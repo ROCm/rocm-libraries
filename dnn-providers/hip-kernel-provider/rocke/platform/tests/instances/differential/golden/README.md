@@ -1,17 +1,20 @@
 # Differential golden anchor
 
-`llvm_gfx_all.json` anchors the output of every parity family (`tests/instances/parity` and
-`library/tests/parity`): for each sampled config, the sha256 of what the Python reference
-emitter produces. A change that alters a blessed config's output fails the check, whether or
-not the C++ engine changed with it -- the byte-identity gate cannot see a change made the same
-way in both engines; this file can.
+`llvm_gfx_all.json` anchors the output of every parity family in `tests/instances/parity`:
+for each sampled config, the sha256 of what the Python reference emitter produces. Families in
+`library/tests/parity` are anchored the same way, in the same format, in
+`library/tests/parity/golden/llvm_gfx_all.json`. `run_diff.py` records and checks each family
+in the file beside its emitters, and fails if a family is blessed in both or a family it checks
+is blessed in the other file. A change that alters a blessed config's output fails the check,
+whether or not the C++ engine changed with it -- the byte-identity gate cannot see a change
+made the same way in both engines; this file can.
 
 It holds two kinds of hash (format: `golden_store.py`):
 
 - `ll` -- the lowered LLVM IR text, **one section per distinct emission profile**
-  (`llvm20`, `llvm22`, `llvm23`). The top-level `aliases` map represents qualified lanes
-  that intentionally share a profile; `llvm24` resolves to the `llvm23` hashes while still
-  being lowered and checked as `llvm24`.
+  (`llvm20`, `llvm22`, `llvm23`, `llvm24`). The top-level `aliases` map can represent
+  qualified lanes that intentionally share a profile; it is empty today because LLVM24's
+  named-barrier pointer ABI makes its output structurally distinct from LLVM23.
 - `ir_canonical` -- the canonical `ck.dsl.ir/v1` serialization (stable across SSA-id
   renumbering). It is produced before lowering and is the same in every flavor, so it has one
   section.

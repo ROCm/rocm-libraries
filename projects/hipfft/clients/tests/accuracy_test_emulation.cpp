@@ -47,8 +47,8 @@ const auto emulation_tokens = {
     "complex_forward_len_216_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_216_odist_216_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_10000_double_ip_batch_1_istride_1_CI_ostride_1_CI_idist_10000_odist_10000_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_128_50_128_single_ip_batch_1_istride_6400_128_1_CI_ostride_6400_128_1_CI_idist_819200_odist_819200_ioffset_0_0_ooffset_0_0",
-    "real_forward_len_16_256_256_single_op_batch_2_istride_65536_256_1_R_ostride_33024_129_1_HI_idist",
-    "real_forward_len_256_128_256_single_op_batch_1_istride_32768_256_1_R_ostride_16512_129_1_HI_idist"
+    "real_forward_len_16_256_256_single_op_batch_2_istride_65536_256_1_R_ostride_33024_129_1_HI_idist_1048576_odist_528384_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_256_128_256_single_op_batch_1_istride_32768_256_1_R_ostride_16512_129_1_HI_idist_8388608_odist_4227072_ioffset_0_0_ooffset_0_0"
     // clang-format on
 };
 
@@ -81,10 +81,24 @@ INSTANTIATE_TEST_SUITE_P(
                                         false /* no support for planar in hipFFT */)),
     accuracy_test::TestName);
 
+// 2D and 3D are combinatorial explosions of test cases.  Given a
+// count of 2D or 3D cases, compute a probability for those cases,
+// scaled relative to the count of 1D cases.  We compute
+// k=count/count_1D and return a probability of:
+// - emulation_prob / k when test_prob == 0
+// - emulation_prob when test_prob == 1
+// Assumes count > emulation_range_1D.size() (i.e. k > 1).
+static double scaled_emulation_prob(size_t count)
+{
+    double k = static_cast<double>(count) / emulation_range_1D.size();
+    return emulation_prob * 1.0 / (k - (k - 1) * test_prob);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     emulation_2D,
     accuracy_test,
-    ::testing::ValuesIn(param_generator(emulation_prob,
+    ::testing::ValuesIn(param_generator(scaled_emulation_prob(emulation_range_2D.size()
+                                                              * emulation_range_2D.size()),
                                         generate_lengths({emulation_range_2D, emulation_range_2D}),
                                         precision_range_sp_dp,
                                         batch_range_1D,
@@ -100,7 +114,8 @@ INSTANTIATE_TEST_SUITE_P(
     emulation_3D,
     accuracy_test,
     ::testing::ValuesIn(param_generator(
-        emulation_prob,
+        scaled_emulation_prob(emulation_range_3D.size() * emulation_range_3D.size()
+                              * emulation_range_3D.size()),
         generate_lengths({emulation_range_3D, emulation_range_3D, emulation_range_3D}),
         precision_range_sp_dp,
         batch_range_1D,

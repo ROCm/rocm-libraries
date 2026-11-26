@@ -121,7 +121,7 @@ struct ExecutionContext
             if(!prefix.empty())
                 filename << prefix << '_';
             // clang-format off
-            filename << GetStream().GetDbBasename();
+            filename << GetStream().GetSystemDbBasename();
 #if MIOPEN_ENABLE_SQLITE && MIOPEN_USE_SQLITE_PERFDB
             const std::string ext = ".db";
 #else
@@ -137,7 +137,7 @@ struct ExecutionContext
             else
             {
                 MIOPEN_LOG_I2("inexact embedded perf database search");
-                const auto db_id        = GetStream().GetTargetProperties().DbId();
+                const auto db_id        = GetStream().GetTargetProperties().SystemDbId();
                 const int real_cu_count = GetStream().GetMaxComputeUnits();
                 const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
                 int closest_cu          = std::numeric_limits<int>::max();
@@ -196,7 +196,7 @@ struct ExecutionContext
             std::string filename{prefix};
             if(!prefix.empty())
                 filename.append("_");
-            filename.append(GetStream().GetDbBasename());
+            filename.append(GetStream().GetSystemDbBasename());
             filename.append(ext);
 
             // clang-format on
@@ -208,7 +208,7 @@ struct ExecutionContext
             else
             {
                 MIOPEN_LOG_I2("inexact perf database search");
-                const auto db_id        = GetStream().GetTargetProperties().DbId();
+                const auto db_id        = GetStream().GetTargetProperties().SystemDbId();
                 const int real_cu_count = GetStream().GetMaxComputeUnits();
                 const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
                 if(fs::is_directory(pdb_path))

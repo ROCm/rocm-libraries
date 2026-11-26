@@ -11,6 +11,11 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
+
 
 def build_library(root, text, name="libamd_comgr.so", extra=()):
     root.mkdir(parents=True, exist_ok=True)
@@ -52,12 +57,11 @@ comgr._assert_ir_flavor_matches_lib(result.llvm_text)
 assert lower_llvm._datalayout_for_flavor("llvm23") in result.llvm_text
 
 # Spec bindings added alongside the existing families share the same selection.
-conv_spec = {"problem": {"N": 1, "H": 16, "W": 32, "cpg": 16, "kpg": 128}}
-conv = rocke_engine.conv_direct_nongrouped_lower_llvm(conv_spec, arch="gfx950")
-assert lower_llvm._datalayout_for_flavor("llvm23") in conv
+rmsnorm = rocke_engine.rmsnorm2d_lower_llvm({}, arch="gfx950")
+assert lower_llvm._datalayout_for_flavor("llvm23") in rmsnorm
 
 # Paged and strided attention bindings use the same compiler, including both
-# modules emitted by the gfx950 segment/reduce path.
+# modules (segment, then reduce) that each tiled 3D binding emits.
 attention_spec = {"head_size": 64, "block_size": 16, "num_query_heads": 8,
                   "num_kv_heads": 2, "num_segments": 2, "num_seqs": 1,
                   "dtype": "fp16"}
@@ -65,8 +69,7 @@ for arch in ("gfx942", "gfx950"):
     for layout in ("paged", "strided"):
         text = getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm")(
             dict(attention_spec, kv_layout=layout), arch=arch)
-        expected_modules = 2 if arch == "gfx950" else 1
-        assert text.count(lower_llvm._datalayout_for_flavor("llvm23")) == expected_modules
+        assert text.count(lower_llvm._datalayout_for_flavor("llvm23")) == 2
         assert ("k_stride_batch_bytes" in text) == (layout == "strided")
 
 # The direct serialized-IR binding also delegates AUTO, but explicit emission
@@ -101,8 +104,10 @@ def test_python_bindings_use_the_compiling_library(tmp_path):
     env.update(ROCM_PATH=str(tmp_path / "native"), ROCKE_BACKEND="python")
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     result = subprocess.run(
-        [sys.executable, "-c", BINDING_PROBE, str(tmp_path / "torch" / "__init__.py")],
-        env=env,
+        rocke_python_command(
+            "-c", BINDING_PROBE, str(tmp_path / "torch" / "__init__.py")
+        ),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
         check=False,
@@ -156,8 +161,8 @@ for lower, spec, arch in cases:
         else:
             raise AssertionError(lower.__name__ + " did not propagate resolver failure")
 
-# A failure in the second gfx950 stage must release its reduce builder too.
-calls = 0
+# A failure in the second (reduce) stage must propagate and release its
+# builder too.
 def fail_reduce():
     global calls
     calls += 1
@@ -166,12 +171,15 @@ def fail_reduce():
     return unavailable()
 
 lower_llvm._resolve_llvm_flavor = fail_reduce
-try:
-    rocke_engine.gfx950_attention_tiled_3d_lower_llvm(attention, arch="gfx950")
-except ComgrError:
-    assert calls == 2
-else:
-    raise AssertionError("reduce resolver failure did not propagate")
+for arch in ("gfx942", "gfx950"):
+    calls = 0
+    try:
+        getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm")(
+            attention, arch=arch)
+    except ComgrError:
+        assert calls == 2
+    else:
+        raise AssertionError(arch + " reduce resolver failure did not propagate")
 
 # Keep spec validation ahead of automatic compiler selection.
 lower_llvm._resolve_llvm_flavor = unavailable
@@ -243,8 +251,10 @@ assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm24")
 def test_binding_resolver_failure_preserves_error_contract():
     pytest.importorskip("rocke_engine")
     result = subprocess.run(
-        [sys.executable, "-B", "-c", CLEANUP_PROBE],
-        env=dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path)),
+        rocke_python_command("-c", CLEANUP_PROBE, interpreter_flags=("-B",)),
+        env=rocke_subprocess_env(
+            dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -268,12 +278,9 @@ def test_resolver_failure_releases_binding_builders(tmp_path):
             "--show-leak-kinds=definite",
             "--xml=yes",
             "--xml-file=" + str(report),
-            sys.executable,
-            "-B",
-            "-c",
-            CLEANUP_PROBE,
+            *rocke_python_command("-c", CLEANUP_PROBE, interpreter_flags=("-B",)),
         ],
-        env=env,
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
         check=False,

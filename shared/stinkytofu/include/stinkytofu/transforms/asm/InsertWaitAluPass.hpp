@@ -42,6 +42,8 @@ struct InsertWaitAluOptions {
     bool sharedOrderCountFollowers = false;
     /// Count an XDL producer's followers from the nearest anchor rather than its own ticket.
     bool xdlCountFromNextWmma = false;
+    /// Ignore the arch's WaitHide table: every wait is emitted (plain mode 2). Test hook.
+    bool ignoreWaitHide = false;
 };
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
@@ -68,7 +70,15 @@ struct WaitAluNeed {
 
 /// An op the scoreboard counts toward hiding a wait: a WMMA hides a va_vdst, an op in the LDS
 /// or TEX FIFO hides a vm_vsrc (a flat_* is in both).
-enum class WaitAluHideOp { Wmma, Lds, Tex, Flat };
+enum class WaitAluHideOp { Wmma, Lds, Tex, Flat, Valu };
+
+/// What a mixed hide rule still asks for (see WaitAluTracker::untilFreeMixed).
+struct WaitAluMixGap {
+    int leadWmmas = -1;
+    int tailSlots = 0;
+    int wmmaSlots = 1;
+    bool operator==(const WaitAluMixGap&) const = default;
+};
 
 /// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
 /// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
@@ -92,6 +102,15 @@ class STINKYTOFU_EXPORT WaitAluTracker {
     /// untilFree() for `consumer` right after `producer`, with nothing else in flight.
     int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
                     WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr) const;
+    /// The mixed hide `inst` still owes: `leadWmmas` more matrix ops reach the rule's lead, then
+    /// `tailSlots` slots that matrix ops (`wmmaSlots` each) and VALUs (one each) fill. Both 0: no
+    /// va_vdst now; leadWmmas -1: no mixed rule applies, see untilFree.
+    WaitAluMixGap untilFreeMixed(const StinkyInstruction& inst,
+                                 const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFreeMixed() for `consumer` right after `producer`, with nothing else in flight.
+    WaitAluMixGap requiredGapMixed(const StinkyInstruction& producer,
+                                   const StinkyInstruction& consumer,
+                                   const StinkyInstruction* formWmma = nullptr) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
 

@@ -20,14 +20,23 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
   - Standalone pointwise activation
-  - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX, MIN)
+  - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX_OP, MIN_OP; the frontend spells the last two MAX and MIN)
+  - Standalone reduction (ADD, MUL, MIN, MAX, AMAX, AVG, NORM1, NORM2)
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)
-  - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only; off by default, enable with `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON`)
+  - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950 with any packed operand layout (FP8 A with FP6 B needs a row-major A), gfx1250 with K-contiguous A and B and the type pairs hipBLASLt has kernels for; off by default, enable with `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON`)
 
 - **[HIP Kernel Provider Plugin](../../../dnn-providers/hip-kernel-provider/README.md)** - Custom HIP kernels compiled at run time with HIPRTC, plus assembly SDPA kernels. This provider has no separate operation support document.
   - HIP MLops engine: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward)
+    - Layernorm and RMSNorm need an input `x` of rank 4 or 5. The engine declines lower-rank graphs, such as the `[B, S, D]` transformer form.
+    - Layernorm declines a graph whose scale, bias, mean, inverse variance, dscale or dbias tensor:
+      - is passed by value;
+      - is padded, overlaps itself, or orders its strides differently from `x`;
+      - has dims other than `x`'s extents on the normalized dims and 1 elsewhere (scale, bias, dscale, dbias), or `x`'s extents on the other dims and 1 on the normalized dims (mean, inverse variance).
+    - Layernorm backward needs `dx` to have the same data type as `x`.
+    - Layernorm supports at most 2^22 - 1 rows and RMSNorm at most 2^24 - 1 rows, forward and backward. Rows are the product of `x`'s dims outside the normalized dims.
+    - Resample declines graphs where an input extent plus its pre- and post-padding, or the product of the window extents, overflows int64. Its output (`y` forward, `dx` backward) may hold at most 2^32 - 256 elements.
   - ASM SDPA engine: SDPA forward and backward
   - Optional engines, off by default: HIP Flash2 SDPA forward (`ENABLE_HIP_FLASH2_ENGINE`) and the kernel ingestor engine (`HIPDNN_ENABLE_KERNEL_INGESTOR`, RFC 0017)
 
@@ -42,6 +51,29 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Used as the oracle for graph-only integration test bundles
   - Supports a subset of the CPU operations (e.g. Convolution forward, Batchnorm forward, Layernorm, RMSNorm, Reduction, SDPA forward, Matmul, Pointwise)
   - Not intended for performance or production use
+
+> [!NOTE]
+> The CPU and GPU references do not accept the same pointwise graphs:
+>
+> - **Modes.** The CPU reference takes every mode the GPU reference does, and many more: the math modes (`EXP`,
+>   `LOG`, ...), `DIV`, `MAX_OP`, `MIN_OP`, the comparison and logical modes, `GEN_INDEX` and `BINARY_SELECT`.
+>   The GPU document lists them all.
+> - **Datatypes.** Only the CPU reference takes `FP64`, `FP8`, `BOOLEAN` and `INT32` tensors, an FP32 operand
+>   beside a 16-bit one, and FP16, BFP16 or FP64 compute types. Only the GPU reference takes unary conversions
+>   that widen a 16-bit type or go between FP16 and BFP16, and binary ops that mix FP16 with BFP16.
+> - **Compute type.** Both references run the arithmetic in the node's compute type and decline a node whose
+>   compute type no tuple has. The GPU reference registers FP32 compute only.
+> - **Parameters.** Both references ignore a parameter the mode does not use. The CPU reference reads the ReLU
+>   parameters, `swish_beta`, `elu_alpha` and `softplus_beta` for the modes that use them. The GPU reference
+>   reads the ReLU parameters and, for `SWISH_FWD`, `swish_beta`: it has no mode that uses the others.
+> - **Rank.** The GPU reference addresses at most 5 dimensions and declines a deeper pointwise node. The CPU
+>   reference has no rank limit and runs it.
+>
+> The full datatype tuples, parameter behavior and shape rules are in the
+> [CPU](./OperationSupport-ReferenceImpl.md#pointwise-restrictions) and
+> [GPU](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md#pointwise-modes)
+> documents. `TestPointwiseReferenceParity` (integration test project) fails when either reference gains or
+> loses a mode or datatype tuple without the difference being recorded there.
 
 ## Roadmap
 

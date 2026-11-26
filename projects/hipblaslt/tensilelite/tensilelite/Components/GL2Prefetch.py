@@ -5,13 +5,15 @@ from rocisa.code import Module, Label
 from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, GlobalPrefetchB8, \
     VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SMovB64, SAddU32, SAddCU32, SAndB32, SBranch, \
-    SCBranchSCC0, SCBranchSCC1, SCMovB32, SCmpEQU32, SLShiftRightB32, SLoadB64, SWaitCnt
+    SCBranchSCC0, SCBranchSCC1, SCMovB32, SCMovB64, SCmpEQU32, SLShiftRightB32, SLoadB64, \
+    SMulHIU32, SWaitCnt, SSubU32, SMaxI32, SLShiftLeftB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
-from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
-    scalarStaticRemainder
+from rocisa.functions import vectorMultiply64Bpe, vectorMultiplyBpe, scalarMultiplyBpe, \
+    scalarMultiply64Bpe, vectorStaticDivideAndRemainder, scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
 from ..Common.MxScaleLayout import mxFreeTile, mxGl2CoalescedDim
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
 
 # Bit 15 of the packed GSU kernel argument selects how the summation loop is cut
 # up between the GSU groups, and the two layouts need different start offsets and
@@ -60,6 +62,22 @@ class GL2PrefetchLoad(GL2Prefetch):
             # Convert the cluster free-dimension extent to MX scale-row units.
             coalescedDim = mxGl2CoalescedDim(mt, numTileWGs, mxUnit, mxTile)
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
+        elif tp.get("isSwizzledTDM"):
+            # gfx1250 pre-swizzled A/B is laid out as a sequence of free-dimension
+            # MI rows. One row's DepthU slice is contiguous, while consecutive rows
+            # are separated by MI*paddedK. Treat each row as the perpendicular
+            # dimension and its cache regions as the coalesced dimension.
+            du: int = kernel["_DepthU%s" % subTc]
+            swizzleMi: int = SWIZZLE_BLOCK_ROWS
+            rowSliceBytes: int = round(swizzleMi * du * bpe)
+            assert mt % swizzleMi == 0, "swizzled-TDM MacroTile must contain whole MI rows"
+            assert du % tp["swizzleK"] == 0, \
+                "swizzled-TDM DepthU must contain whole swizzle-K blocks"
+            assert rowSliceBytes % globalPrefetchSize == 0, \
+                "swizzled-TDM DepthU row slice must contain whole GL2 cache regions"
+            tp["gl2SwizzleMi"] = swizzleMi
+            coalescedDim = swizzleMi * du
+            perpendicularDim = mt * numTileWGs // swizzleMi
         else:
             du: int = kernel["_DepthU%s" % subTc]
             coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
@@ -71,6 +89,31 @@ class GL2PrefetchLoad(GL2Prefetch):
         tp["gl2ncc"] = max(1, (coalescedBytes + globalPrefetchSize - 1) // globalPrefetchSize)
         tp["gl2nc"] = tp["gl2ncp"] * tp["gl2ncc"]
         tp["gl2nl"] = max(1, ceil(tp["gl2nc"] / numCooperativeThreads))
+
+    @staticmethod
+    def numIncSgpr(kernel: Mapping) -> int:
+        """Width of GL2PrefetchInc{tc}: 2 sgprs (64-bit) if PrefetchGL2Inc64Bit, else 1."""
+        return 2 if kernel["PrefetchGL2Inc64Bit"] else 1
+
+    @staticmethod
+    def useSAddr(kernel: Mapping) -> bool:
+        """True if each tensor uses one sgpr pair base (GL2PrefetchBase{tc}) plus 32-bit vgpr offsets."""
+        return kernel["PrefetchGL2SAddr"]
+
+    @staticmethod
+    def numAddrVgpr(kernel: Mapping) -> int:
+        """Vgprs per GL2PrefetchAddr{tc}_{i}: a 32-bit offset in SAddr mode, else a 64-bit address."""
+        return 1 if GL2PrefetchLoad.useSAddr(kernel) else 2
+
+    def clearIncrement(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
+        """Zero the addr increment if SCC is set."""
+        mod = Module()
+        incName: str = f"GL2PrefetchInc{tp['tensorChar']}"
+        if self.numIncSgpr(kernel) == 2:
+            mod.add(SCMovB64(sgpr(incName, 2), 0))
+        else:
+            mod.add(SCMovB32(sgpr(incName), 0))
+        return mod
 
     def isGSUEnabled(self, kernel: Mapping) -> bool:
         """True when the kernel emits the GSUOn paths, so GSU/GSUSumIdx are live."""
@@ -101,8 +144,15 @@ class GL2PrefetchLoad(GL2Prefetch):
             comment="interleaved chunks: startIter = GSUSumIdx"))
         mod.add(SBranch(gsucLabelEnd.getLabelName()))
         mod.add(gsucLabel)
-        mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), shiftHex=int(log2(depthU)), src=sgpr("SizesSum"), \
-            comment="numIter = SizesSum / DepthU(%u)" % depthU))
+        if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+            # tail folding: GSU distributes ceil(K / DepthU) k-tiles (the partial one included)
+            mod.add(SAddU32(dst=sgpr(dstSgprIdx), src0=sgpr("SizesSum"), src1=depthU - 1, \
+                comment="TailFolding: SizesSum + DepthU - 1"))
+            mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), shiftHex=int(log2(depthU)), src=sgpr(dstSgprIdx), \
+                comment="TailFolding: numIter = ceil(SizesSum / DepthU(%u))" % depthU))
+        else:
+            mod.add(SLShiftRightB32(dst=sgpr(dstSgprIdx), shiftHex=int(log2(depthU)), src=sgpr("SizesSum"), \
+                comment="numIter = SizesSum / DepthU(%u)" % depthU))
         mod.add(writer.calculateLoopNumIterOffsetGsu(kernel, dstSgprIdx, tmpSgprRes))
         mod.add(SMovB32(dst=sgpr(dstSgprIdx), src=sgpr(tmpSgprRes.idx), \
             comment="contiguous chunks: startIter = accumulated iters of lower groups"))
@@ -121,6 +171,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         mod = Module("gl2 prefetch GSU chunk offset")
         tc: str = tp["tensorChar"]
         incName: str = f"GL2PrefetchInc{tc}"
+        is64: bool = self.numIncSgpr(kernel) == 2
 
         mod.addComment(f"gl2 prefetch GSU chunk offset of {tc}")
         mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
@@ -129,14 +180,24 @@ class GL2PrefetchLoad(GL2Prefetch):
             tmpVgprIdx, comment="gsuOffset = startIter * inc"))
         mod.add(SAddU64(sgpr(baseSgprIdx, 2), sgpr(baseSgprIdx, 2), sgpr(tmpSgprIdx, 2), \
             comment="skip to this WG's GSU chunk"))
-        # Widen the step to the chunk stride. Kept 32-bit to mirror GlobalReadIncs
-        # on the real load path (GSU.graIncrements), which the prefetch has to
-        # track: a stride that overflows 32 bits is already broken there.
+        if is64:
+            mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(gsuIterSgpr), sgpr(f"{incName}+1"), \
+                comment="gsuOffset.hi = startIter * inc.hi"))
+            mod.add(SAddU32(sgpr(baseSgprIdx + 1), sgpr(baseSgprIdx + 1), sgpr(tmpSgprIdx)))
+        # Widen the step to the chunk stride. In 32-bit mode this mirrors
+        # GlobalReadIncs on the real load path (GSU.graIncrements): a stride that
+        # overflows 32 bits is already broken there.
         mod.add(SAndB32(dst=sgpr(tmpSgprIdx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), \
             comment="Restore GSU"))
         mod.add(SAndB32(dst=sgpr(tmpSgprIdx + 1), src0=sgpr("GSU"), src1=hex(GSUC_BIT), \
             comment="SCC = (GSUC == 1) ?"))
         mod.add(SCMovB32(dst=sgpr(tmpSgprIdx), src=1, comment="stride stays DepthU if GSUC == 1"))
+        if is64:
+            mod.add(SMulI32(sgpr(tmpSgprIdx + 1), sgpr(f"{incName}+1"), sgpr(tmpSgprIdx), \
+                comment="inc.hi * GSU chunk stride"))
+            mod.add(SMulHIU32(sgpr(f"{incName}+1"), sgpr(incName), sgpr(tmpSgprIdx), \
+                comment="carry of inc.lo * GSU chunk stride"))
+            mod.add(SAddU32(sgpr(f"{incName}+1"), sgpr(f"{incName}+1"), sgpr(tmpSgprIdx + 1)))
         mod.add(SMulI32(sgpr(incName), sgpr(incName), sgpr(tmpSgprIdx), \
             comment="addr increment *= GSU chunk stride"))
         return mod
@@ -154,6 +215,8 @@ class GL2PrefetchLoad(GL2Prefetch):
         subTc: str = tc if isM else tc[-1]
         bpe: float = tp["bpeGR"]
         du: int = kernel["_DepthU%s" % subTc]
+        incName: str = f"GL2PrefetchInc{tc}"
+        is64: bool = self.numIncSgpr(kernel) == 2
         if tc.startswith("MX"):
             mxTile = mxFreeTile(kernel, tc)
             kBytes = round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe)
@@ -161,28 +224,44 @@ class GL2PrefetchLoad(GL2Prefetch):
                 # 1D inc = Size * (DepthU/MXBlock) * bpe. 2D K-row pitch is
                 # ceil(Size/MXBlockFree), as in calculateStartAddr; without it
                 # CD4_2 PGL1 walks SizeJ (65536) through a 6144-byte MXSB buffer.
-                mod.add(SAddU32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), mxTile - 1,
+                mod.add(SAddU32(sgpr(incName), sgpr("Size%s"%INDEX_CHARS[tIdx]), mxTile - 1,
                     comment=f"ceil(Size/MXBlockFree({mxTile}))"))
-                mod.add(SLShiftRightB32(sgpr(f"GL2PrefetchInc{tc}"), hex(int(log2(mxTile))),
-                    sgpr(f"GL2PrefetchInc{tc}"), "MXS 2D: scale rows"))
-                mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr(f"GL2PrefetchInc{tc}"), kBytes,
-                    comment="addr increment"))
+                mod.add(SLShiftRightB32(sgpr(incName), hex(int(log2(mxTile))),
+                    sgpr(incName), "MXS 2D: scale rows"))
+                src0, src1 = sgpr(incName), kBytes
             else:
-                mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), kBytes,
-                    comment="addr increment"))
+                src0, src1 = sgpr("Size%s"%INDEX_CHARS[tIdx]), kBytes
+        elif tp.get("isSwizzledTDM"):
+            # One DepthU step of a swizzled tensor spans MI*DepthU contiguous elements.
+            swizzleMi: int = tp["gl2SwizzleMi"]
+            mod.add(SMovB32(dst=sgpr(incName), src=round(swizzleMi * du * bpe), \
+                comment=f"swizzled-TDM addr increment = MI({swizzleMi}) * DepthU({du}) * bpe({bpe})"))
+            if is64:
+                mod.add(SMovB32(dst=sgpr(f"{incName}+1"), src=0, comment="addr increment hi"))
+            return mod
         elif tp["tlu"]:
-            perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
-            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(du * bpe), comment="addr increment"))
+            src0, src1 = writer.strideRef(subTc, 3), round(du * bpe)
         else:
-            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(du * bpe), comment="addr increment"))
+            mod.add(SMovB32(dst=sgpr(incName), src=round(du * bpe), comment="addr increment"))
+            if is64:
+                mod.add(SMovB32(dst=sgpr(f"{incName}+1"), src=0, comment="addr increment hi"))
+            return mod
+        if is64:
+            mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                sgpr(incName), sgpr(f"{incName}+1"), src0, src1, comment="addr increment"))
+        else:
+            mod.add(SMulI32(sgpr(incName), src0, src1, comment="addr increment"))
         return mod
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping, \
-                           gsuIterSgpr: Optional[int] = None) -> Module:
+                           gsuIterSgpr: Optional[int] = None, \
+                           kStartSgprName: Optional[str] = None) -> Module:
         """Compute this workgroup's prefetch start addresses.
 
         gsuIterSgpr holds the shared GSU chunk start iteration from
         calculateGSUIterOffset, or None when the kernel has no GSU paths.
+        kStartSgprName names the SGPR holding a StreamK work item's start
+        iteration within its tile, or None when the work item starts at K=0.
         """
         mod = Module()
         globalPrefetchSize: int = writer.states.regCaps["GlobalPrefetchSize"]
@@ -190,6 +269,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         tIdx: int = tp['idx']
         tlu: bool = tp["tlu"]
         isMX: bool = tc.startswith("MX")
+        isSwizzledTDM: bool = bool(tp.get("isSwizzledTDM"))
         isM: bool = tp.get("isM", False)
         subTc: str = tc if isM else tc[-1]
         mt: int = kernel["MacroTile%s" % subTc]
@@ -214,6 +294,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         nl: int = tp["gl2nl"]
         ncPerInst: int = ceil(nc / tp["gl2nl"])
         inactiveShiftBits: int = int(log2(numCooperativeThreads // ncPerInst))
+        useSAddr: bool = self.useSAddr(kernel)
         numTmpSgpr = 4
         tmpVgprIdx = writer.vgprPool.checkOutAligned(2, 2)
         tmpVgprCoalIdx = writer.vgprPool.checkOutAligned(1, 1)
@@ -294,13 +375,43 @@ class GL2PrefetchLoad(GL2Prefetch):
                     mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
                     mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
                     mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
+            elif isSwizzledTDM:
+                # Convert the cluster's base macro-tile and the free-dimension edge
+                # from elements to outer MI-row coordinates. The host pads the free
+                # dimension to a whole MI row, so the last partially populated row
+                # is a valid prefetch target.
+                swizzleMi: int = tp["gl2SwizzleMi"]
+                assert swizzleMi > 0 and (swizzleMi & (swizzleMi - 1)) == 0, \
+                    "swizzled-TDM MI free dimension must be a power of two"
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt // swizzleMi, \
+                    comment=f"clusterBaseTile * MT({mt}) / MI({swizzleMi})"))
+                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
+                mod.add(SLShiftRightB32(sgpr(tmpSgprIdx1), int(log2(swizzleMi)), sgpr(tmpSgprIdx1), \
+                    comment=f"last valid outer MI({swizzleMi}) row"))
+                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), \
+                    comment="max outer MI row inside cluster tiles"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt, comment=f"clusterBaseTile * MT({mt})"))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
 
+            # Swizzled A/B rows are separated by MI*paddedK elements. Compute that
+            # physical stride directly in bytes so fractional element sizes do not
+            # lose precision by scaling the row coordinate before multiplication.
+            if isSwizzledTDM:
+                padK: int = tp["swizzlePadK"]
+                swizzleMi: int = tp["gl2SwizzleMi"]
+                assert padK > 0 and (padK & (padK - 1)) == 0, \
+                    "swizzled-TDM K padding must be a power of two"
+                perpStride = sgpr(tmpSgprIdx2)
+                mod.add(SAddU32(perpStride, sgpr("SizeL"), padK - 1, \
+                    comment=f"paddedK = SizeL + padK({padK}) - 1"))
+                mod.add(SAndB32(perpStride, perpStride, hex(0xFFFFFFFF & ~(padK - 1)), \
+                    comment="paddedK = alignUp(SizeL, padK)"))
+                mod.add(SMulI32(perpStride, perpStride, round(swizzleMi * bpe), \
+                    comment=f"swizzled row stride bytes = MI({swizzleMi}) * paddedK * bpe({bpe})"))
             # will we have MX stride later?
-            if isMX:
+            elif isMX:
                 perpStride = sgpr(tmpSgprIdx2)
                 if mxTile > 1:
                     # Host 2D is [K_blocks][scale_rows]; pitch to the next K-block
@@ -313,6 +424,19 @@ class GL2PrefetchLoad(GL2Prefetch):
                         mod.add(SMulI32(perpStride, perpStride, mxUnit, "MX perp stride * mxUnit"))
                 else:
                     mod.add(SMulI32(perpStride, sgpr(sgprSizeFreeName), mxUnit, f"MX perp stride"))
+            # TailFolding runs the unroll loop once even for K < DepthU, and that iteration prefetches
+            # k-tile 0: keep its K index inside K (a no-op once K >= DepthU).
+            foldKClamp: bool = kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
+            if foldKClamp:
+                assert not isMX, "TailFolding has no MX scales"
+                mod.add(SSubU32(sgpr(tmpSgprIdx2), sgpr("SizesSum+%u" % writer.states.unrollIdx), 1, comment="TailFolding: last K index"))
+                if writer.tailFoldGsu(kernel):
+                    # this GSU split's first k-tile (calculateGSUIterOffset: GSUC ? contiguous : GSUSumIdx) * DU
+                    assert gsuIterSgpr is not None, "TailFolding with GSU needs the GSU start iteration"
+                    mod.add(SLShiftLeftB32(dst=sgpr(tmpSgprIdx3), shiftHex=hex(int(log2(kernel["DepthU"]))), src=sgpr(gsuIterSgpr),
+                                           comment="TailFolding: split start = start k-tile * DU"))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx2), sgpr(tmpSgprIdx2), sgpr(tmpSgprIdx3), comment="TailFolding: last K index from the split start"))
+                    mod.add(SMaxI32(dst=sgpr(tmpSgprIdx2), src0=sgpr(tmpSgprIdx2), src1=0, comment="TailFolding: >= 0"))
             for i in range(nl):
                 vgprAddrName = f"{vgprAddrBaseName}_{i}"
                 vgprAddrNameHi = vgprAddrName + "+1"
@@ -320,39 +444,82 @@ class GL2PrefetchLoad(GL2Prefetch):
                     mod.add(VMovB32(vgpr(tmpVgprCoalIdx), vgpr(vgprAddrName)))
                     mod.add(vectorStaticDivideAndRemainder(vgprAddrName, tmpVgprCoalIdx, tmpVgprCoalIdx, \
                         ncc, ContinuousRegister(tmpVgprIdx, 2), comment="coal/perp index calc"))
-                    mod.add(VMulLOU32(vgpr(tmpVgprCoalIdx), vgpr(tmpVgprCoalIdx), round(globalPrefetchSize / bpe), \
-                        comment="coal * globalPrefetchSize / bpe"))
+                    # Swizzled addresses are built directly in bytes (no trailing bpe scale).
+                    coalScale = globalPrefetchSize if isSwizzledTDM else round(globalPrefetchSize / bpe)
+                    mod.add(VMulLOU32(vgpr(tmpVgprCoalIdx), vgpr(tmpVgprCoalIdx), coalScale, \
+                        comment="cache-region byte offset" if isSwizzledTDM else "coal * globalPrefetchSize / bpe"))
                 else:
                     mod.add(VMovB32(vgpr(tmpVgprCoalIdx), 0, comment="coalesced index"))
                 
-                # edge protection
-                if isMX or tlu:
+                # edge protection (swizzled: clamp the outer MI-row index)
+                if (isMX or tlu) and not isSwizzledTDM:
                     mod.add(VCmpGtU32(VCC(), vgpr(tmpVgprCoalIdx), sgpr(tmpSgprIdx1), comment="> edge limit?"))
                     mod.add(VCndMaskB32(vgpr(tmpVgprCoalIdx), vgpr(tmpVgprCoalIdx), sgpr(tmpSgprIdx1), VCC()))
                 else:
                     mod.add(VCmpGtU32(VCC(), vgpr(vgprAddrName), sgpr(tmpSgprIdx1), comment="> edge limit?"))
                     mod.add(VCndMaskB32(vgpr(vgprAddrName), vgpr(vgprAddrName), sgpr(tmpSgprIdx1), VCC()))
+                if foldKClamp:
+                    kIdx = vgprAddrName if tlu else tmpVgprCoalIdx
+                    mod.add(VCmpGtU32(VCC(), vgpr(kIdx), sgpr(tmpSgprIdx2), comment="TailFolding: past K?"))
+                    mod.add(VCndMaskB32(vgpr(kIdx), vgpr(kIdx), sgpr(tmpSgprIdx2), VCC()))
+                if useSAddr:
+                    # the per-lane byte offset must fit in 32 bits
+                    mod.add(VMulLOU32(vgpr(vgprAddrName), vgpr(vgprAddrName), perpStride, comment="perp *= stride"))
+                    mod.add(VAddU32(vgpr(vgprAddrName), vgpr(vgprAddrName), vgpr(tmpVgprCoalIdx), comment="coal + perp"))
+                    if not isSwizzledTDM:
+                        mod.add(vectorMultiplyBpe(vgprAddrName, vgprAddrName, bpe, comment="scale by bpe"))
+                    continue
                 # perp stride
                 mod.add(VMulHIU32(vgpr(vgprAddrNameHi), vgpr(vgprAddrName), perpStride, comment="perp *= stride"))
                 mod.add(VMulLOU32(vgpr(vgprAddrName), vgpr(vgprAddrName), perpStride))
                 # coal + perp
                 mod.add(VAddCOU32(vgpr(vgprAddrName), VCC(), vgpr(vgprAddrName), vgpr(tmpVgprCoalIdx), comment="coal + perp"))
                 mod.add(VAddCCOU32(vgpr(vgprAddrNameHi), VCC(), vgpr(vgprAddrNameHi), 0, VCC()))
-                mod.add(vectorMultiply64Bpe(vgprAddrName, vgprAddrName, bpe, tmpVgprIdx, comment="scale by bpe"))
+                if not isSwizzledTDM:
+                    mod.add(vectorMultiply64Bpe(vgprAddrName, vgprAddrName, bpe, tmpVgprIdx, comment="scale by bpe"))
 
-            # MT offset (in units of bytes). Added to the addresses here because
-            # resolving a pointer-array base below needs all four tmp sgprs.
-            mod.add(scalarMultiplyBpe(tmpSgprIdx0, tmpSgprIdx0, bpe))
-            if isMX or tlu:
+            # MT offset (in units of bytes). Moved out of the tmp sgprs here because
+            # resolving a pointer-array base below needs all four of them. SAddr
+            # parks it in the scalar base, which the base is added to at the end.
+            if isMX:
+                # The 32-bit scale-unit offset above only feeds the edge limit; it
+                # wraps once Size * mxUnit reaches 2^32. Rebuild it in 64 bits from
+                # the tile's start element, which fits.
+                mod.add(SSubI32(sgpr(tmpSgprIdx0), sgpr(sgprTileWgName), sgpr(tmpSgprIdx3), \
+                    comment="cluster base tile"))
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt, comment=f"clusterBaseTile * MT({mt})"))
+                if mxTile > 1:
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx0), hex(int(log2(mxTile))), sgpr(tmpSgprIdx0),
+                                           f"MXS 2D: / MXBlockFree({mxTile})"))
+                if mxUnit != 1:
+                    mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                        sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
+                        sgpr(tmpSgprIdx0), mxUnit,
+                        tmpVgprIdx, comment=f"scale row * mxUnit({mxUnit})"))
+                else:
+                    mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
+                mod.add(scalarMultiply64Bpe(tmpSgprIdx0, tmpSgprIdx0, bpe, tmpSgprIdx2))
+            elif isSwizzledTDM:
+                # tmpSgprIdx0 is an outer MI-row index; perpStride is already in bytes.
+                mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                    sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
+                    sgpr(tmpSgprIdx0), perpStride,
+                    tmpVgprIdx, comment="MI row * swizzled row stride bytes"))
+            elif tlu:
                 mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
+                mod.add(scalarMultiply64Bpe(tmpSgprIdx0, tmpSgprIdx0, bpe, tmpSgprIdx2))
             else:
+                mod.add(scalarMultiplyBpe(tmpSgprIdx0, tmpSgprIdx0, bpe))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
                     sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
                     sgpr(tmpSgprIdx0), perpStride,
                     tmpVgprIdx, comment="*= stride"))
-            for i in range(nl):
-                dst = f"{vgprAddrBaseName}_{i}"
-                mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2), comment="+ MT offset"))
+            if useSAddr:
+                mod.add(SMovB64(sgpr(f"GL2PrefetchBase{tc}", 2), sgpr(tmpSgprIdx0, 2), comment="MT offset"))
+            else:
+                for i in range(nl):
+                    dst = f"{vgprAddrBaseName}_{i}"
+                    mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2), comment="+ MT offset"))
 
             mod.add(SMovB64(dst=sgpr(tmpSgprIdx0, 2), src=sgpr("Address%s"%tc, 2), comment="base address"))
             # strided batch offset
@@ -381,11 +548,27 @@ class GL2PrefetchLoad(GL2Prefetch):
             if gsuIterSgpr is not None:
                 mod.add(self.applyGSUChunk(writer, kernel, tp, gsuIterSgpr, \
                     tmpSgprIdx0, tmpSgprIdx2, tmpVgprIdx))
+            if kStartSgprName is not None:
+                incName: str = f"GL2PrefetchInc{tc}"
+                mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                    sgpr(tmpSgprIdx2), sgpr(tmpSgprIdx3),
+                    sgpr(kStartSgprName), sgpr(incName),
+                    tmpVgprIdx, comment="kOffset = kStart * inc"))
+                mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2), \
+                    comment="skip to this work item's K start"))
+                if self.numIncSgpr(kernel) == 2:
+                    mod.add(SMulI32(sgpr(tmpSgprIdx2), sgpr(kStartSgprName), sgpr(f"{incName}+1"), \
+                        comment="kOffset.hi = kStart * inc.hi"))
+                    mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx2)))
 
             # add all together
-            for i in range(tp["gl2nl"]):
-                dst = f"{vgprAddrBaseName}_{i}"
-                mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2)))
+            if useSAddr:
+                mod.add(SAddU64(sgpr(f"GL2PrefetchBase{tc}", 2), sgpr(f"GL2PrefetchBase{tc}", 2), \
+                    sgpr(tmpSgprIdx0, 2), comment="scalar base addr = base + MT offset"))
+            else:
+                for i in range(tp["gl2nl"]):
+                    dst = f"{vgprAddrBaseName}_{i}"
+                    mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2)))
 
         writer.vgprPool.checkIn(tmpVgprIdx)
         writer.vgprPool.checkIn(tmpVgprCoalIdx)
@@ -437,22 +620,39 @@ class GL2PrefetchLoad(GL2Prefetch):
     def issueLoad(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         mod = Module()
         tc: str = tp["tensorChar"]
+        if self.useSAddr(kernel):
+            vaddrs = [vgpr(f"GL2PrefetchAddr{tc}_{i}") for i in range(tp["gl2nl"])]
+            saddr = sgpr(f"GL2PrefetchBase{tc}", 2)
+        else:
+            vaddrs = [vgpr(f"GL2PrefetchAddr{tc}_{i}", 2) for i in range(tp["gl2nl"])]
+            saddr = sgpr("off", isOff=True)
+        for vaddr in vaddrs:
+            mod.add(GlobalPrefetchB8(vaddr, saddr, self.globalModifiers))
+        return mod
+
+    def addOffset(self, kernel: Mapping, tp: Mapping, offsetSgpr: str | int, is64: bool) -> Module:
+        """Advance every prefetch address of tp by the 32-bit (or 64-bit if is64) sgpr offsetSgpr."""
+        mod = Module()
+        tc: str = tp["tensorChar"]
+        if self.useSAddr(kernel):
+            base: str = f"GL2PrefetchBase{tc}"
+            if is64:
+                mod.add(SAddU64(sgpr(base, 2), sgpr(base, 2), sgpr(offsetSgpr, 2)))
+            else:
+                mod.add(SAddU32(sgpr(base), sgpr(base), sgpr(offsetSgpr)))
+                mod.add(SAddCU32(sgpr(f"{base}+1"), sgpr(f"{base}+1"), 0))
+            return mod
         for i in range(tp["gl2nl"]):
-            addrName = f"GL2PrefetchAddr{tc}_{i}"
-            mod.add(GlobalPrefetchB8(vgpr(addrName, 2), sgpr("off", isOff=True), self.globalModifiers))
+            addr = f"GL2PrefetchAddr{tc}_{i}"
+            if is64:
+                mod.add(VAddNCU64(vgpr(addr, 2), vgpr(addr, 2), sgpr(offsetSgpr, 2)))
+            else:
+                mod.add(VAddCOU32(vgpr(addr), VCC(), vgpr(addr), sgpr(offsetSgpr)))
+                mod.add(VAddCCOU32(vgpr(f"{addr}+1"), VCC(), vgpr(f"{addr}+1"), 0, VCC()))
         return mod
 
     def incrementAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
-        mod = Module()
-        tc: str = tp["tensorChar"]
-        inc = sgpr(f"GL2PrefetchInc{tc}")
-        for i in range(tp["gl2nl"]):
-            addrName = f"GL2PrefetchAddr{tc}_{i}"
-            addrNameHi = addrName + "+1"
-            mod.add(VAddCOU32(vgpr(addrName), VCC(), vgpr(addrName), inc))
-            mod.add(VAddCCOU32(vgpr(addrNameHi), VCC(), vgpr(addrNameHi), 0, VCC()))
-
-        return mod
+        return self.addOffset(kernel, tp, f"GL2PrefetchInc{tp['tensorChar']}", self.numIncSgpr(kernel) == 2)
     
     def skipPGR(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:
         """Skip PGR loads.
@@ -462,22 +662,22 @@ class GL2PrefetchLoad(GL2Prefetch):
         mod = Module()
         tc: str = tp["tensorChar"]
         inc = sgpr(f"GL2PrefetchInc{tc}")
+        is64: bool = self.numIncSgpr(kernel) == 2
         pgr = kernel["PrefetchGlobalRead"]
         if pgr > 0:
             if pgr > 1:
-                with writer.allocTmpSgpr(2, 2) as tmpSgprRes:
+                with writer.allocTmpSgpr(3 if is64 else 2, 2) as tmpSgprRes:
                     tmpSgprIdx0 = tmpSgprRes.idx
                     tmpSgprIdx1 = tmpSgprRes.idx + 1
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
                         sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
                         inc, pgr, comment="*= PGR"))
-                    for i in range(tp["gl2nl"]):
-                        addr = f"GL2PrefetchAddr{tc}_{i}"
-                        mod.add(VAddNCU64(vgpr(addr, 2), vgpr(addr, 2), sgpr(tmpSgprIdx0, 2)))
+                    if is64:
+                        tmpSgprIdx2 = tmpSgprRes.idx + 2
+                        mod.add(SMulI32(sgpr(tmpSgprIdx2), sgpr(f"GL2PrefetchInc{tc}+1"), pgr, \
+                            comment="inc.hi *= PGR"))
+                        mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx2)))
+                    mod.addModuleAsFlatItems(self.addOffset(kernel, tp, tmpSgprIdx0, True))
             else:
-                for i in range(tp["gl2nl"]):
-                    addr = f"GL2PrefetchAddr{tc}_{i}"
-                    addrHi = addr + "+1"
-                    mod.add(VAddCOU32(vgpr(addr), VCC(), vgpr(addr), inc))
-                    mod.add(VAddCCOU32(vgpr(addrHi), VCC(), vgpr(addrHi), 0, VCC()))
+                mod.addModuleAsFlatItems(self.incrementAddr(writer, kernel, tp))
         return mod

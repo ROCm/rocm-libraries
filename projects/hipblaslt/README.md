@@ -264,7 +264,6 @@ inv build --architecture gfx1100 --clean
 
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts that set PYTHONPATH and trigger rebuilds of rocisa (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 
 *Device libraries options:*
@@ -280,11 +279,11 @@ inv build --architecture gfx1100 --clean
 * `HIPBLASLT_TENSILE_LIBPATH` Path to output the device gemm libraries (default: `build/Tensile`)
 
 > [!NOTE]
-> To determine defaults for the `TensileCreateLibrary` command generated when building the device
-> libraries, run `tensilelite/bin/TensileCreateLibrary --help` from the tensilelite directory.
+> To determine defaults for the TensileLite create-library command used when building the device
+> libraries, run `python -m tensilelite create-library --help` from the tensilelite directory.
 
 > [!NOTE]
-> Refer to the tensilelite [README](./tensilelite/README.md) for instructions on building for the tensile workflow.
+> Refer to the TensileLite [README](./tensilelite/README.md) for instructions on building the TensileLite workflow.
 
 ## Unit tests
 

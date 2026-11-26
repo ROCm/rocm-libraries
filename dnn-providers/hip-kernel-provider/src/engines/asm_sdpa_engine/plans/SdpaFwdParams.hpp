@@ -14,6 +14,25 @@
 namespace asm_sdpa_engine
 {
 
+// Group mode locates each batch's tokens through two INT32 [B+1] token tables per side.
+// The ragged offset tables hold the physical starts (AITER's seqstart, the kernel's
+// ptr_*seq_padding). The cumulative length tables hold the logical lengths as prefix sums
+// (AITER's cu_seqlen, the kernel's ptr_*seq); without them the kernel reads the lengths
+// from the ragged offset tables, so the batches must then be packed with no gaps.
+struct SdpaFwdGroupModeParams
+{
+    int64_t qoRaggedOffsetUid;
+    int64_t kvRaggedOffsetUid;
+
+    /// The graph's cu_seq_len_q and cu_seq_len_kv tensor UIDs, which are always set together.
+    struct CumulativeLengthUids
+    {
+        int64_t q;
+        int64_t kv;
+    };
+    std::optional<CumulativeLengthUids> cuSeqLenUids = std::nullopt;
+};
+
 /**
  * @brief Parameters for SDPA forward kernel execution.
  *
@@ -27,7 +46,8 @@ struct SdpaFwdParams
     int64_t kUid;
     int64_t vUid;
     int64_t oUid;
-    int64_t lseUid = -1; // LSE output, -1 = disabled
+    std::optional<int64_t> lseUid;
+    std::optional<SdpaFwdGroupModeParams> group;
 
     /// FP8 Q/K/V descale tensor UIDs. The three are always set together or all absent
     /// (the non-fp8 path), so they are modeled as one optional struct rather than three
@@ -77,7 +97,8 @@ struct SdpaFwdParams
     unsigned int oStrideBatch;
 
     // LSE tensor stride (in elements).  The forward kernel args struct
-    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field.
+    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field; batch mode
+    // steps batches by q_head_num * s_lse_Hs.
     unsigned int lseStrideHead = 0;
 
     // Tile size

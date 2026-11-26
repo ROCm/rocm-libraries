@@ -502,28 +502,6 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
 # human rather than joining the exception quietly.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
-        # W4A16: SupportCustomStaggerU: True, and they unpack StaggerU from the
-        # packed GSU/StaggerU argument like the gfx950 kernels below.
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x112x64_W8_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x128x64_W8_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x256x64_W16_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x96x64_W8_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x112x64_W4_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x128x64_W4_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x32x64_W4_gfx1151",
-        "RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x96x64_W4_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151",
-        "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         # gfx950
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
@@ -780,28 +758,15 @@ _CODEGEN_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "characterization", "_codegen"
 )
 
-_LOGIC_ROOT = os.path.normpath(
-    os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        *([".."] * 4),
-        "library",
-        "src",
-        "amd_detail",
-        "rocblaslt",
-        "src",
-        "Tensile",
-        "Logic",
-        "asm_full",
-    )
+_FIXTURE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "logic_yaml", "staggeru"
 )
 
-# Shipped tuning logic known to contain solutions with SupportCustomStaggerU:
-# False and a non-zero StaggerU.  Two files rather than one so a retune that
-# drops the shape from either still leaves the check with something to assert.
+# Verbatim copies of shipped gfx950_id75a3 Equality logic that holds solutions
+# with SupportCustomStaggerU: False and a non-zero StaggerU.  They are copies so
+# a retune of the shipped corpus cannot change what this test exercises.
 COMPILED_IN_STAGGERU_LOGIC = (
-    "gfx950/gfx950_id75a3/Equality/"
     "gfx950_Cijk_Ailk_Bjlk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml",
-    "gfx950/gfx950_id75a3/Equality/"
     "gfx950_Cijk_Alik_Bljk_F8B8SS_BH_BiasS_HAS_SAB_SAV_UserArgs.yaml",
 )
 
@@ -864,9 +829,7 @@ def test_generated_kernels_read_stagger_from_the_packed_argument(rel, tmp_path):
     from somewhere the clamp cannot reach.  If the generator ever learns to bake
     a literal StaggerU into a wrap site, this fails and the clause has to widen
     again."""
-    logic = os.path.join(_LOGIC_ROOT, rel)
-    if not os.path.exists(logic):
-        pytest.skip(f"tuning logic tree not present: {rel}")
+    logic = os.path.join(_FIXTURE_DIR, rel)
     if not os.path.isdir(_CODEGEN_DIR):
         pytest.skip("the code generation harness is not present")
     if _CODEGEN_DIR not in sys.path:
@@ -972,6 +935,10 @@ class _Writer:
 
     def isTdmWaveIdxLive(self, kernel):
         return self._waveIdxLive
+
+    def rapLabel(self, name):
+        # Outside ReuseAcrossPersistent's reuse copy a literal label keeps its name.
+        return name
 
     def _emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc):
         return KernelWriterAssembly._emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc)

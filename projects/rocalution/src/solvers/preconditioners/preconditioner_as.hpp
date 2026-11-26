@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,9 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Print(void) const;
 
-        /** \brief Set number of blocks, overlap and array of preconditioners */
+        /** \brief Set number of blocks, overlap and array of preconditioners; Build()
+      * asserts that nb is at most the number of rows of the operator
+      */
         ROCALUTION_EXPORT
         void Set(int nb, int overlap, Solver<OperatorType, VectorType, ValueType>** preconds);
 

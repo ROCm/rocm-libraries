@@ -954,11 +954,11 @@ using GPU_na_fusion_test_bn_peract_FP32 = na_fusion_test_peract<float>;
 TEST_P(GPU_na_fusion_test_bn_peract_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_fusion_test_bn_peract_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_na_fusion_test_bn_peract_FP32,
                          GetSmokePeractCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_na_fusion_test_bn_peract_FP16,
                          GetSmokePeractCases(),
                          TestNameGenerator{});
@@ -966,7 +966,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_test_bn_peract_FP32,
                          GetFullPeractCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_na_fusion_test_bn_peract_FP16,
                          GetFullPeractCases(),
                          TestNameGenerator{});
@@ -977,11 +977,11 @@ using GPU_na_fusion_test_bn_spatial_FP32 = na_fusion_test_spatial<float>;
 TEST_P(GPU_na_fusion_test_bn_spatial_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_fusion_test_bn_spatial_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_na_fusion_test_bn_spatial_FP32,
                          GetSmokeSpatialCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_na_fusion_test_bn_spatial_FP16,
                          GetSmokeSpatialCases(),
                          TestNameGenerator{});

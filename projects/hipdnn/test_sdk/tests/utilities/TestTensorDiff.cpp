@@ -40,8 +40,8 @@ TEST(TestComputeTensorDiff, IdenticalTensorsHaveNoMismatches)
 
     EXPECT_EQ(summary.totalElements, 16u);
     EXPECT_EQ(summary.mismatchCount, 0u);
-    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 0.0f);
-    EXPECT_FLOAT_EQ(summary.meanAbsDiff, 0.0f);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 0.0);
+    EXPECT_DOUBLE_EQ(summary.meanAbsDiff, 0.0);
     EXPECT_TRUE(summary.worstMismatches.empty());
 }
 
@@ -65,14 +65,14 @@ TEST(TestComputeTensorDiff, DetectsSingleMismatch)
 
     EXPECT_EQ(summary.totalElements, 6u);
     EXPECT_EQ(summary.mismatchCount, 1u);
-    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 1.0f);
-    EXPECT_FLOAT_EQ(summary.meanAbsDiff, 1.0f);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 1.0);
+    EXPECT_DOUBLE_EQ(summary.meanAbsDiff, 1.0);
     ASSERT_EQ(summary.maxDiffIndices.size(), 2u);
     EXPECT_EQ(summary.maxDiffIndices[0], 1);
     EXPECT_EQ(summary.maxDiffIndices[1], 2);
     ASSERT_EQ(summary.worstMismatches.size(), 1u);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[0].refValue, 1.0f);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[0].implValue, 2.0f);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].refValue, 1.0);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].implValue, 2.0);
 }
 
 TEST(TestComputeTensorDiff, MismatchesWithinToleranceAreIgnored)
@@ -126,9 +126,9 @@ TEST(TestComputeTensorDiff, WorstMismatchesCappedAtMaxMismatches)
     ASSERT_EQ(summary.worstMismatches.size(), maxMismatches);
 
     // Must retain the largest 3 diffs (10, 9, 8), sorted descending
-    EXPECT_FLOAT_EQ(summary.worstMismatches[0].absDiff, 10.0f);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[1].absDiff, 9.0f);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[2].absDiff, 8.0f);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].absDiff, 10.0);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[1].absDiff, 9.0);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[2].absDiff, 8.0);
 }
 
 TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
@@ -147,7 +147,91 @@ TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
 
     EXPECT_EQ(summary.mismatchCount, 4u);
     EXPECT_TRUE(summary.worstMismatches.empty());
-    EXPECT_GT(summary.maxAbsDiff, 0.0f);
+    EXPECT_GT(summary.maxAbsDiff, 0.0);
+}
+
+TEST(TestComputeTensorDiff, DoubleCountsMismatchesAboveFloatRange)
+{
+    const double aboveFloatMax = 1e39;
+    Tensor<double> ref({5});
+    Tensor<double> impl({5});
+
+    ref.setHostValue(1e300, 0);
+    impl.setHostValue(1e301, 0);
+    ref.setHostValue(1e300, 1);
+    impl.setHostValue(-1e300, 1);
+    ref.setHostValue(aboveFloatMax, 2);
+    impl.setHostValue(2.0 * aboveFloatMax, 2);
+    ref.setHostValue(aboveFloatMax, 3);
+    impl.setHostValue(1.0, 3);
+    ref.setHostValue(1e300, 4);
+    impl.setHostValue(1e300 * (1.0 + 5e-7), 4);
+
+    const float atol = 0.0f;
+    const float rtol = 1e-6f;
+    auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
+
+    EXPECT_EQ(summary.totalElements, 5u);
+    EXPECT_EQ(summary.mismatchCount, 4u);
+
+    const CpuFpReferenceValidation<double> validator(atol, rtol);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+TEST(TestComputeTensorDiff, DoubleCountsTheSameMismatchesAsTheValidator)
+{
+    Tensor<double> ref({2});
+    Tensor<double> impl({2});
+    ref.setHostValue(1.0, 0);
+    impl.setHostValue(1.0 + 1e-13, 0);
+    ref.setHostValue(1.0, 1);
+    impl.setHostValue(1.0 + 1e-9, 1);
+
+    const float atol = 1e-12f;
+    const float rtol = 0.0f;
+    auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1}));
+
+    const CpuFpReferenceValidation<double> validator(atol, rtol);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+
+    impl.setHostValue(1.0 + 1e-13, 1);
+    EXPECT_EQ(computeTensorDiff<double>(ref, impl, atol, rtol).mismatchCount, 0u);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+TEST(TestComputeTensorDiff, DoubleReportsValuesAboveFloatRange)
+{
+    Tensor<double> ref({1});
+    Tensor<double> impl({1});
+    ref.setHostValue(1e300, 0);
+    impl.setHostValue(1e301, 0);
+
+    auto summary = computeTensorDiff<double>(ref, impl, 0.0f, 1e-6f);
+
+    ASSERT_EQ(summary.mismatchCount, 1u);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 9e300);
+    EXPECT_DOUBLE_EQ(summary.meanAbsDiff, 9e300);
+    ASSERT_EQ(summary.worstMismatches.size(), 1u);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].absDiff, 9e300);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].refValue, 1e300);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].implValue, 1e301);
+}
+
+TEST(TestComputeTensorDiff, RelativeToleranceScalesWithTheReference)
+{
+    Tensor<float> ref({1});
+    Tensor<float> impl({1});
+
+    ref.setHostValue(1.0f, 0);
+    impl.setHostValue(2.0f, 0);
+    EXPECT_EQ(computeTensorDiff<float>(ref, impl, 0.0f, 0.6f).mismatchCount, 1u);
+
+    ref.setHostValue(2.0f, 0);
+    impl.setHostValue(1.0f, 0);
+    EXPECT_EQ(computeTensorDiff<float>(ref, impl, 0.0f, 0.6f).mismatchCount, 0u);
 }
 
 // =================================================================================================
@@ -159,10 +243,10 @@ TEST(TestPrintTensorDiffSummary, OutputContainsExpectedFields)
     TensorDiffSummary summary{};
     summary.totalElements = 100;
     summary.mismatchCount = 5;
-    summary.maxAbsDiff = 0.01f;
-    summary.meanAbsDiff = 0.005f;
+    summary.maxAbsDiff = 0.01;
+    summary.meanAbsDiff = 0.005;
     summary.maxDiffIndices = {1, 2, 3};
-    summary.worstMismatches = {{{1, 2, 3}, 1.0f, 1.01f, 0.01f}};
+    summary.worstMismatches = {{{1, 2, 3}, 1.0, 1.01, 0.01}};
 
     std::ostringstream oss;
     printTensorDiffSummary(oss, "testTensor", summary);
@@ -179,8 +263,8 @@ TEST(TestPrintTensorDiffSummary, NoMismatchesOmitsWorstSection)
     TensorDiffSummary summary{};
     summary.totalElements = 50;
     summary.mismatchCount = 0;
-    summary.maxAbsDiff = 0.0f;
-    summary.meanAbsDiff = 0.0f;
+    summary.maxAbsDiff = 0.0;
+    summary.meanAbsDiff = 0.0;
 
     std::ostringstream oss;
     printTensorDiffSummary(oss, "clean", summary);
@@ -300,7 +384,22 @@ TYPED_TEST(RaggedTensorDiff, ReportsInBlockDifference)
 
     EXPECT_EQ(summary.totalElements, 20u);
     EXPECT_EQ(summary.mismatchCount, 1u);
-    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 1.5f);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 1.5);
+    EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1, 1, 2, 1}));
+}
+
+TEST(TestRaggedTensorDiffDouble, InBlockReferenceAboveFloatRangeIsCompared)
+{
+    auto ref = createRaggedSdpaTensor<double>(0.5f);
+    auto impl = createRaggedSdpaTensor<double>(0.5f);
+    ref.setHostValue(1e300, 1, 1, 2, 1);
+    impl.setHostValue(1e301, 1, 1, 2, 1);
+
+    auto summary = computeTensorDiff<double>(ref, impl, 0.0f, 1e-6f);
+
+    EXPECT_EQ(summary.totalElements, 20u);
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 9e300);
     EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1, 1, 2, 1}));
 }
 
@@ -326,6 +425,25 @@ TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatch)
 
     EXPECT_FALSE(result);
     EXPECT_NE(oss.str().find("ragged layout mismatch"), std::string::npos) << oss.str();
+}
+
+// Same lengths at a different origin is a layout mismatch, and the report names origins and
+// lengths.
+TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsOriginsAndLengths)
+{
+    auto ref = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto impl = createRaggedSdpaTensor<TypeParam>(0.5f, {1, 3, 6});
+    ASSERT_EQ(ref.raggedIterationInfo()->lengths, impl.raggedIterationInfo()->lengths);
+    const CpuFpReferenceValidation<TypeParam> validator;
+
+    std::ostringstream oss;
+    const bool result = validateAndReport<TypeParam>(oss, "o", validator, ref, impl, 0.0f, 0.0f);
+
+    EXPECT_FALSE(result);
+    const std::string output = oss.str();
+    EXPECT_NE(output.find("ragged layout mismatch"), std::string::npos) << output;
+    EXPECT_NE(output.find("origins"), std::string::npos) << output;
+    EXPECT_NE(output.find("lengths"), std::string::npos) << output;
 }
 
 TYPED_TEST(RaggedTensorDiff, ValidateAndReportPrintsLayoutMismatchAgainstDense)

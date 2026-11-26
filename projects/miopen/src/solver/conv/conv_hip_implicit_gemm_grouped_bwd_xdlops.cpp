@@ -212,8 +212,8 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       ctx.GetStream().GetDeviceName() != "gfx950")
+    const auto arch = ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -322,24 +322,21 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConvBwd, p, p.GetInDataType(), try_tf32);
-        };
-
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
             return RunKTNGeneric(*this, c, p);
         };
 
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConvBwd, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConvBwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k2DBwdSolverConfig.uses_split_k);
 
         if(RunAIHeuristics(k2DBwdSolverConfig,
                            state,
                            ctx,
                            problem,
                            is_deterministic,
-                           fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
                            mode_use_tf32))
@@ -420,7 +417,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
@@ -429,9 +426,10 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     if(!loader.IsLoaded())
         return false;
 
-    auto data_type = problem.GetInDataType();
-    return loader.IsArgsSupported(
-        CKSolverType::GrpConvBwd, problem, kernel_id, data_type, use_tf32);
+    // use_tf32 is dropped by Deserialize; recompute it from the problem so a restored config is
+    // validated against the right (TF32 or FP32) instance set. 2D bwd-data has TF32-only kernels,
+    // so a stale use_tf32=false would drop those perf-db records here, before GetSolution runs.
+    return loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvBwd, problem, kernel_id);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::operator==(
@@ -457,23 +455,13 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsValidPerformanceConfig(
     return config.IsValid(problem);
 }
 
-size_t
-ConvHipImplicitGemmGroupBwdXdlops::GetCKMaxWorkspaceSize(const ProblemDescription& problem) const
-{
-    const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
-    if(!loader.IsLoaded())
-        return 0;
-
-    auto data_type = problem.GetInDataType();
-    bool use_tf32  = (data_type == miopenFloat) && problem.UseTF32();
-    return loader.GetWorkspaceSize(CKSolverType::GrpConvBwd, problem, data_type, use_tf32);
-}
-
 size_t ConvHipImplicitGemmGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
                                                            const ProblemDescription& problem) const
 {
-    auto ck_ws_size = GetCKMaxWorkspaceSize(problem);
-    return GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    // Only backward weights uses a CK split-K workspace, so a backward-data solution needs the
+    // layout transform buffers alone (as GetSolution() sizes it); asking CK for its maximum
+    // would enumerate every instance for a value GetWorkspaceSizeLayoutTransformConv() ignores.
+    return GetWorkspaceSizeLayoutTransformConv(problem);
 }
 
 PerformanceConfigHipImplicitGemmGroupBwdXdlops
@@ -521,8 +509,7 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConvBwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConvBwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

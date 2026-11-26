@@ -294,6 +294,12 @@ namespace hiptensor
                       : hiptensor::stridesFromLengths(
                             extentB, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
+            double alphaValue{};
+            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
+            {
+                FAIL() << "Unexpected compute data type: " << computeDataType;
+            }
+
             //hiptensorStatus_t err;
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
@@ -349,12 +355,6 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
 
-            double alphaValue{};
-            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
-            {
-                FAIL() << "Unexpected compute data type: " << computeDataType;
-            }
-
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
             int   hotRuns  = std::max(1, opts->hotRuns());      // guard hot_runs <= 0
@@ -384,12 +384,12 @@ namespace hiptensor
 
             size_t sizeA = std::accumulate(extentA.begin(),
                                            extentA.end(),
-                                           hiptensorDataTypeSize(abDataType),
+                                           size_t(hiptensorDataTypeSize(abDataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeB = std::accumulate(extentB.begin(),
                                            extentB.end(),
-                                           hiptensorDataTypeSize(abDataType),
+                                           size_t(hiptensorDataTypeSize(abDataType)),
                                            std::multiplies<size_t>());
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;

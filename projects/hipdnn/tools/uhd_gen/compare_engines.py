@@ -26,6 +26,7 @@ import pathlib
 
 import pandas as pd
 
+from .provenance import hard_provenance
 from .ranking_metrics import RANKING_METRICS, is_valid_metric_value
 
 
@@ -62,7 +63,10 @@ def measure(specs: list[str], names: dict[str, str], metrics: list[str]):
             problem = (benchmark, "" if pd.isna(device) else str(device))
             contract = (
                 binding.get("engine"),
-                json.dumps(binding.get("trained_against"), sort_keys=True),
+                # Code objects from another compiler do not make another contract.
+                json.dumps(
+                    hard_provenance(binding.get("trained_against")), sort_keys=True
+                ),
             )
             if contracts.setdefault((label, metric_name), contract) != contract:
                 raise SystemExit(

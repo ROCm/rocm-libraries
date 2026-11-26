@@ -32,6 +32,7 @@ from ..Activation import ActivationType
 from ..Common import fastdeepcopy as deepcopy
 from ..Common.Constants import INDEX_CHARS
 from ..Common.DataType import DataType
+from ..Common.ScaleAlphaVec import VALID_SCALE_ALPHA_VEC_MODES, scaleAlphaVectorMode
 from ..Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
@@ -171,7 +172,7 @@ class ProblemSizeRange:
 
 class Problem:
   """ Problem sizes, strides, padding and other info"""
-  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None):
+  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, stridesGate=None, count=None, world=None, a2aExtent=None):
     self.sizes = tuple(sizes) if sizes else None
     self.stridesA = tuple(stridesA) if stridesA else None
     self.stridesB = tuple(stridesB) if stridesB else None
@@ -180,19 +181,25 @@ class Problem:
     self.stridesGate = tuple(stridesGate) if stridesGate else None
 
     self.count = count
+    self.world = world
+    self.a2aExtent = a2aExtent
 
   def __str__(self):
-    rv= "{ sizes:" + str(list(self.sizes))
+    rv= "{ sizes: " + str(list(self.sizes))
     if self.stridesA:
-      rv += ", stridesA:" + str(list(self.stridesA))
+      rv += ", stridesA: " + str(list(self.stridesA))
     if self.stridesB:
-      rv += ", stridesB:" + str(list(self.stridesB))
+      rv += ", stridesB: " + str(list(self.stridesB))
     if self.stridesC:
-      rv += ", stridesC:" + str(list(self.stridesC))
+      rv += ", stridesC: " + str(list(self.stridesC))
     if self.stridesD:
-      rv += ", stridesD:" + str(list(self.stridesD))
+      rv += ", stridesD: " + str(list(self.stridesD))
     if self.stridesGate:
-      rv += ", stridesGate:" + str(list(self.stridesGate))
+      rv += ", stridesGate: " + str(list(self.stridesGate))
+    if self.world is not None:
+      rv += ", world: %d" % self.world
+      if self.a2aExtent is not None:
+        rv += ", a2aExtent: %d" % self.a2aExtent
     rv += " }"
     return rv
 
@@ -236,7 +243,7 @@ class ExactList(Problem):
 
 
 class ExactDict(Problem):
-  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate' ]
+  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate', 'world', 'a2aExtent' ]
 
   def __init__(self, e, problemType):
     Problem.__init__(self)
@@ -262,6 +269,30 @@ class ExactDict(Problem):
         raise RuntimeError ("specified size=%s does not have enough indices for problem (expected %d, got %d)" \
                 % (self.sizes, problemType["TotalIndices"], len(self.sizes)))
 
+    if problemType and isFusedA2A(problemType):
+      from ..Components.Signature import FUSED_A2A_MAX_RANKS
+      mode = problemType["FusedA2A"]
+      if self.world is None:
+        raise RuntimeError("FusedA2A=%s problem %s must set 'world'" % (mode, list(self.sizes)))
+      if not 1 <= self.world <= FUSED_A2A_MAX_RANKS:
+        raise RuntimeError("world=%d must be in [1, %d]" % (self.world, FUSED_A2A_MAX_RANKS))
+      if self.sizes[2] != 1:
+        raise RuntimeError("FusedA2A=%s problem %s has batch=%d; must be 1" % (mode, list(self.sizes), self.sizes[2]))
+      if mode == "GemmA2A":
+        if self.a2aExtent is None:
+          self.a2aExtent = self.sizes[0]
+        if not 1 <= self.a2aExtent <= self.sizes[0]:
+          raise RuntimeError("a2aExtent=%d must be in [1, M=%d]" % (self.a2aExtent, self.sizes[0]))
+      else:
+        if self.a2aExtent is None:
+          self.a2aExtent = self.sizes[3]
+        if self.a2aExtent != self.sizes[3]:
+          raise RuntimeError("a2aExtent=%d must equal K=%d" % (self.a2aExtent, self.sizes[3]))
+        if self.sizes[3] % self.world != 0:
+          raise RuntimeError("K=%d is not a multiple of world=%d" % (self.sizes[3], self.world))
+    elif self.world is not None or self.a2aExtent is not None:
+      raise RuntimeError("'world' and 'a2aExtent' apply only to fused A2A problems")
+
 
 ################################################################################
 # ProblemSizes
@@ -271,8 +302,14 @@ Adapter class for class `ProblemSizes`. It satisfies the implicit usage requirem
 of ClientWriter.writeClientConfig() by converting ExactLogic to list of `Problem` objects
 """
 class ProblemSizesMock:
-  def __init__(self, exactLogic):
-    self.problems = [Problem(problem) for problem, solution in exactLogic]
+  def __init__(self, exactLogic, problemType=None):
+    if isFusedA2A(problemType):
+      self.problems = []
+      for size, solution in exactLogic:
+        sizes, lds, (world, extent) = splitFusedA2ARow(size, problemType)
+        self.problems.append(Problem(sizes + lds, world=world, a2aExtent=extent))
+    else:
+      self.problems = [Problem(problem) for problem, solution in exactLogic]
 
 class ProblemSizesMockDummy:
   def __init__(self):
@@ -291,11 +328,15 @@ class ProblemSizes:
         for sizeTypeKey in dictionary:
           #print ("PROBLEM parsed:", sizeTypeKey, dictionary[sizeTypeKey])
           if sizeTypeKey == "Range":
+            if isFusedA2A(problemType):
+              raise RuntimeError("fused A2A problems must use Exact dicts, not Range")
             psr = ProblemSizeRange(problemType, dictionary[sizeTypeKey])
             self.ranges.append( psr )
           elif sizeTypeKey == "Exact":
             e= dictionary[sizeTypeKey]
             if isinstance(e,list):
+              if isFusedA2A(problemType):
+                raise RuntimeError("fused A2A problem %s must be an Exact dict with 'world'" % e)
               self.exacts.append(ExactList(e, problemType))
             elif isinstance(e,dict):
               self.exacts.append(ExactDict(e, problemType))
@@ -400,6 +441,16 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+def _isFloatWithAtMostBits(dataType, nBits):
+    """Return True if dataType is a floating-point type with at most nBits bits.
+
+    For example, with nBits=8 it returns True for FP8, BF8, FP6, BF6 and FP4,
+    and False for FP16 and INT8.
+    """
+    isInt = dataType.isInt8() or dataType.isInt8x4() or dataType.isInt32() \
+        or dataType.isInt64() or dataType.isInt4()
+    return not isInt and dataType.numBytes() * 8 <= nBits
+
 _INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
 
 ################################################################################
@@ -439,7 +490,9 @@ _defaultProblemType = {
     # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
     "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
-    "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
+    # 1/2/3 support M/N/MN vectors; gfx1250 may add 0x4 (5/6/7) for device scalar support.
+    # Scalar-only mode 4 is reserved; capable kernels retain the vector epilogue.
+    "UseScaleAlphaVec": 0,
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,  # Keep kernel names the same for HPA mode.  Useful for testing.
     "Sparse": 0,  # 4:2 Structured Sparse A Matrix, 0=Non Sparse, 1=Sparse Matrix A, 2=Sparse Matrix B
@@ -505,9 +558,12 @@ _defaultProblemType = {
     "ActivationNoGuard": False,
     # AmaxD
     "OutputAmaxD": False,
-    # PUSHes the first AM feature columns to remote peer recv slots from the
-    # GEMM epilogue; the remaining columns store locally.
-    "FusedGemmA2A": False,
+    # Also store every D tile to a second ("peer") D buffer, same layout, passed as an extra
+    # kernel argument: the partitions of a split GEMM then each hold the complete D.
+    "OutputPeerD": False,
+    # GemmA2A: the GEMM epilogue PUSHes the first AM feature columns to the peers.
+    # A2AGemm: B's K shards are gathered from the peers into a2aBuf one shard at a time.
+    "FusedA2A": "Disabled",
     # For kernels putting arguments in workspaces instead of kernel arguments, they can choose to support user arguments input instead.
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
@@ -527,6 +583,23 @@ _defaultProblemType = {
     "DataTypeMXSA": "E8",
     "DataTypeMXSB": "E8",
 }
+
+FUSED_A2A_MODES = ("Disabled", "GemmA2A", "A2AGemm")
+
+
+def isFusedA2A(problemType):
+  """problemType: a ProblemType or a raw logic ProblemType dict."""
+  return (problemType or {}).get("FusedA2A", "Disabled") != "Disabled"
+
+
+def splitFusedA2ARow(size, problemType):
+  """Returns (sizes, LDs, [world, a2aExtent]) of a fused logic row; LDs may be absent."""
+  numSizes = problemType["TotalIndices"]
+  numFields = (numSizes + 2, numSizes + problemType["NumIndicesLD"] + 2)
+  if len(size) not in numFields:
+    raise RuntimeError("fused GEMM+A2A logic row %s has %d fields; expected %d or %d"
+                       % (list(size), len(size), numFields[0], numFields[1]))
+  return list(size[:numSizes]), list(size[numSizes:-2]), list(size[-2:])
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
 # DataType (Ti)        = The data-type of the input matrices: A/B
@@ -602,6 +675,8 @@ _validGEMMTypes = [
     ("F6", "F8", "S", "S"),
     ("F8", "F4", "S", "S"),
     ("F4", "F8", "S", "S"),
+    ("F8", "F4", "B", "S"),
+    ("F4", "F8", "B", "S"),
     ("F6", "F4", "S", "S"),
     ("F4", "F6", "S", "S"),
     ("F6", "F4", "B", "S"),
@@ -636,6 +711,34 @@ _validGEMMTypes = [
     ("B6", "F6", "B", "S"),
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
+    ("F8", "F6", "B", "S"),
+    ("F8", "F6", "H", "S"),
+    ("F8", "B6", "B", "S"),
+    ("F8", "B6", "H", "S"),
+    ("F8", "F4", "H", "S"),
+    ("B8", "F6", "B", "S"),
+    ("B8", "F6", "H", "S"),
+    ("B8", "B6", "S", "S"),
+    ("B8", "B6", "B", "S"),
+    ("B8", "B6", "H", "S"),
+    ("B8", "F4", "B", "S"),
+    ("B8", "F4", "H", "S"),
+    ("F6", "F8", "B", "S"),
+    ("F6", "F8", "H", "S"),
+    ("F6", "B8", "B", "S"),
+    ("F6", "B8", "H", "S"),
+    ("F6", "F4", "H", "S"),
+    ("B6", "F8", "B", "S"),
+    ("B6", "F8", "H", "S"),
+    ("B6", "B8", "S", "S"),
+    ("B6", "B8", "B", "S"),
+    ("B6", "B8", "H", "S"),
+    ("B6", "F4", "H", "S"),
+    ("F4", "F8", "H", "S"),
+    ("F4", "B8", "B", "S"),
+    ("F4", "B8", "H", "S"),
+    ("F4", "F6", "H", "S"),
+    ("F4", "B6", "H", "S"),
 ]
 
 
@@ -701,6 +804,8 @@ _HPATypes = [
     ("F6", "F8", "S", "S"),
     ("F8", "F4", "S", "S"),
     ("F4", "F8", "S", "S"),
+    ("F8", "F4", "B", "S"),
+    ("F4", "F8", "B", "S"),
     ("F6", "F4", "S", "S"),
     ("F4", "F6", "S", "S"),
     ("F6", "F4", "B", "S"),
@@ -729,6 +834,34 @@ _HPATypes = [
     ("B6", "F6", "B", "S"),
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
+    ("F8", "F6", "B", "S"),
+    ("F8", "F6", "H", "S"),
+    ("F8", "B6", "B", "S"),
+    ("F8", "B6", "H", "S"),
+    ("F8", "F4", "H", "S"),
+    ("B8", "F6", "B", "S"),
+    ("B8", "F6", "H", "S"),
+    ("B8", "B6", "S", "S"),
+    ("B8", "B6", "B", "S"),
+    ("B8", "B6", "H", "S"),
+    ("B8", "F4", "B", "S"),
+    ("B8", "F4", "H", "S"),
+    ("F6", "F8", "B", "S"),
+    ("F6", "F8", "H", "S"),
+    ("F6", "B8", "B", "S"),
+    ("F6", "B8", "H", "S"),
+    ("F6", "F4", "H", "S"),
+    ("B6", "F8", "B", "S"),
+    ("B6", "F8", "H", "S"),
+    ("B6", "B8", "S", "S"),
+    ("B6", "B8", "B", "S"),
+    ("B6", "B8", "H", "S"),
+    ("B6", "F4", "H", "S"),
+    ("F4", "F8", "H", "S"),
+    ("F4", "B8", "B", "S"),
+    ("F4", "B8", "H", "S"),
+    ("F4", "F6", "H", "S"),
+    ("F4", "B6", "H", "S"),
 ]
 
 def problemTypeToEnum(problemType):
@@ -886,12 +1019,19 @@ class ProblemType(Mapping):
     normalizeMXBlockTile(self.state, "A", srcFile)
     normalizeMXBlockTile(self.state, "B", srcFile)
 
+    if "FusedGemmA2A" in config and config["FusedGemmA2A"]:
+      raise Exception("ProblemType key FusedGemmA2A is retired; write FusedA2A: GemmA2A")
+    if self["FusedA2A"] not in FUSED_A2A_MODES:
+      raise Exception("FusedA2A=%s; must be one of %s" % (self["FusedA2A"], ", ".join(FUSED_A2A_MODES)))
+
     # Validate parameter types against the _defaultProblemType registry
     validateProblemTypeParameterTypes(
         self.state,
         srcFile=srcFile,
         raiseOnMismatch=raiseOnTypeMismatch,
     )
+    if self["UseScaleAlphaVec"] not in VALID_SCALE_ALPHA_VEC_MODES:
+      printExit("UseScaleAlphaVec must be 0, 1, 2, 3, 5, 6, or 7; scalar-only mode 4 is not supported.")
 
     # adjusting all data types
     if "DataType" in config:
@@ -927,6 +1067,17 @@ class ProblemType(Mapping):
     else:
       self["DataTypeB"] = self["MacDataTypeB"]
     self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
+
+    # Kernels cannot convert between two floats of 8 bits or fewer, so an operand stored in
+    # one is also its MAC type (e.g. DataType F4 with DataTypeB F8 is an F4 x F8 MFMA).
+    for tc in ("A", "B"):
+      dataType, macDataType = self["DataType%s"%tc], self["MacDataType%s"%tc]
+      if dataType != macDataType and _isFloatWithAtMostBits(dataType, 8) \
+          and _isFloatWithAtMostBits(macDataType, 8):
+        if "MacDataType%s"%tc in config:
+          raise Exception("Unsupported input conversion DataType%s (%s) -> MacDataType%s (%s)" \
+                          % (tc, dataType.toChar(), tc, macDataType.toChar()))
+        self["MacDataType%s"%tc] = dataType
 
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
@@ -1117,6 +1268,23 @@ class ProblemType(Mapping):
         if (not self["Gradient"]):
           printWarning("ActivationNoGuard is set to False cause Gradient is off.")
           self["ActivationNoGuard"] = False
+
+    if self["FusedA2A"] != "Disabled":
+      unsupported = [name for name, used in (
+          ("UseBias", self["UseBias"]),
+          ("UseE", self["UseE"]),
+          ("UseGateResidual", self["UseGateResidual"]),
+          ("UseScaleAB", self["UseScaleAB"]),
+          ("UseScaleCD", self["UseScaleCD"]),
+          ("UseScaleAlphaVec", self["UseScaleAlphaVec"]),
+          ("OutputAmaxD", self["OutputAmaxD"]),
+          ("Sparse", self["Sparse"]),
+          ("GroupedGemm", self["GroupedGemm"]),
+          ("Activation", self["ActivationType"] != 'none'),
+          ("TransposeB", self["FusedA2A"] == "A2AGemm" and self["TransposeB"]),
+          ("UseInitialStridesAB", self["FusedA2A"] == "A2AGemm" and self["UseInitialStridesAB"])) if used]
+      if unsupported:
+        raise Exception("FusedA2A=%s does not support %s" % (self["FusedA2A"], ", ".join(unsupported)))
 
   ################################################################################
    # Function checkIfSupportedGEMMType:
@@ -1389,7 +1557,7 @@ class ProblemType(Mapping):
       if self["BiasSrc"] and self["Gradient"]: # Show bias src if gradient = True
         name.append(f"{self['BiasSrc']}")
 
-    factorDim = max(self["UseScaleAlphaVec"], self["UseBias"])
+    factorDim = max(scaleAlphaVectorMode(self["UseScaleAlphaVec"]), self["UseBias"])
     if factorDim > 1 :
         s = ("N" if factorDim == 2 else "MN")
         name.append(f"FD{s}")
@@ -1401,8 +1569,12 @@ class ProblemType(Mapping):
         name.append(f"Aux{self['DataTypeE'].toChar()}")
     if self["OutputAmaxD"]:
       name.append("AmaxD")
-    if self["FusedGemmA2A"]:
-      name.append("FusedA2A")
+    if self["OutputPeerD"]:
+      name.append("PeerD")
+    if self["FusedA2A"] == "GemmA2A":
+      name.append("GemmA2A")
+    if self["FusedA2A"] == "A2AGemm":
+      name.append("A2AGemm")
     if self["Sparse"]:
       if self["Sparse"] == 2:
         name.append("SPBML%d"%(self["MetadataLayout"]))

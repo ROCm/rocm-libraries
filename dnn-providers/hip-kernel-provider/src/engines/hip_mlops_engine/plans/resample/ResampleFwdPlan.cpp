@@ -11,7 +11,6 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include <cstdint>
-#include <limits>
 #include <numeric>
 
 namespace hip_kernel_provider::resample
@@ -204,6 +203,13 @@ ResampleFwdPlan::ResampleFwdPlan(ResampleFwdParams&& params)
 {
 }
 
+std::vector<KernelLaunchShape> ResampleFwdPlan::launchShapes(int64_t numElements)
+{
+    return {{"ResampleFwd",
+             numElements / BLOCK_SIZE + (numElements % BLOCK_SIZE != 0 ? 1 : 0),
+             BLOCK_SIZE}};
+}
+
 size_t ResampleFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     return 0;
@@ -238,13 +244,10 @@ void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     const auto totalElements = outputElementCount();
-    constexpr uint64_t BLOCK_SIZE = 256;
-    const auto gridSize = (totalElements + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    if(gridSize > std::numeric_limits<unsigned int>::max())
+    const auto shapes = launchShapes(static_cast<int64_t>(totalElements));
+    for(const auto& shape : shapes)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "ResampleFwd output is too large for one kernel launch.");
+        checkLaunchFitsThreadLimit(shape);
     }
 
     const size_t spatialDims = rank - 2;
@@ -271,8 +274,8 @@ void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     _compiledProgram = kernelCompiler.compile("ResampleFwd.cpp", options);
     _runnableKernel = _compiledProgram->getKernel("ResampleFwd");
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(BLOCK_SIZE), 1, 1);
-    _runnableKernel->setGridSize(static_cast<unsigned int>(gridSize), 1, 1);
+    _runnableKernel->setBlockSize(static_cast<unsigned int>(shapes[0].threadsPerBlock), 1, 1);
+    _runnableKernel->setGridSize(static_cast<unsigned int>(shapes[0].blocks), 1, 1);
 }
 
 void ResampleFwdPlan::execute(const Handle& handle,

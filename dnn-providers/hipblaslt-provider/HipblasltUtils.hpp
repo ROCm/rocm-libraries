@@ -11,6 +11,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
+#include <vector>
 
 #define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
     do                                                                                \
@@ -36,6 +37,18 @@
         }                                                                                   \
     } while(0)
 
+#define THROW_ON_HIP_FAILURE(status)                                                    \
+    do                                                                                  \
+    {                                                                                   \
+        const hipError_t hipStatusValue = (status);                                     \
+        if(hipStatusValue != hipSuccess)                                                \
+        {                                                                               \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
+                "HIP error occurred: " + std::string(hipGetErrorName(hipStatusValue))); \
+        }                                                                               \
+    } while(0)
+
 #define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                                 \
     do                                                                                      \
     {                                                                                       \
@@ -52,6 +65,15 @@
 
 namespace hipblaslt_plugin::hipblaslt_utils
 {
+
+// Matches hipMalloc's 256-byte alignment guarantee; regions carved out of a
+// caller's workspace are aligned to it so each is as aligned as an allocation.
+constexpr size_t WORKSPACE_ALIGNMENT = 256;
+
+constexpr size_t alignUp(size_t value, size_t alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
 
 inline const char* hipblasStatusToString(hipblasStatus_t status)
 {
@@ -98,6 +120,11 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
+
+/// True when `strides` describe dense row-major data for `dims` (innermost dimension
+/// contiguous, each outer stride the product of the inner extents). The stride of a
+/// size-1 dimension does not affect the layout and is ignored.
+bool isDenseRowMajor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
 
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 

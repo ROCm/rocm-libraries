@@ -3,7 +3,12 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -54,9 +59,10 @@ inline bool globMatches(std::string_view pattern, std::string_view text)
     return patternPos == pattern.size();
 }
 
-// True if any of the `:`-separated patterns matches. An empty pattern matches only an
-// empty name, so "" selects nothing.
-inline bool anyPatternMatches(std::string_view patterns, std::string_view name)
+// True if `predicate` holds for any of the `:`-separated patterns. An empty list holds
+// one empty pattern.
+template <typename Predicate>
+bool anyPattern(std::string_view patterns, const Predicate& predicate)
 {
     std::size_t start = 0;
     while(true)
@@ -64,7 +70,7 @@ inline bool anyPatternMatches(std::string_view patterns, std::string_view name)
         const auto end = patterns.find(':', start);
         const auto pattern = end == std::string_view::npos ? patterns.substr(start)
                                                            : patterns.substr(start, end - start);
-        if(globMatches(pattern, name))
+        if(predicate(pattern))
         {
             return true;
         }
@@ -74,6 +80,109 @@ inline bool anyPatternMatches(std::string_view patterns, std::string_view name)
         }
         start = end + 1;
     }
+}
+
+// True if any of the `:`-separated patterns matches. An empty pattern matches only an
+// empty name, so "" selects nothing.
+inline bool anyPatternMatches(std::string_view patterns, std::string_view name)
+{
+    return anyPattern(patterns,
+                      [name](std::string_view pattern) { return globMatches(pattern, name); });
+}
+
+struct GTestFilterParts
+{
+    std::string_view positive;
+    std::string_view negative;
+};
+
+// Split at the first `-`. An empty positive part before a `-` means `*`.
+inline GTestFilterParts splitGTestFilter(std::string_view filter)
+{
+    const auto dash = filter.find('-');
+    GTestFilterParts parts{filter.substr(0, dash), {}};
+    if(dash != std::string_view::npos)
+    {
+        parts.negative = filter.substr(dash + 1);
+        if(parts.positive.empty())
+        {
+            parts.positive = "*";
+        }
+    }
+    return parts;
+}
+
+// The pattern positions that are live after `globMatches` consumes `prefix`. Position
+// `pattern.size()` means the whole pattern is consumed. A `*` at a live position also
+// makes the next position live, because the `*` can match no characters.
+inline std::vector<bool> globLivePositionsAfter(std::string_view pattern, std::string_view prefix)
+{
+    const auto addWithStarClosure = [pattern](std::vector<bool>& live, std::size_t position) {
+        while(position <= pattern.size() && !live[position])
+        {
+            live[position] = true;
+            if(position == pattern.size() || pattern[position] != '*')
+            {
+                break;
+            }
+            ++position;
+        }
+    };
+
+    std::vector<bool> live(pattern.size() + 1, false);
+    addWithStarClosure(live, 0);
+    for(const char c : prefix)
+    {
+        std::vector<bool> next(pattern.size() + 1, false);
+        bool anyLive = false;
+        for(std::size_t position = 0; position < pattern.size(); ++position)
+        {
+            if(!live[position])
+            {
+                continue;
+            }
+            if(pattern[position] == '*')
+            {
+                addWithStarClosure(next, position);
+                anyLive = true;
+            }
+            else if(pattern[position] == '?' || pattern[position] == c)
+            {
+                addWithStarClosure(next, position + 1);
+                anyLive = true;
+            }
+        }
+        live = std::move(next);
+        if(!anyLive)
+        {
+            break;
+        }
+    }
+    return live;
+}
+
+// True if some text T makes `prefix + T` match `pattern`. Every pattern tail matches
+// some text, so a live position after `prefix` is sufficient.
+inline bool globMayMatchSomeExtension(std::string_view pattern, std::string_view prefix)
+{
+    const auto live = globLivePositionsAfter(pattern, prefix);
+    return std::find(live.begin(), live.end(), true) != live.end();
+}
+
+// True if `prefix + T` matches `pattern` for every text T. This holds when a live
+// position after `prefix` starts a tail of only `*`. The check can return false for
+// some patterns that match every extension.
+inline bool globMatchesEveryExtension(std::string_view pattern, std::string_view prefix)
+{
+    const auto live = globLivePositionsAfter(pattern, prefix);
+    for(std::size_t position = 0; position < pattern.size(); ++position)
+    {
+        if(live[position] && pattern.find_first_not_of('*', position) == std::string_view::npos)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace detail
@@ -90,18 +199,28 @@ inline bool anyPatternMatches(std::string_view patterns, std::string_view name)
 /// this reimplements it; keeping the two in step is what GTestFilter's unit tests pin.
 inline bool gtestFilterSelects(std::string_view filter, std::string_view fullName)
 {
-    const auto dash = filter.find('-');
-    auto positive = filter.substr(0, dash);
-    const auto negative
-        = dash == std::string_view::npos ? std::string_view{} : filter.substr(dash + 1);
+    const auto parts = detail::splitGTestFilter(filter);
+    return detail::anyPatternMatches(parts.positive, fullName)
+           && !detail::anyPatternMatches(parts.negative, fullName);
+}
 
-    if(dash != std::string_view::npos && positive.empty())
-    {
-        positive = "*";
-    }
+/// Whether `--gtest_filter=<filter>` can select some test of the suite `suiteName`.
+/// False means that gtestFilterSelects() is false for every "suiteName.Test", so the
+/// suite's bundles need no parse. True can also occur for a suite with no selected test.
+inline bool gtestFilterMaySelectSuite(std::string_view filter, std::string_view suiteName)
+{
+    std::string prefix{suiteName};
+    prefix += '.';
 
-    return detail::anyPatternMatches(positive, fullName)
-           && !detail::anyPatternMatches(negative, fullName);
+    const auto parts = detail::splitGTestFilter(filter);
+    const auto mayMatch = [&prefix](std::string_view pattern) {
+        return detail::globMayMatchSomeExtension(pattern, prefix);
+    };
+    const auto matchesAll = [&prefix](std::string_view pattern) {
+        return detail::globMatchesEveryExtension(pattern, prefix);
+    };
+    return detail::anyPattern(parts.positive, mayMatch)
+           && !detail::anyPattern(parts.negative, matchesAll);
 }
 
 } // namespace hipdnn_integration_tests::bundle

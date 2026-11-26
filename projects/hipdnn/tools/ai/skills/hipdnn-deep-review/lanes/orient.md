@@ -14,7 +14,11 @@ read `$REPO`, the diff or the PR's commits: reviewers measure the change against
 account of the base. The changed paths and the description only say where to look.
 
 Describe the area, not the change, in at most 80 lines. Link; do not copy. Every backticked path is relative to the
-repository root, never to the area. Write alternatives as `a, b and c`, never as `a/b/c` in backticks.
+repository root, never to the area: a file at `dnn-providers/integration-tests/src/harness/bundle/LiveRows.hpp` is
+always cited that way, never as `bundle/LiveRows.hpp` or `LiveRows.hpp`, even when every path in the area's Code map
+shares that prefix. `partition.py orient-gate` checks each citation against the full repository tree, so a prefix
+dropped anywhere fails it; its output names the file and line a bad citation came from. Write alternatives as
+`a, b and c`, never as `a/b/c` in backticks.
 
 ```markdown
 # <Area>
@@ -29,10 +33,10 @@ where, what it covers, how to select it); **Options and guards**; **Consumers**.
 
 **Options and guards.** For the area's changed files: each `option()` and cache variable with its default, each
 `#ifdef`, `#if` and CMake `if(...)` guard, and for each change the flag it depends on and that flag's default, so a change
-that is dead code with the flag OFF shows. `RUN`, `ROCK` and `AUTH` read this section.
+that is dead code with the flag OFF shows. `RUN`, `ROCK`, `AUTH` and `IMPACT` read this section.
 
 **Consumers.** The in-repo includers of the area's changed public headers (`git -C "$CLONE" grep -l <header name> "$BASE"
--- <pathspec>`) and which project or provider tests exercise them. `RUN` and `AUTH` read this section.
+-- <pathspec>`) and which project or provider tests exercise them. `RUN`, `AUTH` and `IMPACT` read this section.
 
 Sources, in order: the area's `README.md` and `docs/`; `projects/hipdnn/docs/`; RFCs under
 `projects/hipdnn/docs/rfcs/`; then the code and tests. Check a document against the code
@@ -56,7 +60,9 @@ most one page:
 Start with `# Context: <target> (round <N>)`, then `##` sections: **Purpose** (two
 sentences from the description); **Glossary** (merged, one line per term; mark a term two
 areas define differently); **Areas** (table: area, relative link to its Orient file, status,
-one-line summary); **Where the change lands** (per area: the entry points, contracts and
+one-line summary — write the link as `orient/<slug>.md`, a path into this round's evidence
+directory, not the repository; `orient-gate` recognizes that prefix and checks it against
+`$EVIDENCE/r<N>/orient/` instead of the repository tree); **Where the change lands** (per area: the entry points, contracts and
 extension points the stated purpose goes through, and the touch points a change of this
 kind updates: registries, CMake lists, docs, tests); **Options and guards** (merged from the area files: flag, default, areas and paths it gates);
 **Consumers** (merged: header or surface, consumer project, tests); **Tests that should move** (suite,

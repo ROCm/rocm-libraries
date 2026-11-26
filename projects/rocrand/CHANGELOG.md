@@ -5,9 +5,10 @@ Documentation for rocRAND is available at
 
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
-### Added
+### Changed
 
-* Added `rocrand_philox4x32_10(uint4 counter, uint2 key)`, a stateless device and host function that computes one Philox4x32-10 block. It is the equivalent of cuRAND's `curand_Philox4x32_10`.
+* On Linux, `librocrand.so` now exports only its public API. Applications built against this version and run with an older rocRAND may print a non-fatal "no version information available" warning.
+* Replaced offset applied to scrambled Sobol direction vectors with Linear Matrix Scramble. The output of ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32 and ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64 is not bitwise compatible with previous releases.
 
 ### Optimized
 
@@ -16,7 +17,13 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* Fixed a compilation error when calling `operator()(result_type* output, size_t size)` on the C++ wrapper engines in `rocrand.hpp`. An unused `template<class Generator>` parameter that could not be deduced from the arguments has been removed.
 
+### Added
+
+* Added `rocrand_philox4x32_10(uint4 counter, uint2 key)`, a stateless device and host function that computes one Philox4x32-10 block. It is the equivalent of cuRAND's `curand_Philox4x32_10`.
+* New unit tests in `test/test_rocrand_cpp_wrapper.cpp` that call `operator()` on each C++ wrapper engine and compare the output distribution with a reference using a two-sample Kolmogorov-Smirnov test.
+* Added Sobol direction vector equidistribution and scramble tests.
 
 ## rocRAND 5.2.0 for ROCm 10.2.0
 

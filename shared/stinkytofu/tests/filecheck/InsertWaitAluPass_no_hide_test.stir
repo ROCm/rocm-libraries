@@ -1,0 +1,53 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,ignoreWaitHide --print-output
+#
+# Plain mode 2: with the arch's WaitHide table ignored, every hazard is waited on and no count of
+# intervening ops hides a wait. This is the behaviour of an arch or variant without a table.
+
+#===----------------------------------------------------------------------===#
+# Enough matrix ops to hide this wait on gfx1250 follow the producer; without the table it stays.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @no_hide_xdl_followers_still_wait
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 12
+# CHECK-NEXT: ds_load_b32
+st.func @no_hide_xdl_followers_still_wait() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[8:15] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[8:15]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[16:23]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[24:31]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[32:39]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[40:47]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[48:55]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[56:63]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[64:71]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[72:79]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[80:87]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[88:95]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x128_fp8_fp8"(v[300:315], v[316:331], v[96:103]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+  v260 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# Same for vm_vsrc: enough LDS reads to hide it on gfx1250 follow the first; the wait stays.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @no_hide_lds_followers_still_wait
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 6
+# CHECK-NEXT: v40 = "st.v_mov_b32"
+st.func @no_hide_lds_followers_still_wait() {
+^entry:
+  v100 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v111 = "st.ds_load_b32"(v50) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v40 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+}

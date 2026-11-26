@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -94,6 +92,51 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx1201",
+          "bytes": 1642,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
+          "sha256": "759d8028dd3fa1e6d8726fcf6676a894ea90a8151c26814188dbd1886319ed63",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx942",
+          "bytes": 2382,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx942",
+          "sha256": "b5ac8c44ca66b388e1cf3f0caa231b712736d9c167efce3ad64bb0448e7050ae",
+          "status": "ok"
+        },
+        "crosslane/gfx942/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx942",
+          "bytes": 1640,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx942",
+          "sha256": "5fb17686bcc9cc7d2a5eb55881449ffaffe4d34104f4c2ba2fe3890430005418",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_masks_f32": {
+          "arch": "gfx950",
+          "bytes": 2382,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_masks_f32_gfx950",
+          "sha256": "3dc95376d3edbea4f9b153c17c814af871b06f2642eee86e1b24f81f13809e01",
+          "status": "ok"
+        },
+        "crosslane/gfx950/warp_shuffle_xor_dpp_reduce_i32": {
+          "arch": "gfx950",
+          "bytes": 1640,
+          "family": "crosslane",
+          "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx950",
+          "sha256": "1876c64511c6c57254c6209e1b17fd0309a2fdc3dff7f0823cfc1c68a0909ee2",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32": {
           "arch": "gfx1201",

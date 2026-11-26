@@ -22,7 +22,9 @@ When adding or moving a native C++ test, edit its concern-owned fragment rather
 than `tests/CMakeLists.txt`. The ownership rules, same-directory-scope rationale,
 and before/after inventory comparison recipe are in
 [`tests/README.md`](../../tests/README.md#cmake-registration-ownership).
-Installed Python and library CTest entries remain in `platform/CMakeLists.txt`.
+Installed Python CTest entries remain in `platform/CMakeLists.txt`, which
+includes `library/tests/ctest_lists.cmake`; that file owns the installed library
+CTest entries.
 
 > The upstream `python/test/test_rocke_examples.py` end-to-end harness and the
 > `example/ck_tile/dsl/<N>_*/gen.py` generators are **not** part of rocKE (they
@@ -100,7 +102,20 @@ identity, emitted-IR validity, arch-domain warning checks, pytest, and CTest onc
 native tests are built), use `python tests/run_all.py`. This is not a fast smoke:
 its unfiltered CTest phase also includes registered toolchain integration tests.
 See [`tests/README.md`](../../tests/README.md#execution-categories) for selector
-scope and focused routes.
+scope and focused routes. To keep the runner's build, corpus gates, and CTest
+while limiting its two pytest passes, repeat `--pytest-target` with paths or node
+IDs relative to `tests/`:
+
+```bash
+python tests/run_all.py \
+  --pytest-target tools/test_run_all.py \
+  --pytest-target core/test_arch_domain_lane.py::test_the_corpus_gate_is_green
+```
+
+The final line says `RESULT: FOCUSED GREEN`; this is an iteration result, not the
+complete pre-merge verdict. Run `python tests/run_all.py` without selectors
+before submitting a change. For a seconds-scale inner loop, invoke pytest
+itself; use the focused runner when the surrounding gates are relevant.
 
 The example generators that build HSACO + manifest and verify against a
 reference live under `python/rocke/examples/` (run them as modules, e.g.

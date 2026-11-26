@@ -34,7 +34,9 @@ auto MakeProblem(miopen::ExecutionContext& ctx,
 
 } // namespace
 
-TEST(CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE, Wrw)
+using CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE, Wrw)
 {
     auto gfx942   = MockHandle{DevDescription{"gfx942", 304, 64}, true};
     auto other    = MockHandle{DevDescription{"gfx90a", 104, 64}, true};
@@ -60,7 +62,7 @@ TEST(CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE, Wrw)
     EXPECT_TRUE(universal.IsApplicable(ctx942, s2_small_942));
 }
 
-TEST(CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE, BwdData)
+TEST_P(CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE, BwdData)
 {
     auto gfx942   = MockHandle{DevDescription{"gfx942", 304, 64}, true};
     auto other    = MockHandle{DevDescription{"gfx90a", 104, 64}, true};
@@ -86,3 +88,7 @@ TEST(CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE, BwdData)
     EXPECT_TRUE(stride1.IsApplicable(ctx942, s1_large_942));
     EXPECT_TRUE(rest.IsApplicable(ctx942, s2_small_942));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestConvSolverSmallBatchGemmExclusion_NONE,
+                         testing::Values(0));

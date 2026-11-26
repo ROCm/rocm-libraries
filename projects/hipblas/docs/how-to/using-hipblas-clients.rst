@@ -79,6 +79,14 @@ hipblas-bench supports data-driven benchmarks using a YAML-format specification 
 For example, ``hipblas_smoke.yaml`` is a YAML file used to run a smoke test.
 However, other examples can be found in the `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ GitHub repository.
 
+The ``hipblas-GB/s`` column is the effective bandwidth: the bytes a call is modeled to move between device memory
+and the GPU (``clients/include/bytes.hpp``), multiplied by the batch count and divided by the time per call.
+The model is the same as in BLAS++: each input is read once, each output is written once, and an operand that is
+both read and written, such as ``y`` in ``axpy`` and ``gemv`` or ``C`` in ``gemm``, is counted twice, assuming that
+``beta`` is not zero. For matrices, only the elements the function accesses are counted: the full matrix for general
+storage, the stored triangle for symmetric, Hermitian, and triangular matrices (including packed storage), and the
+stored band for banded matrices. The column is reported only for functions with a byte count.
+
 hipblas-test
 ============
 

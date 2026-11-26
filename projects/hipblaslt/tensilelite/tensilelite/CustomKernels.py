@@ -100,6 +100,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
     "batchOffsetB":           "BatchOffsetB",
+    "RNDSeed":                "RNDSeed",
 }
 
 _ACTIVATION_ARG_INDEX = {
@@ -116,10 +117,12 @@ _ACTIVATION_ARG_INDEX = {
 # solution; InternalSupportParams threads through to the kernel writer) and
 # would otherwise be popped because they're not tunable parameters.
 #
-# Provenance-only keys (Source, Version, Features) are deliberately NOT in this
-# set: getCustomKernelConfig drops them so they don't pollute the solution
-# dict, while validateCustomKernelMetadata still sees them via its independent
-# readCustomKernelConfig call.
+# Source, Version and Features are deliberately NOT in this set:
+# getCustomKernelConfig drops them so they don't pollute the solution dict, while
+# validateCustomKernelMetadata (its own readCustomKernelConfig call) and LibraryIO
+# (the raw config it passes to getCustomKernelConfig) still see them. Features SupportsBias, SupportsActivation and
+# SupportsScaleAlpha set to false make LibraryIO restrict that solution's
+# ProblemType so it rejects bias, activation and scale-alpha-vector problems.
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
 
 def isCustomKernelConfig(config):
@@ -293,6 +296,15 @@ def readCustomKernelConfig(name, directory=None):
         raise RuntimeError(f"Custom kernel '{name}' custom.config must be a YAML mapping")
     return config
 
+def magicSizeSemantic(base, magicDivAlg):
+    """Return the algorithm-specific semantic for a packed-dimension magic divisor."""
+    if magicDivAlg not in (1, 2):
+        raise RuntimeError(
+            f"Unsupported MagicDivAlg {magicDivAlg!r} for packed-dimension "
+            f"{base}: expected 1 or 2")
+    return "%sAlg%d" % (base, magicDivAlg)
+
+
 def _metadataArgToCustomArg(metaArg, kernelName=None):
     """Convert a single amdgpu_metadata .args entry to a CustomKernel arg dict.
 
@@ -355,7 +367,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
     if m:
         return {"type": argType, "semantic": "StrideE%s" % m.group(1)}
 
-    m = re.match(r"(MagicNumberSize|MagicShiftSize)(\w)", name)
+    m = re.match(r"((?:MagicNumberSize|MagicShiftSize)Alg[12])(\w)$", name)
     if m:
         from .Common.Constants import INDEX_CHARS
         idx = INDEX_CHARS.index(m.group(2))
@@ -549,7 +561,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     }
 
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = None
+    kernelName: str, internalSupportParams: dict, directory: str = None, kernelConfig: dict = None
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -559,6 +571,8 @@ def getCustomKernelConfig(
         internalSupportParams: A dictionary of internal support parameters to be merged with the kernel configuration.
         directory: Optional directory where custom kernel files are located.
             Defaults to bundled package resources.
+        kernelConfig: The custom.config already read with readCustomKernelConfig; it is modified in place.
+            Read from the kernel when None.
 
     Returns:
         dict: The validated configuration dictionary for the custom kernel.
@@ -566,12 +580,24 @@ def getCustomKernelConfig(
     Raises:
         RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
     """
-    kernelConfig = readCustomKernelConfig(kernelName, directory)
+    if kernelConfig is None:
+        kernelConfig = readCustomKernelConfig(kernelName, directory)
     if "InternalSupportParams" not in kernelConfig:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
 
     if "KernArgsVersion" not in kernelConfig["InternalSupportParams"]:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
+
+    # A handwritten kernel skips the derivation that resolves "Auto", and the
+    # runtime picks which scale modes it serves from this field.
+    problemType = kernelConfig.get("ProblemType", {})
+    if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
+            "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                                     "HostPreSwizzle128x4"):
+        raise RuntimeError(
+            f"Custom kernel {kernelName} has MX scales, so its config must set 'MXScaleFormat' to "
+            "the scale layout it reads: NoSwizzle, HostPreSwizzle, InMemorySwizzle or "
+            "HostPreSwizzle128x4")
 
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the
@@ -721,6 +747,8 @@ def validateCustomKernelMetadata(name, directory=None):
         else:
             ck_missing = _requiredFieldsMissing(custom_kernel, ["args", "macrotile", "threads", "grid"])
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
+            if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
+                missing.append("CustomKernel.uniformSummationOrder (true or false)")
 
     if missing:
         kind = "External" if is_external else "TensileLite"

@@ -11,20 +11,33 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     ROCKE_FIXTURE,
     comgr_lib,
     derive_and_pack,
+    device_lib_path,
+    hip_compiler,
+    hip_path,
     hip_source,
-    hipcc,
     rocm_kpack_dir,
     run_assert,
 )
 
 
 @pytest.fixture(scope="module")
-def mixed_probe(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def mixed_probe(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     work = tmp_path_factory.mktemp("mixed_probe")
     src = work / "src"
     hip_source(src / "hip")
     shutil.copytree(ROCKE_FIXTURE, src / "rocke")
-    return derive_and_pack(src, work, rocm_kpack_dir, hipcc, comgr_lib, rocke=True)
+    return derive_and_pack(
+        src,
+        work,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        rocke=True,
+    )
 
 
 def test_mixed_root_passes_with_per_ukd_kinds(mixed_probe, rocm_kpack_dir, comgr_lib):

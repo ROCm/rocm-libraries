@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -47,10 +47,10 @@ TYPED_TEST(IsSortedVectorTests, TestIsSortedSimple)
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 3), true);
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 4), false);
 
-  ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 3, thrust::less<T>()), true);
+  ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 3, _THRUST_STD::less<T>()), true);
 
-  ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 1, thrust::greater<T>()), true);
-  ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 4, thrust::greater<T>()), false);
+  ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 1, _THRUST_STD::greater<T>()), true);
+  ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 4, _THRUST_STD::greater<T>()), false);
 
   ASSERT_EQ(thrust::is_sorted(v.begin(), v.end()), false);
 }
