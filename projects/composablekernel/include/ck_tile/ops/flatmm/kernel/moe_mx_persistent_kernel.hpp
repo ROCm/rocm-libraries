@@ -40,6 +40,12 @@ namespace ck_tile {
 // within that (occupancy times compute units). Taking row tiles in order lets the first row
 // tiles' down tasks run while the last gate_up tasks are still running.
 //
+// Residency requirement: the launch must get the whole device (as GridSize() computes it) at
+// once. With fewer compute units (a CU mask, a partition) or with another kernel that never
+// releases its compute units (e.g. another persistent kernel waiting on this one), waiting
+// workgroups can hold every slot while the gate_up tasks they wait for are never dispatched,
+// and the launch hangs. Use the two-kernel layer (gate_up, then the down projection) there.
+//
 // Synchronization cost decides whether one launch beats two, so it is kept to a store wait, a
 // barrier and a relaxed atomic increment per gate_up task (the gate_up epilogue writes the
 // intermediate with device-scope stores, visible device-wide once complete, so no cache writeback

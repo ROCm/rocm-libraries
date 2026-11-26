@@ -24,13 +24,14 @@ auto create_args(int argc, char* argv[])
                 "per_slot",
                 "layer only: per_slot | atomic | auto (combine and persistent picked by "
                 "choose_mx_moe_layer_plan)")
-        .insert("fused",
-                "0",
-                "layer only: > 0 runs the layer in one launch with this many intermediate slices")
         .insert("persistent",
                 "0",
-                "layer only: 1 runs the layer as one persistent task-queue launch (with fused > 0, "
-                "the most K slices its down tasks may take; atomic combine)")
+                "layer only: 1 runs the layer as one persistent task-queue launch (both GEMMs); "
+                "0 runs two GEMM kernels")
+        .insert("max_slices",
+                "0",
+                "layer, persistent, atomic combine: the most K slices a down task may take "
+                "(0: one per 256 intermediate columns)")
         .insert("hidden", "1024", "layer only: hidden size")
         .insert("inter", "512", "layer only: intermediate size")
         .insert("mx_prec", "fp4xfp4", "A x B data types: fp4xfp4 (a4w4) or fp8xfp4 (a8w4)")
@@ -60,14 +61,14 @@ int main(int argc, char* argv[])
             if(prec != "fp4xfp4")
                 throw std::runtime_error("layer: only mx_prec=fp4xfp4");
             MxMoeLayerCase l;
-            l.experts      = arg_parser.get_int("experts");
-            l.num_tokens   = arg_parser.get_int("NumTokens");
-            l.topk         = arg_parser.get_int("TopK");
-            l.hidden       = arg_parser.get_int("hidden");
-            l.inter        = arg_parser.get_int("inter");
-            l.per_slot     = arg_parser.get_str("combine") != "atomic";
-            l.fused_slices = arg_parser.get_int("fused");
-            l.persistent   = arg_parser.get_int("persistent") != 0;
+            l.experts    = arg_parser.get_int("experts");
+            l.num_tokens = arg_parser.get_int("NumTokens");
+            l.topk       = arg_parser.get_int("TopK");
+            l.hidden     = arg_parser.get_int("hidden");
+            l.inter      = arg_parser.get_int("inter");
+            l.per_slot   = arg_parser.get_str("combine") != "atomic";
+            l.max_slices = arg_parser.get_int("max_slices");
+            l.persistent = arg_parser.get_int("persistent") != 0;
             if(arg_parser.get_str("combine") == "auto")
             {
                 const auto plan =

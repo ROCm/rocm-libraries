@@ -638,20 +638,19 @@ struct MxMoeLayerCase
     int hidden     = 1024;
     int inter      = 512;
     bool per_slot  = true; // down projection: per-slot + combine, or the atomic gemm2
-    // > 0: the whole layer in one MoeMxFusedKernel launch, the intermediate split into this
-    // many slices per row tile (atomic combine; per_slot is ignored). 0: two kernels.
-    int fused_slices = 0;
     // Run the layer as one persistent task-queue launch (MoeMxPersistentKernel): gate_up and
     // down tiles as tasks with per-row-tile dependencies. With per_slot, the combine kernel
-    // follows as a second launch. Takes precedence over fused_slices, which then caps the K
-    // slices of the down tasks (atomic combine only; default one per 256 columns).
+    // follows as a second launch. false: two GEMM kernels (gate_up, then the down projection).
     bool persistent = false;
-    int init        = 0;
-    unsigned seed   = 11939;
-    bool validate   = true;
-    int warmup      = 0;
-    int repeat      = 0;
-    bool verbose    = true;
+    // Persistent with the atomic combine: the most K slices the down tasks may take (the kernel
+    // picks how many it uses). 0: one per 256 intermediate columns.
+    int max_slices = 0;
+    int init       = 0;
+    unsigned seed  = 11939;
+    bool validate  = true;
+    int warmup     = 0;
+    int repeat     = 0;
+    bool verbose   = true;
 };
 
 // How to run a layer: combine (per-slot + MoeTopkCombineKernel, or fp32 atomics into Y) and
@@ -829,8 +828,7 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
                  SP{static_cast<const ScaleType*>(w1s_dev.GetDeviceBuffer()), 2 * I},
                  {}};
     gate_up.e_scale_ptr     = mids_dev.GetDeviceBuffer();
-    const bool fused        = c.fused_slices > 0 && !c.persistent;
-    const bool per_slot_out = c.per_slot && !fused;
+    const bool per_slot_out = c.per_slot;
     void* down_out          = per_slot_out ? p_dev.GetDeviceBuffer() : out_dev.GetDeviceBuffer();
     Args down{ids,
               sw_dev.GetDeviceBuffer(),
@@ -858,34 +856,17 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
     auto run1 = [&](const ck_tile::stream_config& s) {
         return launch_mx_moe_gemm<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>(gate_up, s, false);
     };
-    // One launch for the whole layer (fused_slices > 0).
     using GateUpKernel =
         typename MxMoeKernelTypes<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>::Kernel;
     using DownKernel = typename MxMoeKernelTypes<K::kFFN_gemm2, F4, F4, float>::Kernel;
-    using Fused      = ck_tile::MoeMxFusedKernel<GateUpKernel, DownKernel>;
-    auto run_fused   = [&](const ck_tile::stream_config& s, bool clear) {
-        const auto fk = Fused::MakeKargs(gate_up, down, c.fused_slices);
-        if(!Fused::IsSupportedArgument(fk))
-            throw std::runtime_error("Arguments not supported by the fused MX MoE kernel");
-        auto clear_out = [&]() {
-            if(clear)
-                HIP_CHECK_ERROR(hipMemsetAsync(
-                    out_dev.GetDeviceBuffer(), 0, out_dev.GetBufferSize(), s.stream_id_));
-        };
-        return ck_tile::launch_kernel_time_mask(
-            s,
-            clear_out,
-            ck_tile::make_kernel<1>(Fused{}, Fused::GridSize(fk), Fused::BlockSize(), 0, fk));
-    };
     // Persistent task-queue launch; its counters live in a workspace zeroed once here.
     using DownSlotKernel = typename MxMoeKernelTypes<K::kFFN_gemm2_per_slot, F4, F4, float>::Kernel;
     using PersistentAtomic  = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownKernel>;
     using PersistentPerSlot = ck_tile::MoeMxPersistentKernel<GateUpKernel, DownSlotKernel>;
-    // Most K slices of the persistent down tasks (the kernel picks how many it uses): fused_slices
+    // Most K slices of the persistent down tasks (the kernel picks how many it uses): max_slices
     // if given, else one per 256 columns with the atomic combine; per-slot output takes one.
     const int persistent_slices =
-        per_slot_out ? 1
-                     : (c.fused_slices > 0 ? c.fused_slices : PersistentAtomic::MaxUsefulSlices(I));
+        per_slot_out ? 1 : (c.max_slices > 0 ? c.max_slices : PersistentAtomic::MaxUsefulSlices(I));
     ck_tile::DeviceMem ws_dev(PersistentAtomic::WorkspaceWords(M / MTile, persistent_slices) *
                               sizeof(int32_t));
     ws_dev.SetZero();
@@ -928,8 +909,6 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         run_persistent(ck_tile::stream_config{nullptr, false}, true);
         run_persistent(ck_tile::stream_config{nullptr, false}, true);
     }
-    else if(fused)
-        run_fused(ck_tile::stream_config{nullptr, false}, true);
     else
     {
         run1(ck_tile::stream_config{nullptr, false});
@@ -956,8 +935,6 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         const ck_tile::stream_config s{nullptr, true, 0, c.warmup, c.repeat, true};
         if(c.persistent)
             res.ms_gate_up = run_persistent(s, false); // the whole layer; ms_down stays 0
-        else if(fused)
-            res.ms_gate_up = run_fused(s, false); // the whole layer; ms_down stays 0
         else
         {
             res.ms_gate_up = run1(s);
@@ -1077,7 +1054,6 @@ inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
         std::cout << "mx_moe layer ("
                   << (c.persistent
                           ? std::string("persistent, ") + (per_slot_out ? "per-slot" : "atomic")
-                      : fused        ? "fused, " + std::to_string(c.fused_slices) + " slices"
                       : per_slot_out ? std::string("per-slot")
                                      : std::string("atomic"))
                   << "): experts " << E << ", tokens " << T << ", topk " << topk << ", hidden " << H

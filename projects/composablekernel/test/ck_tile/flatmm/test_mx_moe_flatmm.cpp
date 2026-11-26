@@ -8,7 +8,7 @@
 // reference) is shared with tile_example_mx_moe_flatmm.
 //
 // The layer cases chain gemm1_gate_up_mx_quant (SiLU(gate) * up quantized to MXFP4 in the
-// epilogue) into the down projection, as two kernels or in one MoeMxFusedKernel launch.
+// epilogue) into the down projection, as two kernels or in one MoeMxPersistentKernel launch.
 //
 // The cases cover the token gather (row-mapping data), padding rows (token counts that are not a
 // multiple of the tile), experts spanning several tiles, many small experts, and one token.
@@ -122,42 +122,37 @@ class MxMoeLayer : public ::testing::TestWithParam<LayerCase>
 {
 };
 
-void run_layer(const LayerCase& t, bool per_slot, int fused_slices = 0, bool persistent = false)
+void run_layer(const LayerCase& t, bool per_slot, bool persistent = false)
 {
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP() << "the MX MoE path is implemented for gfx1250 only";
     MxMoeLayerCase c;
-    c.experts      = t.experts;
-    c.num_tokens   = t.num_tokens;
-    c.topk         = t.topk;
-    c.hidden       = t.hidden;
-    c.inter        = t.inter;
-    c.init         = t.init;
-    c.per_slot     = per_slot;
-    c.fused_slices = fused_slices;
-    c.persistent   = persistent;
-    c.verbose      = false;
-    const auto r   = run_mx_moe_layer(c);
+    c.experts    = t.experts;
+    c.num_tokens = t.num_tokens;
+    c.topk       = t.topk;
+    c.hidden     = t.hidden;
+    c.inter      = t.inter;
+    c.init       = t.init;
+    c.per_slot   = per_slot;
+    c.persistent = persistent;
+    c.verbose    = false;
+    const auto r = run_mx_moe_layer(c);
     EXPECT_EQ(r.intermediate_mismatch, 0.0) << "the MXFP4 intermediate differs from the CPU";
     EXPECT_TRUE(r.pass);
 }
 
 TEST_P(MxMoeLayer, PerSlot) { run_layer(GetParam(), true); }
 TEST_P(MxMoeLayer, Atomic) { run_layer(GetParam(), false); }
-// The whole layer in one MoeMxFusedKernel launch: one slice of the intermediate per row tile,
-// and the most slices (one 256-column K tile each).
-TEST_P(MxMoeLayer, FusedOneSlice) { run_layer(GetParam(), false, 1); }
-TEST_P(MxMoeLayer, FusedMaxSlices) { run_layer(GetParam(), false, GetParam().inter / 256); }
 // The whole layer in one MoeMxPersistentKernel launch (gate_up and down tasks synchronized by
 // per-row-tile counters), launched twice so that the second runs on the counters the first reset.
-TEST_P(MxMoeLayer, PersistentPerSlot) { run_layer(GetParam(), true, 0, true); }
-TEST_P(MxMoeLayer, PersistentAtomic) { run_layer(GetParam(), false, 0, true); }
+TEST_P(MxMoeLayer, PersistentPerSlot) { run_layer(GetParam(), true, true); }
+TEST_P(MxMoeLayer, PersistentAtomic) { run_layer(GetParam(), false, true); }
 // Whatever plan choose_mx_moe_layer_plan picks for the case.
 TEST_P(MxMoeLayer, AutoPlan)
 {
     const auto& t   = GetParam();
     const auto plan = choose_mx_moe_layer_plan(t.experts, t.num_tokens, t.topk, t.hidden, t.inter);
-    run_layer(t, plan.per_slot, 0, plan.persistent);
+    run_layer(t, plan.per_slot, plan.persistent);
 }
 
 INSTANTIATE_TEST_SUITE_P(A4W4,

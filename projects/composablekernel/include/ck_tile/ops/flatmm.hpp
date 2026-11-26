@@ -13,7 +13,6 @@
 #include "ck_tile/ops/flatmm/kernel/grouped_mx_flatmm_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/mixed_prec_flatmm_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/moe_flatmm_kernel.hpp"
-#include "ck_tile/ops/flatmm/kernel/moe_mx_fused_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/moe_mx_persistent_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/moe_topk_combine_kernel.hpp"
 #include "ck_tile/ops/flatmm/kernel/mx_flatmm_kernel.hpp"
