@@ -25,6 +25,7 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "ck_tensor_limits.hpp"
 #include "common.hpp"
 #include "data_types.hpp"
 #include "elementwise/elementwise_cpu_reference.hpp"
@@ -351,9 +352,21 @@ namespace hiptensor
                                                     &cacheMode,
                                                     sizeof(hiptensorCacheMode_t)));
 
-            hiptensorPlan_t plan;
-            CHECK_HIPTENSOR_ERROR(
-                hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
+            hiptensorPlan_t plan = nullptr;
+            auto            planStatus
+                = hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */);
+            // No plan is created for tensors the kernels cannot address, which the bench
+            // configurations include.
+            if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descA));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descB));
+                GTEST_SKIP() << "Tensor size not supported by the kernels";
+            }
+            CHECK_HIPTENSOR_ERROR(planStatus);
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();

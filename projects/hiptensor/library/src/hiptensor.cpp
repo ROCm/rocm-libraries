@@ -36,6 +36,7 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include "ck_tensor_limits.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
@@ -991,6 +992,14 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       const hiptensorPlanPreference_t      pref,
                                       uint64_t                             workspaceSizeLimit)
 {
+    // The kernels would compute wrong results or fail for tensors they cannot address, so no
+    // plan is created for them.
+    if(auto status = hiptensor::checkCkTensorLimits(*desc, "hiptensorCreatePlan");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     (*plan)                     = new hiptensorPlan();
     hiptensorPlan_t newPlan     = *plan;
     newPlan->mRequiredWorkspace = workspaceSizeLimit;

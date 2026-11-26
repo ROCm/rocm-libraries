@@ -493,6 +493,7 @@ set(_HIPTENSOR_HOST_TESTS
   logger_test
   reduction_cpu_impl_test
   reduction_mode_test
+  tensor_size_limit_test
   util_test
   yaml_test
 )
