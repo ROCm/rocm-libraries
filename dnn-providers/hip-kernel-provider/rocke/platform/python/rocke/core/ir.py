@@ -7717,12 +7717,18 @@ class IRBuilder:
     def iglp_opt(self, level: int = 0) -> None:
         """`__builtin_amdgcn_iglp_opt(level)`.
 
-        Asks the AMDGPU post-RA scheduler to apply a canned instruction
-        interleaving for the enclosing loop (MFMA / ds_read / ds_write /
-        VMEM). ``level`` selects the pattern (0 = GEMM MFMA-interleave,
-        1 = attention-style). Placed once at the top of the main loop body;
-        it owns the loop schedule, so manual ``sched_barrier`` /
-        ``sched_group_barrier`` hints should be suppressed when it is used.
+        Asks the AMDGPU scheduler to apply a canned instruction interleaving
+        (MFMA / ds_read / ds_write / VMEM) to the scheduling region it sits
+        in. ``level`` selects LLVM's strategy (0 = ``MFMASmallGemmOpt``,
+        1 = ``MFMASmallGemmSingleWaveOpt``). Placed once at the top of the
+        main loop body; it owns the loop schedule, so manual
+        ``sched_barrier`` / ``sched_group_barrier`` hints should be
+        suppressed when it is used.
+
+        Level 1 needs ROCm 7.11 or newer, the 10.x releases included (LLVM
+        commit 576e1affab35): older compilers run out of memory on a region
+        with fewer than 4 LDS reads. See known issue 8 in
+        ``dsl_docs/architecture/gfx_support_audit.md``.
         """
         self._op("tile.iglp_opt", attrs={"level": int(level)})
 
