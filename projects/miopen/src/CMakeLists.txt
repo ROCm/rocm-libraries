@@ -1229,8 +1229,8 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     endif()
     # Test-only golden-vector fixtures for the LGBM forest walker parity gates
     # (test/gtest/lgbm_picker.cpp, lgbm_pcfg_picker.cpp). Copied next to the
-    # model assets so the tests find them via GetSystemDbPath(), but NOT
-    # installed into the package.
+    # model assets so the tests find them via GetSystemDbPath() in the build
+    # tree. test/gtest/CMakeLists.txt installs them with miopen_gtest.
     if(BUILD_TESTING)
         configure_file("kernels/lgbm_rank_golden.json"
             "${KERNELS_BINARY_DIR}/lgbm_rank_golden.json" COPYONLY)
