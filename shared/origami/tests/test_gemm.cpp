@@ -3021,6 +3021,22 @@ TEST_CASE("GEMM: co-resident BF16 WMMA workgroups share only LDS and the matrix 
           Approx(origami::heuristic_defaults_t::GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC));
 }
 
+TEST_CASE("GEMM: co-resident gfx1250 workgroups queue on the WGP's tail loop", "[gemm][gfx1250][occupancy]") {
+  const auto hw = gfx1250_hardware();
+  auto one      = gfx1250_config(128, 64, 64, 3);
+  auto three    = one;
+  three.occupancy = 3;
+  auto lat = [&](size_t k, const origami::config_t& c) {
+    return origami::gemm::compute_total_latency(make_problem(4096, 4096, k), hw, c);
+  };
+  // 2048 tiles keep three workgroups on every WGP.  The tail moves its whole DepthU window at the WGP's rate, so
+  // a 32 deep tail costs a tile about the same whether one or three workgroups share the WGP.
+  const double tail_one   = lat(352, one) - lat(320, one);
+  const double tail_three = lat(352, three) - lat(320, three);
+  REQUIRE(tail_one > 0.0);
+  REQUIRE(tail_three == Approx(tail_one).epsilon(0.05));
+}
+
 TEST_CASE("GEMM: gfx1250 cluster lockstep, tail loop and odd K", "[gemm][gfx1250][cluster]") {
   const auto hw = gfx1250_hardware();
   auto lat = [&](const origami::problem_t& p, const origami::config_t& c) {

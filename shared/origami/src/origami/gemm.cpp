@@ -3101,8 +3101,8 @@ double compute_tile_latency(const problem_t& problem,
                     win_kib;
   }
   // gfx1250: r workgroups resident on a WGP overlap everything but the WGP's shared LDS port (operand reads and
-  // tensor-DMA writes at its bandwidth), matrix pipes and store path, so r of them take one tile's time plus r - 1
-  // such busy times (measured up to 4 workgroups per WGP).
+  // tensor-DMA writes at its bandwidth), matrix pipes, store path and tail loop (L_tail is the WGP's rate), so r of
+  // them take one tile's time plus r - 1 such busy times (measured up to 4 workgroups per WGP).
   if (wmma_bf16 && wgs_per_cu > 1.0 && k_iters > 0) {
     const double r     = std::min(wgs_per_cu, heuristic_defaults_t::GFX1250_MAX_MEASURED_RESIDENT_WGS);
     const double mt_k  = static_cast<double>(MT_K);
@@ -3111,7 +3111,8 @@ double compute_tile_latency(const problem_t& problem,
                          mt_k * context.a_bytes;
     const double busy  = lds_b / static_cast<double>(hardware_t::get_lds_read_bytes_per_clk(hardware.arch)) +
                         n_mi / wg_simds * wmma_bf16_issue(wg_wps * r);
-    L_tile_total = (L_tile_total + (r - 1.0) * (busy * static_cast<double>(k_iters) + L_epilogue)) / r;
+    L_tile_total =
+        (L_tile_total + (r - 1.0) * (busy * static_cast<double>(k_iters) + L_epilogue + L_tail)) / r;
   }
 
   if (debug) {
