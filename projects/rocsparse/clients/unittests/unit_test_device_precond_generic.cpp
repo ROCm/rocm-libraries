@@ -982,12 +982,8 @@ namespace
         check_csr_matrix<K, T, I, J>(
             handle, shape(make_fat_row_matrix<T>(100, 3)), opt, what + " fat row 100");
         // A row of 520 entries: binary-search kernel.
-        // Not for spildlt0 i32 rows / i64 cols: find_csrildlt0_kernel_binsearch_launch
-        // dispatches <int32_t, int32_t> whenever row_type is i32 without looking at
-        // col_type, so 64-bit column indices are read as 32-bit (AISPARSE-920).
-        if constexpr(!(K == Kind::ildlt && sizeof(I) == 4 && sizeof(J) == 8))
-            check_csr_matrix<K, T, I, J>(
-                handle, shape(make_fat_row_matrix<T>(520, 3)), opt, what + " fat row 520");
+        check_csr_matrix<K, T, I, J>(
+            handle, shape(make_fat_row_matrix<T>(520, 3)), opt, what + " fat row 520");
     }
 
     template <Kind K, typename T>
