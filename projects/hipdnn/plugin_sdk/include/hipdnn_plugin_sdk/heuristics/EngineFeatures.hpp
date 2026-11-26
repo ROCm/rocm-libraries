@@ -363,9 +363,11 @@ std::optional<double>
     const auto unpagedMatches = [batch, sk](const Tensor& side) {
         return side.dims()->Get(0) == batch && side.dims()->Get(2) == sk;
     };
+    // K and V may each have their own head count, as long as each divides the query heads
+    // (grouped-query attention per side): the work per query head does not depend on either.
     if(sk <= 0 || (!extent->pagedK && !unpagedMatches(*k))
-       || (!extent->pagedV && !unpagedMatches(*v)) || k->dims()->Get(1) != v->dims()->Get(1)
-       || heads % k->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
+       || (!extent->pagedV && !unpagedMatches(*v)) || heads % k->dims()->Get(1) != 0
+       || heads % v->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
        || o->dims()->Get(2) != sq || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
     {
         return std::nullopt;

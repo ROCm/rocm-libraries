@@ -1450,6 +1450,42 @@ TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOpera
     }
 }
 
+// K and V may each have a head count of their own, each dividing the query heads (the
+// gfx1151 and FlyDSL attention engines serve it): the work per query head is unchanged, so
+// forward and backward count what equal K and V heads count. A V head count that does not
+// divide the query heads is not attention hipDNN describes.
+TEST(TestEngineFeatures, AttentionCountsKAndVWithTheirOwnHeadCounts)
+{
+    // Q has 8 heads, K 2; V (uid 3) and the backward's dV (uid 9) take vHeads.
+    const auto forward = [](int64_t vHeads) {
+        auto graph = attentionGraph(attention());
+        graph.tensors[2]->dims = {2, vHeads, 7, 32};
+        return graph;
+    };
+    const auto backward = [](int64_t vHeads) {
+        auto graph = backwardGraph([](SdpaBackwardAttributesT&) {});
+        graph.tensors[2]->dims = {2, vHeads, 7, 32};
+        graph.tensors[8]->dims = {2, vHeads, 7, 32};
+        return graph;
+    };
+    for(const int64_t vHeads : {int64_t{1}, int64_t{4}, int64_t{8}})
+    {
+        SCOPED_TRACE(vHeads);
+        EXPECT_DOUBLE_EQ(features(forward(vHeads)).at("graph.flops").get<double>(), 32256.0);
+        EXPECT_DOUBLE_EQ(features(backward(vHeads)).at("graph.flops").get<double>(), 23040.0);
+    }
+    // K with more heads than V counts the same.
+    auto moreKeyHeads = forward(2);
+    moreKeyHeads.tensors[1]->dims = {2, 4, 7, 16};
+    EXPECT_DOUBLE_EQ(features(moreKeyHeads).at("graph.flops").get<double>(), 32256.0);
+
+    for(const auto& published : {features(forward(3)), features(backward(3))})
+    {
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+    }
+}
+
 /// The key a reference keeps for query row @p row, as CpuFpReferenceSdpa masks (SEM-001).
 bool referenceKeeps(
     const DiagonalBandParams& band, int64_t row, int64_t key, int64_t sq, int64_t sk)
