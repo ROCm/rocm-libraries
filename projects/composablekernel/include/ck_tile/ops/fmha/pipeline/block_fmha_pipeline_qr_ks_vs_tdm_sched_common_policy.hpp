@@ -141,7 +141,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy : BlockFmhaPipelineQRKSVSTdmD
         }
     };
 
-    // One QK WMMA of a K group; with scales, K64 runs as Derived's zero-padded K128 WMMA.
+    // One QK WMMA of a K group; with scales, K64 runs as Derived's paired or zero-padded K128.
     template <index_t WmmaOrdinal,
               typename BlockGemm,
               typename CBlockTensor,
@@ -182,6 +182,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy : BlockFmhaPipelineQRKSVSTdmD
             (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
         constexpr index_t m_iter = WmmaOrdinal % BlockGemm::MIterPerWarp;
 
+        // Scaled D192 runs K64 steps 0+1 as one K128 WMMA; step 2 stays zero-padded.
+        constexpr bool kPairedK64 = !std::is_same_v<AScaleFn, NoScale> && WarpGemm::kK != 128 &&
+                                    BlockGemm::KIterPerWarp == 3;
+        if constexpr(kPairedK64 && k_iter == 0)
+            return;
+
         AWarpTensor a_warp_tensor;
         a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
             merge_sequences(sequence<m_iter, k_iter>{}, a_warp_y_index_zeros),
@@ -205,6 +211,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy : BlockFmhaPipelineQRKSVSTdmD
                        b_warp_tensor,
                        a_scale(number<m_iter>{}, number<k_iter>{}),
                        b_scale(number<n_iter>{}, number<k_iter>{}));
+        else if constexpr(kPairedK64 && k_iter == 1)
+        {
+            AWarpTensor a_lo_tensor;
+            a_lo_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                merge_sequences(sequence<m_iter, 0>{}, a_warp_y_index_zeros),
+                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+            BWarpTensor b_lo_tensor;
+            b_lo_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                merge_sequences(sequence<n_iter, 0>{}, b_warp_y_index_zeros),
+                merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+            Derived::RunPairedScaledWmma(c_warp_tensor,
+                                         a_lo_tensor,
+                                         a_warp_tensor,
+                                         b_lo_tensor,
+                                         b_warp_tensor,
+                                         a_scale(number<m_iter>{}, number<k_iter>{}),
+                                         b_scale(number<n_iter>{}, number<k_iter>{}));
+        }
         else
             Derived::RunPaddedScaledWmma(c_warp_tensor,
                                          a_warp_tensor,

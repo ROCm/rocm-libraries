@@ -158,6 +158,37 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy
         c_warp_tensor.get_thread_buffer() = c.get_thread_buffer();
     }
 
+    // K128 WMMA from two adjacent K64 steps, low step in the low eight dwords.
+    template <typename CWarpTensor, typename AWarpTensor, typename BWarpTensor>
+    CK_TILE_DEVICE static void RunPairedScaledWmma(CWarpTensor& c_warp_tensor,
+                                                   const AWarpTensor& a_lo,
+                                                   const AWarpTensor& a_hi,
+                                                   const BWarpTensor& b_lo,
+                                                   const BWarpTensor& b_hi,
+                                                   int32_t a_scale,
+                                                   int32_t b_scale)
+    {
+        using QDataType     = typename Geometry::QDataType;
+        using PairedGemm    = WarpGemmDispatcher<QDataType, QDataType, float, 16, 16, 128, true>;
+        using Half          = int32_t __attribute__((ext_vector_type(8)));
+        constexpr auto zero = number<0>{};
+        constexpr auto one  = number<1>{};
+        static_assert(sizeof(typename AWarpTensor::DataType) == 1 &&
+                      AWarpTensor::get_thread_buffer_size() == sizeof(Half) &&
+                      BWarpTensor::get_thread_buffer_size() == sizeof(Half));
+
+        typename PairedGemm::AWarpTensor a;
+        typename PairedGemm::BWarpTensor b;
+        typename PairedGemm::CWarpTensor c;
+        a.get_thread_buffer().template set_as<Half>(zero, bit_cast<Half>(a_lo.get_thread_buffer()));
+        a.get_thread_buffer().template set_as<Half>(one, bit_cast<Half>(a_hi.get_thread_buffer()));
+        b.get_thread_buffer().template set_as<Half>(zero, bit_cast<Half>(b_lo.get_thread_buffer()));
+        b.get_thread_buffer().template set_as<Half>(one, bit_cast<Half>(b_hi.get_thread_buffer()));
+        c.get_thread_buffer() = c_warp_tensor.get_thread_buffer();
+        PairedGemm{}(c, a, b, a_scale, b_scale);
+        c_warp_tensor.get_thread_buffer() = c.get_thread_buffer();
+    }
+
     // QK stage WMMAs interleaved with reads of the next K group (last stage: the PV V tile).
     template <index_t Stage,
               typename Mode,

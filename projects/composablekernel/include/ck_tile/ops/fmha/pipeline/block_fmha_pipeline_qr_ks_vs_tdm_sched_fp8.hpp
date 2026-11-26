@@ -859,6 +859,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         {
             mx_copy = QuantScale::MakeMxCopyOffsets(mx, kv_load_start, kv_last);
             QuantScale::IssueMxScalesToLds(mx, mx_copy, MxScaleLds(0), kv_load_start, kv_last);
+            if constexpr(QuantScale::kMxPairedK64)
+                QuantScale::PairMxQkScales(q_scales);
             Pins::PinEachToVgpr(q_scales);
         }
         // MX scale loads above do not touch Q's LDS, so they overlap the Q transfer.

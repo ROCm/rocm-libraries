@@ -181,6 +181,19 @@ struct FmhaTdmSchedFp8QuantScale
             return *reinterpret_cast<const uint16_t*>(ptr + row * stride) | kMxQkPadScale;
     }
 
+    // D192 runs K64 steps 0+1 as one K128 WMMA, which takes its four scale bytes from plane 1.
+    static constexpr bool kMxPairedK64 = kMxStepScaleBytes == 2 && kMxQkScaleDwords == 3;
+
+    template <index_t N>
+    CK_TILE_DEVICE static void PairMxQkScales(array<int32_t, N>& scales)
+    {
+        constexpr index_t kPlane = N / kMxQkScaleDwords;
+        static_for<0, kPlane, 1>{}([&](auto i) {
+            constexpr auto i1 = number<kPlane + i>{};
+            scales(i1)        = (scales[i] & 0xffff) | (scales[i1] << 16);
+        });
+    }
+
     // K64-step K scale dwords hold two copied bytes; replace the upper two by the 1.0 pad scale.
     template <index_t N>
     CK_TILE_DEVICE static void PadMxKScales(array<int32_t, N>& scales)
@@ -188,6 +201,8 @@ struct FmhaTdmSchedFp8QuantScale
         if constexpr(kMxStepScaleBytes == 2)
             static_for<0, N, 1>{}(
                 [&](auto i) { scales(i) = (scales[i] & 0xffff) | kMxQkPadScale; });
+        if constexpr(kMxPairedK64)
+            PairMxQkScales(scales);
     }
 
     // MX scales of a KV tile in LDS: kN K dwords per plane, then the V dwords (first kDv used).
