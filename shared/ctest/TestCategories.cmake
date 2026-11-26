@@ -120,6 +120,25 @@ function(_validate_test_category_inputs target_name yaml_file working_dir parse_
 endfunction()
 
 
+# Reports a failed run of a category parser script.
+#
+# The parsers exit with status 2 when they reject the YAML or the arguments (an invalid
+# pattern, label or YAML syntax): the project's configuration is wrong, and carrying on
+# would register the tests without the tier labels, so this is a configure error. Any
+# other status (missing or unreadable file, Python failure) stays a warning.
+#
+# Arguments:
+#   parse_result - Exit status of the parser
+#   what - What was being parsed, for the message
+#   yaml_file - Path to the YAML file
+#   parse_error - Standard error of the parser
+function(_report_test_category_parse_failure parse_result what yaml_file parse_error)
+    if(parse_result EQUAL 2)
+        message(FATAL_ERROR "Invalid ${what} ${yaml_file}:\n${parse_error}")
+    endif()
+    message(WARNING "Failed to parse ${what} ${yaml_file}: ${parse_error}")
+endfunction()
+
 # Function to apply category labels to discovered GTest tests
 #
 # Arguments:
@@ -187,7 +206,7 @@ function(apply_test_category_labels target_name yaml_file working_dir)
     )
 
     if(NOT PARSE_RESULT EQUAL 0)
-        message(WARNING "Failed to parse test categories YAML: ${PARSE_ERROR}")
+        _report_test_category_parse_failure("${PARSE_RESULT}" "test categories YAML" "${yaml_file}" "${PARSE_ERROR}")
         return()
     endif()
 
@@ -254,7 +273,7 @@ function(apply_catch2_test_category_labels target_name yaml_file working_dir)
     )
 
     if(NOT PARSE_RESULT EQUAL 0)
-        message(WARNING "Failed to parse Catch2 test categories YAML: ${PARSE_ERROR}")
+        _report_test_category_parse_failure("${PARSE_RESULT}" "Catch2 test categories YAML" "${yaml_file}" "${PARSE_ERROR}")
         return()
     endif()
 
@@ -334,7 +353,7 @@ function(get_ctest_category_names yaml_file out_var)
     )
 
     if(NOT PARSE_RESULT EQUAL 0)
-        message(WARNING "Failed to parse test category names: ${PARSE_ERROR}")
+        _report_test_category_parse_failure("${PARSE_RESULT}" "test category names" "${yaml_file}" "${PARSE_ERROR}")
         set(${out_var} "" PARENT_SCOPE)
         return()
     endif()
@@ -405,7 +424,7 @@ function(apply_ctest_category_labels yaml_file)
     )
 
     if(NOT PARSE_RESULT EQUAL 0)
-        message(WARNING "Failed to parse test categories YAML: ${PARSE_ERROR}")
+        _report_test_category_parse_failure("${PARSE_RESULT}" "test categories YAML" "${yaml_file}" "${PARSE_ERROR}")
         return()
     endif()
 

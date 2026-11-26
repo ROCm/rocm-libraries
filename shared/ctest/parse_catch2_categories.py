@@ -5,6 +5,11 @@ import platform
 import argparse
 import contextlib
 
+# Exit status when the YAML is rejected: the project's configuration is wrong and has to be
+# fixed. TestCategories.cmake turns this status into a configure error. Every other failure
+# exits with 1 (missing or unreadable file, Python errors) and stays a CMake warning.
+EXIT_INVALID_CONFIG = 2
+
 # Allowlist patterns for YAML-sourced values
 _TAG_RE = re.compile(r"^~?\[[\w\-\.\*\/]*\]$")
 _IDENTIFIER_RE = re.compile(r"^[\w\-\.]+$")
@@ -98,7 +103,11 @@ def validate_categories(categories, is_windows, is_linux):
 
 
 def load_yaml(yaml_file):
-    """Load and parse a YAML file, exiting with a descriptive error on failure."""
+    """Load and parse a YAML file, exiting with a descriptive error on failure.
+
+    Invalid YAML syntax exits with EXIT_INVALID_CONFIG; a missing or unreadable file
+    exits with 1.
+    """
     try:
         with open(yaml_file, "r") as f:
             return yaml.safe_load(f)
@@ -110,6 +119,7 @@ def load_yaml(yaml_file):
         )
     except yaml.YAMLError as e:
         print(f"Error: Invalid YAML syntax in {yaml_file}: {e}", file=sys.stderr)
+        sys.exit(EXIT_INVALID_CONFIG)
     except Exception as e:
         print(
             f"Error: Unexpected failure loading {yaml_file}: {type(e).__name__}: {e}",
@@ -217,7 +227,7 @@ def main():
             )
             for msg in validation_errors:
                 print(f"  - {msg}", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(EXIT_INVALID_CONFIG)
 
         print("# Generated CMake code for Catch2 test categories (tag-based)")
         print(f"# Detected OS: {platform.system()}")

@@ -6,6 +6,12 @@ import argparse
 import contextlib
 import shlex
 
+# Exit status when the YAML or the command-line arguments are rejected: the project's
+# configuration is wrong and has to be fixed. TestCategories.cmake turns this status into a
+# configure error. Every other failure exits with 1 (missing or unreadable file, Python
+# errors) and stays a CMake warning.
+EXIT_INVALID_CONFIG = 2
+
 
 def _format_extra_args(extra_args):
     """Format a list of extra command-line args for CMake add_test().
@@ -347,7 +353,11 @@ def exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
 
 
 def load_yaml(yaml_file):
-    """Load and parse a YAML file, exiting with a descriptive error on failure."""
+    """Load and parse a YAML file, exiting with a descriptive error on failure.
+
+    Invalid YAML syntax exits with EXIT_INVALID_CONFIG; a missing or unreadable file
+    exits with 1.
+    """
     try:
         with open(yaml_file, "r") as f:
             return yaml.safe_load(f)
@@ -359,6 +369,7 @@ def load_yaml(yaml_file):
         )
     except yaml.YAMLError as e:
         print(f"Error: Invalid YAML syntax in {yaml_file}: {e}", file=sys.stderr)
+        sys.exit(EXIT_INVALID_CONFIG)
     except Exception as e:
         print(
             f"Error: Unexpected failure loading {yaml_file}: {type(e).__name__}: {e}",
@@ -486,12 +497,12 @@ def main():
         err = validate_identifier(args.test_name_prefix)
         if err is not None:
             print(f"Error: invalid --test-name-prefix value: {err}", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(EXIT_INVALID_CONFIG)
     for label in args.additional_label:
         err = validate_identifier(label)
         if err is not None:
             print(f"Error: invalid --additional-label value: {err}", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(EXIT_INVALID_CONFIG)
     cli_env_overrides = {}
     for entry in args.environment:
         if "=" not in entry:
@@ -499,14 +510,14 @@ def main():
                 f"Error: invalid --environment value {entry!r}: expected KEY=VALUE",
                 file=sys.stderr,
             )
-            sys.exit(1)
+            sys.exit(EXIT_INVALID_CONFIG)
         key, value = entry.split("=", 1)
         cli_env_overrides[key] = value
     if resource_group is not None:
         err = validate_identifier(resource_group)
         if err is not None:
             print(f"Error: invalid --resource-group value: {err}", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(EXIT_INVALID_CONFIG)
     base_name_prefix = args.test_name_prefix if args.test_name_prefix else target_name
     name_prefix = (
         f"{base_name_prefix}_{resource_group}" if resource_group else base_name_prefix
@@ -581,7 +592,7 @@ def main():
             )
             for msg in validation_errors:
                 print(f"  - {msg}", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(EXIT_INVALID_CONFIG)
 
         print("# Generated CMake code for test categories")
         print(f"# Detected OS: {platform.system()}")

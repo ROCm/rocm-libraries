@@ -627,6 +627,14 @@ Each test gets labels that enable flexible CTest filtering:
 
 **Validation:** The function validates all inputs before execution and emits `WARNING` messages if any check fails, returning early without generating tests.
 
+**Invalid configuration:** When a parser rejects the YAML or its arguments (an invalid pattern, label or
+category, a YAML syntax error), it exits with status 2 and the CMake function stops the configure
+with a `FATAL_ERROR` that quotes the parser's message. This applies to `apply_test_category_labels()`,
+`apply_catch2_test_category_labels()`, `apply_ctest_category_labels()` and
+`get_ctest_category_names()`. Carrying on would register the tests without their category labels, and no
+tier would select them. Any other parser failure (a missing or unreadable file, a Python error such as
+a missing PyYAML) exits with status 1 and stays a `WARNING`.
+
 ### Optional rtest driver (`--use-rtest-driver`)
 
 By default, generated CTest suites run the **gtest executable** with `--gtest_filter=...`. If the project passes **`--use-rtest-driver`** as the optional **`parser_extra`** argument to `apply_test_category_labels()`, the parser instead emits commands to run the **rtest** Python driver next to the binary. The driver basename is derived from the CTest name prefix (typically `mylib-test` → `mylib_rtest.py`). The driver is invoked as `<python> <stem>_rtest.py -t ctest_<category>` using a platform-appropriate interpreter on `PATH` at CTest run time (`python3` on Linux/macOS, `python` on Windows—not configure-time `Python3_EXECUTABLE`, which may be absent on CI test nodes). **`--cmake-python3`** may be passed explicitly to the parser to override the install-tree interpreter. PR-style labels are read at rtest run time from the **`GITHUB_PR_LABELS`** environment variable (semicolon-separated, same format as rtest’s `--ci_labels`) when that variable is set and `--ci_labels` was not passed on the command line. CTest **`LABELS`** on the suite are unchanged (for `ctest -L`). The project’s rtest XML must define matching `<test sets="ctest_<category>">` entries. GPU-specific exclusion suites still invoke the gtest binary directly. In **rocm-libraries**, only **rocBLAS** enables this via `USE_RTEST_DRIVER` in `projects/rocblas/clients/gtest/CMakeLists.txt`.
