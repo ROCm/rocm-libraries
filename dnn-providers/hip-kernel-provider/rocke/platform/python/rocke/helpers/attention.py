@@ -10,6 +10,7 @@ import math
 from typing import Tuple
 
 from ..core.ir import BF8E5M2, FP8E4M3, F32, I32, IRBuilder, Type, Value
+from .reduction import butterfly_allreduce
 
 
 def next_power_of_2(x: int) -> int:
@@ -338,26 +339,12 @@ def warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     ``1, 2, 4, 8`` lower to ``ds_swizzle_b32``, not ``ds_bpermute``);
     the only difference is the combiner is ``fadd`` instead of ``fmax``.
 
-    For f32/i32 data the stages inside one 16-lane DPP row ride
-    ``warp_shuffle_xor_dpp`` (VALU DPP, no ``ds_swizzle`` / no
-    ``lgkmcnt(0)`` wait): masks 1 and 2 as themselves (``quad_perm`` on
-    gfx9 CDNA), masks 4 and 8 as dpp masks 7 and 15 (``row_half_mirror``
-    / ``row_mirror``). The stages run in ascending order, so when the
-    mask 4 (8) stage runs every lane of each quad (half-row) holds the same
-    sum, and pairing with ``i ^ 7`` (``i ^ 15``) adds the same value as
-    ``i ^ 4`` (``i ^ 8``): the result is bitwise identical. Masks 16 and
-    up, and any other dtype, stay on ``warp_shuffle_xor``.
+    It is a :func:`~rocke.helpers.reduction.butterfly_allreduce`, so f32/i32
+    stages inside one 16-lane DPP row ride DPP; the sum is bitwise identical
+    to the plain XOR butterfly.
     Mirrors ``cpp/helpers/attention.cpp::rocke_warp_xor_reduce_sum``.
     """
-    cur = v
-    for k in range(stages):
-        mask = 1 << k
-        if mask <= 8 and cur.type.name in ("f32", "i32"):
-            remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
-        else:
-            remote = b.warp_shuffle_xor(cur, mask)
-        cur = b.fadd(cur, remote)
-    return cur
+    return butterfly_allreduce(b, v, b.fadd, stages=stages)
 
 
 def warp_xor_reduce_max_32lane(b: IRBuilder, v: Value) -> Value:
