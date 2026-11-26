@@ -40,7 +40,6 @@ library/builders/gfx950/attention/prefill/parity_unified_attention.py: import to
 library/builders/gfx950/gdn/gdn_decode.py: import torch_api torch_object
 library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py: import torch_api torch_object
 library/dispatch/sdpa/bind_shared.py: torch_interop
-library/kernels/common/attention_bwd_comgr.py: import
 library/kernels/common/attention_unified.py: import torch_api torch_interop torch_object
 library/tests/ctest_lists.cmake: config
 library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py: torch_interop

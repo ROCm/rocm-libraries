@@ -44,12 +44,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# The toolchain the gate's resource thresholds were calibrated on. Tests use the
+# compiler rocKE's discovery loads, so on any other one the gate's verdicts do not
+# count and its cases skip. The two pins stay in this file, which the gate tests
+# and the counted gates' preflight read, until AICK-3320 unpins the gate. The
+# flavor alone does not name the comgr: a preset ``ROCKE_LLVM_FLAVOR=llvm22``
+# also reports llvm22 when a process loaded a newer comgr, whose register
+# allocation differs.
 GATE_FLAVOR = "llvm22"
-# The production comgr: the ROCm vintage of the library that compiled the gate's
-# kernels must be this one (torch's bundled comgr on the cluster, pinned by path
-# without importing torch: :func:`pin_production_comgr`). The flavor alone does
-# not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports llvm22 when a
-# process loaded a newer system comgr, whose register allocation differs.
 GATE_COMGR_ROCM = "7.2"
 
 
@@ -736,16 +738,6 @@ def disassemble(hsaco: bytes, *, arch: str) -> str:
     if find_objdump() is None:
         raise FileNotFoundError("llvm-objdump not found (set LLVM_OBJDUMP)")
     return _probe_isa_inspect().disassemble_hsaco(bytes(hsaco), mcpu=arch)
-
-
-def pin_production_comgr() -> str | None:
-    """Make the next compile in this process use the production comgr
-    (torch's bundled library, pinned by path) without importing torch; the
-    library conftest already did it for the session. Returns the pinned path
-    (None: nothing to pin, the gate then reads whichever comgr loads)."""
-    from kernels.common.attention_bwd_comgr import ensure_production_comgr
-
-    return ensure_production_comgr()
 
 
 def comgr_version() -> str | None:

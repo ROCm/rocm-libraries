@@ -13,9 +13,8 @@ one layer is read by every other one: the key is the same everywhere.
   the LLVM IR flavor of the lowering (``ROCKE_LLVM_FLAVOR`` or the autodetected
   one), the ``libamd_comgr`` rocKE resolves (path, ROCm vintage and a content
   digest of the library file) and the environment switches that change the
-  emitted IR (``ROCKE_DEBUG_LOC``). It never imports torch: it pins the
-  production comgr (``attention_bwd_comgr``) and names the one the next
-  compile in this process would load.
+  emitted IR (``ROCKE_DEBUG_LOC``): the one the next compile in this process
+  would load, as rocKE's discovery finds it. It never imports torch.
 * :func:`backward_source_hash` is a content hash of every Python source the
   backward kernels can depend on under the Python lowering backend: the whole
   ``rocke`` package and every module under ``library/kernels``. Line endings
@@ -167,15 +166,15 @@ class Toolchain:
 def toolchain_identity() -> Toolchain:
     """Flavor, comgr and emission switches the next compile here would use.
 
-    Never imports torch. It first pins the production comgr (torch's bundled
-    library, found without importing torch; see
-    :func:`kernels.common.attention_bwd_comgr.ensure_production_comgr`), so a
-    torch-free process names the same library, vintage and digest as one that
-    imported torch. The library digest is memoised per file version.
+    Never imports torch. It first gives comgr's code-object cache a directory
+    of this process tree
+    (:func:`kernels.common.attention_bwd_comgr.pin_comgr_cache`), which the
+    compiles that follow inherit. The library digest is memoised per file
+    version.
     """
-    from kernels.common.attention_bwd_comgr import ensure_production_comgr
+    from kernels.common.attention_bwd_comgr import pin_comgr_cache
 
-    ensure_production_comgr()
+    pin_comgr_cache()
     flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
     if not flavor:
         try:

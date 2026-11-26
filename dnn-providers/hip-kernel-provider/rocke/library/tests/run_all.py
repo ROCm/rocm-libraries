@@ -149,9 +149,9 @@ def _gate_environment(
         if not partial:
             environment.pop("ROCKE_TEST_SHARD", None)
     if name == "counted-compiler":
-        # Preserve the resource gate's reference-toolchain contract. The
-        # library conftest pins that compiler when it is available; preflight
-        # reports one gate-level outcome when it is not.
+        # The gate keeps its reference toolchain until AICK-3320: on any other
+        # compiler its preflight skips every case and ends the session with 77
+        # (an INCOMPLETE run, never a plain GREEN; a failure when required).
         environment.pop("ROCKE_BWD_NO_COMGR_PIN", None)
         environment.pop("ROCKE_BWD_ISA_ARCH", None)
         if gate_arch is not None:
@@ -500,8 +500,9 @@ def main() -> int:
     parser.add_argument(
         "--require-compiler-gate",
         action="store_true",
-        help="fail when the counted ISA gate's qualified toolchain is unavailable; "
-        "the default local run reports that gate as skipped",
+        help="fail when the counted ISA gate cannot run (no llvm-objdump, a comgr "
+        "without a target, or a compiler other than its reference toolchain, "
+        "until AICK-3320); the default local run reports that gate as skipped",
     )
     parser.add_argument(
         "--allow-partial-gate",
@@ -715,17 +716,22 @@ def main() -> int:
                     name == "counted-compiler" and not args.require_compiler_gate
                 ),
             )
-            if gate_result.code == 0 and not gate_result.skipped:
-                try:
-                    attestation = json.loads(sentinel.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    attestation = {}
-                if attestation.get("collected", 0) <= 0:
-                    print(
-                        f"rocke library gate: {name}: FAIL(no executed pytest session)",
-                        flush=True,
-                    )
-                    gate_result = _StageResult(1)
+            try:
+                attestation = json.loads(sentinel.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                attestation = {}
+            if skipped_for := attestation.get("skipped_for"):
+                print(f"rocke library gate: {name}: skipped for: {skipped_for}")
+            if (
+                gate_result.code == 0
+                and not gate_result.skipped
+                and attestation.get("collected", 0) <= 0
+            ):
+                print(
+                    f"rocke library gate: {name}: FAIL(no executed pytest session)",
+                    flush=True,
+                )
+                gate_result = _StageResult(1)
         status = status or gate_result.code
         skipped |= gate_result.skipped
         if status and not args.keep_going:

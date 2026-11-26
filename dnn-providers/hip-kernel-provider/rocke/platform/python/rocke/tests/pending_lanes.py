@@ -167,6 +167,29 @@ QUARANTINE_MAX_DAYS = 30
 ISSUE_PATTERN = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
 
 
+# The reasons the attention backward test files wait (AICK-3259).
+_BACKWARD_NOT_REGISTERED = (
+    "the attention backward CTest entries (CPU and gfx942 GPU) are not registered "
+    "yet; their slow tests are cut down first (AICK-3218)"
+)
+_BACKWARD_EXHAUSTIVE = (
+    "in the exhaustive cohort (library/tests/_affordable_lane.py): too slow for a "
+    "pull-request tier; the attention backward CTest entries add a sample of it "
+    "to the standard tier"
+)
+_BACKWARD_DEVICE_TWINS = (
+    "per-lever device twins of the backward kernel, left out of the attention "
+    "backward GPU entry; they need a GPU run on gfx942 and gfx950 first"
+)
+# The backward files whose resource-gate cases keep the gate's reference
+# toolchain until AICK-3320 add this to their record's reason.
+_PINNED_RESOURCE_GATE = (
+    "; its resource-gate cases count only on the gate's reference toolchain "
+    "(llvm22 with the 7.2 comgr) and skip on any other compiler until AICK-3320 "
+    "unpins them"
+)
+
+
 def _require_test_path(kind: str, path: str) -> None:
     if not path.endswith(".py") or path.startswith("/"):
         raise ValueError(
@@ -666,6 +689,9 @@ def _waiting_tests(
 
 # The attention backward CTest entries, not registered yet.
 _ATTENTION_BWD_ENTRIES = LaneTicket("AICK-3259", TICKET, "2026-12-31")
+# The counted compiler gate, which keeps the resource gate's reference
+# toolchain until it is unpinned.
+_UNPINNED_RESOURCE_GATE = LaneTicket("AICK-3320", TICKET, "2027-02-15")
 # The cases that take torch tensors or capture a graph, until they run without
 # torch.
 _TORCH_CASES = LaneTicket("AICK-3408", TICKET, "2027-01-08")
@@ -687,6 +713,7 @@ _SOURCE_CHECKOUT = LaneTicket("AICK-3470", SOURCE_TREE, "2027-01-22")
 _SCHEDULED_TIERS = LaneTicket("AICK-3471", TICKET, "2027-01-15")
 LANE_TICKETS: tuple[LaneTicket, ...] = (
     _ATTENTION_BWD_ENTRIES,
+    _UNPINNED_RESOURCE_GATE,
     _TORCH_CASES,
     _RUNTIME_TORCH_INTEROP,
     _GFX950_RUNNERS,
@@ -700,8 +727,7 @@ LANE_TICKETS: tuple[LaneTicket, ...] = (
 PENDING: tuple[PendingTest, ...] = (
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        "the attention backward CTest entries (CPU and gfx942 GPU) are not registered "
-        "yet; their slow tests are cut down first (AICK-3218)",
+        _BACKWARD_NOT_REGISTERED,
         _LIBRARY,
         "library/tests/dispatch/attention_bwd/test_dense_tuning_registry.py",
         "library/tests/dispatch/attention_bwd/test_gfx950_tuning.py",
@@ -712,10 +738,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/dispatch/attention_bwd/test_tuned_tables.py",
         "library/tests/dispatch/attention_bwd/test_tuning_registry.py",
         "library/tests/dispatch/attention_bwd/test_unified_tuning.py",
-        "library/tests/test_attention_bwd.py",
-        "library/tests/test_attention_bwd_access.py",
         "library/tests/test_attention_bwd_addr.py",
-        "library/tests/test_attention_bwd_aux.py",
         "library/tests/test_attention_bwd_band.py",
         "library/tests/test_attention_bwd_barrier_merge.py",
         "library/tests/test_attention_bwd_bench.py",
@@ -731,7 +754,6 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_bwd_hsaco_cache.py",
         "library/tests/test_attention_bwd_kernel_cases.py",
         "library/tests/test_attention_bwd_lds.py",
-        "library/tests/test_attention_bwd_mirror.py",
         "library/tests/test_attention_bwd_mutations.py",
         "library/tests/test_attention_bwd_noatomic.py",
         "library/tests/test_attention_bwd_numeric.py",
@@ -753,7 +775,6 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_bwd_worklist.py",
         "library/tests/test_attention_bwd_xt.py",
         "library/tests/test_attention_dense_bwd.py",
-        "library/tests/test_attention_dense_bwd_ir.py",
         "library/tests/test_attention_dense_bwd_numeric.py",
         "library/tests/test_attention_dense_bwd_split.py",
         "library/tests/test_lse_store_ir.py",
@@ -762,24 +783,24 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        "in the exhaustive cohort (library/tests/_affordable_lane.py): too slow for a "
-        "pull-request tier; the attention backward CTest entries add a sample of it "
-        "to the standard tier",
+        _BACKWARD_NOT_REGISTERED + _PINNED_RESOURCE_GATE,
+        _LIBRARY,
+        "library/tests/test_attention_bwd.py",
+        "library/tests/test_attention_bwd_access.py",
+        "library/tests/test_attention_bwd_aux.py",
+        "library/tests/test_attention_bwd_mirror.py",
+        "library/tests/test_attention_dense_bwd_ir.py",
+        whole_file=True,
+    ),
+    *_waiting(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_EXHAUSTIVE,
         _LIBRARY,
         "library/tests/test_attention_bwd_agpr_probe.py",
-        "library/tests/test_attention_bwd_barrier_fence.py",
-        "library/tests/test_attention_bwd_dq.py",
-        "library/tests/test_attention_bwd_dq_sched.py",
         "library/tests/test_attention_bwd_epilogue.py",
-        "library/tests/test_attention_bwd_ir.py",
         "library/tests/test_attention_bwd_ir_golden.py",
         "library/tests/test_attention_bwd_ring.py",
-        "library/tests/test_attention_bwd_ring_sched.py",
-        "library/tests/test_attention_bwd_sched_body.py",
-        "library/tests/test_attention_bwd_split.py",
-        "library/tests/test_attention_bwd_split_sched.py",
         "library/tests/test_attention_bwd_transpose_probe.py",
-        "library/tests/test_attention_bwd_unified.py",
         "library/tests/test_attention_bwd_valu.py",
         "library/tests/test_attention_bwd_xt_probe.py",
         "library/tests/test_barrier_fence_parity_emit.py",
@@ -787,16 +808,44 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        "per-lever device twins of the backward kernel, left out of the attention "
-        "backward GPU entry; they need a GPU run on gfx942 and gfx950 first",
+        _BACKWARD_EXHAUSTIVE + _PINNED_RESOURCE_GATE,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_barrier_fence.py",
+        "library/tests/test_attention_bwd_dq.py",
+        "library/tests/test_attention_bwd_dq_sched.py",
+        "library/tests/test_attention_bwd_ir.py",
+        "library/tests/test_attention_bwd_ring_sched.py",
+        "library/tests/test_attention_bwd_sched_body.py",
+        "library/tests/test_attention_bwd_split.py",
+        "library/tests/test_attention_bwd_split_sched.py",
+        "library/tests/test_attention_bwd_unified.py",
+        whole_file=True,
+    ),
+    *_waiting(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_TWINS,
         _LIBRARY,
         "library/tests/test_attention_bwd_aux_numeric.py",
         "library/tests/test_attention_bwd_gemm_numeric.py",
         "library/tests/test_attention_bwd_ring_numeric.py",
         "library/tests/test_attention_bwd_sched_numeric.py",
         "library/tests/test_attention_bwd_split_numeric.py",
-        "library/tests/test_attention_bwd_tiles_numeric.py",
         "library/tests/test_attention_bwd_valu_numeric.py",
+        whole_file=True,
+    ),
+    *_waiting(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_TWINS + _PINNED_RESOURCE_GATE,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_tiles_numeric.py",
+        whole_file=True,
+    ),
+    _UNPINNED_RESOURCE_GATE.waiting(
+        "library/tests/gates/attention_bwd_counted_compiler_gate.py",
+        "the counted compiler gate keeps the resource gate's reference toolchain "
+        "(llvm22 with the 7.2 comgr): on any other compiler its preflight skips "
+        "every case until AICK-3320 unpins it",
+        _LIBRARY,
         whole_file=True,
     ),
     *_waiting(
