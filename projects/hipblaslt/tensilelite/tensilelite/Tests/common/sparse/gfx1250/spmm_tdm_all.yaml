@@ -24,7 +24,6 @@ GlobalParameters:
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
   Architecture: gfx1250
-  CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
 
