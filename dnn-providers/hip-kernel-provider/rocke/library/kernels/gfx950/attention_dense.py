@@ -3003,10 +3003,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             VGPR wave index, so M0 needs a readfirstlane per DMA), not the scalar
             destination of the grid body's loader. That was a choice of scope when
             this body learned the strides, not a measured one: the scalar form has
-            not been built or timed on this body. Timed without it, the persistent
-            family (this body and the wide-DMA one) passes the speed bar only
-            through the bar's floor, not against the measured noise (the gfx950
-            persistent results of the launch-time strides case study)."""
+            not been built or timed on this body. How the persistent family (this
+            body and the wide-DMA one) does against the speed bar without it is
+            recorded in the launch-time strides case study, section 7.1, not here."""
             buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
             if ROWS_PER_INSTR == 1:
                 n_issue, step = ROWS_PER_WAVE, 1

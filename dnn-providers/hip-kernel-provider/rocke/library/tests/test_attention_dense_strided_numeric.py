@@ -234,7 +234,11 @@ def test_lse_buffer_check_takes_device_views():
     onto_o = h.LseView(prob.views["o"].buf, expected)
     with pytest.raises(ValueError, match="lse overlaps out"):
         _check_lse_buffer(onto_o, q, expected, inputs)
-    with pytest.raises(ValueError, match="torch tensor"):
+    # A numpy array has shape and dtype but none of the four methods.
+    with pytest.raises(
+        ValueError,
+        match="lacks is_contiguous, data_ptr, numel, element_size$",
+    ):
         _check_lse_buffer(np.zeros(expected, np.float32), q, expected, inputs)
 
 

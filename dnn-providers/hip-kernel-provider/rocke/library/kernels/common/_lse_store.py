@@ -239,6 +239,17 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
     return b.bitcast(bits, VectorType(dtype, width))
 
 
+# What ``_check_lse_buffer`` needs from the LSE buffer before it reads anything else.
+_LSE_BUFFER_ATTRS = (
+    "shape",
+    "dtype",
+    "is_contiguous",
+    "data_ptr",
+    "numel",
+    "element_size",
+)
+
+
 def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
     on q's GPU, and not overlapping any input or output tensor.
@@ -249,8 +260,8 @@ def _check_lse_buffer(lse, q, expected, inputs):
     * ``lse``: ``shape``, ``dtype`` (FP32 is any dtype whose ``str()`` ends in
       ``float32``: torch's or numpy's), ``is_contiguous()``, ``data_ptr()``,
       ``numel()``, ``element_size()``, ``device`` and ``is_cuda`` (True). One of the
-      first six missing raises ``ValueError``; a missing ``device`` raises
-      ``AttributeError``.
+      first six missing raises ``ValueError`` that names every one that is missing;
+      a missing ``device`` raises ``AttributeError``.
     * ``q``: ``device`` and ``is_cuda`` (True); a missing ``device`` raises
       ``AttributeError``.
     * each tensor of ``inputs`` that is not None (q, k, v, out and the optional
@@ -264,18 +275,11 @@ def _check_lse_buffer(lse, q, expected, inputs):
     tensor without it, or with it False, is refused with ``ValueError`` (a CPU
     view whose ``device`` equals q's would otherwise reach a GPU kernel by its
     host address). ``device`` is still compared with q's."""
-    if not all(
-        hasattr(lse, a)
-        for a in (
-            "shape",
-            "dtype",
-            "is_contiguous",
-            "data_ptr",
-            "numel",
-            "element_size",
+    missing = [a for a in _LSE_BUFFER_ATTRS if not hasattr(lse, a)]
+    if missing:
+        raise ValueError(
+            f"lse must be a tensor or a device view; it lacks {', '.join(missing)}"
         )
-    ):
-        raise ValueError("lse must be a torch tensor")
     if not str(lse.dtype).endswith("float32"):
         raise ValueError("lse must have dtype float32")
     if tuple(lse.shape) != expected:

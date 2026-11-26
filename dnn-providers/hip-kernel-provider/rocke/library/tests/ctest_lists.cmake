@@ -252,10 +252,10 @@ endif()
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 # Quick runs this entry unsplit on one CI shard, so its TIMEOUT holds the S2
-# headroom of TESTING.md 5.0.3 over the whole run: about 145 s from an install
-# on a loaded host, timed with ctest -R '^rocke_library_attention_cpu_pytest$'.
-# From a source tree at the head of the launch-time strides change the run takes
-# about 210 s on a loaded host, which the strided tests lengthen.
+# headroom of TESTING.md 5.0.3 (at least twice the longest run) over the whole
+# run, timed on a loaded host with ctest -R '^rocke_library_attention_cpu_pytest$'.
+# The strided tests lengthen the run, and the longest run is the one from a source
+# tree: re-time both before lowering the limit.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_gemm.py"
     "tests/library/tests/test_attention_bwd_body.py"
@@ -351,8 +351,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # tree does not carry, so they skip in the CPU lane above. A build tree runs the
 # whole file from the source tree here; nothing installs this entry. A skip here
 # means the driver did not run, so the entry fails on one; -rs prints its reason.
-# The file runs in about 15 s; TIMEOUT stops a hung driver subprocess long before
-# its own 600 s limit.
+# The file runs in seconds, well inside its TIMEOUT, which stops a hung driver
+# subprocess long before the test's own 600 s subprocess limit.
 if(BUILD_TESTING)
   add_test(
     NAME rocke_library_attention_strided_ab_dryrun

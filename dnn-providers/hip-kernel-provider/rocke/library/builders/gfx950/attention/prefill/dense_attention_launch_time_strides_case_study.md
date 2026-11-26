@@ -79,8 +79,8 @@ The additive-bias bodies (`use_additive_bias`, hipDNN's `attn_mask`) are packed-
 architectures. Their bias read indexes only by the bias's own three strides. They ignore the twelve
 because they were added while this work was open and were not ported to it; on gfx950 the D128 bias
 body with LSE already sits at the 256-VGPR budget (it keeps its bias loads scalar because the
-4-wide ones spill), so the extra stride arithmetic may not fit. Serving strides there is tracked in
-AICK-3355. The hipDNN dense engines decline a graph that has an `attn_mask` and operands that are
+4-wide ones spill), so the extra stride arithmetic may not fit. Serving strides there is open work.
+The hipDNN dense engines decline a graph that has an `attn_mask` and operands that are
 not packed BSHD, with the cause `attn_mask` in the INFO log.
 
 A KV-segment launch with a strided O is refused (the combine step needs a packed O). The baseline
@@ -371,8 +371,8 @@ moved either: `74a573ca382`, `c3448b0c5f5` and the current base have the same 8 
 library rows.
 
 **gfx950: the timed code has changed since.** The gfx950 rows were measured on a tree built on
-`84c6e7ced46`. A later change in the base, #15951 (each query row decides its own lazy rescale),
-changed both bodies that were timed, the grid body and the persistent body, in the baseline as
+`84c6e7ced46`. A later change in the base, the per-row lazy-rescale change (each query row decides its own
+rescale), changed both bodies that were timed, the grid body and the persistent body, in the baseline as
 much as in this change: it moved 45 of the 47 gfx950 representative rows that existed at
 measurement. Section 3.1 and the gfx950 half of the catalog sweep (section 5) therefore describe
 the gfx950 kernels before that change. The speed rows were re-timed on the code after it (section
@@ -451,9 +451,9 @@ is the same manifest with the full knob space, cut to the head-count pairs the g
 3912 kernels, grid bodies only, as no persistent kernel ships in that catalog; gfx942: 256
 kernels). Every graph is served by the hipDNN kernel-ingestor engine and timed through
 `dnn-benchmark` by `sweep.py`. The tree that built the catalog and the enumeration predates
-#15951 (section 3.3), so the gfx950 half of this sweep (sections 5.1 and 5.2) timed the grid
-body as it was before that change, and it has not been re-run since; #15951 changes only gfx950
-code, so the gfx942 half is not affected by it.
+the per-row lazy-rescale change (section 3.3), so the gfx950 half of this sweep (sections 5.1
+and 5.2) timed the grid body as it was before that change, and it has not been re-run since;
+that change touches only gfx950 code, so the gfx942 half is not affected by it.
 
 None of these graphs has an `attn_mask`, so the bias kernels shipped since would not serve them
 (and they are packed-only, section 1). Counted as distinct binaries in the slice this recipe
@@ -524,8 +524,8 @@ the same shapes, minus 1 (largest and median over the 8 families):
 | batch slice | +0.15% / -0.05% | +1.36% / +0.20% |
 
 No strided cell is worse than its BSHD twin beyond the 3% band on either architecture (0 of 32 on
-each; on gfx950, kernels from before #15951), so these graphs do not need strided-specific kernels
-at these configurations. On gfx942 two
+each; on gfx950, kernels from before the per-row lazy-rescale change), so these graphs do not need
+strided-specific kernels at these configurations. On gfx942 two
 cells show a 2.3% to 2.5% strided-only loss inside the band (bf16 D128 causal, BHSD and packed KV);
 for BHSD the best shipped kernel uses the diagonal split with one priority setting and the best
 enumerated kernel another setting without the split. A literal reading of the pre-registered rule
@@ -586,10 +586,11 @@ This is independent of the strides and is relevant to any regeneration of these 
   not: its gfx942 runner needs torch at launch, so its torch-free export fails, and with torch
   imported the export is pinned to torch's LLVM 22. A cross-compiler A/B against the baseline is
   therefore not possible with the shipped harness as it is.
-- **The gfx950 selection-set rows and the catalog sweep predate #15951** (section 3.3), which
-  changed the timed gfx950 bodies in the base. The speed rows were re-timed on the code after it
-  (section 7.1); the gfx950 half of the catalog sweep (sections 5.1 and 5.2) has not been re-run.
-  #15951 changes only gfx950 code, so the gfx942 rows are not affected by it.
+- **The gfx950 selection-set rows and the catalog sweep predate the per-row lazy-rescale
+  change** (section 3.3), which changed the timed gfx950 bodies in the base. The speed rows were
+  re-timed on the code after it (section 7.1); the gfx950 half of the catalog sweep (sections 5.1
+  and 5.2) has not been re-run. That change touches only gfx950 code, so the gfx942 rows are not
+  affected by it.
 - **How the gate rows were measured.** The speed rows of sections 3.1 (apart from the independent
   lever re-measurement) and 3.2 come from earlier scratch versions of the in-process harness whose
   design the shipped harness inherits (they loaded each arm's kernel file as a separate module in
@@ -616,9 +617,9 @@ This is independent of the strides and is relevant to any regeneration of these 
   layout.
 - **Speed on strided layouts** is not a comparison against the baseline (the baseline cannot launch
   them); it rests on the catalog sweep against each graph's BSHD twin.
-- **gfx950 persistent bodies:** the selection-set row (before #15951) was +0.27% overall, six
-  shapes above the measured noise, and passed only through the band's 1% floor. The re-time after
-  #15951 (section 7.1) fails the bar in three of three seeds: p09 (D64, 64/8 heads, S 2048,
+- **gfx950 persistent bodies:** the selection-set row (before the per-row lazy-rescale
+  change) was +0.27% overall, six shapes above the measured noise, and passed only through the
+  band's 1% floor. The re-time after that change (section 7.1) fails the bar in three of three seeds: p09 (D64, 64/8 heads, S 2048,
   causal, bf16) is +1.5% to +1.6%, wholly above the band, with p10 near it and p12 unstable between
   runs. The failure is accepted and not explained. A speed pass like the gfx942 one would be a
   follow-up: a port of the scalar LDS destination to the non-wide persistent bodies, and, for the
@@ -631,11 +632,11 @@ This is independent of the strides and is relevant to any regeneration of these 
   causal KV-segment shape, +1.7% to +2.1%); the 30-shape and 22-shape sets fail the same two
   families. Also accepted: the LLVM 20 two-SGPR spill of g06.
 - **Bodies that ignore the strides** (section 1). A strided layout for one of them still needs a
-  copy; serving them is tracked per body family:
-  - AICK-3355: the additive-bias bodies, on both architectures.
-  - AICK-3356: the gfx950 fp8 K/V-cache bodies.
-  - AICK-3357: the ragged, varlen and paged bodies (on gfx942, paged).
-  - AICK-3358: the gfx950 `gqa_pair` persistent work orders and the gfx942 K double-buffer and V
+  copy; serving them is open work, per body family:
+  - the additive-bias bodies, on both architectures;
+  - the gfx950 fp8 K/V-cache bodies;
+  - the ragged, varlen and paged bodies (on gfx942, paged);
+  - the gfx950 `gqa_pair` persistent work orders and the gfx942 K double-buffer and V
     register-prefetch pipelines.
 - **Trained rankers and strided graphs.** The trained rankers (UHD) of both dense engines take the
   Q/K/V/O strides as input features, but they were trained on corpus graphs that are all packed
@@ -654,8 +655,8 @@ This is independent of the strides and is relevant to any regeneration of these 
 Two sets of device runs of the shipped harness (`dense-strided-ab-2`, from this change, unedited),
 packed BSHD tensors, LLVM 22 in every arm and in the timing process, 24 rounds, an A/A' control in
 every run, one 304-CU gfx942 and one 256-CU gfx950. The code timed is this change at `2cb5a1aed24`. The
-base merged since changed both dense kernel files only by naming the LDS-DMA widths (the capability
-table, #16179); the dense IR goldens did not change and the current tree matches them at LLVM 20,
+base merged since changed both dense kernel files only by naming the LDS-DMA widths (the per-arch capability
+table change); the dense IR goldens did not change and the current tree matches them at LLVM 20,
 22, 23 and 24. The numeric gate passed for every arm, before and after timing, in every run, and
 the output hash of every arm equals the baseline's in every case: the outputs are bit-identical to
 the baseline's.
@@ -663,8 +664,8 @@ the baseline's.
 - **gfx942 held-out run.** The 22 shapes of the design below, none of them one of the 30 that chose
   the body changes. Baseline A: the merge base of this change, `05205668b34`. The pass rule
   below was fixed before the run. Arms B (this change) and C to G (one edit each).
-- **gfx950 re-time.** Not held-out: the 26 selection shapes of section 3.1, re-timed after #15951.
-  Baseline A: `e77263495e2` (contains #15951; its code objects equal those of the merge base on all
+- **gfx950 re-time.** Not held-out: the 26 selection shapes of section 3.1, re-timed after the per-row lazy-rescale change.
+  Baseline A: `e77263495e2` (contains that change; its code objects equal those of the merge base on all
   26 shapes). Grid and KV-segment family: seeds 0 and 1. Persistent and wide-DMA family: seeds 0, 1
   and 2.
 
@@ -728,7 +729,7 @@ Pass rule, point by point (the rule is below):
 | 4 a lever's comment may claim a gain only with an upper bound below 0 | PV order: yes on the causal D128 persistent rows (it costs on the non-causal ones); per-row exception: no, no measured effect; scalar base: yes as registered, not with q20K; `k_major`: no evidence for a default |
 | 5 D and E diagnostic on q14G and q20K | q14G spills as expected; q20K does not |
 
-**gfx950 re-time, B against A** (26 selection shapes, after #15951). The band is 1.00% in every
+**gfx950 re-time, B against A** (26 selection shapes, after the per-row lazy-rescale change). The band is 1.00% in every
 row.
 
 | family (shapes) | seed | A2/A p95 | B/A geomean [95% interval] | shapes wholly above the band | speed bar |
@@ -755,7 +756,7 @@ was, but the bar fails on one shape:
   over 9 runs it read about 0% in 4 and +1.06% to +1.74% in 5, with the same seed giving both
   outcomes and identical code objects and arguments; in three runs it was wholly above the band. The 95% interval of one run understates its run-to-run variation. Buffer placement is the
   likely cause and was not isolated.
-- p02, the row that was +1.02% before #15951, is +0.16% to +0.21% now.
+- p02, the row that was +1.02% before the per-row lazy-rescale change, is +0.16% to +0.21% now.
 
 **These regressions are measured, not explained.** The gfx942 rows q15 and q20K and the gfx950 rows
 p09, p10 and p12 were not profiled. The arm pairs say which change costs what on q15 (the strides

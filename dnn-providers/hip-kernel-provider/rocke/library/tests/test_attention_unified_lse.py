@@ -475,6 +475,25 @@ def test_lse_buffer_check_refuses_a_gpu_tensor_on_another_device(who, message):
         _check_lse_buffer(lse, q, expected, inputs)
 
 
+@pytest.mark.parametrize(
+    "gone, named",
+    [
+        pytest.param(("data_ptr",), "data_ptr", id="one"),
+        pytest.param(
+            ("element_size", "shape"), "shape, element_size", id="several-in-order"
+        ),
+    ],
+)
+def test_lse_buffer_check_names_the_attributes_the_lse_lacks(gone, named):
+    """A caller without torch learns which attribute its view is missing, not
+    that it should have passed a torch tensor."""
+    lse, q, expected, inputs = _lse_buffer_call()
+    for attr in gone:
+        delattr(lse, attr)
+    with pytest.raises(ValueError, match=f"lacks {named}$"):
+        _check_lse_buffer(lse, q, expected, inputs)
+
+
 def test_lse_buffer_check_still_refuses_an_input_that_overlaps_the_lse():
     lse, q, expected, inputs = _lse_buffer_call()
     _check_lse_buffer(lse, q, expected, inputs)  # disjoint ranges pass

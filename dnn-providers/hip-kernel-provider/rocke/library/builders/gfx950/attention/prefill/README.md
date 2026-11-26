@@ -50,9 +50,9 @@ persistent body in every order that reads the runtime shape, and the wide-DMA fo
 them. The `gqa_pair` orders, the fp8 K/V-cache bodies, ragged, varlen and paged specs, and
 the additive-bias bodies (`use_additive_bias`) take the arguments and ignore them;
 `run_attention_dense_torch` admits packed tensors only for those (`body_serves_strides`) and
-raises `ValueError` for any other layout; serving strides there is tracked per body family:
-additive bias AICK-3355, fp8 K/V-cache AICK-3356, ragged, varlen and paged AICK-3357,
-`gqa_pair` orders AICK-3358. A strided O is refused with `kv_segments > 1`,
+raises `ValueError` for any other layout; serving strides there is open work, per body
+family: additive bias, fp8 K/V-cache, ragged, varlen and paged, and `gqa_pair` orders.
+A strided O is refused with `kv_segments > 1`,
 and so is an O whose bytes meet those of Q, K or V (the kernel writes O while other
 workgroups still read the inputs). The strides are not a spec field: the kernel name and
 the cache key do not change. The admission rules (stride multiples, alignment, overlap,
@@ -325,8 +325,8 @@ run_attention_dense_torch(
   ported to it. The D128 bias body with LSE already sits at the 256-VGPR budget (it
   keeps its bias loads scalar because the 4-wide ones spill), so the extra stride
   arithmetic may not fit. A strided Q, K, V or O raises `ValueError`; the hipDNN
-  engine declines such a graph with the cause `attn_mask`. Serving strides here is tracked
-  in AICK-3355.
+  engine declines such a graph with the cause `attn_mask`. Serving strides here is open
+  work.
 
 Through the dispatcher, set `use_attn_bias=True` (fp32 only: `attn_bias_dtype="f32"`) on
 an `AttentionRequest` pinned to `gfx950_dense_grid` and pass the bias as
@@ -512,8 +512,8 @@ original sweep result.
    and improve per-sequence load balance across workgroups so short and long
    sequences in a batch don't serialize.
 3. **Launch-time strides: the open items.** Serve the strides in the bodies that
-   still ignore them: additive bias (AICK-3355), fp8 K/V-cache (AICK-3356), ragged,
-   varlen and paged (AICK-3357), `gqa_pair` orders (AICK-3358);
+   still ignore them: additive bias, fp8 K/V-cache, ragged, varlen and paged, and
+   `gqa_pair` orders;
    port the scalar LDS-DMA destination to the non-wide persistent bodies; find what
    the stride addressing costs in the persistent bodies (the D64 64/8-head shapes
    fail the speed bar in the re-time after the per-row lazy-rescale change); re-time

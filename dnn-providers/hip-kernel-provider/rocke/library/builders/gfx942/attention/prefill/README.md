@@ -44,8 +44,8 @@ Three kinds of body take the arguments and ignore them: the opt-in `v_reg_prefet
 `lds_num_buffers=2` pipelines, the paged body, and the additive-bias bodies
 (`use_additive_bias`). `run_attention_dense_torch` admits packed tensors only for those
 (`body_serves_strides`) and raises `ValueError` for any other layout; serving strides
-there is tracked per body family: additive bias AICK-3355, paged AICK-3357, the K
-double-buffer and V register-prefetch pipelines AICK-3358. The strides are not
+there is open work, per body family: additive bias, paged, and the K double-buffer and
+V register-prefetch pipelines. The strides are not
 a spec field: the kernel name and the cache key do not change. The admission rules
 (stride multiples, alignment, overlap, size limits) are in
 `kernels/common/_attention_dense_strides.py`; it also refuses an O whose bytes meet those
@@ -198,8 +198,7 @@ run_attention_dense_torch(
   arguments and ignore them: the bias read indexes only by the bias's own three
   strides, and the bias bodies were added while the stride work was open and were not
   ported to it. A strided Q, K, V or O raises `ValueError`; the hipDNN engine
-  declines such a graph with the cause `attn_mask`. Serving strides here is tracked in
-  AICK-3355.
+  declines such a graph with the cause `attn_mask`. Serving strides here is open work.
 - **Refused** by `supports_attention_dense`: the KV-segment split (`kv_segments > 1`;
   its segment store skips the bias epilogue), the opt-in K double-buffer / V
   register-prefetch pipeline (`lds_num_buffers=2`, `v_reg_prefetch=True`; the bias
