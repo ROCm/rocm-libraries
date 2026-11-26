@@ -91,6 +91,39 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under: small (64Ki elements or fewer, bound by the launch) or large (bound by bandwidth).",
+  "regime_label": [
+    {
+      "name": "size",
+      "labels": [
+        {
+          "label": "small",
+          "when": {
+            "<=": [
+              {
+                "*": [
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.D0",
+                          "$q.D1"
+                        ]
+                      },
+                      "$q.D2"
+                    ]
+                  },
+                  "$q.D3"
+                ]
+              },
+              65536
+            ]
+          }
+        }
+      ],
+      "otherwise": "large"
+    }
+  ],
   "graph_builder": {
     "function": "pointwiseUnary",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",

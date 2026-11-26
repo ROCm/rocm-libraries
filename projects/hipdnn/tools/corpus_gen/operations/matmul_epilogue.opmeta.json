@@ -95,6 +95,53 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under. skinny: M or N of 16 or less, a decode step's or a small batch's GEMV-like product, bound by reading the weights. deep_k: K four times the larger of M and N or more, a weight gradient's reduction over tokens, where split-K and stream-K kernels win. regular: the rest, the prefill and training projections.",
+  "regime_label": [
+    {
+      "name": "shape",
+      "labels": [
+        {
+          "label": "skinny",
+          "when": {
+            "or": [
+              {
+                "<=": [
+                  "$q.M",
+                  16
+                ]
+              },
+              {
+                "<=": [
+                  "$q.N",
+                  16
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "label": "deep_k",
+          "when": {
+            ">=": [
+              "$q.K",
+              {
+                "*": [
+                  4,
+                  {
+                    "max": [
+                      "$q.M",
+                      "$q.N"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "otherwise": "regular"
+    }
+  ],
   "graph_builder": {
     "function": "matmulEpilogue",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
@@ -380,6 +427,95 @@
         ],
         "K": [
           "$q.M"
+        ]
+      }
+    },
+    {
+      "name": "lm_head",
+      "note": "the vocabulary projection: tokens against the embedding table, the widest N an LLM runs",
+      "values": {
+        "M": [
+          1,
+          32,
+          512,
+          2048,
+          8192
+        ],
+        "N": [
+          32000,
+          128256,
+          151936
+        ],
+        "K": [
+          2048,
+          4096,
+          8192
+        ]
+      }
+    },
+    {
+      "name": "small_llm_projection",
+      "note": "Llama 3.2 1B and 3B and their peers: hidden 2048 and 3072, MLP 8192",
+      "values": {
+        "M": [
+          1,
+          16,
+          512,
+          2048,
+          8192
+        ],
+        "N": [
+          2048,
+          3072,
+          8192
+        ],
+        "K": [
+          2048,
+          3072
+        ]
+      }
+    },
+    {
+      "name": "moe_expert",
+      "note": "a mixture-of-experts expert's GEMMs (DeepSeek-V3 hidden 7168 and expert width 2048, Mixtral 4096 and 14336): the tokens routed to one expert, a few to a few thousand",
+      "values": {
+        "M": [
+          16,
+          64,
+          256,
+          1024,
+          4096
+        ],
+        "N": [
+          2048,
+          4096,
+          7168,
+          14336
+        ],
+        "K": [
+          2048,
+          4096,
+          7168
+        ]
+      }
+    },
+    {
+      "name": "weight_gradient",
+      "note": "a projection's weight gradient: hidden by hidden, reduced over a training batch's tokens",
+      "values": {
+        "M": [
+          2048,
+          4096,
+          8192
+        ],
+        "N": [
+          4096,
+          14336
+        ],
+        "K": [
+          8192,
+          16384,
+          32768
         ]
       }
     }

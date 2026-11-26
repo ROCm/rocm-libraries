@@ -88,6 +88,53 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under. skinny: M or N of 16 or less, a decode step's or a small batch's GEMV-like product, bound by reading the weights. deep_k: K four times the larger of M and N or more, a weight gradient's reduction over tokens, where split-K and stream-K kernels win. regular: the rest, the prefill and training projections.",
+  "regime_label": [
+    {
+      "name": "shape",
+      "labels": [
+        {
+          "label": "skinny",
+          "when": {
+            "or": [
+              {
+                "<=": [
+                  "$q.M",
+                  16
+                ]
+              },
+              {
+                "<=": [
+                  "$q.N",
+                  16
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "label": "deep_k",
+          "when": {
+            ">=": [
+              "$q.K",
+              {
+                "*": [
+                  4,
+                  {
+                    "max": [
+                      "$q.M",
+                      "$q.N"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "otherwise": "regular"
+    }
+  ],
   "graph_builder": {
     "function": "blockScaledMatmul",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
@@ -336,6 +383,52 @@
           4096,
           8192,
           14336
+        ]
+      }
+    },
+    {
+      "name": "decode_gemv",
+      "note": "a decode step's projections at a microscaled weight format: a few tokens against the weights",
+      "values": {
+        "M": [
+          1,
+          2,
+          4,
+          8,
+          16
+        ],
+        "N": [
+          4096,
+          8192,
+          14336
+        ],
+        "K": [
+          4096,
+          8192,
+          14336
+        ]
+      }
+    },
+    {
+      "name": "moe_expert",
+      "note": "a mixture-of-experts expert's GEMMs at a microscaled format (DeepSeek-V3 hidden 7168 and expert width 2048, gpt-oss in MXFP4)",
+      "values": {
+        "M": [
+          16,
+          64,
+          256,
+          1024,
+          4096
+        ],
+        "N": [
+          2048,
+          2880,
+          7168
+        ],
+        "K": [
+          2048,
+          2880,
+          7168
         ]
       }
     }

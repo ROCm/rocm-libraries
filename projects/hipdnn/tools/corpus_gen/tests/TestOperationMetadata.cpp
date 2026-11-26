@@ -504,4 +504,154 @@ TEST(TestOperationMetadata, AModelShapeDefaultMustBeADeclaredValueOfAnEnumParame
               std::string::npos);
 }
 
+TEST(TestOperationMetadata, ADtypeMapRespellsTheSourcesValuesForItsOwnArgumentOnly)
+{
+    // inputDataType is argument 2 and computeDataType 3 of the worked example.
+    auto declaration = layernormMetadata();
+    declaration["graph_builder"]["arguments"][2]["map"] = {{"fp16", "bf16"}, {"fp32", "fp16"}};
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+    const auto& arguments = load.metadata->graphBuilder.arguments;
+    EXPECT_EQ(arguments[2].dtypeMap,
+              (std::map<std::string, std::string>{{"fp16", "bf16"}, {"fp32", "fp16"}}));
+    EXPECT_TRUE(arguments[3].dtypeMap.empty());
+
+    const auto spelled = [&load](const char* dtype, size_t argument) {
+        const auto resolved
+            = resolveArguments(load.metadata->graphBuilder,
+                               ProblemPoint{{"batch", int64_t{4}},
+                                            {"seq_len", int64_t{512}},
+                                            {"hidden_dim", int64_t{1024}},
+                                            {"dtype", std::string(dtype)},
+                                            {"forward_phase", std::string("TRAINING")}});
+        EXPECT_TRUE(resolved.ok()) << resolved.error;
+        return std::get<std::string>(resolved.arguments[argument].value);
+    };
+    EXPECT_EQ(spelled("fp16", 2), "bf16");
+    EXPECT_EQ(spelled("fp32", 2), "fp16");
+    EXPECT_EQ(spelled("bf16", 2), "bf16") << "a value the map does not list is its own spelling";
+    EXPECT_EQ(spelled("fp16", 3), "fp16") << "the map belongs to one argument";
+}
+
+TEST(TestOperationMetadata, ADtypeMapThatCouldNotApplyIsRefusedAtLoad)
+{
+    const auto errorFor = [](size_t argument, const nlohmann::json& map) {
+        auto declaration = layernormMetadata();
+        declaration["graph_builder"]["arguments"][argument]["map"] = map;
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    // A value the source does not declare would never match, and read as a typo that changes
+    // nothing.
+    EXPECT_NE(errorFor(2, {{"fp64", "bf16"}}).find("does not declare"), std::string::npos);
+    // A target that is not a name, and a map on an argument that is not dtype_of.
+    EXPECT_NE(errorFor(2, {{"fp16", 3}}).find("not a dtype name"), std::string::npos);
+    EXPECT_NE(errorFor(2, nlohmann::json::array()).find("'map'"), std::string::npos);
+    EXPECT_NE(errorFor(0, {{"fp16", "bf16"}}).find("'map'"), std::string::npos);
+}
+
+TEST(TestOperationMetadata, ALetResolvesBeforeTheArgumentsAndReadsTheLetsBeforeIt)
+{
+    // A width several arguments share is declared once; a later let may build on an earlier one.
+    auto declaration = layernormMetadata();
+    declaration["graph_builder"]["let"] = nlohmann::json::parse(R"([
+      { "name": "tokens", "value": { "*": ["$q.batch", "$q.seq_len"] } },
+      { "name": "rows", "value": { "*": ["$let.tokens", 2] } }
+    ])");
+    declaration["graph_builder"]["arguments"][0]["value"]
+        = nlohmann::json::array({"$let.tokens", "$q.hidden_dim"});
+    declaration["graph_builder"]["arguments"].push_back(
+        {{"name", "rowDims"},
+         {"kind", "expr"},
+         {"value", nlohmann::json::array({"$let.rows", "$let.tokens"})}});
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    const ProblemPoint point{{"batch", int64_t{4}},
+                             {"seq_len", int64_t{512}},
+                             {"hidden_dim", int64_t{1024}},
+                             {"dtype", std::string("fp16")},
+                             {"forward_phase", std::string("TRAINING")}};
+    const auto resolved = resolveArguments(load.metadata->graphBuilder, point);
+    ASSERT_TRUE(resolved.ok()) << resolved.error;
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.find("dims")->value),
+              (std::vector<int64_t>{2048, 1024}));
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.find("strides")->value),
+              (std::vector<int64_t>{1024, 1}));
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.find("rowDims")->value),
+              (std::vector<int64_t>{4096, 2048}));
+}
+
+TEST(TestOperationMetadata, ALetReferenceThatCannotResolveIsRefusedAtLoad)
+{
+    // Lets resolve in declaration order, so a let may read only the lets before it: a later one
+    // (or itself, the only way to write a cycle) would be unbound when it resolves.
+    const auto errorFor = [](const char* lets, const char* dims) {
+        auto declaration = layernormMetadata();
+        declaration["graph_builder"]["let"] = nlohmann::json::parse(lets);
+        declaration["graph_builder"]["arguments"][0]["value"] = nlohmann::json::parse(dims);
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+    const auto* dims = R"(["$let.a", "$q.hidden_dim"])";
+
+    EXPECT_EQ(errorFor(R"([{ "name": "a", "value": "$q.batch" }])", dims), "");
+    // An argument reading a let nobody declares.
+    EXPECT_NE(errorFor(R"([{ "name": "a", "value": "$q.batch" }])", R"(["$let.b"])").find("$let.b"),
+              std::string::npos);
+    // A forward reference, and a let reading itself.
+    EXPECT_NE(errorFor(R"([{ "name": "a", "value": { "+": ["$let.b", 1] } },
+                           { "name": "b", "value": "$q.batch" }])",
+                       dims)
+                  .find("not declared before"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"([{ "name": "a", "value": { "+": ["$let.a", 1] } }])", dims)
+                  .find("not declared before"),
+              std::string::npos);
+    // A let over an undeclared parameter, and one declared twice.
+    EXPECT_NE(errorFor(R"([{ "name": "a", "value": "$q.sequence_length" }])", dims)
+                  .find("sequence_length"),
+              std::string::npos);
+    EXPECT_NE(
+        errorFor(R"([{ "name": "a", "value": "$q.batch" }, { "name": "a", "value": 1 }])", dims)
+            .find("twice"),
+        std::string::npos);
+}
+
+TEST(TestOperationMetadata, ASameAsArgumentCopiesAnEarlierArgumentAndRefusesALaterOne)
+{
+    // A gradient laid out as its input: one declaration, so the two cannot drift apart.
+    auto declaration = layernormMetadata();
+    auto& arguments = declaration["graph_builder"]["arguments"];
+    arguments.push_back({{"name", "gradDims"}, {"kind", "same_as"}, {"of", "dims"}});
+    arguments.push_back({{"name", "gradStrides"}, {"kind", "same_as"}, {"of", "strides"}});
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    const ProblemPoint point{{"batch", int64_t{4}},
+                             {"seq_len", int64_t{512}},
+                             {"hidden_dim", int64_t{1024}},
+                             {"dtype", std::string("fp16")},
+                             {"forward_phase", std::string("TRAINING")}};
+    const auto resolved = resolveArguments(load.metadata->graphBuilder, point);
+    ASSERT_TRUE(resolved.ok()) << resolved.error;
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.find("gradDims")->value),
+              (std::vector<int64_t>{4, 512, 1024}));
+    EXPECT_EQ(std::get<std::vector<int64_t>>(resolved.find("gradStrides")->value),
+              (std::vector<int64_t>{int64_t{512} * 1024, 1024, 1}));
+
+    // Arguments resolve in declaration order: a copy of a later one is caught at load.
+    auto forward = layernormMetadata();
+    auto& forwardArguments = forward["graph_builder"]["arguments"];
+    forwardArguments.insert(
+        forwardArguments.begin(),
+        nlohmann::json{{"name", "gradDims"}, {"kind", "same_as"}, {"of", "dims"}});
+    const auto refused = parseOperationMetadata(forward);
+    EXPECT_FALSE(refused.ok());
+    ASSERT_FALSE(refused.errors.empty());
+    EXPECT_NE(refused.errors.front().find("same_as 'dims'"), std::string::npos)
+        << refused.errors.front();
+}
+
 } // namespace hipdnn_corpus_gen

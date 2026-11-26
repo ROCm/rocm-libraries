@@ -36,6 +36,8 @@ struct ShapeDimension
     std::string name;
     int64_t low = 1;
     int64_t high = 1;
+    /// Values are searched at multiples of this (Parameter::step); 1 is every integer.
+    int64_t step = 1;
 };
 
 /// What the search reached, and what it did not.
@@ -44,9 +46,15 @@ struct FeasibleSetStats
     /// Oracle calls; each is a graph build plus a predicate call.
     int64_t oracleCalls = 0;
 
-    /// Draws made seeking a foothold, and how many were accepted.
+    /// Draws made seeking a foothold, and how many were accepted: the caller's seeds
+    /// (FeasibleSetRequest::seeds), then log-uniform draws where those gave too few.
     int64_t seedAttempts = 0;
     int64_t seedsFound = 0;
+
+    /// Of seedAttempts and seedsFound, the caller's seeds; the rest are log-uniform draws.
+    /// Each attempt is one oracle call, so oracleCalls - seedAttempts were walk steps.
+    int64_t callerSeedAttempts = 0;
+    int64_t callerSeedsFound = 0;
 
     /// Footholds whose walk never moved. Evidence of isolated components, not a count.
     int64_t isolatedStarts = 0;
@@ -130,6 +138,32 @@ inline int64_t fromLogFrom(double value, int64_t low, int64_t high)
     return std::clamp(offset + low - 1, low, high);
 }
 
+/// @p value moved to the nearest multiple of @p step inside [@p low, @p high]; unchanged when
+/// @p step is 1 or no multiple lies inside.
+inline int64_t snapToStep(int64_t value, int64_t step, int64_t low, int64_t high)
+{
+    if(step <= 1)
+    {
+        return value;
+    }
+    // The multiples inside the bounds, rounding toward the inside for either sign.
+    const auto first = (low >= 0 ? (low + step - 1) / step : low / step) * step;
+    const auto last = (high >= 0 ? high / step : (high - step + 1) / step) * step;
+    if(first > last)
+    {
+        return value;
+    }
+    const auto nearest
+        = static_cast<int64_t>(std::llround(static_cast<double>(value) / static_cast<double>(step)))
+          * step;
+    return std::clamp(nearest, first, last);
+}
+
+inline int64_t snapToStep(int64_t value, const ShapeDimension& dimension)
+{
+    return snapToStep(value, dimension.step, dimension.low, dimension.high);
+}
+
 /// Log-uniform draw across the box; a uniform draw would almost never visit small shapes.
 inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::mt19937_64& rng)
 {
@@ -138,7 +172,28 @@ inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::
     for(const auto& dimension : dimensions)
     {
         const double along = uniformReal(rng, toLog(1), toLogFrom(dimension.high, dimension.low));
-        shape.push_back(fromLogFrom(along, dimension.low, dimension.high));
+        shape.push_back(snapToStep(fromLogFrom(along, dimension.low, dimension.high), dimension));
+    }
+    return shape;
+}
+
+/// A log-uniform draw with about half its coordinates taken from @p seed instead, each clamped
+/// into the box. A region pinned to a few values of one parameter (head_dim 192 or 576 under
+/// MLA) is a set of measure zero that a log-uniform draw never lands in, and a seed that holds
+/// the value can still be refused for another coordinate (a sequence length outside the
+/// regime); crossing the two keeps the seed's value where the region needs it and redraws the
+/// rest.
+inline Shape drawCrossedWithSeed(const std::vector<ShapeDimension>& dimensions,
+                                 const Shape& seed,
+                                 std::mt19937_64& rng)
+{
+    auto shape = drawLogUniform(dimensions, rng);
+    for(size_t d = 0; d < dimensions.size() && d < seed.size(); ++d)
+    {
+        if(bernoulli(rng, 0.5))
+        {
+            shape[d] = std::clamp(seed[d], dimensions[d].low, dimensions[d].high);
+        }
     }
     return shape;
 }
@@ -370,8 +425,10 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
         Shape candidate(current.size());
         for(size_t d = 0; d < dimensions.size(); ++d)
         {
-            candidate[d] = fromLogFrom(
-                position[d] + (t * direction[d]), dimensions[d].low, dimensions[d].high);
+            candidate[d] = snapToStep(fromLogFrom(position[d] + (t * direction[d]),
+                                                  dimensions[d].low,
+                                                  dimensions[d].high),
+                                      dimensions[d]);
         }
 
         if(candidate == current)
@@ -435,9 +492,11 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
             continue;
         }
         ++result.stats.seedAttempts;
+        ++result.stats.callerSeedAttempts;
         if(ask(seed))
         {
             ++result.stats.seedsFound;
+            ++result.stats.callerSeedsFound;
             record(seed);
             footholds.push_back(seed);
         }
@@ -463,20 +522,32 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
         {
             const auto allowance
                 = std::max<int64_t>(1, request.oracleBudget / (request.restarts * 2));
-            for(int64_t attempt = 0;
-                attempt < allowance && result.stats.oracleCalls < request.oracleBudget;
-                ++attempt)
-            {
-                ++result.stats.seedAttempts;
-                Shape candidate = detail::drawLogUniform(request.dimensions, rng);
-                if(ask(candidate))
+            const auto seek = [&](const auto& draw) {
+                for(int64_t attempt = 0;
+                    attempt < allowance && result.stats.oracleCalls < request.oracleBudget;
+                    ++attempt)
                 {
-                    ++result.stats.seedsFound;
-                    record(candidate);
-                    current = std::move(candidate);
-                    started = true;
-                    break;
+                    ++result.stats.seedAttempts;
+                    Shape candidate = draw();
+                    if(ask(candidate))
+                    {
+                        ++result.stats.seedsFound;
+                        record(candidate);
+                        current = std::move(candidate);
+                        return true;
+                    }
                 }
+                return false;
+            };
+            started = seek([&]() { return detail::drawLogUniform(request.dimensions, rng); });
+            // Only when log-uniform draws find nothing: a search they serve is drawn as before.
+            if(!started && !request.seeds.empty())
+            {
+                started = seek([&]() {
+                    const auto& seed
+                        = request.seeds[detail::uniformIndex(rng, request.seeds.size())];
+                    return detail::drawCrossedWithSeed(request.dimensions, seed, rng);
+                });
             }
         }
 

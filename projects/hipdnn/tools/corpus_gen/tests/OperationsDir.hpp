@@ -71,15 +71,16 @@ inline ProblemPoint withDefaultCategoricals(const OperationMetadata& metadata, P
 }
 
 /// The facets a narrow `--keep` names on the shipped forward: one value of each of form, layout,
-/// scale, window and dtype, which leaves is_causal x alignment x generate_stats (8 combinations,
-/// 6 of them able to hold a problem) of the 6912.
+/// scale, window, dtype and value_head_dim, which leaves is_causal x alignment x generate_stats
+/// (8 combinations, 6 of them able to hold a problem) of the 53760.
 inline std::vector<KeepClause> narrowSdpaFwdKeeps()
 {
     return {{"form", "plain"},
             {"layout", "bshd"},
             {"scale", "inv_sqrt_d"},
             {"window", "none"},
-            {"dtype", "fp16"}};
+            {"dtype", "fp16"},
+            {"value_head_dim", "same"}};
 }
 
 /// What the tool's search admits for a keep: only the points the clauses keep. @p keep must

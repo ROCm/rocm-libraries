@@ -68,15 +68,49 @@ inline hipdnn_plugin_sdk::uhd::VariableContext contextFor(const ProblemPoint& po
     return context;
 }
 
+/// A let's resolved value as a binding: a number, a flag or a name.
+inline hipdnn_plugin_sdk::uhd::VariableContext::ValueType
+    bindable(const hipdnn_plugin_sdk::ingestor::jsonexpr::Value& value)
+{
+    if(value.isInt())
+    {
+        return value.asInt();
+    }
+    if(value.isString())
+    {
+        return value.asString();
+    }
+    if(value.isBool())
+    {
+        return value.asBool();
+    }
+    return hipdnn_plugin_sdk::uhd::ExpressionSet::number(value);
+}
+
 } // namespace detail
 
 /// @brief Resolves every argument of @p spec against @p point, in declaration order.
-/// Order matters: `strides_of` reads an argument resolved earlier.
+/// The lets resolve first, in their own order, and bind `$let.*` for the arguments. Order
+/// matters: `strides_of` and `same_as` read an argument resolved earlier.
 inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const ProblemPoint& point)
 {
     ArgumentResolution resolution;
 
-    const auto context = detail::contextFor(point);
+    auto context = detail::contextFor(point);
+    for(size_t i = 0; i < spec.letNames.size(); ++i)
+    {
+        try
+        {
+            context.bind("$let." + spec.letNames[i],
+                         detail::bindable(spec.lets.resolve(i, context)));
+        }
+        catch(const std::exception& error)
+        {
+            // Fail closed (§6.2), as an argument does.
+            resolution.error = "let '" + spec.letNames[i] + "': " + error.what();
+            return resolution;
+        }
+    }
 
     for(const auto& argument : spec.arguments)
     {
@@ -177,6 +211,19 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
             break;
         }
 
+        case BuilderArgument::Kind::SAME_AS:
+        {
+            const auto* source = resolution.find(argument.of);
+            if(source == nullptr)
+            {
+                resolution.error = "argument '" + argument.name + "': same_as '" + argument.of
+                                   + "', which is not resolved yet";
+                return resolution;
+            }
+            resolved.value = source->value;
+            break;
+        }
+
         case BuilderArgument::Kind::DTYPE_OF:
         {
             const auto reference = detail::queryReference(argument.source);
@@ -194,8 +241,10 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
                                    + "' is not a dtype name";
                 return resolution;
             }
-            // Kept as the declared name; the dispatch maps it to the FlatBuffers enum.
-            resolved.value = *name;
+            // Kept as the declared name, or as the argument's own spelling of it; the dispatch
+            // maps it to the FlatBuffers enum.
+            const auto spelled = argument.dtypeMap.find(*name);
+            resolved.value = spelled == argument.dtypeMap.end() ? *name : spelled->second;
             break;
         }
 
