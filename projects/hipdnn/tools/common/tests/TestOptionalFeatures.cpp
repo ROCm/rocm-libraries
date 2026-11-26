@@ -199,6 +199,12 @@ TEST(TestOptionalFeatures, WorkFeaturesMayBeBareOnlyInAModelOfAMetricDerivedFrom
     EXPECT_EQ(unguarded(signature, "time"),
               (std::vector<std::string>{"$graph.flops", "$graph.nodes[0].flops"}));
     EXPECT_EQ(unguarded({SCALE}, "tflops"), std::vector<std::string>{SCALE});
+    // Node 0 exists in every graph; a later node only in graphs that have it, whatever the
+    // metric: a plain convolution publishes no graph.nodes[2].flops though its work is known.
+    EXPECT_EQ(unguarded({"$graph.nodes[0].flops", "$graph.nodes[2].flops"}, "tflops"),
+              std::vector<std::string>{"$graph.nodes[2].flops"});
+    EXPECT_TRUE(
+        unguarded({{{"value_or_default", {"$graph.nodes[2].flops", -1}}}}, "tflops").empty());
 }
 
 // A feature's name does not say its node's type, so the node is any type having every operand

@@ -577,7 +577,10 @@ struct UnguardedReference
 /// type, so each node may be any type having every operand the signature reads bare at it
 /// (a guarded read narrows nothing); an operand required in all of those is not optional
 /// there. Work features are exempt in a model of a metric derived from the work (@p metric,
-/// see metricIsDerivedFromWork()).
+/// see metricIsDerivedFromWork()), except a later node's: every graph has a node 0, but node
+/// `i > 0` only a graph of more than `i` nodes, so a corpus mixing graph shapes (a plain
+/// convolution beside a convolution, bias add and activation) leaves `graph.nodes[2].flops`
+/// unbound in graphs whose work is known.
 inline std::vector<UnguardedReference>
     unguardedOptionalReferences(const std::vector<nlohmann::json>& signature,
                                 std::string_view metric)
@@ -599,8 +602,11 @@ inline std::vector<UnguardedReference>
     for(const auto& reference : unguarded)
     {
         const auto* feature = findOptionalFeature(reference);
+        const auto node = detail::nodeOperandOf(reference);
+        const bool laterNode = node.has_value() && node->first != "0";
         if(feature == nullptr
-           || (feature->kind == OptionalFeatureKind::WORK && metricIsDerivedFromWork(metric)))
+           || (feature->kind == OptionalFeatureKind::WORK && metricIsDerivedFromWork(metric)
+               && !laterNode))
         {
             continue;
         }
