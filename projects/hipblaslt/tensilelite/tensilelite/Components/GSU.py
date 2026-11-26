@@ -33,6 +33,8 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, 
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
+from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -227,6 +229,13 @@ class GSUOff(GSU):
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
         m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
+        # Swizzled-TDM operand: one K step of DepthU spans MI rows of the pre-swizzled layout,
+        # so the per-iteration advance is MI * DepthU * bpe (same factor GSUOn.graIncrements
+        # applies). Persistent data-parallel kernels select GSUOff (SingleBuffer), so without
+        # it the TDM address advances by a single row's worth and every K step re-reads the
+        # wrong data.
+        if tP.get("isSwizzledTDM"):
+          m *= SWIZZLE_BLOCK_ROWS     # the host swizzle blocks 16 rows whatever the WMMA shape
         if isMirrorIdx:
           m = -m
 
@@ -244,16 +253,16 @@ class GSUOff(GSU):
             # MX scale unroll-step SRD increment, gated by MXScaleFormat:
             #   - Swizzled (HostPreSwizzle/InMemorySwizzle): each K-block of
             #     scales (DepthU/MXBlock K-scales per M) is laid out as a
-            #     contiguous (M, K_inner) block, so a K-step of DepthU advances
-            #     the SRD by Size{tile} * (DepthU/MXBlock * bpe).
+            #     contiguous (ceil(M/MXBlockFree), K_inner) block, so a K-step of DepthU
+            #     advances the SRD by ceil(Size{tile}/MXBlockFree)*(DepthU/MXBlock*bpe).
             #   - NoSwizzle: canonical row/column layout with K-axis stride 1;
             #     the K-step of DepthU is just DepthU/MXBlock * bpe and goes
             #     through the standard graIncrementsCommon path.
             mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
             if isMxSwizzledScale and writer.isConstUnitStride(stride):
-                module.add(SMulI32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
-                    src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=m, \
+                module.add(mulScaleRows(sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), m, \
+                    sgpr("Size%s"%INDEX_CHARS[tIdx]), mxFreeTile(kernel, tc), \
                     comment="incr%s = Size%s*DepthU*Bpe (unrollIdx, swizzled MX scale layout)"%(tc, INDEX_CHARS[tIdx])))
             else:
                 module.add(self.graIncrementsCommon(writer, loopIdx, tc, stride, m))
@@ -428,8 +437,15 @@ class GSUOn(GSU):
         module.add(gsucLabel)
         gsuOffsetStr = "gsuOffset = DepthU*accumulatedNumOfLoopCounterL"
         loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
-        module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
-                                    comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
+        if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+            # tail folding: GSU distributes ceil(K / DepthU) k-tiles (the partial one included)
+            module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr("SizesSum"), src1=depthU - 1, \
+                               comment="TailFolding: SizesSum + DepthU - 1"))
+            module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr(loopCounterName), shiftHex=log2(depthU), \
+                                        comment="TailFolding: s[%s] = ceil(s[sgprSizesSum] / %s)"%(loopCounterName, depthU)))
+        else:
+            module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
+                                        comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
         tmpSgprInfo = ContinuousRegister(idx=stmp, size=2)
         module.add(writer.calculateLoopNumIterOffsetGsu(kernel, loopCounterName, tmpSgprInfo))
         module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthUDiv, comment=gsuOffsetStr))
@@ -509,7 +525,8 @@ class GSUOn(GSU):
                 mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
                 isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
                 if isMxSwizzledScale:
-                    module.add(SMulI32(dst=incSgpr, src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d) (swizzled MX scale layout)"%(mi_dim)))
+                    module.add(mulScaleRows(incSgpr, duBpe, sgpr("Size%s"%INDEX_CHARS[tIdx]), mxFreeTile(kernel, tc), \
+                        comment="GSU*DepthU*Bpe*MI_dim(%d) (swizzled MX scale layout)"%(mi_dim)))
                 elif kernel["enableTDMMetadata"] and tP["isM"] and kernel["ProblemType"]["MetadataLayout"]:
                     ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
                     metadataStrideSgpr = f"Stride{tc}{writer.states.indexChars[ia[1]]}"
@@ -952,11 +969,7 @@ class GSUOn(GSU):
             # Use VGPR up to next occupancy threshold:
             maxVgprs, occupancy = writer.getMaxRegsForOccupancy(kernel["NumThreads"], writer.vgprPool.size(), writer.sgprPool.size(), \
                 writer.getLdsSize(kernel), writer.agprPool.size(), writer.states.doubleVgpr)
-            # Set occupancy limit for register pools
-            # TODO: Support gfx12 and gfx117x
-            if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
-                writer.vgprPool.setOccupancyLimit(writer.states.regCaps["MaxVgpr"], writer.states.regCaps["PhysicalMaxVgpr"] // occupancy)
-                writer.sgprPool.setOccupancyLimit(writer.states.regCaps["MaxSgpr"], writer.states.regCaps["PhysicalMaxSgpr"] // occupancy)
+            writer.setOccupancyLimits(kernel, maxVgprs, occupancy)
 
             if ss.numVgprsPerElement:
                 numElementsPerBatch = numVgprAvailable // ss.numVgprsPerElement
@@ -1554,10 +1567,17 @@ class GSUOn(GSU):
                 module.add(SCmpGtI32(src0=sgpr(tmpSgpr.idx), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
                 module.add(SCBranchSCC1(labelName=accvgprWriteLabel.getLabelName(), comment="branch if true"))
                 module.addComment("GSU <= %u, do accvgpr_read for the last gsu wg" % self.gsuThreshold)
-                if clsLoop and clsM0BaseSgpr is not None:
-                    # accvgpr READ: acc is src via M0[9:0]; keep M0[25:16]=0.
-                    module.add(SMovB32(dst=mgpr(0), src=sgpr(clsM0BaseSgpr),
-                        comment="MBSK CLS (reduction) M0[9:0] = acc src offset for accvgpr read"))
+                if kernel.get("CompactLoopStore", False):
+                    if clsLoop:
+                        # accvgpr READ: acc is src via M0[9:0]; keep M0[25:16]=0.
+                        module.add(SMovB32(dst=mgpr(0), src=sgpr(clsM0BaseSgpr),
+                            comment="MBSK CLS (reduction) M0[9:0] = acc src offset for accvgpr read"))
+                    else:
+                        # Nothing has written M0 since the prologue set it to LdsNumBytes,
+                        # and its low bits would offset the v_movrelsd_2_b32 acc source
+                        # index. The write block below covers the branch-taken path.
+                        module.add(SMovB32(dst=mgpr(0), src=0,
+                            comment="reset M0 for v_movrelsd_2_b32 outside CLS loop"))
                 module.add(self.lastGsuWgReduction(kernel, writer, ss, batchIdx, tmpVgpr, tmpVgprDynamic, gwvw, batchElements, \
                                                codeAccVgprRead, addrCalc.globalOffset, addrCalc.addrDVgpr))
 
@@ -1566,13 +1586,10 @@ class GSUOn(GSU):
         module.add(accvgprWriteLabel)
         module.addComment("accvgpr write")
         if kernel.get("CompactLoopStore", False):
-            if clsLoop and clsM0BaseSgpr is not None:
+            if clsLoop:
                 # Write: M0[25:16] from rdM0Base (do not keep the read M0).
                 module.add(SLShiftLeftB32(dst=mgpr(0), src=sgpr(clsM0BaseSgpr), shiftHex=hex(16),
                     comment="MBSK CLS (reduction) M0[25:16] = acc dst offset for accvgpr write"))
-            elif clsLoop:
-                # Header already set M0; do not zero it.
-                pass
             else:
                 module.add(SMovB32(dst=mgpr(0), src=0,
                     comment="reset M0 for v_movrelsd_2_b32 outside CLS loop"))
@@ -2366,7 +2383,7 @@ class GSUOn(GSU):
         # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
         if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
             with writer.allocTmpSgpr(1, tag="initializeSrd_tmpSgprGSU") as tmpSgprGSU:
-                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
                 module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
                 if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):

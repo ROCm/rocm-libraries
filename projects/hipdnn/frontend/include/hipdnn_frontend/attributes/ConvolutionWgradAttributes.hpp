@@ -32,8 +32,10 @@ namespace hipdnn_frontend::graph
  * @code{.cpp}
  * auto dw = graph.conv_wgrad(dy, x, ConvWgradAttributes()
  *              .set_padding({1, 1})
- *              .set_stride({1, 1}));
- * // Required before validation/build; strides may be omitted and inferred.
+ *              .set_stride({1, 1})
+ *              .set_dilation({1, 1}));
+ * // Padding, stride and dilation are all required. dw dims are required before
+ * // validation/build; strides may be omitted and inferred.
  * dw->set_dim({K, C, R, S});
  * @endcode
  *

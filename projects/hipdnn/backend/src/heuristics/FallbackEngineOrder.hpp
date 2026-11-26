@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -54,21 +55,18 @@ inline std::vector<int64_t> parseFallbackOrderingEnv()
     return ids;
 }
 
-/// Restrict @p candidates to engines named in @p envOrder, preserving the env
-/// order. Engines not listed in the env are dropped — when the operator sets
-/// HIPDNN_HEUR_FALLBACK_ENGINE_ORDER they are explicitly opting out of every
-/// other engine. Names in the env that are not in @p candidates are silently
-/// skipped (the policy loop only sees engines the rest of the stack already
-/// filtered down to).
+/// Restrict @p candidates to engines named in @p envOrder, keeping only the first
+/// occurrence of each engine in env order. Unlisted engines are dropped because
+/// the operator opted out of them. Entries that are not candidates are skipped.
 inline std::vector<int64_t> applyFallbackOrdering(const std::vector<int64_t>& candidates,
                                                   const std::vector<int64_t>& envOrder)
 {
-    const std::unordered_set<int64_t> candidateSet(candidates.begin(), candidates.end());
+    std::unordered_set<int64_t> remaining(candidates.begin(), candidates.end());
     std::vector<int64_t> out;
-    out.reserve(envOrder.size());
+    out.reserve(std::min(envOrder.size(), remaining.size()));
     for(const int64_t id : envOrder)
     {
-        if(candidateSet.count(id) != 0U)
+        if(remaining.erase(id) != 0U)
         {
             out.push_back(id);
         }

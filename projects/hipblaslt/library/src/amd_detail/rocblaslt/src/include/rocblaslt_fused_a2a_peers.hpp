@@ -18,6 +18,14 @@
 
 namespace rocblaslt
 {
+    // A caller's region aligned to the public constant must keep every channel's
+    // flag block, biased below by a whole number of blocks, on a line boundary.
+    static_assert(HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT % TensileLite::FUSED_A2A_LINE_BYTES == 0
+                      && TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES
+                                 % HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT
+                             == 0,
+                  "HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT no longer matches the flag block layout");
+
     // The drain bits this layer asks for. IN_KERNEL_FULL maps to both.
     constexpr uint32_t fusedA2ADrainFor(hipblasLtA2ACompletionMode_t mode)
     {
@@ -49,7 +57,7 @@ namespace rocblaslt
                 = peerFlag != nullptr && peerFlag[j] != nullptr
                       ? static_cast<char*>(peerFlag[j]) + flagBias
                       : nullptr;
-            peers[j][TensileLite::FUSED_A2A_SLOT_RECV_PTR]
+            peers[j][TensileLite::FUSED_A2A_SLOT_BUF_PTR]
                 = recvPtrs != nullptr ? recvPtrs[j] : nullptr;
             if(queues != nullptr)
             {

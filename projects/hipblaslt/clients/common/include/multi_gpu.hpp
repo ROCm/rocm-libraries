@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -103,7 +104,7 @@ namespace hipblaslt_bench
 
             std::vector<char> all(sizeof(mine) * m_env.world);
             if(allgather(mine, all.data(), sizeof(mine)) != HIPBLAS_STATUS_SUCCESS)
-                return false;
+                throw std::runtime_error("rendezvous failed while comparing hostnames");
 
             for(uint32_t j = 0; j < m_env.world; ++j)
                 if(all[j * sizeof(mine)] == '\0')
@@ -266,14 +267,6 @@ namespace hipblaslt_bench
         int              m_to_server   = -1;
         std::vector<int> m_peers;
     };
-
-    inline hipblasStatus_t rendezvous_allgather_trampoline(void*       userData,
-                                                           const void* sendbuf,
-                                                           void*       recvbuf,
-                                                           size_t      bytesPerRank)
-    {
-        return static_cast<TcpRendezvous*>(userData)->allgather(sendbuf, recvbuf, bytesPerRank);
-    }
 
     inline CollectiveAgreement make_agreement(TcpRendezvous& rendezvous, uint32_t world)
     {

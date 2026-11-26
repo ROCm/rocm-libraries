@@ -186,7 +186,10 @@ class TestOverflowStillRejectsTheKernel:
 
     def _verdict(self, vgprs, maxVgpr=256):
         writer = SimpleNamespace(
-            states=SimpleNamespace(regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}))
+            # The guard now sits alongside the PLSIN fused store check; off here,
+            # as for any non-MXF4 kernel.
+            states=SimpleNamespace(postLoopStoreInNll=False,
+                                   regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}))
         namespace = {"self": writer, "totalVgprs": vgprs, "totalSgprs": 0, "verdict": 0}
         return _exec(self._budgetGuard(), namespace)["verdict"]
 
@@ -213,12 +216,13 @@ class TestForceGenerateKernel:
     def _writer(self, error, forceGenerateKernel):
         # _getKernelSource also records the kernel's own CustomKernel metadata, so a
         # SimpleNamespace standing in for a real writer must carry what that path
-        # reads: the arg-registration hook, the kernel name and the collected arg
-        # definitions. A real KernelWriter always has all three.
+        # reads: the arg-registration hook, the kernel name, the collected arg
+        # definitions and the arch caps. A real KernelWriter always has all four.
         return SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
             _registerKernelArgs=lambda kernel: None,
-            states=SimpleNamespace(kernelName="test_kernel"),
+            states=SimpleNamespace(kernelName="test_kernel",
+                                   archCaps={"HasVALUReadSGPRHazard": 0}),
             kernelArgDefs=[],
             stringIdx=0,
             kernelBody=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),

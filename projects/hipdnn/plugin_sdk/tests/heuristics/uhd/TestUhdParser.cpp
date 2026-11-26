@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -19,6 +20,8 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+
+#include "../../TestResourcePaths.hpp"
 
 /**
  * @file TestUhdParser.cpp
@@ -59,7 +62,9 @@ enum class Base
     NATIVE,
     TREE_DATA,
     CUSTOM_LIBRARY,
-    STATIC_ORDER
+    STATIC_ORDER,
+    LINEAR_DATA,
+    MLP_DATA
 };
 
 /// A valid document of each body kind. The native one carries every optional block a
@@ -96,6 +101,23 @@ nlohmann::json baseDocument(Base base)
         document.erase("native");
         document["tree_data"] = {{"artifact", "models/model.fb"}, {"hash", DIGEST}};
     }
+    else if(base == Base::LINEAR_DATA)
+    {
+        // A within-catalog ranker: a log slowdown, lower is better, estimating no metric.
+        document["adapter"] = "linear_data";
+        document.erase("native");
+        document.erase("score");
+        document["objective"] = "min";
+        document["linear_data"] = {{"artifact", "models/linear.fb"}, {"hash", DIGEST}};
+    }
+    else if(base == Base::MLP_DATA)
+    {
+        // An engine estimate: the log of a registered metric, so the score names both.
+        document["adapter"] = "mlp_data";
+        document.erase("native");
+        document["score"]["transform"] = "log";
+        document["mlp_data"] = {{"artifact", "models/mlp.fb"}, {"hash", DIGEST}};
+    }
     else if(base == Base::CUSTOM_LIBRARY)
     {
         document["adapter"] = "custom_library";
@@ -103,6 +125,26 @@ nlohmann::json baseDocument(Base base)
         document["custom_library"]
             = {{"library", "lib/scorer.so"}, {"symbol", "scorer"}, {"hash", DIGEST}};
     }
+    return document;
+}
+
+/// The slot provenance forms of RFC 0021 §9 exist only in a 1.1 document.
+nlohmann::json slotKmdForm(nlohmann::json document, const std::string& slot)
+{
+    document["version"] = "1.1";
+    document["trained_against"]["slot"] = slot;
+    return document;
+}
+
+/// A 1.1 native document whose provenance names a slot's KMD per slot (`kmds`) in place of `kmd`.
+nlohmann::json kmdsForm(nlohmann::json document)
+{
+    document["version"] = "1.1";
+    auto& provenance = document["trained_against"];
+    provenance.erase("kmd");
+    provenance["kmds"]
+        = {{{"slot", "prep"}, {"id", "31112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}},
+           {{"slot", "dkdv"}, {"id", "32112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.2"}}};
     return document;
 }
 
@@ -196,7 +238,7 @@ const std::vector<Refusal> REFUSALS = {
     {"RootIsNotAnObject", Base::NATIVE, [](nlohmann::json& doc) { doc = nlohmann::json::array(); }},
     {"UnknownRootKey", Base::NATIVE, [](nlohmann::json& doc) { doc["featuresHash"] = "x"; }},
     {"MissingVersion", Base::NATIVE, [](nlohmann::json& doc) { doc.erase("version"); }},
-    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.1"; }},
+    {"UnsupportedVersion", Base::NATIVE, [](nlohmann::json& doc) { doc["version"] = "1.3"; }},
     {"IdIsNotAUuid", Base::NATIVE, [](nlohmann::json& doc) { doc["id"] = "model-1"; }},
     {"EmptyName", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = ""; }},
     {"NameIsNotAString", Base::NATIVE, [](nlohmann::json& doc) { doc["name"] = 3; }},
@@ -352,6 +394,39 @@ const std::vector<Refusal> REFUSALS = {
     {"CustomLibraryWithConfiguration",
      Base::CUSTOM_LIBRARY,
      [](nlohmann::json& doc) { doc["custom_library"]["config"] = {{"threads", 4}}; }},
+    {"LinearDataWithTheMaxObjective",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["objective"] = "max"; }},
+    {"LinearDataWithAMetric",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["score"] = {{"metric", "time"}}; }},
+    {"LinearDataWithATransform",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["score"] = {{"transform", "log1p"}}; }},
+    {"LinearDataWithoutASignature",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc.erase("features_signature"); }},
+    {"LinearDataBodyHasAnUnknownKey",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["linear_data"]["library"] = "x"; }},
+    {"LinearDataNamesAnotherBody",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["adapter"] = "table"; }},
+    {"MlpDataWithoutAMetric",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) {
+         doc["score"].erase("metric");
+         doc["score"]["calibrated"] = false;
+     }},
+    {"MlpDataWithAnotherTransform",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc["score"]["transform"] = "log1p"; }},
+    {"MlpDataWithoutATransform",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc["score"].erase("transform"); }},
+    {"MlpDataWithoutASignature",
+     Base::MLP_DATA,
+     [](nlohmann::json& doc) { doc.erase("features_signature"); }},
 };
 
 INSTANTIATE_TEST_SUITE_P(Rule,
@@ -377,9 +452,115 @@ TEST(TestUhdParser, AcceptsEveryBaseDocument)
     EXPECT_EQ(custom.customLibrarySymbol, "scorer");
     EXPECT_EQ(custom.modelHash, DIGEST);
 
+    const auto linear = parseUhdConfig(baseDocument(Base::LINEAR_DATA), descriptorPath());
+    EXPECT_EQ(linear.adapterType, "linear_data");
+    EXPECT_EQ(linear.objective, "min");
+    EXPECT_TRUE(linear.scoreMetric.empty());
+    EXPECT_FALSE(linear.scoreCalibrated);
+    EXPECT_EQ(linear.modelHash, DIGEST);
+    EXPECT_EQ(std::filesystem::path(linear.modelArtifactPath).filename().string(), "linear.fb");
+
+    // Either registered metric, each with its own direction.
+    const auto throughput = parseUhdConfig(baseDocument(Base::MLP_DATA), descriptorPath());
+    EXPECT_EQ(throughput.adapterType, "mlp_data");
+    EXPECT_EQ(throughput.scoreMetric, "tflops");
+    EXPECT_EQ(throughput.scoreTransform, "log");
+    EXPECT_EQ(std::filesystem::path(throughput.modelArtifactPath).filename().string(), "mlp.fb");
+    auto time = baseDocument(Base::MLP_DATA);
+    time["score"]["metric"] = "time";
+    time["objective"] = "min";
+    EXPECT_EQ(parseUhdConfig(time, descriptorPath()).scoreMetric, "time");
+
+    // An identity transform is what an absent one means.
+    auto identity = baseDocument(Base::LINEAR_DATA);
+    identity["score"] = {{"transform", "identity"}, {"calibrated", false}};
+    EXPECT_NO_THROW(parseUhdConfig(identity, descriptorPath()));
+
     // static_order scores nothing, so it is admitted without an objective.
     const auto ordered = parseUhdConfig(baseDocument(Base::STATIC_ORDER), descriptorPath());
     EXPECT_EQ(ordered.adapterType, "static_order");
+}
+
+/// Each slot provenance form of RFC 0021 §9 is accepted in a 1.1 document, including names the
+/// refusals sit next to.
+TEST(TestUhdParser, AcceptsEachSlotProvenanceForm)
+{
+    const auto base = baseDocument(Base::NATIVE);
+
+    const auto single = parseUhdConfig(slotKmdForm(base, "dkdv_2"), descriptorPath());
+    EXPECT_EQ(single.trainedAgainst.at("slot"), "dkdv_2");
+    EXPECT_TRUE(single.trainedAgainst.contains("kmd"));
+    EXPECT_FALSE(single.trainedAgainst.contains("kmds"));
+
+    const auto many = parseUhdConfig(kmdsForm(base), descriptorPath());
+    EXPECT_FALSE(many.trainedAgainst.contains("kmd"));
+    ASSERT_EQ(many.trainedAgainst.at("kmds").size(), 2U);
+    EXPECT_EQ(many.trainedAgainst.at("kmds")[1].at("slot"), "dkdv");
+
+    // One slot is a valid kmds, and a name may contain digits and underscores after its letter.
+    auto one = kmdsForm(base);
+    one["trained_against"]["kmds"] = nlohmann::json::array({one["trained_against"]["kmds"][0]});
+    one["trained_against"]["kmds"][0]["slot"] = "p_9";
+    EXPECT_NO_THROW(parseUhdConfig(one, descriptorPath()));
+}
+
+/// `codegen_revision` arrived with UHD 1.2: an older document recording it is refused, naming
+/// the version it needs, and a 1.2 one is read.
+TEST(TestUhdParser, ReadsACodegenRevisionOnlyFromVersion12)
+{
+    auto document = baseDocument(Base::NATIVE);
+    document["trained_against"]["codegen_revision"] = "codegen-a";
+    for(const auto* version : {"1.0", "1.1"})
+    {
+        SCOPED_TRACE(version);
+        document["version"] = version;
+        try
+        {
+            (void)parseUhdConfig(document, descriptorPath());
+            ADD_FAILURE() << "a codegen_revision under " << version << " was accepted";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            const std::string message = error.what();
+            EXPECT_NE(message.find("records codegen_revision"), std::string::npos) << message;
+            EXPECT_NE(message.find("requires UHD version 1.2"), std::string::npos) << message;
+        }
+    }
+    document["version"] = "1.2";
+    EXPECT_EQ(parseUhdConfig(document, descriptorPath()).trainedAgainst.at("codegen_revision"),
+              "codegen-a");
+}
+
+/// The `trained_against` header grammar of RFC 0021 §9: the rows the packer, its schema and
+/// `uhd_gen` also run, each a valid form with an RFC 6902 patch.
+TEST(TestUhdParser, ConformsToTheTrainedAgainstSlotCorpus)
+{
+    std::ifstream stream(hipdnn_plugin_sdk::test::uhdGeneratedFixtureDir() / "conformance"
+                         / "trained_against_slots.json");
+    ASSERT_TRUE(stream.is_open());
+    const auto corpus = nlohmann::json::parse(stream);
+    for(const auto& row : corpus.at("rows"))
+    {
+        SCOPED_TRACE(row.at("name").get<std::string>());
+        const auto skip = row.value("skip", nlohmann::json::array());
+        if(std::find(skip.begin(), skip.end(), nlohmann::json("parser")) != skip.end())
+        {
+            continue;
+        }
+        const auto form
+            = corpus.at("bases").at(row.at("base").get<std::string>()).patch(row.at("patch"));
+        auto document = baseDocument(Base::NATIVE);
+        document["version"] = form.at("version");
+        document["trained_against"] = form.at("trained_against");
+        if(row.value("reject", false))
+        {
+            EXPECT_THROW(parseUhdConfig(document, descriptorPath()), std::invalid_argument);
+        }
+        else
+        {
+            EXPECT_NO_THROW(parseUhdConfig(document, descriptorPath()));
+        }
+    }
 }
 
 /// The boundaries the int32 refusals sit next to are themselves accepted.

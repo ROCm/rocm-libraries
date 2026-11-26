@@ -54,6 +54,9 @@ binding decides everything below:
   directory named for the arch on the path from the provider's staged directory down to the
   installed UED (for a provider that packs kernels, the directory that also holds `kpack/`).
   Hand that root, never the UED's own folder, to every tool.
+  A UED with a `slots` list is a **slotted engine** (version `1.1`): one KMD, catalog, knobs
+  and metric-less `sort_kernel_catalog` per slot, `predict_engine` at the engine
+  ([Slotted engines](#slotted-engines)).
 - **Opaque engine** (no UED): L1 only, bound in its provider's code. The engine overrides
   `getPrediction` and passes the UHD ids it reads to the plugin SDK's binding
   (`EngineModelBinding` / `resolveDeclaredEnginePredictions`, in
@@ -168,6 +171,35 @@ binding decides everything below:
    payload and `eval_report.json`), beside that model's `training_problem_keys` and
    `eval_problem_keys`. [evaluate.md](evaluate.md) reads it, then [validate.md](validate.md).
 
+## Slotted engines
+
+A slotted engine (UED `slots`, RFC 0021) selects one kernel per slot, in slot order; a
+candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob is
+`<slot>.<field>`. The workflow above holds with these differences:
+
+- **Roles.** L2 is one metric-less ranker **per slot**, trained from that slot's rows; L1 is
+  the engine-level `predict_engine`, trained as above from the bench's L1 corpus; its
+  `trained_against` names every slot's KMD in `kmds` and `train` writes it as a `1.1` UHD,
+  or `1.2` when it also records `codegen_revision`. A slot ranker is trained without
+  `--metric`: one that declares `score.metric` makes the loader drop the engine, and
+  `generate --slot` and `promote` refuse it. Slots carry no `predict_applicable_kernels`.
+- **Collect (step 5, L2).** `uhd_gen generate` refuses to collect measurements for a slotted
+  engine (`generate measures an engine that declares no slots`). Sweep each graph with `hipdnn_bench --sweep`,
+  which times the product of the slot catalogs and adds the `kernel` (composite id) and
+  `slot_reference` columns, then convert it ([data.md](data.md), "Slotted sweeps"). A
+  reference kernel that fails to launch fails the sweep, naming the reference program; fix or
+  remove that kernel, as no row is dropped. (The runtime benchmark instead moves a failing
+  reference pick to the slot's next kernel.)
+- **Train (step 7, L2).** One run per slot: `generate --dataset <dataset dir> --slot <slot>
+  --no-promote --target avgTimeMs --objective min --features ...`; `promote` installs it.
+- **Install.** `promote --role sort_kernel_catalog`; see the uhd_gen README ("Slotted engines") and [validate.md](validate.md).
+- **Dispatch and launches.** Each slot has its own UDD (dispatch symbol
+  `<namespace>.<slot>_dispatch`), because packs with different launch sets need different
+  dispatch descriptors. A slot's kernels may be multi-launch UKD 1.1 `sources` (a packaged
+  `rocke`, `hip` or `hsaco` pack with `launches`; the generator checks one launch set per
+  slot). Alternatively, the slot's native handler launches a dependent kernel of the same
+  code object by a symbol name its KMD records, with no `sources` entry (RFC 0021 §3).
+
 ## Decision rules
 
 - **One device.** Every set, collection, dataset and model is one product of one arch.
@@ -176,7 +208,9 @@ binding decides everything below:
 - **Accumulate.** A second set for the same engine and device excludes the first; it does not
   replace it. Archive a key's sets ([data.md](data.md)) to start afresh.
 - **Revision.** Collections of different selector revisions go to different datasets; a model
-  trains from one.
+  trains from one. Collections of one selector revision built by different compilers
+  (different `codegen_revision`) share a dataset; training warns and the model records no
+  `codegen_revision`.
 - **Tier.** A smoke round proves the pipeline, not the model: it passes when every graph is
   collected, the model trains and is scored held out, and Stage V's identity, available,
   metric and selector-revision gates pass. Its accuracy gate is reported, and a smoke model is

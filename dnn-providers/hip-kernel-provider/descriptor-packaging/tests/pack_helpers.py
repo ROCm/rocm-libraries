@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack import pipeline, provenance_sidecar
+from hkp_pack import agreement, pipeline, provenance_sidecar
 from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets
 
 PACKAGING = Path(__file__).resolve().parent.parent
@@ -49,6 +49,14 @@ def _silent(*_args, **_kwargs):
     pass
 
 
+def _restamp(doc):
+    """Re-publish every launch's descriptor digest over an edited shipped document,
+    so only the check under test can refuse it."""
+    binding = agreement.descriptor_binding(doc)
+    for evidence in doc["provenance"]["effective_spec"].values():
+        evidence["descriptor_digest"] = binding
+
+
 # --- Packing ------------------------------------------------------------------
 def _load_kpack(rocm_kpack_dir):
     from hkp_pack.kpack_resolver import load_kpack
@@ -57,13 +65,24 @@ def _load_kpack(rocm_kpack_dir):
     return kpack
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches, source_label=None):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches,
+    source_label=None,
+    hip_path=None,
+    device_lib_path=None,
+):
     """Pack one root. A root holding an `embedded_source` descriptor needs a label."""
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         source_label=source_label,

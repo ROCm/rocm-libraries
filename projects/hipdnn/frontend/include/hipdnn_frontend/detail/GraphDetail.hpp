@@ -3,11 +3,17 @@
 #pragma once
 
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -40,6 +46,10 @@ inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
     return {ErrorCode::OK, ""};
 }
 
+// Appends the retrieved engine-config descriptors to @p engineConfigs, in heuristic rank order,
+// and replaces the contents of @p engineIds with their engine ids. On success, engineIds[i] is
+// the id of the i-th appended descriptor: when @p engineConfigs starts empty, as for every
+// caller, engineConfigs.size() == engineIds.size().
 inline Error
     getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
                      std::vector<int64_t>& engineIds,
@@ -69,6 +79,7 @@ inline Error
     // already reflected in the ranked list — no extra frontend search is needed
     // for that knob.
     const int64_t requiredCount = getAll ? availableEngineCount : 1;
+    const size_t firstConfigIndex = engineConfigs.size();
     std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
     for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
     {
@@ -99,6 +110,16 @@ inline Error
         return {ErrorCode::GRAPH_NOT_SUPPORTED,
                 "No engine configurations retrieved from the heuristic desc."};
     }
+
+    if(count > static_cast<int64_t>(engineConfigsShallow.size()))
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Backend returned " + std::to_string(count) + " engine configurations after "
+                    + std::to_string(engineConfigsShallow.size()) + " were requested."};
+    }
+
+    // The backend may fill fewer descriptors than were requested; drop the unfilled ones.
+    engineConfigs.resize(firstConfigIndex + static_cast<size_t>(count));
 
     // Finalize and get ids for engine configs
     engineIds.resize(static_cast<size_t>(count), -1);
@@ -131,6 +152,54 @@ inline Error
             "Failed to get engine id from engine descriptor.");
     }
 
+    return {ErrorCode::OK, ""};
+}
+
+/// Ranked engine configurations for @p modes, as cudnn-frontend's get_heuristics_list builds
+/// them: one heuristic query per mode, in the order given, results concatenated. An engine an
+/// earlier mode returned is not repeated, since hipDNN returns one configuration per engine,
+/// and modes that select the same backend mode are queried once.
+inline Error getEngineConfigsForModes(
+    std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
+    std::vector<int64_t>& engineIds,
+    hipdnnBackendDescriptor_t graphDesc,
+    const std::vector<HeuristicMode>& modes,
+    std::string_view rankingMetric)
+{
+    engineConfigs.clear();
+    engineIds.clear();
+    if(modes.empty())
+    {
+        return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
+    }
+
+    std::vector<hipdnnBackendHeurMode_t> queried;
+    for(const HeuristicMode mode : modes)
+    {
+        const hipdnnBackendHeurMode_t backendMode = toBackendType(mode);
+        if(std::find(queried.begin(), queried.end(), backendMode) != queried.end())
+        {
+            continue;
+        }
+        queried.push_back(backendMode);
+
+        ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, graphDesc, mode, /*findFirst=*/false, rankingMetric));
+
+        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> modeConfigs;
+        std::vector<int64_t> modeIds;
+        HIPDNN_CHECK_ERROR(
+            getEngineConfigs(modeConfigs, modeIds, engineHeuristicDesc.get(), /*getAll=*/true));
+        for(size_t i = 0; i < modeIds.size(); ++i)
+        {
+            if(std::find(engineIds.begin(), engineIds.end(), modeIds[i]) == engineIds.end())
+            {
+                engineIds.push_back(modeIds[i]);
+                engineConfigs.push_back(std::move(modeConfigs[i]));
+            }
+        }
+    }
     return {ErrorCode::OK, ""};
 }
 

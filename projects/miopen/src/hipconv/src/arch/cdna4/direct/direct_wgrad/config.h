@@ -3,7 +3,7 @@
 // The parameters one direct_wgrad kernel is compiled for.
 //
 // docs/algorithms/direct/direct-wgrad.md is the algorithm these configure, and
-// docs/algorithms/direct/direct-wgrad-config-table.md the set of them the table holds.
+// docs/algorithms/details/direct/direct-wgrad-config-table.md the set of them the table holds.
 
 #include "mathutil.h"
 
@@ -25,7 +25,7 @@ static constexpr int TILE_VGPR_BUDGET = 192;
 // Channels a swizzled LDS row needs, on either operand: TransposeSwizzle needs C4 >= 8.
 static constexpr int MIN_SWIZZLED_CHANS = 32;
 
-// The MFMA the compute phase tiles onto: 16x16x32.
+// The MFMA the compute phase tiles onto: 16×16×32.
 //
 // M is the input-channel axis of the gradient tile, N the output-channel axis, and K the Q
 // reduction, so one instruction consumes 32 output columns. It sits here rather than with the
@@ -69,6 +69,31 @@ struct Config
     // which is the only way to reach an image past 2 GiB. Must be a multiple of unroll(). See
     // the row-tile section of row_schedule.h.
     int rows_per_tile = 0;
+
+    // Whether the entry serves layers whose spatial axis the grid leaves unsplit.
+    //
+    // Each dW element then has one writer, so the epilogue stores dW directly where a split
+    // entry stores partials. writes_fit_the_split gives each entry only the layers
+    // its write suits. After every field the older entries set, so that an entry without it mangles
+    // as it did before the field.
+    bool no_splits = false;
+
+    // Whether the entry also divides the image into row segments, for layers whose column blocks
+    // alone leave some of a workgroup's waves_q partitions without an item.
+    //
+    // rows_fit_the_split admits a layer to an unsegmented config or to its row-segmented copy,
+    // never both. Last, so that unsegmented entries mangle as they did before the field. See the
+    // row segments section of docs/algorithms/direct/direct-wgrad.md.
+    bool row_segments = false;
+
+    // Whether the entry runs a 1×N layer as N×1 over its H/W-exchanged view.
+    //
+    // A 1×N filter is the same bytes as the N×1 one, so only the loaders' strides change. See
+    // docs/algorithms/details/direct/direct-wgrad-exchange-hw.md.
+    //
+    // Declared last because the mangling drops a trailing false member, so entries without the
+    // exchange keep their symbol names.
+    bool exchange_hw = false;
 
     constexpr bool is_tf32() const { return elem_bytes == 4; }
 

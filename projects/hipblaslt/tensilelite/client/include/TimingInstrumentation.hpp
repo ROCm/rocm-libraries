@@ -22,6 +22,53 @@ namespace TensileLite
         // Single-threaded — no atomic needed.
         inline double g_calibratedPerCallOverheadMs = 0;
 
+        // Set while the per-solution CPU reference recompute runs, so the SolveCPU timers
+        // ("solve_cpu_fast"/"solve_cpu_slow") are reported under per-solution names and
+        // do not get attributed to the per-problem cpu_reference_gemm timer. The kind says
+        // whether the MX inputs actually changed since the reference was last computed, which
+        // separates necessary recomputes from redundant ones.
+        enum class PerSolutionRefKind
+        {
+            None,
+            InputsChanged,
+            InputsUnchanged,
+        };
+        inline thread_local PerSolutionRefKind g_perSolutionRefKind = PerSolutionRefKind::None;
+
+        inline const char* solveCpuFastCategory()
+        {
+            switch(g_perSolutionRefKind)
+            {
+            case PerSolutionRefKind::InputsChanged:
+                return "solve_cpu_fast_per_solution_inputs_changed";
+            case PerSolutionRefKind::InputsUnchanged:
+                return "solve_cpu_fast_per_solution_inputs_unchanged";
+            default:
+                return "solve_cpu_fast";
+            }
+        }
+
+        inline const char* solveCpuSlowCategory()
+        {
+            switch(g_perSolutionRefKind)
+            {
+            case PerSolutionRefKind::InputsChanged:
+                return "solve_cpu_slow_per_solution_inputs_changed";
+            case PerSolutionRefKind::InputsUnchanged:
+                return "solve_cpu_slow_per_solution_inputs_unchanged";
+            default:
+                return "solve_cpu_slow";
+            }
+        }
+
+        // Set by main() around the per-run "gpu_input_reset" call of prepareGPUInputs() so the
+        // sub-timers inside it are reported as gpu_input_reset_* instead of gpu_input_prep_*.
+        inline thread_local bool g_inGpuInputReset = false;
+        inline const char* gpuInputCategory(const char* resetName, const char* prepName)
+        {
+            return g_inGpuInputReset ? resetName : prepName;
+        }
+
         // ---- Deferred I/O buffer ------------------------------------------------
         //
         // During measurement, timing data is captured as raw structs with no string
@@ -236,6 +283,50 @@ namespace TensileLite
             g_calibratedPerCallOverheadMs
                 = std::chrono::duration<double, std::milli>(t1 - t0).count() / kIter;
             g_timingBuffer.clear();
+        }
+
+        // Measures the time spent destroying a scope's locals (hipFree, hipEventDestroy, ...).
+        // Declare it FIRST in the scope so it is destroyed LAST, call mark() as the last
+        // statement of the scope, and the destructor records (destructor-time - mark-time).
+        // Early exits that skip mark() record nothing.
+        class ScopeTeardownTimer
+        {
+        public:
+            ScopeTeardownTimer(const char* category)
+                : m_category(category)
+            {
+            }
+
+            void mark()
+            {
+                if(g_timingInstrumentationEnabled)
+                    m_mark = TimingClock::now();
+                m_marked = g_timingInstrumentationEnabled;
+            }
+
+            ~ScopeTeardownTimer()
+            {
+                if(m_marked)
+                {
+                    double ms = std::chrono::duration<double, std::milli>(TimingClock::now()
+                                                                          - m_mark)
+                                    .count();
+                    g_timingBuffer.push_back(TimingRec{m_category, ms});
+                }
+            }
+
+        private:
+            const char*                          m_category;
+            std::chrono::time_point<TimingClock> m_mark;
+            bool                                 m_marked = false;
+        };
+
+        // Record an interval measured by hand (start..now) under `category`.
+        inline void recordTimingSince(const char* category, TimingClock::time_point start)
+        {
+            if(g_timingInstrumentationEnabled)
+                g_timingBuffer.push_back(TimingRec{
+                    category, std::chrono::duration<double, std::milli>(TimingClock::now() - start).count()});
         }
 
         // Report problem context for correlation (single GEMM).

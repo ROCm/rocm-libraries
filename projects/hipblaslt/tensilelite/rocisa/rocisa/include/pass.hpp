@@ -60,41 +60,36 @@ namespace rocisa
     // Internal use only
     struct Graph
     {
-        std::vector<std::vector<std::shared_ptr<Item>>> vgpr;
-        std::vector<std::vector<std::shared_ptr<Item>>> sgpr;
-        std::vector<std::vector<std::shared_ptr<Item>>> mgpr;
+        // Only the sgpr lists are consumed (by removeDuplicateAssignment), so
+        // vgpr/mgpr only record their sizes for the out-of-range checks.
+        //
+        // Barrier items (branches, labels, waitcnts, ...) apply to every sgpr,
+        // so instead of being pushed into each list they bump barrierSeq, and
+        // each entry records the barrierSeq it was added at.  A resetting
+        // barrier between two entries is detected by comparing resetsBefore.
+        enum class Kind : uint8_t
+        {
+            Reset, // NoOpt module, branch, label, macro, waitcnt
+            SMov, // SMovB32
+            Instr, // any other Instruction
+            Other
+        };
+        struct Entry
+        {
+            std::shared_ptr<Item> item;
+            int                   barrierSeq; // barriers recorded before this entry
+            Kind                  kind;
+            bool                  noOpt; // item came from a NoOpt module
+            bool                  dstHit; // Instr whose first param covers this sgpr
+        };
+        std::vector<std::vector<Entry>> sgpr;
+        size_t                          vgprSize   = 0;
+        size_t                          mgprSize   = 0;
+        int                             barrierSeq = 0;
+        // resetsBefore[k] = number of resetting barriers among the first k.
+        std::vector<int> resetsBefore = {0};
         // Highest VGPR index referenced by any instruction; -1 = none seen.
         int maxVgprSeen = -1;
-
-        std::vector<std::vector<std::shared_ptr<Item>>>& getGprRef(const std::string& gpr)
-        {
-            if(gpr == "v")
-                return vgpr;
-            else if(gpr == "s")
-                return sgpr;
-            else if(gpr == "m")
-                return mgpr;
-            else
-                throw std::runtime_error("Invalid gpr type");
-        }
-    };
-
-    // No opt item container class
-    class NoOptItem : public Item
-    {
-    public:
-        NoOptItem(std::shared_ptr<Item> item)
-            : Item("")
-            , _item(item)
-        {
-        }
-        std::shared_ptr<Item> getItem() const
-        {
-            return _item;
-        }
-
-    private:
-        std::shared_ptr<Item> _item;
     };
 
     void insertDelayAlu(std::shared_ptr<Module> module);

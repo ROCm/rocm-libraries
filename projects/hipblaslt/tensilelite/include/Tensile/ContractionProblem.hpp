@@ -34,6 +34,7 @@
 
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/TensorDescriptor.hpp>
@@ -176,14 +177,30 @@ namespace TensileLite
         }
 
         // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
-        void setUniformSummationOrder(bool uniformSummationOrder)
+        void setUniformSummationOrder(int uniformSummationOrder)
         {
+            if(uniformSummationOrder < -1 || uniformSummationOrder > 1)
+            {
+                throw std::invalid_argument("uniform summation order must be -1, 0, or 1");
+            }
             m_uniformSummationOrder = uniformSummationOrder;
         }
 
-        bool uniformSummationOrder() const
+        int uniformSummationOrder() const
         {
             return m_uniformSummationOrder;
+        }
+
+        // True when ScaleAlphaVec points to one device scalar which must be
+        // broadcast across the output tensor, rather than to a per-row vector.
+        void setDeviceScalarAlpha(bool deviceScalarAlpha)
+        {
+            m_deviceScalarAlpha = deviceScalarAlpha;
+        }
+
+        bool deviceScalarAlpha() const
+        {
+            return m_deviceScalarAlpha;
         }
 
         void setSmCountTarget(int smCountTarget)
@@ -194,6 +211,31 @@ namespace TensileLite
         int smCountTarget() const
         {
             return m_smCountTarget;
+        }
+
+        // CU-occupancy probe target for kernels built with SupportOccupancyProbe.
+        // A 1-D grid below minGrid is padded to it with probe-only WGs; any
+        // other grid below it gets a null probe address.
+        void setOccupancyProbe(void* addr, uint32_t epoch, uint32_t minGrid)
+        {
+            m_occupancyProbeAddr    = addr;
+            m_occupancyProbeEpoch   = epoch;
+            m_occupancyProbeMinGrid = minGrid;
+        }
+
+        void* occupancyProbeAddr() const
+        {
+            return m_occupancyProbeAddr;
+        }
+
+        uint32_t occupancyProbeEpoch() const
+        {
+            return m_occupancyProbeEpoch;
+        }
+
+        uint32_t occupancyProbeMinGrid() const
+        {
+            return m_occupancyProbeMinGrid;
         }
 
     private:
@@ -209,7 +251,11 @@ namespace TensileLite
         bool             m_fallbackStatus = false; // default value
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
-        bool             m_uniformSummationOrder = false; // default value
+        bool             m_deviceScalarAlpha = false; // correctness request; not reset by tuning
+        int              m_uniformSummationOrder = -1; // default value
+        void*            m_occupancyProbeAddr    = nullptr;
+        uint32_t         m_occupancyProbeEpoch   = 0;
+        uint32_t         m_occupancyProbeMinGrid = 0;
     };
 
     /**
@@ -320,6 +366,16 @@ namespace TensileLite
             return m_useDeviceUserArguments;
         }
 
+        uint32_t world() const
+        {
+            return m_world;
+        }
+
+        void setWorld(uint32_t world)
+        {
+            m_world = world;
+        }
+
     protected:
         friend class ContractionProblemGemm;
         std::vector<TensorDescriptor> m_tensors;
@@ -333,6 +389,8 @@ namespace TensileLite
         rocisa::DataType m_computeInputTypeB;
 
         bool m_useDeviceUserArguments = false;
+
+        uint32_t m_world = 1;
     };
 
     /**
@@ -366,6 +424,7 @@ namespace TensileLite
             GATE_RESIDUAL = 17,
             // Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
             SCALEZEROA    = 18,
+            A2A_BUF       = 19,
             TENSOR_COUNT
         };
 
@@ -427,6 +486,16 @@ namespace TensileLite
         using BoundIndices = std::vector<BoundIndex>;
 
         virtual std::string description() const;
+
+        /**
+         * Create a single, non-transposed 1-by-k times k-by-1 GEMM with packed
+         * operands and scalar C/D. A/B and their compute-input types use
+         * inputType; C/D use outputType. Alpha/beta types are set separately.
+         */
+        static ContractionProblemGemm GEMM_InnerProduct(rocisa::DataType inputType,
+                                                        rocisa::DataType outputType,
+                                                        size_t           k,
+                                                        double           beta);
 
         /**
         * Create a ContractionProblemGemm representing a batched GEMM, specifying
@@ -778,6 +847,11 @@ namespace TensileLite
             m_outputAmaxD = outputAmaxD;
         }
 
+        void setOutputPeerD(bool outputPeerD)
+        {
+            m_outputPeerD = outputPeerD;
+        }
+
         void setUseBias(int useBias)
         {
             m_useBias = useBias;
@@ -878,6 +952,11 @@ namespace TensileLite
         bool outputAmaxD() const
         {
             return m_outputAmaxD;
+        }
+
+        bool outputPeerD() const
+        {
+            return m_outputPeerD;
         }
 
         int useBias() const
@@ -1265,14 +1344,26 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
+        /// mxBlockFree is the extent of one scaling tile along the free dimension
+        /// (M for A, N for B); mxBlock is its extent along the bound (K)
+        /// dimension. mxBlockFree == 1 is the original 1xmxBlock layout, one
+        /// scale per (row, K-block).
+        void setMXScaleA(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> saStride              = {},
+                         bool                padScaleTensorFreeDim = true,
+                         int                 mxBlockFree           = 1);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleB(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> sbStride              = {},
+                         bool                padScaleTensorFreeDim = true,
+                         int                 mxBlockFree           = 1);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1299,14 +1390,26 @@ namespace TensileLite
             m_swizzleTensorB = swizzle;
         }
 
-        bool fusedGemmA2A() const
+        // MXScaleFormat id of the host scale layout (see Contractions.py).
+        // 0 for every layout the host does not tell apart.
+        int mxScaleFormat() const
         {
-            return m_fusedGemmA2A;
+            return m_mxScaleFormat;
         }
 
-        void setFusedGemmA2A(bool fusedGemmA2A)
+        void setMXScaleFormat(int format)
         {
-            m_fusedGemmA2A = fusedGemmA2A;
+            m_mxScaleFormat = format;
+        }
+
+        FusedA2A fusedA2A() const
+        {
+            return m_fusedA2A;
+        }
+
+        void setFusedA2A(FusedA2A mode)
+        {
+            m_fusedA2A = mode;
         }
 
         int64_t fusedA2AExtent() const
@@ -1319,14 +1422,20 @@ namespace TensileLite
             m_fusedA2AExtent = extent;
         }
 
-        uint32_t fusedA2AWorld() const
+        // [W][N][extent/W]: recv in D's type for GemmA2A, gathered in B's type for A2AGemm.
+        void setA2ABuf()
         {
-            return m_fusedA2AWorld;
-        }
-
-        void setFusedA2AWorld(uint32_t world)
-        {
-            m_fusedA2AWorld = world;
+            const size_t world  = m_world;
+            const size_t tokens = freeSizeB(0);
+            const bool   gather = m_fusedA2A == FusedA2A::A2AGemm;
+            const size_t shard  = m_fusedA2AExtent / world;
+            m_tensors[ContractionProblemGemm::TENSOR::A2A_BUF]
+                = {"a2aBuf",
+                   m_tensors[gather ? ContractionProblemGemm::TENSOR::B
+                                    : ContractionProblemGemm::TENSOR::D]
+                       .dataType(),
+                   {shard, tokens, world},
+                   {1, shard, shard * tokens}};
         }
 
         size_t mxBlockA() const
@@ -1337,6 +1446,58 @@ namespace TensileLite
         size_t mxBlockB() const
         {
             return m_mxBlockB;
+        }
+
+        /// True when the MX scale buffer for A that this caller hands to an
+        /// *external* custom kernel is packed with the compact ceil(K/mxBlock)
+        /// leading dimension, even though mxsa() carries the gfx950 padding
+        /// setMXScaleA applies for the Tensile-generated HostPreSwizzle kernels.
+        ///
+        /// Each operand is declared on its own because hipBLASLt takes the A and
+        /// B scale formats independently. hipBLASLt sets it for every MX format
+        /// except Block_32_UE8M0_32_8_EXT, whose buffer the caller pre-swizzled
+        /// into the padded gfx950 layout. The TensileLite benchmark client leaves
+        /// it false: it allocates the scale buffer from the padded descriptor and
+        /// hands that same buffer to the custom kernel.
+        void setCustomKernelMXScaleAIsPacked(bool packed)
+        {
+            m_customKernelMXScaleAIsPacked = packed;
+        }
+
+        /// As setCustomKernelMXScaleAIsPacked, for B and mxsb().
+        void setCustomKernelMXScaleBIsPacked(bool packed)
+        {
+            m_customKernelMXScaleBIsPacked = packed;
+        }
+
+        /// Declares both operands, for a caller that lays out A and B alike.
+        void setCustomKernelMXScalesArePacked(bool packed)
+        {
+            m_customKernelMXScaleAIsPacked = packed;
+            m_customKernelMXScaleBIsPacked = packed;
+        }
+
+        bool customKernelMXScaleAIsPacked() const
+        {
+            return m_customKernelMXScaleAIsPacked;
+        }
+
+        bool customKernelMXScaleBIsPacked() const
+        {
+            return m_customKernelMXScaleBIsPacked;
+        }
+
+        /// Extent of one scaling tile along the free dimension: M for A, N for
+        /// B. 1 means one scale per row/column, the layout that predates 2D MX
+        /// scaling. Never 0, so callers can divide by it unconditionally.
+        size_t mxBlockFreeA() const
+        {
+            return m_mxBlockFreeA;
+        }
+
+        size_t mxBlockFreeB() const
+        {
+            return m_mxBlockFreeB;
         }
 
         /// Allocated elements excluding batch dimensions
@@ -1595,11 +1756,12 @@ namespace TensileLite
         bool             m_useE                    = false;
         rocisa::DataType m_auxType                 = rocisa::DataType::None;
         bool             m_outputAmaxD             = false;
+        bool             m_outputPeerD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
-        bool             m_fusedGemmA2A            = false;
+        int              m_mxScaleFormat           = 0;
+        FusedA2A         m_fusedA2A                = FusedA2A::Disabled;
         int64_t          m_fusedA2AExtent          = 0;
-        uint32_t         m_fusedA2AWorld           = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
         rocisa::DataType m_gateType               = rocisa::DataType::None;
@@ -1615,8 +1777,12 @@ namespace TensileLite
         int              m_metadataLayout          = 0;
         int              m_mxBlockA                = 0;
         int              m_mxBlockB                = 0;
+        int              m_mxBlockFreeA            = 1;
+        int              m_mxBlockFreeB            = 1;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
+        bool             m_customKernelMXScaleAIsPacked = false;
+        bool             m_customKernelMXScaleBIsPacked = false;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;
@@ -1739,6 +1905,9 @@ namespace TensileLite
         void*       d     = nullptr;
         void*       e     = nullptr;
         void*       amaxD = nullptr;
+        // Second D buffer (OutputPeerD). `d` and `peerD` are the two buffers' batch 0, with or
+        // without batch pointer arrays: the kernel gets the distance between them.
+        void*       peerD = nullptr;
 
         void const* const* batchA    = nullptr;
         void const* const* batchB    = nullptr;
@@ -1775,6 +1944,7 @@ namespace TensileLite
         void*                           fusedA2ACounter = nullptr;
         uint32_t                        fusedA2AMyRank  = 0;
         uint32_t                        fusedA2ADrain   = 0;
+        void*                           a2aBuf          = nullptr;
 
         // Workspace
         void* ws = nullptr;

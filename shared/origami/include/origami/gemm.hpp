@@ -174,6 +174,18 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     grid_selection_t grid_selection);
 
 /**
+ * @brief Data type operand A has in LDS
+ *
+ * The type of A in global memory, unless the kernel converts A before writing it to LDS (a
+ * W4A16 kernel dequantizes its int4 A to the MI type).
+ *
+ * @param problem Problem characteristics (@see origami::problem_t)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @return data_type_t Type of A's elements in LDS
+ */
+ORIGAMI_EXPORT data_type_t lds_dtype_a(const problem_t& problem, const hardware_t& hardware);
+
+/**
  * @brief Check if MT fits in LDS
  *
  * @param hardware Hardware characteristics (@see origami::hardware_t)
@@ -293,6 +305,35 @@ ORIGAMI_EXPORT dim4_t count_unique_tiles_timestep(const dim4_t& grid,
                                    const workgroup_mapping_t& wgm_mapping,
                                    size_t N_CU,
                                    size_t timestep_id);
+
+/**
+ * @brief Estimate the L2 hit rates of A and B on gfx1250 from the first launch wave (ids
+ * [0, wave), WGMXCC off) on one L2 domain.
+ *
+ * An approximation, not a per-workgroup count: the wave's distinct rows and columns come from
+ * count_unique_range, and each is kept with the chance that one of its ids lands on the
+ * domain, which owns xcd_per_l2_domain consecutive XCDs of every NUM_XCD in the round-robin
+ * dispatch (dispatch_xcd), at a random phase of the cycle.  The domain's request count is exact.
+ * A request hits when another workgroup of the domain already brought its tile, and the domain
+ * keeps the share of the footprint that fits its L2.
+ *
+ * A cluster kernel is dispatched whole and bypasses WGM: the footprint is taken over the
+ * cluster grid, each cluster covering several tiles.
+ *
+ * @param problem Problem description.
+ * @param hardware Hardware characteristics (XCD count and L2 domains).
+ * @param config Kernel configuration (cluster dimensions).
+ * @param context Context computed from the three above (grid, CU budget, per-tile traffic, and
+ * context.wgm.wgm, the workgroup mapping: slab width, negative for column-major slabs; 0 is
+ * priced as 1).  A cluster kernel overrides it with its column-major cluster slab.
+ * @param unique_bytes If set, receives the A + B bytes of the domain's distinct tiles.
+ * @return (L2 A, L2 B, MALL A, MALL B) hit rates; there is no MALL, so its rates are 0.
+ */
+cache_hit_rates_t estimate_l2_hit_cdna5(const problem_t& problem,
+                                        const hardware_t& hardware,
+                                        const config_t& config,
+                                        const context_t& context,
+                                        double* unique_bytes = nullptr);
 
 /**
  * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K

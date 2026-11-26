@@ -27,7 +27,7 @@ namespace hipdnn_frontend::graph
  *
  * PointwiseAttributes specifies the parameters for pointwise operations that
  * operate element-wise on tensors. This includes:
- * - Activation functions: RELU, SIGMOID, TANH, GELU, ELU, SWISH, etc.
+ * - Activation functions: RELU_FWD, SIGMOID_FWD, TANH_FWD, GELU_FWD, ELU_FWD, SWISH_FWD, etc.
  * - Arithmetic operations: ADD, MUL, SUB, DIV, etc.
  * - Comparison operations: CMP_EQ, CMP_GT, etc.
  * - Other supported pointwise operations as defined in PointwiseMode
@@ -35,7 +35,7 @@ namespace hipdnn_frontend::graph
  * @code{.cpp}
  * // ReLU activation
  * auto y = graph.pointwise(x, PointwiseAttributes()
- *              .set_mode(PointwiseMode::RELU));
+ *              .set_mode(PointwiseMode::RELU_FWD));
  *
  * // Leaky ReLU with negative slope
  * auto y = graph.pointwise(x, PointwiseAttributes()
@@ -46,6 +46,13 @@ namespace hipdnn_frontend::graph
  * auto c = graph.pointwise(a, b, PointwiseAttributes()
  *              .set_mode(PointwiseMode::ADD));
  * @endcode
+ *
+ * **ReLU parameters (RELU_FWD / RELU_BWD):**
+ * y = x for lower_clip <= x <= upper_clip, y = upper_clip above, and below
+ * lower_clip y = lower_clip + slope * (x - lower_clip). An unset lower clip
+ * means 0, an unset upper clip means no upper bound, and an unset slope or a
+ * slope of exactly 0 means no leaky slope, so equivalent encodings select the
+ * same operation.
  *
  * **Tensor Shapes:**
  * Pointwise operations are dimension-agnostic — input tensors can have any shape.
@@ -65,19 +72,19 @@ public:
     {
         return mode;
     }
-    /// @brief Get ReLU lower clipping bound
+    /// @brief Get ReLU lower clipping bound (unset means 0)
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_clip() const
     {
         return relu_lower_clip;
     }
-    /// @brief Get ReLU upper clipping bound
+    /// @brief Get ReLU upper clipping bound (unset means no upper bound)
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_upper_clip() const
     {
         return relu_upper_clip;
     }
-    /// @brief Get slope for Leaky ReLU (negative region)
+    /// @brief Get slope for Leaky ReLU (negative region); unset or 0 means no slope
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_clip_slope() const
     {
@@ -101,7 +108,7 @@ public:
     {
         return softplus_beta;
     }
-    /// @brief Get axis for operations like softmax
+    /// @brief Get the axis for axis-dependent modes (GEN_INDEX)
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<int64_t> get_axis() const
     {
@@ -143,18 +150,21 @@ public:
         mode = value;
         return *this;
     }
+    /// @brief Set ReLU lower clipping bound; leaving it unset is the same as 0
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_relu_lower_clip(float value)
     {
         relu_lower_clip = value;
         return *this;
     }
+    /// @brief Set ReLU upper clipping bound; leaving it unset means no upper bound
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_relu_upper_clip(float value)
     {
         relu_upper_clip = value;
         return *this;
     }
+    /// @brief Set Leaky ReLU slope below the lower clip; leaving it unset is the same as 0
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_relu_lower_clip_slope(float value)
     {
@@ -250,7 +260,7 @@ public:
     std::optional<float> relu_lower_clip = std::nullopt; ///< ReLU lower clip bound
     std::optional<float> relu_upper_clip = std::nullopt; ///< ReLU upper clip bound
     std::optional<float> relu_lower_clip_slope = std::nullopt; ///< Leaky ReLU slope
-    std::optional<int64_t> axis = std::nullopt; ///< Axis for reductions
+    std::optional<int64_t> axis = std::nullopt; ///< Axis for GEN_INDEX
     std::optional<float> swish_beta = std::nullopt; ///< Swish beta parameter
     std::optional<float> elu_alpha = std::nullopt; ///< ELU alpha parameter
     std::optional<float> softplus_beta = std::nullopt; ///< Softplus beta parameter

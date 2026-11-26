@@ -5,6 +5,42 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Added
+
+* Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and 
+  `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly
+  one device; otherwise the existing MPI paths remain. Set the
+  `ROCFFT_RCCL_DISABLE` environment variable to `1` to force the MPI fallback.
+### Changed
+
+* Multi-device plans are now built as independent per-brick transforms, without any data movement
+  between devices, when no input or output brick splits a transform length and every input brick
+  has an output brick on the same device covering the same batch range.
+* Multi-dimensional, multi-device transforms whose bricks split no transform length, but cannot be
+  paired as above, now redistribute data between devices instead of gathering the entire transform
+  on a single device.
+* Planar array types are now rejected by `rocfft_plan_create` if a field is set for either input or
+  output (previously, only the side with a field set was checked).
+
+### Resolved issues
+
+* Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
+  factors silently falling back to running the transform on a single device.  Such plans may now
+  perform better.
+* Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
+* Fixed data races on work memory that could cause sporadic incorrect results for
+  multi-device transforms requiring work memory.
+* Fixed hangs or incorrect results of multi-process transforms that redistribute data between
+  MPI ranks when a rank owns no brick or several bricks of an input or output field.
+* Fixed failures of single-process transforms without RCCL support when an input or output
+  field has several bricks on the same device.
+
+### Known issues
+
+* Some multi-device plans may read their input before the work queued on the streams set with
+  `rocfft_execution_info_set_stream` is complete. Synchronize these streams before calling
+  `rocfft_execute`. This issue will be addressed in an upcoming release.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added

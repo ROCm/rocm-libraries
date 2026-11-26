@@ -10,11 +10,14 @@
 //
 // Two layers of coverage:
 //   * GPU_* : exercise the real CK lazy-init path end-to-end for the 2D Fwd/Bwd/Wrw solvers, so
-//     they require a ROCm device and the installed CK grouped-conv library (GTEST_SKIP otherwise).
-//     They use a canonical group=1, C=K=64, 3x3 shape that CK should always enumerate kernels for;
-//     if SetNextValue() returns no kernels the ASSERT fails on purpose -- that signals a real CK /
-//     applicability regression, not a bad test shape. The 3D Fwd/Bwd end-to-end equivalents live in
-//     their own perf_config_HipImplicitGemm3DGroup*Xdlops.cpp files.
+//     they require a ROCm device (GTEST_SKIP otherwise) and a canonical group=1, C=K=64, 3x3 shape.
+//     Each test skips where the solver is inapplicable -- CK ships no instance for the dtype/arch
+//     (e.g. FP32 grouped bwd-weight on gfx11/gfx12), the CK library is not loaded, or the solver is
+//     env-disabled -- and otherwise asserts the search starts at valid_kernels[0]. Keying the skip
+//     on the solver's own IsApplicable() (via group_conv::SolverApplicable) is the same CK
+//     predicate the enumeration uses, so a broken enumeration on an applicable shape still fails
+//     the assert loudly. The 3D Fwd/Bwd equivalents live in
+//     perf_config_HipImplicitGemm3DGroup*Xdlops.cpp.
 //   * CPU_* : host-only advance walks for the non-split solvers (2D Fwd, 3D Fwd/Bwd). With
 //     valid_kernels injected directly, SetNextValue() bypasses the CK populate branch and only the
 //     advance path runs -- no device or CK library is needed and these run in the CPU-only stage.
@@ -79,21 +82,23 @@ Problem MakeSearchProblem3D(group_conv::GroupConvTestConfig<3u> conv,
 
 } // namespace
 
-TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
+using GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
-
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenHalf,
                           miopenTensorNHWC,
                           Direction::Forward);
+
+    using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     FwdConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -103,21 +108,27 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16,
+                         ::testing::Values(0));
+
+using GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
-
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenHalf,
                           miopenTensorNHWC,
                           Direction::BackwardData);
+
+    using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     BwdConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -128,21 +139,27 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero)
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16,
+                         ::testing::Values(0));
+
+using GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
-
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
 
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
                           miopenFloat,
                           miopenTensorNHWC,
                           Direction::BackwardWeights);
+
+    using Solver = miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     WrwConfig cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -153,12 +170,18 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32,
+                         ::testing::Values(0));
+
 // --- Host-only advance walk for the non-split solvers (2D Fwd, 3D Fwd, 3D Bwd). With valid_kernels
 // pre-populated, SetNextValue() bypasses the CK populate branch and runs only the advance path: it
 // must visit index 0..N-1 in order and then return false without stepping out of bounds. (The
 // split-k Bwd/Wrw advance walk is covered in perf_config_group_deterministic_set_next_value.cpp.)
 
-TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
+using CPU_PerfConfigGroupFwdAdvance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
@@ -185,7 +208,7 @@ TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_EQ(cfg.index, 2);
 }
 
-TEST(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
+TEST_P(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
 {
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
@@ -205,7 +228,11 @@ TEST(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
     EXPECT_EQ(cfg.kernel_id, "A");
 }
 
-TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroupFwdAdvance_NONE, testing::Values(0));
+
+using CPU_PerfConfig3DGroupFwdAdvance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem = MakeSearchProblem3D(
         {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
@@ -231,7 +258,11 @@ TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_EQ(cfg.index, 2);
 }
 
-TEST(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfig3DGroupFwdAdvance_NONE, testing::Values(0));
+
+using CPU_PerfConfig3DGroupBwdAdvance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem = MakeSearchProblem3D(
         {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
@@ -256,3 +287,5 @@ TEST(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_FALSE(cfg.SetNextValue(problem));
     EXPECT_EQ(cfg.index, 2);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfig3DGroupBwdAdvance_NONE, testing::Values(0));

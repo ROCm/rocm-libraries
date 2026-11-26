@@ -109,6 +109,11 @@ RMSnormFwdPlan::RMSnormFwdPlan(RMSnormFwdParams&& params)
 {
 }
 
+std::vector<KernelLaunchShape> RMSnormFwdPlan::launchShapes(int64_t outerSize, int64_t stride)
+{
+    return {{"RMSnormFwd", outerSize * stride, LOCAL_SIZE}};
+}
+
 size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for RMS norm
@@ -137,16 +142,15 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const int64_t stride = problem.stride();
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
-    if(outerSize * stride >= UINT32_MAX)
+    const auto shapes = launchShapes(outerSize, stride);
+    for(const auto& shape : shapes)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Unsupported number of workgroups: "
-                                                           + std::to_string(outerSize * stride));
+        checkLaunchFitsThreadLimit(shape);
     }
 
     // Calculate block and grid dimensions
-    const unsigned int xlocalsize = 256;
-    const auto xgridsize = static_cast<unsigned int>(outerSize * stride);
+    const auto xlocalsize = static_cast<unsigned int>(shapes[0].threadsPerBlock);
+    const auto xgridsize = static_cast<unsigned int>(shapes[0].blocks);
     const unsigned int ylocalsize = 1;
     const unsigned int ygridsize = 1;
     const unsigned int zlocalsize = 1;

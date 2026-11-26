@@ -904,9 +904,9 @@ AGPRs. A compile-only probe showed that no LLVM register-class hint keeps it
 there once the conditional lazy rescale exists: carried as loop values, the
 accumulator's AGPR-to-VGPR copies are hoisted to the top of the loop and the
 absorbed query spills. So the accumulator never becomes an IR value
-(`_AgprAcc`): the PV MFMA is inline asm accumulating in place in fixed
-`a[4t:4t+3]`, the rescale scales in place under a wave-uniform `scf_if`, and
-the epilogue reads it out once. `agpr_alloc = (0, 0)` keeps the backend out of
+([`AgprAcc`](../../../kernels/mla/_mla_prefill_gfx942_body.py)): the PV MFMA
+is inline asm accumulating in place in fixed `a[4t:4t+3]`, the rescale scales
+in place under a wave-uniform `scf_if`, and the epilogue reads it out once. `agpr_alloc = (0, 0)` keeps the backend out of
 the AGPR file. llvm20 ignores that and lets its own MFMAs write the hidden
 tiles, so admission refuses llvm20; the guard test checks that only the
 in-place asm MFMAs touch AGPRs. The asm pads its own hazards (`s_nop 1` before

@@ -42,6 +42,8 @@ struct InsertWaitAluOptions {
     bool sharedOrderCountFollowers = false;
     /// Count an XDL producer's followers from the nearest anchor rather than its own ticket.
     bool xdlCountFromNextWmma = false;
+    /// Ignore the arch's WaitHide table: every wait is emitted (plain mode 2). Test hook.
+    bool ignoreWaitHide = false;
 };
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
@@ -66,6 +68,18 @@ struct WaitAluNeed {
     }
 };
 
+/// An op the scoreboard counts toward hiding a wait: a WMMA hides a va_vdst, an op in the LDS
+/// or TEX FIFO hides a vm_vsrc (a flat_* is in both).
+enum class WaitAluHideOp { Wmma, Lds, Tex, Flat, Valu };
+
+/// What a mixed hide rule still asks for (see WaitAluTracker::untilFreeMixed).
+struct WaitAluMixGap {
+    int leadWmmas = -1;
+    int tailSlots = 0;
+    int wmmaSlots = 1;
+    bool operator==(const WaitAluMixGap&) const = default;
+};
+
 /// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
 /// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
 /// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
@@ -79,6 +93,24 @@ class STINKYTOFU_EXPORT WaitAluTracker {
 
     /// The wait `inst` would need if it were issued next.
     WaitAluNeed query(const StinkyInstruction& inst) const;
+    /// How many more `op`s must issue before `inst` no longer needs the wait `op` hides
+    /// (va_vdst for Wmma, vm_vsrc otherwise). 0: it needs no wait on that counter now; -1: no
+    /// number of `op`s hides it, only a wait drains it. The WMMA form the va_vdst hide counts is
+    /// the one already issued, else `formWmma`'s (an XDL WMMA).
+    int untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
+                  const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFree() for `consumer` right after `producer`, with nothing else in flight.
+    int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
+                    WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr) const;
+    /// The mixed hide `inst` still owes: `leadWmmas` more matrix ops reach the rule's lead, then
+    /// `tailSlots` slots that matrix ops (`wmmaSlots` each) and VALUs (one each) fill. Both 0: no
+    /// va_vdst now; leadWmmas -1: no mixed rule applies, see untilFree.
+    WaitAluMixGap untilFreeMixed(const StinkyInstruction& inst,
+                                 const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFreeMixed() for `consumer` right after `producer`, with nothing else in flight.
+    WaitAluMixGap requiredGapMixed(const StinkyInstruction& producer,
+                                   const StinkyInstruction& consumer,
+                                   const StinkyInstruction* formWmma = nullptr) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
 

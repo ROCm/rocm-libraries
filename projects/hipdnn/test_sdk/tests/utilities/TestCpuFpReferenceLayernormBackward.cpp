@@ -29,12 +29,12 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation2D)
     //
     // Sample 0: mean=2.5, var=1.25, rstd=1/sqrt(1.25+1e-5)=0.894423613312618
     //   a      = 1.7888329159619083
-    //   b      = -3.5776586765921525
+    //   b      = 0.894423613312618
     //   dx     = [-4.7998926705705713e-05, 3.577687297918808, -7.15538175116928, 3.5777159192454633]
     //
     // Sample 1: mean=5.0, var=5.0, rstd=1/sqrt(5.0+1e-5)=0.4472131482870333
     //   a      = -0.8944245077250512
-    //   b      = 3.5776962420511893
+    //   b      = -0.8944262965740666
     //   dx     = [2.3999731674440028e-05, -3.5777033974472507, 7.155408583743517, -3.577710552843312]
     //
     // dscale = [-1.341640786446209, 0.8944271909641394, 1.341640786446209, -5.366563145784836]
@@ -107,12 +107,12 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional2
     //
     // Sample 0: mean=2.5, var=1.25, rstd=1/sqrt(1.25+1e-5)=0.894423613312618
     //   a      = 1.7888329159619083
-    //   b      = -3.5776586765921525
+    //   b      = 0.894423613312618
     //   dx     = [-4.7998926705705713e-05, 3.577687297918808, -7.15538175116928, 3.5777159192454633]
     //
     // Sample 1: mean=5.0, var=5.0, rstd=1/sqrt(5.0+1e-5)=0.4472131482870333
     //   a      = -0.8944245077250512
-    //   b      = 3.5776962420511893
+    //   b      = -0.8944262965740666
     //   dx     = [2.3999731674440028e-05, -3.5777033974472507, 7.155408583743517, -3.577710552843312]
     //
     // dscale = [-1.341640786446209, 0.8944271909641394, 1.341640786446209, -5.366563145784836]
@@ -195,9 +195,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation3D)
     // rstd = 1/sqrt(2.9166666666666665 + 1e-5) = 0.5855390399887689
     //
     // With scale=1, bias=0 (identity affine):
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 6
-    //   b      = rstd * sum(dy * scale) / 6 - a * mean
-    //   dx     = rstd * dy * scale - a * x - b
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 6
+    //   b      = rstd * sum(dy * scale) / 6
+    //   dx     = rstd * dy * scale - a * (x - mean) - b
     //   dscale = sum(dy * (x - mean) * rstd)
     //   dbias  = sum(dy)
 
@@ -278,9 +278,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional3
     // rstd = 1/sqrt(2.9166666666666665 + 1e-5) = 0.5855390399887689
     //
     // With scale=1, bias=0 (identity affine):
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 6
-    //   b      = rstd * sum(dy * scale) / 6 - a * mean
-    //   dx     = rstd * dy * scale - a * x - b
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 6
+    //   b      = rstd * sum(dy * scale) / 6
+    //   dx     = rstd * dy * scale - a * (x - mean) - b
     //   dscale = sum(dy * (x - mean) * rstd)
     //   dbias  = sum(dy)
 
@@ -366,9 +366,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationEntire3D)
     // rstd = 1/sqrt(2.9166666666666665 + 1e-5) = 0.5855390399887689
     //
     // With scale=1, bias=0 (identity affine):
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 6
-    //   b      = rstd * sum(dy * scale) / 6 - a * mean
-    //   dx     = rstd * dy * scale - a * x - b
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 6
+    //   b      = rstd * sum(dy * scale) / 6
+    //   dx     = rstd * dy * scale - a * (x - mean) - b
     //   dscale = sum(dy * (x - mean) * rstd)
     //   dbias  = sum(dy)
 
@@ -444,9 +444,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationEntire3D)
 TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllZeros)
 {
     // All-zero input: mean=0, var=0, rstd=1/sqrt(epsilon)
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 4 = 0
-    //   b      = rstd * sum(dy * scale) / 4 - a * mean = 0
-    //   dx     = rstd * dy * scale - a * x - b = 0
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 4 = 0
+    //   b      = rstd * sum(dy * scale) / 4 = 0
+    //   dx     = rstd * dy * scale - a * (x - mean) - b = 0
     //   dscale = sum(dy * (x - mean) * rstd) = 0
     //   dbias  = sum(dy) = 0
 
@@ -492,9 +492,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllZeros)
 TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllOnes)
 {
     // All-one input: mean=1, var=0, rstd=1/sqrt(epsilon)
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 5 = 0
-    //   b      = rstd * sum(dy * scale) / 5 - a * mean = sum(scale) / std::sqrt(epsilon) / 5 = 1.5 / std::sqrt(epsilon)
-    //   dx     = rstd * dy * scale - a * x - b = scale / std::sqrt(epsilon) - sum(scale) / std::sqrt(epsilon) / 5 = 0
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 5 = 0
+    //   b      = rstd * sum(dy * scale) / 5 = sum(scale) / std::sqrt(epsilon) / 5 = 1.5 / std::sqrt(epsilon)
+    //   dx     = rstd * dy * scale - a * (x - mean) - b = scale / std::sqrt(epsilon) - sum(scale) / std::sqrt(epsilon) / 5 = 0
     //   dscale = sum(dy * (x - mean) * rstd) = 0
     //   dbias  = sum(dy) = 3
 
@@ -536,9 +536,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllOnes)
 TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropConstantInput)
 {
     // All elements = 7.0, scale = 1.0: mean=7, var=0
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 3 = 0
-    //   b      = rstd * sum(dy * scale) / 3 - a * mean = sum(dy) / std::sqrt(epsilon) / 3 = 7.0 / std::sqrt(epsilon)
-    //   dx     = rstd * dy * scale - a * x - b = dy / std::sqrt(epsilon) - sum(dy) / std::sqrt(epsilon) / 3 = 0
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 3 = 0
+    //   b      = rstd * sum(dy * scale) / 3 = sum(dy) / std::sqrt(epsilon) / 3 = 7.0 / std::sqrt(epsilon)
+    //   dx     = rstd * dy * scale - a * (x - mean) - b = dy / std::sqrt(epsilon) - sum(dy) / std::sqrt(epsilon) / 3 = 0
     //   dscale = sum(dy * (x - mean) * rstd) = 0
     //   dbias  = sum(dy) = 14.0
 
@@ -581,9 +581,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSingleFeature)
 {
     // Shape [3, 1]: normalize over dim of size 1
     // mean = x, var = 0
-    //   a      = rstd³ * (dy * scale * x - dy * scale * mean) = 0
-    //   b      = rstd * dy * scale - a * mean = scale / std::sqrt(epsilon) = 2.0 * dy / std::sqrt(epsilon)
-    //   dx     = rstd * dy * scale - a * x - b = 2.0 * dy / std::sqrt(epsilon) - 2.0 * dy / std::sqrt(epsilon) = 0
+    //   a      = rstd³ * dy * scale * (x - mean) = 0
+    //   b      = rstd * dy * scale = scale / std::sqrt(epsilon) = 2.0 * dy / std::sqrt(epsilon)
+    //   dx     = rstd * dy * scale - a * (x - mean) - b = 2.0 * dy / std::sqrt(epsilon) - 2.0 * dy / std::sqrt(epsilon) = 0
     //   dscale = sum(dy * (x - mean) * rstd) = 0
     //   dbias  = sum(dy) = -2
 
@@ -638,9 +638,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNegativeAndMixedValues)
     //   mean   = 0
     //   var    = 5
     //   rstd   = 1/sqrt(5 + 1e-5)
-    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 4 = 0
-    //   b      = rstd * sum(dy * scale) / 4 - a * mean = sum(scale) / std::sqrt(epsilon) / 4 = 0
-    //   dx     = rstd * dy * scale - a * x - b = dy / std::sqrt(5 + epsilon) = [-1, -3, 3, 1] / std::sqrt(5 + epsilon)
+    //   a      = rstd³ * sum(dy * scale * (x - mean)) / 4 = 0
+    //   b      = rstd * sum(dy * scale) / 4 = sum(scale) / std::sqrt(epsilon) / 4 = 0
+    //   dx     = rstd * dy * scale - a * (x - mean) - b = dy / std::sqrt(5 + epsilon) = [-1, -3, 3, 1] / std::sqrt(5 + epsilon)
     //   dscale = dy * (x - mean) * rstd = [3, -3, -3, 3] / std::sqrt(5 + epsilon)
     //   dbias  = dy = [-1, -3, 3, 1]
 
@@ -709,17 +709,21 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropLargeValueNumericalStability)
     // Naive one-pass (E[x²] - E[x]²) would suffer catastrophic cancellation here
     // because E[x²] ≈ 1e30 and E[x]² ≈ 1e30, so their difference loses all precision.
     // Welford's algorithm computes variance from centered deltas, avoiding this.
+    // bprop centers x on the mean the same way before accumulating, so
+    // sum(dy * scale * (x - mean)) keeps the differences that
+    // sum(dy * scale * x) - sum(dy * scale) * mean would cancel at this offset.
     //
-    // dy     = [-1e15 - 1, -1e15 - 2, -1e15 - 3, -1e15 - 4]
+    // dy     = [-1, -2, -3, -4]
     // x      = [1e15 + 1, 1e15 + 2, 1e15 + 3, 1e15 + 4]
     // mean   = 1e15 + 2.5
     // var    = 1.25 (same as small-value case, independent of offset)
     // rstd   = 1/sqrt(1.25 + 1e-5)
-    // a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 4 = 0
-    // b      = rstd * sum(dy * scale) / 4 - a * mean = (-1e15 - 2.5) / std::sqrt(1.25 + 1e-5) = -894423613312620.2
-    // dx     = rstd * dy * scale - a * x - b = [1.375, 0.5, -0.375, -1.375]
-    // dscale = dy * (x - mean) * rstd = [1.5e+15 + 1.5, 5.0e+14 + 1.0, -5.0e+14 - 1.5, -1.5e+15 - 6.0] / std::sqrt(1.25 + 1e-5) = [1.34163542e+15, 4.47211807e+14, -4.47211807e+14, -1.34163542e+15]
-    // dbias  = dy = [-1e15 - 1, -1e15 - 2, -1e15 - 3, -1e15 - 4]
+    // a      = rstd³ * sum(dy * scale * (x - mean)) / 4 = -1.25 * rstd³
+    // b      = rstd * sum(dy * scale) / 4 = -2.5 * rstd
+    // dx     = rstd * dy * scale - a * (x - mean) - b = [1.5, 0.5, -0.5, -1.5] * rstd * 1e-5 / (1.25 + 1e-5)
+    //        = [1.0732997495756719e-05, 3.5776658319189061e-06, -3.5776658319189061e-06, -1.0732997495756719e-05]
+    // dscale = dy * (x - mean) * rstd = [1.5, 1.0, -1.5, -6.0] / std::sqrt(1.25 + 1e-5) = [1.34163542, 0.89442361, -1.34163542, -5.36654168]
+    // dbias  = dy = [-1, -2, -3, -4]
 
     Tensor<double> dy({1, 4});
     Tensor<double> x({1, 4});
@@ -731,10 +735,10 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropLargeValueNumericalStability)
     Tensor<double> dbias({4});
 
     const double offset = 1.0e15;
-    dy.setHostValue(-offset - 1.0, 0, 0);
-    dy.setHostValue(-offset - 2.0, 0, 1);
-    dy.setHostValue(-offset - 3.0, 0, 2);
-    dy.setHostValue(-offset - 4.0, 0, 3);
+    dy.setHostValue(-1.0, 0, 0);
+    dy.setHostValue(-2.0, 0, 1);
+    dy.setHostValue(-3.0, 0, 2);
+    dy.setHostValue(-4.0, 0, 3);
 
     x.setHostValue(offset + 1.0, 0, 0);
     x.setHostValue(offset + 2.0, 0, 1);
@@ -750,21 +754,20 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropLargeValueNumericalStability)
 
     auto tolerance = layernorm::getTolerance<double>();
 
-    // Normalized output should match the small-value case exactly
-    EXPECT_NEAR(dx.getHostValue(0, 0), 1.375, tolerance);
-    EXPECT_NEAR(dx.getHostValue(0, 1), 0.5, tolerance);
-    EXPECT_NEAR(dx.getHostValue(0, 2), -0.375, tolerance);
-    EXPECT_NEAR(dx.getHostValue(0, 3), -1.375, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 0), 1.0732997495756719e-05, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 1), 3.5776658319189061e-06, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 2), -3.5776658319189061e-06, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 3), -1.0732997495756719e-05, tolerance);
 
-    EXPECT_NEAR(dscale.getHostValue(0), (1.5e15 + 1.5) * rstd.getHostValue(0), tolerance);
-    EXPECT_NEAR(dscale.getHostValue(1), (0.5e15 + 1.0) * rstd.getHostValue(0), tolerance);
-    EXPECT_NEAR(dscale.getHostValue(2), (-0.5e15 - 1.5) * rstd.getHostValue(0), tolerance);
-    EXPECT_NEAR(dscale.getHostValue(3), (-1.5e15 - 6.0) * rstd.getHostValue(0), tolerance);
+    EXPECT_NEAR(dscale.getHostValue(0), 1.5 * rstd.getHostValue(0), tolerance);
+    EXPECT_NEAR(dscale.getHostValue(1), 1.0 * rstd.getHostValue(0), tolerance);
+    EXPECT_NEAR(dscale.getHostValue(2), -1.5 * rstd.getHostValue(0), tolerance);
+    EXPECT_NEAR(dscale.getHostValue(3), -6.0 * rstd.getHostValue(0), tolerance);
 
-    EXPECT_NEAR(dbias.getHostValue(0), -1.0e15 - 1.0, tolerance);
-    EXPECT_NEAR(dbias.getHostValue(1), -1.0e15 - 2.0, tolerance);
-    EXPECT_NEAR(dbias.getHostValue(2), -1.0e15 - 3.0, tolerance);
-    EXPECT_NEAR(dbias.getHostValue(3), -1.0e15 - 4.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(0), -1.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(1), -2.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(2), -3.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(3), -4.0, tolerance);
 }
 
 // ============================================================================
@@ -821,21 +824,21 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropTypicalTransformerShape)
         for(size_t j = 0; j < 8; ++j)
         {
             const float batchRstd = rstd.getHostValue(i, j);
-            float sumDyScaleX = 0.0f;
+            const float batchMean = mean.getHostValue(i, j);
+            float sumDyScaleXc = 0.0f;
             float sumDyScale = 0.0f;
             for(size_t k = 0; k < 64; ++k)
             {
-                sumDyScaleX
-                    += dy.getHostValue(i, j, k) * scale.getHostValue(k) * x.getHostValue(i, j, k);
+                sumDyScaleXc += dy.getHostValue(i, j, k) * scale.getHostValue(k)
+                                * (x.getHostValue(i, j, k) - batchMean);
                 sumDyScale += dy.getHostValue(i, j, k) * scale.getHostValue(k);
             }
-            const float a = batchRstd * batchRstd * batchRstd
-                            * (sumDyScaleX - sumDyScale * mean.getHostValue(i, j)) / 64.0f;
-            const float b = batchRstd * sumDyScale / 64.0f - a * mean.getHostValue(i, j);
+            const float a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 64.0f;
+            const float b = batchRstd * sumDyScale / 64.0f;
             for(size_t k = 0; k < 64; ++k)
             {
                 const float outDx = batchRstd * dy.getHostValue(i, j, k) * scale.getHostValue(k)
-                                    - a * x.getHostValue(i, j, k) - b;
+                                    - a * (x.getHostValue(i, j, k) - batchMean) - b;
                 EXPECT_NEAR(outDx, dx.getHostValue(i, j, k), tolerance);
             }
         }
@@ -986,26 +989,25 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNormalizeLastTwoDims)
     {
         const double batchMean = mean.getHostValue(i);
         const double batchRstd = rstd.getHostValue(i);
-        double sumDyScaleX = 0.0;
+        double sumDyScaleXc = 0.0;
         double sumDyScale = 0.0;
         for(size_t j = 0; j < 3; ++j)
         {
             for(size_t k = 0; k < 4; ++k)
             {
-                sumDyScaleX += dy.getHostValue(i, j, k) * scale.getHostValue(j, k)
-                               * x.getHostValue(i, j, k);
+                sumDyScaleXc += dy.getHostValue(i, j, k) * scale.getHostValue(j, k)
+                                * (x.getHostValue(i, j, k) - batchMean);
                 sumDyScale += dy.getHostValue(i, j, k) * scale.getHostValue(j, k);
             }
         }
-        const double a
-            = batchRstd * batchRstd * batchRstd * (sumDyScaleX - sumDyScale * batchMean) / 12.0;
-        const double b = batchRstd * sumDyScale / 12.0 - a * batchMean;
+        const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 12.0;
+        const double b = batchRstd * sumDyScale / 12.0;
         for(size_t j = 0; j < 3; ++j)
         {
             for(size_t k = 0; k < 4; ++k)
             {
                 const double outDx = batchRstd * dy.getHostValue(i, j, k) * scale.getHostValue(j, k)
-                                     - a * x.getHostValue(i, j, k) - b;
+                                     - a * (x.getHostValue(i, j, k) - batchMean) - b;
                 EXPECT_NEAR(outDx, dx.getHostValue(i, j, k), tolerance);
             }
         }
@@ -1124,26 +1126,27 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropPerFeatureScale)
 
     auto tolerance = layernorm::getTolerance<double>();
 
-    // a         = rstd³ * (sum(dy[i] * scale[i] * x[i]) - sum(dy[i] * scale[i]) * mean)
-    // b         = rstd * sum(dy[i] * scale[i]) - a * mean
-    // dx[i]     = rstd * dy[i] * scale[i] - a * x[i] - b
+    // a         = rstd³ * sum(dy[i] * scale[i] * (x[i] - mean)) / 4
+    // b         = rstd * sum(dy[i] * scale[i]) / 4
+    // dx[i]     = rstd * dy[i] * scale[i] - a * (x[i] - mean) - b
     // dscale[i] = dy[i] * (x[i] - mean) * rstd
     // dbias[i]  = dy[i]
     const double batchRstd = rstd.getHostValue(0);
-    double sumDyScaleX = 0.0;
+    const double batchMean = mean.getHostValue(0);
+    double sumDyScaleXc = 0.0;
     double sumDyScale = 0.0;
     for(size_t k = 0; k < 4; ++k)
     {
-        sumDyScaleX += dy.getHostValue(0, k) * scale.getHostValue(k) * x.getHostValue(0, k);
+        sumDyScaleXc
+            += dy.getHostValue(0, k) * scale.getHostValue(k) * (x.getHostValue(0, k) - batchMean);
         sumDyScale += dy.getHostValue(0, k) * scale.getHostValue(k);
     }
-    const double a = batchRstd * batchRstd * batchRstd
-                     * (sumDyScaleX - sumDyScale * mean.getHostValue(0)) / 4.0;
-    const double b = batchRstd * sumDyScale / 4.0 - a * mean.getHostValue(0);
+    const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 4.0;
+    const double b = batchRstd * sumDyScale / 4.0;
     for(size_t k = 0; k < 4; ++k)
     {
         const double outDx = batchRstd * dy.getHostValue(0, k) * scale.getHostValue(k)
-                             - a * x.getHostValue(0, k) - b;
+                             - a * (x.getHostValue(0, k) - batchMean) - b;
         EXPECT_NEAR(outDx, dx.getHostValue(0, k), tolerance);
     }
     for(size_t k = 0; k < 4; ++k)
@@ -1317,20 +1320,21 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop1D)
     auto tolerance = layernorm::getTolerance<double>();
 
     const double batchRstd = rstd.getHostValue(0);
-    double sumDyScaleX = 0.0;
+    const double batchMean = mean.getHostValue(0);
+    double sumDyScaleXc = 0.0;
     double sumDyScale = 0.0;
     for(size_t k = 0; k < 5; ++k)
     {
-        sumDyScaleX += dy.getHostValue(k) * scale.getHostValue(k) * x.getHostValue(k);
+        sumDyScaleXc
+            += dy.getHostValue(k) * scale.getHostValue(k) * (x.getHostValue(k) - batchMean);
         sumDyScale += dy.getHostValue(k) * scale.getHostValue(k);
     }
-    const double a = batchRstd * batchRstd * batchRstd
-                     * (sumDyScaleX - sumDyScale * mean.getHostValue(0)) / 5.0;
-    const double b = batchRstd * sumDyScale / 5.0 - a * mean.getHostValue(0);
+    const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 5.0;
+    const double b = batchRstd * sumDyScale / 5.0;
     for(size_t k = 0; k < 5; ++k)
     {
-        const double outDx
-            = batchRstd * dy.getHostValue(k) * scale.getHostValue(k) - a * x.getHostValue(k) - b;
+        const double outDx = batchRstd * dy.getHostValue(k) * scale.getHostValue(k)
+                             - a * (x.getHostValue(k) - batchMean) - b;
         EXPECT_NEAR(outDx, dx.getHostValue(k), tolerance);
     }
     for(size_t k = 0; k < 5; ++k)
@@ -1395,22 +1399,22 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast1)
             for(size_t k = 0; k < 2; ++k)
             {
                 const double batchRstd = rstd.getHostValue(i, j, k);
-                double sumDyScaleX = 0.0;
+                const double batchMean = mean.getHostValue(i, j, k);
+                double sumDyScaleXc = 0.0;
                 double sumDyScale = 0.0;
                 for(size_t l = 0; l < 4; ++l)
                 {
-                    sumDyScaleX += dy.getHostValue(i, j, k, l) * scale.getHostValue(l)
-                                   * x.getHostValue(i, j, k, l);
+                    sumDyScaleXc += dy.getHostValue(i, j, k, l) * scale.getHostValue(l)
+                                    * (x.getHostValue(i, j, k, l) - batchMean);
                     sumDyScale += dy.getHostValue(i, j, k, l) * scale.getHostValue(l);
                 }
-                const double a = batchRstd * batchRstd * batchRstd
-                                 * (sumDyScaleX - sumDyScale * mean.getHostValue(i, j, k)) / 4.0;
-                const double b = batchRstd * sumDyScale / 4.0 - a * mean.getHostValue(i, j, k);
+                const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 4.0;
+                const double b = batchRstd * sumDyScale / 4.0;
                 for(size_t l = 0; l < 4; ++l)
                 {
                     const double outDx
                         = batchRstd * dy.getHostValue(i, j, k, l) * scale.getHostValue(l)
-                          - a * x.getHostValue(i, j, k, l) - b;
+                          - a * (x.getHostValue(i, j, k, l) - batchMean) - b;
                     EXPECT_NEAR(outDx, dx.getHostValue(i, j, k, l), tolerance);
                 }
             }
@@ -1482,7 +1486,8 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast3)
     for(size_t i = 0; i < 2; ++i)
     {
         const double batchRstd = rstd.getHostValue(i);
-        double sumDyScaleX = 0.0;
+        const double batchMean = mean.getHostValue(i);
+        double sumDyScaleXc = 0.0;
         double sumDyScale = 0.0;
         for(size_t j = 0; j < 3; ++j)
         {
@@ -1490,15 +1495,14 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast3)
             {
                 for(size_t l = 0; l < 4; ++l)
                 {
-                    sumDyScaleX += dy.getHostValue(i, j, k, l) * scale.getHostValue(j, k, l)
-                                   * x.getHostValue(i, j, k, l);
+                    sumDyScaleXc += dy.getHostValue(i, j, k, l) * scale.getHostValue(j, k, l)
+                                    * (x.getHostValue(i, j, k, l) - batchMean);
                     sumDyScale += dy.getHostValue(i, j, k, l) * scale.getHostValue(j, k, l);
                 }
             }
         }
-        const double a = batchRstd * batchRstd * batchRstd
-                         * (sumDyScaleX - sumDyScale * mean.getHostValue(i)) / 24.0;
-        const double b = batchRstd * sumDyScale / 24.0 - a * mean.getHostValue(i);
+        const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 24.0;
+        const double b = batchRstd * sumDyScale / 24.0;
         for(size_t j = 0; j < 3; ++j)
         {
             for(size_t k = 0; k < 2; ++k)
@@ -1507,7 +1511,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast3)
                 {
                     const double outDx
                         = batchRstd * dy.getHostValue(i, j, k, l) * scale.getHostValue(j, k, l)
-                          - a * x.getHostValue(i, j, k, l) - b;
+                          - a * (x.getHostValue(i, j, k, l) - batchMean) - b;
                     EXPECT_NEAR(outDx, dx.getHostValue(i, j, k, l), tolerance);
                 }
             }
@@ -1580,25 +1584,26 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropFullTensorNormalization)
     auto tolerance = layernorm::getTolerance<double>();
 
     const double batchRstd = rstd.getHostValue(0);
-    double sumDyScaleX = 0.0;
+    const double batchMean = mean.getHostValue(0);
+    double sumDyScaleXc = 0.0;
     double sumDyScale = 0.0;
     for(size_t i = 0; i < 2; ++i)
     {
         for(size_t j = 0; j < 3; ++j)
         {
-            sumDyScaleX += dy.getHostValue(i, j) * scale.getHostValue(i, j) * x.getHostValue(i, j);
+            sumDyScaleXc += dy.getHostValue(i, j) * scale.getHostValue(i, j)
+                            * (x.getHostValue(i, j) - batchMean);
             sumDyScale += dy.getHostValue(i, j) * scale.getHostValue(i, j);
         }
     }
-    const double a = batchRstd * batchRstd * batchRstd
-                     * (sumDyScaleX - sumDyScale * mean.getHostValue(0)) / 6.0;
-    const double b = batchRstd * sumDyScale / 6.0 - a * mean.getHostValue(0);
+    const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 6.0;
+    const double b = batchRstd * sumDyScale / 6.0;
     for(size_t i = 0; i < 2; ++i)
     {
         for(size_t j = 0; j < 3; ++j)
         {
             const double outDx = batchRstd * dy.getHostValue(i, j) * scale.getHostValue(i, j)
-                                 - a * x.getHostValue(i, j) - b;
+                                 - a * (x.getHostValue(i, j) - batchMean) - b;
             EXPECT_NEAR(outDx, dx.getHostValue(i, j), tolerance);
         }
     }
@@ -1681,27 +1686,27 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop5DNormalizeLast2)
             for(size_t k = 0; k < 3; ++k)
             {
                 const double batchRstd = rstd.getHostValue(i, j, k);
-                double sumDyScaleX = 0.0;
+                const double batchMean = mean.getHostValue(i, j, k);
+                double sumDyScaleXc = 0.0;
                 double sumDyScale = 0.0;
                 for(size_t l = 0; l < 4; ++l)
                 {
                     for(size_t m = 0; m < 5; ++m)
                     {
-                        sumDyScaleX += dy.getHostValue(i, j, k, l, m) * scale.getHostValue(l, m)
-                                       * x.getHostValue(i, j, k, l, m);
+                        sumDyScaleXc += dy.getHostValue(i, j, k, l, m) * scale.getHostValue(l, m)
+                                        * (x.getHostValue(i, j, k, l, m) - batchMean);
                         sumDyScale += dy.getHostValue(i, j, k, l, m) * scale.getHostValue(l, m);
                     }
                 }
-                const double a = batchRstd * batchRstd * batchRstd
-                                 * (sumDyScaleX - sumDyScale * mean.getHostValue(i, j, k)) / 20.0;
-                const double b = batchRstd * sumDyScale / 20.0 - a * mean.getHostValue(i, j, k);
+                const double a = batchRstd * batchRstd * batchRstd * sumDyScaleXc / 20.0;
+                const double b = batchRstd * sumDyScale / 20.0;
                 for(size_t l = 0; l < 4; ++l)
                 {
                     for(size_t m = 0; m < 5; ++m)
                     {
                         const double outDx
                             = batchRstd * dy.getHostValue(i, j, k, l, m) * scale.getHostValue(l, m)
-                              - a * x.getHostValue(i, j, k, l, m) - b;
+                              - a * (x.getHostValue(i, j, k, l, m) - batchMean) - b;
                         EXPECT_NEAR(outDx, dx.getHostValue(i, j, k, l, m), tolerance);
                     }
                 }

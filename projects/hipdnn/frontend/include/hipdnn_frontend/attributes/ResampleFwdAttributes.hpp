@@ -77,6 +77,14 @@ public:
         return setInput(input_names::X, std::move(x));
     }
 
+    /**
+     * @brief Set the output tensor
+     *
+     * Unset Y dimensions are inferred per spatial dimension as
+     * (x + pre_padding + post_padding - window) / stride + 1, with truncating division, as
+     * cuDNN does; an inferred extent below 1 is rejected with INVALID_VALUE. Y dimensions set
+     * by the caller are not checked against that formula, as in cuDNN.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_y(const std::shared_ptr<TensorAttributes>& y)
     {
@@ -180,6 +188,8 @@ public:
         return padding_mode;
     }
 
+    /// @brief Set the padding mode; required: validation rejects PaddingMode::NOT_SET with
+    ///        ATTRIBUTE_NOT_SET
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_padding_mode(PaddingMode value)
     {
@@ -193,6 +203,12 @@ public:
         return generate_index;
     }
 
+    /**
+     * @brief Request the max-pool index output
+     *
+     * generate_index is ignored for modes other than ResampleMode::MAXPOOL, as in cuDNN: no
+     * index output is created and the operation is lowered with generate_index false.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleFwdAttributes& set_generate_index(bool value)
     {

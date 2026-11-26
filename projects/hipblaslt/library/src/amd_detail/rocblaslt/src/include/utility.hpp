@@ -32,9 +32,14 @@
 #include "handle.h"
 #include "logging.h"
 #include <algorithm>
-#include <exception>
-#include <mutex>
 #include <csignal>
+#include <cstddef>
+#include <exception>
+#include <hip/hip_runtime_api.h>
+#include <mutex>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 #pragma STDC CX_LIMITED_RANGE ON
 
@@ -43,6 +48,33 @@ inline std::mutex log_mutex;
 inline bool isAligned(const void* pointer, size_t byte_count)
 {
     return reinterpret_cast<uintptr_t>(pointer) % byte_count == 0;
+}
+
+// Launches kernel and returns that launch's own status, which hipGetLastError
+// cannot give: it also returns an error the caller left pending. The arguments
+// are converted to the kernel's parameter types first, so a missing or extra
+// argument, or one that does not convert, fails to compile rather than handing
+// hipLaunchKernel's untyped argument list a wrong address.
+template <typename... Params, typename... Args>
+hipError_t rocblaslt_launch_kernel(void (*kernel)(Params...),
+                                   dim3        grid,
+                                   dim3        block,
+                                   size_t      sharedMemBytes,
+                                   hipStream_t stream,
+                                   Args&&... args)
+{
+    static_assert(sizeof...(Params) == sizeof...(Args),
+                  "the arguments must match the kernel's parameters");
+    std::tuple<std::decay_t<Params>...> typed{std::forward<Args>(args)...};
+    void* addresses[sizeof...(Params) > 0 ? sizeof...(Params) : 1] = {};
+    std::apply(
+        [&](auto&... arg) {
+            size_t i = 0;
+            ((addresses[i++] = static_cast<void*>(&arg)), ...);
+        },
+        typed);
+    return hipLaunchKernel(
+        reinterpret_cast<const void*>(kernel), grid, block, addresses, sharedMemBytes, stream);
 }
 
 bool rocblaslt_is_complex_datatype(hipDataType type);
@@ -387,6 +419,8 @@ inline bool is_e_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_RELU_AUX_BIAS:
     case ROCBLASLT_EPILOGUE_GELU_AUX:
     case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_EXT:
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
     // backward pass:
@@ -414,6 +448,7 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_BGRADB:
     case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
         return true;
@@ -440,6 +475,8 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_EXT:
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:

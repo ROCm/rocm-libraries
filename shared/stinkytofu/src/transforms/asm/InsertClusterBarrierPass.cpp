@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <iostream>
 #include <optional>
 #include <random>
 #include <string>
@@ -35,6 +36,7 @@
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/ScalarBranchFacts.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/AsmSetSymbolMap.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
@@ -43,6 +45,10 @@
 #include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
+
+// Enable with StinkyTofuDebugPass: "InsertClusterBarrierPass" in YAML, or
+// PassManagerDebugConfig::addDebugOnly("InsertClusterBarrierPass").
+#define DEBUG_TYPE "InsertClusterBarrierPass"
 
 namespace stinkytofu {
 namespace {
@@ -71,6 +77,10 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// the range instead, which lands it closer than the configured Rule 3 signal
 /// lead rather than further away.
 constexpr int kRule3SignalMaxLeadCycles = 900;
+// ReduceClusterBarrierPerLoop normally coalesces nearby Rule 3 triggers in one
+// loop. A long fall-through unroll copy may need another handshake; measure
+// trigger-to-trigger distance with EstimateAsmCyclesPerInstructionAnalysis.
+constexpr uint32_t kReducedClusterBarrierIntervalCycles = 2000;
 
 /// Segment edges one handshake may climb across when its own segment is too
 /// short to hold the configured Rule 3 signal lead. One hop reaches the
@@ -121,8 +131,11 @@ bool isWorkgroupBarrierSignal(const StinkyInstruction& inst) {
 }
 
 bool isClusterBarrierWait(const StinkyInstruction& inst) {
+    // Memory tokens select LDS dependencies; the physical barrier ID still
+    // identifies a cluster rendezvous. Explicit typed waits must remain hard
+    // stops and count toward cluster-token balance and idempotency.
     return isBarrierWithLiteralId(inst, /*wantSignal=*/false, kClusterBarrierId,
-                                  /*rejectMemToken=*/true);
+                                  /*rejectMemToken=*/false);
 }
 
 bool isClusterBarrierSignal(const StinkyInstruction& inst) {
@@ -289,8 +302,33 @@ StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     return nullptr;
 }
 
+/// Lift a cluster-signal insertion point above the `s_wait_dscnt` run right in
+/// front of \p anchor. StinkyWaitCntInsertionPass parked those drains for the
+/// instruction at \p anchor, not for the signal, so the signal goes first and
+/// the drain stays next to its consumer. Only `s_wait_dscnt` is stepped over:
+/// it neither reads nor writes SCC, so the gate's `s_cmp` keeps the SCC state
+/// the anchor was chosen for, and stopping at anything else (a label included)
+/// keeps the signal on the same side of every branch target and barrier.
+IRBase* hoistSignalAboveLeadingDsCntWaits(IRBase* anchor) {
+    if (anchor == nullptr) return anchor;
+    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+    if (anchorInst == nullptr || anchorInst->getParent() == nullptr) return anchor;
+    BasicBlock* parent = anchorInst->getParent();
+    IRBase* hoisted = anchor;
+    auto it = BasicBlock::iterator(anchorInst);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr || prev->getUnifiedOpcode() != GFX::s_wait_dscnt) break;
+        hoisted = prev;
+    }
+    return hoisted;
+}
+
+/// The signal goes above the `s_wait_dscnt` run in front of \p anchor.
 void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
+    anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
@@ -323,11 +361,13 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 }
 
 /// `s_barrier_signal -3` alone. Used when the wave-0 check already happened at
-/// the loop entrance, so this site must not clobber SCC again.
+/// the loop entrance, so this site must not clobber SCC again. The signal goes
+/// above the `s_wait_dscnt` run in front of \p anchor.
 void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     assert(signalDesc && "Cluster-barrier signal opcode is not supported on this architecture");
+    anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
     signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
@@ -396,6 +436,14 @@ void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRB
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
+/// `s_wait_tensorcnt 0`: every outstanding tensor load is retired. A second run
+/// of this pass finds that wait sitting where it would insert another.
+bool isFullTensorDrain(const StinkyInstruction& inst) {
+    if (!inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+    const auto* data = inst.getModifier<SWaitTensorCntData>();
+    return data != nullptr && data->tlcnt == 0;
+}
+
 /// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
 /// right after a cooperative `tensor_load_to_lds` group). Under PGR>=2 the
 /// cooperative load is async and produced by a PEER wave, so the consumer's own
@@ -446,18 +494,24 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
 }
 
-/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and
-/// return the first real instruction after that wait.
-IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
+/// Scan only within the hard stop's segment and before the wait being led.
+/// A later WG pair cannot anchor an earlier signal, and labels/branches/calls
+/// end the straight-line proof even though labels are pseudo instructions.
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
+                                        const IRBase* limit) {
     BasicBlock* parent = wgSignal->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (isWorkgroupBarrierSignal(*inst)) break;
         if (!isWorkgroupBarrierWait(*inst)) continue;
         for (auto after = std::next(it); after != parent->end(); ++after) {
+            if (after.getNodePtr() == limit) break;
             auto* next = dyn_cast<StinkyInstruction>(after.getNodePtr());
+            if (next != nullptr && isSegmentBoundary(*next)) break;
             if (next == nullptr || isPseudoInst(next)) continue;
             return next;
         }
@@ -466,17 +520,19 @@ IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* def
     return defaultAnchor;
 }
 
-/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
-/// (signal then wait).  Returns the first real instruction after that wait, or
-/// ``defaultAnchor`` when the pair is missing or incomplete.
-IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
+/// Find a complete earlier WG pair after the previous cluster wait. Missing or
+/// out-of-bounds pairs leave the signal co-located with its own wait.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
+                                             const IRBase* limit) {
     BasicBlock* parent = afterWait->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (!isWorkgroupBarrierSignal(*inst)) continue;
-        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, limit);
     }
     return defaultAnchor;
 }
@@ -849,9 +905,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // which is where the group is gathered again.
     auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
         if (isClusterBarrierWait(*inst))
-            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor, sccLimit(inst));
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
-            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, sccLimit(inst));
         return nullptr;
     };
 
@@ -1696,11 +1752,12 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 bool splitWaveLoop)
+                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
-          splitWaveLoop_(splitWaveLoop) {}
+          splitWaveLoop_(splitWaveLoop),
+          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1716,7 +1773,7 @@ class InsertClusterBarrierPassImpl : public Pass {
 
         static const std::unordered_map<const StinkyInstruction*, uint32_t> kEmptyCycleMap;
         const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap =
-            (rule3SignalLeadCycles_ > 0)
+            (rule3SignalLeadCycles_ > 0 || reduceClusterBarrierPerLoop_)
                 ? AM.getResult<EstimateAsmCyclesPerInstructionAnalysis>(func)
                 : kEmptyCycleMap;
 
@@ -1792,6 +1849,17 @@ class InsertClusterBarrierPassImpl : public Pass {
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
+            // reduceClusterBarrierPerLoop_: the first Rule 3 trigger of each
+            // enclosing loop handshakes. A later trigger may handshake again
+            // after kReducedClusterBarrierIntervalCycles estimated cycles from
+            // the last accepted trigger. Existing waits also establish the
+            // baseline, which keeps a second pass idempotent.
+            struct ReducedLoopHandshakeState {
+                bool claimed = false;
+                std::optional<uint32_t> lastCycle;
+            };
+            std::unordered_map<StinkyInstruction*, ReducedLoopHandshakeState>
+                reducedLoopHandshakeState;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
             // insertProducerTensorDrainBefore.
@@ -1812,19 +1880,65 @@ class InsertClusterBarrierPassImpl : public Pass {
                         findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
                     if (trigger == nullptr) continue;
                     if (!seenTriggers.insert(trigger).second) continue;
-                    if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
 
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop
                     // there is no next trip to hand a token to and no exit to compensate
                     // at, and the run-up's own load is Rule 2's business.
-                    if (findEnclosingLoopHead(trigger) == nullptr) continue;
+                    StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                    if (head == nullptr) continue;
 
-                    // Emit the cluster wait above the drains the wait-cnt pass
-                    // already anchored on this workgroup signal.
-                    IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
-                    auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
-                    triggers.push_back({trigger, segBegin, waitAnchor,
-                                        (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    bool emitHandshake = false;
+                    if (reduceClusterBarrierPerLoop_) {
+                        ReducedLoopHandshakeState& state = reducedLoopHandshakeState[head];
+                        const auto cycleIt = cycleMap.find(trigger);
+                        const std::optional<uint32_t> triggerCycle =
+                            cycleIt != cycleMap.end() ? std::optional<uint32_t>(cycleIt->second)
+                                                      : std::nullopt;
+                        const bool alreadyHasWait =
+                            isImmediatelyPrecededByClusterBarrierWait(trigger);
+                        const bool intervalReached = state.lastCycle.has_value() &&
+                                                     triggerCycle.has_value() &&
+                                                     *triggerCycle >= *state.lastCycle &&
+                                                     *triggerCycle - *state.lastCycle >=
+                                                         kReducedClusterBarrierIntervalCycles;
+                        const auto previousCycle = state.lastCycle;
+
+                        if (alreadyHasWait) {
+                            // A pre-existing handshake is authoritative even if
+                            // the estimate or interval changed since it was
+                            // planted. Use it as the next spacing baseline.
+                            state.claimed = true;
+                            state.lastCycle = triggerCycle;
+                        } else if (!state.claimed || intervalReached) {
+                            emitHandshake = true;
+                            state.claimed = true;
+                            state.lastCycle = triggerCycle;
+                        }
+                        PASS_DEBUG(std::cerr
+                                   << "[InsertClusterBarrier] reduce trigger=" << trigger
+                                   << " head=" << head << " cycle="
+                                   << (triggerCycle ? std::to_string(*triggerCycle) : "none")
+                                   << " previousCycle="
+                                   << (previousCycle ? std::to_string(*previousCycle) : "none")
+                                   << " alreadyHasWait=" << alreadyHasWait
+                                   << " intervalReached=" << intervalReached
+                                   << " emitHandshake=" << emitHandshake << "\n");
+                    } else if (isImmediatelyPrecededByClusterBarrierWait(trigger)) {
+                        // A re-run skips a trigger that already has its wait, and
+                        // skips the drain recording below with it.
+                        continue;
+                    } else {
+                        emitHandshake = true;
+                    }
+
+                    if (emitHandshake) {
+                        // Emit the cluster wait above the drains the wait-cnt pass
+                        // already anchored on this workgroup signal.
+                        IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                        auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
+                        triggers.push_back({trigger, segBegin, waitAnchor,
+                                            (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    }
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
@@ -1843,8 +1957,18 @@ class InsertClusterBarrierPassImpl : public Pass {
                             }
                             break;
                         }
-                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
-                                                                            : nullptr);
+                        // The slot after the group is already s_wait_tensorcnt 0 when
+                        // this pass has run before. Inserting again would stack
+                        // a second drain in front of that one.
+                        bool alreadyDrained = false;
+                        if (postIt != bb.end()) {
+                            if (auto* next = dyn_cast<StinkyInstruction>(postIt.getNodePtr()))
+                                alreadyDrained = isFullTensorDrain(*next);
+                        }
+                        if (!alreadyDrained) {
+                            producerDrainAnchors.push_back(
+                                (postIt != bb.end()) ? postIt.getNodePtr() : nullptr);
+                        }
                     }
                 }
             }
@@ -2024,6 +2148,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int pgrValue_ = 1;
     const int rule3SignalLeadCycles_ = 100;
     const bool splitWaveLoop_ = false;
+    const bool reduceClusterBarrierPerLoop_ = false;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -2031,10 +2156,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 }  // namespace
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
-                                                     int rule3SignalLeadCycles,
-                                                     bool splitWaveLoop) {
+                                                     int rule3SignalLeadCycles, bool splitWaveLoop,
+                                                     bool reduceClusterBarrierPerLoop) {
     return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles, splitWaveLoop);
+                                                          rule3SignalLeadCycles, splitWaveLoop,
+                                                          reduceClusterBarrierPerLoop);
 }
 
 namespace cluster_barrier {

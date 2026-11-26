@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_spvec.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -66,10 +67,8 @@ void testing_axpby_bad_arg(const Arguments& argus)
     Y* dy     = (Y*)dy_managed.get();
 
     // Structures
-    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, xType);
-    hipsparseDnVecDescr_t y;
-
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, yType), "Success");
+    hipsparseLocalSpVec x(size, nnz, dx_ind, dx_val, idxType, idxBase, xType);
+    hipsparseLocalDnVec y(size, dy, yType);
 
     // Axpby
     verify_hipsparse_status_invalid_handle(hipsparseAxpby(nullptr, &alpha, x, &beta, y));
@@ -81,9 +80,6 @@ void testing_axpby_bad_arg(const Arguments& argus)
                                             "Error: beta is nullptr");
     verify_hipsparse_status_invalid_pointer(hipsparseAxpby(handle, &alpha, x, &beta, nullptr),
                                             "Error: y is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
 #endif
 }
 
@@ -136,10 +132,8 @@ void testing_axpby(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(Y) * size, hipMemcpyHostToDevice));
 
     // Create structures
-    hipsparseLocalSpVec   x(size, nnz, dx_ind, dx_val, idxType, idxBase, xType);
-    hipsparseDnVecDescr_t y;
-
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, yType));
+    hipsparseLocalSpVec x(size, nnz, dx_ind, dx_val, idxType, idxBase, xType);
+    hipsparseLocalDnVec y(size, dy, yType);
 
     if(argus.unit_check)
     {
@@ -199,9 +193,6 @@ void testing_axpby(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
-
 #endif
 }
 

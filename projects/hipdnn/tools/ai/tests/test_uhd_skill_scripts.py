@@ -393,6 +393,35 @@ def test_a_stale_selector_revision_fails(decide):
     assert not report["gates"]["selector_revision"]["passed"]
 
 
+@pytest.mark.parametrize(
+    "engine,recorded,noted",
+    [
+        ("cg-A", "cg-A", False),
+        ("cg-B", "cg-A", True),
+        (None, "cg-A", False),
+        ("cg-B", None, False),
+    ],
+    ids=["same", "differs", "engine_reports_none", "candidate_records_none"],
+)
+def test_a_codegen_revision_is_reported_and_never_fails(
+    decide, engine, recorded, noted
+):
+    """The engine binds a model measured with other code objects and warns, so Stage V notes
+    the difference and passes."""
+    rows = _rows()
+    for row in rows:
+        row["candidate"]["trained_against"] = {
+            "selector_revision": "rev-A",
+            **({"codegen_revision": engine} if engine else {}),
+        }
+    report = _decide_l1(decide, _document(rows), candidate_codegen_revision=recorded)
+    gate = report["gates"]["selector_revision"]
+    assert report["passed"] and gate["passed"], report["gates"]
+    assert gate["codegen_revision"]["engine_reports"] == ([engine] if engine else [])
+    assert gate["codegen_revision"]["trained_against"] == recorded
+    assert (gate["codegen_revision"]["note"] is not None) == noted
+
+
 def test_a_candidate_answering_in_another_metric_fails(decide):
     report = _decide_l1(decide, _document(_rows(metric="time")))
     assert not report["passed"] and not report["gates"]["metric"]["passed"]
@@ -747,7 +776,10 @@ def _installed_tree(tmp_path: Path) -> tuple:
                 **document,
                 "name": "candidate",
                 "tree_data": {"artifact": "model.bin"},
-                "trained_against": {"selector_revision": "rev-A"},
+                "trained_against": {
+                    "selector_revision": "rev-A",
+                    "codegen_revision": "cg-A",
+                },
             }
         )
     )
@@ -804,7 +836,8 @@ graph = args[args.index("--graph") + 1]
 index = int(os.path.basename(graph).split(".")[0][1:])
 truth = 100.0 + 10 * index
 binding = {"engine": "OPAQUE_ENGINE", "selector_revision": "rev-A", "arch": "gfx950",
-           "role": "predict_engine", "trained_against": {"selector_revision": "rev-A"},
+           "role": "predict_engine",
+           "trained_against": {"selector_revision": "rev-A", "codegen_revision": "cg-B"},
            "metric": "tflops"}
 if "--collect-immediate" in args:
     flops = 1e12
@@ -899,6 +932,10 @@ def test_the_l1_run_and_its_verdict_end_to_end(tmp_path):
     paired = report["metrics"]["paired"]
     assert paired["candidate"]["median_abs_pct_error"] == pytest.approx(2.0)
     assert paired["incumbent"]["median_abs_pct_error"] == pytest.approx(25.0)
+    # The engine's code objects differ from the candidate's: noted, not failed.
+    codegen = report["gates"]["selector_revision"]["codegen_revision"]
+    assert (codegen["engine_reports"], codegen["trained_against"]) == (["cg-B"], "cg-A")
+    assert codegen["note"]
 
 
 # --- one isolated engine run --------------------------------------------------------

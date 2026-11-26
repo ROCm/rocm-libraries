@@ -43,6 +43,28 @@ struct EstimateAsmCyclesAnalysis {
     static STINKYTOFU_EXPORT Result run(Function& F, AnalysisManager& AM);
 };
 
+/// Cycle totals split around the primary LoopBeginL natural loop.
+///
+/// The loop body runs from label_LoopBeginL through the block that branches
+/// back to it, or to label_LoopBeginL_CBWave0 after the cluster-barrier wave
+/// split. mainLoopCycles sums that one iteration. The other wave's copy is the
+/// same iteration and is not added again. preLoopCycles and postLoopCycles are
+/// the longest path through the blocks before and after that range. A back-edge
+/// counts one iteration. The global-write edge fork always takes NonEdge; other
+/// exclusive edges keep the heavier side. Each block is replayed from empty
+/// issue state, so a wait does not see a load issued in another block.
+struct EstimateAsmCyclePhases {
+    uint32_t preLoopCycles = 0;
+    uint32_t mainLoopCycles = 0;
+    uint32_t postLoopCycles = 0;
+};
+
+struct EstimateAsmCyclePhasesAnalysis {
+    STINKYTOFU_ANALYSIS_KEY("EstimateAsmCyclePhasesAnalysis")
+    using Result = EstimateAsmCyclePhases;
+    static STINKYTOFU_EXPORT Result run(Function& F, AnalysisManager& AM);
+};
+
 /// Analysis result type for the per-instruction estimated cumulative cycle map
 /// (see computeEstimatedCyclesPerInstruction).
 struct EstimateAsmCyclesPerInstructionAnalysis {
@@ -58,11 +80,16 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createEstimateAsmCyclesPass();
 /// `<This is N-cycle>` comments or publish the total-cycles function metadata,
 /// so it is safe to call from AM.getResult<EstimateAsmCyclesAnalysis>() and
 /// other read-only contexts. Use createEstimateAsmCyclesPass() when you want
-/// the annotated IR.
+/// `<This is N-cycle>` comments on the primary LoopBeginL body. Blocks outside
+/// that loop are left unchanged.
 /// @param func The function to analyze
 /// @param passCtx The pass context
 /// @return The total estimated cycles
 STINKYTOFU_EXPORT unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx);
+
+/// Calculate phase-level cycle estimates around the primary LoopBeginL region.
+STINKYTOFU_EXPORT EstimateAsmCyclePhases calculateEstimateAsmCyclePhases(Function& func,
+                                                                         PassContext& passCtx);
 
 /// Run the asm-cycle estimator and return a per-instruction map of estimated
 /// cumulative cycle positions (the cycle index at which each instruction is

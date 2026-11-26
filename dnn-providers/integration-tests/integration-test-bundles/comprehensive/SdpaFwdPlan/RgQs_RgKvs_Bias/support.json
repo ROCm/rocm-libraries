@@ -1,0 +1,86 @@
+{
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_00fe137edd4e701f",
+          "bf16_054def80703dc7cb",
+          "bf16_1f3022c4de4f5fa1",
+          "bf16_24e9c4cef0f4c483",
+          "bf16_3b7f48e7c1ca644e",
+          "bf16_57acfb41e1e21b10",
+          "bf16_c7bb069cb847108d",
+          "bf16_fa784fd358d26e12"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_00fe137edd4e701f",
+          "bf16_054def80703dc7cb",
+          "bf16_1f3022c4de4f5fa1",
+          "bf16_24e9c4cef0f4c483",
+          "bf16_33d1f16b5365968f",
+          "bf16_3ae31900d4dd2164",
+          "bf16_3b7f48e7c1ca644e",
+          "bf16_4993c6bf517faae8",
+          "bf16_57acfb41e1e21b10",
+          "bf16_5e033c78346308af",
+          "bf16_b0e73826319c339a",
+          "bf16_c02866945ae790d6",
+          "bf16_c7bb069cb847108d",
+          "bf16_d4d4e8d3837ff552",
+          "bf16_fa784fd358d26e12",
+          "fp32_41270f0d9ccdfa4f"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_00fe137edd4e701f",
+          "bf16_054def80703dc7cb",
+          "bf16_1f3022c4de4f5fa1",
+          "bf16_24e9c4cef0f4c483",
+          "bf16_33d1f16b5365968f",
+          "bf16_3ae31900d4dd2164",
+          "bf16_3b7f48e7c1ca644e",
+          "bf16_4993c6bf517faae8",
+          "bf16_57acfb41e1e21b10",
+          "bf16_5e033c78346308af",
+          "bf16_b0e73826319c339a",
+          "bf16_bdd1d1202be0c79e",
+          "bf16_c02866945ae790d6",
+          "bf16_c7bb069cb847108d",
+          "bf16_d4d4e8d3837ff552",
+          "bf16_e5798ec3b9daf9f0",
+          "bf16_fa784fd358d26e12",
+          "fp32_41270f0d9ccdfa4f"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

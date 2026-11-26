@@ -68,6 +68,17 @@ class OptimizationBackend(ABC):
         """
         pass
 
+    def uses_benchmark_results(self) -> bool:
+        """Check if run() reads what benchmark_runner returns to choose what to benchmark next.
+
+        If not, BenchmarkProblems prepares the steps of all problem types first and generates
+        their kernels in one pool: benchmark_runner then only prepares its step and returns None.
+
+        Returns:
+            True unless the backend says otherwise.
+        """
+        return True
+
 
 class BackendFactory:
     """Factory for registering and instantiating benchmark backends."""

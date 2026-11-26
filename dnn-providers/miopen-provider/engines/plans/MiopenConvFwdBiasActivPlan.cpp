@@ -63,14 +63,14 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     }
 
     if(activAttr.elu_alpha().has_value() || activAttr.softplus_beta().has_value()
-       || activAttr.swish_beta().has_value() || activAttr.relu_lower_clip_slope().has_value())
+       || activAttr.swish_beta().has_value() || hasLeakyReluSlope(activAttr))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ConvFwdBiasActivParams: Fusion supports only relu, clipped relu "
             "(relu_upper_clip set), "
             "or CLAMP "
-            "(relu_upper_clip and relu_lower_clip set)");
+            "(relu_lower_clip set, with or without relu_upper_clip)");
     }
 
     HIPDNN_PREPEND_MESSAGE_ON_THROW(_activParams = mapPointwiseModeToMiopenActivation(activAttr),

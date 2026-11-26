@@ -241,9 +241,9 @@ protected:
 
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
-        // X: [2, 64, 32, 32], Scale: [2, 2, 32, 32] (block_size=32 on channel dim)
+        // X: [2, 64, 32, 32], Scale: [2, 64, 32, 1] (block_size=32 on the last dim)
         const std::vector<int64_t> xDims = {2, 64, 32, 32};
-        const std::vector<int64_t> scaleDims = {2, 2, 32, 32};
+        const std::vector<int64_t> scaleDims = {2, 64, 32, 1};
         SimpleBlockScaleDequantizeTensorBundle tensorBundle(xDims, scaleDims);
 
         auto [graph, tensors] = createBlockScaleDequantizeTestGraph(

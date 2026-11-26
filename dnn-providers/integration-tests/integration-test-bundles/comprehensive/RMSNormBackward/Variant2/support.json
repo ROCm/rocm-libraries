@@ -21,6 +21,26 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_rmsnorm_bwd": [
+      {
+        "cases": [
+          "16_3_8_14_14_bfp16_ncdhw",
+          "4096_128_1_1_bfp16_nchw"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

@@ -42,7 +42,8 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
-from .test_attention_bwd_ir import _walk, lds_hazards, step_bodies, traced_spec
+from ._attention_bwd_lds_model import lds_hazards, traced_spec
+from .test_attention_bwd_ir import _walk, step_bodies
 
 ARCHS = ("gfx942", "gfx950")
 HEADS = (64, 128)
@@ -397,7 +398,7 @@ def test_emitted_step_counts_races_and_replicated_stores(arch, d, km, kn, w):
             )
         ]
         # P and dS: one store per accumulator slot of the wave's G0 fragments
-        slots = 2 * geom.g0.frags_m * geom.g0.frags_n * geom.g0.op.c_frag_len
+        slots = 2 * geom.g0.frags_m * geom.g0.frags_n * geom.g0.op.dst.frag_len
         assert len(guarded) == (slots if replicated else 0), (len(guarded), slots)
 
 

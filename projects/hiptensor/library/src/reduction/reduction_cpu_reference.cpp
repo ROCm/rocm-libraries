@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cstring>
 #include <vector>
 
 #include "../elementwise/elementwise_cpu_reference.hpp"
@@ -105,17 +106,6 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
         betaD = hiptensor::readVal<double>(beta, typeCompute);
     }
 
-    if(C && C != D)
-    {
-        // CK API can only process $D = alpha * reduce(A) + beta * D$
-        // Need to copy C to D if C != D
-        CHECK_HIP_ERROR(hipMemcpy(D,
-                                  C,
-                                  hiptensor::elementsFromLengths(descC->mLengths)
-                                      * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                  hipMemcpyHostToHost));
-    }
-
     // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
     // non-reduced tensor mode (modeA).
     //
@@ -136,10 +126,30 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
     hiptensorTensorDescriptor sortedDescC    = *descC;
     std::vector<int>          sortingIndices = {};
 
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
-        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
+    auto sortStatus = hiptensor::getSortingIndices(
+        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices);
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths);
+    }
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides);
+    }
+    if(sortStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return sortStatus;
+    }
+
+    if(C && C != D)
+    {
+        // CK API can only process $D = alpha * reduce(A) + beta * D$
+        // Need to copy C to D if C != D
+        std::memcpy(D,
+                    C,
+                    hiptensor::elementsFromLengths(descC->mLengths)
+                        * hiptensor::hiptensorDataTypeSize(descC->mType));
+    }
 
     for(auto [_, pSolution] : solutionQ.solutions())
     {

@@ -196,15 +196,13 @@ namespace rocalution
 
             for(int ai = 0; ai < this->nrow_; ++ai)
             {
-                int s = this->mat_.col[this->mat_.row_offset[ai]];
-
                 for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
                     ++aj)
                 {
                     int col      = this->mat_.col[aj];
                     int prev_col = (aj > this->mat_.row_offset[ai]) ? this->mat_.col[aj - 1] : -1;
 
-                    if((col < 0) || (col > this->ncol_))
+                    if((col < 0) || (col >= this->ncol_))
                     {
                         // LCOV_EXCL_START
                         LOG_VERBOSE_INFO(
@@ -223,8 +221,7 @@ namespace rocalution
                         // LCOV_EXCL_STOP
                     }
 
-                    ValueType val = this->mat_.val[aj];
-                    if((val == std::numeric_limits<ValueType>::infinity()) || (val != val))
+                    if(!rocalution_is_finite(this->mat_.val[aj]))
                     {
                         // LCOV_EXCL_START
                         LOG_VERBOSE_INFO(
@@ -233,12 +230,10 @@ namespace rocalution
                         // LCOV_EXCL_STOP
                     }
 
-                    if((aj > this->mat_.row_offset[ai]) && (s >= col))
+                    if(prev_col > col)
                     {
                         sorted = false;
                     }
-
-                    s = this->mat_.col[aj];
                 }
             }
         }
@@ -1262,6 +1257,19 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    PtrType HostMatrixCSR<ValueType>::LLDiagonal_(int ai) const
+    {
+        PtrType diag_idx = this->mat_.row_offset[ai];
+
+        while(diag_idx < this->mat_.row_offset[ai + 1] && this->mat_.col[diag_idx] < ai)
+        {
+            ++diag_idx;
+        }
+
+        return diag_idx;
+    }
+
+    template <typename ValueType>
     bool HostMatrixCSR<ValueType>::LLSolve(const BaseVector<ValueType>& in,
                                            BaseVector<ValueType>*       out) const
     {
@@ -1280,7 +1288,9 @@ namespace rocalution
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
+
+            assert(diag_idx < this->mat_.row_offset[ai + 1] && this->mat_.col[diag_idx] == ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1293,7 +1303,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
             ValueType value    = cast_out->vec_[ai] / this->mat_.val[diag_idx];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
@@ -1330,7 +1340,7 @@ namespace rocalution
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1343,7 +1353,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = this->LLDiagonal_(ai);
             ValueType value    = cast_out->vec_[ai] * cast_diag->vec_[ai];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
@@ -1615,8 +1625,12 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // host_csritsv_solve overwrites the limit with the iterations it ran
+            int max_iter_L = max_iter;
+            int max_iter_U = max_iter;
+
             // Solve L
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_L,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1643,7 +1657,7 @@ namespace rocalution
             }
 
             // Solve U
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_U,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1806,8 +1820,12 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // host_csritsv_solve overwrites the limit with the iterations it ran
+            int max_iter_L  = max_iter;
+            int max_iter_LT = max_iter;
+
             // Solve L
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_L,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_none,
@@ -1834,7 +1852,7 @@ namespace rocalution
             }
 
             // Solve Lt
-            status = host_csritsv_solve(&max_iter,
+            status = host_csritsv_solve(&max_iter_LT,
                                         tol_ptr,
                                         nullptr,
                                         host_sparse_operation_transpose,
@@ -2221,9 +2239,7 @@ namespace rocalution
         int nrow = this->nrow_;
         int ncol = this->ncol_;
 
-        int64_t nnz = std::min(2 * maxrow, nrow) * nrow;
-
-        int remaining_nnz = nnz;
+        int64_t nnz = std::min(2 * static_cast<int64_t>(maxrow), static_cast<int64_t>(nrow)) * nrow;
 
         PtrType*   row_offset = NULL;
         int*       col        = NULL;
@@ -2304,31 +2320,28 @@ namespace rocalution
             // store elements
             int store_size = driver.row_size();
 
-            if(remaining_nnz < store_size)
+            if(row_offset[i] + store_size > nnz)
             {
-                nnz += static_cast<size_t>(nnz * 1.5f);
-                remaining_nnz += static_cast<size_t>(nnz * 1.5f);
+                int64_t new_nnz
+                    = std::max(nnz + nnz / 2, static_cast<int64_t>(row_offset[i]) + store_size);
 
                 LOG_INFO("ILUTFactorize reallocating");
 
-                int*       col_tmp = (int*)realloc(col, nnz * sizeof(int));
-                ValueType* val_tmp = (ValueType*)realloc(val, nnz * sizeof(ValueType));
+                int*       new_col = NULL;
+                ValueType* new_val = NULL;
 
-                if(col_tmp == NULL || val_tmp == NULL)
-                {
-                    // LCOV_EXCL_START
-                    free(col);
-                    free(val);
+                allocate_host(new_nnz, &new_col);
+                allocate_host(new_nnz, &new_val);
 
-                    LOG_INFO("ILUTFactorize failed on realloc");
-                    FATAL_ERROR(__FILE__, __LINE__);
-                    // LCOV_EXCL_STOP
-                }
-                else
-                {
-                    col = col_tmp;
-                    val = val_tmp;
-                }
+                copy_h2h(row_offset[i], col, new_col);
+                copy_h2h(row_offset[i], val, new_val);
+
+                free_host(&col);
+                free_host(&val);
+
+                col = new_col;
+                val = new_val;
+                nnz = new_nnz;
             }
 
             int diag_in;
@@ -2342,11 +2355,10 @@ namespace rocalution
             }
 
             row_offset[i + 1] = row_offset[i] + store_size;
-            remaining_nnz -= store_size;
         }
 
         free(buffer);
-        free(temp_pivot_buffer);
+        free_host(&temp_pivot_buffer);
 
         // pinned memory
         int*       p_col = NULL;
@@ -2360,8 +2372,8 @@ namespace rocalution
         copy_h2h(nnz, col, p_col);
         copy_h2h(nnz, val, p_val);
 
-        free(col);
-        free(val);
+        free_host(&col);
+        free_host(&val);
 
         this->Clear();
         this->SetDataPtrCSR(&row_offset, &p_col, &p_val, nnz, nrow, ncol);
@@ -2667,6 +2679,23 @@ namespace rocalution
         {
             if(mis[ai] == 0)
             {
+                // A nonsymmetric pattern can couple ai to a node of the set that is not
+                // coupled to ai, and then ai cannot join the set
+                for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
+                    ++aj)
+                {
+                    if(ai != this->mat_.col[aj] && mis[this->mat_.col[aj]] == 1)
+                    {
+                        mis[ai] = -1;
+                        break;
+                    }
+                }
+
+                if(mis[ai] == -1)
+                {
+                    continue;
+                }
+
                 // set the node
                 mis[ai] = 1;
                 ++size;
@@ -3185,7 +3214,7 @@ namespace rocalution
             HostMatrixCSR<ValueType> tmp(this->local_backend_);
             tmp.CopyFrom(*this);
 
-            for(int i = 0; i < p; ++i)
+            for(int i = 1; i < p; ++i)
             {
                 this->SymbolicMatMatMult(tmp);
             }
@@ -3791,13 +3820,10 @@ namespace rocalution
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::Transpose(void)
     {
-        if(this->nnz_ > 0)
-        {
-            HostMatrixCSR<ValueType> tmp(this->local_backend_);
+        HostMatrixCSR<ValueType> tmp(this->local_backend_);
 
-            tmp.CopyFrom(*this);
-            tmp.Transpose(this);
-        }
+        tmp.CopyFrom(*this);
+        tmp.Transpose(this);
 
         return true;
     }
@@ -3811,11 +3837,11 @@ namespace rocalution
 
         assert(cast_T != NULL);
 
+        cast_T->Clear();
+        cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
+
         if(this->nnz_ > 0)
         {
-            cast_T->Clear();
-            cast_T->AllocateCSR(this->nnz_, this->ncol_, this->nrow_);
-
             for(int64_t i = 0; i < cast_T->nnz_; ++i)
             {
                 cast_T->mat_.row_offset[this->mat_.col[i] + 1] += 1;
@@ -4018,11 +4044,9 @@ namespace rocalution
         cast_perm->Clear();
         cast_perm->Allocate(this->nrow_);
 
-        int next   = 0;
-        int head   = 0;
-        int tmp    = 0;
-        int test   = 1;
-        int maxdeg = 0;
+        int next = 0;
+        int head = 0;
+        int tmp  = 0;
 
         int* nd         = NULL;
         int* marker     = NULL;
@@ -4039,27 +4063,37 @@ namespace rocalution
         for(int k = 0; k < this->nrow_; ++k)
         {
             marker[k] = 0;
-            nd[k] = static_cast<int>(this->mat_.row_offset[k + 1] - this->mat_.row_offset[k] - 1);
+            nd[k]     = 0;
 
-            if(nd[k] > maxdeg)
+            // A row need not store its diagonal, so only the other entries count
+            for(PtrType j = this->mat_.row_offset[k]; j < this->mat_.row_offset[k + 1]; ++j)
             {
-                maxdeg = nd[k];
+                if(this->mat_.col[j] != k)
+                {
+                    ++nd[k];
+                }
             }
         }
 
-        head               = this->mat_.col[0];
-        levset[0]          = head;
-        cast_perm->vec_[0] = 0;
+        levset[0]             = head;
+        cast_perm->vec_[head] = 0;
         ++next;
         marker[head] = 1;
+
+        // Every node before restart is numbered
+        int restart = 0;
 
         while(next < this->nrow_)
         {
             int position = 0;
 
+            // The nodes of the level are in the order of their numbers. Each one numbers its
+            // unnumbered neighbours by increasing degree
             for(int h = 0; h < qlength; ++h)
             {
                 head = levset[h];
+
+                int first = position;
 
                 for(PtrType k = this->mat_.row_offset[head]; k < this->mat_.row_offset[head + 1];
                     ++k)
@@ -4070,30 +4104,42 @@ namespace rocalution
                     {
                         nextlevset[position] = tmp;
                         marker[tmp]          = 1;
-                        cast_perm->vec_[tmp] = next;
-                        ++next;
                         ++position;
                     }
+                }
+
+                // std::stable_sort allocates a buffer on every call, so short lists are sorted
+                // in place
+                if(position - first > 16)
+                {
+                    std::stable_sort(nextlevset + first, nextlevset + position, [&](int a, int b) {
+                        return nd[a] < nd[b];
+                    });
+                }
+                else
+                {
+                    for(int j = first + 1; j < position; ++j)
+                    {
+                        int node = nextlevset[j];
+                        int i    = j;
+
+                        for(; i > first && nd[nextlevset[i - 1]] > nd[node]; --i)
+                        {
+                            nextlevset[i] = nextlevset[i - 1];
+                        }
+
+                        nextlevset[i] = node;
+                    }
+                }
+
+                for(int j = first; j < position; ++j)
+                {
+                    cast_perm->vec_[nextlevset[j]] = next;
+                    ++next;
                 }
             }
 
             qlength = position;
-
-            while(test == 1)
-            {
-                test = 0;
-
-                for(int j = position - 1; j > 0; --j)
-                {
-                    if(nd[nextlevset[j]] < nd[nextlevset[j - 1]])
-                    {
-                        tmp               = nextlevset[j];
-                        nextlevset[j]     = nextlevset[j - 1];
-                        nextlevset[j - 1] = tmp;
-                        test              = 1;
-                    }
-                }
-            }
 
             for(int i = 0; i < position; ++i)
             {
@@ -4102,15 +4148,16 @@ namespace rocalution
 
             if(qlength == 0)
             {
-                for(int i = 0; i < this->nrow_; ++i)
+                for(; restart < this->nrow_; ++restart)
                 {
-                    if(marker[i] == 0)
+                    if(marker[restart] == 0)
                     {
-                        levset[0]          = i;
-                        qlength            = 1;
-                        cast_perm->vec_[i] = next;
-                        marker[i]          = 1;
+                        levset[0]                = restart;
+                        qlength                  = 1;
+                        cast_perm->vec_[restart] = next;
+                        marker[restart]          = 1;
                         ++next;
+                        break;
                     }
                 }
             }
@@ -4166,7 +4213,7 @@ namespace rocalution
 
         for(int i = 0; i < this->nrow_; ++i, ++it)
         {
-            cast_perm->vec_[i] = it->second;
+            cast_perm->vec_[it->second] = i;
         }
 
         return true;
@@ -4215,16 +4262,16 @@ namespace rocalution
             row_buffer[i + 1]            = this->mat_.row_offset[i + 1];
         }
 
-        for(int i = 0; i < nnz; ++i)
+        for(int i = 0; i < n; ++i)
         {
             if(cast_map->vec_[i] < 0)
             {
                 continue;
             }
 
-            this->mat_.col[row_buffer[cast_map->vec_[i]]] = i;
-            this->mat_.val[i]                             = static_cast<ValueType>(1);
-            row_buffer[cast_map->vec_[i]]++;
+            PtrType pos         = row_buffer[cast_map->vec_[i]]++;
+            this->mat_.col[pos] = i;
+            this->mat_.val[pos] = static_cast<ValueType>(1);
         }
 
         assert(this->mat_.row_offset[m] == nnz);
@@ -4280,6 +4327,7 @@ namespace rocalution
         return true;
     }
 
+    // LCOV_EXCL_START (deprecated interface)
     // ----------------------------------------------------------
     // original function connect(const spmat &A,
     //                           float eps_strong)
@@ -4874,6 +4922,7 @@ namespace rocalution
 
         return true;
     }
+    // LCOV_EXCL_STOP
 
     // ----------------------------------------------------------
     // original function aggregates( const spmat &A,
@@ -4986,6 +5035,7 @@ namespace rocalution
         return true;
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGBoundaryNnz(const BaseVector<int>&       boundary,
                                                   const BaseVector<bool>&      connections,
@@ -5131,6 +5181,7 @@ namespace rocalution
 
         return true;
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // ----------------------------------------------------------
     // original function connect(const spmat &A,
@@ -5191,6 +5242,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5202,6 +5254,7 @@ namespace rocalution
                     cast_conn->vec_[j + this->nnz_]
                         = (v * v > eps_dia_i * cast_diag->vec_[c + this->nrow_]);
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -5260,6 +5313,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5271,6 +5325,7 @@ namespace rocalution
                         break;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             cast_state->vec_[i] = s;
@@ -5298,7 +5353,7 @@ namespace rocalution
         return *ti;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGExtractBoundaryState(
         const BaseVector<PtrType>&   bnd_csr_row_ptr,
@@ -5385,7 +5440,7 @@ namespace rocalution
 
         return true;
     }
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::AMGPMISFindMaxNeighbourNode(
@@ -5464,6 +5519,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5481,6 +5537,7 @@ namespace rocalution
                         t_max = lexographical_max(&tj, &t_max);
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Find distance two max node
@@ -5514,6 +5571,7 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[row];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[row + 1];
 
@@ -5531,9 +5589,10 @@ namespace rocalution
                             t_max = lexographical_max(&tj, &t_max);
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
-            else
+            else // COVERAGE_EXCL_NO_MPI_START
             {
                 PtrType bnd_row_start = cast_bnd_ptr->vec_[t_max.i - this->nrow_];
                 PtrType bnd_row_end   = cast_bnd_ptr->vec_[t_max.i - this->nrow_ + 1];
@@ -5559,6 +5618,7 @@ namespace rocalution
 
                     t_max = lexographical_max(&tj, &t_max);
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             if(cast_state->vec_[i] == 0)
@@ -5655,6 +5715,7 @@ namespace rocalution
 
                 if(global)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -5678,6 +5739,7 @@ namespace rocalution
                             }
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
             else if(s == -2)
@@ -6027,6 +6089,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6041,6 +6104,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Count number of entries in interior prolong
@@ -6076,15 +6140,17 @@ namespace rocalution
                         int_set.insert(global_node);
                         cast_f2c->vec_[global_node - global_column_begin] = 1;
                     }
-                    else
+                    else // COVERAGE_EXCL_NO_MPI_START
                     {
                         gst_set.insert(global_node);
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // LCOV_EXCL_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
@@ -6118,6 +6184,7 @@ namespace rocalution
 
                 cast_pg->mat_.row_offset[i + 1] = gst_set.size();
                 // LCOV_EXCL_STOP
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             cast_pi->mat_.row_offset[i + 1] = int_set.size();
@@ -6187,6 +6254,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6211,6 +6279,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Fill the interpolation matrix.
@@ -6241,6 +6310,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // LCOV_EXCL_START
                 for(PtrType j = cast_gst->mat_.row_offset[i]; j < cast_gst->mat_.row_offset[i + 1];
                     ++j)
@@ -6258,6 +6328,7 @@ namespace rocalution
                     }
                 }
                 // LCOV_EXCL_STOP
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             dia = static_cast<ValueType>(1) / dia;
@@ -6303,7 +6374,7 @@ namespace rocalution
                             int_table[global_node] = v;
                         }
                     }
-                    else
+                    else // COVERAGE_EXCL_NO_MPI_START
                     {
                         if(gst_table.find(global_node) != gst_table.end())
                         {
@@ -6313,11 +6384,13 @@ namespace rocalution
                         {
                             gst_table[global_node] = v;
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // LCOV_EXCL_START
                 PtrType pg_row_begin = cast_pg->mat_.row_offset[i];
                 PtrType pg_row_end   = pg_row_begin;
@@ -6375,6 +6448,7 @@ namespace rocalution
                     ++pg_row_end;
                 }
                 // LCOV_EXCL_STOP
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             for(auto it = int_table.begin(); it != int_table.end(); it++)
@@ -6429,6 +6503,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6443,6 +6518,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Count number of entries in interior prolong
@@ -6460,9 +6536,10 @@ namespace rocalution
                     cast_pi->mat_.row_offset[i + 1]                   = 1;
                     cast_f2c->vec_[global_node - global_column_begin] = 1;
                 }
-                else
+                else // COVERAGE_EXCL_NO_MPI_START
                 {
                     cast_pg->mat_.row_offset[i + 1] = 1;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -6523,6 +6600,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -6547,6 +6625,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Count number of entries in interior prolong
@@ -6567,12 +6646,13 @@ namespace rocalution
                         = cast_f2c->vec_[global_node - global_column_begin];
                     cast_pi->mat_.val[pi_row_end] = 1;
                 }
-                else
+                else // COVERAGE_EXCL_NO_MPI_START
                 {
                     PtrType pg_row_end = cast_pg->mat_.row_offset[i];
 
                     cast_pg->mat_.val[pg_row_end] = 1;
                     cast_glo->vec_[pg_row_end]    = global_node;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -6625,10 +6705,15 @@ namespace rocalution
 
             if(nnz_row == 1)
             {
-                PtrType aj = this->mat_.row_offset[ai];
-                if(this->mat_.col[aj] == ai)
+                int j = col[row_offset[ai]];
+
+                for(PtrType aj = this->mat_.row_offset[j]; aj < this->mat_.row_offset[j + 1]; ++aj)
                 {
-                    val[row_offset[ai]] = static_cast<ValueType>(1) / this->mat_.val[aj];
+                    if(this->mat_.col[aj] == j)
+                    {
+                        val[row_offset[ai]] = static_cast<ValueType>(1) / this->mat_.val[aj];
+                        break;
+                    }
                 }
             }
             else
@@ -6870,6 +6955,7 @@ namespace rocalution
         // S_ij = { 1   if i != j and -a_ij > eps * max(-a_ik) for k != i
         //        { 0   otherwise
         //
+        // where row i is scaled by -1 first if its diagonal is negative.
         // This means, S_ij is 1, only if i strongly depends on j.
         // S has been extended to also work with matrices that do not have
         // fully non-positive off-diagonal entries.
@@ -6926,16 +7012,19 @@ namespace rocalution
             ValueType cond = (sign ? max_a_ik : min_a_ik) * static_cast<ValueType>(eps);
 
             // Fill S
+            bool depends = false;
             for(PtrType j = row_begin; j < row_end; ++j)
             {
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                cast_S->vec_[j] = (col != i) && (val < cond);
+                cast_S->vec_[j] = (col != i) && (sign ? val > cond : val < cond);
+                depends         = depends || cast_S->vec_[j];
             }
 
-            // If cond is zero -> i is independent of other grid points
-            if(cond == static_cast<ValueType>(0))
+            // i is an F point from the start if it depends on no other point. cond can round
+            // to zero although i depends on other points.
+            if(!depends)
             {
                 cast_cf->vec_[i] = 2;
             }
@@ -6976,6 +7065,8 @@ namespace rocalution
         S_row_offset[0] = 0;
 
         // Split into C and F
+        // A point that depends on i is no F point yet, since it depends on some point. So
+        // lambda_i counts each such point once and starts below n, the number of buckets.
         std::vector<int> lambda(this->nrow_);
 
         for(int i = 0; i < this->nrow_; ++i)
@@ -6983,7 +7074,8 @@ namespace rocalution
             int temp = 0;
             for(PtrType j = S_row_offset[i]; j < S_row_offset[i + 1]; ++j)
             {
-                temp += (cast_cf->vec_[S_col[j]] == 0 ? 1 : 2);
+                assert(cast_cf->vec_[S_col[j]] == 0);
+                ++temp;
             }
 
             lambda[i] = temp;
@@ -7224,7 +7316,7 @@ namespace rocalution
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                if(col != i && val < cond)
+                if(col != i && (sign ? val > cond : val < cond))
                 {
                     // col is strongly connected to i
                     cast_S->vec_[j] = true;
@@ -7251,7 +7343,7 @@ namespace rocalution
                     int       col = cast_gst->mat_.col[j];
                     ValueType val = cast_gst->mat_.val[j];
 
-                    if(val < cond)
+                    if(sign ? val > cond : val < cond)
                     {
                         // col is strongly connected to i
                         cast_S->vec_[j + this->nnz_] = true;
@@ -7401,6 +7493,7 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7438,6 +7531,7 @@ namespace rocalution
                             }
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7496,6 +7590,7 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                     PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7516,6 +7611,7 @@ namespace rocalution
                             }
                         }
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7606,6 +7702,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
@@ -7619,6 +7716,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
 #ifdef _OPENMP
@@ -7635,7 +7733,9 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     cast_pg->mat_.row_offset[row] = 0;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
             else
@@ -7664,6 +7764,7 @@ namespace rocalution
                 // Ghost part
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     for(PtrType j = cast_gst->mat_.row_offset[row];
                         j < cast_gst->mat_.row_offset[row + 1];
                         ++j)
@@ -7677,6 +7778,7 @@ namespace rocalution
                         amin = (amin < cast_gst->mat_.val[j]) ? amin : cast_gst->mat_.val[j];
                         amax = (amax > cast_gst->mat_.val[j]) ? amax : cast_gst->mat_.val[j];
                     }
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
 
                 cast_Amin->vec_[row] = amin = amin * static_cast<ValueType>(0.2f);
@@ -7700,6 +7802,7 @@ namespace rocalution
                 // Ghost part
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     PtrType gst_nnz = 0;
 
                     row_begin = cast_gst->mat_.row_offset[row];
@@ -7719,6 +7822,7 @@ namespace rocalution
                     }
 
                     cast_pg->mat_.row_offset[row] = gst_nnz;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
             }
         }
@@ -7780,12 +7884,14 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Exclusive sum to obtain row offset pointers of P
@@ -7815,6 +7921,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             for(int i = this->nrow_; i > 0; --i)
             {
@@ -7836,6 +7943,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
 #ifdef _OPENMP
@@ -7904,6 +8012,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType ghost_row_begin = cast_gst->mat_.row_offset[row];
                 PtrType ghost_row_end   = cast_gst->mat_.row_offset[row + 1];
 
@@ -7941,6 +8050,7 @@ namespace rocalution
                         }
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             ValueType cf_neg = static_cast<ValueType>(1);
@@ -7987,6 +8097,7 @@ namespace rocalution
 
             if(global)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 PtrType ghost_row_P     = cast_pg->mat_.row_offset[row];
                 PtrType ghost_row_begin = cast_gst->mat_.row_offset[row];
                 PtrType ghost_row_end   = cast_gst->mat_.row_offset[row + 1];
@@ -8009,13 +8120,14 @@ namespace rocalution
                         ++ghost_row_P;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
         return true;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::RSExtPIBoundaryNnz(const BaseVector<int>&       boundary,
                                                       const BaseVector<int>&       CFmap,
@@ -8187,7 +8299,7 @@ namespace rocalution
 
         return true;
     }
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::RSExtPIProlongNnz(int64_t                    global_column_begin,
@@ -8236,6 +8348,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
@@ -8252,6 +8365,7 @@ namespace rocalution
             // Number of ghost rows is identical to interior
             cast_pg->nrow_ = this->nrow_;
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
 #ifdef _OPENMP
@@ -8271,7 +8385,9 @@ namespace rocalution
 
                 if(global == true)
                 {
+                    // COVERAGE_EXCL_NO_MPI_START
                     cast_pg->mat_.row_offset[row] = 0;
+                    // COVERAGE_EXCL_NO_MPI_STOP
                 }
 
                 continue;
@@ -8356,6 +8472,7 @@ namespace rocalution
 
                     if(skip_ghost == false && global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Row entry and exit of this fine point
                         row_begin_j = cast_gst->mat_.row_offset[col_j];
                         row_end_j   = cast_gst->mat_.row_offset[col_j + 1];
@@ -8384,12 +8501,14 @@ namespace rocalution
                                 gst_set.insert(gcol_k);
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // Row entry and exit points
                 row_begin = cast_gst->mat_.row_offset[row];
                 row_end   = cast_gst->mat_.row_offset[row + 1];
@@ -8462,6 +8581,7 @@ namespace rocalution
                         }
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Write row nnz back to global memory
@@ -8469,7 +8589,9 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 cast_pg->mat_.row_offset[row] = gst_set.size();
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Set this points state to fine
@@ -8530,6 +8652,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             assert(cast_l2g != NULL);
             assert(cast_gst != NULL);
@@ -8541,6 +8664,7 @@ namespace rocalution
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Exclusive sum to obtain row offset pointers of P
@@ -8570,6 +8694,7 @@ namespace rocalution
         // Once again for the ghost part
         if(global == true)
         {
+            // COVERAGE_EXCL_NO_MPI_START
             // LCOV_EXCL_START
             for(int i = this->nrow_; i > 0; --i)
             {
@@ -8591,6 +8716,7 @@ namespace rocalution
 
             cast_glo->Allocate(cast_pg->nnz_);
             // LCOV_EXCL_STOP
+            // COVERAGE_EXCL_NO_MPI_STOP
         }
 
         // Extract diagonal matrix entries
@@ -8701,6 +8827,7 @@ namespace rocalution
 
                     if(skip_ghost == false && global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Loop over all ghost columns of the fine point
                         for(PtrType l = cast_gst->mat_.row_offset[col_ik];
                             l < cast_gst->mat_.row_offset[col_ik + 1];
@@ -8725,12 +8852,14 @@ namespace rocalution
                                 gst_table[gcol_kl] = zero;
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
                 }
             }
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 for(PtrType k = cast_gst->mat_.row_offset[row];
                     k < cast_gst->mat_.row_offset[row + 1];
                     ++k)
@@ -8788,6 +8917,7 @@ namespace rocalution
                         }
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Now, we need to do the numerical part
@@ -8879,6 +9009,7 @@ namespace rocalution
 
                     if(global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Loop over all columns of the fine point
                         for(PtrType l = cast_gst->mat_.row_offset[col_ik];
                             l < cast_gst->mat_.row_offset[col_ik + 1];
@@ -8912,6 +9043,15 @@ namespace rocalution
                                 }
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
+                    }
+
+                    // Without couplings to distribute a_ik through, it is lumped into the
+                    // diagonal
+                    if(sum_l == zero)
+                    {
+                        sum_n += val_ik;
+                        continue;
                     }
 
                     // Update sum over l with a_ik
@@ -8952,6 +9092,7 @@ namespace rocalution
 
                     if(global == true)
                     {
+                        // COVERAGE_EXCL_NO_MPI_START
                         // Row entry and exit of this fine point
                         row_begin_k = cast_gst->mat_.row_offset[col_ik];
                         row_end_k   = cast_gst->mat_.row_offset[col_ik + 1];
@@ -8982,6 +9123,7 @@ namespace rocalution
                                 }
                             }
                         }
+                        // COVERAGE_EXCL_NO_MPI_STOP
                     }
 
                     // If sign of a_ki and a_kk are different, a_ki contributes to the
@@ -9019,6 +9161,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // Loop over all columns of the i-th row
                 for(PtrType k = cast_gst->mat_.row_offset[row];
                     k < cast_gst->mat_.row_offset[row + 1];
@@ -9114,6 +9257,14 @@ namespace rocalution
                             }
                         }
 
+                        // Without couplings to distribute a_ik through, it is lumped into the
+                        // diagonal
+                        if(sum_l == zero)
+                        {
+                            sum_n += val_ik;
+                            continue;
+                        }
+
                         // Store a_ki, if present
                         ValueType val_ki = zero;
 
@@ -9195,10 +9346,13 @@ namespace rocalution
                         sum_k += val_ik;
                     }
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
-            // Precompute a_ii_tilde
-            ValueType a_ii_tilde = static_cast<ValueType>(-1) / (sum_n + sum_k + val_ii);
+            // Precompute a_ii_tilde. A zero diagonal, for example after lumping a_ik into it,
+            // leaves the row without interpolation
+            ValueType diagonal   = sum_n + sum_k + val_ii;
+            ValueType a_ii_tilde = diagonal == zero ? zero : static_cast<ValueType>(-1) / diagonal;
 
             // Entry point into P (interior)
             PtrType int_idx = cast_pi->mat_.row_offset[row];
@@ -9214,6 +9368,7 @@ namespace rocalution
 
             if(global == true)
             {
+                // COVERAGE_EXCL_NO_MPI_START
                 // Entry point into P (ghost)
                 PtrType gst_idx = cast_pg->mat_.row_offset[row];
 
@@ -9225,6 +9380,7 @@ namespace rocalution
                     cast_pg->mat_.val[gst_idx] = a_ii_tilde * it->second;
                     ++gst_idx;
                 }
+                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -10118,54 +10274,10 @@ namespace rocalution
 
         assert(cast_G != NULL);
 
-        // Initialize G
-        for(int i = 0; i < cast_G->size_; ++i)
+        if(ordering < 0 || ordering > 5)
         {
-            cast_G->vec_[i] = -2;
+            return false;
         }
-
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
-
-        // Build U
-        for(int i = 0; i < this->nrow_; ++i)
-        {
-            ValueType sum = static_cast<ValueType>(0);
-
-            for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
-            {
-                if(i != this->mat_.col[j])
-                {
-                    sum += std::abs(this->mat_.val[j]);
-                }
-                else
-                {
-                    ind_diag[i] = j;
-                }
-            }
-
-            sum *= static_cast<ValueType>(5);
-
-            if(this->mat_.val[ind_diag[i]] > sum)
-            {
-                cast_G->vec_[i] = -1;
-                ++Usize;
-            }
-        }
-
-        // Initialize rG and sizes
-        Gsize  = 2;
-        rGsize = this->nrow_ - Usize;
-        allocate_host(Gsize * rGsize, rG);
-
-        for(int i = 0; i < Gsize * rGsize; ++i)
-        {
-            (*rG)[i] = -1;
-        }
-
-        nc              = 0;
-        ValueType betam = -beta;
 
         // Ordering
         HostVector<int> perm(this->local_backend_);
@@ -10200,21 +10312,81 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
+        // Initialize G
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -2;
+        }
+
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
+
+        // Build U
+        for(int i = 0; i < this->nrow_; ++i)
+        {
+            ValueType sum = static_cast<ValueType>(0);
+
+            for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
+            {
+                if(i != this->mat_.col[j])
+                {
+                    sum += std::abs(this->mat_.val[j]);
+                }
+                else
+                {
+                    diag[i] = this->mat_.val[j];
+                }
+            }
+
+            sum *= static_cast<ValueType>(5);
+
+            if(diag[i] > sum)
+            {
+                cast_G->vec_[i] = -1;
+                ++Usize;
+            }
+        }
+
+        // Initialize rG and sizes
+        Gsize  = 2;
+        rGsize = this->nrow_ - Usize;
+        allocate_host(Gsize * rGsize, rG);
+
+        for(int i = 0; i < Gsize * rGsize; ++i)
+        {
+            (*rG)[i] = -1;
+        }
+
+        nc              = 0;
+        ValueType betam = -beta;
+
         // Main algorithm
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to the connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in G
             if(cast_G->vec_[i] != -2)
@@ -10226,12 +10398,13 @@ namespace rocalution
             cast_G->vec_[i] = nc;
             (*rG)[nc]       = i;
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10253,7 +10426,6 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(cast_G->vec_[col_j] == -2)
                     {
                         min_j    = j;
@@ -10267,9 +10439,9 @@ namespace rocalution
                     min_j    = j;
                 }
 
-                if(val_j > max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10297,8 +10469,6 @@ namespace rocalution
             ++nc;
         }
 
-        free_host(&ind_diag);
-
         return true;
     }
 
@@ -10321,63 +10491,10 @@ namespace rocalution
         assert(cast_G != NULL);
         assert(cast_mat != NULL);
 
-        // Initialize G
-        for(int i = 0; i < cast_G->size_; ++i)
+        if(ordering < 0 || ordering > 5)
         {
-            cast_G->vec_[i] = -2;
+            return false;
         }
-
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
-
-        // Build U
-        for(int i = 0; i < this->nrow_; ++i)
-        {
-            ValueType sum = static_cast<ValueType>(0);
-
-            for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
-            {
-                if(i != this->mat_.col[j])
-                {
-                    sum += std::abs(this->mat_.val[j]);
-                }
-                else
-                {
-                    ind_diag[i] = j;
-                }
-            }
-
-            if(cast_mat->nnz_ > 0)
-            {
-                for(PtrType j = cast_mat->mat_.row_offset[i]; j < cast_mat->mat_.row_offset[i + 1];
-                    ++j)
-                {
-                    sum += std::abs(cast_mat->mat_.val[j]);
-                }
-            }
-
-            sum *= static_cast<ValueType>(5);
-
-            if(this->mat_.val[ind_diag[i]] > sum)
-            {
-                cast_G->vec_[i] = -1;
-                ++Usize;
-            }
-        }
-
-        // Initialize rG and sizes
-        Gsize  = 2;
-        rGsize = this->nrow_ - Usize;
-        allocate_host(Gsize * rGsize, rG);
-
-        for(int i = 0; i < Gsize * rGsize; ++i)
-        {
-            (*rG)[i] = -1;
-        }
-
-        nc              = 0;
-        ValueType betam = -beta;
 
         // Ordering
         HostVector<int> perm(this->local_backend_);
@@ -10412,21 +10529,90 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
+        // Initialize G
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -2;
+        }
+
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
+
+        // Build U
+        for(int i = 0; i < this->nrow_; ++i)
+        {
+            ValueType sum = static_cast<ValueType>(0);
+
+            for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
+            {
+                if(i != this->mat_.col[j])
+                {
+                    sum += std::abs(this->mat_.val[j]);
+                }
+                else
+                {
+                    diag[i] = this->mat_.val[j];
+                }
+            }
+
+            if(cast_mat->nnz_ > 0)
+            {
+                for(PtrType j = cast_mat->mat_.row_offset[i]; j < cast_mat->mat_.row_offset[i + 1];
+                    ++j)
+                {
+                    sum += std::abs(cast_mat->mat_.val[j]);
+                }
+            }
+
+            sum *= static_cast<ValueType>(5);
+
+            if(diag[i] > sum)
+            {
+                cast_G->vec_[i] = -1;
+                ++Usize;
+            }
+        }
+
+        // Initialize rG and sizes
+        Gsize  = 2;
+        rGsize = this->nrow_ - Usize;
+        allocate_host(Gsize * rGsize, rG);
+
+        for(int i = 0; i < Gsize * rGsize; ++i)
+        {
+            (*rG)[i] = -1;
+        }
+
+        nc              = 0;
+        ValueType betam = -beta;
+
         // Main algorithm
 
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to the connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in G
             if(cast_G->vec_[i] != -2)
@@ -10438,12 +10624,13 @@ namespace rocalution
             cast_G->vec_[i] = nc;
             (*rG)[nc]       = i;
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries, ghost entries included
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10465,7 +10652,6 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(cast_G->vec_[col_j] == -2)
                     {
                         min_j    = col_j;
@@ -10479,9 +10665,9 @@ namespace rocalution
                     min_j    = col_j;
                 }
 
-                if(val_j > max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10497,9 +10683,9 @@ namespace rocalution
                         val_j *= static_cast<ValueType>(-1);
                     }
 
-                    if(val_j > max_a_ij)
+                    if(-val_j > max_a_ij)
                     {
-                        max_a_ij = val_j;
+                        max_a_ij = -val_j;
                     }
                 }
             }
@@ -10547,8 +10733,6 @@ namespace rocalution
             ++nc;
         }
 
-        free_host(&ind_diag);
-
         return true;
     }
 
@@ -10565,29 +10749,10 @@ namespace rocalution
         HostVector<int>* cast_G = dynamic_cast<HostVector<int>*>(G);
         assert(cast_G != NULL);
 
-        // Initialize G and inverse indexing for G
-        Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
-
-        for(int i = 0; i < Gsize * rGsizec; ++i)
+        if(ordering < 0 || ordering > 5)
         {
-            rGc[i] = -1;
+            return false;
         }
-
-        for(int i = 0; i < cast_G->size_; ++i)
-        {
-            cast_G->vec_[i] = -1;
-        }
-
-        // Initialize U
-        int* U = NULL;
-        allocate_host(this->nrow_, &U);
-        set_to_zero_host(this->nrow_, U);
-
-        nc              = 0;
-        ValueType betam = -beta;
 
         // Ordering
         HostVector<int> perm(this->local_backend_);
@@ -10622,19 +10787,54 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
+        // Initialize G and inverse indexing for G
+        Gsize *= 2;
+        int     rGsizec = this->nrow_;
+        int64_t rGcsize = static_cast<int64_t>(Gsize) * rGsizec;
+        int*    rGc     = NULL;
+        allocate_host(rGcsize, &rGc);
+
+        for(int64_t i = 0; i < rGcsize; ++i)
+        {
+            rGc[i] = -1;
+        }
+
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -1;
+        }
+
+        // Initialize U
+        int* U = NULL;
+        allocate_host(this->nrow_, &U);
+        set_to_zero_host(this->nrow_, U);
+
+        nc              = 0;
+        ValueType betam = -beta;
+
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in U
             if(U[i] == 1)
@@ -10646,7 +10846,7 @@ namespace rocalution
             U[i] = 1;
 
             // Fill G and rG
-            for(int r = 0; r < Gsize / 2; ++r)
+            for(int64_t r = 0; r < Gsize / 2; ++r)
             {
                 rGc[r * rGsizec + nc] = (*rG)[r * rGsize + i];
 
@@ -10671,7 +10871,8 @@ namespace rocalution
                 }
             }
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
@@ -10693,12 +10894,10 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
-
                     if(U[col_j] == 0)
                     {
                         min_j    = j;
-                        min_a_ij = max_a_ij;
+                        min_a_ij = val_j;
                     }
                 }
 
@@ -10708,9 +10907,9 @@ namespace rocalution
                     min_j    = j;
                 }
 
-                if(val_j < max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10730,7 +10929,7 @@ namespace rocalution
                 // Add j if conditions are fulfilled
                 if(val_j < max_a_ij)
                 {
-                    for(int r = 0; r < Gsize / 2; ++r)
+                    for(int64_t r = 0; r < Gsize / 2; ++r)
                     {
                         rGc[(r + Gsize / 2) * rGsizec + nc] = (*rG)[r * rGsize + col_j];
 
@@ -10775,29 +10974,10 @@ namespace rocalution
         assert(cast_G != NULL);
         assert(cast_mat != NULL);
 
-        // Initialize G and inverse indexing for G
-        Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
-
-        for(int i = 0; i < Gsize * rGsizec; ++i)
+        if(ordering < 0 || ordering > 5)
         {
-            rGc[i] = -1;
+            return false;
         }
-
-        for(int i = 0; i < cast_G->size_; ++i)
-        {
-            cast_G->vec_[i] = -1;
-        }
-
-        // Initialize U
-        int* U = NULL;
-        allocate_host(this->nrow_, &U);
-        set_to_zero_host(this->nrow_, U);
-
-        nc              = 0;
-        ValueType betam = -beta;
 
         // Ordering
         HostVector<int> perm(this->local_backend_);
@@ -10832,19 +11012,54 @@ namespace rocalution
             break;
         }
 
+        // The orderings map each node to its position. One that is not a permutation is
+        // rejected before any output is written.
+        if(ordering != 0 && perm.GetSize() != this->nrow_)
+        {
+            return false;
+        }
+
+        std::vector<int> node(this->nrow_, -1);
+        for(int n = 0; n < this->nrow_; ++n)
+        {
+            const int k = ordering == 0 ? n : perm.vec_[n];
+            if(k < 0 || k >= this->nrow_ || node[k] != -1)
+            {
+                return false;
+            }
+            node[k] = n;
+        }
+
+        // Initialize G and inverse indexing for G
+        Gsize *= 2;
+        int     rGsizec = this->nrow_;
+        int64_t rGcsize = static_cast<int64_t>(Gsize) * rGsizec;
+        int*    rGc     = NULL;
+        allocate_host(rGcsize, &rGc);
+
+        for(int64_t i = 0; i < rGcsize; ++i)
+        {
+            rGc[i] = -1;
+        }
+
+        for(int i = 0; i < cast_G->size_; ++i)
+        {
+            cast_G->vec_[i] = -1;
+        }
+
+        // Initialize U
+        int* U = NULL;
+        allocate_host(this->nrow_, &U);
+        set_to_zero_host(this->nrow_, U);
+
+        nc              = 0;
+        ValueType betam = -beta;
+
         // While U != empty
         for(int k = 0; k < this->nrow_; ++k)
         {
             // Pick i according to connectivity
-            int i;
-            if(ordering == 0)
-            {
-                i = k;
-            }
-            else
-            {
-                i = perm.vec_[k];
-            }
+            int i = node[k];
 
             // Check if i in U
             if(U[i] == 1)
@@ -10856,7 +11071,7 @@ namespace rocalution
             U[i] = 1;
 
             // Fill G and rG
-            for(int r = 0; r < Gsize / 2; ++r)
+            for(int64_t r = 0; r < Gsize / 2; ++r)
             {
                 rGc[r * rGsizec + nc] = (*rG)[r * rGsize + i];
 
@@ -10881,7 +11096,8 @@ namespace rocalution
                 }
             }
 
-            // Determine minimum and maximum offdiagonal entry and j index
+            // Determine the minimum offdiagonal entry and its j index, and the maximum
+            // magnitude of the negative offdiagonal entries, ghost entries included
             ValueType min_a_ij = static_cast<ValueType>(0);
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
@@ -10903,11 +11119,10 @@ namespace rocalution
 
                 if(min_j == -1)
                 {
-                    max_a_ij = val_j;
                     if(U[col_j] == 0)
                     {
                         min_j    = col_j;
-                        min_a_ij = max_a_ij;
+                        min_a_ij = val_j;
                     }
                 }
 
@@ -10917,9 +11132,9 @@ namespace rocalution
                     min_j    = col_j;
                 }
 
-                if(val_j < max_a_ij)
+                if(-val_j > max_a_ij)
                 {
-                    max_a_ij = val_j;
+                    max_a_ij = -val_j;
                 }
             }
 
@@ -10935,9 +11150,9 @@ namespace rocalution
                         val_j *= static_cast<ValueType>(-1);
                     }
 
-                    if(val_j > max_a_ij)
+                    if(-val_j > max_a_ij)
                     {
-                        max_a_ij = val_j;
+                        max_a_ij = -val_j;
                     }
                 }
             }
@@ -10974,7 +11189,7 @@ namespace rocalution
                     {
                         if(min_j == col_j)
                         {
-                            for(int r = 0; r < Gsize / 2; ++r)
+                            for(int64_t r = 0; r < Gsize / 2; ++r)
                             {
                                 rGc[(r + Gsize / 2) * rGsizec + nc] = (*rG)[r * rGsize + min_j];
 
@@ -11059,7 +11274,7 @@ namespace rocalution
 
             int m = 0;
 
-            for(int r = 0; r < Gsize; ++r)
+            for(int64_t r = 0; r < Gsize; ++r)
             {
                 int i = rG[r * rGsize + k];
 
@@ -11202,106 +11417,101 @@ namespace rocalution
     {
         assert(vec.GetSize() == this->nrow_);
 
-        if(this->nnz_ > 0)
-        {
-            const HostVector<ValueType>* cast_vec
-                = dynamic_cast<const HostVector<ValueType>*>(&vec);
-            assert(cast_vec != NULL);
+        const HostVector<ValueType>* cast_vec = dynamic_cast<const HostVector<ValueType>*>(&vec);
+        assert(cast_vec != NULL);
 
-            PtrType*   row_offset = NULL;
-            int*       col        = NULL;
-            ValueType* val        = NULL;
+        PtrType*   row_offset = NULL;
+        int*       col        = NULL;
+        ValueType* val        = NULL;
 
-            int nrow = this->nrow_;
-            int ncol = this->ncol_;
+        int nrow = this->nrow_;
+        int ncol = this->ncol_;
 
-            allocate_host(nrow + 1, &row_offset);
-            row_offset[0] = 0;
+        allocate_host(nrow + 1, &row_offset);
+        row_offset[0] = 0;
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow; ++i)
+        for(int i = 0; i < nrow; ++i)
+        {
+            bool add = true;
+
+            row_offset[i + 1] = this->mat_.row_offset[i + 1] - this->mat_.row_offset[i];
+
+            for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
             {
-                bool add = true;
-
-                row_offset[i + 1] = this->mat_.row_offset[i + 1] - this->mat_.row_offset[i];
-
-                for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
+                if(this->mat_.col[j] == idx)
                 {
-                    if(this->mat_.col[j] == idx)
-                    {
-                        add = false;
-                        break;
-                    }
-                }
-
-                if(add == true && cast_vec->vec_[i] != static_cast<ValueType>(0))
-                {
-                    ++row_offset[i + 1];
-                }
-
-                if(add == false && cast_vec->vec_[i] == static_cast<ValueType>(0))
-                {
-                    --row_offset[i + 1];
+                    add = false;
+                    break;
                 }
             }
 
-            for(int i = 0; i < nrow; ++i)
+            if(add == true && cast_vec->vec_[i] != static_cast<ValueType>(0))
             {
-                row_offset[i + 1] += row_offset[i];
+                ++row_offset[i + 1];
             }
 
-            PtrType nnz = row_offset[nrow];
+            if(add == false && cast_vec->vec_[i] == static_cast<ValueType>(0))
+            {
+                --row_offset[i + 1];
+            }
+        }
 
-            allocate_host(nnz, &col);
-            allocate_host(nnz, &val);
+        for(int i = 0; i < nrow; ++i)
+        {
+            row_offset[i + 1] += row_offset[i];
+        }
+
+        PtrType nnz = row_offset[nrow];
+
+        allocate_host(nnz, &col);
+        allocate_host(nnz, &val);
 
 // Fill new CSR matrix
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow; ++i)
+        for(int i = 0; i < nrow; ++i)
+        {
+            PtrType k = row_offset[i];
+            PtrType j = this->mat_.row_offset[i];
+
+            for(; j < this->mat_.row_offset[i + 1]; ++j)
             {
-                PtrType k = row_offset[i];
-                PtrType j = this->mat_.row_offset[i];
-
-                for(; j < this->mat_.row_offset[i + 1]; ++j)
+                if(this->mat_.col[j] < idx)
                 {
-                    if(this->mat_.col[j] < idx)
-                    {
-                        col[k] = this->mat_.col[j];
-                        val[k] = this->mat_.val[j];
-                        ++k;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if(cast_vec->vec_[i] != static_cast<ValueType>(0))
-                {
-                    col[k] = idx;
-                    val[k] = cast_vec->vec_[i];
+                    col[k] = this->mat_.col[j];
+                    val[k] = this->mat_.val[j];
                     ++k;
-                    ++j;
                 }
-
-                for(; j < this->mat_.row_offset[i + 1]; ++j)
+                else
                 {
-                    if(this->mat_.col[j] > idx)
-                    {
-                        col[k] = this->mat_.col[j];
-                        val[k] = this->mat_.val[j];
-                        ++k;
-                    }
+                    break;
                 }
             }
 
-            this->Clear();
-            this->SetDataPtrCSR(&row_offset, &col, &val, row_offset[nrow], nrow, ncol);
+            if(cast_vec->vec_[i] != static_cast<ValueType>(0))
+            {
+                col[k] = idx;
+                val[k] = cast_vec->vec_[i];
+                ++k;
+            }
+
+            for(; j < this->mat_.row_offset[i + 1]; ++j)
+            {
+                if(this->mat_.col[j] > idx)
+                {
+                    col[k] = this->mat_.col[j];
+                    val[k] = this->mat_.val[j];
+                    ++k;
+                }
+            }
         }
+
+        this->Clear();
+        this->SetDataPtrCSR(&row_offset, &col, &val, row_offset[nrow], nrow, ncol);
 
         return true;
     }
@@ -11312,29 +11522,25 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->nrow_);
 
-        if(this->nnz_ > 0)
-        {
-            HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
-            assert(cast_vec != NULL);
+        HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
+        assert(cast_vec != NULL);
 
-            _set_omp_backend_threads(this->local_backend_, this->nrow_);
+        _set_omp_backend_threads(this->local_backend_, this->nrow_);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int ai = 0; ai < this->nrow_; ++ai)
-            {
-                // Initialize with zero
-                cast_vec->vec_[ai] = static_cast<ValueType>(0);
+        for(int ai = 0; ai < this->nrow_; ++ai)
+        {
+            // Initialize with zero
+            cast_vec->vec_[ai] = static_cast<ValueType>(0);
 
-                for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
-                    ++aj)
+            for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1]; ++aj)
+            {
+                if(idx == this->mat_.col[aj])
                 {
-                    if(idx == this->mat_.col[aj])
-                    {
-                        cast_vec->vec_[ai] = this->mat_.val[aj];
-                        break;
-                    }
+                    cast_vec->vec_[ai] = this->mat_.val[aj];
+                    break;
                 }
             }
         }
@@ -11347,105 +11553,101 @@ namespace rocalution
     {
         assert(vec.GetSize() == this->ncol_);
 
-        if(this->nnz_ > 0)
+        const HostVector<ValueType>* cast_vec = dynamic_cast<const HostVector<ValueType>*>(&vec);
+        assert(cast_vec != NULL);
+
+        PtrType*   row_offset = NULL;
+        int*       col        = NULL;
+        ValueType* val        = NULL;
+
+        int nrow = this->nrow_;
+        int ncol = this->ncol_;
+
+        allocate_host(nrow + 1, &row_offset);
+        row_offset[0] = 0;
+
+        // Compute nnz of row idx
+        int nnz_idx = 0;
+
+        for(int i = 0; i < ncol; ++i)
         {
-            const HostVector<ValueType>* cast_vec
-                = dynamic_cast<const HostVector<ValueType>*>(&vec);
-            assert(cast_vec != NULL);
-
-            PtrType*   row_offset = NULL;
-            int*       col        = NULL;
-            ValueType* val        = NULL;
-
-            int nrow = this->nrow_;
-            int ncol = this->ncol_;
-
-            allocate_host(nrow + 1, &row_offset);
-            row_offset[0] = 0;
-
-            // Compute nnz of row idx
-            int nnz_idx = 0;
-
-            for(int i = 0; i < ncol; ++i)
+            if(cast_vec->vec_[i] != static_cast<ValueType>(0))
             {
-                if(cast_vec->vec_[i] != static_cast<ValueType>(0))
-                {
-                    ++nnz_idx;
-                }
+                ++nnz_idx;
             }
+        }
 
-            // Fill row_offset
-            PtrType shift = nnz_idx - this->mat_.row_offset[idx + 1] + this->mat_.row_offset[idx];
+        // Fill row_offset
+        PtrType shift = nnz_idx - this->mat_.row_offset[idx + 1] + this->mat_.row_offset[idx];
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow + 1; ++i)
+        for(int i = 0; i < nrow + 1; ++i)
+        {
+            if(i < idx + 1)
             {
-                if(i < idx + 1)
-                {
-                    row_offset[i] = this->mat_.row_offset[i];
-                }
-                else
-                {
-                    row_offset[i] = this->mat_.row_offset[i] + shift;
-                }
+                row_offset[i] = this->mat_.row_offset[i];
             }
+            else
+            {
+                row_offset[i] = this->mat_.row_offset[i] + shift;
+            }
+        }
 
-            PtrType nnz = row_offset[nrow];
+        PtrType nnz = row_offset[nrow];
 
-            // Fill col and val
-            allocate_host(nnz, &col);
-            allocate_host(nnz, &val);
+        // Fill col and val
+        allocate_host(nnz, &col);
+        allocate_host(nnz, &val);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow; ++i)
+        for(int i = 0; i < nrow; ++i)
+        {
+            // Rows before idx
+            if(i < idx)
             {
-                // Rows before idx
-                if(i < idx)
+                for(PtrType j = row_offset[i]; j < row_offset[i + 1]; ++j)
                 {
-                    for(PtrType j = row_offset[i]; j < row_offset[i + 1]; ++j)
-                    {
-                        col[j] = this->mat_.col[j];
-                        val[j] = this->mat_.val[j];
-                    }
-
-                    // Row == idx
+                    col[j] = this->mat_.col[j];
+                    val[j] = this->mat_.val[j];
                 }
-                else if(i == idx)
+
+                // Row == idx
+            }
+            else if(i == idx)
+            {
+                PtrType k = row_offset[i];
+
+                for(int j = 0; j < ncol; ++j)
                 {
-                    PtrType k = row_offset[i];
-
-                    for(int j = 0; j < ncol; ++j)
+                    if(cast_vec->vec_[j] != static_cast<ValueType>(0))
                     {
-                        if(cast_vec->vec_[j] != static_cast<ValueType>(0))
-                        {
-                            col[k] = j;
-                            val[k] = cast_vec->vec_[j];
-                            ++k;
-                        }
-                    }
-
-                    // Rows after idx
-                }
-                else if(i > idx)
-                {
-                    PtrType k = row_offset[i];
-
-                    for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
-                    {
-                        col[k] = this->mat_.col[j];
-                        val[k] = this->mat_.val[j];
+                        col[k] = j;
+                        val[k] = cast_vec->vec_[j];
                         ++k;
                     }
                 }
-            }
 
-            this->Clear();
-            this->SetDataPtrCSR(&row_offset, &col, &val, nnz, nrow, ncol);
+                // Rows after idx
+            }
+            else if(i > idx)
+            {
+                PtrType k = row_offset[i];
+
+                for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
+                {
+                    col[k] = this->mat_.col[j];
+                    val[k] = this->mat_.val[j];
+                    ++k;
+                }
+            }
         }
+
+        this->Clear();
+        this->SetDataPtrCSR(&row_offset, &col, &val, nnz, nrow, ncol);
 
         return true;
     }
@@ -11456,25 +11658,22 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->ncol_);
 
-        if(this->nnz_ > 0)
+        HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
+        assert(cast_vec != NULL);
+
+        _set_omp_backend_threads(this->local_backend_, this->nrow_);
+
+        cast_vec->Zeros();
+
+        for(PtrType aj = this->mat_.row_offset[idx]; aj < this->mat_.row_offset[idx + 1]; ++aj)
         {
-            HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
-            assert(cast_vec != NULL);
-
-            _set_omp_backend_threads(this->local_backend_, this->nrow_);
-
-            cast_vec->Zeros();
-
-            for(PtrType aj = this->mat_.row_offset[idx]; aj < this->mat_.row_offset[idx + 1]; ++aj)
-            {
-                cast_vec->vec_[this->mat_.col[aj]] = this->mat_.val[aj];
-            }
+            cast_vec->vec_[this->mat_.col[aj]] = this->mat_.val[aj];
         }
 
         return true;
     }
 
-    // LCOV_EXCL_START
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     bool HostMatrixCSR<ValueType>::ExtractGlobalColumnIndices(int     ncol,
                                                               int64_t global_offset,
@@ -12443,7 +12642,7 @@ namespace rocalution
         return true;
     }
 
-    // LCOV_EXCL_STOP
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     template class HostMatrixCSR<double>;
     template class HostMatrixCSR<float>;

@@ -489,28 +489,27 @@ TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
     EXPECT_EQ(count, 20);
 }
 
-TEST(TestTypeErasedIteratorRagged, RaggedCompositeIndexKeepsLegacyPublicMembers)
+// The iterator walks the live rows `s < lengths[b]` of each batch from its origin: with seq_len
+// bound, the origin is offsets[b] (offsets[b + 1] is not read) and rows past the length are never
+// visited.
+TEST(TestTypeErasedIteratorRagged, IteratesLiveRowsFromEachOrigin)
 {
-    using Index = ITensorIterator<false>::RaggedCompositeIndex;
-    static_assert(std::is_same_v<decltype(Index::indices), std::vector<int64_t>>);
-    static_assert(std::is_same_v<decltype(Index::rowOffsets), std::vector<int64_t>>);
-    static_assert(std::is_same_v<decltype(Index::tensor), ITensorIterator<false>::TensorType>);
-    static_assert(std::is_same_v<decltype(Index::seqAxis), int>);
-    static_assert(std::is_same_v<decltype(Index::seqStride), int64_t>);
-    static_assert(std::is_constructible_v<Index,
-                                          ITensorIterator<false>::TensorType,
-                                          RaggedIterationInfo,
-                                          bool>);
+    const std::vector<int64_t> dims = {2, 1, 4, 2};
+    const std::vector<int64_t> strides = {8, 2, 2, 1};
+    auto offsets = makeOffsetAux<int32_t>({10, 0, 0}); // origins at rows 5 and 0
+    auto lengths = makeOffsetAux<int32_t>({2, 3});
+    RaggedTensor<float> tensor(dims, strides, K_SEQ_AXIS, offsets, std::nullopt, 1, lengths);
+    tensor.fillWithValue(0.0f);
 
-    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
-    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, K_SEQ_AXIS, aux);
-    const auto info = tensor.raggedIterationInfo();
-    ASSERT_TRUE(info.has_value());
+    const auto* base = static_cast<const float*>(tensor.memory().hostData());
+    std::vector<int64_t> visited;
+    for(auto it = tensor.begin(); it != tensor.end(); ++it)
+    {
+        visited.push_back(static_cast<const float*>(*it) - base);
+    }
 
-    const auto index = std::get<Index>(tensor.begin().index());
-    EXPECT_EQ(index.rowOffsets, info->rowOffsets);
-    EXPECT_EQ(index.seqAxis, info->seqAxis);
-    EXPECT_EQ(index.seqStride, info->seqStride);
+    // Batch 0: rows 5, 6 (addresses 10..13); batch 1: rows 0..2 (addresses 0..5).
+    EXPECT_EQ(visited, (std::vector<int64_t>{10, 11, 12, 13, 0, 1, 2, 3, 4, 5}));
 }
 
 TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)

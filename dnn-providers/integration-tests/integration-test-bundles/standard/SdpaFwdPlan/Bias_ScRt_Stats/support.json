@@ -1,0 +1,103 @@
+{
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "bf16_8231afa61f43376c"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_14106621547b4551",
+          "bf16_17effe073b92cb22",
+          "bf16_195fa1067d4d3335",
+          "bf16_60b393c640001e3e",
+          "bf16_8231afa61f43376c",
+          "bf16_e255b647ffccf099",
+          "fp16_cac75816120eee36"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_8231afa61f43376c",
+          "fp16_cac75816120eee36"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_8231afa61f43376c",
+          "fp16_cac75816120eee36"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_14106621547b4551",
+          "bf16_17effe073b92cb22",
+          "bf16_195fa1067d4d3335",
+          "bf16_60b393c640001e3e",
+          "bf16_8231afa61f43376c",
+          "bf16_e255b647ffccf099",
+          "fp16_cac75816120eee36"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_8231afa61f43376c",
+          "fp16_cac75816120eee36"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

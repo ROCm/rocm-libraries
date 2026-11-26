@@ -230,6 +230,16 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
         return "ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE";        
     case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
         return "ROCBLASLT_MATRIX_LAYOUT_OFFSET";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH";
     case ROCBLASLT_MATRIX_LAYOUT_MAX:
         return "ROCBLASLT_MATRIX_LAYOUT_MAX";
     default:
@@ -294,11 +304,17 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
+    case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+        return "MATMUL_DESC_FUSED_PROLOGUE";
 #endif
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
         return "MATMUL_DESC_BIAS_BATCH_STRIDE";
+    case ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE:
+        return "MATMUL_DESC_ALPHA_BATCH_STRIDE";
+    case ROCBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE:
+        return "MATMUL_DESC_BETA_BATCH_STRIDE";
     default:
         return "Invalid";
     }
@@ -367,6 +383,8 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_64_F16_ZP";
     case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
         return "Block_128_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        return "Block_32_UE8M0_128_4_EXT";
     default:
         return "Invalid";
     }
@@ -439,6 +457,10 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_SWISH_EXT";
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
         return "EPILOGUE_SWISH_BIAS_EXT";
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_EXT:
+        return "EPILOGUE_SWISH_AUX_EXT";
+    case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
+        return "EPILOGUE_SWISH_AUX_BIAS_EXT";
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:
         return "EPILOGUE_CLAMP_EXT";
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:

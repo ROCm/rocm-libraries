@@ -1,0 +1,39 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_2fd4dad04cb30170",
+          "bf16_40b6f5128ab17a2d",
+          "bf16_b610b77e2619dbda",
+          "bf16_e10d6a13c9740ab3"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_2fd4dad04cb30170",
+          "bf16_40b6f5128ab17a2d",
+          "bf16_b610b77e2619dbda",
+          "bf16_e10d6a13c9740ab3"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
