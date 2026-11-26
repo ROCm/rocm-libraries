@@ -150,10 +150,6 @@ _PAGED = {"paged": True, "block_size": 16, "num_kv_blocks": 64, "dtype": "fp16"}
         ("sliding_window", {"sliding_window": 64}),
         # The single-sequence paged body has no shifted diagonal.
         ("paged=True unless varlen", _PAGED),
-        (
-            "use_sinks is not yet supported with paged KV",
-            {**_PAGED, "varlen": True, "use_sinks": True},
-        ),
         ("right_bound", {"varlen": True, "right_bound": 64}),
         ("seqlen_q <= seqlen_kv", {**_PAGED, "varlen": True, "seqlen_q": 2048}),
     ],

@@ -317,6 +317,16 @@ _CASES: tuple[dict, ...] = (
     dict(
         use_sinks=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
+    dict(
+        use_sinks=True,
+        paged=True,
+        varlen=True,
+        causal_bottom_right=True,
+        block_size=16,
+        num_kv_blocks=64,
+        seqlen_q=256,
+        seqlen_kv=1024,
+    ),
     dict(use_sinks=True, varlen=True),
     dict(use_sinks=True, varlen=True, causal_bottom_right=True, seqlen_kv=1024),
     dict(use_sinks=True, varlen=True, sliding_window=128),

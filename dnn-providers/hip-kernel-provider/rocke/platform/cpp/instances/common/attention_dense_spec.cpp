@@ -687,8 +687,6 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
     }
     else if(s->use_i64_kv_addr)
         ROCKE_SPEC_FAIL(reason, cap, "use_i64_kv_addr requires paged=True");
-    if(s->use_sinks && s->paged)
-        ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
     return true;
 }
 

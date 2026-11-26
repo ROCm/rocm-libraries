@@ -367,8 +367,6 @@ class AttentionDenseSpec:
                 )
         elif self.use_i64_kv_addr:
             raise ValueError("use_i64_kv_addr requires paged=True")
-        if self.use_sinks and self.paged:
-            raise ValueError("use_sinks is not yet supported with paged KV")
 
     @property
     def num_waves(self) -> int:

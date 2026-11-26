@@ -93,8 +93,11 @@ def test_gfx950_dense_layout_picks_default_body(overrides, candidate):
         # Wide DMA needs a page per KV tile at least.
         ({"kv_block_size": 16}, "attention_gfx950_dense_persist"),
         ({"sliding_window": 1024}, "attention_gfx950_dense_persist"),
+        # Sinks rule out wide DMA, as for contiguous K/V.
+        ({"use_sinks": True}, "attention_gfx950_dense_persist"),
         # The persistent bodies take one sequence.
         ({"batch": 4}, "attention_gfx950_dense_grid"),
+        ({"batch": 4, "use_sinks": True}, "attention_gfx950_dense_grid"),
         ({"seqlen_q": 512, "seqlen_k": 512}, "attention_gfx950_dense_persist_widedma"),
         (
             {"seqlen_q": 512, "seqlen_k": 512, "kv_block_size": 16},
@@ -123,6 +126,10 @@ def test_gfx950_paged_layout_picks_default_body(overrides, candidate):
         # narrow windows keep their grid geometry.
         ({"dtype": "fp16"}, False),
         ({"dtype": "fp16", "sliding_window": 4096}, True),
+        # Sinks leave the choice as it is without them.
+        ({"use_sinks": True}, True),
+        ({"use_sinks": True, "dtype": "fp16"}, False),
+        ({"use_sinks": True, "batch": 4}, False),
         ({"dtype": "fp16", "sliding_window": 256}, False),
         ({"sliding_window": 128}, False),
         ({"hdim_q": 64, "hdim_v": 64}, False),
@@ -133,14 +140,24 @@ def test_gfx950_paged_layout_picks_default_body(overrides, candidate):
     ],
 )
 def test_gfx942_paged_layout_picks_default_body(overrides, persistent):
-    result = dispatch_attention(_request("gfx942", layout="paged", **overrides))
+    req = _request("gfx942", layout="paged", **overrides)
+    result = dispatch_attention(req)
     assert result.candidate.name == "attention_gfx942_dense"
     assert ("_persist" in result.spec.kernel_name()) == persistent
+    pinned = dispatch_attention(
+        dataclasses.replace(
+            req, algorithm=result.candidate.algorithm, spec_id=result.candidate.spec_id
+        )
+    )
+    assert pinned.spec.kernel_spec == result.spec.kernel_spec
 
 
-def test_gfx942_paged_several_windowed_d128_sequences_stay_on_unified():
+@pytest.mark.parametrize("use_sinks", [False, True])
+def test_gfx942_paged_several_windowed_d128_sequences_stay_on_unified(use_sinks):
     result = dispatch_attention(
-        _request("gfx942", layout="paged", batch=4, sliding_window=1024)
+        _request(
+            "gfx942", layout="paged", batch=4, sliding_window=1024, use_sinks=use_sinks
+        )
     )
     assert result.candidate.name == "attention_unified_2d"
 
@@ -208,7 +225,8 @@ def test_fp8_keeps_the_unified_route_off_the_dense_layout():
 @pytest.mark.parametrize(
     "overrides",
     [
-        pytest.param({"use_sinks": True}, id="sinks"),
+        # Paged dense is causal-only, with or without sinks.
+        pytest.param({"use_sinks": True, "mask_type": 0}, id="non_causal_sinks"),
         pytest.param({"seqlen_q": 1, "mask_type": 0}, id="decode"),
         # Several sequences whose queries are fewer than their keys under the
         # top-left mask: dense computes it only for q_len == kv_len.

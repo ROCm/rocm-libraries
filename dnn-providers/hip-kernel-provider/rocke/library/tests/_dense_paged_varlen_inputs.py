@@ -80,11 +80,13 @@ def check_paged_varlen(
     dtype,
     window,
     q_lens=None,
+    sinks=False,
 ):
     """One packed launch of ``lens`` against ``reference(q, k, v, scale, window)``
     per sequence ([1, S, H, D] tensors). ``make_spec(lens, block_size, d, dtype,
     num_kv_blocks, window=...)`` builds the arch's varlen spec. ``q_lens``: query
-    lengths that differ from the KV lengths ``lens`` (bottom-right)."""
+    lengths that differ from the KV lengths ``lens`` (bottom-right). ``sinks``:
+    per-head sink logits go to the launch and to ``reference(..., sinks=...)``."""
     torch.manual_seed(0)
     scale = 1.0 / math.sqrt(d)
     q, ks, vs, k_cache, v_cache, table, kv_lens, cu = paged_varlen_inputs(
@@ -93,6 +95,11 @@ def check_paged_varlen(
     q_lens = lens if q_lens is None else q_lens
     spec = make_spec(lens, block_size, d, dtype, k_cache.shape[0], window=window)
     assert spec.varlen
+    sink_kw = {}
+    if sinks:
+        spec = dataclasses.replace(spec, use_sinks=True)
+        # Large enough that a dropped sink moves every row.
+        sink_kw["sinks"] = (2.0 * torch.randn(q.shape[1], device="cuda")).to(q.dtype)
     # Unwritten rows stay NaN. The rows past the packed output catch a tail
     # store of the last sequence's partial q-block that its guard missed.
     total = q.shape[0]
@@ -110,6 +117,7 @@ def check_paged_varlen(
         block_tables=table,
         kv_lens=kv_lens,
         cu_seqlens_q=cu,
+        **sink_kw,
     )
     torch.cuda.synchronize()
     assert torch.isnan(out_buf[total:]).all(), "store past the packed output"
@@ -125,6 +133,7 @@ def check_paged_varlen(
             vs[b][None],
             scale,
             window,
+            **sink_kw,
         )[0]
         max_abs = (ref - got.float()).abs().max().item()
         assert max_abs < tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"

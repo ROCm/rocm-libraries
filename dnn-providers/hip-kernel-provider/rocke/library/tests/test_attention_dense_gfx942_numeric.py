@@ -1534,12 +1534,12 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
+def _lse_reference(q, k, v, scale, *, causal, diagonal=0, window=0, sinks=None):
     """Independent FP32 O and natural-log LSE, including truly empty rows.
 
     Scores use FP32 Q/K with the softmax scale applied in FP32. ``sinks`` adds one
     logit per query head with no value row, so a row with no key has the sink as
-    its LSE.
+    its LSE. ``diagonal`` shifts the causal diagonal (bottom-right: kv_len - q_len).
     """
     batch, sq, hq = q.shape[:3]
     skv, hkv = k.shape[1:3]
@@ -1547,7 +1547,7 @@ def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
     kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
     vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
     scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
-    qi = torch.arange(sq, device=q.device).view(-1, 1)
+    qi = torch.arange(sq, device=q.device).view(-1, 1) + diagonal
     ki = torch.arange(skv, device=q.device).view(1, -1)
     allowed = torch.ones((sq, skv), device=q.device, dtype=torch.bool)
     if causal:
@@ -2338,9 +2338,51 @@ class TestDensePagedNumeric:
         ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("emit_lse", [False, True], ids=["out", "lse"])
+    @pytest.mark.parametrize(
+        "sq,sk,window,d",
+        [
+            pytest.param(1024, 1024, 256, 128, id="swa-d128"),
+            pytest.param(2048, 2048, 0, 64, id="causal-d64"),
+            pytest.param(1024, 512, 128, 128, id="swa-empty-rows-1024x512"),
+        ],
+    )
+    def test_paged_sinks_matches_dense_bit_exact(
+        self, dtype, persistent, emit_lse, sq, sk, window, d
+    ):
+        """Sinks with paged K/V: the same O (and LSE) bits as contiguous K/V with
+        sinks, and the sink reference; rows whose window holds no key give O = 0
+        and LSE = the sink logit."""
+        if persistent and sq != sk:
+            pytest.skip("the persistent body takes whole query tiles of one length")
+        self._check_paged(
+            dtype,
+            16,
+            sq,
+            sk,
+            window,
+            d,
+            persistent=persistent,
+            sinks=True,
+            emit_lse=emit_lse,
+        )
+
     @staticmethod
     def _check_paged(
-        dtype, block_size, sq, sk, window, d, use_cfvst=None, persistent=False
+        dtype,
+        block_size,
+        sq,
+        sk,
+        window,
+        d,
+        use_cfvst=None,
+        persistent=False,
+        sinks=False,
+        emit_lse=False,
     ):
         hq, hkv, B = 16, 4, 1
         tdt = getattr(torch, _TORCH_DT[dtype])
@@ -2381,27 +2423,64 @@ class TestDensePagedNumeric:
             # Paged on the persistent body against contiguous on the same body.
             paged_spec = dataclasses.replace(paged_spec, persistent=True)
             dense_spec = dataclasses.replace(dense_spec, persistent=True)
+        assert sinks or not emit_lse, "the LSE checks below run with sinks only"
+        knobs = dict(use_sinks=sinks, emit_lse=emit_lse)
+        paged_spec = dataclasses.replace(paged_spec, **knobs)
+        dense_spec = dataclasses.replace(dense_spec, **knobs)
+        # Large enough that a dropped sink moves every row.
+        sink = (2.0 * torch.randn(hq, device="cuda")).to(tdt) if sinks else None
 
-        dense_out = torch.empty_like(q)
-        run_attention_dense_torch(
-            spec=dense_spec, q=q, k=k, v=v, out=dense_out, scale=scale
-        )
-        paged_out = torch.empty_like(q)
-        run_attention_dense_torch(
-            spec=paged_spec,
-            q=q,
-            k=k_cache,
-            v=v_cache,
-            out=paged_out,
-            scale=scale,
-            block_tables=block_tables,
-            kv_lens=kv_lens,
+        def launch(spec, k, v, **paged_kw):
+            out = torch.empty_like(q)
+            lse = None
+            if emit_lse:
+                lse = torch.full(
+                    (B, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
+                )
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=scale,
+                sinks=sink,
+                lse=lse,
+                **paged_kw,
+            )
+            return out, lse
+
+        dense_out, dense_lse = launch(dense_spec, k, v)
+        paged_out, paged_lse = launch(
+            paged_spec, k_cache, v_cache, block_tables=block_tables, kv_lens=kv_lens
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {persistent=} {use_cfvst=}"
+        name = (
+            f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {persistent=} "
+            f"{use_cfvst=} {sinks=} {emit_lse=}"
+        )
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
+        if sinks:
+            # Every row has the sink's mass, so the reference is defined everywhere:
+            # a row with no key is O = 0 and LSE = the sink logit.
+            ref, ref_lse = _lse_reference(
+                q, k, v, scale, causal=True, window=window, sinks=sink
+            )
+            max_abs = (ref - paged_out.float()).abs().max().item()
+            assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+            qi = torch.arange(sq, device="cuda").view(-1, 1)
+            ki = torch.arange(sk, device="cuda").view(1, -1)
+            keyless = ~((ki <= qi) & ((ki > qi - window) if window else True)).any(1)
+            if keyless.any():
+                worst = paged_out.float()[:, keyless].abs().max().item()
+                assert worst == 0.0, f"{name}: keyless rows: {worst}"
+            if emit_lse:
+                assert torch.equal(paged_lse, dense_lse), f"{name}: LSE bits differ"
+                lse_gap = (ref_lse - paged_lse).abs().max().item()
+                assert lse_gap < 1e-2, f"{name}: LSE max_abs={lse_gap:.3e}"
+            return
         qi = torch.arange(sq, device="cuda").view(-1, 1)
         ki = torch.arange(sk, device="cuda").view(1, -1)
         keep = ki <= qi  # top-left diagonal
@@ -2657,6 +2736,28 @@ class TestDensePagedVarlenNumeric:
     def test_paged_varlen_window_and_bf16(self, dtype, window, d):
         self._check(list(PAGED_VARLEN_EDGES), 16, d, dtype, window)
 
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,window,d", [("fp16", 256, 128), ("bf16", 0, 64)])
+    def test_paged_varlen_sinks_matches_reference(self, dtype, window, d):
+        def reference(q, k, v, scale, window, sinks):
+            return _lse_reference(
+                q, k, v, scale, causal=True, window=window, sinks=sinks
+            )[0]
+
+        check_paged_varlen(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            list(PAGED_VARLEN_EDGES),
+            16,
+            d,
+            dtype,
+            window,
+            sinks=True,
+        )
+
     @staticmethod
     def _check(lens, block_size, d, dtype, window):
         def reference(q, k, v, scale, window):
@@ -2819,6 +2920,32 @@ class TestDensePagedVarlenBottomRightNumeric:
                 )
                 gap = (ref[0] - out[rows].float()).abs().max().item()
                 assert gap > 0.1, f"{name}: output also matches the {control} shift"
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,d", [("fp16", 128), ("bf16", 64)])
+    def test_paged_varlen_sinks_matches_per_sequence_reference(self, dtype, d):
+        """Sinks with the per-sequence shift: each row's softmax also holds the sink."""
+
+        def reference(q, k, v, scale, window, sinks):
+            shift = k.shape[1] - q.shape[1]
+            return _lse_reference(
+                q, k, v, scale, causal=True, diagonal=shift, sinks=sinks
+            )[0]
+
+        check_paged_varlen(
+            run_attention_dense_torch,
+            self._make_spec(),
+            reference,
+            _tolerance,
+            self._KV_LENS,
+            16,
+            d,
+            dtype,
+            0,
+            q_lens=self._Q_LENS,
+            sinks=True,
+        )
 
     @requires_gfx942_gpu
     @pytest.mark.gpu

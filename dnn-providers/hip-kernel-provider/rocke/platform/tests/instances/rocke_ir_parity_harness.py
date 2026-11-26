@@ -2082,6 +2082,44 @@ def cases():
                 "wide_lds_dma": True,
             },
         ),
+        # Paged + sinks: sink_ptr precedes the paged params.
+        (
+            "paged_swa_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "paged_varlen_bottom_right_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persist_paged_sinks_causal_bf16_sq512",
+            {
+                "dtype": "bf16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.
@@ -2564,6 +2602,43 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 32,
                 "use_i64_kv_addr": True,
+            },
+        ),
+        # Paged + sinks, the same cases as the gfx950 entries of these names.
+        (
+            "paged_swa_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "paged_varlen_bottom_right_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persist_paged_sinks_causal_bf16_sq512",
+            {
+                **_persist942,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "use_sinks": True,
             },
         ),
     ):

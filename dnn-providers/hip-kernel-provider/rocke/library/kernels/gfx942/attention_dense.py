@@ -1279,8 +1279,8 @@ def supports_attention_dense(
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
     LDS budget and 32-bit addressing, sliding-window (KV-loop prune + window mask), and
-    attention sinks (alone or with sliding-window), and paged K/V, one sequence or
-    packed varlen sequences. Contiguous varlen and ragged are later follow-ups
+    attention sinks (alone or with sliding-window), and paged K/V (sinks included),
+    one sequence or packed varlen sequences. Contiguous varlen and ragged are later follow-ups
     (rejected below).
     """
     if arch != "gfx942":
@@ -1353,8 +1353,8 @@ def supports_attention_dense(
         )
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
-    # use_sinks is supported here (m/l seed per work item). The shared __post_init__
-    # rejects it with paged, and contiguous varlen is refused above.
+    # use_sinks is supported here (m/l seed per work item), paged K/V included;
+    # contiguous varlen is refused above.
     # use_additive_bias runs on both grids. It is refused where the body cannot honour
     # it: the KV-segment store returns before the epilogue that zeroes a row with no
     # live key, paged K/V has no bias-indexing rule, and the opt-in KDB/VPF pipeline

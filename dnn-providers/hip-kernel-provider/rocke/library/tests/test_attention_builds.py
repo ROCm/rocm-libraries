@@ -1608,7 +1608,7 @@ class TestAttentionHelpers(unittest.TestCase):
     def test_dense_paged_varlen_spec_admission(self):
         """Paged varlen: any number of packed sequences, maxima that need not be tile
         multiples (each sequence's tails are handled in the kernel), q_len == kv_len
-        so seqlen_q == seqlen_kv; LSE, sinks and persistent stay refused."""
+        so seqlen_q == seqlen_kv; sinks admitted; LSE and persistent stay refused."""
         for arch in ("gfx942", "gfx950"):
             with self.subTest(arch=arch):
                 self._check_dense_paged_varlen_spec_admission(arch)
@@ -1641,6 +1641,7 @@ class TestAttentionHelpers(unittest.TestCase):
             dict(sliding_window=256),
             dict(seqlen_q=4096, seqlen_kv=4096),
             dict(block_size=64),
+            dict(use_sinks=True),
         ):
             with self.subTest(accept=kw):
                 ok, why = supports_attention_dense(AttentionDenseSpec(**{**base, **kw}))
@@ -1648,7 +1649,6 @@ class TestAttentionHelpers(unittest.TestCase):
         for kw, error in (
             (dict(seqlen_kv=1024), "seqlen_q must equal seqlen_kv"),
             (dict(emit_lse=True), "emit_lse"),
-            (dict(use_sinks=True), "use_sinks"),
             (dict(persistent=True), "persistent"),
             (dict(causal=False), "causal"),
             (dict(varlen=False, seqlen_q=1024, seqlen_kv=1024), "needs varlen"),
@@ -1826,6 +1826,24 @@ class TestAttentionHelpers(unittest.TestCase):
             # Paged varlen takes no cu_seqlens_kv: kv_lens holds the KV lengths.
             "paged-varlen": AttentionDenseSpec(
                 **base, varlen=True, paged=True, block_size=16, num_kv_blocks=256
+            ),
+            # sink_ptr sits between the shape kernargs and the paged params.
+            "paged-varlen-sinks": AttentionDenseSpec(
+                **base,
+                varlen=True,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=256,
+                use_sinks=True,
+            ),
+            "persistent-paged-sinks": AttentionDenseSpec(
+                **{**base, "batch": 1},
+                persistent=True,
+                num_persistent=256,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=128,
+                use_sinks=True,
             ),
         }
         for arm, spec in arms.items():
@@ -2371,8 +2389,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
             self.assertIs(ok.exception, sentinel)
 
-    def test_gfx950_dense_sinks_rejected_with_paged(self):
-        """AttentionDenseSpec.__post_init__ rejects use_sinks with paged."""
+    def test_gfx950_dense_sinks_with_paged(self):
+        """Sinks combine with paged K/V: one sequence and packed varlen sequences."""
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
         base = dict(
@@ -2387,42 +2405,17 @@ class TestAttentionHelpers(unittest.TestCase):
             use_sinks=True,
         )
 
-        # Valid: sinks without paged
-        spec = AttentionDenseSpec(**base)
-        self.assertTrue(spec.use_sinks)
-
-        # Reject: use_sinks + paged
-        with self.assertRaises(ValueError) as ctx:
+        self.assertTrue(AttentionDenseSpec(**base).use_sinks)
+        self.assertTrue(
             AttentionDenseSpec(
                 paged=True, block_size=16, num_kv_blocks=512, sliding_window=128, **base
-            )
-        self.assertEqual(
-            str(ctx.exception), "use_sinks is not yet supported with paged KV"
+            ).use_sinks
         )
-
-    def test_gfx950_dense_sinks_with_varlen(self):
-        """Sinks combine with contiguous varlen; paged varlen still rejects them."""
-        from kernels.gfx950.attention_dense import AttentionDenseSpec
-
-        base = dict(
-            batch=1,
-            seqlen_q=256,
-            seqlen_kv=256,
-            num_query_heads=32,
-            num_kv_heads=8,
-            head_size=128,
-            causal=True,
-            dtype="bf16",
-            use_sinks=True,
-        )
-
         self.assertTrue(AttentionDenseSpec(varlen=True, **base).use_sinks)
-        with self.assertRaises(ValueError) as ctx:
+        self.assertTrue(
             AttentionDenseSpec(
                 varlen=True, paged=True, block_size=16, num_kv_blocks=64, **base
-            )
-        self.assertEqual(
-            str(ctx.exception), "use_sinks is not yet supported with paged KV"
+            ).use_sinks
         )
 
     def test_attention_3d_workspace_size_matches_shapes(self):
@@ -5115,6 +5108,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         other would feed the decode the wrong divisors. Each arm is also checked
         with ``use_sinks``, which appends ``sink_ptr`` after all of those.
         """
+        from dataclasses import replace
+
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
         from kernels.gfx942.attention_dense import (
@@ -5161,6 +5156,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             *((f"{v}+sinks", s) for v, s in persist_sinks.items()),
             ("paged", paged),
             ("paged-varlen", paged_varlen),
+            # sink_ptr sits between the shape kernargs and the paged params.
+            ("paged+sinks", replace(paged, use_sinks=True)),
+            ("paged-varlen+sinks", replace(paged_varlen, use_sinks=True)),
         ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params
