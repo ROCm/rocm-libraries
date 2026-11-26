@@ -97,6 +97,9 @@ struct BiasGraphSpec
     bool trailingRelu = false;
     /// The convolution alone, writing y; no ADD and no bias.
     bool convOnly = false;
+    /// A 3-D convolution: NDHWC x, y and the convolution output with depth 4, a
+    /// 3 x 3 x 3 filter and a (1, K, 1, 1, 1) bias (biasDims / biasStrides ignored).
+    bool threeD = false;
 };
 
 flatbuffers::FlatBufferBuilder buildBiasGraph(const BiasGraphSpec& spec = {})
@@ -106,28 +109,45 @@ flatbuffers::FlatBufferBuilder buildBiasGraph(const BiasGraphSpec& spec = {})
     const int64_t c = 32;
     const int64_t h = 14;
     const int64_t w = 14;
+    const int64_t d = 4;
     const int64_t cpg = c / spec.groups;
-    const auto nhwc = [](int64_t channels) {
-        return std::vector<int64_t>{h * w * channels, 1, w * channels, channels};
+    // Channels-last dims and strides of an activation with @p channels channels.
+    const auto activation = [&](int64_t channels) {
+        return spec.threeD
+                   ? std::pair<std::vector<int64_t>, std::vector<int64_t>>{{n, channels, d, h, w},
+                                                                           {d * h * w * channels,
+                                                                            1,
+                                                                            h * w * channels,
+                                                                            w * channels,
+                                                                            channels}}
+                   : std::pair<std::vector<int64_t>, std::vector<int64_t>>{
+                         {n, channels, h, w}, {h * w * channels, 1, w * channels, channels}};
     };
-    std::vector<Tensor> tensors{
-        {X_UID, {n, c, h, w}, nhwc(c), spec.io},
-        {W_UID, {spec.k, cpg, 3, 3}, {9 * cpg, 1, 3 * cpg, cpg}, spec.io},
-        {Y_UID, {n, spec.k, h, w}, nhwc(spec.k), spec.io, spec.trailingRelu}};
+    const auto [xDims, xStrides] = activation(c);
+    const auto [yDims, yStrides] = activation(spec.k);
+    const auto filter = spec.threeD
+                            ? std::pair<std::vector<int64_t>,
+                                        std::vector<int64_t>>{{spec.k, cpg, 3, 3, 3},
+                                                              {27 * cpg, 1, 9 * cpg, 3 * cpg, cpg}}
+                            : std::pair<std::vector<int64_t>, std::vector<int64_t>>{
+                                  {spec.k, cpg, 3, 3}, {9 * cpg, 1, 3 * cpg, cpg}};
+    std::vector<Tensor> tensors{{X_UID, xDims, xStrides, spec.io},
+                                {W_UID, filter.first, filter.second, spec.io},
+                                {Y_UID, yDims, yStrides, spec.io, spec.trailingRelu}};
     if(!spec.convOnly)
     {
-        tensors.push_back(
-            {YC_UID, {n, spec.k, h, w}, nhwc(spec.k), spec.convOutDtype, spec.convOutVirtual});
+        tensors.push_back({YC_UID, yDims, yStrides, spec.convOutDtype, spec.convOutVirtual});
         tensors.push_back({B_UID,
-                           spec.biasDims,
-                           spec.biasStrides,
+                           spec.threeD ? std::vector<int64_t>{1, spec.k, 1, 1, 1} : spec.biasDims,
+                           spec.threeD ? std::vector<int64_t>{spec.k, 1, spec.k, spec.k, spec.k}
+                                       : spec.biasStrides,
                            spec.biasDtype.value_or(spec.io),
                            spec.biasVirtual,
                            spec.biasPassByValue});
     }
     if(spec.trailingRelu)
     {
-        tensors.push_back({Z_UID, {n, spec.k, h, w}, nhwc(spec.k), spec.io});
+        tensors.push_back({Z_UID, yDims, yStrides, spec.io});
     }
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensorOffsets;
@@ -146,8 +166,8 @@ flatbuffers::FlatBufferBuilder buildBiasGraph(const BiasGraphSpec& spec = {})
         tensorOffsets.push_back(tensorBuilder.Finish());
     }
 
-    const std::vector<int64_t> pad{1, 1};
-    const std::vector<int64_t> one{1, 1};
+    const std::vector<int64_t> pad(spec.threeD ? 3 : 2, 1);
+    const std::vector<int64_t> one(spec.threeD ? 3 : 2, 1);
     const auto convAttributes = data_objects::CreateConvolutionFwdAttributesDirect(
         builder,
         X_UID,
@@ -363,6 +383,8 @@ TEST(TestGfx950ConvFwdBiasAotGraphMatcher, DeclinesEveryOtherBiasShape)
         {{32, 1, 1}, {2, 1, 1}},
         // Dims and strides of different ranks.
         {{1, 32, 1, 1}, {32, 1, 32}},
+        // The 3-D convolution's bias rank: this engine is 2-D only.
+        {{1, 32, 1, 1, 1}, {32, 1, 32, 32, 32}},
     };
     for(const auto& [dims, strides] : shapes)
     {
@@ -372,6 +394,20 @@ TEST(TestGfx950ConvFwdBiasAotGraphMatcher, DeclinesEveryOtherBiasShape)
         spec.biasStrides = strides;
         EXPECT_FALSE(matches(spec));
     }
+}
+
+TEST(TestGfx950ConvFwdBiasAotGraphMatcher, DeclinesA3DConvolution)
+{
+    // The packaged kernels are the 2-D (NHWC) catalog: a 5-D graph, bias included, is
+    // left to another engine, as the unfused engine leaves the 5-D convolution.
+    BiasGraphSpec threeD;
+    threeD.threeD = true;
+    EXPECT_FALSE(matches(threeD));
+    BiasGraphSpec convOnly;
+    convOnly.threeD = true;
+    convOnly.convOnly = true;
+    const GraphFixture single(buildBiasGraph(convOnly), gfx950Properties());
+    EXPECT_FALSE(matchesGraph(GFX950_CONV_FWD_AOT, single.context()));
 }
 
 TEST(TestGfx950ConvFwdBiasAotGraphMatcher, TheBiasIsADeviceTensorOfTheIoDtype)

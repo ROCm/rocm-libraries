@@ -54,8 +54,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd_aot
 namespace conv = gfx950_conv_fwd;
 
 /// The tensors a matched graph binds. @p bias is set by an engine whose kernels add a
-/// per-output-channel bias (dims (1, K, 1, 1), contiguous along K) to the convolution
-/// before storing y; y is then the ADD's output, not the convolution's.
+/// per-output-channel bias (dims (1, K, 1, 1) or (K, 1, 1), contiguous along K) to the
+/// convolution before storing y; y is then the ADD's output, not the convolution's.
 struct Binding
 {
     int64_t x;

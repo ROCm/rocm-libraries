@@ -1164,9 +1164,18 @@ public:
         // No kernel of this pack uses dynamic LDS.
         const auto& signature
             = kernelSignature(launch->kernargs, matched->binding.bias.has_value());
-        // K bias elements of the 16-bit io dtype; the graph match bounded K.
-        const auto biasBytes
-            = matched->binding.bias ? static_cast<int32_t>(2 * matched->problem.k) : 0;
+        // K bias elements of the io dtype, sized like x, w and y (tensorByteSize: the
+        // 16-bit storage types the graph match admits); the match bounded K.
+        const auto biasSize = matched->binding.bias
+                                  ? conv::tensorByteSize({1, matched->problem.k, 1, 1})
+                                  : std::optional<int32_t>{0};
+        if(!biasSize)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                _engine.label + " bias byte size exceeds the signed 32-bit kernel ABI");
+        }
+        const int32_t biasBytes = *biasSize;
         const auto load
             = [&](const KernelDefinition& definition, const conv::LaunchGeometry& geometry) {
                   auto code = buildIngestorKernelCode(_loader, context, definition, signature);
