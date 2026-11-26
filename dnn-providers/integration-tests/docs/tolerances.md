@@ -1003,6 +1003,18 @@ engine (`hipkernel:Gfx950ConvFwdAot`), which sets no allowance, passes the same
 346 cases at 3 as at 12 on an MI355X (gfx950), every conv-forward bundle case it
 accepts.
 
+A later check of that margin, on 5 new input seeds per architecture, MI308X
+(gfx942) and MI250 (gfx90a), took the solver of each output from the MIOpen log
+of the same run that produced it. The conforming solvers (`GemmFwdRest`,
+`GemmFwd1x1_0_1`, the CK xdlops solvers, the non-split assembly implicit GEMM,
+naive and depthwise) needed no `lambda` on either architecture, and at the SDK's
+3 their smallest headroom was 2.59 on gfx942 and 2.88 on gfx90a, with no correct
+output failing. Outputs without a logged solver were left out. A run of the
+same seeds attributed through a separate find run looked tighter (1.05 and
+1.18): that run's timing-based choice gave some outputs of Winograd and
+split-K kernels to conforming solvers. Attribution for this fit needs the log
+of the run whose outputs are graded.
+
 ### The cases the SDK bound failed
 
 Twelve distinct cases (the 22 outputs of the first calibration, 32 at the
