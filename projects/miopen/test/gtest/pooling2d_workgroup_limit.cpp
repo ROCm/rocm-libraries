@@ -10,9 +10,9 @@
 // workgroups in either dimension wraps blockIdx. The 2D pooling kernels map N*C to Z and the
 // vertical tiles to Y; only when that grid exceeds the architecture's limit do the solvers select
 // the kernel variant that linearizes all workgroups into X (otherwise the original launch is
-// used). These cases straddle that limit: N*C = 65536 is the largest count that fits (original
-// path), the others exceed it (linear path). They are valid problems on every architecture. A
-// 32-bit index type is used so that the image index mode (wsidx = 1) fits for every shape.
+// used). The cases cover the 65536 Z-workgroup limit on gfx1200/gfx1201, larger Z grids, and a
+// grid that exceeds the limit only in Y. They are valid problems on every architecture. A 32-bit
+// index type is used so that the image index mode (wsidx = 1) fits for every shape.
 
 namespace {
 
@@ -31,6 +31,7 @@ GetPoolingWorkgroupLimit2dTestCases(bool control_and_large_nc)
                                              {miopenPoolingAverage, 0},
                                              {miopenPoolingAverageInclusive, 0}};
     const std::vector<Config> few_configs = {{miopenPoolingMax, 0}, {miopenPoolingAverage, 0}};
+    const std::vector<Config> average_config = {{miopenPoolingAverage, 0}};
 
     struct Problem
     {
@@ -45,6 +46,11 @@ GetPoolingWorkgroupLimit2dTestCases(bool control_and_large_nc)
     {
         problems.push_back({{256, 256, 14, 20}, {2, 2}, {0, 0}, few_configs}); // N*C = 65536
         problems.push_back({{70000, 1, 28, 20}, {3, 3}, {1, 1}, all_configs}); // N*C = 70000
+
+        // With the default config, forward tile height is (8 / 1) * 1 = 8, so
+        // ceil(524289 / 8) = 65537 Y groups. Backward uses the input height and a
+        // 4 * 1 tile: ceil(1048578 / 4) = 262145 Y groups. N*C = 1, so only Y exceeds the limit.
+        problems.push_back({{1, 1, 1048578, 2}, {2, 2}, {0, 0}, average_config});
     }
 
     std::vector<PoolingTestCase> test_cases;
