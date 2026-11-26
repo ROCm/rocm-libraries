@@ -61,6 +61,9 @@
 #   47  rejected: LDS lanes not a power of two [gfx1250]
 #   48  rejected: LDS lanes 0 [gfx1250]
 #   49  rejected: LDS region of zero width [gfx1250]
+#   50  gfx950: F4 K1 dgrad filter read (2 filter rows) [gfx950]
+#   51  gfx950: F4 bf16 I/O K1 dgrad filter read vec 4 [gfx950]
+#   52  F(6x4) K1 dgrad filter read vec 1, 4 filter rows [gfx1250]
 from _emit_common import run_emit
 from kernels.common.conv_winograd_fwd_rt import (
     RtFilterSpec,
@@ -122,6 +125,9 @@ CONFIGS = [
     ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 4, 'bh': 4, 'bw': 8, 'lanes': 3, 'nt': 1, 'fused': 0}),  # 47: rejected: LDS lanes not a power of two
     ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 4, 'bh': 4, 'bw': 8, 'lanes': 0, 'nt': 1, 'fused': 0}),  # 48: rejected: LDS lanes 0
     ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 4, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 49: rejected: LDS region of zero width
+    ('K1', 'gfx950', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 2, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0, 'dg': 1}),  # 50: gfx950: F4 K1 dgrad filter read (2 filter rows)
+    ('K1', 'gfx950', {'mh': 4, 'mw': 4, 'io': 'bf16', 'op': 'fp16', 'vec': 4, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0, 'dg': 1}),  # 51: gfx950: F4 bf16 I/O K1 dgrad filter read vec 4
+    ('K1', 'gfx1250', {'mh': 6, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 1, 'fr': 4, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0, 'dg': 1}),  # 52: F(6x4) K1 dgrad filter read vec 1, 4 filter rows
 ]
 # fmt: on
 
@@ -133,7 +139,7 @@ def _spec(idx: int):
     if stage == "K1":
         spec = RtFilterSpec(
             mh=d["mh"], mw=d["mw"], io_dtype=d["io"], operand_dtype=d["op"],
-            vec=d["vec"], filter_rows=d["fr"],
+            vec=d["vec"], filter_rows=d["fr"], dgrad=bool(d.get("dg", 0)),
         )  # fmt: skip
     elif stage == "K2a":
         spec = RtPrescaleSpec(io_dtype=d["io"], vec=d["vec"])

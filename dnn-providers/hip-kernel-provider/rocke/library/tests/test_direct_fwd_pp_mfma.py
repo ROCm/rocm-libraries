@@ -285,6 +285,8 @@ def test_engines_agree_on_specs():
         (dict(N=1 << 25, H=256, W=256), {}),
         (dict(H=(1 << 31) - 1, W=(1 << 31) - 1, cpg=(1 << 31) - 8, kpg=8), {}),
         ({}, dict(wave_size=32)),
+        # Valid padding (PAD 0) of a 3x3 filter.
+        (dict(PAD=0), dict(block_k=64)),
     ):
         specs.append(FwdPpMfmaSpec(problem=replace(base, **pkw), **knobs))
     for arch in ("gfx950", "gfx942", "gfx1250"):

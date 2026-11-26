@@ -29,6 +29,7 @@ typedef struct cfg
     const char* io;
     const char* op;
     int vec, fr, block, ps, tpt, bh, bw, lanes, nt, fused;
+    int dg; /* K1: the dgrad filter read (0 where a row leaves it out) */
 } cfg_t;
 
 /* clang-format off */
@@ -83,6 +84,9 @@ static const cfg_t CONFIGS[] = {
     {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 4, 4, 8, 3, 1, 0}, /* 47: rejected: LDS lanes not a power of two */
     {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 4, 4, 8, 0, 1, 0}, /* 48: rejected: LDS lanes 0 */
     {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 1, 4, 0, 16, 1, 0}, /* 49: rejected: LDS region of zero width */
+    {"K1", "gfx950", 4, 4, "fp16", "fp16", 8, 2, 256, 0, 1, 0, 0, 16, 1, 0, 1}, /* 50: gfx950: F4 K1 dgrad filter read (2 filter rows) */
+    {"K1", "gfx950", 4, 4, "bf16", "fp16", 4, 1, 256, 0, 1, 0, 0, 16, 1, 0, 1}, /* 51: gfx950: F4 bf16 I/O K1 dgrad filter read vec 4 */
+    {"K1", "gfx1250", 6, 4, "fp16", "fp16", 1, 4, 256, 0, 1, 0, 0, 16, 1, 0, 1}, /* 52: F(6x4) K1 dgrad filter read vec 1, 4 filter rows */
 };
 /* clang-format on */
 
@@ -134,7 +138,10 @@ int main(int argc, char** argv)
         s.operand_dtype = c->op;
     }
     if(stage == ROCKE_WINOGRAD_RT_K1)
+    {
         s.filter_rows = c->fr;
+        s.dgrad = c->dg != 0;
+    }
     if(stage == ROCKE_WINOGRAD_RT_K2 || stage == ROCKE_WINOGRAD_RT_K4)
     {
         s.block_size = c->block;

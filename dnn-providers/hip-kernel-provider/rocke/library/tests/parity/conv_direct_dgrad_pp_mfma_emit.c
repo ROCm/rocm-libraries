@@ -42,6 +42,15 @@ static rocke_direct_conv_problem_t make_problem(int KH, const char* dtype, int s
     return p;
 }
 
+/* The same transposition of a grouped dgrad: groups of C = K = ch channels. */
+static rocke_direct_conv_problem_t make_grouped_problem(const char* dtype, int groups, int ch)
+{
+    rocke_direct_conv_problem_t p = make_problem(3, dtype, 1, ch);
+    p.groups = groups;
+    p.kpg = ch;
+    return p;
+}
+
 static int make_cfg(int idx, rocke_dgrad_pp_mfma_spec_t* s, const char** arch)
 {
     *s = rocke_dgrad_pp_mfma_spec_default();
@@ -89,6 +98,17 @@ static int make_cfg(int idx, rocke_dgrad_pp_mfma_spec_t* s, const char** arch)
         return 0;
     case 11: /* rejected by both engines: dgrad K = 12 */
         s->problem = make_problem(3, "bf16", 1, 12);
+        return 0;
+    case 12: /* bf16, 3x3, grouped: 4 groups of 56 channels, block_k 64 */
+        s->problem = make_grouped_problem("bf16", 4, 56);
+        s->block_k = 64;
+        return 0;
+    case 13: /* fp16, 3x3, grouped: 2 groups of 64 channels, block_k 64 */
+        s->problem = make_grouped_problem("fp16", 2, 64);
+        s->block_k = 64;
+        return 0;
+    case 14: /* rejected by both engines: grouped at block_k 128 */
+        s->problem = make_grouped_problem("bf16", 4, 56);
         return 0;
     default:
         return -1;

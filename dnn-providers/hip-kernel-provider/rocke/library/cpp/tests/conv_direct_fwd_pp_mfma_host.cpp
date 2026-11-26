@@ -92,6 +92,9 @@ static void test_accepted(void)
     s.problem.KH = s.problem.KW = 7;
     s.problem.PAD = 3;
     expect_ok("7x7 block_k 64", &s);
+    s = base_spec();
+    s.problem.PAD = 0;
+    expect_ok("valid padding", &s);
 }
 
 static void test_arch_and_dtype_refusals(void)
@@ -139,9 +142,9 @@ static void test_problem_refusals(void)
              p->PAD = 0;
          },
          square},
-        {"PAD 0",
-         [](rocke_direct_conv_problem_t* p) { p->PAD = 0; },
-         "'same' padding only: PAD must be 1 (got 0)"},
+        {"PAD 2",
+         [](rocke_direct_conv_problem_t* p) { p->PAD = 2; },
+         "'same' padding only: PAD must be 1 (got 2)"},
         {"pad_w 0",
          [](rocke_direct_conv_problem_t* p) { p->pad_w = 0; },
          "one padding for both axes (got PAD=1x0)"},

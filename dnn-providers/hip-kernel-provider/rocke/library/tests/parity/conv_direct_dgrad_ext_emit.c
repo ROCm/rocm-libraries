@@ -21,13 +21,19 @@
  * fwd without mfma, both reject; 49, a 9x9 depthwise filter) -- mirrors
  * _WIN_FWD_CFGS.
  * Indices 50..58: its grouped forward form (cpg = kpg = 8 / 16 / 32; 52
- * without fwd and 55, a block narrower than a group, both reject) and the
+ * without fwd is the grouped wave64 dgrad form; 55, a block narrower than a
+ * group, both reject) and the
  * forward form at stride 2 (56..58; 58, an odd block_h, both reject). Indices
  * 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
  * cpg 64 (stride 2) -- mirrors _WIN_G8_CFGS.
  * Indices 62..72: the Toeplitz WMMA form (mfma at wave_size 32, gfx1250);
  * 68..70 and 72 (fwd at stride 2, a wave64 mode) both reject, 71 is the
  * depthwise fwd at stride 1 -- mirrors _WMMA_WIN_CFGS.
+ * Indices 73..88: the fp32-storage configs (F32_CFG_BASE).
+ * Indices 89..117: the gfx950 knobs of the windowed spec on the wave64 MFMA
+ * (lds_swz, xcd_tiles, the block-diagonal cpg 2 / 4 forward, dense with and
+ * without dma / wdma, the stride-2 and grouped dgrad, 16 waves; 111..117 both
+ * reject) -- mirrors _WIN_X_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -345,8 +351,8 @@ static int
 
 /* The grouped forward form (cpg = kpg = 8, G counts groups), emitted as
  * WIN_G8_CFG_BASE + idx (mirrors _WIN_G8_CFGS); WIN_G8_FWD / WIN_G8_CPG /
- * WIN_G8_STRIDE hold each config's fwd, cpg and out_stride. 52 (no fwd) both
- * reject. 59..61: cpg 24 and cpg 56 (not powers of two, stride 1) and cpg 64
+ * WIN_G8_STRIDE hold each config's fwd, cpg and out_stride. 52 (no fwd) is
+ * the grouped dgrad form. 59..61: cpg 24 and cpg 56 (not powers of two, stride 1) and cpg 64
  * (the DW_WIN_MAX_GROUP_CH cap, stride 2). */
 #define WIN_G8_CFG_BASE 50
 static const win_cfg_t WIN_G8_CFGS[] = {
@@ -452,6 +458,90 @@ static int make_f32_cfg(int idx,
     return 0;
 }
 
+/* The gfx950 knobs of the windowed spec, emitted as WIN_X_CFG_BASE + idx
+ * (mirrors _WIN_X_CFGS): full problems, then the knobs (the spec defaults
+ * where the Python leaves them). */
+#define WIN_X_CFG_BASE 89
+typedef struct win_x_cfg
+{
+    int N, H, W, G, cpg, KH, KW, PAD, stride;
+    const char* dtype;
+    const char* arch;
+    int block_w, block_waves, block_h, w_fold, prefetch_rows;
+    int mfma, fwd, out_stride, wave_size, dense, lds_swz, xcd_tiles, dma, wdma;
+} win_x_cfg_t;
+
+/* clang-format off */
+static const win_x_cfg_t WIN_X_CFGS[] = {
+    {2, 28, 28, 64, 1, 3, 3, 1, 1, "fp16", "gfx950", 8, 8, 14, 1, 2, 1, 1, 1, 64, 0, 1, 1, 0, 0},
+    {3, 16, 20, 64, 1, 5, 5, 2, 1, "bf16", "gfx950", 8, 4, 16, 2, 2, 1, 1, 1, 64, 0, 1, 1, 0, 0},
+    {2, 16, 24, 64, 1, 3, 3, 1, 1, "fp16", "gfx950", 8, 8, 8, 1, 3, 1, 1, 1, 64, 0, 0, 1, 0, 0},
+    {2, 28, 28, 64, 1, 3, 3, 1, 1, "bf16", "gfx950", 8, 8, 14, 1, 2, 1, 1, 2, 64, 0, 1, 1, 0, 0},
+    {2, 13, 21, 16, 4, 3, 3, 1, 1, "fp16", "gfx950", 8, 3, 13, 2, 2, 1, 1, 1, 64, 0, 0, 0, 0, 0},
+    {2, 12, 12, 32, 2, 3, 3, 1, 1, "bf16", "gfx950", 8, 2, 8, 1, 2, 1, 1, 1, 64, 0, 0, 0, 0, 0},
+    {2, 14, 14, 4, 32, 3, 3, 1, 1, "bf16", "gfx950", 8, 4, 14, 1, 2, 1, 1, 1, 64, 1, 0, 0, 0, 0},
+    {2, 14, 14, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 14, 1, 2, 1, 1, 1, 64, 1, 1, 0, 1, 1},
+    {2, 16, 16, 4, 32, 3, 3, 1, 1, "bf16", "gfx950", 8, 4, 16, 1, 2, 1, 1, 1, 64, 1, 1, 0, 1, 1},
+    {2, 12, 12, 2, 64, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 8, 1, 2, 1, 1, 1, 64, 1, 1, 0, 1, 1},
+    {5, 9, 7, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", 8, 2, 4, 4, 2, 1, 1, 1, 64, 1, 0, 0, 0, 0},
+    {2, 24, 24, 64, 1, 3, 3, 1, 2, "bf16", "gfx950", 8, 8, 12, 2, 2, 1, 0, 1, 64, 0, 0, 0, 0, 0},
+    {2, 21, 19, 64, 1, 7, 7, 3, 2, "fp16", "gfx950", 8, 4, 8, 4, 2, 1, 0, 1, 64, 0, 0, 0, 0, 0},
+    {2, 13, 21, 4, 16, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 8, 2, 2, 1, 0, 1, 64, 0, 0, 0, 0, 0},
+    {2, 24, 22, 8, 8, 3, 3, 1, 2, "bf16", "gfx950", 8, 8, 12, 1, 2, 1, 0, 1, 64, 0, 0, 0, 0, 0},
+    {2, 16, 16, 4, 32, 3, 3, 1, 1, "bf16", "gfx950", 8, 4, 16, 1, 2, 1, 0, 1, 64, 1, 0, 0, 0, 0},
+    {2, 14, 14, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 14, 1, 2, 1, 0, 1, 64, 1, 1, 0, 1, 1},
+    {2, 16, 16, 2, 64, 3, 3, 1, 1, "bf16", "gfx950", 8, 4, 16, 1, 2, 1, 0, 1, 64, 1, 1, 0, 1, 1},
+    {2, 32, 32, 4, 32, 3, 3, 1, 2, "fp16", "gfx950", 8, 4, 16, 1, 2, 1, 0, 1, 64, 1, 0, 0, 0, 0},
+    {2, 20, 20, 128, 1, 3, 3, 1, 1, "fp16", "gfx950", 8, 16, 10, 1, 2, 1, 0, 1, 64, 0, 0, 0, 0, 0},
+    {2, 16, 16, 8, 16, 3, 3, 1, 1, "bf16", "gfx950", 8, 4, 8, 1, 2, 1, 1, 1, 64, 0, 1, 0, 0, 0},
+    {4, 12, 9, 64, 1, 5, 5, 2, 1, "fp16", "gfx950", 8, 4, 12, 4, 2, 1, 0, 1, 64, 0, 1, 0, 0, 0},
+    {2, 14, 14, 64, 1, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 14, 1, 2, 1, 1, 1, 64, 0, 1, 0, 1, 0},
+    {2, 14, 14, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 14, 1, 2, 1, 1, 1, 64, 1, 1, 0, 0, 1},
+    {2, 14, 14, 64, 1, 3, 3, 1, 1, "fp16", "gfx942", 8, 1, 8, 1, 1, 0, 0, 1, 64, 0, 0, 1, 0, 0},
+    {2, 14, 14, 8, 16, 3, 3, 1, 1, "fp16", "gfx950", 8, 4, 14, 1, 2, 1, 1, 1, 64, 1, 0, 0, 0, 0},
+    {2, 24, 24, 64, 1, 3, 3, 1, 2, "bf16", "gfx950", 8, 8, 7, 1, 2, 1, 0, 1, 64, 0, 0, 0, 0, 0},
+    {2, 14, 14, 64, 1, 3, 3, 1, 1, "bf16", "gfx1250", 8, 4, 14, 1, 1, 1, 0, 1, 32, 0, 1, 0, 0, 0},
+    {2, 24, 24, 64, 1, 3, 3, 1, 2, "fp16", "gfx950", 8, 1, 8, 1, 1, 0, 0, 1, 64, 0, 0, 0, 0, 0},
+};
+/* clang-format on */
+
+static int make_win_x_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(WIN_X_CFGS) / sizeof(WIN_X_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    const win_x_cfg_t* c = &WIN_X_CFGS[idx];
+    *spec = rocke_direct_depthwise_dgrad_win_spec_default();
+    spec->problem = rocke_direct_conv_problem_default();
+    spec->problem.N = c->N;
+    spec->problem.H = c->H;
+    spec->problem.W = c->W;
+    spec->problem.groups = c->G;
+    spec->problem.cpg = c->cpg;
+    spec->problem.kpg = c->cpg;
+    spec->problem.KH = c->KH;
+    spec->problem.KW = c->KW;
+    spec->problem.PAD = c->PAD;
+    spec->problem.stride = c->stride;
+    spec->problem.dtype = c->dtype;
+    spec->block_w = c->block_w;
+    spec->block_waves = c->block_waves;
+    spec->block_h = c->block_h;
+    spec->w_fold = c->w_fold;
+    spec->prefetch_rows = c->prefetch_rows;
+    spec->mfma = c->mfma != 0;
+    spec->fwd = c->fwd != 0;
+    spec->out_stride = c->out_stride;
+    spec->wave_size = c->wave_size;
+    spec->dense = c->dense != 0;
+    spec->lds_swz = c->lds_swz != 0;
+    spec->xcd_tiles = c->xcd_tiles != 0;
+    spec->dma = c->dma != 0;
+    spec->wdma = c->wdma != 0;
+    *arch = c->arch;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -468,7 +558,11 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     int is_4c = 0;
     int is_generic = 0;
-    if(idx >= F32_CFG_BASE)
+    if(make_win_x_cfg(idx - WIN_X_CFG_BASE, &spec, &arch) == 0)
+    {
+        /* the windowed spec, gfx950 knobs */
+    }
+    else if(idx >= F32_CFG_BASE)
     {
         const int k = make_f32_cfg(idx - F32_CFG_BASE, &specgen, &spec4c, &arch);
         if(k == 0)

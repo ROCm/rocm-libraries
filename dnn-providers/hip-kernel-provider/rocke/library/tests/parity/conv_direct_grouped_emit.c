@@ -27,7 +27,9 @@
  * non-grouped spec; from index 218 the fp32-storage configs of the grouped
  * kernels, see make_f32_cfg; from index 318 the gfx1250 wave32 and
  * image-per-block wgrad spec, from index 349 the depthwise wgrad spec and
- * from index 356 the small-C wgrad stems of the AOT grid) identically to the
+ * from index 356 the small-C wgrad stems of the AOT grid; from index 371 the
+ * gfx950 depthwise knobs: lds wgrad lane_ch / xcd_pair, MFMA wgrad stride 2 /
+ * xcd_pair / swz / adir and the row-tiled spatial kernel) identically to the
  * Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
@@ -173,6 +175,9 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
+/* The gfx950 depthwise knobs (lane_ch / xcd_pair, stride 2 / xcd_pair / swz /
+ * adir, the row-tiled spatial kernel) follow the 7 ping-pong wgrad ones. */
+#define DW_X_CFG_BASE 371
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -2920,7 +2925,7 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
         dm->problem.PAD = 2;
         dm->q_tiles = 4;
         return 0;
-    case 40: /* must reject: stride 2 */
+    case 40: /* stride 2: four stride-1 phases on the grid's z axis */
         dm->problem = mk_dwp(64);
         dm->problem.stride = 2;
         return 0;
@@ -3461,6 +3466,148 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
     return -1;
 }
 
+/* The gfx950 depthwise knobs, emitted as DW_X_CFG_BASE + idx (see _dw_x_spec
+ * in the Python emitter). Returns 0 on success, -1 if unknown. */
+static int make_dw_x_cfg(int idx,
+                         int* kind,
+                         wgrad_direct_specs_t* w,
+                         rocke_direct_depthwise_spatial_spec_t* ssp)
+{
+    rocke_dw_wgrad_lds_spec_t* ls = &w->lds;
+    rocke_dw_wgrad_mfma_spec_t* dm = &w->dw_mfma;
+    *ls = rocke_dw_wgrad_lds_spec_default();
+    *dm = rocke_dw_wgrad_mfma_spec_default();
+    *ssp = rocke_direct_depthwise_spatial_spec_default();
+    if(idx >= 0 && idx <= 3)
+        *kind = KIND_DW_WGRAD_LDS;
+    else if(idx >= 4 && idx <= 10)
+        *kind = KIND_DW_WGRAD_MFMA;
+    else if(idx >= 11 && idx <= 14)
+    {
+        *kind = KIND_SPATIAL;
+        rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+        p.N = 2;
+        p.H = 40;
+        p.W = 36;
+        p.groups = 16;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 1;
+        p.stride = 1;
+        p.dtype = "fp16";
+        ssp->problem = p;
+    }
+    switch(idx)
+    {
+    case 0: /* lane_ch 4, 5x5 */
+        ls->problem = mk_dwp(64);
+        mk_filter(&ls->problem, 5, 5, 2, 1);
+        ls->lane_ch = 4;
+        return 0;
+    case 1: /* lane_ch 2, 7x7 fp16, xcd_pair (a partial channel tile) */
+        ls->problem = mk_dwp(72);
+        mk_filter(&ls->problem, 7, 7, 3, 1);
+        ls->problem.dtype = "fp16";
+        ls->lane_ch = 2;
+        ls->xcd_pair = true;
+        return 0;
+    case 2: /* xcd_pair at stride 2 */
+        ls->problem = mk_dwp(192);
+        ls->problem.stride = 2;
+        ls->problem.H = 30;
+        ls->problem.W = 40;
+        ls->lanes_w = 8;
+        ls->xcd_pair = true;
+        return 0;
+    case 3: /* must reject: lane_ch 3 */
+        ls->problem = mk_dwp(64);
+        ls->lane_ch = 3;
+        return 0;
+    case 4: /* stride 2: the four phases */
+        dm->problem = mk_dwp(64);
+        dm->problem.stride = 2;
+        dm->problem.H = 20;
+        dm->problem.W = 24;
+        return 0;
+    case 5: /* stride 2 5x5 fp16, xcd_pair + swz */
+        dm->problem = mk_dwp(72);
+        mk_filter(&dm->problem, 5, 5, 2, 2);
+        dm->problem.H = 21;
+        dm->problem.W = 26;
+        dm->problem.dtype = "fp16";
+        dm->q_tiles = 4;
+        dm->rows_per_chunk = 8;
+        dm->xcd_pair = true;
+        dm->swz = true;
+        return 0;
+    case 6: /* adir + swz + xcd_pair */
+        dm->problem = mk_dwp(96);
+        dm->rows_per_chunk = 32;
+        dm->target_blocks = 4096;
+        dm->adir = true;
+        dm->swz = true;
+        dm->xcd_pair = true;
+        return 0;
+    case 7: /* adir at stride 2, 7x7 */
+        dm->problem = mk_dwp(64);
+        mk_filter(&dm->problem, 7, 7, 3, 2);
+        dm->problem.H = 28;
+        dm->problem.W = 28;
+        dm->q_tiles = 4;
+        dm->adir = true;
+        return 0;
+    case 8: /* adir with two packed images */
+        dm->problem = mk_dwp(64);
+        mk_filter(&dm->problem, 5, 5, 0, 1);
+        dm->problem.H = 10;
+        dm->problem.W = 6;
+        dm->q_tiles = 5;
+        dm->unfold_n = 2;
+        dm->adir = true;
+        return 0;
+    case 9: /* must reject: packed images at stride 2 */
+        dm->problem = mk_dwp(64);
+        dm->problem.stride = 2;
+        dm->unfold_n = 2;
+        return 0;
+    case 10: /* must reject: stride 3 */
+        dm->problem = mk_dwp(64);
+        dm->problem.stride = 3;
+        return 0;
+    case 11: /* a 64-row tile */
+        ssp->block_h = 64;
+        return 0;
+    case 12: /* 8-row tiles of a stride-2 5x5 bf16, two waves */
+        ssp->problem.H = 33;
+        ssp->problem.W = 30;
+        ssp->problem.groups = 8;
+        ssp->problem.KH = 5;
+        ssp->problem.KW = 5;
+        ssp->problem.PAD = 2;
+        ssp->problem.stride = 2;
+        ssp->problem.dtype = "bf16";
+        ssp->block_h = 8;
+        ssp->block_waves = 2;
+        return 0;
+    case 13: /* 9x9 row tiles: one wave per SIMD */
+        ssp->problem.N = 1;
+        ssp->problem.H = 40;
+        ssp->problem.W = 40;
+        ssp->problem.groups = 4;
+        ssp->problem.KH = 9;
+        ssp->problem.KW = 9;
+        ssp->problem.PAD = 4;
+        ssp->block_h = 16;
+        return 0;
+    case 14: /* must reject: a negative row tile */
+        ssp->block_h = -1;
+        return 0;
+    }
+    return -1;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -3492,7 +3639,15 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WGRAD_PP_CFG_BASE)
+    if(idx >= DW_X_CFG_BASE)
+    {
+        if(make_dw_x_cfg(idx - DW_X_CFG_BASE, &kind, &swd, &ssp) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WGRAD_PP_CFG_BASE)
     {
         if(make_wgrad_pp_cfg(idx - WGRAD_PP_CFG_BASE, &swd.tiled) != 0)
         {

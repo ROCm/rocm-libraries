@@ -411,6 +411,10 @@ def test_engines_agree_on_specs():
         (dict(H=(1 << 31) - 1, W=(1 << 31) - 1, cpg=(1 << 31) - 8, kpg=8), {}),
         ({}, dict(wave_size=32)),
         ({}, dict(block_k=96)),
+        # Grouped: one group per block, block_k 64 only.
+        (dict(groups=4, cpg=56, kpg=56), dict(block_k=64)),
+        (dict(groups=2, cpg=64, kpg=64), dict(block_k=64)),
+        (dict(groups=4, cpg=56, kpg=56), {}),
     ):
         specs.append(DgradPpMfmaSpec(problem=replace(base, **pkw), **knobs))
     for arch in ("gfx950", "gfx942", "gfx1250"):

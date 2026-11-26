@@ -23,6 +23,9 @@
 #   9  rejected by both engines: gfx942 (no 16-byte LDS DMA)
 #  10  rejected by both engines: stride 2
 #  11  rejected by both engines: dgrad K = 12 (not a multiple of 8)
+#  12  bf16, 3x3, grouped: 4 groups of 56 channels, block_k 64
+#  13  fp16, 3x3, grouped: 2 groups of 64 channels, block_k 64
+#  14  rejected by both engines: grouped at block_k 128
 from dataclasses import replace
 
 from _emit_common import run_emit
@@ -34,14 +37,14 @@ from kernels.common.conv_direct_dgrad_pp_mfma import (
 from kernels.common.conv_direct_grouped import DirectConvProblem
 
 
-def _p(*, KH=3, dtype="bf16", stride=1, kpg=96):
+def _p(*, KH=3, dtype="bf16", stride=1, kpg=96, groups=1, cpg=72):
     return dgrad_pp_mfma_problem(
         DirectConvProblem(
             N=2,
             H=20,
             W=24,
-            groups=1,
-            cpg=72,
+            groups=groups,
+            cpg=cpg,
             kpg=kpg,
             KH=KH,
             KW=KH,
@@ -67,6 +70,12 @@ def _spec(idx: int):
         9: (S(problem=_p()), "gfx942"),
         10: (S(problem=replace(_p(), stride=2)), "gfx950"),
         11: (S(problem=_p(kpg=12)), "gfx950"),
+        12: (S(problem=_p(groups=4, cpg=56, kpg=56), block_k=64), "gfx950"),
+        13: (
+            S(problem=_p(groups=2, cpg=64, kpg=64, dtype="fp16"), block_k=64),
+            "gfx950",
+        ),
+        14: (S(problem=_p(groups=4, cpg=56, kpg=56)), "gfx950"),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")
