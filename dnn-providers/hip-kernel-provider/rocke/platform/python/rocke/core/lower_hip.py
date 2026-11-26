@@ -30,6 +30,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
+    _FLAG_WAIT_ORDERINGS,
     F64,
     _int_add_wrap_error,
     _int_cmp_pred_error,
@@ -1812,7 +1813,11 @@ class _Lowerer:
     def _op_arith_fma(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
-        _reject_f64(op, op.result.type.name)
+        if op.result.type.name == "f64":
+            self._emit(
+                f"{ty} {_name(op.result)} = fma({_name(a)}, {_name(b)}, {_name(c)});"
+            )
+            return
         # `fmaf(a, b, c)` lowers to `v_fma_f32` on AMDGPU for f32; for
         # f16/bf16 we promote to f32, fma, and demote — semantically
         # identical to the IR-level `arith.fma` and matches the
@@ -1825,9 +1830,8 @@ class _Lowerer:
     def _op_arith_fmax3(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
-        _reject_f64(op, op.result.type.name)
         # Two ternary ops in one statement; on AMDGPU the chain folds
-        # into a single `v_max3_f32`.
+        # into a single `v_max3_f32` (f64: two `v_max_f64`).
         self._emit(
             f"{ty} {_name(op.result)} = "
             f"(({_name(b)} > {_name(c)}) ? {_name(b)} : {_name(c)});"
@@ -1840,7 +1844,6 @@ class _Lowerer:
     def _op_arith_fmin3(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
-        _reject_f64(op, op.result.type.name)
         self._emit(
             f"{ty} {_name(op.result)} = "
             f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});"
@@ -1914,11 +1917,20 @@ class _Lowerer:
     # reciprocal-sqrt builtins (single ISA op).
 
     def _math1(
-        self, op: Op, fn_f32: str, *, prefer_amdgcn_builtin: bool = False
+        self,
+        op: Op,
+        fn_f32: str,
+        *,
+        prefer_amdgcn_builtin: bool = False,
+        fn_f64: Optional[str] = None,
     ) -> None:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        if tname == "f64" and fn_f64 is not None:
+            # HIP's double overload (the device math library) computes in f64.
+            self._emit(f"{cpp_t} {_name(op.result)} = {fn_f64}({_name(v)});")
+            return
         _reject_f64(op, tname)
         # ``__builtin_amdgcn_*`` only takes float. For non-f32 types,
         # round-trip via float so the math runs at f32 precision.
@@ -1932,7 +1944,13 @@ class _Lowerer:
     def _op_math_exp2(self, op: Op) -> None:
         # ``__exp2f`` is HIP's device runtime exp2 entry point; for fp16/bf16
         # we promote to f32 first.
-        self._math1(op, "exp2f")
+        self._math1(op, "exp2f", fn_f64="exp2")
+
+    def _op_math_exp(self, op: Op) -> None:
+        self._math1(op, "expf", fn_f64="exp")
+
+    def _op_math_log(self, op: Op) -> None:
+        self._math1(op, "logf", fn_f64="log")
 
     def _op_math_ldexp(self, op: Op) -> None:
         error = _ldexp_op_error(op)
@@ -1947,7 +1965,7 @@ class _Lowerer:
         # ``log2f`` is HIP's device runtime base-2 log entry point; for
         # fp16/bf16 we promote to f32 first (same promote-compute-demote
         # shape as exp2 above).
-        self._math1(op, "log2f")
+        self._math1(op, "log2f", fn_f64="log2")
 
     def _op_math_rcp(self, op: Op) -> None:
         # AMDGPU has a hardware reciprocal; emit the builtin directly for
@@ -1985,14 +2003,17 @@ class _Lowerer:
             )
 
     def _op_math_sqrt(self, op: Op) -> None:
-        self._math1(op, "sqrtf")
+        self._math1(op, "sqrtf", fn_f64="sqrt")
 
     def _op_math_rsqrt(self, op: Op) -> None:
-        # AMDGPU's reciprocal-sqrt builtin (single ISA op on gfx9+).
+        # AMDGPU's reciprocal-sqrt builtin (single ISA op on gfx9+). f64
+        # divides by the IEEE square root, as the LLVM lowering does.
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
-        _reject_f64(op, tname)
+        if tname == "f64":
+            self._emit(f"{cpp_t} {_name(op.result)} = 1.0 / sqrt({_name(v)});")
+            return
         if tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rsqf({_name(v)});"
@@ -2004,7 +2025,7 @@ class _Lowerer:
             )
 
     def _op_math_tanh(self, op: Op) -> None:
-        self._math1(op, "tanhf")
+        self._math1(op, "tanhf", fn_f64="tanh")
 
     # -------------------- arith: casts and bitcast --------------------
 
@@ -2318,11 +2339,16 @@ class _Lowerer:
         )
 
     def _op_memref_global_flag_wait_eq(self, op: Op) -> None:
-        """Lower ``memref.global_flag_wait_eq`` to an acquire-load spin loop."""
+        """Lower ``memref.global_flag_wait_eq`` to an acquire-load spin loop
+        (a relaxed one with the optional ``ordering="monotonic"``)."""
         ptr, idx, expect = op.operands
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = op.attrs.get("ordering", "acquire")
+        if ordering not in _FLAG_WAIT_ORDERINGS:
+            raise ValueError(f"{op.name}: unknown ordering '{ordering}'")
         self._emit(
-            f"while (__hip_atomic_load(&{_name(ptr)}[{_name(idx)}], __ATOMIC_ACQUIRE, "
+            f"while (__hip_atomic_load(&{_name(ptr)}[{_name(idx)}], "
+            f"{_HIP_ATOMIC_ORDER[ordering]}, "
             f"{_HIP_MEMORY_SCOPE[scope]}) != {_name(expect)}) {{}}"
         )
 
@@ -2545,7 +2571,9 @@ class _Lowerer:
                 "byte count would be truncated; pass it as i32"
             )
         ptr, num_bytes = op.operands
-        word3 = backend_for(self.arch).buffer_rsrc_word3
+        # ISA-specific default DWORD3; an explicit per-resource DWORD3
+        # (``IRBuilder.buffer_rsrc(word3=)``) overrides it.
+        word3 = int(op.attrs.get("word3", backend_for(self.arch).buffer_rsrc_word3))
         self._emit(
             f"rsrc_t {_name(op.result)} = "
             f"__builtin_amdgcn_make_buffer_rsrc("
@@ -2972,9 +3000,15 @@ class _Lowerer:
         a, bb, cc = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
-        _reject_f64(op, op.result.type.elem.name)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
+        if op.result.type.elem.name == "f64":
+            for i in range(n):
+                self._emit(
+                    f"{nice}[{i}] = fma({_name(a)}[{i}], "
+                    f"{_name(bb)}[{i}], {_name(cc)}[{i}]);"
+                )
+            return
         for i in range(n):
             self._emit(
                 f"{nice}[{i}] = fmaf((float){_name(a)}[{i}], "

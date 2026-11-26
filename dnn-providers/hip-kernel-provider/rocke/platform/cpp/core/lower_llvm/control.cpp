@@ -484,6 +484,24 @@ static void _op_vector_fma(rocke_lower_t* L, const rocke_op_t* op)
     }
     int count = vec_ty->count;
     const char* elem_name = vec_ty->elem->name;
+    if(strcmp(elem_name, "f64") == 0 && (count == 2 || count == 4))
+    {
+        /* f64 is always fused, as for scalar arith.fma. */
+        rocke_ll_need(L, rocke_arena_printf(&L->arena, "fma.v%df64", count));
+        const char* vec_llvm = rocke_ll_llvm_type(L, vec_ty);
+        rocke_ll_emitf(L,
+                       "  %s = call %s @llvm.fma.v%df64(%s %s, %s %s, %s %s)",
+                       res->name,
+                       vec_llvm,
+                       count,
+                       vec_llvm,
+                       rocke_ll_operand(L, a),
+                       vec_llvm,
+                       rocke_ll_operand(L, b),
+                       vec_llvm,
+                       rocke_ll_operand(L, c));
+        return;
+    }
     if(!(strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0
          || strcmp(elem_name, "f32") == 0))
     {

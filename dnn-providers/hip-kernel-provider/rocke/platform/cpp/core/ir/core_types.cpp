@@ -1479,7 +1479,11 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.buffer_atomic_fadd_f32",
 
     /* math.* value * 2^exponent */
-    "math.ldexp"};
+    "math.ldexp",
+
+    /* math.exp / math.log */
+    "math.exp",
+    "math.log"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1784,7 +1788,11 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* buffer_atomic_fadd_f32     */ false,
 
     /* math.* value * 2^exponent */
-    /* math.ldexp                 */ true};
+    /* math.ldexp                 */ true,
+
+    /* math.exp / math.log */
+    /* math.exp                   */ true,
+    /* math.log                   */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

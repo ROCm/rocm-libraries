@@ -15,6 +15,11 @@ computed on the host. This mirrors CK Tile's
 - :func:`do_magic_division_dynamic` emits it with the pair as runtime values
   (for example kernel arguments the launcher fills from
   :func:`calculate_magic_numbers`).
+- :func:`calculate_magic_numbers_u31` / :func:`do_magic_division_u31_dynamic`: the
+  round-up variant ``umul_hi(n, multiplier) >> shift`` (no add) with the pair as
+  runtime values and ``(0, 0)`` for a divisor of 1 (the quotient is then ``n``
+  itself), the form of hipTensor's shape-generic kernels
+  (``kernels.common.hiptensor_aot``), whose host computes the pairs.
 
 The coordinate-transform DAG in ``rocke.helpers.transforms`` is one caller;
 kernels that split a flat index call it directly.
@@ -99,8 +104,51 @@ def do_magic_division_dynamic(
     return b.lshr(summed, shift)
 
 
+def calculate_magic_numbers_u31(divisor: int) -> Tuple[int, int]:
+    """The round-up ``(multiplier, shift)`` pair with
+    ``n // divisor == umul_hi(n, multiplier) >> shift`` for every ``0 <= n < 2**31``,
+    and ``(0, 0)`` for ``divisor == 1`` (:func:`do_magic_division_u31_dynamic` then
+    returns ``n``). ``multiplier = ceil(2**(32 + shift) / divisor)`` with the smallest
+    ``shift`` whose rounding error stays below one unit over the 31-bit range; it fits
+    32 bits for every ``divisor`` below ``2**31``. Raises ``ValueError`` for a divisor
+    below 1 or without a 32-bit pair."""
+    if divisor < 1:
+        raise ValueError(f"magic division requires divisor >= 1, got {divisor}")
+    if divisor == 1:
+        return 0, 0
+    for s in range(32, 64):
+        m = -(-(1 << s) // divisor)
+        if m >= (1 << 32):
+            break
+        e = m * divisor - (1 << s)
+        if e * ((1 << 31) - 1) < (1 << s):
+            return m, s - 32
+    raise ValueError(f"no 32-bit magic for divisor {divisor}")
+
+
+def do_magic_division_u31_dynamic(
+    b: IRBuilder,
+    dividend: Value,
+    multiplier: Value,
+    shift: Value,
+    *,
+    one: bool = True,
+) -> Value:
+    """Emit ``dividend // divisor`` for ``0 <= dividend < 2**31`` with the runtime pair of
+    :func:`calculate_magic_numbers_u31`: ``umul_hi(dividend, multiplier) >> shift``, then,
+    with ``one``, ``dividend`` itself where ``multiplier == 0`` (a divisor of 1). Without
+    ``one`` the caller guarantees ``divisor >= 2`` (or ``dividend == 0`` where it is 1).
+    """
+    q = b.lshr(b.umul_hi_i32(dividend, multiplier), shift)
+    if not one:
+        return q
+    return b.select(b.cmp_eq(multiplier, b.const_i32(0)), dividend, q)
+
+
 __all__ = [
     "calculate_magic_numbers",
+    "calculate_magic_numbers_u31",
     "do_magic_division",
     "do_magic_division_dynamic",
+    "do_magic_division_u31_dynamic",
 ]

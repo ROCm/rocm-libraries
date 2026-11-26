@@ -41,8 +41,10 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 `elementwise` and `reduce2d` also accept `dtype="f64"` (native f64
-compute, `vec=2`). f64 elementwise is limited to the native f64 ops `copy`,
-`neg`, `abs`, `relu`, `add`, `sub`, `mul`, `max` and `min`.
+compute, `vec=2`). f64 elementwise runs every op except the f32-constant
+activations (`gelu_tanh`, `quick_gelu`, `silu` / `swish`, `swiglu`, `geglu`):
+`copy`, `neg`, `abs`, `relu`, `add`, `sub`, `mul`, `max`, `min`, `exp`, `exp2`,
+`log`, `log2`, `tanh`, `sigmoid`, `sqrt`, `rsqrt` and `rcp`.
 
 ---
 
