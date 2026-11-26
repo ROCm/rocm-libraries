@@ -411,6 +411,8 @@ add_subdirectory(device_memory)
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx11|gfx12")
     add_subdirectory(wmma_op)
 endif()
+# Ungated: compile-only, it picks its own gfx125 targets.
+add_subdirectory(wmma_f8_16x16x128_gfx125)
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx942|gfx950") # smfmac needs ROCm6.2
     add_subdirectory(smfmac_op)
 endif()

@@ -33,7 +33,6 @@ namespace ck {
 // so there the product goes through V_WMMA_F32_16X16X128_F8F6F4, which reads A and B in the same
 // register layout (LLVM lowers it to the scaled form with a scale of 1.0). The f16-accumulator
 // forms have no F8F6F4 equivalent: they accumulate in f32 and round once.
-// Same logic as ck_tile/core/arch/mma/wmma/wmma_gfx1250_f8_16x16x128.hpp.
 template <bool ABf8, bool BBf8>
 __device__ inline float8_t
 wmma_f32_16x16x128_f8_gfx125(const int32x16_t& a, const int32x16_t& b, const float8_t& c)
