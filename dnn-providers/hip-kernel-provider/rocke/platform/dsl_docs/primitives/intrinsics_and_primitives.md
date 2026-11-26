@@ -599,7 +599,7 @@ philox_counter_add(b, base_lo, base_hi, k)
  # -> (lo, hi) of the u64 counter base + k
 
 # SDPA dropout mask, hipDNN SEM-015 (helpers/attention_dropout.py)
-dropout_row_counter(b, offset_lo=, offset_hi=, row_base=)
+dropout_row_counter(b, offset_lo=, offset_hi=, row=, max_sk=)
  # -> (lo, hi) counter of a row's key 0
 dropout_words(b, seed_lo=, seed_hi=, ctr_lo=, ctr_hi=, xor3=, mad64=)
  # -> words of keys 4 * (kv // 4) + 0..3

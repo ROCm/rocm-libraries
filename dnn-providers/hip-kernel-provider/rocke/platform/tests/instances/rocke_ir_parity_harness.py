@@ -1955,6 +1955,19 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # --- Philox dropout: the serial mask (grid), the mask spread over the
+        # PV MFMAs (persistent) and packed sequences.
+        ("dropout_sq512", {"dropout": True}),
+        (
+            "dropout_persist_lse_sq512",
+            {
+                "dropout": True,
+                "emit_lse": True,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        ("dropout_varlen_sq512", {"dropout": True, "varlen": True}),
     ):
         add(
             "attention_dense",
@@ -2052,6 +2065,9 @@ def cases():
                 "waves_per_eu": 4,
             },
         ),
+        # Philox dropout: the k-major PV of both grids.
+        ("dropout_causal_sq512", {"dropout": True}),
+        ("dropout_persist_sq512", {**_persist942, "dropout": True}),
     ):
         add(
             "attention_dense",

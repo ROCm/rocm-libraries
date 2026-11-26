@@ -341,6 +341,7 @@ _PRIVATE_PERTURBATIONS = {
     "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
     "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
+    "dropout": (True,),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -1701,7 +1702,11 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
 #   emit_lse: an optional extra output, legal on every config the body accepts.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse"})
+#   dropout: its refusal (kv_segments > 1) is the constructor's, so no
+#     supports() row can reach it.
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset(
+    {"use_exp2_fast", "emit_lse", "dropout"}
+)
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -1805,6 +1810,9 @@ _CONTRACT_GRID = [
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
+    # --- private: dropout (no rejected region -- see the comment above) ---
+    dict(dropout=True),
+    dict(dropout=True, persistent=True, num_persistent=304),
 ]
 
 

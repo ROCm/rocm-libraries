@@ -118,6 +118,13 @@ from kernels.common.attention_dense_decode import (
     make_fastdiv,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_dropout import (
+    apply_dropout_tile,
+    declare_dropout_params,
+    dropout_launch_args,
+    dropout_query_counter,
+    dropout_signature,
+)
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
@@ -235,6 +242,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # Lives here, not on the shared spec: only this arch's loader decodes fp8,
     # and the shared spec is the one the C++ engine mirrors.
     kv_storage_dtype: str | None = field(default=None, kw_only=True)
+    # Philox dropout on P (hipDNN SEM-015 mask; kernels.common._attention_dropout).
+    # Lives here, not on the shared spec, which the C++ engine mirrors.
+    dropout: bool = field(default=False, kw_only=True)
 
     @property
     def kv_elem_bytes(self) -> int:
@@ -350,6 +360,14 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
         require_bool("emit_lse", self.emit_lse)
+        require_bool("dropout", self.dropout)
+        if self.dropout:
+            # Both are inference forms: the KV split serves chunked prefill, and
+            # hipDNN declines dropout with fp8 scaling (SEM-024).
+            if self.kv_segments != 1:
+                raise ValueError("dropout is not supported with kv_segments > 1")
+            if self.kv_storage_dtype is not None:
+                raise ValueError("dropout is not supported with fp8 KV storage")
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -575,6 +593,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append(codegen)
         if self.emit_lse:
             parts.append("lse")
+        if self.dropout:
+            parts.append("do")
         if self.kv_segments != 1:
             parts.append(f"kvs{self.kv_segments}")
         return tuple(parts)
@@ -1001,6 +1021,7 @@ def build_attention_dense(
     KVS = spec.kv_segments
     if KVS > 1:
         segment_params = declare_segment_params(b)
+    drop = declare_dropout_params(b, xor3=True, mad64=True) if spec.dropout else None
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     # native v_exp_f32 (softmax arg bounded; see the scale-range note above
@@ -1056,6 +1077,30 @@ def build_attention_dense(
         )
     hkv = b.div(hq, _gqa())
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+    if drop is not None:
+        drop_row = dropout_query_counter(
+            b,
+            drop,
+            batch=bt,
+            head=hq,
+            query=b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0)),
+            num_heads=_hq_count(),
+            seqlen_q=seqlen_q_p,
+            seqlen_kv=seqlen_kv_p,
+        )
+
+    def with_dropout(p, tile_idx):
+        if drop is None:
+            return p
+        return apply_dropout_tile(
+            b,
+            drop,
+            drop_row,
+            p,
+            tile_key0=b.mul(tile_idx, b.const_i32(BN)),
+            slot_key=lambda slot: _mfma_32x32_c_row(b, lane, slot),
+            sub_keys=32,
+        )
 
     if varlen:
         # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
@@ -1657,7 +1702,7 @@ def build_attention_dense(
         # the sink's contribution from exp(sink - m_init) = 1.0 to exp(sink - m0).
         l0 = b.fadd(l0, b.fmul(l_init, alpha0))
     o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
-    pk0 = relayout_p(p0_vals)
+    pk0 = relayout_p(with_dropout(p0_vals, start_tile))
 
     iter_args = (
         [("m", m0), ("l", l0)]
@@ -1712,7 +1757,7 @@ def build_attention_dense(
         else:
             l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
             o_acc = rescale_o(o_acc, alpha)
-        p_packs = relayout_p(p_vals)
+        p_packs = relayout_p(with_dropout(p_vals, j))
         b.s_barrier_bare()
         load_tile(pbuf, b.add(j, b.const_i32(1)))
         b.scf_yield(m_new, l_new, *o_acc, *p_packs)
@@ -1869,6 +1914,8 @@ def build_attention_dense(
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:
         rcp_l = b.rcp(l_i)
+    if drop is not None:
+        rcp_l = b.fmul(rcp_l, drop.scale)
     if EMPTY_ROWS and not spec.runtime_shape:
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
@@ -2130,6 +2177,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             writeonly=True,
             align=4,
         )
+    drop = declare_dropout_params(b, xor3=True, mad64=True) if spec.dropout else None
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
     _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
 
@@ -2286,6 +2334,31 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             hkv = work_shape.div(hq, "gqa") if RT else b.div(hq, b.const_i32(gqa))
 
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+        if drop is not None:
+            drop_row = dropout_query_counter(
+                b,
+                drop,
+                batch=bt,
+                head=hq,
+                query=b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0)),
+                num_heads=_hq_count(),
+                seqlen_q=_sq(),
+                seqlen_kv=_skv(),
+            )
+
+        def with_dropout(p, tile_idx):
+            if drop is None:
+                return p
+            return apply_dropout_tile(
+                b,
+                drop,
+                drop_row,
+                p,
+                tile_key0=b.mul(tile_idx, b.const_i32(BN)),
+                slot_key=lambda slot: _mfma_32x32_c_row(b, lane, slot),
+                sub_keys=32,
+            )
+
         q_base = b.add(
             b.mul(b.mul(bt, _sq()), _stride_q()),
             b.mul(hq, b.const_i32(D)),
@@ -2832,7 +2905,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             else:
                 l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
                 o_acc = rescale_o(o_acc, alpha)
-            p_packs = relayout_p(p_vals)
+            p_packs = relayout_p(with_dropout(p_vals, j))
             b.s_barrier_bare()
             if EARLY_K:
                 async_load_v(V_lds_addr, pbuf, next_key0)
@@ -2903,7 +2976,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             m0, _alpha0, p0, l0 = softmax_stats(s0, neg_inf)
 
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
-        pk0 = relayout_p(p0)
+        pk0 = relayout_p(with_dropout(p0, start_tile))
 
         iter_args = (
             [("m", m0), ("l", l0)]
@@ -3019,6 +3092,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
         else:
             rcp_l = b.rcp(l_i)
+        if drop is not None:
+            rcp_l = b.fmul(rcp_l, drop.scale)
         if EMPTY_ROWS and not RT:
             # See the grid builder: a max still at the mask sentinel means no visible
             # key. Under runtime_shape those rows are zeroed by row_has_key below.
@@ -3168,7 +3243,9 @@ def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
     plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
-    i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
+    i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`); the
+    dropout params (``_attention_dropout.DROPOUT_PARAMS``) last when
+    ``spec.dropout``."""
     from rocke.helpers.spec import SignatureBuilder
 
     kv_ptr_dtype = spec.kv_storage_dtype or spec.dtype
@@ -3202,6 +3279,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if getattr(spec, "kv_segments", 1) > 1:
         for name in SEGMENT_PARAMS:
             sig = sig.ptr(name, "f32")
+    if spec.dropout:
+        sig = dropout_signature(sig)
     return sig.build()
 
 
@@ -3263,6 +3342,9 @@ def run_attention_dense_torch(
     validate_paged: bool = True,
     validate_varlen: bool = True,
     lse=None,
+    dropout_seed=None,
+    dropout_offset=None,
+    dropout_p: Optional[float] = None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on caller-owned device arrays: torch tensors or
@@ -3322,7 +3404,12 @@ def run_attention_dense_torch(
     logits that participate in the softmax denominator but have no value vector.
     Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
     raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
-    ``sinks`` is provided when ``spec.use_sinks`` is False."""
+    ``sinks`` is provided when ``spec.use_sinks`` is False.
+
+    Dropout (``spec.dropout``): pass ``dropout_seed`` and ``dropout_offset``
+    (an ``int`` or a device int64 array of one element each) and the drop
+    probability ``dropout_p``; required iff ``spec.dropout``, see
+    :func:`kernels.common._attention_dropout.dropout_launch_args`."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -3371,6 +3458,12 @@ def run_attention_dense_torch(
     # runtime_param_fields, so every shape on the runtime path shares one
     # compiled binary. Every field the body still bakes participates, whether or
     # not kernel_name() remembered to append a token for it.
+    drop_vals = dropout_launch_args(
+        spec.dropout,
+        dropout_seed=dropout_seed,
+        dropout_offset=dropout_offset,
+        dropout_p=dropout_p,
+    )
     key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
@@ -3400,6 +3493,7 @@ def run_attention_dense_torch(
         vals["sink_ptr"] = sinks
     if spec.emit_lse:
         vals["lse_ptr"] = lse
+    vals.update(drop_vals)
     if spec.kv_segments > 1:
         workspace = allocate_segment_workspace(spec, like=q)
         vals.update(workspace)

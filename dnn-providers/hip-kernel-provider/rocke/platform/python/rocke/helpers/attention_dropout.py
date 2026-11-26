@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from ..core.ir import I32, IRBuilder, Value
+from ..core.ir import I32, I64, IRBuilder, Value
 from .rng import PhiloxCall, add_u32_wrap
 
 __all__ = [
@@ -23,15 +23,18 @@ __all__ = [
 
 
 def dropout_row_counter(
-    b: IRBuilder, *, offset_lo: Value, offset_hi: Value, row_base: Value
+    b: IRBuilder, *, offset_lo: Value, offset_hi: Value, row: Value, max_sk: Value
 ) -> Tuple[Value, Value]:
-    """Counter words of key 0 of a row: ``offset + row_base`` mod ``2**64``.
+    """Counter words of key 0 of a row: ``offset + row * ceil(max_sk / 4)`` mod ``2**64``.
 
-    ``row_base`` is the i64 ``((z * Hq + h) * max_sq + q) * ceil(max_sk / 4)``
-    (non-negative, below ``2**63`` for any real tensor); ``offset`` the u64
-    sum of hipDNN's offsets as two i32 words. Hoist it per row: a key ``kv``
-    adds ``kv // 4`` (:func:`rocke.helpers.rng.philox_counter_add`).
+    ``row`` is the i32 ``(z * Hq + h) * max_sq + q`` and ``max_sk`` the declared
+    key extent; their product is taken in i64, as it outgrows i32 on long
+    sequences. ``offset`` is the u64 sum of hipDNN's offsets as two i32 words.
+    Hoist it per row: a key ``kv`` adds ``kv // 4``
+    (:func:`rocke.helpers.rng.philox_counter_add`).
     """
+    per_row = b.lshr(b.add(max_sk, b.const_i32(3)), b.const_i32(2))
+    row_base = b.mul(b.zext(row, I64), b.zext(per_row, I64))
     rb_lo = b.trunc(row_base, I32)
     rb_hi = b.trunc(b.lshr(row_base, b.const_i64(32)), I32)
     lo = add_u32_wrap(b, offset_lo, rb_lo)

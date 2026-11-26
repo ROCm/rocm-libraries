@@ -17,7 +17,7 @@ import unittest
 
 import numpy as np
 
-from rocke.core.ir import I32, I64, IRBuilder
+from rocke.core.ir import I32, IRBuilder
 from rocke.helpers import attention_dropout
 from rocke.helpers import rng
 from rocke.numeric import philox_dropout as oracle
@@ -167,6 +167,18 @@ class IRHelperTest(unittest.TestCase):
         with self.assertRaises(IntPoison):
             evaluate_int_ops(b, {"x": 3}, [m])
 
+    def test_evaluator_div_mod_truncate(self):
+        """The evaluator's div / mod follow the lowering's ``sdiv`` / ``srem``."""
+        b = IRBuilder("divmod")
+        x, y = b.param("x", I32), b.param("y", I32)
+        outs = [b.div(x, y), b.mod(x, y)]
+        for xv, yv in ((7, 2), (-7, 2), (7, -2), (63, 32)):
+            got = evaluate_int_ops(b, {"x": xv & M32, "y": yv & M32}, outs)
+            want = [int(xv / yv), xv - int(xv / yv) * yv]
+            self.assertEqual(got, [w & M32 for w in want], (xv, yv))
+        with self.assertRaises(IntPoison):
+            evaluate_int_ops(b, {"x": 1, "y": 0}, outs)
+
     def test_row_keep_matches_oracle(self):
         """The per-element path a kernel runs: row counter, ``+ kv // 4``, words, compare,
         in each form a kernel may select (``xor3`` = gfx950 ``v_bitop3_b32``, ``mad64``).
@@ -183,11 +195,12 @@ class IRHelperTest(unittest.TestCase):
 
     def _check_row_keep(self, cases, *, xor3, mad64):
         b = IRBuilder("row")
-        names = ("seed_lo", "seed_hi", "off_lo", "off_hi", "thr", "k")
-        seed_lo, seed_hi, off_lo, off_hi, thr, k = (b.param(n, I32) for n in names)
-        row_base = b.param("row_base", I64)
+        names = ("seed_lo", "seed_hi", "off_lo", "off_hi", "thr", "k", "row", "sk")
+        seed_lo, seed_hi, off_lo, off_hi, thr, k, row, max_sk = (
+            b.param(n, I32) for n in names
+        )
         r_lo, r_hi = attention_dropout.dropout_row_counter(
-            b, offset_lo=off_lo, offset_hi=off_hi, row_base=row_base
+            b, offset_lo=off_lo, offset_hi=off_hi, row=row, max_sk=max_sk
         )
         c_lo, c_hi = rng.philox_counter_add(b, r_lo, r_hi, k)
         words = attention_dropout.dropout_words(
@@ -203,9 +216,6 @@ class IRHelperTest(unittest.TestCase):
         for B, Hq, sq, sk, p, seed, off in cases:
             mask = oracle.philox_keep_mask(B, Hq, sq, sk, p, seed, off)
             for z, h, q in np.ndindex(B, Hq, sq):
-                rb = oracle.philox_counter_row_base(
-                    z, h, q, Hq=Hq, max_sq=sq, max_sk=sk
-                )
                 for k4 in range((sk + 3) // 4):
                     inputs = {
                         "seed_lo": seed & M32,
@@ -214,7 +224,8 @@ class IRHelperTest(unittest.TestCase):
                         "off_hi": off >> 32,
                         "thr": oracle.dropout_threshold(p) & M32,
                         "k": k4,
-                        "row_base": rb,
+                        "row": (z * Hq + h) * sq + q,
+                        "sk": sk,
                     }
                     got = evaluate_int_ops(b, inputs, keeps)
                     want = mask[z, h, q, 4 * k4 : 4 * k4 + 4]

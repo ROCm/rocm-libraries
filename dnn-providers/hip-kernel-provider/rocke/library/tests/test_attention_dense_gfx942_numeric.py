@@ -42,6 +42,7 @@ from kernels.gfx942.attention_dense import (
     supports_attention_dense,
 )
 
+from ._dense_dropout_gpu import check_mask, check_output_and_lse, check_paged
 from ._dense_numeric_gpu import (
     Alias,
     assert_close,
@@ -2261,6 +2262,54 @@ def test_cfvst_kdb_vpf_pipeline_reuses_runtime_shape_binary():
         _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
         if old_entry is not None:
             _DENSE_LAUNCHER_CACHE[keys[0]] = old_entry
+
+
+class TestDenseDropoutNumericGfx942:
+    """Philox dropout (SdpaSemanticsRegister SEM-015) on both grids against the oracle mask."""
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("d,form", [(128, "value"), (128, "device"), (64, "mixed")])
+    def test_mask_bit_exact(self, persistent, d, form):
+        spec = _spec("bf16", d, 4, 2, persistent, batch=2, sq=256, sk=d)
+        check_mask(
+            run_attention_dense_torch,
+            dataclasses.replace(spec, dropout=True),
+            form=form,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize(
+        "s,causal,p,form",
+        [(512, True, 0.1, "device"), (768, False, 0.5, "value")],
+        ids=["s512-causal", "s768"],
+    )
+    def test_output_and_lse(self, persistent, s, causal, p, form):
+        spec = _spec("bf16", 128, 8, 2, persistent, batch=2, sq=s, causal=causal)
+        spec = dataclasses.replace(spec, dropout=True, emit_lse=True)
+        check_output_and_lse(
+            run_attention_dense_torch, spec, form=form, p=p, tol=_tolerance("bf16")
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_paged_matches_contiguous(self):
+        shipped = _spec("bf16", 128, 8, 2, False, sq=512, kv_block_size=16)
+        paged = dataclasses.replace(shipped, dropout=True)
+        contiguous = dataclasses.replace(
+            paged, paged=False, block_size=0, num_kv_blocks=0, use_cfvst=False
+        )
+        check_paged(
+            run_attention_dense_torch,
+            paged,
+            contiguous,
+            form="mixed",
+            p=0.3,
+            tol=_tolerance("bf16"),
+        )
 
 
 if __name__ == "__main__":

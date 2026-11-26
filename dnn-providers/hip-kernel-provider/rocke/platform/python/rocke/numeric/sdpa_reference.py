@@ -47,6 +47,11 @@ Two forward score modifiers the hipDNN node does not have, both off by default:
   ``p_k = exp(s_k) / (exp(sink) + sum_j exp(s_j))``, and ``LSE`` includes the
   sink term. A row with no kept key then yields ``O = 0`` and ``LSE = sink``.
 
+Dropout (``SdpaSemanticsRegister`` SEM-015) is the explicit-mask form:
+``O = (P * mask * dropout_scale) @ V`` with the mask in the in-batch positions
+the bias uses; ``LSE`` stays the pre-dropout softmax's. A Philox mask comes from
+``rocke.numeric.philox_dropout.philox_keep_mask``.
+
 Backward (:func:`sdpa_reference_bwd`) follows the hipDNN CPU reference
 backward: it consumes the natural-log LSE of the forward, recomputes
 ``P = exp(scale * q.k - LSE)`` on kept cells only, and returns ``dQ``, ``dK``,
@@ -232,22 +237,23 @@ def _band_mask(s_q, s_kv, top_left, left, right):
     return m
 
 
-def _expand_bias(bias, B, H, Sq, Skv):
+def _expand_bias(bias, B, H, Sq, Skv, name="bias"):
     bias = np.asarray(bias, dtype=np.float64)
     if not 1 <= bias.ndim <= 4:
-        raise ValueError("bias rank must be 1..4")
+        raise ValueError(f"{name} rank must be 1..4")
     bias = bias.reshape((1,) * (4 - bias.ndim) + bias.shape)
     want = (B, H, Sq, Skv)
     for got, w in zip(bias.shape, want):
         if got not in (1, w):
-            raise ValueError(f"bias shape {bias.shape} not broadcastable to {want}")
+            raise ValueError(f"{name} shape {bias.shape} not broadcastable to {want}")
     return np.broadcast_to(bias, want)
 
 
-def _attend(q, k, v, scale, bias2d, band, *, softcap, sink):
+def _attend(q, k, v, scale, bias2d, band, *, softcap, sink, dropout2d=None):
     """One (batch, head) problem. q[sq,D], k[skv,D], v[skv,Dv] -> (o, lse).
 
-    ``sink`` is the head's sink logit; ``-inf`` (no sink) adds nothing."""
+    ``sink`` is the head's sink logit; ``-inf`` (no sink) adds nothing.
+    ``dropout2d`` (``mask * scale``) multiplies P after the softmax."""
     sq, skv = q.shape[0], k.shape[0]
     if skv == 0:
         return np.zeros((sq, v.shape[1])), np.full(sq, sink, dtype=np.float64)
@@ -263,7 +269,10 @@ def _attend(q, k, v, scale, bias2d, band, *, softcap, sink):
     e = np.where(live[:, None], np.exp(s - safe[:, None]), 0.0)
     den = e.sum(axis=1) + np.where(live, np.exp(sink - safe), 0.0)
     den1 = np.where(live, den, 1.0)
-    o = (e / den1[:, None]) @ v
+    prob = e / den1[:, None]
+    if dropout2d is not None:
+        prob = prob * dropout2d
+    o = prob @ v
     lse = np.where(live, mx + np.log(den1), -np.inf)
     return o, lse
 
@@ -286,6 +295,8 @@ def sdpa_reference(
     kv_offsets=None,
     softcap=0.0,
     sinks=None,
+    dropout_mask=None,
+    dropout_scale=None,
 ):
     """Float64 SDPA forward. Returns ``(O, LSE)``, both float64.
 
@@ -294,7 +305,8 @@ def sdpa_reference(
     otherwise inputs are dense 4-D with optional per-batch ``seq_len_q`` /
     ``seq_len_kv`` counts. ``scale`` defaults to ``1/sqrt(D)``. ``softcap``
     (``>= 0``, 0 = off) and ``sinks`` (one logit per query head, ``None`` = off)
-    are the score modifiers in the module docstring.
+    are the score modifiers in the module docstring. ``dropout_mask`` (broadcast
+    as ``bias`` is) and ``dropout_scale`` are hipDNN's explicit-mask dropout.
     """
     if not (math.isfinite(softcap) and softcap >= 0):
         raise ValueError(f"softcap must be finite and >= 0, got {softcap}")
@@ -361,6 +373,13 @@ def sdpa_reference(
     if scale is None:
         scale = 1.0 / math.sqrt(D)
     bias_full = None if bias is None else _expand_bias(bias, B, Hq, Smax_q, Smax_kv)
+    if (dropout_mask is None) != (dropout_scale is None):
+        raise ValueError("dropout_mask and dropout_scale go together")
+    drop_full = None
+    if dropout_mask is not None:
+        drop_full = _expand_bias(
+            dropout_mask, B, Hq, Smax_q, Smax_kv, name="dropout_mask"
+        ) * float(dropout_scale)
     if sinks is None:
         head_sinks = np.full(Hq, -np.inf)
     else:
@@ -376,7 +395,11 @@ def sdpa_reference(
         for h in range(Hq):
             hk, hv = h // (Hq // Hk), h // (Hq // Hv)
             bb = None if bias_full is None else bias_full[b, h, :sq, :skv]
-            modifiers = {"softcap": softcap, "sink": head_sinks[h]}
+            modifiers = {
+                "softcap": softcap,
+                "sink": head_sinks[h],
+                "dropout2d": None if drop_full is None else drop_full[b, h, :sq, :skv],
+            }
             if ragged:
                 qs = slice(qo[b], qo[b] + sq)
                 ks = slice(ko[b], ko[b] + skv)

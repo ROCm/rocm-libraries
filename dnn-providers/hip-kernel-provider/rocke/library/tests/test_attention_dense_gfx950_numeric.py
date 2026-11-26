@@ -39,6 +39,16 @@ from kernels.gfx950.attention_dense import (
     supports_attention_dense,
 )
 
+from ._dense_dropout_gpu import (
+    assert_mask_bit_exact,
+    check_mask,
+    check_output_and_lse,
+    check_paged,
+    dropout_args,
+    identity_v,
+    keep_mask,
+    scores_inputs,
+)
 from ._dense_numeric_gpu import (
     Alias,
     dense_reference,
@@ -2541,6 +2551,114 @@ class TestDenseRowIndependence:
         assert changed.size == 0, (
             f"{len(changed)} (row, head) pairs that mask key {S - 1} changed, rows "
             f"{sorted(set(changed[:, 1].tolist()))}"
+        )
+
+
+class TestDenseDropoutNumericGfx950:
+    """Philox dropout (SdpaSemanticsRegister SEM-015) on the grid, persistent and
+    wide-DMA bodies, varlen and paged, against the oracle mask."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize(
+        "d,causal,form",
+        # Persistent D128 causal is the wide-DMA body.
+        [(128, False, "value"), (128, True, "device"), (64, True, "mixed")],
+        ids=["d128", "d128-causal", "d64-causal"],
+    )
+    def test_mask_bit_exact(self, persistent, d, causal, form):
+        spec = _spec("bf16", d, 4, 2, persistent, batch=2, sq=256, sk=d, causal=causal)
+        check_mask(run_attention_dense_torch, replace(spec, dropout=True), form=form)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize(
+        "s,causal,p,form",
+        # 300: the ragged (partial-tile) path.
+        [(512, True, 0.1, "device"), (300, False, 0.5, "value")],
+        ids=["s512-causal", "s300"],
+    )
+    def test_output_and_lse(self, persistent, s, causal, p, form):
+        spec = _spec("bf16", 128, 8, 2, persistent, batch=2, sq=s, causal=causal)
+        spec = replace(spec, dropout=True, emit_lse=True)
+        check_output_and_lse(
+            run_attention_dense_torch, spec, form=form, p=p, tol=_tolerance("bf16")
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_varlen_mask_and_output(self):
+        """Packed sequences draw the mask at in-sequence positions over the
+        declared extents (the spec's seqlen_q / seqlen_kv), here longer than every
+        sequence. Lengths are tile multiples, as the packed body requires."""
+        q_lens, kv_lens, hq, hkv, d, p = (256, 256), (128, 64), 4, 2, 128, 0.5
+        max_sq, max_sk = 512, 192
+        q_off = [0, *np.cumsum(q_lens).tolist()]
+        kv_off = [0, *np.cumsum(kv_lens).tolist()]
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=max_sq,
+            seqlen_kv=max_sk,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            head_size=d,
+            dtype="bf16",
+            varlen=True,
+            dropout=True,
+        )
+        rng = np.random.default_rng(3)
+        q, k = scores_inputs(rng, (q_off[-1], hq, d), (kv_off[-1], hkv, d), "bf16")
+        cu = {
+            "cu_seqlens_q": DeviceArray(np.array(q_off, dtype=np.int32)),
+            "cu_seqlens_kv": DeviceArray(np.array(kv_off, dtype=np.int32)),
+        }
+        keep = keep_mask(2, hq, max_sq, max_sk, p)
+        drop = dropout_args("mixed", p)
+        out = filled(q.shape, "bf16")
+        v = identity_v(None, hkv, d, "bf16", kv_lens=kv_lens)
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, scale=d**-0.5, **cu, **drop
+        )
+        expected = np.zeros(q.shape, bool)
+        for b, (sq, sk) in enumerate(zip(q_lens, kv_lens)):
+            visible = np.tril(np.ones((sq, sk), bool))
+            rows = keep[b, :, :sq, :sk] & visible
+            expected[q_off[b] : q_off[b + 1], :, :sk] = rows.transpose(1, 0, 2)
+        assert_mask_bit_exact(out, expected, spec.kernel_name())
+        v = operand(rng, (kv_off[-1], hkv, d), "bf16")
+        out = filled(q.shape, "bf16")
+        run_attention_dense_torch(
+            spec=spec, q=q, k=k, v=v, out=out, scale=d**-0.5, **cu, **drop
+        )
+        ref, _ = dense_reference(
+            q,
+            k,
+            v,
+            d**-0.5,
+            q_offsets=q_off,
+            kv_offsets=kv_off,
+            # The packed reference indexes masks by in-sequence position up to
+            # the longest sequence.
+            dropout=(keep[:, :, : max(q_lens), : max(kv_lens)], 1.0 / (1.0 - p)),
+        )
+        err = max_abs_error(values(out), values(ref))
+        assert err < _tolerance("bf16") / (1.0 - p), f"max_abs={err:.3e}"
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_paged_matches_contiguous(self):
+        shipped = _spec("bf16", 128, 8, 2, False, sq=512, kv_block_size=16)
+        paged = replace(shipped, dropout=True)
+        contiguous = replace(paged, paged=False, block_size=0, num_kv_blocks=0)
+        check_paged(
+            run_attention_dense_torch,
+            paged,
+            contiguous,
+            form="mixed",
+            p=0.3,
+            tol=_tolerance("bf16"),
         )
 
 

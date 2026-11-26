@@ -24,6 +24,11 @@ class IntPoison(AssertionError):
 
 
 _WIDTH = {"i1": 1, "i32": 32, "i64": 64}
+_ARITH = {
+    "arith.add": lambda x, y: x + y,
+    "arith.sub": lambda x, y: x - y,
+    "arith.mul": lambda x, y: x * y,
+}
 
 
 def _signed(v: int, bits: int) -> int:
@@ -70,17 +75,27 @@ def evaluate_int_ops(builder, inputs: Mapping[str, object], outputs: Iterable) -
             continue
         bits = _WIDTH[res.type.name]
         mask = (1 << bits) - 1
-        if op.name in ("arith.add", "arith.mul"):
-            exact_u = a + c if op.name == "arith.add" else a * c
+        if op.name in ("arith.add", "arith.sub", "arith.mul"):
+            apply = _ARITH[op.name]
+            exact_u = apply(a, c)
             if op.attrs.get("wrap") == "nuw":
-                if exact_u > mask:
+                if not 0 <= exact_u <= mask:
                     raise IntPoison(f"{op.name} nuw overflow: {a}, {c}")
             else:
                 sa, sc = _signed(a, bits), _signed(c, bits)
-                exact_s = sa + sc if op.name == "arith.add" else sa * sc
+                exact_s = apply(sa, sc)
                 if not -(1 << (bits - 1)) <= exact_s < (1 << (bits - 1)):
                     raise IntPoison(f"{op.name} nsw overflow: {sa}, {sc}")
             out = exact_u & mask
+        elif op.name in ("arith.div", "arith.mod"):
+            # sdiv / srem: truncating; a zero divisor or INT_MIN / -1 is
+            # undefined behaviour.
+            sa, sc = _signed(a, bits), _signed(c, bits)
+            if sc == 0 or (sa == -(1 << (bits - 1)) and sc == -1):
+                raise IntPoison(f"{op.name} undefined: {sa} / {sc}")
+            quot = abs(sa) // abs(sc) * (1 if (sa < 0) == (sc < 0) else -1)
+            rem = sa - quot * sc
+            out = (quot if op.name == "arith.div" else rem) & mask
         elif op.name == "arith.xor":
             out = a ^ c
         elif op.name == "arith.and":

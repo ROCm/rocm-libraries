@@ -104,6 +104,7 @@ def dense_reference(
     sinks=None,
     q_offsets: Sequence[int] | None = None,
     kv_offsets: Sequence[int] | None = None,
+    dropout: tuple[np.ndarray, float] | None = None,
 ):
     """Float64 ``(O, LSE)`` of a dense attention launch on exactly the stored values.
 
@@ -114,6 +115,8 @@ def dense_reference(
     ignored without it), ``window`` keeps the ``window`` keys ending at the diagonal
     (0 = unbounded), ``bottom_right`` moves the diagonal to ``s_kv - s_q``. ``sinks``
     (one logit per query head) joins every row's softmax with no value row.
+    ``dropout`` is ``(keep mask [B, Hq, Sq, Skv], scale)`` (``sdpa_reference``'s
+    explicit-mask dropout; packed rows read it at in-sequence positions).
 
     ``O`` comes back in the input layout; ``LSE`` (natural log) is ``[B, Hq, Sq, 1]``
     (``[T, Hq, 1]`` packed). A row with no visible key has ``O = 0`` and
@@ -126,11 +129,14 @@ def dense_reference(
     }
     stored = [_stored(x) for x in (q, k, v)]
     sink_values = None if sinks is None else values(sinks)
-    key = _memo_key(stored, sink_values, scale, band, q_offsets, kv_offsets)
+    key = _memo_key(stored, sink_values, scale, band, q_offsets, kv_offsets, dropout)
     if key not in _REFERENCE_MEMO:
         qv, kv, vv = (values(x) for x in (q, k, v))
         _remember(
-            key, _reference(qv, kv, vv, scale, band, sink_values, q_offsets, kv_offsets)
+            key,
+            _reference(
+                qv, kv, vv, scale, band, sink_values, q_offsets, kv_offsets, dropout
+            ),
         )
     _REFERENCE_MEMO.move_to_end(key)
     return _REFERENCE_MEMO[key]
@@ -155,13 +161,17 @@ def _stored(array):
     return host_values(array), array_info(array).dtype
 
 
-def _memo_key(stored, sink_values, scale, band, q_offsets, kv_offsets):
+def _memo_key(stored, sink_values, scale, band, q_offsets, kv_offsets, dropout):
     digest = hashlib.sha256()
     for array, dtype in stored:
         digest.update(repr((array.shape, dtype)).encode())
         digest.update(np.ascontiguousarray(array).data)
     if sink_values is not None:
         digest.update(sink_values.tobytes())
+    if dropout is not None:
+        mask, drop_scale = dropout
+        digest.update(repr((mask.shape, float(drop_scale))).encode())
+        digest.update(np.ascontiguousarray(mask, dtype=bool).data)
     offsets = tuple(
         None if x is None else tuple(int(i) for i in x) for x in (q_offsets, kv_offsets)
     )
@@ -178,7 +188,7 @@ def _remember(key, result):
         total -= sum(x.nbytes for x in dropped)
 
 
-def _reference(q, k, v, scale, band, sink_values, q_offsets, kv_offsets):
+def _reference(q, k, v, scale, band, sink_values, q_offsets, kv_offsets, dropout):
     """``sdpa_reference`` of float64 ``[B, S, H, D]`` (or packed ``[T, H, D]``)
     values as ``(O, LSE[..., 1])`` in the input layout.
 
@@ -214,6 +224,14 @@ def _reference(q, k, v, scale, band, sink_values, q_offsets, kv_offsets):
             q_offsets=q_offsets,
             kv_offsets=kv_offsets,
             **band,
+            **(
+                {}
+                if dropout is None
+                else {
+                    "dropout_mask": dropout[0][batch, q_head : q_head + 1],
+                    "dropout_scale": dropout[1],
+                }
+            ),
         )
 
     run_reference_pieces(

@@ -220,6 +220,14 @@ from kernels.common.attention_dense_spec import (
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
 # atoms (mfma_atom_catalog.md), so the softmax reductions + epilogue port verbatim.
 from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_dropout import (
+    dropout_keep_run,
+    dropout_tile_counter,
+    declare_dropout_params,
+    dropout_launch_args,
+    dropout_query_counter,
+    dropout_signature,
+)
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
@@ -512,6 +520,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   count for short query lengths over long KV (chunked prefill), where one CTA
     #   per (query block, head) leaves most CUs idle. 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # Philox dropout on P (hipDNN SEM-015 mask; kernels.common._attention_dropout).
+    # Lives here, not on the shared spec, which the C++ engine mirrors.
+    dropout: bool = field(default=False, kw_only=True)
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -530,6 +541,10 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def __post_init__(self) -> None:
         super().__post_init__()
         require_bool("emit_lse", self.emit_lse)
+        require_bool("dropout", self.dropout)
+        # The KV split serves chunked prefill (inference), where no engine offers dropout.
+        if self.dropout and self.kv_segments != 1:
+            raise ValueError("dropout is not supported with kv_segments > 1")
         # Reject, never coerce: bool("false") is True, so a truthiness read would
         # silently build the CFVST kernel the caller asked to turn off.
         if self.use_cfvst is not None and type(self.use_cfvst) is not bool:
@@ -791,6 +806,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append("wskip")
     if spec.emit_lse:
         parts.append("lse")
+    if spec.dropout:
+        parts.append("do")
     if spec.kv_segments != 1:
         parts.append(f"kvs{spec.kv_segments}")
     return "".join(f"_{p}" for p in parts)
@@ -1610,6 +1627,7 @@ def _build_attention_dense_single_buffer(
     KVS = spec.kv_segments
     if KVS > 1:
         segment_params = declare_segment_params(b)
+    drop = declare_dropout_params(b) if spec.dropout else None
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1875,6 +1893,22 @@ def _build_attention_dense_single_buffer(
             hkv = b.div(hq, gqa_p if spec.runtime_shape else b.const_i32(gqa))
         diag_off = _diag_off() if BR else None
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+        if drop is not None:
+            RT = spec.runtime_shape
+            drop_row = dropout_query_counter(
+                b,
+                drop,
+                batch=bt,
+                head=hq,
+                query=b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0)),
+                num_heads=hq_p if RT else b.const_i32(Hq),
+                seqlen_q=seqlen_q_p if RT else b.const_i32(Sq),
+                seqlen_kv=seqlen_kv_p if RT else b.const_i32(Skv),
+            )
+
+            def drop_slot_key(slot):
+                return _mfma_32x32_c_row(b, lane, slot)
+
         # NOT hoisted into a local shared with o_base below: the IR builder is
         # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
         # written. Hoisting moves that node earlier and lets the second use CSE
@@ -2273,13 +2307,30 @@ def _build_attention_dense_single_buffer(
             # the packed casts are numerically bit-identical: pure live-range relief.
             l_local = b.const_f32(0.0)
             p_packs = []
+            if drop is not None:
+                drop_tile = dropout_tile_counter(
+                    b, drop_row, b.mul(j, b.const_i32(BN)), drop_slot_key
+                )
             for kk in range(KK_STEPS):
                 nsub = kk // 4
                 base_i = (kk % 4) * 4
+                if drop is not None:
+                    # Pack kk holds slots base_i .. base_i + 3: one Philox call.
+                    keep = dropout_keep_run(
+                        b,
+                        drop,
+                        drop_tile,
+                        nsub=nsub,
+                        g=kk % 4,
+                        slot_key=drop_slot_key,
+                        sub_keys=32,
+                    )
                 elems = []
                 for j2 in range(4):
                     pv = exp2(b.fsub(s[nsub][base_i + j2], m_new))
                     l_local = b.fadd(l_local, pv)
+                    if drop is not None:
+                        pv = b.select(keep[j2], pv, b.const_f32(0.0))
                     elems.append(pv if PACK_P_BF16 else b.cast_f32_to(pv, dtype))
                 if PACK_P_BF16:
                     p_packs.append(_pack_p_bf16(b, elems))
@@ -2689,6 +2740,8 @@ def _build_attention_dense_single_buffer(
             rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
         else:
             rcp_l = b.rcp(l_i)
+        if drop is not None:
+            rcp_l = b.fmul(rcp_l, drop.scale)
         o_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
@@ -2860,7 +2913,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     per work-decode divisor. Then a ``sink_ptr`` ([Hq], q dtype) when
     ``spec.use_sinks``, ``block_tables``/``kv_lens`` (i32 pointers) and
     ``block_table_stride`` (i32) when ``spec.paged``, and an f32 ``lse_ptr`` when
-    ``spec.emit_lse``, in that order.
+    ``spec.emit_lse``, in that order; the dropout params
+    (``_attention_dropout.DROPOUT_PARAMS``) last when ``spec.dropout``.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -2899,6 +2953,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if _as_gfx942_spec(spec).kv_segments > 1:
         for name in SEGMENT_PARAMS:
             sig = sig.ptr(name, "f32")
+    if getattr(spec, "dropout", False):
+        sig = dropout_signature(sig)
     return sig.build()
 
 
@@ -2934,6 +2990,9 @@ def run_attention_dense_torch(
     block_tables=None,
     kv_lens=None,
     validate_paged: bool = True,
+    dropout_seed=None,
+    dropout_offset=None,
+    dropout_p: float | None = None,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
     kernel on caller-owned device arrays: torch tensors or
@@ -2969,7 +3028,12 @@ def run_attention_dense_torch(
     writes the natural-log softmax normalizer while still returning ``out``. Rows
     with no allowed key (a sliding window past the end of the keys) write O=0 and
     LSE=-inf; with an attention sink, those rows instead write the sink logit as
-    LSE. Supplying ``lse`` with ``emit_lse=False`` is an error."""
+    LSE. Supplying ``lse`` with ``emit_lse=False`` is an error.
+
+    Dropout (``spec.dropout``): pass ``dropout_seed`` and ``dropout_offset``
+    (an ``int`` or a device int64 array of one element each) and the drop
+    probability ``dropout_p``; required iff ``spec.dropout``, see
+    :func:`kernels.common._attention_dropout.dropout_launch_args`."""
     spec = _as_gfx942_spec(spec)
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
@@ -2988,6 +3052,12 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
+    drop_vals = dropout_launch_args(
+        spec.dropout,
+        dropout_seed=dropout_seed,
+        dropout_offset=dropout_offset,
+        dropout_p=dropout_p,
+    )
     key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
@@ -3015,6 +3085,7 @@ def run_attention_dense_torch(
         vals.update(paged_launch_args(block_tables, kv_lens))
     if spec.emit_lse:
         vals["lse_ptr"] = lse
+    vals.update(drop_vals)
     if spec.kv_segments > 1:
         workspace = allocate_segment_workspace(spec, like=q)
         vals.update(workspace)
