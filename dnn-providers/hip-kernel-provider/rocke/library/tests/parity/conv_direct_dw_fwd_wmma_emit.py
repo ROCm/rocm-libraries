@@ -26,6 +26,7 @@
 #  built (rectangular filters, one forward PAD on both axes):
 #  12  bf16, 3x5 PAD 1, 6 rows, w_fold 2
 #  13  fp16, 1x7 PAD 3, 2 waves, 4 rows
+from dataclasses import replace
 from _emit_common import run_emit
 from kernels.common.conv_direct_dw_fwd_wmma import DwFwdWmmaSpec, build_dw_fwd_wmma
 from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -48,7 +49,7 @@ def _p(K=3, PAD=1, dtype="bf16", G=64, H=20, W=37, pad_w=-1, KW=None):
     )
 
 
-def _spec(idx: int):
+def _base_spec(idx: int):
     S = DwFwdWmmaSpec
     cfgs = {
         0: (S(problem=_p()), "gfx1250"),
@@ -94,6 +95,31 @@ def _spec(idx: int):
 
 def _build(spec, arch):
     return build_dw_fwd_wmma(spec, arch=arch)
+
+
+# Conv + bias forward, configs 14..: the config _BIAS_CFGS[idx - 14]
+# above rebuilt with bias=True (the Bias / Bias_bytes kernarg tail and the
+# fp32 bias add before the store).
+_BIAS_CFG_BASE = 14
+_BIAS_CFGS = (
+    0,
+    1,
+    2,
+    3,
+    6,
+    12,
+)
+
+
+def _spec(idx: int):
+    if idx < _BIAS_CFG_BASE:
+        return _base_spec(idx)
+    if idx - _BIAS_CFG_BASE >= len(_BIAS_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    sel = _base_spec(_BIAS_CFGS[idx - _BIAS_CFG_BASE])
+    if isinstance(sel, tuple):
+        return replace(sel[0], bias=True), sel[1]
+    return replace(sel, bias=True)
 
 
 def main() -> int:

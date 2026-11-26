@@ -70,6 +70,8 @@ typedef struct rocke_direct_dw_fwd_wmma_spec
     int block_h; /* default 8 */
     int w_fold; /* default 1 */
     int prefetch_rows; /* default 2 */
+    bool bias; /* default false; conv + bias (Bias / Bias_bytes tail): the
+                * Toeplitz builder's forward bias, passed through the win spec */
 } rocke_direct_dw_fwd_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

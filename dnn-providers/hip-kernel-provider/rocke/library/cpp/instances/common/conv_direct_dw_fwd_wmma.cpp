@@ -114,7 +114,7 @@ rocke_status_t rocke_direct_dw_fwd_wmma_kernel_name(const rocke_direct_dw_fwd_wm
     snprintf(bh, sizeof bh, "bh%d", spec->block_h);
     snprintf(f, sizeof f, "f%d", spec->w_fold);
     snprintf(pf, sizeof pf, "pf%d", spec->prefetch_rows);
-    const char* parts[] = {rsp, wv, bh, f, pf};
+    const char* parts[] = {rsp, wv, bh, f, pf, spec->bias ? "cbias" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "rocke_direct_dw_fwd_wmma",
@@ -264,6 +264,7 @@ rocke_direct_depthwise_dgrad_win_spec_t
     w.prefetch_rows = spec->prefetch_rows;
     w.wave_size = ROCKE_DW_FWD_WMMA_WAVE;
     w.fwd = true;
+    w.bias = spec->bias;
     return w;
 }
 
