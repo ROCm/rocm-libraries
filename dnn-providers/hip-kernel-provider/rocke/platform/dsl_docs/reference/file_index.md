@@ -197,7 +197,7 @@ Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/att
 |---------------------------------------------------|--------------------------------------------------------------------|
 | `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
-| `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
+| `examples/common/ck_tile_parity.py` | Small-op parity harness vs numpy references. |
 
 The attention parity harnesses are not examples; they live in the library, one
 per arch:
