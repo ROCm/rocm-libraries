@@ -1251,6 +1251,26 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
     problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
+    if constexpr(std::is_same<Inputs, rocblaslt::RocGemmInputsV2>::value
+                 && std::is_same<Epilogue, rocblaslt::RocGemmEpilogueV2>::value)
+    {
+        if(rocEpilogue.gate_mode != 0)
+        {
+            if(inputs.gate == nullptr)
+            {
+                log_error(__func__, "a gate mode is set but the gate pointer is null");
+                return rocblaslt_status_invalid_pointer;
+            }
+            const size_t ldGate = rocEpilogue.gate_ld ? rocEpilogue.gate_ld : m;
+            problem.gate        = inputs.gate;
+            problem.gate_mode   = rocEpilogue.gate_mode;
+            problem.gate_type   = rocEpilogue.gate_data_type == HIPBLASLT_DATATYPE_INVALID
+                                      ? problemtype.type_d
+                                      : rocEpilogue.gate_data_type;
+            problem.col_stride_gate   = ldGate;
+            problem.batch_stride_gate = rocEpilogue.gate_stride ? rocEpilogue.gate_stride : ldGate * n;
+        }
+    }
     if constexpr(std::is_same<Inputs, rocblaslt::RocGemmInputsV2>::value)
         problem.dPeer = inputs.dPeer;
     return gemmCreate(problem, gemmData, gemmCount);
@@ -1635,6 +1655,34 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         effective_uniform_summation_order(handle, nullptr)});
         problems.back().int4EncodingA = int4EncA;
         problems.back().deviceScalarAlpha = deviceScalarAlpha;
+        if constexpr(std::is_same<Inputs, rocblaslt::RocGemmInputsV2>::value
+                     && std::is_same<Epilogue, rocblaslt::RocGemmEpilogueV2>::value)
+        {
+            // Every group must use the same gate mode: the kernel is chosen from group 0.
+            if(rocEpilogue[iIdx].gate_mode != rocEpilogue[0].gate_mode)
+            {
+                log_error(__func__, "all groups must use the same gate mode");
+                return rocblaslt_status_invalid_value;
+            }
+            if(rocEpilogue[iIdx].gate_mode != 0)
+            {
+                if(inputs[i].gate == nullptr)
+                {
+                    log_error(__func__, "a gate mode is set but the gate pointer is null");
+                    return rocblaslt_status_invalid_pointer;
+                }
+                auto&        gp     = problems.back();
+                const size_t ldGate = rocEpilogue[iIdx].gate_ld ? rocEpilogue[iIdx].gate_ld : m[i];
+                gp.gate             = inputs[i].gate;
+                gp.gate_mode        = rocEpilogue[iIdx].gate_mode;
+                gp.gate_type = rocEpilogue[iIdx].gate_data_type == HIPBLASLT_DATATYPE_INVALID
+                                   ? problemtype[0].type_d
+                                   : rocEpilogue[iIdx].gate_data_type;
+                gp.col_stride_gate   = ldGate;
+                gp.batch_stride_gate
+                    = rocEpilogue[iIdx].gate_stride ? rocEpilogue[iIdx].gate_stride : ldGate * n[i];
+            }
+        }
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

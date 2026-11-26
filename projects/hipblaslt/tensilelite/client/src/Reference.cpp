@@ -2312,7 +2312,9 @@ namespace TensileLite
                                                 inputs.gateResidual,
                                                 gateIndex,
                                                 aConjugate);
-                                        current = gateVal * current + gateVal;
+                                        current = problem.gateMulOnly()
+                                                      ? gateVal * current
+                                                      : gateVal * current + gateVal;
                                     }
                                     curBatchD[idxD] = current;
                                 }
@@ -2850,7 +2852,8 @@ namespace TensileLite
                                                inputs.gateResidual,
                                                gateIndex,
                                                aConjugate);
-                    resultD = gateVal * resultD + gateVal;
+                    resultD
+                        = problem.gateMulOnly() ? gateVal * resultD : gateVal * resultD + gateVal;
                 }
 
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);

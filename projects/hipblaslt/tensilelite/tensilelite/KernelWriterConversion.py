@@ -877,12 +877,16 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += "  %s[%d] *= scaleD_data;%s" % (accumStr, vIdx, self.endLine)
     kStr += self.endLine
 
-    #Gate Residual: D = gate * acc + gate
+    #Gate Residual: D = gate * acc + gate (GateMulOnly: D = gate * acc)
     if self.state["ProblemType"]["UseGateResidual"]:
       kStr += "  if(arg.Gate != 0){%s" % self.endLine
       for vIdx in range(self.num_dword_load):
-        kStr += "    %s[%d] = (%s)arg.Gate[idxGate+%d] * %s[%d] + (%s)arg.Gate[idxGate+%d];%s" \
-                % (accumStr, vIdx, intermediateDataType, vIdx, accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+        if self.state["ProblemType"]["GateMulOnly"]:
+          kStr += "    %s[%d] = (%s)arg.Gate[idxGate+%d] * %s[%d];%s" \
+                  % (accumStr, vIdx, intermediateDataType, vIdx, accumStr, vIdx, self.endLine)
+        else:
+          kStr += "    %s[%d] = (%s)arg.Gate[idxGate+%d] * %s[%d] + (%s)arg.Gate[idxGate+%d];%s" \
+                  % (accumStr, vIdx, intermediateDataType, vIdx, accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
       kStr += "  }%s" % self.endLine
       kStr += self.endLine
 
@@ -1003,7 +1007,7 @@ class KernelWriterConversion(KernelWriterBase):
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)
     if state["ProblemType"]["UseGateResidual"]:
-      name += "_GateR"
+      name += "_GateM" if state["ProblemType"]["GateMulOnly"] else "_GateR"
     return name
 
 

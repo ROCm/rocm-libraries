@@ -622,7 +622,7 @@ class MasterSolutionLibrary:
                 if problemType.supportDeviceUserArguments:
                     placeholderName += '_UA'
                 if getattr(problemType, 'useGateResidual', False):
-                    placeholderName += '_GateRes'
+                    placeholderName += '_GateMul' if getattr(problemType, 'gateMulOnly', False) else '_GateRes'
             return library, placeholderName
 
         # end library creation functions

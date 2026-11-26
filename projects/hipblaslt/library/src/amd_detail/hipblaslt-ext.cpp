@@ -317,11 +317,19 @@ namespace hipblaslt_ext
             = RocblasltContractionProblem::ScalingFormat::None;
         float act0;
         float act1;
+        // Keep this layout in sync with rocblaslt::RocGemmEpilogueV2.
+        int         gate_mode      = 0;
+        hipDataType gate_data_type = HIPBLASLT_DATATYPE_INVALID;
+        int         gate_ld        = 0;
+        int         gate_stride    = 0;
     };
 
     GemmEpilogue::GemmEpilogue()
         : pimpl(std::make_unique<GemmEpilogueImpl>())
     {
+        static_assert(sizeof(GemmEpilogueImpl) == sizeof(rocblaslt::RocGemmEpilogueV2));
+        static_assert(offsetof(GemmEpilogueImpl, gate_mode)
+                      == offsetof(rocblaslt::RocGemmEpilogueV2, gate_mode));
     }
 
     GemmEpilogue::~GemmEpilogue() = default;
@@ -363,6 +371,26 @@ namespace hipblaslt_ext
     void GemmEpilogue::setAuxBatchStride(int aux_stride)
     {
         pimpl->aux_stride = aux_stride;
+    }
+
+    void GemmEpilogue::setGateMode(GateMode gateMode)
+    {
+        pimpl->gate_mode = static_cast<int>(gateMode);
+    }
+
+    void GemmEpilogue::setGateDataType(hipDataType gateDataType)
+    {
+        pimpl->gate_data_type = gateDataType;
+    }
+
+    void GemmEpilogue::setGateLeadingDimension(int gateLeadingDimension)
+    {
+        pimpl->gate_ld = gateLeadingDimension;
+    }
+
+    void GemmEpilogue::setGateBatchStride(int gateBatchStride)
+    {
+        pimpl->gate_stride = gateBatchStride;
     }
 
     namespace
@@ -543,6 +571,26 @@ namespace hipblaslt_ext
         return pimpl->aux_stride;
     }
 
+    GateMode GemmEpilogue::getGateMode() const
+    {
+        return static_cast<GateMode>(pimpl->gate_mode);
+    }
+
+    hipDataType GemmEpilogue::getGateDataType() const
+    {
+        return pimpl->gate_data_type;
+    }
+
+    int GemmEpilogue::getGateLeadingDimension() const
+    {
+        return pimpl->gate_ld;
+    }
+
+    int GemmEpilogue::getGateBatchStride() const
+    {
+        return pimpl->gate_stride;
+    }
+
     hipblasLtMatmulMatrixScale_t GemmEpilogue::getScalingAType() const
     {
         return mapFormatToMatrixScale(pimpl->scaling_a_type, "A");
@@ -617,6 +665,7 @@ namespace hipblaslt_ext
         static_assert(sizeof(GemmInputsImpl) == sizeof(rocblaslt::RocGemmInputsV2));
         static_assert(offsetof(GemmInputsImpl, deviceScalarAlpha)
                       == offsetof(rocblaslt::RocGemmInputsV2, deviceScalarAlpha));
+        static_assert(offsetof(GemmInputsImpl, gate) == offsetof(rocblaslt::RocGemmInputsV2, gate));
     }
 
     GemmInputs::~GemmInputs() = default;
@@ -717,6 +766,11 @@ namespace hipblaslt_ext
         pimpl->amaxD = amaxD;
     }
 
+    void GemmInputs::setGate(const void* gate)
+    {
+        pimpl->gate = gate;
+    }
+
     const void* GemmInputs::getA() const
     {
         return pimpl->a;
@@ -795,6 +849,11 @@ namespace hipblaslt_ext
     const void* GemmInputs::getAmaxD() const
     {
         return pimpl->amaxD;
+    }
+
+    const void* GemmInputs::getGate() const
+    {
+        return pimpl->gate;
     }
 
     // End of pimpl classes

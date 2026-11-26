@@ -352,6 +352,8 @@ namespace TensileLite
                 m_biasSrc = args["bias-source"].as<int>();
             if(args.count("use-gate-residual"))
                 m_useGateResidual = args["use-gate-residual"].as<bool>();
+            if(args.count("gate-mul-only"))
+                m_gateMulOnly = args["gate-mul-only"].as<bool>();
             if(args.count("gate-type-args"))
                 m_gateTypeArgs = args["gate-type-args"].as<std::vector<rocisa::DataType>>();
             if(args.count("use-scaleAB"))
@@ -739,6 +741,7 @@ namespace TensileLite
                                 rv.back().setParams().setUniformSummationOrder(m_uniformSummationOrder);
                                 rv.back().setUseBias(m_useBias);
                                 rv.back().setUseGateResidual(m_useGateResidual);
+                                rv.back().setGateMulOnly(m_gateMulOnly);
                                 rv.back().setUseE(m_useE);
                                 rv.back().setOutputAmaxD(m_outputAmaxD);
                                 rv.back().setOutputPeerD(m_outputPeerD);

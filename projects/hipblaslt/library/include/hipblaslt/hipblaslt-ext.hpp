@@ -222,6 +222,20 @@ namespace hipblaslt_ext
     typedef GemmProblemType GemmProblemTypeV2;
 
     /*! \ingroup types_module
+     *  \brief How the gate tensor is applied to the GEMM result.
+     *
+     * \details The gate has the shape of D. It is applied last, after the activation:
+     * with ``x = Activation(alpha * A * B + beta * C + bias)``, ``Residual`` stores
+     * ``D = gate * x + gate`` and ``Multiply`` stores ``D = gate * x``.
+     */
+    enum class GateMode
+    {
+        None     = 0, //!< No gate.
+        Residual = 1, //!< D = gate * x + gate.
+        Multiply = 2 //!< D = gate * x.
+    };
+
+    /*! \ingroup types_module
      *  \brief hipBLASLt extension for the epilogue for GEMM problems.
      *
      * \details This class sets the epilogue of a GEMM problem.
@@ -250,6 +264,16 @@ namespace hipblaslt_ext
             int auxLeadingDimension); //!< Set the aux leading dimension. Only works if the mode is set to aux-related epilogues.
         HIPBLASLT_EXPORT void setAuxBatchStride(
             int auxBatchStride); //!< Set the aux batch stride. Only works if the mode is set to aux-related epilogues.
+        HIPBLASLT_EXPORT void setGateMode(
+            GateMode
+                gateMode); //!< Apply the gate tensor given by GemmInputs::setGate. Default is GateMode::None.
+        HIPBLASLT_EXPORT void setGateDataType(
+            hipDataType
+                gateDataType); //!< Set the gate data type. Defaults to the data type of D. Only works if a gate mode is set.
+        HIPBLASLT_EXPORT void setGateLeadingDimension(
+            int gateLeadingDimension); //!< Set the gate leading dimension. Defaults to m. Only works if a gate mode is set.
+        HIPBLASLT_EXPORT void setGateBatchStride(
+            int gateBatchStride); //!< Set the gate batch stride. Defaults to leading dimension * n. Only works if a gate mode is set.
         HIPBLASLT_EXPORT void
             setScalingAType(hipblasLtMatmulMatrixScale_t
                                 scalingAType); //!< Only works if DataTypeA = DataTypeB = FP8.
@@ -269,6 +293,10 @@ namespace hipblaslt_ext
             const; //!< The aux leading dimension. Only works if the mode is set to aux-related epilogues.
         HIPBLASLT_EXPORT int getAuxBatchStride()
             const; //!< The aux batch stride. Only works if the mode is set to aux-related epilogues.
+        HIPBLASLT_EXPORT GateMode    getGateMode() const; //!< How the gate tensor is applied.
+        HIPBLASLT_EXPORT hipDataType getGateDataType() const; //!< The gate data type.
+        HIPBLASLT_EXPORT int getGateLeadingDimension() const; //!< The gate leading dimension.
+        HIPBLASLT_EXPORT int getGateBatchStride() const; //!< The gate batch stride.
         HIPBLASLT_EXPORT hipblasLtMatmulMatrixScale_t getScalingAType()
             const; //!< 0 is scalar. 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
         HIPBLASLT_EXPORT hipblasLtMatmulMatrixScale_t getScalingBType()
@@ -362,6 +390,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleAlphaScalar(const void* scaleAlphaScalar);
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
         HIPBLASLT_EXPORT void setAmaxD(const void* amaxD); //!< Set the AmaxD input pointer.
+        HIPBLASLT_EXPORT void setGate(
+            const void*
+                gate); //!< Set the gate input pointer. Only works if a gate mode is set in GemmEpilogue.
 
         HIPBLASLT_EXPORT const void* getA() const; //!< The A matrix input pointer.
         HIPBLASLT_EXPORT const void* getB() const; //!< The B matrix input pointer.
@@ -381,6 +412,7 @@ namespace hipblaslt_ext
             getScaleAlphaScalar() const; //!< The device scalar alpha pointer, or nullptr otherwise.
         HIPBLASLT_EXPORT const void* getAux() const; //!< The aux input pointer.
         HIPBLASLT_EXPORT const void* getAmaxD() const; //!< The AmaxD input pointer.
+        HIPBLASLT_EXPORT const void* getGate() const; //!< The gate input pointer.
 
     private:
         friend Gemm;

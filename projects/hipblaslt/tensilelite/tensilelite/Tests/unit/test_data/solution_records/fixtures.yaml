@@ -33,6 +33,14 @@ gfx950-plain-epilogue-defaults:
     ProblemType.DestDataType: 7  # BFloat16
   delete: [ProblemType.BiasDataTypeList, ProblemType.GateResidualDataTypeList]
 
+# The gate without its "+ gate" term: GateMulOnly on a gate kernel.
+gfx950-plain-gate-mul:
+  base: gfx950-plain
+  set:
+    ProblemType.UseGateResidual: true
+    ProblemType.GateMulOnly: true
+  delete: [ProblemType.GateResidualDataTypeList]
+
 # A 32x16 tile, so GemmA2AShape tells MacroTile0 from MacroTile1, every size and
 # stride assertion, GlobalSplitU 4 on multiple buffers, a batched GemmA2A,
 # swizzled A and B, and an exact-size bound.

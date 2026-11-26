@@ -101,6 +101,7 @@ problemType.useBias=1
 problemType.biasSrcWhiteList=[0]
 problemType.useE=true
 problemType.useGateResidual=true
+problemType.gateMulOnly=false
 problemType.gateResidualDataTypeWhiteList=["Float","Half"]
 problemType.useScaleAB=""
 problemType.useScaleCD=false

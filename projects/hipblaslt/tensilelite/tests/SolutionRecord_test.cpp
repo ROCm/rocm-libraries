@@ -255,6 +255,7 @@ namespace
         add("problemType.biasSrcWhiteList", jsonInts(problem.biasSrcWhiteList));
         add("problemType.useE", jsonBool(problem.useE));
         add("problemType.useGateResidual", jsonBool(problem.useGateResidual));
+        add("problemType.gateMulOnly", jsonBool(problem.gateMulOnly));
         add("problemType.gateResidualDataTypeWhiteList",
             jsonDataTypes(problem.gateResidualDataTypeWhiteList));
         add("problemType.useScaleAB", jsonString(problem.useScaleAB));

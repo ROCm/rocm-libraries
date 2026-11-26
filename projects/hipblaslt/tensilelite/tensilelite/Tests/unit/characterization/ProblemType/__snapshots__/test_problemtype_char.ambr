@@ -29,6 +29,7 @@
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
     'FusedA2A': 'Disabled',
+    'GateMulOnly': False,
     'GateResidualDataTypeList': list([
     ]),
     'Gradient': False,
@@ -163,6 +164,7 @@
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
     'FusedA2A': 'Disabled',
+    'GateMulOnly': False,
     'GateResidualDataTypeList': list([
     ]),
     'Gradient': False,
@@ -277,7 +279,7 @@
     'getitem_datatype': 'Float',
     'is_mapping_iter_sorted': True,
     'keys_is_list': True,
-    'len': 96,
+    'len': 97,
   })
 # ---
 # name: test_no_data_type_raises
@@ -310,6 +312,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -445,6 +448,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -580,6 +584,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -715,6 +720,7 @@
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -850,6 +856,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -986,6 +993,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': True,
@@ -1121,6 +1129,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -1256,6 +1265,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -1391,6 +1401,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -1526,6 +1537,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -1661,6 +1673,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -1800,6 +1813,7 @@
       'DestDataType': '<DataType BFloat16>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -1936,6 +1950,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2072,6 +2087,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2208,6 +2224,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2344,6 +2361,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2481,6 +2499,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2616,6 +2635,7 @@
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2751,6 +2771,7 @@
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -2886,6 +2907,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -3021,6 +3043,7 @@
       'DestDataType': '<DataType Double>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -3156,6 +3179,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType XFloat32>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -3291,6 +3315,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -3427,6 +3452,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': True,
@@ -3562,6 +3588,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': True,
@@ -3697,6 +3724,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': True,
@@ -3832,6 +3860,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -3967,6 +3996,7 @@
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4102,6 +4132,7 @@
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4239,6 +4270,7 @@
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4374,6 +4406,7 @@
       'DestDataType': '<DataType Int8>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4509,6 +4542,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4644,6 +4678,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4793,6 +4828,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -4928,6 +4964,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5063,6 +5100,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5198,6 +5236,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5333,6 +5372,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5468,6 +5508,7 @@
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5604,6 +5645,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5742,6 +5784,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -5880,6 +5923,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -6018,6 +6062,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -6155,6 +6200,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -6290,6 +6336,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -6425,6 +6472,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -6560,6 +6608,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,
@@ -6695,6 +6744,7 @@
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedA2A': 'Disabled',
+      'GateMulOnly': False,
       'GateResidualDataTypeList': list([
       ]),
       'Gradient': False,

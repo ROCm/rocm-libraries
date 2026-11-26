@@ -480,6 +480,7 @@ _defaultProblemType = {
     "Gradient": False,  # =True set globalWriteElements to gradient mode
     "UseBias": 0,  # =1 support bias vector on M direction, =2 support bias vector on N direction, =3 support bias vector on both M,N direction
     "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
+    "GateMulOnly": False,  # =True (needs UseGateResidual) drop the "+ gate" term: D = gate * result
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
     # W4A16 group scales: dense [M][ceil(K/G)] of DataTypeB.
@@ -1184,6 +1185,8 @@ class ProblemType(Mapping):
         self["GateResidualDataTypeList"] = getGateResidualDataTypeListDefault(self)
     else:
       self["GateResidualDataTypeList"] = []
+    if self["GateMulOnly"] and not self["UseGateResidual"]:
+      printExit("GateMulOnly needs UseGateResidual: True (it reuses the gate tensor).")
 
     # Activation
     # Currently, ActivationType supports only 'all' and 'hipblaslt_all', and is active only when the Activation configuration is set to True.
@@ -1613,7 +1616,7 @@ class ProblemType(Mapping):
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
     if self["UseGateResidual"]:
-      name.append("GateRes")
+      name.append("GateMul" if self["GateMulOnly"] else "GateRes")
       if self["GateResidualDataTypeList"] != getGateResidualDataTypeListDefault(self):
         name.append("".join(i.toChar() for i in self["GateResidualDataTypeList"]))
 

@@ -116,6 +116,7 @@ namespace TensileLite
             bool        m_useE             = false;
             bool        m_useGradient      = false;
             bool        m_useGateResidual  = false;
+            bool        m_gateMulOnly      = false;
             bool        m_outputAmaxD      = false;
             bool        m_outputPeerD      = false;
 

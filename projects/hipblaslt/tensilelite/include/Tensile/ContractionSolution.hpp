@@ -1184,6 +1184,7 @@ namespace TensileLite
             int              useBias                   = 0;
             bool             useE                      = false;
             bool             useGateResidual           = false;
+            bool             gateMulOnly               = false;
             std::string      useScaleAB                = "";
             bool             useScaleCD                = false;
             int              useScaleAlphaVec          = 0;

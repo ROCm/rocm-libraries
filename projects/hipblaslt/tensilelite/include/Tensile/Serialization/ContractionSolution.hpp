@@ -307,6 +307,7 @@ namespace TensileLite
                 iot::mapOptional(io, "useBias", s.useBias);
                 iot::mapOptional(io, "useE", s.useE);
                 iot::mapOptional(io, "useGateResidual", s.useGateResidual);
+                iot::mapOptional(io, "gateMulOnly", s.gateMulOnly);
                 iot::mapOptional(io, "useScaleAB", s.useScaleAB);
                 iot::mapOptional(io, "useScaleCD", s.useScaleCD);
                 iot::mapOptional(io, "useScaleAlphaVec", s.useScaleAlphaVec);

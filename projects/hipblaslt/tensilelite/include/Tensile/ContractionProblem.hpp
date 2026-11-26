@@ -862,6 +862,12 @@ namespace TensileLite
             m_useGateResidual = useGateResidual;
         }
 
+        // With the gate on: D = gate * result, without the "+ gate" term.
+        void setGateMulOnly(bool gateMulOnly)
+        {
+            m_gateMulOnly = gateMulOnly;
+        }
+
         void setUseScaleAB(std::string useScaleAB)
         {
             m_useScaleAB = useScaleAB;
@@ -967,6 +973,11 @@ namespace TensileLite
         bool useGateResidual() const
         {
             return m_useGateResidual;
+        }
+
+        bool gateMulOnly() const
+        {
+            return m_gateMulOnly;
         }
 
         rocisa::DataType gateType() const
@@ -1764,6 +1775,7 @@ namespace TensileLite
         int64_t          m_fusedA2AExtent          = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
+        bool             m_gateMulOnly             = false;
         rocisa::DataType m_gateType               = rocisa::DataType::None;
         std::string      m_useScaleAB              = "";
         bool             m_useScaleCD              = false;
