@@ -444,7 +444,7 @@ flash). The swept axes: `num_warps ∈ {1,2,4,8}` × `block_m_per_warp ∈
 its sub-flags × `use_k_single_buffer` × `use_v_double_buffer` ×
 `use_staggered_iter_wait` × `kv_ring_depth ∈ {2,3}` ×
 `use_early_v_schedule` × `use_sched_barrier` × `use_register_pv` ×
-`use_q_reread` × `compile_backend ∈ {llvm,hipcc}`.
+`use_q_reread` × `compile_backend ∈ {llvm,hip}`.
 
 The **best config the sweep can find per shape** (the achievable ceiling),
 vs both baselines:
