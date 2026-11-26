@@ -382,9 +382,45 @@ class TestPatchAotGrid(unittest.TestCase):
             for j in aj._dgrad_jobs("gfx950", "bf16", 64, "mma", target, 1024)
             if j.identity.patch
         ]
+        # The patch grid proper: the twins of the variant geometries (prefetch,
+        # K pad, XCD order, dtl, tile_k 128) are counted by the grid test of
+        # the gfx950 implicit-GEMM variants.
+        plain = [
+            j
+            for j in jobs
+            if not (
+                j.identity.prefetch_global_regs
+                or j.identity.lds_k_pad
+                or j.identity.chiplet_swizzle
+                or j.identity.dtl
+                or j.identity.tile_k == 128
+            )
+        ]
+
+        def key(i):
+            return (
+                i.tile_m,
+                i.tile_n,
+                i.tile_k,
+                i.warp_m,
+                i.warp_n,
+                i.warp_tile_m,
+                i.pipeline,
+            )
+
+        listed = [
+            j for j in plain if key(j.identity) in aj.CACHE_DGRAD_PATCH_GEOMETRIES
+        ]
         self.assertEqual(
-            len(jobs), len(aj.CACHE_DGRAD_PATCH_GEOMETRIES) * len(aj._VECS)
+            len(listed), len(aj.CACHE_DGRAD_PATCH_GEOMETRIES) * len(aj._VECS)
         )
+        # The variant geometries outside that list add the patch base at width 8.
+        extra = [j for j in plain if j not in listed]
+        self.assertTrue(extra)
+        for j in extra:
+            self.assertIn(key(j.identity), aj.CACHE_DGRAD_VARIANT_GEOMETRIES)
+            self.assertEqual(j.identity.vector_size_b, 8)
+        jobs = listed
         for j in jobs:
             i = j.identity
             self.assertFalse(i.grouped)

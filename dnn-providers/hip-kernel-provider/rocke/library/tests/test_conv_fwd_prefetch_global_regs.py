@@ -18,6 +18,8 @@ import re
 import unittest
 from dataclasses import replace
 
+from rocke.tests.engines import skip_without_cpp_engine
+
 
 def _spec(dtype="fp16", **kw):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
@@ -396,7 +398,7 @@ class TestFwdPrefetchGlobalRegsCrossEngine(unittest.TestCase):
         try:
             self.eng = import_engine(ENGINE_MODULE)
         except BackendError as e:
-            self.skipTest(f"C++ engine not importable: {e}")
+            skip_without_cpp_engine(e, f"C++ engine not importable: {e}")
 
     def _lower_cpp(self, spec):
         from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict

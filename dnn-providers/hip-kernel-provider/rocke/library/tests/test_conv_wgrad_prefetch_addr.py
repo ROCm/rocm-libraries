@@ -386,6 +386,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["ws_replicas"]
         del fields["uniform_k_decode"]  # dgrad's flag, likewise hash-neutral
         del fields["patch"]  # dgrad's patch store, likewise
+        del fields["dtl"]  # the patch GEMM's two-stage DMA loop, off
         del fields["tap_outer_k"]  # dgrad's tap-outer K loop, off
         del fields["dy_halo"], fields["halo_max_wo"]  # dgrad dY halo, off
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
