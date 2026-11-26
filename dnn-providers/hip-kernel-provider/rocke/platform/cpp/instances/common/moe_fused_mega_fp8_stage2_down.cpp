@@ -106,6 +106,9 @@ rocke_value_t* rocke_moe_fp8_emit_fp8_down_group_gemm(rocke_moe_fp8_build_ctx_t*
         rocke_value_t* kg = outer.iv;
         rocke_value_t* down_outer = outer.iter_vars[0];
 
+        /* Fewer than 4 LDS reads per iteration with the K=128 atom: safe for
+         * iglp_opt(1) only once LLVM unrolls this constant-trip loop (see the
+         * note in _emit_fp8_down_group_gemm, moe_fused_mega_fp8.py). */
         rocke_moe_fp8_emit_loop_cadence_hint(ctx, cadence);
 
         /* A-side dynamic scale: HiddenScale_smem[m_row, local-inter-block kg]. */
