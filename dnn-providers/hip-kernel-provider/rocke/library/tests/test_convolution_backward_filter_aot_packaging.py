@@ -149,10 +149,12 @@ def catalog():
 
 
 # The shipped gfx942 catalog: the instances of cases_wgrad.txt's fast-rank sweep
-# that keep every case within 1% of its best (gfx942_wgrad.json). These counts
+# that keep every case within 1% of its best non-packed-atomic instance
+# (gfx942_wgrad.json; packed 16-bit atomic split-K binaries are left out for
+# accuracy). These counts
 # track that list; a re-pruned catalog updates them.
-_CATALOG_SIZE = 275
-_CATALOG_TWO_STAGE = 175
+_CATALOG_SIZE = 248
+_CATALOG_TWO_STAGE = 201
 _CATALOG_FAMILIES = {"implicit_gemm", "direct_wgrad_dw_cols"}
 
 

@@ -1058,12 +1058,13 @@ TEST(TestGfx942ConvWgradGeometry, EveryCatalogInstanceParses)
             }
         }
         // The gfx942 catalog (gfx942_wgrad.json, pruned to keep every cases_wgrad.txt case
-        // within 1% of its best, plus the helpers its pipelines launch): fp16 is 186
-        // implicit GEMM and the two-stage Stage 2; bf16 is 87 implicit GEMM, 2
+        // within 1% of its best non-packed-atomic instance, plus the helpers its
+        // pipelines launch): fp16 is 164 implicit GEMM and the two-stage Stage 2; bf16 is
+        // 82 implicit GEMM, 2
         // direct_wgrad_dw_cols and their fold, cast and the Stage 2. These track the
         // catalog: a re-pruned one updates them (and test_make_conv_wgrad_aot_config.py's).
         const bool fp16 = std::string_view(dtype) == "fp16";
-        EXPECT_EQ(implicitCount, fp16 ? 186U : 87U) << dtype;
+        EXPECT_EQ(implicitCount, fp16 ? 164U : 82U) << dtype;
         EXPECT_EQ(helpers, fp16 ? 1U : 3U) << dtype;
         size_t directTotal = 0;
         for(const auto& [variant, count] : directByVariant)
@@ -1072,7 +1073,7 @@ TEST(TestGfx942ConvWgradGeometry, EveryCatalogInstanceParses)
         }
         EXPECT_EQ(directTotal, fp16 ? 0U : 2U) << dtype;
         EXPECT_EQ(directByVariant["direct_wgrad_dw_cols"], directTotal) << dtype;
-        EXPECT_EQ(catalog::catalog(dtype).size(), fp16 ? 187U : 92U) << dtype;
+        EXPECT_EQ(catalog::catalog(dtype).size(), fp16 ? 165U : 87U) << dtype;
     }
 }
 

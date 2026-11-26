@@ -46,6 +46,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942ConvWgradGeometry.hpp"
 #include "IngestorIntegrationSupport.hpp"
 #include "ScopedPluginLogCapture.hpp"
 
@@ -283,11 +284,6 @@ KnobSetting benchmarkingKnob(bool enabled)
     return KnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{enabled ? 1 : 0});
 }
 
-std::string candidateCount(size_t candidates)
-{
-    return std::to_string(candidates) + " candidate(s)";
-}
-
 /// The kernel id following @p marker in the last log that carries it, or empty.
 std::string loggedKernel(const LogRecorderBase& recorder, const std::string& marker)
 {
@@ -343,21 +339,70 @@ struct CatalogKernel
     int64_t dilationW = 0;
     int64_t cpg = 0;
     int64_t kpg = 0;
+    /// The instance its metadata describes, as the engine parses it (std::nullopt for
+    /// a helper or a malformed one).
+    std::optional<hip_kernel_provider::kernel_ingestor_engine::gfx942_conv_wgrad::AotInstance>
+        instance;
     /// Every UED knob, at the kernel's value (an ordinal for a string field).
     std::vector<KnobSetting> knobs;
 
-    /// Whether the kernel's pinned build-time capability is the graph's.
+    /// Whether the engine plans @p problem on this kernel: the pack's own geometry
+    /// (Gfx942ConvWgradGeometry.hpp, golden-tested against rocKE's adapter) decides, so
+    /// every admission rule -- capability, group merge, vector widths, split-K -- counts.
     bool capabilityAdmits(const WgradProblem& problem) const
     {
-        if(family == IMPLICIT_GEMM_FAMILY)
+        namespace wgrad = hip_kernel_provider::kernel_ingestor_engine::gfx942_conv_wgrad;
+        if(!instance)
         {
-            return true;
+            return false;
         }
-        const bool geometry = filterH == problem.y && filterW == problem.x
-                              && strideH == problem.strideH && strideW == problem.strideW
-                              && padH == problem.padH && padW == problem.padW
-                              && dilationH == problem.dilationH && dilationW == problem.dilationW;
-        return geometry && (cpg == 0 || cpg == problem.cpg()) && (kpg == 0 || kpg == problem.kpg());
+        const wgrad::Problem p{problem.n,
+                               problem.c,
+                               problem.k,
+                               problem.hi,
+                               problem.wi,
+                               problem.y,
+                               problem.x,
+                               problem.strideH,
+                               problem.strideW,
+                               problem.padH,
+                               problem.padW,
+                               problem.dilationH,
+                               problem.dilationW,
+                               problem.groups,
+                               dtype == "bf16" ? wgrad::ElementType::BF16
+                                               : wgrad::ElementType::FP16,
+                               false};
+        return wgrad::instancePlan(p, *instance).has_value();
+    }
+};
+
+/// intField / stringField over a kernel's KDP metadata, as parseAotInstance reads it.
+struct JsonMetadata
+{
+    const nlohmann::json& fields;
+    std::vector<std::string> strings;
+
+    explicit JsonMetadata(const nlohmann::json& f) : fields(f) {}
+
+    std::optional<int64_t> intField(std::string_view name) const
+    {
+        const auto found = fields.find(std::string(name));
+        if(found == fields.end() || !found->is_number_integer())
+        {
+            return std::nullopt;
+        }
+        return found->get<int64_t>();
+    }
+
+    const std::string* stringField(std::string_view name) const
+    {
+        const auto found = fields.find(std::string(name));
+        if(found == fields.end() || !found->is_string())
+        {
+            return nullptr;
+        }
+        return found->get_ptr<const std::string*>();
     }
 };
 
@@ -542,6 +587,8 @@ const WgradCatalog& shippedCatalog()
             kernel.dilationW = metadata.at("dilation_w").get<int64_t>();
             kernel.cpg = metadata.at("cpg").get<int64_t>();
             kernel.kpg = metadata.at("kpg").get<int64_t>();
+            kernel.instance = hip_kernel_provider::kernel_ingestor_engine::gfx942_conv_wgrad::
+                parseAotInstance(JsonMetadata(metadata));
             for(const auto& knob : ued.at("knobs"))
             {
                 const auto name = knob.get<std::string>();
@@ -886,7 +933,12 @@ TEST_P(IntegrationGpuGfx942ConvWgradAot, UnbenchmarkedPlanServesFromTheWholeCata
     for(size_t i = 1; i < VARIANTS.size(); ++i)
     {
         const auto ordinal = catalog.ordinal(DIRECT_VARIANT_KNOB, VARIANTS[i]);
-        ASSERT_TRUE(ordinal) << VARIANTS[i];
+        if(!ordinal)
+        {
+            // A direct pipeline the shipped catalog does not carry has no knob value.
+            ASSERT_EQ(counts[i], 0U) << VARIANTS[i];
+            continue;
+        }
         forced.emplace_back(KnobSetting(DIRECT_VARIANT_KNOB, *ordinal), counts[i]);
     }
     for(const auto& [knob, count] : forced)

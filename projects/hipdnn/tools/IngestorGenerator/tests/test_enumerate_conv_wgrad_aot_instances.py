@@ -36,7 +36,7 @@ def _rocke_on_path():
 
 @pytest.fixture(scope="module")
 def catalog():
-    """rocKE's own registered gfx950 wgrad catalog, in rocKE's on-disk order."""
+    """rocKE's own registered gfx942 wgrad catalog, in rocKE's on-disk order."""
     return tool.read_rocke_catalog("wgrad")
 
 
@@ -57,29 +57,21 @@ def _label(identity):
     return KernelIdentity.from_dict(identity).label()
 
 
-def test_the_catalog_lists_the_same_kernels_for_both_dtypes(catalog):
-    """A set, not a fixed count (rocKE's own catalog is the source of truth, so its
-    size is not pinned here): both dtypes list the same kernels, and the same number
-    of them."""
-    by_dtype = collections.defaultdict(list)
+def test_the_catalog_holds_both_dtypes_and_no_packed_atomic_split(catalog):
+    """The gfx942 catalog is the cases_wgrad.txt fast-rank sweep's 1% cover, chosen per
+    dtype (so the dtypes need not list the same kernels), and leaves out the one-stage
+    packed 16-bit atomic split-K binaries (split_k > 1 without two_stage) for accuracy."""
+    dtypes = {identity["dtype_a"] for identity in catalog}
+    assert dtypes == set(tool.DTYPES)
     for identity in catalog:
-        by_dtype[identity["dtype_a"]].append(identity)
-    assert sorted(by_dtype) == sorted(tool.DTYPES)
-    assert len({len(v) for v in by_dtype.values()}) == 1
-
-    def without_dtype(identity):
-        return tuple(
-            sorted((k, v) for k, v in identity.items() if not k.startswith("dtype_"))
-        )
-
-    assert sorted(map(without_dtype, by_dtype["fp16"])) == sorted(
-        map(without_dtype, by_dtype["bf16"])
-    )
+        if identity["algorithm"] == "implicit_gemm" and identity.get("split_k", 1) > 1:
+            assert identity.get("two_stage"), _label(identity)
 
 
 def test_the_two_stage_identities_are_shipped_with_their_stage2(catalog, committed):
     two_stage = [i for i in catalog if i.get("two_stage")]
-    assert len(two_stage) == 220
+    # Tracks gfx942_wgrad.json; a re-pruned catalog updates it.
+    assert len(two_stage) == 201
     assert all(i["algorithm"] == "implicit_gemm" for i in two_stage)
     listed = {tool.stable_hash(e) for d in tool.DTYPES for e in committed[d]}
     for identity in two_stage:
@@ -93,10 +85,13 @@ def test_the_lists_add_the_helpers_per_dtype_their_instances_need(committed):
     for dtype, entries in committed.items():
         helpers = [e for e in entries if tool.family(e) == "helper"]
         assert helpers, dtype
-        assert {e["algorithm"] for e in helpers} == {
-            "direct_wgrad_fold",
-            "direct_wgrad_ws_reduce",
-        }
+        # Every dtype's two-stage instances need the Stage 2; only bf16 ships the
+        # folded direct_wgrad_dw_cols pipeline, so only it needs the fold.
+        assert {e["algorithm"] for e in helpers} == (
+            {"direct_wgrad_fold", "direct_wgrad_ws_reduce"}
+            if any(tool.family(e) == "direct" for e in entries)
+            else {"direct_wgrad_ws_reduce"}
+        ), dtype
         needed = {
             tool.stable_hash(h)
             for e in entries
@@ -111,7 +106,7 @@ def test_the_lists_add_the_helpers_per_dtype_their_instances_need(committed):
 
 
 def test_every_list_entry_is_a_wgrad_sweep_identity(committed, monkeypatch):
-    """Each entry, the fold helper included, is a gfx950 wgrad identity of rocKE's
+    """Each entry, the fold helper included, is a gfx942 wgrad identity of rocKE's
     implicit-GEMM AOT grid or of its direct grid."""
     for dtype, entries in committed.items():
         (flavor,) = {entry["llvm_flavor"] for entry in entries}
@@ -160,7 +155,7 @@ def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
     argv = ["--rocke-root", str(_ROCKE), "--jobs", "4"]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
     err = capsys.readouterr().err
-    assert "not a gfx950 wgrad sweep identity" in err
+    assert "not a gfx942 wgrad sweep identity" in err
     assert "wgrad implicit-GEMM" in err
 
 

@@ -66,30 +66,25 @@ def specs(identities):
     return sorted(out, key=lambda s: (s.dtype, s.instance_id))
 
 
-def test_the_committed_lists_hold_234_instances_per_dtype_across_all_8_families(specs):
-    """156 implicit-GEMM (110 of them two-stage) + 67 direct + 9 fold helpers + the
-    Stage 2 fold at 8 slabs (the two-stage instances') and at one (the direct
-    instances' cast into a 16-bit dW) per dtype: the deliverable set for the gfx950
-    wgrad AOT catalog, one count per (kernel_family, direct_variant) pair."""
+def test_the_committed_lists_hold_the_pruned_gfx942_catalog(specs):
+    """gfx942_wgrad.json's 248 instances (the cases_wgrad.txt fast-rank sweep's 1% cover
+    without packed 16-bit atomic split-K binaries) plus the helpers they launch: the
+    Stage 2 at 8 slabs for the two-stage instances, and for bf16's two
+    direct_wgrad_dw_cols instances their fold and their one-slab cast into a 16-bit dW.
+    One count per (kernel_family, direct_variant) pair; tracks the catalog."""
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
-    for dtype in ("bf16", "fp16"):
-        assert by_dtype[dtype] == {
-            (0, "none"): 156,
-            (1, "direct_wgrad"): 5,
-            (1, "direct_wgrad_tiled"): 20,
-            (1, "direct_wgrad_dw"): 5,
-            (1, "direct_wgrad_dw_cols"): 1,
-            (1, "direct_wgrad_dw_mfma"): 14,
-            (1, "direct_wgrad_gather"): 16,
-            (1, "direct_wgrad_grouped_mfma"): 6,
-            (2, "direct_wgrad_fold"): 9,
-            (2, "direct_wgrad_ws_reduce"): 2,
-        }
-    assert sum(1 for s in specs if not s.is_helper) == 446
-    assert sum(1 for s in specs if s.two_stage) == 220
-    assert len(specs) == 468
+    assert by_dtype["fp16"] == {(0, "none"): 164, (2, "direct_wgrad_ws_reduce"): 1}
+    assert by_dtype["bf16"] == {
+        (0, "none"): 82,
+        (1, "direct_wgrad_dw_cols"): 2,
+        (2, "direct_wgrad_fold"): 1,
+        (2, "direct_wgrad_ws_reduce"): 2,
+    }
+    assert sum(1 for s in specs if not s.is_helper) == 248
+    assert sum(1 for s in specs if s.two_stage) == 201
+    assert len(specs) == 252
 
 
 def test_every_two_stage_instance_has_its_stage2_in_the_catalog(specs):
@@ -154,7 +149,7 @@ def test_every_direct_instance_has_its_cast_in_the_catalog(specs):
             fields = gfx942_conv_wgrad_aot_cast_fields(spec)
             assert (fields["dtype"], fields["ws_replicas"]) in shipped
             checked += 1
-    assert checked == 134
+    assert checked == 2
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):
@@ -267,7 +262,7 @@ def test_dumped_config_loads_back(specs):
     [
         ({"direction": "fwd"}, "wgrad implicit-GEMM"),
         ({"direction": "dgrad"}, "wgrad implicit-GEMM"),
-        ({"arch": "gfx942"}, "wgrad implicit-GEMM"),
+        ({"arch": "gfx950"}, "wgrad implicit-GEMM"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"filter_h": 3}, "filter_h"),
         ({"pad_h": 1}, "pad_h"),
@@ -286,12 +281,12 @@ def test_unsupported_implicit_identities_are_named_with_their_reason(
 @pytest.mark.parametrize(
     ("algorithm", "change", "reason"),
     [
-        ("direct_wgrad", {"algorithm": "direct_grouped_dgrad"}, "no packaged"),
-        ("direct_wgrad", {"direction": "direct_fwd"}, "direct_wgrad"),
+        ("direct_wgrad_dw_cols", {"algorithm": "direct_grouped_dgrad"}, "no packaged"),
+        ("direct_wgrad_dw_cols", {"direction": "direct_fwd"}, "direct_wgrad"),
         (
-            "direct_wgrad",
-            {"knobs": '{"ho_per_block": 30, "mfma_k": 32, "waves_c": 1, '
-            '"waves_k": 1, "waves_q": 1, "nonsense": 1}'},
+            "direct_wgrad_dw_cols",
+            {"knobs": '{"channels": 3, "strip": 16, "target_blocks": 2048, '
+            '"threads": 256, "nonsense": 1}'},
             "nonsense",
         ),
     ],

@@ -1298,11 +1298,11 @@ def test_instance_list_tool_keeps_a_dgrad_list_sorted(tmp_path, capsys):
 
 def test_wgrad_catalog_is_the_pruned_gfx942_list():
     """gfx942_wgrad.json: the instances of cases_wgrad.txt's fast-rank sweep
-    that keep every case within 1% of its best (275: 273 implicit GEMM, 2
-    direct_wgrad_dw_cols), nothing silently dropped. Tracks that list; a
+    that keep every case within 1% of its best non-packed-atomic instance (248:
+    246 implicit GEMM, 2 direct_wgrad_dw_cols), nothing silently dropped. Tracks that list; a
     re-pruned catalog updates it."""
     insts = gc.registered_conv_grouped_instances(_WGRAD_ARCH, direction="wgrad")
-    assert len(insts) == 275
+    assert len(insts) == 248
     assert {i.identity.algorithm for i in insts} == _WGRAD_FAMILIES
 
 
