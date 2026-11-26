@@ -1607,9 +1607,7 @@ Every test that the CI entries do not run normally is recorded in one data modul
 Each record names its reason, the GitHub team that owns the test (`team`, one of
 `TEAMS`, a CODEOWNERS team of its path) and the issue that tracks it (`issue`, a
 Jira id or `ROCm/<repo>#<n>`). A record without a filed issue is refused: file
-one first. The records written before an issue tracked them name AICK-3410, the
-follow-up that triages every CI test and re-decides each. It holds three kinds
-of record:
+one first. It holds three kinds of record:
 
 | Kind | Records | Longest expiry | Expired record |
 |---|---|---|---|
@@ -1617,12 +1615,12 @@ of record:
 | `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | 90 days | as `PendingTest` |
 | `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>` of a test function (not a class); a name without parameters covers all of them, or, with `params`, those whose parameter ids include each of them (one record for one defect across several cases). May name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; no two entries may cover one test, so one entry names every arch and compiler it fails on; at most `QUARANTINE_CAP` (10) at once | 30 days | as `PendingTest`; its test stays held out until the record is re-decided |
 
-The pending entries one issue tracks for one lane take their lane, issue and
-expiry from a lane ticket (`LaneTicket`, listed in `LANE_TICKETS`): the lane
-has one date, set to when its capability is expected, by which all of them are
-re-decided, and the check refuses a pending entry that names a lane ticket's
-issue with another lane or date. An issue that is not a lane ticket (the
-triage follow-up, AICK-3410) may track entries of several lanes and dates.
+Every pending entry takes its lane, issue and expiry from a lane ticket
+(`LaneTicket`, listed in `LANE_TICKETS`): the issue that tracks one lane's
+entries and the one date, set to when the lane's capability is expected, by
+which all of them are re-decided. The check refuses an entry whose issue is no
+lane ticket's, or that names one's issue with another lane or date. The
+measured budgets share one issue and one date the same way.
 
 A record whose expiry is further away than its longest window is refused when
 the registry loads. Reaching the date means re-deciding the record: fix the
@@ -1692,8 +1690,8 @@ works per file. It fails when:
   stale (its test gone, a whole-file record's file assigned to a CI entry, or a
   case record's file assigned to none);
 - a record's team is not a CODEOWNERS team of its test;
-- a pending entry names a lane ticket's issue with another lane or expiry, or a
-  lane ticket is missing from `LANE_TICKETS`;
+- a pending entry's issue is no lane ticket's, or it names a lane ticket's issue
+  with another lane or expiry, or a lane ticket is missing from `LANE_TICKETS`;
 - a test file calls an arch helper with arches no pull-request runner has (a
   literal, or a module-level name bound to one) and has no `RUNNER_HARDWARE`
   or whole-file record;

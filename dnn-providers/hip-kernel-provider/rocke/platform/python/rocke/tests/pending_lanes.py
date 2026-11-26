@@ -28,46 +28,34 @@ request, or develop, red, and a scheduled run passes ``--strict-expiry`` to
 fail on every expired entry. An expired quarantine keeps its test held out
 until someone re-decides it.
 
+A pending entry waits on a lane ticket (:class:`LaneTicket`, listed in
+``LANE_TICKETS``): the issue that tracks one lane's entries and the one date,
+when the lane's capability is expected, by which all of them are re-decided.
+The entry takes its lane, issue and expiry from the ticket:
+
+    _GFX1250_RUNNERS = LaneTicket("AICK-1234", RUNNER_HARDWARE, "2027-02-12")
+
+    _GFX1250_RUNNERS.waiting(
+        "library/tests/test_example.py",  # relative to the rocke directory
+        "its device cases need gfx1250, which no CI GPU stage has",
+        _LIBRARY,
+    )
+
 An entry for a file assigned to no CI entry (``whole_file=True``) covers every case
 of the file, and is the file's only entry. Any other entry covers only the
 cases that declare its lane where they skip (``rocke.tests.lanes.skip_until``):
 a case that skips for any other reason is not covered, whatever its reason
 says. A file whose cases wait for several lanes has one entry per lane.
 
-    PendingTest(
-        path="library/tests/test_example.py",  # relative to the rocke directory
-        lane=RUNNER_HARDWARE,
-        reason="its device cases need gfx950, which no CI GPU stage has",
-        team=_LIBRARY,
-        issue="AICK-1234",
-        expires="2027-02-12",
-    )
-
 An entry may name one test of its file instead (``node``, as a quarantine
 does): it covers that test's cases whatever their skip reason, for a test that
 CI does not select, or whose skip cannot name its lane:
 
-    PendingTest(
-        path="library/tests/test_example.py",
-        lane=TICKET,
-        reason="its sweep runs only in a comprehensive-tier entry",
-        team=_LIBRARY,
-        issue="AICK-3410",
-        expires="2027-01-15",
-        node="test_sweep",
-    )
-
-Pending entries that one issue tracks for one lane take their lane, issue and
-expiry from a lane ticket (:class:`LaneTicket`, listed in ``LANE_TICKETS``), so
-the lane has one date, when its capability is expected, by which all of them
-are re-decided:
-
-    _GFX1250_RUNNERS = LaneTicket("AICK-1234", RUNNER_HARDWARE, "2027-02-12")
-
-    _GFX1250_RUNNERS.waiting(
+    _SCHEDULED_TIERS.waiting(
         "library/tests/test_example.py",
-        "its device cases need gfx1250, which no CI GPU stage has",
+        "its sweep runs only in a comprehensive-tier entry",
         _LIBRARY,
+        node="test_sweep",
     )
 
 The file-level check cannot see single cases. ``tools/limbo_audit.py`` checks
@@ -91,7 +79,7 @@ reports it stale or expired.
         compilers=Compilers(llvm_major=24),
         reason="spills 40 B at its VGPR cap on LLVM 24; LLVM 20 spills none",
         team=_LIBRARY,
-        issue="AICK-3410",
+        issue="AICK-1234",
         expires="2026-12-31",
     )
 
@@ -176,11 +164,6 @@ PENDING_MAX_DAYS = 90
 QUARANTINE_MAX_DAYS = 30
 # A Jira id (AICK-1234) or a GitHub issue (ROCm/rocm-libraries#123).
 _ISSUE = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
-
-
-# The issue of the records written before any issue tracked them: the test
-# system epic's follow-up for triaging every CI test, which re-decides each.
-_TRIAGE_FOLLOW_UP = "AICK-3410"
 
 
 def _require_test_path(kind: str, path: str) -> None:
@@ -337,7 +320,8 @@ class LaneTicket:
     Its pending entries take their lane, issue and expiry from it
     (:meth:`waiting`), so the lane has one date, not one per entry;
     ``LANE_TICKETS`` lists every lane ticket, and the registry check refuses a
-    pending entry that names one's issue with another lane or date.
+    pending entry whose issue is no lane ticket's, or that names one's issue
+    with another lane or date.
     """
 
     issue: str
@@ -660,39 +644,6 @@ def quarantined_test(path: str, node_name: str) -> QuarantinedTest | None:
 
 
 def _waiting(
-    lane: Lane,
-    reason: str,
-    team: str,
-    issue: str,
-    expires: str,
-    *paths: str,
-    whole_file: bool = False,
-) -> tuple[PendingTest, ...]:
-    """One entry per path, all waiting for ``lane`` for the same reason."""
-    return tuple(
-        PendingTest(path, lane, reason, team, issue, expires, whole_file=whole_file)
-        for path in paths
-    )
-
-
-def _waiting_tests(
-    lane: Lane,
-    reason: str,
-    team: str,
-    issue: str,
-    expires: str,
-    path: str,
-    *nodes: str,
-) -> tuple[PendingTest, ...]:
-    """One entry per test of the file ``path``, all waiting for ``lane`` for
-    the same reason."""
-    return tuple(
-        PendingTest(path, lane, reason, team, issue, expires, node=node)
-        for node in nodes
-    )
-
-
-def _waiting_on(
     ticket: LaneTicket,
     reason: str,
     team: str,
@@ -700,15 +651,17 @@ def _waiting_on(
     whole_file: bool = False,
 ) -> tuple[PendingTest, ...]:
     """One entry per path, all waiting on ``ticket`` for the same reason."""
-    return _waiting(
-        ticket.lane,
-        reason,
-        team,
-        ticket.issue,
-        ticket.expires,
-        *paths,
-        whole_file=whole_file,
+    return tuple(
+        ticket.waiting(path, reason, team, whole_file=whole_file) for path in paths
     )
+
+
+def _waiting_tests(
+    ticket: LaneTicket, reason: str, team: str, path: str, *nodes: str
+) -> tuple[PendingTest, ...]:
+    """One entry per test of the file ``path``, all waiting on ``ticket`` for
+    the same reason."""
+    return tuple(ticket.waiting(path, reason, team, node=node) for node in nodes)
 
 
 # The attention backward CTest entries, not registered yet.
@@ -720,16 +673,31 @@ _TORCH_CASES = LaneTicket("AICK-3408", TICKET, "2027-01-08")
 _RUNTIME_TORCH_INTEROP = LaneTicket("AICK-3409", TICKET, "2027-01-08")
 # The device cases that need a gfx950 GPU.
 _GFX950_RUNNERS = LaneTicket("AICK-3411", RUNNER_HARDWARE, "2027-02-09")
+# The device cases that need another GPU no CI stage has: gfx1250, gfx1151,
+# gfx1200, gfx1201, gfx90a, or a second GPU.
+_OTHER_RUNNERS = LaneTicket("AICK-3469", RUNNER_HARDWARE, "2027-02-16")
+# The cases that need what CI's build or test step lacks: the C++ engine's
+# Python modules or shared library, the LLVM tools, optional packages.
+_BUILD_VARIANT_TOOLS = LaneTicket("AICK-3468", BUILD_VARIANT, "2027-01-29")
+# The cases that run only in a source checkout (run_all.py).
+_SOURCE_CHECKOUT = LaneTicket("AICK-3470", SOURCE_TREE, "2027-01-22")
+# The cases that run only in a comprehensive-tier entry or the exhaustive
+# cohort, and the cases kept on purpose until what they check exists.
+_SCHEDULED_TIERS = LaneTicket("AICK-3471", TICKET, "2027-01-15")
 LANE_TICKETS: tuple[LaneTicket, ...] = (
     _ATTENTION_BWD_ENTRIES,
     _TORCH_CASES,
     _RUNTIME_TORCH_INTEROP,
     _GFX950_RUNNERS,
+    _OTHER_RUNNERS,
+    _BUILD_VARIANT_TOOLS,
+    _SOURCE_CHECKOUT,
+    _SCHEDULED_TIERS,
 )
 
 
 PENDING: tuple[PendingTest, ...] = (
-    *_waiting_on(
+    *_waiting(
         _ATTENTION_BWD_ENTRIES,
         "the attention backward CTest entries (CPU and gfx942 GPU) are not registered "
         "yet; their slow tests are cut down first (AICK-3218)",
@@ -791,7 +759,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_lse_store_numeric.py",
         whole_file=True,
     ),
-    *_waiting_on(
+    *_waiting(
         _ATTENTION_BWD_ENTRIES,
         "in the exhaustive cohort (library/tests/_affordable_lane.py): too slow for a "
         "pull-request tier; the attention backward CTest entries add a sample of it "
@@ -816,7 +784,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_barrier_fence_parity_emit.py",
         whole_file=True,
     ),
-    *_waiting_on(
+    *_waiting(
         _ATTENTION_BWD_ENTRIES,
         "per-lever device twins of the backward kernel, left out of the attention "
         "backward GPU entry; they need a GPU run on gfx942 and gfx950 first",
@@ -831,16 +799,14 @@ PENDING: tuple[PendingTest, ...] = (
         whole_file=True,
     ),
     *_waiting(
-        TICKET,
+        _SCHEDULED_TIERS,
         "registered only in comprehensive-tier entries (runner contract, worker "
         "integration); triage proposes the standard tier",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "library/tests/test_library_test_tiers.py",
         whole_file=True,
     ),
-    *_waiting_on(
+    *_waiting(
         _TORCH_CASES,
         "its torch-caller cases bind torch GPU tensors, as the production callers do, "
         "and skip without torch (the DeviceArray cases run)",
@@ -848,13 +814,13 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/sdpa/test_dense_sdpa_numeric.py",
         "library/tests/sdpa/test_unified_sdpa_numeric.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _TORCH_CASES,
         "its graph-replay case captures through torch and skips without it",
         _LIBRARY,
         "library/tests/test_attention_unified_lse_numeric.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _TORCH_CASES,
         "its torch-caller cases (graph replay, the concurrent workspace on torch "
         "streams, the prepared decode lifecycle) take torch tensors and skip without "
@@ -862,7 +828,7 @@ PENDING: tuple[PendingTest, ...] = (
         _LIBRARY,
         "library/tests/test_strided_kv_decode_numeric.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _TORCH_CASES,
         "its torch cases exercise a torch API of rocKE (torch tensor inputs, "
         "to_torch, torch custom ops) and skip without torch",
@@ -875,45 +841,34 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_strided_kv_decode.py",
     ),
     *_waiting(
-        TICKET,
+        _SCHEDULED_TIERS,
         "its exhaustive cases are deselected in CI (-m 'not exhaustive'); no job runs "
         "the exhaustive cohort yet",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "library/tests/test_convolution_forward_aot_packaging.py",
         "library/tests/test_kernel_label.py",
         "library/tests/test_selector_cpp_parity.py",
     ),
-    PendingTest(
+    _SCHEDULED_TIERS.waiting(
         "library/tests/test_conv_direct_nongrouped_tf32.py",
-        TICKET,
         "the sweep sampler runs only in rocke_library_conv_sweep_gpu_pytest, a "
         "comprehensive-tier entry",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         node="TestNongroupedF32Gpu::test_sweep_candidates",
     ),
-    PendingTest(
+    _SCHEDULED_TIERS.waiting(
         "library/tests/test_attention_tiled_cache_key.py",
-        TICKET,
         "the invariant sweep runs only in "
         "rocke_library_attention_cache_key_sweep_pytest, a comprehensive-tier entry",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         node="test_key_matches_build_identity",
     ),
-    PendingTest(
+    _SCHEDULED_TIERS.waiting(
         "library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py",
-        TICKET,
         "the score-modifier mixes run only in "
         "rocke_library_attention_biased_mixes_gpu_pytest, a comprehensive-tier entry, "
         "and need gfx950",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         node="test_modifier_mixes",
     ),
     _TORCH_CASES.waiting(
@@ -924,12 +879,10 @@ PENDING: tuple[PendingTest, ...] = (
         node="test_winograd_fwd_gpu_pipeline_modes[graph_merge_chunks_f2]",
     ),
     *_waiting(
-        TICKET,
+        _SCHEDULED_TIERS,
         "registered only in rocke_tiling_visualization_pytest, a slow, low-importance "
         "comprehensive-tier entry; no scheduled job runs that tier yet",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "platform/python/rocke/tests/helpers/tiling/visualization/test_auto_pipeline.py",
         "platform/python/rocke/tests/helpers/tiling/visualization/test_block_diagram.py",
         "platform/python/rocke/tests/helpers/tiling/visualization/test_layout_render.py",
@@ -937,14 +890,12 @@ PENDING: tuple[PendingTest, ...] = (
         whole_file=True,
     ),
     *_waiting(
-        TICKET,
+        _SCHEDULED_TIERS,
         "registered only in rocke_heuristics_pytest, a comprehensive-tier entry; no "
         "scheduled job runs that tier yet, and one that does installs the packages of "
         "rocke/heuristics/tests/requirements.txt (without them the cases skip, "
         "waiting for build-variant)",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "platform/python/rocke/heuristics/tests/test_data_pipeline.py",
         "platform/python/rocke/heuristics/tests/test_evaluate.py",
         "platform/python/rocke/heuristics/tests/test_feature_engine.py",
@@ -955,7 +906,7 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/heuristics/tests/test_train.py",
         whole_file=True,
     ),
-    *_waiting_on(
+    *_waiting(
         _TORCH_CASES,
         "its torch cases exercise a torch API of rocKE (torch tensor inputs, "
         "to_torch, torch custom ops) and skip without torch",
@@ -970,41 +921,35 @@ PENDING: tuple[PendingTest, ...] = (
         _PLATFORM,
         node="TestNumericVerification::test_moe_e2e_forward",
     ),
-    *_waiting_on(
+    *_waiting(
         _RUNTIME_TORCH_INTEROP,
         "its torch cases exercise the runtime's torch interop and skip without torch",
         _PLATFORM,
         "platform/tests/runtime/test_device_array.py",
     ),
     *_waiting(
-        SOURCE_TREE,
+        _SOURCE_CHECKOUT,
         "source-tree only: it reads cpp/, tools/ or dsl_docs/, or needs a native "
         "build, so the install leaves it out or it skips there; run_all.py runs it",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-26",
         "library/tests/test_attention_bwd_counted_sync.py",
         "library/tests/test_attention_bwd_resources.py",
         "library/tests/test_dsl_probe_attention_demos.py",
         whole_file=True,
     ),
     *_waiting(
-        SOURCE_TREE,
+        _SOURCE_CHECKOUT,
         "its source-tree cases (they read platform tools, C++ sources, docs or the "
         "git history, which the installed test tree omits) skip in CI; run_all.py "
         "runs them",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-26",
         "library/tests/test_reference_common.py",
     ),
     *_waiting(
-        SOURCE_TREE,
+        _SOURCE_CHECKOUT,
         "source-tree only: it reads cpp/, tools/ or dsl_docs/, or needs a native "
         "build, so the install leaves it out or it skips there; run_all.py runs it",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-22",
         "platform/python/rocke/benchmark/perf/tests/test_wavescope_pmc.py",
         "platform/tests/instances/differential/test_canonical_text.py",
         "platform/tests/instances/differential/test_check_byte_identity_progress.py",
@@ -1021,24 +966,20 @@ PENDING: tuple[PendingTest, ...] = (
         whole_file=True,
     ),
     *_waiting(
-        SOURCE_TREE,
+        _SOURCE_CHECKOUT,
         "every test carries the integration marker (pytestmark), which the installed "
         "entries deselect with -m 'not integration'; run_all.py runs it",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-22",
         "platform/tests/tools/test_provider_install_contract.py",
         "platform/tests/tools/test_sdpa_asset_cmake_contract.py",
         whole_file=True,
     ),
     *_waiting(
-        SOURCE_TREE,
+        _SOURCE_CHECKOUT,
         "its source-tree cases (they read platform tools, C++ sources, docs or the "
         "git history, which the installed test tree omits) skip in CI; run_all.py "
         "runs them",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-22",
         "platform/python/rocke/portable_ir/tests/test_freshness.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_dtypes.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_issuable_pairs.py",
@@ -1067,47 +1008,39 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/tools/test_run_hook_on_deletion.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "C++ engine parity checks that need the rocke_engine module; every case skips "
         "without it, until TheRock's build environment has pybind11",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_selector_cpp_parity.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's shared library (librocke) skip "
         "where the build installs none (the Windows provider build)",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_attention_bwd_lds_alignment.py",
         "library/tests/test_attention_ir_cpp_parity.py",
         "library/tests/test_gdn_decode_ir_cpp_parity.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's Python modules (rocke_engine, "
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them; its cases that read the code object need llvm-objdump, which the "
         "CI test step does not put on PATH",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_attention_tiled_3d_kv_cache_policy.py",
         "library/tests/test_conv_direct_nongrouped_tf32.py",
         "library/tests/test_conv_direct_tf32_mfma.py",
         "library/tests/test_conv_fwd_tf32.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's Python modules (rocke_engine, "
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_attention_tiled_3d_kv_lds_swizzle.py",
         "library/tests/test_attention_tiled_3d_running_max.py",
         "library/tests/test_attention_tiled_3d_wave_page_id_load.py",
@@ -1126,33 +1059,27 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_strided_kv_decode.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's Python modules (rocke_engine, "
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them; its cases that lower through the C++ engine's shared library "
         "(librocke) skip where the build installs none (the Windows provider build)",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_conv_direct_grouped_backend_parity.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that read code objects need llvm-objdump, which the CI test step "
         "does not put on PATH",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_attention_tiled_3d_reduce_lds.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's library module "
         "(rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build it",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-02",
         "library/tests/test_dgrad_stem_wmma.py",
         "library/tests/test_direct_dgrad_wmma.py",
         "library/tests/test_direct_dw_fwd_wmma.py",
@@ -1164,14 +1091,12 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_img2col_spec.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's Python modules (rocke_engine, "
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them; its cases that lower through the C++ engine's shared library "
         "(librocke) skip where the build installs none (the Windows provider build)",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/tests/core/test_arch_domain_lane.py",
         "platform/tests/core/test_gfx950_scaled_mfma.py",
         "platform/tests/core/test_mx_scale_decode.py",
@@ -1180,13 +1105,11 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/test_rocke.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's Python modules (rocke_engine, "
         "rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build them",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/tests/core/test_f64_mma.py",
         "platform/tests/instances/test_gemm_tdm_padding.py",
         "platform/tests/instances/test_gemm_tdm_traits_cpp_engine.py",
@@ -1195,12 +1118,10 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/test_compiler_detection_native.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's shared library (librocke) skip "
         "where the build installs none (the Windows provider build)",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-05",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_dtypes.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_issuable_pairs.py",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_issue.py",
@@ -1271,66 +1192,54 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/support/test_require_cpp_engine.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's shared library (librocke) skip "
         "where the build installs none (the Windows provider build); its cases need "
         "jsonschema or llc, which the CI test environment lacks",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-05",
         "platform/tests/core/test_debug_info.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's shared library (librocke) skip "
         "where the build installs none (the Windows provider build); its cases that "
         "read the code object need llvm-objdump, which the CI test step does not put "
         "on PATH",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-05",
         "platform/tests/core/test_nontemporal_lowering.py",
         "platform/tests/core/test_trap.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases that load the shared librocke (the portable-IR C ABI) skip where "
         "the build installs none (the Windows provider build)",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/python/rocke/portable_ir/tests/test_abi.py",
         "platform/python/rocke/portable_ir/tests/test_guard.py",
         "platform/python/rocke/portable_ir/tests/test_launch.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases need jsonschema or llc, which the CI test environment lacks",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/tests/analysis/test_lds_serialization.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its figure cases need matplotlib, which the CI test environment lacks",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/python/rocke/tests/helpers/tiling/test_lds_conflict.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its occupancy cases build code objects with llc and read them with "
         "llvm-readelf, which the CI test step does not put on PATH",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/python/rocke/benchmark/perf/tests/test_cli.py",
         "platform/python/rocke/benchmark/perf/tests/test_occupancy.py",
         "platform/tests/benchmark/test_occupancy_targets.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _GFX950_RUNNERS,
         "its device cases need gfx950, which no CI GPU stage has",
         _LIBRARY,
@@ -1361,19 +1270,17 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_kda_gdn_gfx950_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device cases need gfx950, which no CI GPU stage has (AICK-3411); its "
         "device cases need gfx1250, which no CI GPU stage has",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         "library/tests/test_conv_dgrad_correctness.py",
         "library/tests/test_conv_dgrad_depthwise_windowed.py",
         "library/tests/test_conv_fwd_split_k.py",
         "library/tests/test_conv_wgrad_correctness.py",
         "library/tests/test_direct_conv_correctness.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _GFX950_RUNNERS,
         "its gfx950 reference cases wait for a gfx950 runner: the gfx942 reference "
         "entry deselects them, and the gfx950 one exits on the CI runners",
@@ -1381,23 +1288,19 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_conv_pinned_reference.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its gfx950 reference cases wait for a gfx950 runner: the gfx942 reference "
         "entry deselects them, and the gfx950 one exits on the CI runners "
         "(AICK-3411); its gfx1151, gfx1200 and gfx1201 reference cases wait for those "
         "runners: the gfx942 reference entry deselects them, and theirs exit on the "
         "CI runners",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         "library/tests/test_sdpa_pinned_reference.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device cases need gfx1250, which no CI GPU stage has",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         "library/tests/test_conv_fwd_correctness.py",
         "library/tests/test_conv_winograd_dispatch_gpu.py",
         "library/tests/test_conv_winograd_fwd_gpu.py",
@@ -1421,56 +1324,43 @@ PENDING: tuple[PendingTest, ...] = (
         _LIBRARY,
         node="TestConvDgradUniformKDecode",
     ),
-    PendingTest(
+    _OTHER_RUNNERS.waiting(
         "library/tests/test_conv_wgrad_correctness.py",
-        RUNNER_HARDWARE,
         "WMMA split-K wgrad: its atomics are not enabled on gfx942, so it runs on "
         "gfx1250",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         node="TestConvWgradCorrectness::test_split_k_wmma",
     ),
-    PendingTest(
+    _OTHER_RUNNERS.waiting(
         "library/tests/test_conv_wgrad_correctness.py",
-        RUNNER_HARDWARE,
         "WMMA split-K wgrad: its atomics are not enabled on gfx942, so it runs on "
         "gfx1250",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         node="TestConvWgradCorrectness::test_grouped_split_k_wmma",
     ),
-    PendingTest(
+    _OTHER_RUNNERS.waiting(
         "library/tests/test_conv_wgrad_correctness.py",
-        RUNNER_HARDWARE,
         "WMMA split-K wgrad: its atomics are not enabled on gfx942, so it runs on "
         "gfx1250",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         node="TestConvWgradCorrectness::test_wide_tile_spec_at_degree_cap_gfx1250",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device cases need gfx1151, gfx1200 or gfx1201, which no CI GPU stage has",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-19",
         "library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py",
         "library/tests/test_wmma_fmha_fwd_v2_features.py",
         "library/tests/test_wmma_fmha_fwd_v2_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device cases need gfx950, which no CI GPU stage has (AICK-3411); its "
         "device cases need gfx1250, which no CI GPU stage has",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_k_coupling.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _GFX950_RUNNERS,
         "its device cases need gfx950 (the multi-GPU sweep, two of them), which no CI "
         "GPU stage has",
@@ -1484,11 +1374,9 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/instances/test_gfx950_mxfp8_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device cases need gfx1250, which no CI GPU stage has",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/tests/core/test_gpu_checked_value.py",
         "platform/tests/instances/test_gfx1250_mixed_scaled_gemm_numeric.py",
         "platform/tests/instances/test_gfx1250_mxfp4_numeric.py",
@@ -1499,20 +1387,16 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/instances/test_gfx1250_scale_formats_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device case runs on gfx1151 or gfx1201 only, which no CI GPU stage has",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/tests/instances/test_matmul_nbits_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its GPU cases compile for gfx90a only (39 cases in these files); they pass "
         "on a gfx90a node",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/python/rocke/tests/helpers/tiling/kernels/test_tiling_gemm_interleaved_demo.py",
         "platform/python/rocke/tests/helpers/tiling/kernels/test_tiling_gemm_manual_demo.py",
         "platform/python/rocke/tests/helpers/tiling/test_fragment_storage.py",
@@ -1520,15 +1404,13 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/python/rocke/tests/helpers/tiling/test_leading_axes.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its GPU case checks gfx90a instructions on gfx90a only",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/tests/core/test_u8_arith.py",
         "platform/tests/numeric/test_gfx90a_mfma_ops.py",
     ),
-    *_waiting_on(
+    *_waiting(
         _GFX950_RUNNERS,
         "its device cases need gfx950, which no CI GPU stage has",
         _PLATFORM,
@@ -1537,60 +1419,48 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/numeric/test_warp_shuffle_xor_dpp_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its device cases need gfx1151, gfx1200 or gfx1201, which no CI GPU stage has",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/tests/instances/test_attention_fwd_ext_numeric.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its case follows a change of the current device, which needs two GPUs",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/tests/support/test_gpu.py",
     ),
     *_waiting(
-        RUNNER_HARDWARE,
+        _OTHER_RUNNERS,
         "its gfx1151 cases need a gfx1151 GPU, which no CI GPU stage has",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-02-16",
         "platform/tests/instances/test_rocke_numeric.py",
     ),
     *_waiting(
-        SOURCE_TREE,
+        _SOURCE_CHECKOUT,
         "its cases that read rocke/tools, rocke/agents, the C++ headers or the "
         "examples, which the installed test tree omits, skip in CI; run_all.py runs "
         "them",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-22",
         "platform/tests/core/test_debug_info.py",
         "platform/tests/instances/test_gfx950_grouped_gemm.py",
         "platform/tests/tools/test_compliance_patterns.py",
     ),
     *_waiting(
-        BUILD_VARIANT,
+        _BUILD_VARIANT_TOOLS,
         "its cases need tools or a compiler build the CI test step lacks (Ninja and "
         "a C++ compiler; a COMGR whose committed column rejects gfx1154)",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-29",
         "platform/tests/core/test_compile_target_with_this_hosts_compiler.py",
         "platform/tests/support/test_cmake_file_api.py",
         "platform/tests/tools/test_run_all.py",
     ),
     *_waiting_tests(
-        TICKET,
+        _SCHEDULED_TIERS,
         "it checks a column alias or an all-negative aliased declare, which no "
         "committed column has yet; it is kept on purpose until the committed data "
         "has one",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "platform/tests/core/test_arch_domain_lane.py",
         "test_a_borrowing_lane_refuses_at_its_source",
         "test_a_waived_alias_does_not_turn_its_sibling_into_a_refusal",
@@ -1598,38 +1468,31 @@ PENDING: tuple[PendingTest, ...] = (
         "test_the_post_pass_reports_every_key_an_aliased_declare_could_be",
     ),
     *_waiting_tests(
-        TICKET,
+        _SCHEDULED_TIERS,
         "its native-engine cases of a concrete MMA op do not run (native LLVM lowers "
         "the neutral tile.mma only); they are kept on purpose until the engine "
         "supports them",
         _PLATFORM,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "platform/tests/core/test_gfx1250_scaled_wmma.py",
         "test_scaled_lowering_rejects_accumulator_types",
         "test_scaled_lowering_rejects_arity",
         "test_scaled_lowering_rejects_sources",
     ),
     *_waiting_tests(
-        TICKET,
+        _SCHEDULED_TIERS,
         "its decode cases at head widths no decode bucket serves do not run; they "
         "are kept on purpose until a decode bucket serves those widths",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         "library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py",
         "test_dispatch_unequal_head_dims",
         "test_runtime_head_dims_serve_every_width_in_a_bucket",
         "test_runtime_head_dims_unequal_widths",
     ),
-    PendingTest(
+    _SCHEDULED_TIERS.waiting(
         "library/tests/test_attention_builds.py",
-        TICKET,
         "it checks the budgets the file's other tests exercised, so it skips in a "
         "CI shard that builds none of them; triage gives it a shard with them",
         _LIBRARY,
-        _TRIAGE_FOLLOW_UP,
-        "2027-01-15",
         node="test_every_declared_budget_was_exercised",
     ),
 )
@@ -1650,6 +1513,9 @@ _LLVM_24_CI = Compilers(llvm_major=24, llvm_commits=(_LLVM_24_CI_COMMIT,))
 _LLVM_24_ROCM_INSTALL = Compilers(
     llvm_major=24, llvm_commits=(_LLVM_24_ROCM_INSTALL_COMMIT,)
 )
+# The issue that tracks the spill retunes, and the one date by which every
+# measured budget is re-decided.
+_SPILL_RETUNE_ISSUE = "AICK-3472"
 _SPILL_RETUNE_EXPIRES = "2026-12-31"
 
 
@@ -1665,7 +1531,7 @@ def _measured(
             compilers,
             reason,
             _LIBRARY,
-            _TRIAGE_FOLLOW_UP,
+            _SPILL_RETUNE_ISSUE,
             _SPILL_RETUNE_EXPIRES,
         )
         for kernel_name, scratch_bytes in allowances

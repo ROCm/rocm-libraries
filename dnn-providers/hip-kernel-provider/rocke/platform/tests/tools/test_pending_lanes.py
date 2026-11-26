@@ -441,16 +441,25 @@ def test_a_pending_test_needs_its_recorded_reason_team_and_issue():
 def lane_ticket_breaches(
     pending: Iterable[PendingTest], tickets: Iterable[LaneTicket]
 ) -> list[str]:
-    """The lane tickets listed twice, and the records that name a lane
-    ticket's issue with another lane or expiry: a lane ticket's records take
-    both from it, so the lane has one date."""
+    """The lane tickets listed twice, the entries whose issue is no lane
+    ticket's, and the entries that name a lane ticket's issue with another lane
+    or expiry: every entry takes all three from its lane ticket, so each lane
+    of an issue has one date."""
     tickets = list(tickets)
+    pending = list(pending)
     issues = [ticket.issue for ticket in tickets]
     breaches = [
         f"lane ticket listed twice: {issue}"
         for issue in sorted({issue for issue in issues if issues.count(issue) > 1})
     ]
     ticket_of = {ticket.issue: ticket for ticket in tickets}
+    breaches += [
+        f"{entry.path}{'::' + entry.node if entry.node else ''} names "
+        f"{entry.issue}, which is no lane ticket's issue: add a LaneTicket to "
+        "LANE_TICKETS and write the entry with LaneTicket.waiting"
+        for entry in pending
+        if entry.issue not in ticket_of
+    ]
     breaches += [
         f"{entry.path}{'::' + entry.node if entry.node else ''} names lane ticket "
         f"{entry.issue} with lane {entry.lane.name} and expiry {entry.expires}, "
@@ -486,8 +495,9 @@ def test_a_lane_ticket_gives_its_records_its_lane_issue_and_expiry():
 
 
 def test_a_record_that_names_a_lane_ticket_takes_its_lane_and_expiry():
-    """An entry that names a lane ticket's issue with another lane or date is a
-    breach, so the lane keeps one date; a ticket is listed once."""
+    """An entry whose issue is no lane ticket's, or that names a lane ticket's
+    issue with another lane or date, is a breach, so each lane of an issue
+    keeps one date; a ticket is listed once."""
     ticket = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(30))
     path = "library/tests/test_x.py"
     assert lane_ticket_breaches([ticket.waiting(path, "why", TEAMS[0])], [ticket]) == []
@@ -497,6 +507,10 @@ def test_a_record_that_names_a_lane_ticket_takes_its_lane_and_expiry():
     other_lane = _pending(path, TICKET, issue="AICK-1", expires=ticket.expires)
     other_issue = _pending(path, TICKET, issue="AICK-2")
     assert lane_ticket_breaches([other_date, other_lane, other_issue], [ticket]) == [
+        (
+            f"{path} names AICK-2, which is no lane ticket's issue: add a "
+            "LaneTicket to LANE_TICKETS and write the entry with LaneTicket.waiting"
+        ),
         (
             f"{path} names lane ticket AICK-1 with lane runner-hardware and expiry "
             f"{other_date.expires}, expected runner-hardware and {ticket.expires}: "
