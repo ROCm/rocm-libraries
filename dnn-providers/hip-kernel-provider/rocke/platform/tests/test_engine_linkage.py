@@ -564,15 +564,21 @@ def test_pytest_entries_require_the_cpp_engine_where_it_is_installed(
     """Where the build installs the shared engine beside the package, every
     installed pytest entry but the explicit gates loads
     rocke.tests.require_cpp_engine right after the shard plugin, so a missing
-    engine fails it; where the build installs none there, no entry does."""
+    engine fails it, and every GPU entry loads
+    rocke.tests.differential_engines, so it runs the Python engine's kernels
+    and compares the C++ engine's with them; where the build installs none
+    there, no entry loads either."""
     _, ctest_dir = configure_installed_ctest(tmp_path, *cmake_arguments)
     pytest_entries = {
-        test["name"]: test["command"]
+        test["name"]: test
         for test in list_installed_ctest_entries(ctest_dir, tmp_path)
         if runs_pytest(test)
     }
     assert pytest_entries
-    for name, command in pytest_entries.items():
+    for name, test in pytest_entries.items():
+        command = test["command"]
+        gpu = "gpu" in (entry_property(test, "LABELS") or [])
+        assert ("rocke.tests.differential_engines" in command) == (strict and gpu), name
         if name in EXPLICIT_GATES:
             assert "rocke.tests.require_cpp_engine" not in command, name
             continue

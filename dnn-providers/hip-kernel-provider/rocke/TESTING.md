@@ -1278,7 +1278,11 @@ slowest measured CI time with `@pytest.mark.rocke_measured_seconds(seconds)`,
 which raises that test's limit alone to twice the time
 (`rocke.tests.item_time_limit`). Every GPU pytest entry also loads
 `rocke.tests.require_gpu`, which fails a run that finds no GPU (its docstring
-says why).
+says why). Where the build installs the shared C++ engine beside the package,
+every GPU pytest entry also loads `rocke.tests.differential_engines`, which
+sets `ROCKE_BACKEND=both`: its tests run the kernels the Python engine builds,
+which the provider ships, and each lowering fails when the C++ engine's output
+differs.
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).

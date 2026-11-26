@@ -449,6 +449,14 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
 # parallel ctest -j never runs two of them at once on the one GPU.
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY
     "-p rocke.tests.item_time_limit -p rocke.tests.require_gpu --timeout-method=thread")
+# Where the shared engine is beside the package, the policy also loads
+# rocke.tests.differential_engines (ROCKE_BACKEND=both): the GPU checks run the
+# Python engine's kernels, which the provider ships, and compare the C++
+# engine's output with them on every kernel they build.
+if(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE)
+  string(APPEND _ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY
+         " -p rocke.tests.differential_engines")
+endif()
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT
     "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY}")
 set(_ROCKE_INSTALLED_GPU_RESOURCE_LOCK "rocke_gpu")

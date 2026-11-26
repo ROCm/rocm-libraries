@@ -1119,15 +1119,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
     def test_grouped_depthwise(self):
         # Depthwise (groups == C, cpg == 1): each input channel is its own group.
         # kpg==1 (K==C) is pure depthwise; kpg==2 (K==2C) is a channel multiplier.
-        # cpg==1/kpg==1 forces scalar loads (vec==1), which the C++ *serialized*
-        # lowerer cannot handle yet (no scalar `tile.buffer_load` op), so skip the
-        # ROCKE_BACKEND=both differential lane; numeric correctness is validated
-        # via the (reference) Python engine in the default lane.
-        if os.environ.get("ROCKE_BACKEND") == "both":
-            self.skipTest(
-                "C++ serialized engine lacks scalar tile.buffer_load; depthwise "
-                "(vec=1) is validated numerically via the Python engine"
-            )
+        # cpg==1/kpg==1 forces scalar loads (vec==1).
         depthwise = [
             _Shape(
                 "dw_g32_c32k32",

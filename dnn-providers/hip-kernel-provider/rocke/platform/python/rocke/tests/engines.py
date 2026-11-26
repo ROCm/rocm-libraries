@@ -106,7 +106,12 @@ from typing import Literal, NoReturn
 import pytest
 
 from rocke.core import native_engine
-from rocke.core.backend import CPP_STRICT_ENV, _lower_via_cpp_engine, cpp_fallbacks
+from rocke.core.backend import (
+    BACKEND_ENV,
+    CPP_STRICT_ENV,
+    _lower_via_cpp_engine,
+    cpp_fallbacks,
+)
 from rocke.core.ir import KernelDef
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -596,7 +601,7 @@ def assert_backend_lane_rejects(
         # (ROCKE_REQUIRE_CPP_ENGINE), checked before the lane's own.
         native_engine_or_skip()
     backend, strict = _LANE_ENVIRONMENT[lane]
-    for variable, value in (("ROCKE_BACKEND", backend), (CPP_STRICT_ENV, strict)):
+    for variable, value in ((BACKEND_ENV, backend), (CPP_STRICT_ENV, strict)):
         if value is None:
             monkeypatch.delenv(variable, raising=False)
         else:
