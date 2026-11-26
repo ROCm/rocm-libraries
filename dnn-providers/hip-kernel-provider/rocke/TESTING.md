@@ -1059,9 +1059,10 @@ what the level below cannot see.
 | 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
 
 **Make the test prove the claim.** Each new refusal has a test that asserts the
-error's type and message. Each claim in a docstring, commit message or PR text has a test that
-fails if the claim is false: assert the property claimed (the `align N` of a
-load, not only its vector type). Use real inputs, not stubs.
+error's type and message. A claim people rely on has a test that fails if the
+claim is false: assert the property claimed (the `align N` of a load, not only
+its vector type). Use real inputs, not stubs. A one-time claim (a measurement,
+"IR unchanged") needs evidence in the PR instead. Drop a claim you can't back.
 
 The quick golden entries lower with the Python engine only. The byte-identity
 gate over the kernel families runs in `tests/run_all.py`, through
