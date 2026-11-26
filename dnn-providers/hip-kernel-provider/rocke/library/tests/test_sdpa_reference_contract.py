@@ -230,6 +230,35 @@ def test_independent_sdpa_matches_analytic_uniform_attention(causal):
     assert actual.dtype == np.float64
 
 
+def _two_key_case_inputs(query_value: float) -> tuple[Case, dict[str, np.ndarray]]:
+    """One query over two keys, head dim 2: the query (``query_value``, 0) scores
+    ``query_value * case.scale`` against key (1, 0) and 0 against key (0, 0), so
+    the weights depend on the scale; values (2, 4) and (6, 8)."""
+    case = Case("fp16", 2, 1, 1, False, False, batch=1, sequence_length=2)
+    q = np.array([[[[query_value, 0]], [[query_value, 0]]]], np.float16)
+    k = np.array([[[[1, 0]], [[0, 0]]]], np.float16)
+    v = np.array([[[[2, 4]], [[6, 8]]]], np.float16)
+    return case, {"q": q, "k": k, "v": v}
+
+
+def test_independent_sdpa_applies_the_scale():
+    case, inputs = _two_key_case_inputs(2.0)
+    score = 2.0 * case.scale
+    weight = np.exp(score) / (np.exp(score) + 1.0)
+    expected_row = weight * np.array([2.0, 4.0]) + (1 - weight) * np.array([6.0, 8.0])
+    actual = independent_reference(case, inputs)
+    np.testing.assert_allclose(actual[0, 0, 0], expected_row, rtol=1e-12)
+    np.testing.assert_allclose(actual[0, 1, 0], expected_row, rtol=1e-12)
+
+
+def test_independent_sdpa_subtracts_the_row_maximum():
+    # A score near 778 overflows exp in float64 unless the row maximum is
+    # subtracted first; with it the far smaller second weight underflows to 0.
+    case, inputs = _two_key_case_inputs(1100.0)
+    actual = independent_reference(case, inputs)
+    np.testing.assert_array_equal(actual[0, :, 0], [[2.0, 4.0], [2.0, 4.0]])
+
+
 def _bundle(tmp_path, architecture="gfx942", variant="dense"):
     target = get_adapter(architecture, variant)
     payload = tmp_path / "payload"
