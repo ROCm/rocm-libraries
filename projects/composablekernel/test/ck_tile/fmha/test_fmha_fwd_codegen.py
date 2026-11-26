@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from collections import Counter
 from fnmatch import fnmatch
 from itertools import product
@@ -137,6 +138,7 @@ enum class bias_enum { no_bias, elementwise_bias, alibi };
 enum class quant_scale_enum { no_scale, pertensor, blockscale, kv_blockscale, mx, perhead };
 struct FmhaFwdBf16 {};
 struct FmhaFwdFp8 {};
+struct FmhaFwdFp8Bf16 {};
 struct FmhaFwdFp16 {};
 struct FmhaMasks {
     struct NoMask {};
@@ -2408,7 +2410,7 @@ int main() {
             (48, 48, pertensor, 0, "qr_tdm", True),
             (64, 32, pertensor, 0, "qr_tdm", True),
             (64, 64, pertensor, 0, "qr_tdm_fp8_sched", False),
-            (64, 64, blockscale, 64, "qr_tdm", False),
+            (64, 64, blockscale, 64, "qr_tdm", True),
             (64, 64, blockscale, 128, "qr_tdm_fp8_sched", False),
         ):
             with self.subTest(hdim_q=hdim_q, hdim_v=hdim_v, qscale=qscale):
@@ -2420,7 +2422,7 @@ int main() {
                     qscale="pertensor" if qscale == pertensor else "blockscale",
                     dpad="t" if padded else "f",
                     dvpad="t" if padded else "f",
-                    spad="f" if pipeline == "qr_tdm" else "t",
+                    spad="f" if pipeline == "qr_tdm" and qscale == blockscale else "t",
                 )
                 if pipeline == "qr_tdm_fp8_sched":
                     features["packgqa"] = "f"
@@ -2804,6 +2806,170 @@ int main() {
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
 
 
+class TestGfx125PaddingPruning(unittest.TestCase):
+    @staticmethod
+    def generate(receipt=0, pattern="fmha_fwd_d*_fp8*", mask="simplified", dims=None):
+        return get_fwd_blobs(
+            ["gfx1250"], pattern, receipt, [64, 128] if dims is None else dims, mask
+        )
+
+    @staticmethod
+    def unpruned(pattern="fmha_fwd_d*_fp8*", mask="simplified", dims=None, receipt=0):
+        # A custom factory must retain its requested specializations, even when
+        # its geometry happens to equal the built-in factory's geometry.
+        class CustomFactory(KernelComponentFactoryGfx125):
+            pass
+
+        with patch("codegen.ops.fmha_fwd.get_factory", return_value=CustomFactory):
+            return TestGfx125PaddingPruning.generate(
+                receipt=receipt, pattern=pattern, mask=mask, dims=dims
+            )
+
+    def test_receipts_retain_padded_replacements_and_explicit_filters(self):
+        for receipt in (0, 2, 3, 4, 5, 100, 200, 600, 700, 888):
+            with self.subTest(receipt=receipt):
+                # Exclude the separate M128-to-M64 dropout consolidation, which
+                # also deliberately preserves custom-factory specializations.
+                options = dict(receipt=receipt, pattern="*_ndropout_*", dims=[-1])
+                _, original = self.unpruned(**options)
+                _, pruned = self.generate(**options)
+                originals = {k.filename: k for k in original}
+                names = {k.filename for k in pruned}
+                self.assertFalse(names - originals.keys())
+                removed = originals.keys() - names
+                self.assertTrue(removed, "each receipt must exercise pruning")
+                for name in removed:
+                    kernel = originals[name]
+                    # Every removed instance has an otherwise identical twin
+                    # with at least head padding in the final receipt inventory.
+                    self.assertTrue(
+                        any(
+                            replace(
+                                kernel,
+                                F_pipeline=replace(kernel.F_pipeline, **pads),
+                            ).filename
+                            in names
+                            for pads in (
+                                dict(F_dpad="t", F_dvpad="t"),
+                                dict(F_spad="t", F_skpad="t", F_dpad="t", F_dvpad="t"),
+                            )
+                        ),
+                        name,
+                    )
+                # Exercise broad padding filters for CI, plus an exact requested
+                # specialization for each integration receipt.
+                patterns = (originals[min(removed)].name,)
+                if receipt == 0:
+                    patterns = (
+                        "fmha_fwd_d*_fp8*_qr_vr_npad_*",
+                        "fmha_fwd_d*_fp8*_qr_tdm_vr_npad_*",
+                        "fmha_fwd_d*_fp8*_qr_tdm_vr_pddv_*",
+                    )
+                for pattern in patterns:
+                    with self.subTest(pattern=pattern):
+                        wanted = {
+                            k.filename for k in original if fnmatch(k.name, pattern)
+                        }
+                        _, filtered = self.generate(
+                            receipt=receipt, pattern=pattern, dims=[-1]
+                        )
+                        self.assertTrue(wanted)
+                        self.assertEqual({k.filename for k in filtered}, wanted)
+
+    @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+    def test_unreachable_fp16_head_traits_keep_dispatch(self):
+        for dtype in ("fp16", "bf16"):
+            pattern = f"fmha_fwd_d*_{dtype}_*_nlogits*_nskip*"
+            old_pool, original = self.unpruned(pattern, dims=[32, 192])
+            new_pool, pruned = self.generate(pattern=pattern, dims=[32, 192])
+            self.assertLess(len(pruned), len(original))
+            self.assertTrue(
+                all(
+                    k.F_pipeline.F_dpad == k.F_pipeline.F_dvpad == "t"
+                    for k in pruned
+                    if k.F_pipeline.tag == "qr_tdm"
+                )
+            )
+            before = _CompiledDispatcher(self, old_pool, original)
+            after = _CompiledDispatcher(self, new_pool, pruned)
+            old_names = {i: k.name for k, i in before.kernel_ids}
+            new_names = {i: k.name for k, i in after.kernel_ids}
+            for group, dims, sq, sk in product(
+                (0, 1),
+                ((1, 1), (24, 24), (32, 32), (160, 128), (192, 96), (192, 128)),
+                (16, 256),
+                (127, 128),
+            ):
+                args = dict(
+                    dtype=dtype,
+                    group=group,
+                    hdim_q=dims[0],
+                    hdim_v=dims[1],
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                )
+                with self.subTest(**args):
+                    old_id, new_id = before.run(**args)[0], after.run(**args)[0]
+                    self.assertGreater(old_id, 0)
+                    self.assertEqual(old_names[old_id], new_names.get(new_id))
+            # A developer explicitly asking for the unpadded trait still gets it.
+            for pad in ("npad", "pssk"):
+                explicit = f"fmha_fwd_d*_{dtype}_*_qr_tdm_vr_{pad}_*"
+                _, wanted = self.unpruned(explicit, dims=[32, 192])
+                _, retained = self.generate(pattern=explicit, dims=[32, 192])
+                self.assertTrue(wanted)
+                self.assertEqual(
+                    {k.filename for k in wanted}, {k.filename for k in retained}
+                )
+
+    @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+    def test_fallback_inputs_remain_supported(self):
+        # Receipt-specific inventories and filters are checked above. Receipt 0
+        # covers both FP8 dtypes and all padding fallbacks in compiled dispatch.
+        pattern = (
+            "fmha_fwd_d*_fp8*_[bg]*_nlogits_nbias_nmask_nlse_ndropout_nskip_*_nsink*"
+        )
+        old_pool, old_kernels = self.unpruned(pattern)
+        new_pool, new_kernels = self.generate(pattern=pattern)
+        before = _CompiledDispatcher(
+            self, old_pool, old_kernels, filter_fn=lambda t: True
+        )
+        after = _CompiledDispatcher(
+            self, new_pool, new_kernels, filter_fn=lambda t: True
+        )
+        before_names = {i: k.name for k, i in before.kernel_ids}
+        after_names = {i: k.name for k, i in after.kernel_ids}
+        changed = 0
+        for dtype, group, dims, scale, sink_ptr, sk in product(
+            ("fp8", "fp8bf16"),
+            (0, 1),
+            ((31, 31), (48, 48), (64, 32), (64, 64), (128, 128)),
+            (0, 1, 2, 5),
+            (0, 1),
+            (127, 128),
+        ):
+            args = dict(
+                dtype=dtype,
+                group=group,
+                hdim_q=dims[0],
+                hdim_v=dims[1],
+                seqlen_q=64,
+                seqlen_k=sk,
+                qscale=scale,
+                has_sink_ptr=sink_ptr,
+                nhead_k=8,
+                block_scale_size_q=64,
+                block_scale_size_kv=128,
+            )
+            with self.subTest(**args):
+                old_id = before.run(**args)[0]
+                new_id = after.run(**args)[0]
+                self.assertEqual(old_id > 0, new_id > 0)
+                if old_id > 0:
+                    changed += before_names[old_id] != after_names[new_id]
+        self.assertGreater(changed, 0, "the fallback cases must exercise pruning")
+
+
 class TestGfx125QrReplacement(unittest.TestCase):
     @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
     def test_short_d64_causal_lse_dispatch(self):
@@ -2928,10 +3094,11 @@ class TestGfx125QrReplacement(unittest.TestCase):
                             seen.add(condition)
 
     def test_instance_budget(self):
-        # PR #15342 parent (d90dfdb), receipt 0, all head dimensions/dtypes.
+        # Padding-pruned inventory: gfx1250, receipt 0, --optdim=-1, no filter.
+        # Upper bounds allow further pruning while catching instance growth.
         for mask, total in (
-            ("simplified", 15300),
-            ("generic", 22654),
+            ("simplified", 11216),
+            ("generic", 16228),
         ):
             with self.subTest(mask=mask):
                 _, kernels = get_fwd_blobs(["gfx1250"], None, 0, [-1], mask)

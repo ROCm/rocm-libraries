@@ -3061,6 +3061,7 @@ def get_fwd_blobs(
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
     gen = list()
     generated_names = set()
+    padding_replacements = {}
     api_pool = FmhaFwdApiPool()
 
     factories = get_factories_for_targets(targets, get_factory)
@@ -3132,9 +3133,49 @@ def get_fwd_blobs(
                     )
                     if unpadded.filename in generated_names:
                         continue
-                api_pool.register_traits(kernel.api_trait())
+                if factory is KernelComponentFactoryGfx125:
+                    pads = None
+                    if (
+                        dtype in factory._DT_FP8_FP8BF16
+                        and pipeline.tag in ("qr", "qr_tdm")
+                        and not (mode == "group" and pipeline.F_qscale == "blockscale")
+                    ):
+                        # Scheduled FP8 handles ordinary exact heads. Reuse the
+                        # head-padded legacy fallback for Q64 scales and virtual
+                        # sinks; group block-scale keeps its faster specialization.
+                        pads = dict(F_dpad="t", F_dvpad="t")
+                        # D64 per-tensor/per-head scales also reuse the sequence-
+                        # padded twin; other scales and D128 keep faster variants.
+                        if pipeline.tag == "qr" or (
+                            hdim == 64 and pipeline.F_qscale in ("pertensor", "perhead")
+                        ):
+                            pads.update(F_spad="t", F_skpad="t")
+                    elif (
+                        dtype in factory._DT_FP16_BF16
+                        and pipeline.tag == "qr_tdm"
+                        and pipeline.F_dpad == pipeline.F_dvpad == "f"
+                        and min(hdim, hdim_v) < TDM_K0_MAX_SUBMAX_MAP[tile.F_bk0max]
+                    ):
+                        # D32 requires a positive multiple of 64; D192/V128
+                        # requires V to be a multiple of 192. Neither unpadded
+                        # trait can accept valid heads within its dispatch bucket.
+                        pads = dict(F_dpad="t", F_dvpad="t")
+                    if pads is not None:
+                        padded = replace(kernel, F_pipeline=replace(pipeline, **pads))
+                        if padded.filename != kernel.filename:
+                            padding_replacements[kernel.filename] = padded.filename
                 gen.append(kernel)
                 generated_names.add(kernel.filename)
+
+    # Resolve after generation: padded twins may occur later in the inventory.
+    # A receipt or explicit filter that excludes the twin retains the original.
+    gen = [
+        kernel
+        for kernel in gen
+        if padding_replacements.get(kernel.filename) not in generated_names
+    ]
+    for kernel in gen:
+        api_pool.register_traits(kernel.api_trait())
 
     return (api_pool, gen)
 
