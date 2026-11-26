@@ -35,7 +35,7 @@ namespace asm_sdpa_engine::asm_kernels
 /// - If the first component does not start with "gfx", returns unchanged.
 inline auto getAsmKernelTocKey(const std::string& coName) -> std::string
 {
-    auto const pos = coName.find('/');
+    const auto pos = coName.find('/');
     if(pos == std::string::npos)
     {
         return coName;

@@ -85,7 +85,7 @@ flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleGraphConfig&
         flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndex);
     }
 
-    auto const resampleAttr = data_objects::CreateResampleFwdAttributesDirect(
+    const auto resampleAttr = data_objects::CreateResampleFwdAttributesDirect(
         builder,
         1,
         2,
@@ -106,7 +106,7 @@ flatbuffers::FlatBufferBuilder createResampleFwdGraph(const ResampleGraphConfig&
                                        data_objects::NodeAttributes::ResampleFwdAttributes,
                                        resampleAttr.Union()));
 
-    auto const graphOffset = data_objects::CreateGraphDirect(builder,
+    const auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                              "test",
                                                              data_objects::DataType::FLOAT,
                                                              data_objects::DataType::FLOAT,
@@ -145,7 +145,7 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraph(const ResampleBwdGraphConf
             builder, 3, "index", config.indexType, &config.indexStrides, &config.indexDims));
     }
 
-    auto const resampleAttr = data_objects::CreateResampleBwdAttributesDirect(
+    const auto resampleAttr = data_objects::CreateResampleBwdAttributesDirect(
         builder,
         1,
         2,
@@ -165,7 +165,7 @@ flatbuffers::FlatBufferBuilder createResampleBwdGraph(const ResampleBwdGraphConf
                                        data_objects::NodeAttributes::ResampleBwdAttributes,
                                        resampleAttr.Union()));
 
-    auto const graphOffset = data_objects::CreateGraphDirect(builder,
+    const auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                              "test",
                                                              data_objects::DataType::FLOAT,
                                                              data_objects::DataType::FLOAT,

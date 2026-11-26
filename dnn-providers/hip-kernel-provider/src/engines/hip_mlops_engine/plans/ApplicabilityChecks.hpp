@@ -45,7 +45,7 @@ public:
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
-        : _tensorMap(tensorMap) {};
+        : _tensorMap(tensorMap){};
 
     virtual ~IValidator() = default;
 

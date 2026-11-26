@@ -197,7 +197,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
 uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines)
 {
     const auto& engineDefinitions = getEngineDefinitions();
-    auto const totalEngines = static_cast<uint32_t>(engineDefinitions.size());
+    const auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
 
     if(maxEngines == 0)
     {
@@ -205,7 +205,7 @@ uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint3
         return totalEngines;
     }
 
-    auto const enginesToCopy = std::min(maxEngines, totalEngines);
+    const auto enginesToCopy = std::min(maxEngines, totalEngines);
     for(uint32_t i = 0; i < enginesToCopy; ++i)
     {
         engineIds[i] = engineDefinitions[i].id;

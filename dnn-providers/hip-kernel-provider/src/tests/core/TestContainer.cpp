@@ -95,7 +95,7 @@ TEST(TestContainer, CopyEngineIdsAdvertisesEveryExpectedEngine)
 {
     std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto const totalEngines
+    const auto totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
     ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
@@ -135,7 +135,7 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
 #else
     std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto const totalEngines
+    const auto totalEngines
         = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
     EXPECT_EQ(numEngines, totalEngines);
@@ -470,7 +470,7 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
         {"hipkernel:flydsl_sdpa_bwd_merged", "1.4.0"},
         {"hipkernel:flydsl_sdpa_bwd_split", "1.4.0"}};
     Container container;
-    auto const& manager = container.getEngineManager();
+    const auto& manager = container.getEngineManager();
     const auto baseline = providerBaselineGraphSchema();
     for(const auto engineId : manager.getAllEngineIds())
     {
@@ -495,7 +495,7 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
     Container container;
-    auto const& engineManager = container.getEngineManager();
+    const auto& engineManager = container.getEngineManager();
 
     (void)engineManager;
 }
@@ -506,7 +506,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     Handle handle;
-    auto const deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
     if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
@@ -515,7 +515,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     auto& engineManager = container.getEngineManager();
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
-    auto const strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
                                                                      strides,
                                                                      dims,
@@ -528,7 +528,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
                                                                      DataType::FLOAT);
     auto graphBuffer = graph.Release();
 
-    auto const graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
@@ -600,7 +600,7 @@ TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
 TEST(TestContainer, GetAllEngineIds)
 {
     Container container;
-    auto const& engineManager = container.getEngineManager();
+    const auto& engineManager = container.getEngineManager();
 
     auto allEngines = engineManager.getAllEngineIds();
 
@@ -664,7 +664,7 @@ TEST(TestContainer, RoutesARaggedSdpaGraphToTheAsmEngine)
     }
     const std::vector<int64_t> dims{4, 8, 256, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
-    auto const ragged = hipdnn_test_sdk::utilities::sdpa::withRaggedTensors(
+    const auto ragged = hipdnn_test_sdk::utilities::sdpa::withRaggedTensors(
         hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
             dims,
             strides,
@@ -808,7 +808,7 @@ TEST(TestContainer, RanksTheAsmEngineFirstForTheSdpaForwardGraphsItServes)
     Container container;
     auto& manager = container.getEngineManager();
     const auto asmId = asm_sdpa_engine::AsmSdpaEngine::staticId();
-    for(auto const& testCase : cases)
+    for(const auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.name);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(

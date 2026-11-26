@@ -64,7 +64,7 @@ public:
         -> cudnn_frontend::EngineConfigList
     {
         cudnn_frontend::EngineConfigList engine_configs;
-        // NOLINTNEXTLINE(misc-const-correctness)
+        // NOLINTNEXTLINE(misc-const-correctness) verbatim port of the cuDNN frontend source
         for(auto fn : engine_config_generators)
         {
             cudnn_frontend::EngineConfigList new_engine_config = fn(opGraph);

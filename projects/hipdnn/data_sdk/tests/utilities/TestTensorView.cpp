@@ -267,7 +267,7 @@ TEST(TestTensorView, AutoTypeDeduction)
     TensorView<float> view(*iTensor);
 
     // auto should correctly deduce float&
-    // NOLINTNEXTLINE(misc-const-correctness)
+    // NOLINTNEXTLINE(misc-const-correctness) the deduction under test is auto&, not const auto&
     for(auto& value : view)
     {
         static_assert(std::is_same_v<decltype(value), float&>, "Type should be float&");

@@ -730,7 +730,7 @@ struct ChildProcess
 /// escaping.
 std::wstring widenAscii(const std::string& narrow)
 {
-    return std::wstring(narrow.begin(), narrow.end());
+    return {narrow.begin(), narrow.end()};
 }
 #endif
 
@@ -748,11 +748,11 @@ std::optional<ChildProcess> spawnHelper(const std::filesystem::path& helper,
     SECURITY_ATTRIBUTES pipeAttributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     HANDLE readEnd = nullptr;
     HANDLE writeEnd = nullptr;
-    if(!::CreatePipe(&readEnd, &writeEnd, &pipeAttributes, 0))
+    if(::CreatePipe(&readEnd, &writeEnd, &pipeAttributes, 0) == FALSE)
     {
         return std::nullopt;
     }
-    if(!::SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0))
+    if(::SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0) == FALSE)
     {
         ::CloseHandle(readEnd);
         ::CloseHandle(writeEnd);
@@ -787,7 +787,7 @@ std::optional<ChildProcess> spawnHelper(const std::filesystem::path& helper,
                                           &startupInfo,
                                           &processInfo);
     ::CloseHandle(writeEnd);
-    if(!created)
+    if(created == FALSE)
     {
         ::CloseHandle(readEnd);
         return std::nullopt;
@@ -850,7 +850,7 @@ std::optional<std::string> readChildLine(ChildProcess& child,
         }
 #if defined(_WIN32)
         DWORD available = 0;
-        if(!::PeekNamedPipe(child.readPipe, nullptr, 0, nullptr, &available, nullptr))
+        if(::PeekNamedPipe(child.readPipe, nullptr, 0, nullptr, &available, nullptr) == FALSE)
         {
             return std::nullopt;
         }
@@ -861,7 +861,7 @@ std::optional<std::string> readChildLine(ChildProcess& child,
         }
         char byte = '\0';
         DWORD readCount = 0;
-        if(!::ReadFile(child.readPipe, &byte, 1, &readCount, nullptr) || readCount != 1)
+        if(::ReadFile(child.readPipe, &byte, 1, &readCount, nullptr) == FALSE || readCount != 1)
         {
             return std::nullopt;
         }
@@ -917,7 +917,7 @@ std::optional<int> awaitChild(ChildProcess& child,
             break;
         }
         DWORD available = 0;
-        if(!::PeekNamedPipe(child.readPipe, nullptr, 0, nullptr, &available, nullptr))
+        if(::PeekNamedPipe(child.readPipe, nullptr, 0, nullptr, &available, nullptr) == FALSE)
         {
             break; // The pipe closed: the child exited or closed its stdout.
         }
@@ -943,11 +943,12 @@ std::optional<int> awaitChild(ChildProcess& child,
         }
         std::array<char, 256> buffer{};
         DWORD readCount = 0;
-        if(!::ReadFile(child.readPipe,
-                       buffer.data(),
-                       static_cast<DWORD>(buffer.size()),
-                       &readCount,
-                       nullptr)
+        if(::ReadFile(child.readPipe,
+                      buffer.data(),
+                      static_cast<DWORD>(buffer.size()),
+                      &readCount,
+                      nullptr)
+               == FALSE
            || readCount == 0)
         {
             break;
@@ -1100,7 +1101,7 @@ TEST_F(TestLineStore, TwoProcessesRacingTheSameKeysAppendEachKeyExactlyOnce)
     }
 
     {
-        std::ofstream barrier(barrierPath);
+        const std::ofstream barrier(barrierPath);
         ASSERT_TRUE(barrier.is_open());
     }
 

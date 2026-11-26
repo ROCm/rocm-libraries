@@ -241,7 +241,7 @@ TEST_P(IntegrationGpuGfx942AttentionUnified3dKnobs,
     const detail::SelectedKernelReport report(ENGINE, testCase.name, capture);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = detail::buildSdpaGraph(testCase.name, decodeGraphSpec(testCase));
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, decodeGraphSpec(testCase));
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     auto result = sdpa.graph->create_execution_plan_ext(engineId(), knobSettingsFor(testCase));

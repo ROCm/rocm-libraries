@@ -27,7 +27,7 @@ namespace hip_kernel_provider::batchnorm::test
 
 TEST(TestBatchnormFwdInferenceWithVarianceParams, ConstructsFromSingleNodeGraph)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -41,7 +41,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, ConstructsFromSingleNodeGraph)
 
 TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForSingleNode)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -66,7 +66,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForSin
 
 TEST(TestBatchnormFwdInferenceWithVarianceParams, TensorPointersMatchExpectedUids)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -86,7 +86,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, TensorPointersMatchExpectedUid
 
 TEST(TestBatchnormFwdInferenceWithVarianceParams, IsMoveConstructible)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -108,7 +108,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, IsNotCopyConstructible)
 
 TEST(TestBatchnormFwdInferenceWithVarianceParams, ConstructGraphWithActivation)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -125,7 +125,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, ConstructGraphWithActivation)
 
 TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForGraphWithActivation)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -151,7 +151,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForGra
 TEST(TestBatchnormFwdInferenceWithVarianceParams,
      TensorPointersMatchExpectedUidsForGraphWithActivation)
 {
-    auto const builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -252,7 +252,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileCallsCompilerWithCorrectK
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -274,7 +274,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileIncludesOffloadArchOption
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto const deviceProps = createTestDeviceProps("gfx942");
+    const auto deviceProps = createTestDeviceProps("gfx942");
 
     plan.compile(mockCompiler, deviceProps);
 }
@@ -297,11 +297,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileDefaultSetsCorrectDef
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto const hasOption = [&](const std::string& opt) {
+    const auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -356,11 +356,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileSetsCorrectDefines)
         });
 
     auto [fbb, plan] = createPlanFromGraph();
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto const hasOption = [&](const std::string& opt) {
+    const auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -397,11 +397,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp16, CompileSetsCorrectDefines)
     auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1},
                                            {1, 3, 224, 224},
                                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto const hasOption = [&](const std::string& opt) {
+    const auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -440,11 +440,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
         = createPlanFromGraph({150528, 50176, 224, 1},
                               {1, 3, 224, 224},
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto const hasOption = [&](const std::string& opt) {
+    const auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -481,11 +481,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNchwLayoutSetsCorrectDefi
 
     // NCHW strides: N=C*H*W, C=H*W, H=W, W=1
     auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto const hasOption = [&](const std::string& opt) {
+    const auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -512,11 +512,11 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileNhwcLayoutSetsCorrectDefi
 
     // NHWC strides: N=H*W*C, H=W*C, W=C, C=1
     auto [fbb, plan] = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto const hasOption = [&](const std::string& opt) {
+    const auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -529,7 +529,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileWithUnsupportedDimensionT
     const MockKernelCompiler mockCompiler;
 
     // 2D tensor is not supported
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
         {4, 1}, {1, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -540,7 +540,7 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileWithUnsupportedDimensionT
     BatchnormFwdInferenceWithVarianceParams params(attr, graph.getTensorMap());
     BatchnormFwdInferenceWithVariancePlan plan(std::move(params));
 
-    auto const deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

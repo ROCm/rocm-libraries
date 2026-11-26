@@ -820,7 +820,7 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                         + "/" + std::to_string(blockN);
                 text += ", persistent " + std::to_string(persistent) + " ";
                 text += order;
-                text += ")";
+                text += ')';
             }
         }
         return text.empty() ? std::string(" none") : text;
@@ -844,7 +844,7 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     const detail::SelectedKernelReport report(ENGINE, testCase.name, capture);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     const auto settings = testCase.forced
@@ -934,7 +934,7 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
     const ScopedPluginLogCapture capture(this);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     std::vector<Knob> knobs;
@@ -983,7 +983,7 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSwzLegality, NeverOffersAnHqMinorSwzKer
     const int64_t persistentSwz = ordinalOf(PERSIST_DECODE_KNOB, "hq_minor_swz");
     for(const auto& [shape, offered] : {std::pair{sixteen, true}, std::pair{twelve, false}})
     {
-        auto sdpa = detail::buildSdpaGraph("SwzLegality", shape);
+        const auto sdpa = detail::buildSdpaGraph("SwzLegality", shape);
         ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
         std::vector<Knob> knobs;
         const auto result = sdpa.graph->get_knobs_for_engine(engineId(), knobs);
@@ -996,7 +996,7 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSwzLegality, NeverOffersAnHqMinorSwzKer
 
     const ScopedPluginLogCapture capture(this);
     const auto& recorder = capture.recorder();
-    auto sdpa = detail::buildSdpaGraph("SwzLegalityHq12", twelve);
+    const auto sdpa = detail::buildSdpaGraph("SwzLegalityHq12", twelve);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
     std::vector<KnobSetting> settings;
     settings.emplace_back(BLOCK_M_KNOB, int64_t{256});
@@ -1121,7 +1121,7 @@ protected:
         const ScopedPluginLogCapture capture(this);
         ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(this->_handle, this->_stream));
 
-        auto loaded = std::make_shared<Graph>();
+        const auto loaded = std::make_shared<Graph>();
         result = detail::loadInForm(*loaded, this->_handle, saved, form);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

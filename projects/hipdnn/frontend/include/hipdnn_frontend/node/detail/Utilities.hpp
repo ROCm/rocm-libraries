@@ -787,12 +787,13 @@ inline Error validateIndexTensor(const std::shared_ptr<graph::TensorAttributes>&
                         RANK,
                         ErrorCode::INVALID_VALUE,
                         prefix + " must be rank-4, got rank=" + std::to_string(dims.size()));
-    HIPDNN_RETURN_IF_NE(dims[0],
-                        firstDim,
-                        ErrorCode::INVALID_VALUE,
-                        // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-                        prefix + " dim[0] must equal " + firstDimLabel + " ("
-                            + std::to_string(firstDim) + "), got " + std::to_string(dims[0]));
+    if(dims[0] != firstDim)
+    {
+        std::string message = prefix;
+        message.append(" dim[0] must equal ").append(firstDimLabel).append(" (");
+        message.append(std::to_string(firstDim)).append("), got ").append(std::to_string(dims[0]));
+        return {ErrorCode::INVALID_VALUE, message};
+    }
     for(size_t i = 1; i < RANK; ++i)
     {
         HIPDNN_RETURN_IF_NE(dims[i],

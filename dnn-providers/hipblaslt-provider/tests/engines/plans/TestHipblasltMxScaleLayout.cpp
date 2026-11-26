@@ -100,7 +100,7 @@ TEST(TestMxScaleLayout, NaturalMatchingOrderIsPassThrough)
 {
     for(const auto order : {MxOrder::K_CONTIGUOUS, MxOrder::MN_CONTIGUOUS})
     {
-        MxScalePrep const prep(order, order, MxScaleFormat::NATURAL, 64, 8);
+        const MxScalePrep prep(order, order, MxScaleFormat::NATURAL, 64, 8);
         EXPECT_TRUE(prep.isPassThrough());
         EXPECT_EQ(prep.workspaceSize(), 0u);
         EXPECT_EQ(prep.describe(), "pass-through");
@@ -114,7 +114,7 @@ TEST(TestMxScaleLayout, NaturalMismatchedOrderTransposes)
     {
         const auto operandOrder
             = order == MxOrder::K_CONTIGUOUS ? MxOrder::MN_CONTIGUOUS : MxOrder::K_CONTIGUOUS;
-        MxScalePrep const prep(order, operandOrder, MxScaleFormat::NATURAL, 48, 4);
+        const MxScalePrep prep(order, operandOrder, MxScaleFormat::NATURAL, 48, 4);
         EXPECT_EQ(prep.method(), MxScalePrep::Method::TRANSPOSE) << toString(order);
         EXPECT_EQ(prep.describe(), "transpose");
         EXPECT_GE(prep.workspaceSize(), 48u * 4u);
@@ -125,7 +125,7 @@ TEST(TestMxScaleLayout, NaturalMismatchedOrderTransposes)
 // rounded up to hipMalloc's alignment: a 16 x 8 scale (128 bytes) takes 256.
 TEST(TestMxScaleLayout, WorkspaceSizeIsRoundedToTheWorkspaceAlignment)
 {
-    MxScalePrep const prep(
+    const MxScalePrep prep(
         MxOrder::MN_CONTIGUOUS, MxOrder::K_CONTIGUOUS, MxScaleFormat::NATURAL, 16, 8);
     EXPECT_EQ(prep.workspaceSize(), hipblaslt_utils::WORKSPACE_ALIGNMENT);
 }
@@ -133,7 +133,7 @@ TEST(TestMxScaleLayout, WorkspaceSizeIsRoundedToTheWorkspaceAlignment)
 // A vector scale (one row or one column) reads the same in either order.
 TEST(TestMxScaleLayout, NaturalVectorScaleIsPassThrough)
 {
-    MxScalePrep const prep(
+    const MxScalePrep prep(
         MxOrder::K_CONTIGUOUS, MxOrder::MN_CONTIGUOUS, MxScaleFormat::NATURAL, 64, 1);
     EXPECT_TRUE(prep.isPassThrough());
 }
@@ -196,7 +196,7 @@ TEST_F(TestGpuMxScaleKernel, SwizzledFormatsUseTheRelayoutKernel)
     {
         for(const auto order : {MxOrder::K_CONTIGUOUS, MxOrder::MN_CONTIGUOUS})
         {
-            MxScalePrep const prep(order, MxOrder::K_CONTIGUOUS, format, 48, 5);
+            const MxScalePrep prep(order, MxOrder::K_CONTIGUOUS, format, 48, 5);
             EXPECT_EQ(prep.method(), MxScalePrep::Method::RELAYOUT_KERNEL) << toString(format);
             EXPECT_EQ(prep.describe(), "relayout kernel");
             EXPECT_GE(prep.workspaceSize(), mxScaleBytes(format, 48, 5)) << toString(format);
@@ -221,7 +221,7 @@ TEST_F(TestGpuMxScaleKernel, SwizzlesIntoAnUnalignedWorkspace)
         const auto expected = format == MxScaleFormat::SWIZZLED_GFX950
                                   ? swizzleGfx950Host(natural, MN, KB)
                                   : swizzleGfx1250Host(natural, MN, KB);
-        MxScalePrep const prep(MxOrder::K_CONTIGUOUS, MxOrder::K_CONTIGUOUS, format, MN, KB);
+        const MxScalePrep prep(MxOrder::K_CONTIGUOUS, MxOrder::K_CONTIGUOUS, format, MN, KB);
         auto workspace = deviceAlloc(prep.workspaceSize() + 4);
         ASSERT_EQ(hipMemset(workspace.get(), 0xA5, prep.workspaceSize() + 4), hipSuccess);
         void* unaligned = static_cast<char*>(workspace.get()) + 1;
@@ -284,7 +284,7 @@ TEST_P(TestGpuMxScaleLayout, MatchesHostReference)
         break;
     }
 
-    MxScalePrep const prep(sourceOrder, operandOrder, format, mnSigned, kbSigned);
+    const MxScalePrep prep(sourceOrder, operandOrder, format, mnSigned, kbSigned);
 
     const auto deviceSource = upload(source);
     // Fill the workspace with garbage so missing padding writes are caught.

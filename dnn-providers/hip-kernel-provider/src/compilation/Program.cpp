@@ -18,7 +18,7 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     : _programName(std::move(kernelFileName))
 {
     // Load source/includes
-    auto const kernelSrc = hip_plugin::getKernelSrc(_programName.c_str());
+    const auto kernelSrc = hip_plugin::getKernelSrc(_programName.c_str());
     std::vector<std::string_view> includeTexts;
     std::vector<const char*> includeNames;
     hip_plugin::getKernelIncList(includeTexts, includeNames);
@@ -51,7 +51,7 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
         optPtrs.push_back(opt.c_str());
     }
 
-    auto const result
+    const auto result
         = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
     if(result != HIPRTC_SUCCESS)
     {
@@ -98,7 +98,7 @@ Program::~Program()
 {
     if(_module != nullptr)
     {
-        auto const result = hipModuleUnload(_module);
+        const auto result = hipModuleUnload(_module);
         if(result != hipSuccess)
         {
             // Log the error for debugging purposes

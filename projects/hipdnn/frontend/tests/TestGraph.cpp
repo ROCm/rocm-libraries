@@ -109,8 +109,7 @@ public:
     /// Inject a dummy entry into _planSpecs (simulates add_engine_*() having run).
     void injectDummyPlanSpec()
     {
-        // Fully-qualified to work around clang-tidy-20 name resolution difference
-        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        autotune::detail::PlanSpec spec;
         spec.engineId = 0;
         _planSpecs.push_back(std::move(spec));
     }
@@ -123,8 +122,7 @@ public:
     /// Inject a plan spec with specific engine ID and workspace size.
     void injectPlanSpec(int64_t engineId, int64_t workspaceSize)
     {
-        // Fully-qualified to work around clang-tidy-20 name resolution difference
-        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        autotune::detail::PlanSpec spec;
         spec.engineId = engineId;
         spec.workspaceSize = workspaceSize;
         _planSpecs.push_back(std::move(spec));
@@ -134,7 +132,7 @@ public:
     /// EXHAUSTIVE priming loop runs (and can fail) for this engine.
     void injectPlanSpec(int64_t engineId, int64_t workspaceSize, bool supportsExhaustive)
     {
-        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        autotune::detail::PlanSpec spec;
         spec.engineId = engineId;
         spec.workspaceSize = workspaceSize;
         spec.supportsExhaustive = supportsExhaustive;

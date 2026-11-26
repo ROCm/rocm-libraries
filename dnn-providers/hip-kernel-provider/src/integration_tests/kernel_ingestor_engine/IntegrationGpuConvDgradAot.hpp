@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -85,7 +86,7 @@ inline constexpr int64_t HELPER_FAMILY = 2;
 inline constexpr size_t BENCHMARK_LIMIT = 64;
 /// The NaN tail executeAndVerify places after dX: a kernel's store past dX's end lands in
 /// it. Wider than any one workgroup's dX tile row.
-inline constexpr size_t DX_GUARD_BYTES = 64 * 1024;
+inline constexpr size_t DX_GUARD_BYTES = static_cast<const size_t>(64 * 1024);
 inline constexpr int64_t DY_UID = 1;
 inline constexpr int64_t W_UID = 2;
 inline constexpr int64_t DX_UID = 3;

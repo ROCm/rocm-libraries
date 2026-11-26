@@ -68,12 +68,12 @@ __forceinline__ __device__ __host__ auto
 
 template <typename ComputeReadVecType>
 __forceinline__ __host__ __device__ ComputeReadVecType
-    vectorizedBwdActivationOp(ComputeReadVecType const& dy,
-                              ComputeReadVecType const& xnorm,
-                              ComputeType const& scale,
-                              ComputeType const& bias,
-                              ComputeType const& alpha,
-                              ComputeType const& beta)
+    vectorizedBwdActivationOp(const ComputeReadVecType& dy,
+                              const ComputeReadVecType& xnorm,
+                              const ComputeType& scale,
+                              const ComputeType& bias,
+                              const ComputeType& alpha,
+                              const ComputeType& beta)
 {
     auto constexpr size = hip_kernel_provider::mapped_vector_info<ComputeReadVecType>::size;
     if constexpr(size == 4)

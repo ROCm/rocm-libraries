@@ -200,7 +200,7 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsGraphCaptureSupport)
 {
     // getDetails asks the builders whether they serve the graph, so it needs a real
     // graph; the behavior note does not depend on which builder serves it.
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THAT(
@@ -211,7 +211,7 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsGraphCaptureSupport)
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 {
     // Create a batchnorm inference graph - this does not use SDPA attributes
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -229,7 +229,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
         GTEST_SKIP();
     }
 
-    auto const builder = createSdpaFwdGraph();
+    const auto builder = createSdpaFwdGraph();
     const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
@@ -247,7 +247,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
-    auto const builder
+    const auto builder
         = sdpa::withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
                                       dims,
                                       strides,
@@ -271,7 +271,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
 /// than throwing, whether or not a descriptor tree exists.
 TEST_F(TestAsmSdpaEngine, ReportsNoEstimateWhenNoDeclaredModelIsDeployed)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
@@ -340,10 +340,10 @@ TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComp
 /// must carry the requested metric.
 TEST_F(TestAsmSdpaEngine, ConfigurationDeclineCarriesTheRequestedMetric)
 {
-    auto const graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
-    auto const configBuilder = engineConfigNaming("time");
+    const auto configBuilder = engineConfigNaming("time");
     const EngineConfigWrapper timeConfig(configBuilder.GetBufferPointer(), configBuilder.GetSize());
     const auto inTime = _engine.getPrediction(
         _handle, graph, timeConfig, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
@@ -365,9 +365,9 @@ TEST_F(TestAsmSdpaEngine, NoModelForTheRequestedMetricIsUnavailableNotSubstitute
 {
     SKIP_IF_NO_DEVICES();
 
-    auto const graphBuilder = createSdpaFwdGraph();
+    const auto graphBuilder = createSdpaFwdGraph();
     const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
-    auto const configBuilder = engineConfigNaming("time");
+    const auto configBuilder = engineConfigNaming("time");
     const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
 
     const auto prediction
@@ -380,9 +380,9 @@ TEST_F(TestAsmSdpaEngine, NoModelForTheRequestedMetricIsUnavailableNotSubstitute
 /// returning UNAVAILABLE.
 TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
 {
-    auto const graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
-    auto const configBuilder = engineConfigNaming("bandwidth");
+    const auto configBuilder = engineConfigNaming("bandwidth");
     const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
 
     EXPECT_THROW(static_cast<void>(_engine.getPrediction(
@@ -751,7 +751,7 @@ TEST_F(TestAsmSdpaEngine, GetDetailsAdvertisesAccumulatorKnobForBwdGraph)
         GTEST_SKIP();
     }
 
-    auto const builder = createSdpaBwdGraph();
+    const auto builder = createSdpaBwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     const auto engineDetails = details(graph);
 
@@ -767,7 +767,7 @@ TEST_F(TestAsmSdpaEngine, GetDetailsAdvertisesNoKnobsForFwdGraph)
         GTEST_SKIP();
     }
 
-    auto const builder = createSdpaFwdGraph();
+    const auto builder = createSdpaFwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(_engine.isApplicable(_handle, graph));
 
@@ -782,7 +782,7 @@ TEST_F(TestAsmSdpaEngine, MaxWorkspaceSizeFollowsAccumulatorKnob)
         GTEST_SKIP();
     }
 
-    auto const builder = createSdpaBwdGraph();
+    const auto builder = createSdpaBwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     const auto noKnobs = createEngineConfigWithoutKnobs();
     const auto a32 = createAccumulatorKnobConfig("a32");
@@ -810,7 +810,7 @@ TEST_F(TestAsmSdpaEngine, InvalidAccumulatorKnobIsRejected)
         GTEST_SKIP();
     }
 
-    auto const builder = createSdpaBwdGraph();
+    const auto builder = createSdpaBwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     for(const auto& configBuilder :
@@ -828,7 +828,7 @@ TEST_F(TestAsmSdpaEngine, InvalidAccumulatorKnobIsRejected)
 TEST_F(TestAsmSdpaEngine, InitializeExecutionContextThrowsInternalErrorIfNoBuilderApplies)
 {
     // A graph no builder accepts must not yield a context that has no plan.
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     Context context;
@@ -847,7 +847,7 @@ TEST_F(TestAsmSdpaEngine, InitializeExecutionContextThrowsInternalErrorIfNoBuild
 
 TEST_F(TestAsmSdpaEngine, GetMaxWorkspaceSizeThrowsInternalErrorIfNoBuilderApplies)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     const hipdnn_test_sdk::utilities::MockEngineConfig engineConfig;

@@ -132,7 +132,7 @@ protected:
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForValidGraph)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -161,7 +161,7 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForOutputOverThreadLimit
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsFalseForNonResampleGraph)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -172,7 +172,7 @@ TEST_F(TestResamplePlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 {
     setupMockCompileChain();
 
-    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -183,7 +183,7 @@ TEST_F(TestResamplePlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 
 TEST_F(TestResamplePlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -193,11 +193,11 @@ TEST_F(TestResamplePlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 
 TEST_F(TestResamplePlanBuilder, GetCustomKnobsReturnsEmpty)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto const knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
@@ -267,7 +267,7 @@ std::ostream& operator<<(std::ostream& os, const ResampleFwdMutation& value)
 
 flatbuffers::FlatBufferBuilder mutatedResampleFwdGraph(const std::function<void(GraphT&)>& mutate)
 {
-    auto const base = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto base = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
     return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
 }
 
@@ -290,7 +290,7 @@ class TestResampleFwdDecline : public TestResamplePlanBuilder,
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForMaxpoolWithGeneratedIndex)
 {
-    auto const builder = mutatedResampleFwdGraph([](GraphT&) {});
+    const auto builder = mutatedResampleFwdGraph([](GraphT&) {});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -299,7 +299,7 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForMaxpoolWithGeneratedIn
 
 TEST_P(TestResampleFwdDecline, IsApplicableReturnsFalse)
 {
-    auto const builder = mutatedResampleFwdGraph(GetParam().mutate);
+    const auto builder = mutatedResampleFwdGraph(GetParam().mutate);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

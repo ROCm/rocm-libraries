@@ -427,7 +427,7 @@ bool BatchnormPlanBuilder::isApplicable(
         return false;
     }
 
-    auto const anyNodeIsNotF32Compute = [&]() {
+    const auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType()

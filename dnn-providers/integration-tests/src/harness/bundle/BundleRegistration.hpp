@@ -311,8 +311,7 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
 // the bundles (lib/integration-test-bundles).
 inline std::filesystem::path resolveDataDir()
 {
-    // NOLINTNEXTLINE(misc-const-correctness)
-    auto& config = TestConfig::get();
+    const auto& config = TestConfig::get();
     if(config.hasGoldenDataDir())
     {
         return config.getGoldenDataDir();

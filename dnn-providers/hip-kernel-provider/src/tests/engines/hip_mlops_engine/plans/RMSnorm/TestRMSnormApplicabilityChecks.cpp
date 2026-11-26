@@ -13,7 +13,7 @@ using namespace hip_kernel_provider::rmsnorm;
 
 TEST(TestRMSnormValidator, Valid)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
@@ -25,7 +25,7 @@ TEST(TestRMSnormValidator, Valid)
 
 TEST(TestRMSnormValidator, ValidActivation)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node0 = graph.getNode(0);
@@ -39,7 +39,7 @@ TEST(TestRMSnormValidator, ValidActivation)
 
 TEST(TestRMSnormValidator, ValidBackward)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
@@ -51,7 +51,7 @@ TEST(TestRMSnormValidator, ValidBackward)
 
 TEST(TestRMSnormValidator, ValidBackwardActivation)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node1 = graph.getNode(0);
@@ -83,7 +83,7 @@ class TestRMSnormActivationValidator : public ::testing::TestWithParam<Activatio
 TEST_P(TestRMSnormActivationValidator, DirectionIdentityAndLeakyRelu)
 {
     const auto& testCase = GetParam();
-    auto const original = testCase.isBwd
+    const auto original = testCase.isBwd
                               ? hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph()
                               : hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     auto nativeGraph
@@ -141,7 +141,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(TestRMSnormValidator, UnsupportedDim)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
         {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -157,7 +157,7 @@ TEST(TestRMSnormValidator, UnsupportedDim)
 
 TEST(TestRMSnormValidator, UnsupportedDimActivation)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
         {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -175,7 +175,7 @@ TEST(TestRMSnormValidator, UnsupportedDimActivation)
 
 TEST(TestRMSnormValidator, UnsupportedDimBackward)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {12, 4, 1}, {1, 3, 4}, true, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -191,7 +191,7 @@ TEST(TestRMSnormValidator, UnsupportedDimBackward)
 
 TEST(TestRMSnormValidator, UnsupportedDimBackwardActivation)
 {
-    auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {12, 4, 1}, {1, 3, 4}, true, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -261,7 +261,7 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    auto const rmsnormAttributes
+    const auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                         1, // x uid
                                                                         3, // scale uid
@@ -272,7 +272,7 @@ flatbuffers::FlatBufferBuilder
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -280,7 +280,7 @@ flatbuffers::FlatBufferBuilder
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -347,7 +347,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormActivationGraph(
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "yActiv", yActivType, &strides, &dims));
 
-    auto const rmsnormAttributes
+    const auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                         1, // x uid
                                                                         3, // scale uid
@@ -357,7 +357,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormActivationGraph(
                                                                         5 // invRMS uid
         );
 
-    auto const pointwiseAttributes
+    const auto pointwiseAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
             builder,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -374,7 +374,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormActivationGraph(
             std::nullopt);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -382,7 +382,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormActivationGraph(
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto const nodeActivation = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto nodeActivation = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -390,7 +390,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormActivationGraph(
         pointwiseAttributes.Union());
     nodes.push_back(nodeActivation);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -447,7 +447,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardGraph(
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "inv_rms", invRMSType, &invRMSStrides, &invRMSDims));
 
-    auto const rmsnormBwdAttributes
+    const auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
             1, // dy uid
@@ -460,7 +460,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardGraph(
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm_bwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -468,7 +468,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardGraph(
         rmsnormBwdAttributes.Union());
     nodes.push_back(node);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -533,7 +533,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 9, "dyActiv", dyActivType, &strides, &dims, true));
 
-    auto const pointwiseAttributes
+    const auto pointwiseAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
             builder,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
@@ -549,7 +549,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
             std::nullopt,
             std::nullopt);
 
-    auto const rmsnormBwdAttributes
+    const auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
             9, // dyActiv uid
@@ -562,7 +562,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -570,7 +570,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
         pointwiseAttributes.Union());
     nodes.push_back(nodePointwise);
 
-    auto const nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm_bwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -578,7 +578,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
         rmsnormBwdAttributes.Union());
     nodes.push_back(nodeBwd);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -594,7 +594,7 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
 
 TEST(TestRMSnormValidator, MismatchIOTypes)
 {
-    auto const builder
+    const auto builder
         = createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -614,7 +614,7 @@ TEST(TestRMSnormValidator, MismatchIOTypes)
 
 TEST(TestRMSnormValidator, MismatchIOTypesActivation)
 {
-    auto const builder = createExplicitTypeRMSNormActivationGraph(
+    const auto builder = createExplicitTypeRMSNormActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -637,7 +637,7 @@ TEST(TestRMSnormValidator, MismatchIOTypesActivation)
 
 TEST(TestRMSnormValidator, MismatchIOTypesBackward)
 {
-    auto const builder = createExplicitTypeRMSNormBackwardGraph(
+    const auto builder = createExplicitTypeRMSNormBackwardGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -659,7 +659,7 @@ TEST(TestRMSnormValidator, MismatchIOTypesBackward)
 
 TEST(TestRMSnormValidator, MismatchIOTypesBackwardActivation)
 {
-    auto const builder = createExplicitTypeRMSNormBackwardActivationGraph(
+    const auto builder = createExplicitTypeRMSNormBackwardActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -685,7 +685,7 @@ TEST(TestRMSnormValidator, MismatchIOTypesBackwardActivation)
 
 TEST(TestRMSnormValidator, UnsupportedScaleType)
 {
-    auto const builder
+    const auto builder
         = createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
@@ -706,7 +706,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleType)
 
 TEST(TestRMSnormValidator, UnsupportedScaleTypeActivation)
 {
-    auto const builder = createExplicitTypeRMSNormActivationGraph(
+    const auto builder = createExplicitTypeRMSNormActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
@@ -730,7 +730,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleTypeActivation)
 
 TEST(TestRMSnormValidator, UnsupportedScaleTypeBackward)
 {
-    auto const builder = createExplicitTypeRMSNormBackwardGraph(
+    const auto builder = createExplicitTypeRMSNormBackwardGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
@@ -753,7 +753,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleTypeBackward)
 
 TEST(TestRMSnormValidator, UnsupportedScaleTypeBackwardActivation)
 {
-    auto const builder = createExplicitTypeRMSNormBackwardActivationGraph(
+    const auto builder = createExplicitTypeRMSNormBackwardActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -780,7 +780,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleTypeBackwardActivation)
 
 TEST(TestRMSnormValidator, UnsupportedInvRMSType)
 {
-    auto const builder
+    const auto builder
         = createExplicitTypeRMSNormGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -801,7 +801,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMSType)
 
 TEST(TestRMSnormValidator, UnsupportedInvRMSTypeActivation)
 {
-    auto const builder = createExplicitTypeRMSNormActivationGraph(
+    const auto builder = createExplicitTypeRMSNormActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -825,7 +825,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMSTypeActivation)
 
 TEST(TestRMSnormValidator, UnsupportedInvRMSTypeBackward)
 {
-    auto const builder = createExplicitTypeRMSNormBackwardGraph(
+    const auto builder = createExplicitTypeRMSNormBackwardGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -848,7 +848,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMSTypeBackward)
 
 TEST(TestRMSnormValidator, UnsupportedInvRMSTypeBackwardActivation)
 {
-    auto const builder = createExplicitTypeRMSNormBackwardActivationGraph(
+    const auto builder = createExplicitTypeRMSNormBackwardActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -936,7 +936,7 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    auto const rmsnormAttributes
+    const auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                         1, // x uid
                                                                         3, // scale uid
@@ -947,7 +947,7 @@ flatbuffers::FlatBufferBuilder
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -955,7 +955,7 @@ flatbuffers::FlatBufferBuilder
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1043,7 +1043,7 @@ flatbuffers::FlatBufferBuilder
         &yActivStrides,
         &yActivDims));
 
-    auto const rmsnormAttributes
+    const auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                         1, // x uid
                                                                         3, // scale uid
@@ -1053,7 +1053,7 @@ flatbuffers::FlatBufferBuilder
                                                                         5 // invRMS uid
         );
 
-    auto const pointwiseAttributes
+    const auto pointwiseAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
             builder,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -1070,7 +1070,7 @@ flatbuffers::FlatBufferBuilder
             std::nullopt);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1078,7 +1078,7 @@ flatbuffers::FlatBufferBuilder
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto const nodeActivation = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto nodeActivation = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1086,7 +1086,7 @@ flatbuffers::FlatBufferBuilder
         pointwiseAttributes.Union());
     nodes.push_back(nodeActivation);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1169,7 +1169,7 @@ flatbuffers::FlatBufferBuilder
         &invRMSStrides,
         &invRMSDims));
 
-    auto const rmsnormBwdAttributes
+    const auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
             1, // dy uid
@@ -1182,7 +1182,7 @@ flatbuffers::FlatBufferBuilder
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm_bwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1190,7 +1190,7 @@ flatbuffers::FlatBufferBuilder
         rmsnormBwdAttributes.Union());
     nodes.push_back(node);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1289,7 +1289,7 @@ flatbuffers::FlatBufferBuilder
         &dyActivDims,
         true));
 
-    auto const pointwiseAttributes
+    const auto pointwiseAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
             builder,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
@@ -1305,7 +1305,7 @@ flatbuffers::FlatBufferBuilder
             std::nullopt,
             std::nullopt);
 
-    auto const rmsnormBwdAttributes
+    const auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
             9, // dyActiv uid
@@ -1318,7 +1318,7 @@ flatbuffers::FlatBufferBuilder
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto const nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1326,7 +1326,7 @@ flatbuffers::FlatBufferBuilder
         pointwiseAttributes.Union());
     nodes.push_back(nodePointwise);
 
-    auto const nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm_bwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1334,7 +1334,7 @@ flatbuffers::FlatBufferBuilder
         rmsnormBwdAttributes.Union());
     nodes.push_back(nodeBwd);
 
-    auto const graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -1365,7 +1365,7 @@ TEST(TestRMSnormValidator, MismatchIOShapes)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(xDims,
+    const auto builder = createExplicitShapeRMSNormGraph(xDims,
                                                          xStrides,
                                                          yDims,
                                                          yStrides,
@@ -1405,7 +1405,7 @@ TEST(TestRMSnormValidator, MismatchIOShapesActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(xDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(xDims,
                                                                    xStrides,
                                                                    yDims,
                                                                    yStrides,
@@ -1449,7 +1449,7 @@ TEST(TestRMSnormValidator, MismatchIOShapesBackward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(yDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(yDims,
                                                                  yStrides,
                                                                  xDims,
                                                                  xStrides,
@@ -1494,7 +1494,7 @@ TEST(TestRMSnormValidator, MismatchIOShapesBackwardActivation)
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(yDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(yDims,
                                                                            yStrides,
                                                                            xDims,
                                                                            xStrides,
@@ -1547,7 +1547,7 @@ TEST(TestRMSnormValidator, MismatchAffineDims)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -1589,7 +1589,7 @@ TEST(TestRMSnormValidator, MismatchAffineDimsActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -1635,7 +1635,7 @@ TEST(TestRMSnormValidator, MismatchAffineDimsBackward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -1681,7 +1681,7 @@ TEST(TestRMSnormValidator, MismatchAffineDimsBackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -1728,7 +1728,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleShape)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -1765,7 +1765,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleShapeActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -1806,7 +1806,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleShapeBackward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -1847,7 +1847,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleShapeBackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -1893,7 +1893,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShape)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -1928,7 +1928,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShapeActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -1967,7 +1967,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShapeBackward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -2006,7 +2006,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShapeBackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -2051,7 +2051,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -2085,7 +2085,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1Activation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -2123,7 +2123,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1Backward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -2161,7 +2161,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1BackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -2205,7 +2205,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -2239,7 +2239,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2Activation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -2277,7 +2277,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2Backward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -2315,7 +2315,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2BackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -2359,7 +2359,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -2393,7 +2393,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3Activation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -2430,7 +2430,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3Backward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -2468,7 +2468,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3BackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -2512,7 +2512,7 @@ TEST(TestRMSnormValidator, Valid4DChannelLast)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -2546,7 +2546,7 @@ TEST(TestRMSnormValidator, Valid4DChannelLastActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -2584,7 +2584,7 @@ TEST(TestRMSnormValidator, Valid4DChannelLastBackward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -2622,7 +2622,7 @@ TEST(TestRMSnormValidator, Valid4DChannelLastBackwardActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,
@@ -2668,7 +2668,7 @@ TEST(TestRMSnormValidator, MismatchInputOutputLayouts)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          xStrides,
                                                          ioDims,
                                                          yStrides,
@@ -2705,7 +2705,7 @@ TEST(TestRMSnormValidator, MismatchInputOutputLayoutsActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    xStrides,
                                                                    ioDims,
                                                                    yStrides,
@@ -2746,7 +2746,7 @@ TEST(TestRMSnormValidator, MismatchInputOutputLayoutsBackward)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  yStrides,
                                                                  ioDims,
                                                                  xStrides,
@@ -2788,7 +2788,7 @@ TEST(TestRMSnormValidator, MismatchInputOutputLayoutsBackwardActivation)
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(xStrides));
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            yStrides,
                                                                            ioDims,
                                                                            xStrides,
@@ -2834,7 +2834,7 @@ TEST(TestRMSnormValidator, MismatchAffineTensorLayout)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormGraph(ioDims,
                                                          ioStrides,
                                                          ioDims,
                                                          ioStrides,
@@ -2868,7 +2868,7 @@ TEST(TestRMSnormValidator, MismatchAffineTensorLayoutActivation)
     const std::vector<int64_t> invRMSStrides = hipdnn_data_sdk::utilities::generateStrides(
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
-    auto const builder = createExplicitShapeRMSNormActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormActivationGraph(ioDims,
                                                                    ioStrides,
                                                                    ioDims,
                                                                    ioStrides,
@@ -2907,7 +2907,7 @@ TEST(TestRMSnormValidator, MismatchAffineTensorLayoutBackward)
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto const builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardGraph(ioDims,
                                                                  ioStrides,
                                                                  ioDims,
                                                                  ioStrides,
@@ -2947,7 +2947,7 @@ TEST(TestRMSnormValidator, MismatchAffineTensorLayoutBackwardActivation)
         invRMSDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto const builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
+    const auto builder = createExplicitShapeRMSNormBackwardActivationGraph(ioDims,
                                                                            ioStrides,
                                                                            ioDims,
                                                                            ioStrides,

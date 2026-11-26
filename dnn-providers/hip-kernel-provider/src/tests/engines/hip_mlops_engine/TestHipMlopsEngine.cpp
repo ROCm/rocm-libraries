@@ -153,7 +153,7 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
     // tensor: the flip to rejected must come from the engine's ragged guard, not the
     // plan builder. The baseline proves the graph is otherwise accepted; the ragged
     // case asserts the plan builder is never consulted (Times(0)).
-    auto const baseBuilder = createValidMatmulGraph();
+    const auto baseBuilder = createValidMatmulGraph();
     const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
     {
@@ -167,7 +167,7 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
         EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
     }
 
-    auto const raggedBuilder = makeGraphWithRaggedTensor(createValidMatmulGraph());
+    const auto raggedBuilder = makeGraphWithRaggedTensor(createValidMatmulGraph());
     const GraphWrapper raggedGraph(raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize());
 
     {
@@ -183,7 +183,7 @@ TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
 
 TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
 {
-    auto const baseBuilder = createValidMatmulGraph();
+    const auto baseBuilder = createValidMatmulGraph();
     const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
     {
@@ -197,7 +197,7 @@ TEST(TestHipMlopsEngine, Non16ByteAlignmentFlipsApplicableGraphToRejected)
         EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
     }
 
-    auto const misalignedBuilder = makeGraphWithTensorAlignment(createValidMatmulGraph(), 8);
+    const auto misalignedBuilder = makeGraphWithTensorAlignment(createValidMatmulGraph(), 8);
     const GraphWrapper misalignedGraph(misalignedBuilder.GetBufferPointer(),
                                        misalignedBuilder.GetSize());
 
@@ -216,7 +216,7 @@ TEST(TestHipMlopsEngine, RaggedOffsetMultiplierWithoutRaggedOffsetFlipsApplicabl
 {
     // A multiplier other than 1 means something only beside a ragged offset; on a dense tensor
     // the engine declines before any plan builder is consulted.
-    auto const baseBuilder = createValidMatmulGraph();
+    const auto baseBuilder = createValidMatmulGraph();
     const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
     {
@@ -230,7 +230,7 @@ TEST(TestHipMlopsEngine, RaggedOffsetMultiplierWithoutRaggedOffsetFlipsApplicabl
         EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
     }
 
-    auto const strayBuilder = mutateGraph(createValidMatmulGraph(), [](auto& graph) {
+    const auto strayBuilder = mutateGraph(createValidMatmulGraph(), [](auto& graph) {
         graph.tensors.front()->ragged_offset_multiplier = 2;
     });
     const GraphWrapper strayGraph(strayBuilder.GetBufferPointer(), strayBuilder.GetSize());

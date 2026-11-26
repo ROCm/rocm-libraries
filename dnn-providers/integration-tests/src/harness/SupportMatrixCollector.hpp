@@ -89,11 +89,9 @@ public:
         const std::lock_guard<std::mutex> lock(_mutex);
 
         std::set<std::string> engineNames;
-        // NOLINTNEXTLINE(misc-const-correctness)
-        for(auto id : supportingEngineIds)
+        for(const auto id : supportingEngineIds)
         {
-            // NOLINTNEXTLINE(misc-const-correctness)
-            auto it = _engineNames.find(id);
+            const auto it = _engineNames.find(id);
             engineNames.emplace(it != _engineNames.end()
                                     ? it->second
                                     : hipdnn_data_sdk::utilities::engineNameOrHex(id));
@@ -192,15 +190,13 @@ public:
         for(const auto& [key, entry] : grouped)
         {
             const auto& description = key.first;
-            // NOLINTNEXTLINE(misc-const-correctness)
-            auto spacePos = description.find(' ');
+            const auto spacePos = description.find(' ');
             const std::string firstOp
                 = (spacePos != std::string::npos) ? description.substr(0, spacePos) : description;
 
             // Strip attribute suffix (e.g., ":AVG", ":RELU_FWD") to group
             // operations of the same base type under one section heading.
-            // NOLINTNEXTLINE(misc-const-correctness)
-            auto colonPos = firstOp.find(':');
+            const auto colonPos = firstOp.find(':');
             const std::string sectionKey
                 = (colonPos != std::string::npos) ? firstOp.substr(0, colonPos) : firstOp;
 
@@ -213,8 +209,7 @@ public:
             sections.back().second.emplace_back(key, &entry);
         }
 
-        // NOLINTNEXTLINE(misc-const-correctness)
-        auto writeTableHeader = [&]() {
+        const auto writeTableHeader = [&]() {
             out << "| Operations | Notes |";
             for(const auto& engine : allEngineNames)
             {
@@ -241,8 +236,7 @@ public:
                 out << "| " << description << " | " << note << " |";
                 for(const auto& engine : allEngineNames)
                 {
-                    // NOLINTNEXTLINE(misc-const-correctness)
-                    auto it = entryPtr->engineLayouts.find(engine);
+                    const auto it = entryPtr->engineLayouts.find(engine);
                     if(it != entryPtr->engineLayouts.end())
                     {
                         out << " \xe2\x9c\x85";

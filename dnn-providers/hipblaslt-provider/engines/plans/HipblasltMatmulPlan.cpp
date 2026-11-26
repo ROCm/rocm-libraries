@@ -95,8 +95,8 @@ hipblasComputeType_t MatmulParams::getComputeDataType(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
 {
-    auto const hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
-    auto const hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
+    const auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
+    const auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
     if(hipDataTypeA == hipDataTypeB && hipDataTypeA == HIP_R_16F)
     {
         return HIPBLAS_COMPUTE_32F_FAST_16F;
@@ -354,7 +354,7 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
     hipblasLtMatmulPreference_t prefHandle;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&prefHandle));
     // Own the preference via RAII.
-    hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> const pref(
+    const hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> pref(
         prefHandle, [](hipblasLtMatmulPreference_t p) {
             LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceDestroy(p));
         });
@@ -398,11 +398,11 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                          uint32_t numDeviceBuffers,
                          void* workspace) const
 {
-    auto const aBuffer
+    const auto aBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.a().uid(), deviceBuffers, numDeviceBuffers);
-    auto const bBuffer
+    const auto bBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.b().uid(), deviceBuffers, numDeviceBuffers);
-    auto const cBuffer
+    const auto cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
 
     // Update bias pointer in the descriptor if they are present.

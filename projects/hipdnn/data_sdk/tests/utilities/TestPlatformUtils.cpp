@@ -348,7 +348,7 @@ TEST(TestPlatformUtils, ExpandUserLeadingTildeExpandsToUserProfile)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
                                                                              "C:\\Users\\testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("~\\foo");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("~\\foo");
 
     EXPECT_EQ(result, "C:\\Users\\testuser\\foo");
 }
@@ -358,7 +358,7 @@ TEST(TestPlatformUtils, ExpandUserLeadingUserProfileTokenExpands)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
                                                                              "C:\\Users\\testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("%USERPROFILE%\\foo");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("%USERPROFILE%\\foo");
 
     EXPECT_EQ(result, "C:\\Users\\testuser\\foo");
 }
@@ -368,7 +368,7 @@ TEST(TestPlatformUtils, ExpandUserEmbeddedTildeIsReturnedVerbatim)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
                                                                              "C:\\Users\\testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("C:\\tmp\\a~b");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("C:\\tmp\\a~b");
 
     EXPECT_EQ(result, "C:\\tmp\\a~b");
 }
@@ -378,7 +378,7 @@ TEST(TestPlatformUtils, ExpandUserNamedUserIsNotExpanded)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
                                                                              "C:\\Users\\testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("~otheruser\\foo");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("~otheruser\\foo");
 
     EXPECT_EQ(result, "~otheruser\\foo");
 }
@@ -408,7 +408,7 @@ TEST(TestPlatformUtils, ExpandUserNoLeadingTokenReturnsInputUnchanged)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
                                                                              "C:\\Users\\testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("relative\\path");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("relative\\path");
 
     EXPECT_EQ(result, "relative\\path");
 }
@@ -418,7 +418,7 @@ TEST(TestPlatformUtils, ExpandUserEmptyInputReturnsInputUnchanged)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
                                                                              "C:\\Users\\testuser");
 
-    auto result = hipdnn_data_sdk::utilities::expandUser("");
+    const auto result = hipdnn_data_sdk::utilities::expandUser("");
 
     EXPECT_EQ(result, "");
 }

@@ -404,17 +404,17 @@ struct SdpaGraph
 /// out explicitly: the frontend's default for an unset output is packed BHSD.
 SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
 {
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     graph->set_name(name)
         .set_io_data_type(shape.dataType)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto q = makeBshdTensor(
+    const auto q = makeBshdTensor(
         Q_UID, "Q", shape.dataType, shape.batch, shape.queryHeads, shape.seqQ, shape.headSize);
-    auto k = makeBshdTensor(
+    const auto k = makeBshdTensor(
         K_UID, "K", shape.dataType, shape.batch, shape.kvHeads, shape.seqKv, shape.headSize);
-    auto v = makeBshdTensor(
+    const auto v = makeBshdTensor(
         V_UID, "V", shape.dataType, shape.batch, shape.kvHeads, shape.seqKv, shape.headSize);
 
     SdpaAttributes attributes;
@@ -429,7 +429,7 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
-    auto o = outputs[0];
+    const auto& o = outputs[0];
     o->set_uid(O_UID)
         .set_name("O")
         .set_output(true)
@@ -652,7 +652,7 @@ protected:
                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first,
                                    Harness::DEFAULT_MIN,
@@ -789,7 +789,7 @@ TEST_P(IntegrationGpuGfx950AttentionUnifiedKnobs, SelectsTheExpectedKernelAndMat
     const SelectedKernelReport report(testCase.name, testCase.engine, capture);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_TRUE(offers(*sdpa.graph, testCase.engine))
         << testCase.engine << " did not offer to serve this graph on " << SERVED_ARCH
         << "; its packed descriptors load through HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
@@ -839,8 +839,8 @@ TEST_P(IntegrationGpuGfx950AttentionUnifiedKnobs, SelectsTheExpectedKernelAndMat
 /// both catalogs serve, hipkernel:Gfx950AttentionDense still ranks ahead of Unified2D.
 TEST_F(IntegrationGpuGfx950AttentionUnifiedPrecedence, DenseStillRanksAheadWhenUnpinned)
 {
-    auto sdpa = buildSdpaGraph("DenseStillRanksAheadWhenUnpinned",
-                               {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 1, 512, 512});
+    const auto sdpa = buildSdpaGraph("DenseStillRanksAheadWhenUnpinned",
+                                     {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 1, 512, 512});
     auto result = sdpa.graph->build_operation_graph(this->_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     std::vector<int64_t> rankedEngineIds;
@@ -861,7 +861,7 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedPrecedence, DenseStillRanksAheadWhenU
 TEST_P(IntegrationGpuGfx950AttentionUnifiedDeclines, IsNotOffered)
 {
     const auto& testCase = GetParam();
-    auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
     EXPECT_FALSE(offers(*sdpa.graph, testCase.engine))
         << testCase.engine << " offered to serve " << testCase.name;
 }

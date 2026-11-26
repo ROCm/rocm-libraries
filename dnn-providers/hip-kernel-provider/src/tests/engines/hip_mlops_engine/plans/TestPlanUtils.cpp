@@ -58,25 +58,25 @@ TEST(TestCheckedNarrowToInt, NegativeValueInRange)
 
 TEST(TestCheckedNarrowToInt, IntMaxBoundary)
 {
-    auto const maxVal = static_cast<int64_t>(INT_MAX);
+    const auto maxVal = static_cast<int64_t>(INT_MAX);
     EXPECT_EQ(checkedNarrowToInt(maxVal, "test"), INT_MAX);
 }
 
 TEST(TestCheckedNarrowToInt, IntMinBoundary)
 {
-    auto const minVal = static_cast<int64_t>(INT_MIN);
+    const auto minVal = static_cast<int64_t>(INT_MIN);
     EXPECT_EQ(checkedNarrowToInt(minVal, "test"), INT_MIN);
 }
 
 TEST(TestCheckedNarrowToInt, ExceedsIntMaxThrows)
 {
-    auto const overMax = static_cast<int64_t>(INT_MAX) + 1;
+    const auto overMax = static_cast<int64_t>(INT_MAX) + 1;
     EXPECT_THROW(checkedNarrowToInt(overMax, "dim"), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestCheckedNarrowToInt, BelowIntMinThrows)
 {
-    auto const underMin = static_cast<int64_t>(INT_MIN) - 1;
+    const auto underMin = static_cast<int64_t>(INT_MIN) - 1;
     EXPECT_THROW(checkedNarrowToInt(underMin, "dim"), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 

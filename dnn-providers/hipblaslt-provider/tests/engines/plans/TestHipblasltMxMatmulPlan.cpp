@@ -100,10 +100,10 @@ T getDescAttribute(const HipblasltMatmulDesc& desc, hipblasLtMatmulDescAttribute
 TEST(TestMxMatmulParams, LayoutUidsMatchInputTensors)
 {
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(params.a().uid(), attrs.deqB.x_tensor_uid()); // hipBLAS A <- our B
     EXPECT_EQ(params.b().uid(), attrs.deqA.x_tensor_uid()); // hipBLAS B <- our A
@@ -116,10 +116,10 @@ TEST(TestMxMatmulParams, LayoutUidsMatchInputTensors)
 TEST(TestMxMatmulParams, ScaleUidsAndModeWiring)
 {
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(params.aScaleUid(), attrs.deqB.scale_tensor_uid()); // hipBLAS A_SCALE <- our B
     EXPECT_EQ(params.bScaleUid(), attrs.deqA.scale_tensor_uid()); // hipBLAS B_SCALE <- our A
@@ -139,10 +139,10 @@ TEST(TestMxMatmulParams, ScaleUidsAndModeWiring)
 TEST(TestMxMatmulParams, TransposeInferenceDefault)
 {
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(getDescAttribute<hipblasOperation_t>(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSA),
               HIPBLAS_OP_N);
@@ -158,10 +158,10 @@ TEST(TestMxMatmulParams, TransposeInferenceRowMajorA)
     // Row-major A (strides {128,1}) instead of the default col-major {1,32}.
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {128, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(getDescAttribute<hipblasOperation_t>(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSA),
               HIPBLAS_OP_N);
@@ -177,10 +177,10 @@ TEST(TestMxMatmulParams, TransposeInferenceColMajorB)
     // Col-major B (strides {1,128}) instead of the default row-major {32,1}.
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(getDescAttribute<hipblasOperation_t>(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSA),
               HIPBLAS_OP_T);
@@ -193,10 +193,10 @@ TEST(TestMxMatmulParams, TransposeInferenceColMajorB)
 TEST(TestMxMatmulParams, TransposeInferenceKContiguous)
 {
     auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(getDescAttribute<hipblasOperation_t>(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSA),
               HIPBLAS_OP_T);
@@ -212,10 +212,10 @@ TEST(TestMxMatmulParams, ScaleOperandsDefaultLayout)
 {
     auto fb = createValidMxMatmulGraph(
         {48, 128}, {1, 48}, {128, 32}, {32, 1}, {48, 32}, {32, 1}, {48, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     EXPECT_EQ(params.aScale().uid, attrs.deqB.scale_tensor_uid());
     EXPECT_EQ(params.aScale().mn, 32);
@@ -233,10 +233,10 @@ TEST(TestMxMatmulParams, ScaleOperandsDefaultLayout)
 TEST(TestMxMatmulParams, ScaleOperandsKContiguousLayout)
 {
     auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
-    MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    const MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
     for(const auto* scale : {&params.aScale(), &params.bScale()})
     {
@@ -251,13 +251,13 @@ TEST(TestMxMatmulParams, ScaleModeFollowsScaleFormat)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {128, 1}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     for(const auto format :
         {MxScaleFormat::NATURAL, MxScaleFormat::SWIZZLED_GFX950, MxScaleFormat::SWIZZLED_GFX1250})
     {
-        MxMatmulParams const params(
+        const MxMatmulParams params(
             attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap(), format);
         EXPECT_EQ(params.scaleFormat(), format);
         EXPECT_EQ(getDescAttribute<hipblasLtMatmulMatrixScale_t>(
@@ -276,7 +276,7 @@ TEST(TestMxMatmulParams, PackedMxOrder)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {128, 1}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
     const auto& tensorMap = graph.getTensorMap();
     const auto xA = hipblaslt_utils::findTensorAttributes(tensorMap, attrs.deqA.x_tensor_uid());
@@ -355,7 +355,7 @@ TEST(TestMxMatmulParams, PackedMxOrderRejectsPaddedMatrix)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {136, 1}, {128, 32}, {1, 136}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
     const auto& tensorMap = graph.getTensorMap();
 
@@ -411,7 +411,7 @@ protected:
 TEST_F(TestGpuMxMatmulPlan, CreatesPlanWithValidGraph)
 {
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
@@ -425,11 +425,11 @@ TEST_F(TestGpuMxMatmulPlan, CreatesPlanWithValidGraph)
 TEST_F(TestGpuMxMatmulPlan, ExecuteThrowsOnNullWorkspace)
 {
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
-    MxMatmulPlan const plan(_handle, std::move(params));
+    const MxMatmulPlan plan(_handle, std::move(params));
     ASSERT_GT(plan.getWorkspaceSize(_handle), 0u);
 
     try
@@ -452,11 +452,11 @@ TEST_F(TestGpuMxMatmulPlan, KContiguousNaturalScalesArePassedThrough)
         GTEST_SKIP() << "gfx950 (rocRoller) only";
     }
     auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
-    MxMatmulPlan const plan(_handle, std::move(params));
+    const MxMatmulPlan plan(_handle, std::move(params));
 
     EXPECT_TRUE(plan.aScalePrep().isPassThrough());
     EXPECT_TRUE(plan.bScalePrep().isPassThrough());
@@ -467,11 +467,11 @@ TEST_F(TestGpuMxMatmulPlan, KContiguousNaturalScalesArePassedThrough)
 TEST_F(TestGpuMxMatmulPlan, DefaultLayoutTransposesOnlyTheAScale)
 {
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
-    MxMatmulPlan const plan(_handle, std::move(params));
+    const MxMatmulPlan plan(_handle, std::move(params));
 
     EXPECT_TRUE(plan.aScalePrep().isPassThrough()); // our B's scale
     EXPECT_EQ(plan.bScalePrep().method(), MxScalePrep::Method::TRANSPOSE); // our A's scale
@@ -499,7 +499,7 @@ TEST_F(TestGpuMxMatmulPlan, Gfx950SwizzledFormatFallsBackToRocRoller)
         GTEST_SKIP() << "gfx950-only check";
     }
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     const auto plan = createMxMatmulPlan(_handle,
@@ -522,7 +522,7 @@ TEST_F(TestGpuMxMatmulPlan, Gfx1250SwizzledFormatDoesNotFallBack)
         GTEST_SKIP() << "gfx950-only check";
     }
     auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     EXPECT_THROW(static_cast<void>(createMxMatmulPlan(_handle,
@@ -764,7 +764,7 @@ std::unique_ptr<MxMatmulPlan> createExecutePlan(const HipdnnEnginePluginHandle& 
                                                 const MxShape& shape = EXEC_SHAPE)
 {
     auto fb = createExecuteGraph(s, shape);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
     return createMxMatmulPlan(handle,
                               attrs.deqA,
@@ -789,7 +789,7 @@ MxExecution execute(const HipdnnEnginePluginHandle& handle,
     const auto k = in.shape.k;
     const auto kBlocks = in.shape.kBlocks();
     auto fb = createExecuteGraph(s, in.shape);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
     const auto plan = createExecutePlan(handle, s, format, in.shape);
 

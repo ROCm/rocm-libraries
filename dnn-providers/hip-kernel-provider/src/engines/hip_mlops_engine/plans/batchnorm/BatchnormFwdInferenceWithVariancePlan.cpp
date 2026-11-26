@@ -152,8 +152,8 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     {
         batches = checkedNarrowToInt(xDims->Get(0), "batches");
         channels = checkedNarrowToInt(xDims->Get(1), "channels");
-        auto const height = checkedNarrowToInt(xDims->Get(2), "height");
-        auto const width = checkedNarrowToInt(xDims->Get(3), "width");
+        const auto height = checkedNarrowToInt(xDims->Get(2), "height");
+        const auto width = checkedNarrowToInt(xDims->Get(3), "width");
         spatialSize = height * width;
 
         batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
@@ -164,9 +164,9 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     {
         batches = checkedNarrowToInt(xDims->Get(0), "batches");
         channels = checkedNarrowToInt(xDims->Get(1), "channels");
-        auto const depth = checkedNarrowToInt(xDims->Get(2), "depth");
-        auto const height = checkedNarrowToInt(xDims->Get(3), "height");
-        auto const width = checkedNarrowToInt(xDims->Get(4), "width");
+        const auto depth = checkedNarrowToInt(xDims->Get(2), "depth");
+        const auto height = checkedNarrowToInt(xDims->Get(3), "height");
+        const auto width = checkedNarrowToInt(xDims->Get(4), "width");
         // For 5D, combine D*H*W into spatial dimension
         spatialSize = depth * height * width;
 
@@ -181,13 +181,13 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
                                                            + std::to_string(xDims->size()));
     }
 
-    auto const inSpatialSize = static_cast<unsigned int>(spatialSize);
+    const auto inSpatialSize = static_cast<unsigned int>(spatialSize);
 
     // Detect layout: NLC/NHWC/NDHWC has C dimension (index 1) with stride 1, NCL/NCHW/NCDHW has stride L/H*W/D*H*W
     const bool isLayoutChannelLast = isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto const vectorsize = computeVectorSize(isLayoutChannelLast, channels, inSpatialSize);
+    const auto vectorsize = computeVectorSize(isLayoutChannelLast, channels, inSpatialSize);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -218,7 +218,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
 
     zlocalsize = 1;
     const size_t activeThreadsXy = xgridsize * ygridsize;
-    auto const maxActiveThreads = static_cast<size_t>(deviceProperties.multiProcessorCount) * 32
+    const auto maxActiveThreads = static_cast<size_t>(deviceProperties.multiProcessorCount) * 32
                                   * static_cast<size_t>(deviceProperties.warpSize);
 
     if(activeThreadsXy < maxActiveThreads)
@@ -241,11 +241,11 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     }
 
     // Determine data type configuration
-    auto const xDataType = _inferenceParams.x()->data_type();
-    auto const yDataType = _inferenceParams.optActivation().has_value()
+    const auto xDataType = _inferenceParams.x()->data_type();
+    const auto yDataType = _inferenceParams.optActivation().has_value()
                                ? _inferenceParams.activationOut()->data_type()
                                : _inferenceParams.y()->data_type();
-    auto const scaleDataType = _inferenceParams.scale()->data_type();
+    const auto scaleDataType = _inferenceParams.scale()->data_type();
 
     const bool useFp16Mix
         = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF

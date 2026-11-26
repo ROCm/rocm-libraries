@@ -32,7 +32,7 @@ enum class ActivationMode : int
 /// @param beta Second activation parameter
 /// @return Activated value
 template <typename T, ActivationMode Mode>
-__forceinline__ __device__ T applyActivation(T const& value, T const& alpha, T const& beta)
+__forceinline__ __device__ T applyActivation(const T& value, const T& alpha, const T& beta)
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,
@@ -66,7 +66,7 @@ __forceinline__ __device__ T applyActivation(T const& value, T const& alpha, T c
 /// @return Gradient with respect to input
 template <typename T, ActivationMode Mode>
 __forceinline__ __device__ T
-    applyActivationGradient(T const& dy, T const& input_value, T const& alpha, T const& beta)
+    applyActivationGradient(const T& dy, const T& input_value, const T& alpha, const T& beta)
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,

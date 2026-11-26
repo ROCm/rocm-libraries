@@ -140,9 +140,9 @@ inline std::filesystem::path openablePath(const std::filesystem::path& path)
     }
     if(native.rfind(LR"(\\)", 0) == 0)
     {
-        return std::filesystem::path(LR"(\\?\UNC\)" + native.substr(2));
+        return {LR"(\\?\UNC\)" + native.substr(2)};
     }
-    return std::filesystem::path(LR"(\\?\)" + native);
+    return {LR"(\\?\)" + native};
 #else
     return path;
 #endif

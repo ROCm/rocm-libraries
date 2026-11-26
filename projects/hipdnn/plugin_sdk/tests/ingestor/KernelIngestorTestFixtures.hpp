@@ -350,7 +350,7 @@ inline void ensureNoopDispatchRegistered(const std::string& symbol = "test.dispa
 /// convertible from int so tests can keep identifying handles by a bare literal.
 struct TestHandle
 {
-    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    // NOLINTNEXTLINE(google-explicit-constructor)
     TestHandle(int handleId = 0)
         : id(handleId)
     {

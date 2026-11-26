@@ -102,8 +102,8 @@ bool isSupportedSdpaAlibi(const SdpaAttributesType& nodeAttributes)
 }
 
 /// The raw pointer an options setter takes, or nullptr. (Calling get() inline inside the
-/// templated options chains trips clang-tidy-20's readability-redundant-smartptr-get, a false
-/// positive in dependent calls.)
+/// templated options chains trips clang-tidy's readability-redundant-smartptr-get, a false
+/// positive in dependent calls that clang-tidy 23 still reports.)
 template <typename T>
 T* rawPointer(const std::unique_ptr<T>& owner)
 {

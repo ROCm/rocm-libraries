@@ -274,7 +274,7 @@ TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicable)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithTypes(TypeParam::X_TYPE, TypeParam::OUT_TYPE);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
         << "x=" << EnumNameDataType(TypeParam::X_TYPE)
         << " out=" << EnumNameDataType(TypeParam::OUT_TYPE);
@@ -307,7 +307,7 @@ TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes, IsApplicable)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithTypes(TypeParam::A_TYPE, DT::HALF, TypeParam::B_TYPE);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
         << "a=" << EnumNameDataType(TypeParam::A_TYPE)
         << " b=" << EnumNameDataType(TypeParam::B_TYPE);
@@ -334,7 +334,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrd
                                        32,
                                        false,
                                        true /*swapDequantOrder*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
@@ -346,21 +346,21 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrd
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsPlainMatmul)
 {
     auto fb = createValidMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 // Wrong node count (not 3)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongNodeCount)
 {
-    MockGraph const mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
     EXPECT_FALSE(_builder.isApplicable(_handle, mockGraph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongNodeCount4)
 {
-    MockGraph const mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
     EXPECT_FALSE(_builder.isApplicable(_handle, mockGraph));
 }
@@ -378,7 +378,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonMxInputHalf)
                                        {4, 32},
                                        DT::HALF,
                                        DT::HALF);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -394,7 +394,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonMxInputFloat)
                                        {4, 32},
                                        DT::FLOAT,
                                        DT::HALF);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -411,7 +411,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8Output)
                                        {4, 32},
                                        DT::FP8_E4M3,
                                        DT::FP8_E4M3);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -427,7 +427,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8E8M0Output)
                                        {4, 32},
                                        DT::FP8_E4M3,
                                        DT::FP8_E8M0);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -436,7 +436,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsMNotDiv16)
 {
     auto fb = createValidMxMatmulGraph(
         {33, 128}, {1, 33}, {128, 32}, {32, 1}, {33, 32}, {32, 1}, {33, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -445,7 +445,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNNotDiv16)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 33}, {33, 1}, {32, 33}, {33, 1}, {32, 4}, {4, 33});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -454,7 +454,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsKNotDiv128)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 96}, {1, 32}, {96, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 3}, {3, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -475,7 +475,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongBlockSize)
                                        DT::FP8_E8M0,
                                        DT::FLOAT,
                                        16 /*blockSize*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -492,7 +492,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensors)
 
     auto packed
         = createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16);
-    GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
+    const GraphWrapper packedGraph(packed.GetBufferPointer(), packed.GetSize());
     ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
 
     struct Case
@@ -524,7 +524,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensors)
 
     for(auto& c : cases)
     {
-        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        const GraphWrapper graph(c.graph.GetBufferPointer(), c.graph.GetSize());
         EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << c.name;
     }
 }
@@ -544,7 +544,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsN
     const std::vector<int64_t> scaleBPacked = {32, 1};
 
     auto packed = createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
-    GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
+    const GraphWrapper packedGraph(packed.GetBufferPointer(), packed.GetSize());
     ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
 
     struct Case
@@ -568,7 +568,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsN
 
     for(auto& c : cases)
     {
-        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        const GraphWrapper graph(c.graph.GetBufferPointer(), c.graph.GetSize());
         EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << c.name;
     }
 }
@@ -586,7 +586,7 @@ TEST(TestMxGraphConstraints, AcceptsPackedOperandsWithScalesInEitherOrder)
         {
             auto fb = createMxGraphWithLayout(
                 layout, DT::FP8_E4M3, DT::HALF, DT::UNSET, mnContiguousScales);
-            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
             EXPECT_NO_THROW(checkMxGraphConstraints(graph))
                 << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
         }
@@ -621,7 +621,7 @@ TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
                                            DT::UNSET,
                                            {4, 1},
                                            {1, 4});
-        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
         try
         {
             checkMxGraphConstraints(graph);
@@ -675,7 +675,7 @@ TEST(TestMxGraphConstraints, DeclinesMatricesThatAreNotPacked)
 
     for(auto& c : cases)
     {
-        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        const GraphWrapper graph(c.graph.GetBufferPointer(), c.graph.GetSize());
         EXPECT_THROW(checkMxGraphConstraints(graph), HipdnnPluginException) << c.name;
     }
 }
@@ -690,7 +690,7 @@ TEST(TestMxGraphConstraints, SwizzledScaleFormatsNeedKContiguousOperands)
                              MxOperandLayout::MN_K})
     {
         auto fb = createMxGraphWithLayout(layout);
-        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
         EXPECT_NO_THROW(checkMxLayoutForScaleFormat(graph, MxScaleFormat::NATURAL))
             << toString(layout);
         for(const auto format : {MxScaleFormat::SWIZZLED_GFX950, MxScaleFormat::SWIZZLED_GFX1250})
@@ -719,7 +719,7 @@ TEST(TestMxGraphConstraints, DeclinesMisalignedShapes)
 {
     const auto expectDeclined
         = [](const flatbuffers::FlatBufferBuilder& fb, const std::string& reason) {
-              GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+              const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
               try
               {
                   checkMxGraphConstraints(graph);
@@ -758,7 +758,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx9
         {
             auto fb = createMxGraphWithLayout(
                 layout, DT::FP8_E4M3, DT::HALF, DT::UNSET, mnContiguousScales);
-            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
             EXPECT_TRUE(_builder.isApplicable(_handle, graph))
                 << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
         }
@@ -777,7 +777,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousOnGfx1
     {
         auto fb = createMxGraphWithLayout(
             MxOperandLayout::K_K, DT::FP8_E4M3, DT::BFLOAT16, DT::UNSET, mnContiguousScales);
-        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
         EXPECT_TRUE(_builder.isApplicable(_handle, graph))
             << "mnContiguousScales=" << mnContiguousScales;
     }
@@ -787,7 +787,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousOnGfx1
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchnormGraph)
 {
     auto fb = createValidBatchnormInferenceGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -803,7 +803,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsBatchGreaterThan1)
                                        {1024, 32, 1},
                                        {2, 32, 4},
                                        {2, 4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -825,7 +825,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsEpilogue)
                                        DT::FLOAT,
                                        32,
                                        true /*withEpilogue*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -853,7 +853,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8AWithFp6B)
                                                false,
                                                false,
                                                bType /*xTypeB*/);
-            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
             EXPECT_FALSE(_builder.isApplicable(_handle, graph))
                 << "A=" << EnumNameDataType(aType) << " B=" << EnumNameDataType(bType);
         }
@@ -875,7 +875,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousFp8AWi
             for(const auto bType : {DT::FP6_E2M3, DT::FP6_E3M2})
             {
                 auto fb = createMxGraphWithLayout(layout, aType, DT::HALF, bType);
-                GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+                const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
                 EXPECT_TRUE(_builder.isApplicable(_handle, graph))
                     << toString(layout) << " A=" << EnumNameDataType(aType)
                     << " B=" << EnumNameDataType(bType);
@@ -900,7 +900,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFloatComputeType)
                                        DT::FP8_E8M0,
                                        DT::FP8_E8M0,
                                        DT::HALF /*computeType*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -911,7 +911,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsShapeMismatch)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 48}, {48, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -921,49 +921,49 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsShapeMismatch)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualFp8InputA)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::XA);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualFp8InputB)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::XB);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualScaleA)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::SCALE_A);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualScaleB)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::SCALE_B);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonVirtualDequantOutputA)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::YA);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonVirtualDequantOutputB)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::YB);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsVirtualOutputC)
 {
     auto fb = createMxGraphWithWrongVirtual(MxTensor::C);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -989,7 +989,7 @@ TEST_P(TestHipblasltMxMatmulPlanBuilderNegativeScale, IsApplicableDeclinesNegati
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     auto fb = createMxGraphWithWrongVirtual(
         MxTensor::NONE, GetParam().negativeScaleA, GetParam().negativeScaleB);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
 
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "is_negative_scale"))
@@ -1008,7 +1008,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableDoesNotDeclineDefaultScaleS
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     auto fb = createMxGraphWithWrongVirtual(MxTensor::NONE);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
 
     (void)_builder.isApplicable(_handle, graph);
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "is_negative_scale"))
@@ -1019,7 +1019,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsDefaultScaleSign)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithWrongVirtual(MxTensor::NONE);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1057,7 +1057,7 @@ TEST_P(TestHipblasltMxMatmulPlanBuilderScaleStrides, IsApplicableDeclinesScalesT
                   }
               }
           });
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
 
     (void)_builder.isApplicable(_handle, graph);
     EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO,
@@ -1094,7 +1094,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleTypeA)
                                        DT::FP8_E4M3,
                                        DT::HALF,
                                        DT::FLOAT /*scaleAType*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1112,7 +1112,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleTypeB)
                                        DT::HALF,
                                        DT::FP8_E8M0,
                                        DT::FLOAT /*scaleBType*/);
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1121,7 +1121,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleShapeA)
     // scale_a inner dim 5 instead of K/32 = 4
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 5}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1130,7 +1130,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleShapeB)
     // scale_b outer dim 5 instead of K/32 = 4
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {5, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1141,7 +1141,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleA)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {4, 32}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1150,7 +1150,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleB)
     // scale_b as [N, K/32] instead of [K/32, N]
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {32, 4});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
@@ -1162,14 +1162,14 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeValid)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_NO_THROW(_builder.getWorkspaceSize(_handle, graph));
 }
 
 TEST_F(TestHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeThrowsOnInvalidGraph)
 {
     auto fb = createValidMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_THROW(_builder.getWorkspaceSize(_handle, graph), HipdnnPluginException);
 }
 
@@ -1181,7 +1181,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, BuildPlanValid)
 {
     SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
     EXPECT_NO_THROW(_builder.buildPlan(_handle, graph, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
@@ -1190,7 +1190,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, BuildPlanValid)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, BuildPlanThrowsOnInvalidGraph)
 {
     auto fb = createValidMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
     EXPECT_THROW(_builder.buildPlan(_handle, graph, ctx), HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());

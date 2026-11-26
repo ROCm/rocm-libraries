@@ -422,7 +422,7 @@ TEST_P(IntegrationGpuGfx942AttentionUnified2DKnobs,
     const detail::SelectedKernelReport report(ENGINE, testCase.name, capture);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     auto result
@@ -469,7 +469,7 @@ TEST_P(IntegrationGpuGfx942AttentionUnified2DKnobs,
 TEST_P(IntegrationGpuGfx942AttentionUnified2DDeclines, IsNotOffered)
 {
     const auto& testCase = GetParam();
-    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     EXPECT_FALSE(offersToServe(*sdpa.graph))
         << ENGINE.name << " offered to serve " << testCase.name;
 }

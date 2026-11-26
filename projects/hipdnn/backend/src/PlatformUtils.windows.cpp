@@ -57,7 +57,7 @@ void* getSymbol(PluginLibHandle handle, const char* symbolName)
     void* symbol = hipdnn_data_sdk::utilities::getSymbol(handle, symbolName);
     if(symbol == nullptr)
     {
-        auto errorCode = GetLastError();
+        const auto errorCode = GetLastError();
         throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                               "Failed to get symbol: " + std::string(symbolName)
                                   + " (Error Code: " + std::to_string(errorCode) + ")");

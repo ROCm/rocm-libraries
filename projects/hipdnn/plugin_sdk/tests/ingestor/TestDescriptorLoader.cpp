@@ -7773,9 +7773,9 @@ std::string levelFilename(int level)
 TEST(TestDescriptorLoader, ExecutableIsLongPathAware)
 {
     // 24 is RT_MANIFEST; the RT_MANIFEST macro is narrow or wide by the UNICODE setting.
-    const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(24));
+    const auto resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(24));
     ASSERT_NE(resource, nullptr);
-    const HGLOBAL loaded = LoadResource(nullptr, resource);
+    const auto loaded = LoadResource(nullptr, resource);
     ASSERT_NE(loaded, nullptr);
     const void* bytes = LockResource(loaded);
     ASSERT_NE(bytes, nullptr);

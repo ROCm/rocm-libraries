@@ -530,7 +530,7 @@ protected:
                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first,
                                    Harness::DEFAULT_MIN,

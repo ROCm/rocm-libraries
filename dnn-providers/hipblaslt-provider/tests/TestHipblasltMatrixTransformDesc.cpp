@@ -10,14 +10,14 @@ using namespace hipblaslt_plugin;
 TEST(TestHipblasltMatrixTransformDesc, CanCreateAndDestroy)
 {
     EXPECT_NO_THROW({
-        HipblasltMatrixTransformDesc const desc(HIP_R_32F, HIPBLAS_OP_T);
+        const HipblasltMatrixTransformDesc desc(HIP_R_32F, HIPBLAS_OP_T);
         EXPECT_NE(desc.transformDesc(), nullptr);
     });
 }
 
 TEST(TestHipblasltMatrixTransformDesc, SetsTransA)
 {
-    HipblasltMatrixTransformDesc const desc(HIP_R_32F, HIPBLAS_OP_T);
+    const HipblasltMatrixTransformDesc desc(HIP_R_32F, HIPBLAS_OP_T);
 
     hipblasOperation_t transA{};
     size_t sizeWritten = 0;
@@ -34,7 +34,7 @@ TEST(TestHipblasltMatrixTransformDesc, SetsTransA)
 TEST(TestHipblasltMatrixTransformDesc, DefaultIsNull)
 {
     EXPECT_NO_THROW({
-        HipblasltMatrixTransformDesc const desc;
+        const HipblasltMatrixTransformDesc desc;
         EXPECT_EQ(desc.transformDesc(), nullptr);
     });
 }

@@ -105,8 +105,7 @@ inline std::optional<VerificationMode>
     {
         return cliValue;
     }
-    // NOLINTNEXTLINE(misc-const-correctness)
-    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VERIFICATION_MODE");
+    const auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VERIFICATION_MODE");
     if(!envVal.empty())
     {
         return parseVerificationMode(envVal);
@@ -124,8 +123,7 @@ inline std::optional<ValidatorDevice>
     {
         return cliValue;
     }
-    // NOLINTNEXTLINE(misc-const-correctness)
-    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VALIDATOR");
+    const auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VALIDATOR");
     if(!envVal.empty())
     {
         return parseValidatorDevice(envVal);
@@ -141,8 +139,7 @@ inline std::optional<std::filesystem::path>
     {
         return cliValue;
     }
-    // NOLINTNEXTLINE(misc-const-correctness)
-    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR");
+    const auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR");
     if(!envVal.empty())
     {
         return std::filesystem::path(envVal);

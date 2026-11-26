@@ -531,12 +531,15 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto identity = engineIdentity(set);
     auto knobs = set.engine.knobs;
-    const auto predictions = std::move(set.enginePredictionsByMetric);
-    const auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
+    // Not const: these are moved again below, and moving a const object copies it.
+    // NOLINTBEGIN(misc-const-correctness) moved below; const would turn each move into a copy
+    auto predictions = std::move(set.enginePredictionsByMetric);
+    auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
     auto provenance = engineBindingProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);
     auto engine = set.engine;
-    const auto graphMatchSymbol = engine.graphMatchNativeSymbol;
+    auto graphMatchSymbol = engine.graphMatchNativeSymbol;
+    // NOLINTEND(misc-const-correctness)
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
         std::move(engine),
         makeStateManager<THandle>(std::move(set),

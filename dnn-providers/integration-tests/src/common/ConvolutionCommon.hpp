@@ -62,8 +62,7 @@ struct ConvTestCase
         }
 
         // Determine the number of spatial dimensions
-        // NOLINTNEXTLINE(misc-const-correctness)
-        auto spatialDims = xDims.size() - 2; // Exclude N and C
+        const auto spatialDims = xDims.size() - 2; // Exclude N and C
 
         // Validate that the convolution parameter vectors match the number of spatial dimensions
         if(convPrePadding.size() != spatialDims || convPostPadding.size() != spatialDims
@@ -74,21 +73,16 @@ struct ConvTestCase
         }
 
         // Calculate output dimensions based on input dimensions and convolution parameters
-        // NOLINTNEXTLINE(misc-const-correctness)
-        auto n = xDims[N];
-        // NOLINTNEXTLINE(misc-const-correctness)
-        auto cOut = wDims[N];
+        const auto n = xDims[N];
+        const auto cOut = wDims[N];
         std::vector<int64_t> outputDims = {n, cOut};
 
         // Output dims are inferred by the frontend, duplicated here for logging.
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            // NOLINTNEXTLINE(misc-const-correctness)
-            auto paddedInputSize = xDims[2 + i] + convPrePadding[i] + convPostPadding[i];
-            // NOLINTNEXTLINE(misc-const-correctness)
-            auto effectiveKernelSize = (convDilation[i] * (wDims[2 + i] - 1)) + 1;
-            // NOLINTNEXTLINE(misc-const-correctness)
-            auto dimOut = ((paddedInputSize - effectiveKernelSize) / convStride[i]) + 1;
+            const auto paddedInputSize = xDims[2 + i] + convPrePadding[i] + convPostPadding[i];
+            const auto effectiveKernelSize = (convDilation[i] * (wDims[2 + i] - 1)) + 1;
+            const auto dimOut = ((paddedInputSize - effectiveKernelSize) / convStride[i]) + 1;
             outputDims.push_back(dimOut);
         }
 

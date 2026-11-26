@@ -218,7 +218,6 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
     }
 
     // Keep the loader path if best-effort canonicalization fails.
-    // NOLINTNEXTLINE(misc-const-correctness)
     std::error_code failed;
     const auto resolved = std::filesystem::weakly_canonical(info.dli_fname, failed);
     return (failed ? std::filesystem::path(info.dli_fname) : resolved).parent_path();
