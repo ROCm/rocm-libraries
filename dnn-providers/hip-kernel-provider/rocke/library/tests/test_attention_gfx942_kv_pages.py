@@ -13,7 +13,10 @@ causal prefill, fp16 and bf16, page sizes 16 to 64, head sizes 64 to 256,
 sliding window, softcap, ALiBi, LSE, the two-phase causal loop, the 32x32 MFMA
 paths and the global_load_lds K copies. Overstating ``num_kv_blocks`` makes a
 small cache take the i64 path, which the launch guard allows. On i32, page ids
-outside the cache read as zeros instead of faulting.
+at or past the 32-bit buffer bound (or negative) read as zeros through the
+buffer copies; the opt-in global_load_lds K path is not bounded. Ids below that
+bound but past the real block count still read past the allocation, as through
+the old whole-cache resource.
 """
 
 import re
@@ -586,8 +589,10 @@ def test_block_table_tail_is_masked(rt, i64):
 @pytest.mark.gpu
 @pytest.mark.parametrize("case_id", ["decode_d128", "prefill_d128"])
 def test_i32_out_of_range_page_ids_read_zeros(rt, case_id):
-    """i32 addressing: a page id outside the cache (negative or past the i32
-    bound), inside a sequence or in padding past it, reads as zeros as it did
-    through the whole-cache resource, instead of faulting. i64 has no bound to
+    """i32 addressing: a page id at or past the 32-bit buffer bound (or
+    negative), inside a sequence or in padding past it, reads as zeros through
+    the buffer copies, as it did through the whole-cache resource, instead of
+    faulting. The cases use buffer K copies: the opt-in global_load_lds K path
+    builds its address from the page id and is not bounded. i64 has no bound to
     check against."""
     _run_case(rt, _CASES[case_id], False, bad_ids=True)

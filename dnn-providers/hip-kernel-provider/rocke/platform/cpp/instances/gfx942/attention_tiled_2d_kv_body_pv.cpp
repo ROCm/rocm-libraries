@@ -521,7 +521,7 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  * tile1's V and accumulate (lines 4760-4770). */
                 rocke_b_s_waitcnt(B, -1, 0, -1);
                 rocke_b_sync(B);
-                rocke_gfx942_attn2d_issue_v(ctx, in->safe_tile1, in->nxt_buf);
+                rocke_gfx942_attn2d_issue_v(ctx, in->safe_tile1, in->nxt_buf, NULL);
                 rocke_b_s_waitcnt(B, 0, 0, -1);
                 rocke_b_sync(B);
                 for(int n = 0; n < ACC_N_TILES; ++n)
@@ -826,7 +826,6 @@ static rocke_for_t rocke__run_kv_phase(rocke_gfx942_attn2d_build_ctx_t* ctx,
                 ctx->page_cur[i] = iv[ml + num_accs + 1 + i];
                 ctx->page_next[i] = iv[ml + num_accs + 1 + n_pages + i];
             }
-            ctx->page_cur_tile = kvloop.iv;
         }
     }
 

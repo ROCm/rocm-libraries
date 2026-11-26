@@ -408,9 +408,13 @@ alias information, so the scheduler could not move reads past each other on its 
 
 Emit every QK K operand read before the first QK MFMA (both engines). LLVM then batches the
 reads under one wait in every variant, D64 decode recovers, and D128 and D256 are
-unchanged. The reorder left the occupancy of every dispatched spec unchanged (VGPRs moved
-only at D256 prefill, which stays at one wave); two non-default emit configs lost a wave
-against the variant without it, landing at the old loader's occupancy.
+unchanged. Against the staging branch, with the page copies on the shared `PagedKVCopies`
+helper, register use moved for several dispatched specs but occupancy for none: LDS already
+limits the one-warp decode specs to under one wave per SIMD, and the prefill specs to one.
+The largest move is D64 decode at page size 64 on i32, which runs out of VGPRs and spills to
+AGPRs (D64 page size 32 on i32 also grows); several D128 and D256 i64 specs stop spilling.
+Both D64 i32 specs still run faster than on staging. The PR description's resource table
+lists every spec.
 
 ### Lesson
 

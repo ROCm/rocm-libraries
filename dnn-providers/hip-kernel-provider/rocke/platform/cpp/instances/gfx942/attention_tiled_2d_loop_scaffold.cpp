@@ -279,11 +279,13 @@ void rocke_gfx942_attn2d_emit_preloop_prefetch(rocke_gfx942_attn2d_build_ctx_t* 
         rocke_value_t* start_next = rocke_b_select(B, in_range, start_next_raw, ctx->tile_start);
         rocke_gfx942_attn2d_tile_page_ids(ctx, ctx->tile_start, ctx->page_start);
         rocke_gfx942_attn2d_tile_page_ids(ctx, start_next, ctx->page_start_next);
-        ctx->page_start_tile = ctx->tile_start;
     }
 
     /* Prefetch tile_start's K into buffer 0 BEFORE the loop (3591). */
-    rocke_gfx942_attn2d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(B, 0));
+    rocke_gfx942_attn2d_issue_k(ctx,
+                                ctx->tile_start,
+                                rocke_b_const_i32(B, 0),
+                                rocke_gfx942_attn2d_carried(ctx, ctx->page_start));
 
     /* cur_buf carry append (3606-3607). */
     int idx = ctx->iter_args_count;
