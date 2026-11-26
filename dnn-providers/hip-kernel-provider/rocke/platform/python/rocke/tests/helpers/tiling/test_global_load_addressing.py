@@ -16,7 +16,9 @@ it.
 These tests lower a tile copy (``load_fragment`` then ``store_fragment``) with each engine and
 check, in the LLVM IR, that every per-element load reads the base or ``add nsw base, C`` off one
 shared base, and that the index each load reads is the element the layout puts in that register,
-for every lane. Host only: nothing is compiled or launched.
+for every lane. A packed sub-byte tile over a reversed view is checked the same way, loads and
+stores both: its constant is a negative number of 32-bit words. Host only: nothing is compiled or
+launched.
 """
 
 from __future__ import annotations
@@ -24,11 +26,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rocke.core.ir import F16, U8
+from rocke.core.ir import F16, FP4E2M1, FP6E2M3, I32, U8
+from rocke.core.storage import storage_group
+from rocke.helpers.tiling import make_tensor_desc, make_tile_desc
 from rocke.tests.engines import ENGINES, Engine, lower_with_engine
 from rocke.tests.llvm_ir import KernelIR
 
-from ._copy_kernels import LANES_PER_ROW, CopyCase, copy_kernel
+from ._copy_kernels import LANES_PER_ROW, CopyCase, copy_kernel, window_copy_kernel
 
 _CASES = [
     # u8 is outside the dtypes the layer moves with wide loads, so its run stays scalar.
@@ -47,16 +51,15 @@ def _lowered(case: CopyCase, engine: Engine) -> KernelIR:
     return KernelIR(lower_with_engine(kernel, "gfx942", engine=engine))
 
 
-def _load_indices(ir: KernelIR) -> list[str]:
-    """The i32 element index of every load from ``%src``, in IR order. A masked load's index is
-    ``select %in_bounds, <index>, 0``; its in-bounds arm is returned."""
+def _access_indices(ir: KernelIR, pointer: str) -> list[str]:
+    """The i32 element index of every access through the parameter ``pointer``, in IR order. A
+    masked load's index is ``select %in_bounds, <index>, 0``; its in-bounds arm is returned.
+    """
     indices = []
-    for name in ir.find("load"):
-        # load <type>, ptr <gep>, align <n>
-        _, gep, _ = ir.operands(name)
+    for gep in ir.find("getelementptr"):
         # getelementptr inbounds <type>, ptr <pointer>, i32 <index>
-        _, pointer, index = ir.operands(gep)
-        if pointer != "%src":
+        _, base, index = ir.operands(gep)
+        if base != pointer:
             continue
         if ir.opcode(index) == "select":
             select = index
@@ -64,6 +67,12 @@ def _load_indices(ir: KernelIR) -> list[str]:
             assert out_of_bounds == "0", ir.definitions[select]
         indices.append(index)
     return indices
+
+
+def _load_indices(ir: KernelIR) -> list[str]:
+    """The i32 element index of every load from ``%src``, in IR order (the copy only loads
+    through it)."""
+    return _access_indices(ir, "%src")
 
 
 def _expected_indices(case: CopyCase, lanes: np.ndarray) -> list[np.ndarray]:
@@ -113,3 +122,52 @@ def test_every_per_element_load_reads_its_registers_element(
     read = [ir.evaluate(index, inputs) for index in _load_indices(ir)]
     for register, (got, want) in enumerate(zip(read, _expected_indices(case, lanes))):
         np.testing.assert_array_equal(got, want, err_msg=f"register {register}")
+
+
+# A packed tile over a view whose rows run backward: each lane holds one run of `run` elements
+# (whole 32-bit word groups) in each of the tile's two rows, so the second row's accesses sit a
+# negative number of words from the first's. Three rows put the two-row tile across a tile
+# boundary, so every access is masked; four rows at origin 2 keep it inside, unmasked.
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "rows,origin_row", [(3, 1), (4, 2)], ids=["masked", "unmasked"]
+)
+@pytest.mark.parametrize("dtype,run", [(FP4E2M1, 8), (FP6E2M3, 16)], ids=["fp4", "fp6"])
+def test_a_packed_reversed_view_addresses_each_run_by_whole_words(
+    dtype, run, rows, origin_row, engine: Engine
+) -> None:
+    lanes = np.arange(64)
+    row_stride = -64 * run
+    tile = make_tile_desc(
+        shape=[2, 64 * run],
+        thread_tile=[1, run],
+        thread_dist=[1, 64],
+        block_repeat=[2, 1],
+        wave_size=64,
+    )
+    tensor = make_tensor_desc((rows, 64 * run), (row_stride, 1), dtype)
+    kernel = window_copy_kernel(
+        f"packed_reversed_{dtype.name}", tile, tensor, (origin_row, 0), I32
+    )
+    ir = KernelIR(lower_with_engine(kernel, "gfx950", engine=engine))
+    group_elements, group_words = storage_group(dtype.name)
+    words_per_run = run // group_elements * group_words
+    # Register run `repeat` of a lane starts at element (origin_row + repeat, lane * run). The
+    # words of a run are moved one per access, or all in one wide access (an unmasked fp6 run).
+    words = [
+        ((origin_row + repeat) * row_stride + lanes * run)
+        // group_elements
+        * group_words
+        + word
+        for repeat in range(2)
+        for word in range(words_per_run)
+    ]
+    inputs = {ir.call_named("llvm.amdgcn.workitem.id.x"): lanes}
+    for pointer in ("%src", "%dst"):
+        indices = _access_indices(ir, pointer)
+        assert len(indices) in (len(words), 2), pointer
+        expected = words[:: len(words) // len(indices)]
+        for access, (index, want) in enumerate(zip(indices, expected)):
+            np.testing.assert_array_equal(
+                ir.evaluate(index, inputs), want, err_msg=f"{pointer} access {access}"
+            )

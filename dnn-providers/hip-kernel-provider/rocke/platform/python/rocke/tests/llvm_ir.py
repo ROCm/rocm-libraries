@@ -253,8 +253,9 @@ class KernelIR:
     ) -> np.ndarray | np.int64:
         """Evaluate an i32 index value with numpy, given values (scalars or
         arrays that broadcast) for the work-item ids and loop counters it
-        reads, keyed by SSA name. Every value here is a non-negative index, so
-        ``sdiv`` / ``srem`` are floor division and remainder; a
+        reads, keyed by SSA name. ``sdiv`` / ``srem`` by a positive divisor
+        round toward zero, as LLVM's do, so an index below zero (a reversed
+        view addresses back from its pointer) divides as on the GPU; a
         ``readfirstlane`` passes its operand through, which is right for the
         wave-uniform values the lowering reads that way. An instruction this
         does not know fails the test."""
@@ -277,6 +278,8 @@ class KernelIR:
         if op == "or":
             return args[0] | args[1]
         if op in ("sdiv", "srem"):
-            assert (np.asarray(args[0]) >= 0).all() and args[1] > 0
-            return args[0] // args[1] if op == "sdiv" else args[0] % args[1]
+            dividend, divisor = args
+            assert divisor > 0, self.definitions[name]
+            quotient = np.sign(dividend) * (np.abs(dividend) // divisor)
+            return quotient if op == "sdiv" else dividend - quotient * divisor
         raise AssertionError(f"not modelled: {self.definitions[name]}")

@@ -127,10 +127,16 @@ class FragmentPacking:
         )
 
 
-def _require_int_at_least(name: str, value: int, minimum: int) -> int:
-    """Return ``value`` if it is an int (not a bool) of at least ``minimum``, else raise."""
+def _require_int(name: str, value: int) -> int:
+    """Return ``value`` if it is an int (not a bool), else raise ``TypeError``."""
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an integer, got {value!r}")
+    return value
+
+
+def _require_int_at_least(name: str, value: int, minimum: int) -> int:
+    """Return ``value`` if it is an int (not a bool) of at least ``minimum``, else raise."""
+    _require_int(name, value)
     if value < minimum:
         raise ValueError(f"{name} must be at least {minimum}, got {value}")
     return value
@@ -195,6 +201,25 @@ def elements_to_storage(dtype: str, count: int) -> int:
     if not is_register_packed(dtype):
         return count
     return -(-count * dtype_info(dtype).encoded_bits // REGISTER_BITS)
+
+
+def offset_to_storage(dtype: str, offset: int) -> int:
+    """The :func:`storage_dtype` elements a signed ``offset`` of ``dtype`` elements
+    moves by: a stride, or the distance from one element to another, negative along
+    an axis with a negative stride (a reversed view). ``offset`` for a dtype held one
+    to one, else ``offset`` over the :func:`storage_group` group's elements times its
+    words. Where :func:`elements_to_storage` counts elements and rounds a partly
+    filled last word up, an offset must be a whole number of groups, and one that is
+    not raises ``ValueError``."""
+    _require_int("offset", offset)
+    elements, words = storage_group(dtype)
+    if offset % elements:
+        raise ValueError(
+            f"offset_to_storage failed - offset={offset} {dtype_info(dtype).name} "
+            f"elements, expected a multiple of {elements}: a packed offset moves by "
+            "whole groups of 32-bit words"
+        )
+    return offset // elements * words
 
 
 def storage_to_elements(dtype: str, storage_count: int) -> int:

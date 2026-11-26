@@ -29,6 +29,7 @@ from ...core.storage import (
     element_bytes,
     elements_to_storage,
     is_register_packed,
+    offset_to_storage,
     storage_dtype,
     storage_group,
     storage_to_elements,
@@ -380,17 +381,19 @@ def _register_index(
 ) -> Any:
     """The register's storage-unit index: the lane base index (already in storage units, see
     :func:`_unit_index`) plus the register's compile-time coordinate offset linearized by the tensor
-    strides and converted to units. Consecutive registers' indices then differ by a constant, which
-    the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
-    positions by linearity. For every byte-or-wider dtype a unit is an element, so the offset keeps
-    its sign: a negative stride (a reversed view) gives a negative offset."""
+    strides and converted to units (:func:`rocke.core.storage.offset_to_storage`). Consecutive
+    registers' indices then differ by a constant, which the backend vectorizer can merge; it is
+    bit-exact with :func:`_address` of the register's positions by linearity. The offset keeps its
+    sign: a negative stride (a reversed view) gives a negative offset."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
     lead = _leading_rank(window, len(deltas))
-    offset = sum(
-        delta * window.tensor.strides[lead + axis] for axis, delta in enumerate(deltas)
+    offset = offset_to_storage(
+        dtype.name,
+        sum(
+            delta * window.tensor.strides[lead + axis]
+            for axis, delta in enumerate(deltas)
+        ),
     )
-    if is_register_packed(dtype.name):
-        offset = elements_to_storage(dtype.name, offset)
     return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
 
 
@@ -709,7 +712,7 @@ def _packed_access_units(
     run_words = elements_to_storage(dtype.name, length)
     # Every other stride is a whole number of groups (_check_packed_runs), so it steps whole words.
     other_stride_words = [
-        elements_to_storage(dtype.name, stride)
+        offset_to_storage(dtype.name, stride)
         for axis, stride in enumerate(window.tensor.strides)
         if axis != run_axis
     ]
@@ -718,7 +721,7 @@ def _packed_access_units(
         if origin is None:
             return group_words
         # The origin moves every run start, as a stride does.
-        other_stride_words.append(elements_to_storage(dtype.name, origin))
+        other_stride_words.append(offset_to_storage(dtype.name, origin))
     return _widest_word_group(run_words, group_words, other_stride_words)
 
 
