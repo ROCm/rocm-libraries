@@ -138,8 +138,11 @@ when a claim cannot be proved from source at all.
 
 Build-flag-gated and default-OFF engines take the same tiers as default engines. The finding names the flag that ships the
 engine: the one that installs its descriptor or registration, so the engine is selectable. When the code compiles under a
-different flag, it names that flag too. Both come from Orient's **Options and guards** (or by grepping CMake). A finding at
-`IMPORTANT` or above carries in **Proof** the stage, the call path from the public entry point, the traced gate and `path:line`.
+different flag, it names that flag too. An ingestor descriptor's family folder (the first folder under `descriptors/`) can
+have its own packaging option, listed in `HKP_DESCRIPTOR_FAMILIES` (`descriptor-packaging/cmake/HkpPackaging.cmake`); it
+is then packed only with that option ON. Both flags come from Orient's **Options and guards** (or by grepping CMake). A
+finding at `IMPORTANT` or above carries in **Proof** the stage, the call path from the public entry point, the traced gate
+and `path:line`.
 
 ## Exempt: do not report
 
