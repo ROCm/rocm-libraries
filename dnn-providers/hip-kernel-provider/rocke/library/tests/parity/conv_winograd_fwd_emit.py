@@ -12,7 +12,7 @@
 #
 # A config row: (problem N, Hi, Wi, C, K, Y, X, pad, dilation, groups), the
 # stage ("K1" | "K2a" | "K2" | "K4", or "A,B" for a merged launch), the arch,
-# and the WinogradFwdSpec knobs. Index map:
+# and the WinogradFwdSpec knobs ('bias' defaults to 0). Index map:
 #    0  F4 fp16 K1 [gfx1250]
 #    1  F4 fp16 K2 [gfx1250]
 #    2  F4 fp16 K4 [gfx1250]
@@ -66,6 +66,13 @@
 #   50  rejected: 5x5 filter [gfx1250]
 #   51  rejected: merged K2a without a split prescale [gfx1250]
 #   52  rejected: tiles_per_thread does not divide the LDS block [gfx1250]
+#   53  bias: F4 fp16 K4 [gfx1250]
+#   54  bias: F(6x4) bf16 prescale K4 [gfx1250]
+#   55  bias: F4 odd channels (vec 1) K4 [gfx1250]
+#   56  bias: F4 dilation 2 K4 (vec 4) [gfx1250]
+#   57  bias: F2 bf16 operands K4, regular stores [gfx1250]
+#   58  bias: gfx950: F(6x4) bf16 prescale K4 [gfx950]
+#   59  bias: F4 K1 (unchanged, no tag) [gfx1250]
 from _emit_common import run_emit
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_winograd_fwd import (
@@ -133,6 +140,13 @@ CONFIGS = [
     ((1, 12, 12, 64, 64, 5, 5, 2, 1, 1), 'K1', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 50: rejected: 5x5 filter
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2a,K1', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 51: rejected: merged K2a without a split prescale
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2', 'gfx1250', {'m': 2, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 4, 'pmode': 'fused', 'bh': 2, 'bw': 3, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 52: rejected: tiles_per_thread does not divide the LDS block
+    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K4', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 53: bias: F4 fp16 K4
+    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K4', 'gfx1250', {'m': 6, 'm_w': 4, 'io': 'bf16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 1, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 54: bias: F(6x4) bf16 prescale K4
+    ((1, 13, 11, 33, 35, 3, 3, 1, 1, 1), 'K4', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 55: bias: F4 odd channels (vec 1) K4
+    ((1, 40, 40, 128, 64, 3, 3, 2, 2, 1), 'K4', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 4, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 56: bias: F4 dilation 2 K4 (vec 4)
+    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K4', 'gfx1250', {'m': 2, 'm_w': 0, 'io': 'bf16', 'op': 'bf16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 0, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 57: bias: F2 bf16 operands K4, regular stores
+    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K4', 'gfx950', {'m': 6, 'm_w': 4, 'io': 'bf16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 1, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 58: bias: gfx950: F(6x4) bf16 prescale K4
+    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K1', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0, 'bias': 1}),  # 59: bias: F4 K1 (unchanged, no tag)
 ]
 # fmt: on
 
@@ -170,6 +184,7 @@ def _spec(idx: int):
         lds_lanes=d["lanes"],
         filter_rows=d["frows"],
         filter_vec=d["fvec"],
+        bias=bool(d.get("bias", 0)),
     )
     return (spec, stage), arch
 

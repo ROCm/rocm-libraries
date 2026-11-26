@@ -253,6 +253,8 @@ rocke_status_t rocke_winograd_fused_1d_kernel_name(const rocke_winograd_fused_1d
         tag += "_o" + std::to_string(spec->waves_per_eu);
     if(spec->m_f16)
         tag += "_mh";
+    if(spec->bias)
+        tag += "_cbias";
     std::string name = spec->name ? spec->name : "";
     std::string full = name.empty() ? tag : name + "_" + tag;
     for(char& ch : full)
@@ -424,7 +426,7 @@ struct Ctx
     int m, n, S, Q, FK, C, K, d, pw, Wi, Wo;
     int64_t TB, KB, VT, RR, CP, MP, C32, CV, WAVES, NTH, KBN, GRID, GPK, RA, MDUMMY, MPH;
     bool PF, MH;
-    V *x, *x_rsrc, *u_rsrc, *y_rsrc, *c0, *oob;
+    V *x, *x_rsrc, *u_rsrc, *y_rsrc, *bias_rsrc, *c0, *oob;
     V *raw_lds, *v_lds, *m_lds;
     V *tid, *wave, *lane, *l16, *lhalf, *wg, *kbi, *first, *k0, *n_iter;
     V *tr_col, *tr_row, *xf_tg, *xf_bin, *xf_colok, *bt_frag, *zero8;
@@ -881,6 +883,9 @@ void do_out(Ctx& c, const Dec& dc)
             V* x1 = modi(c, item, ci(c, KV));
             kc = mul(c, x1, ci(c, FW_VEC));
         }
+        std::vector<V*> bias;
+        if(c.bias_rsrc != NULL)
+            bias = rocke_wino::bias_f32(b, c.bias_rsrc, add(c, c.k0, kc), "fp16", FW_VEC);
         std::vector<std::vector<V*>> ms;
         for(int bb = 0; bb < c.n; ++bb)
         {
@@ -925,6 +930,9 @@ void do_out(Ctx& c, const Dec& dc)
                     col.push_back(ms[bb][ch]);
                 vals.push_back(lin(c, &c.at[(size_t)i * c.n], col, false));
             }
+            if(!bias.empty())
+                for(int ch = 0; ch < FW_VEC; ++ch)
+                    vals[ch] = rocke_b_fadd(b, vals[ch], bias[ch]);
             V* wo;
             {
                 V* x1 = mul(c, tile, ci(c, c.m));
@@ -1056,6 +1064,7 @@ rocke_kernel_def_t*
         V* nb = rocke_b_param(b, "y_bytes", rocke_i32(), NULL);
         c.y_rsrc = rocke_b_buffer_rsrc(b, y, nb);
     }
+    c.bias_rsrc = spec->bias ? rocke_wino::bias_rsrc(b, "fp16") : NULL;
     c.c0 = ci(c, 0);
     c.oob = ci(c, rocke_wino::kOob);
 

@@ -10,7 +10,8 @@
 # emitter conv_winograd_fwd_rt_emit.c (same table, same order).
 #
 # A config row: the stage ("K1" | "K2a" | "K2" | "K4"), the arch, and the
-# spec knobs (a stage reads the ones its spec class has). Index map:
+# spec knobs (a stage reads the ones its spec class has; 'bias' defaults to 0).
+# Index map:
 #    0  F4 fp16 K1 (2 filter rows) [gfx1250]
 #    1  F2 bf16 operands K1 (all rows) [gfx1250]
 #    2  F(6x4) K1 vec 4 [gfx1250]
@@ -61,6 +62,10 @@
 #   47  rejected: LDS lanes not a power of two [gfx1250]
 #   48  rejected: LDS lanes 0 [gfx1250]
 #   49  rejected: LDS region of zero width [gfx1250]
+#   50  bias: F4 K4 [gfx1250]
+#   51  bias: F(6x4) bf16 K4 prescale [gfx1250]
+#   52  bias: F2 K4 vec 1 block 64, regular stores [gfx1250]
+#   53  bias: gfx950: F4 bf16 K4 prescale [gfx950]
 from _emit_common import run_emit
 from kernels.common.conv_winograd_fwd_rt import (
     RtFilterSpec,
@@ -122,6 +127,10 @@ CONFIGS = [
     ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 4, 'bh': 4, 'bw': 8, 'lanes': 3, 'nt': 1, 'fused': 0}),  # 47: rejected: LDS lanes not a power of two
     ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 4, 'bh': 4, 'bw': 8, 'lanes': 0, 'nt': 1, 'fused': 0}),  # 48: rejected: LDS lanes 0
     ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 4, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 49: rejected: LDS region of zero width
+    ('K4', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0, 'bias': 1}),  # 50: bias: F4 K4
+    ('K4', 'gfx1250', {'mh': 6, 'mw': 4, 'io': 'bf16', 'op': 'fp16', 'vec': 4, 'fr': 1, 'block': 256, 'ps': 1, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0, 'bias': 1}),  # 51: bias: F(6x4) bf16 K4 prescale
+    ('K4', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 1, 'fr': 1, 'block': 64, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 0, 'fused': 0, 'bias': 1}),  # 52: bias: F2 K4 vec 1 block 64, regular stores
+    ('K4', 'gfx950', {'mh': 4, 'mw': 4, 'io': 'bf16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 1, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0, 'bias': 1}),  # 53: bias: gfx950: F4 bf16 K4 prescale
 ]
 # fmt: on
 
@@ -148,7 +157,7 @@ def _spec(idx: int):
         spec = RtOutputSpec(
             mh=d["mh"], mw=d["mw"], io_dtype=d["io"], operand_dtype=d["op"],
             vec=d["vec"], block_size=d["block"], prescale=bool(d["ps"]),
-            nt_stores=bool(d["nt"]),
+            nt_stores=bool(d["nt"]), bias=bool(d.get("bias", 0)),
         )  # fmt: skip
     return spec, arch
 

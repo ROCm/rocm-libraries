@@ -511,6 +511,7 @@ void build_output(Ctx& c)
     rocke_value_t* y = param_ptr(c, "y", io_dt(s), false);
     rocke_value_t* m_rsrc = rsrc_of(c, mm, "m_bytes");
     rocke_value_t* y_rsrc = rsrc_of(c, y, "y_bytes");
+    rocke_value_t* bias_rsrc = s->bias ? rocke_wino::bias_rsrc(b, io_dt(s)) : NULL;
     TileCoords tc = flat_tile(c, p.K / vec, rocke_winograd_gen_tiles_w(s));
     rocke_value_t* k = mulc(c, tc.cv, vec);
     rocke_value_t* mb = mulc(c, tc.t, (int64_t)bins * p.K);
@@ -524,6 +525,9 @@ void build_output(Ctx& c)
             rocke_value_t* off = addc(c, mbase, (int64_t)(uu * nx + vv) * p.K * 2);
             raw[uu].push_back(rocke_wino::load_raw(b, m_rsrc, off, op_dt(s), vec));
         }
+    Vals bias;
+    if(bias_rsrc != NULL)
+        bias = rocke_wino::bias_f32(b, bias_rsrc, k, io_dt(s), vec);
     rocke_value_t* h = mulc(c, tc.ti, (int64_t)p.dH * my);
     rocke_value_t* ho0 = rocke_b_add(b, tc.a, h);
     rocke_value_t* w = mulc(c, tc.tj, (int64_t)p.dW * mx);
@@ -576,6 +580,9 @@ void build_output(Ctx& c)
                     t.emplace_back(ty->AT(i, uu).value(), txv[uu][j][ch]);
                 vals.push_back(lin(c, t));
             }
+            if(!bias.empty())
+                for(int ch = 0; ch < vec; ++ch)
+                    vals[ch] = rocke_b_fadd(b, vals[ch], bias[ch]);
             rocke_value_t* off = rocke_b_add(b, yrow[i], ycol[j]);
             rocke_value_t* packed = rocke_wino::pack_vec_f32(b, vals, io_dt(s));
             pending.emplace_back(off, packed);
@@ -769,6 +776,8 @@ rocke_status_t rocke_winograd_gen_kernel_name(const rocke_winograd_gen_spec_t* s
         return ROCKE_ERR_VALUE;
     std::string name = std::string(spec->name ? spec->name : "conv_winograd_gen") + "_" + w + "_"
                        + spec_short(spec);
+    if(spec->bias && strcmp(w, "output") == 0)
+        name += "_cbias";
     for(char& ch : name)
         if(ch == '/')
             ch = '_';

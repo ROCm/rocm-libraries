@@ -21,6 +21,8 @@
 #   case 9  1x3 F(2,3), vec 2, N = 3                           gfx1250
 #   case 10 1x5 F(4,5) (the selector's only 1x5 variant)       gfx1250
 #   case 11 5x1 F(4,5), bf16 I/O, dilation 2                   gfx1250
+#   case 12 bias: 1x11 6s2, fp16 (K4 adds the bias)            gfx1250
+#   case 13 bias: 5x5 F(3x3,5x5), groups 4, bf16, C = K = 36   gfx950
 #   60      rejected by both engines: stride 2
 #   61      rejected by both engines: F(4,11) single segment (no default points)
 #   62      rejected by both engines: segments along H
@@ -84,6 +86,12 @@ def _case(i: int):
     if i == 11:
         p = P(N=1, Hi=60, Wi=3, C=32, K=64, Y=5, X=1, pH=4, dH=2)
         return p, A(4, 5), ONE, dict(io_dtype="bf16"), "gfx1250"
+    if i == 12:
+        p = P(N=2, Hi=1, Wi=200, C=64, K=64, Y=1, X=11, pW=5)
+        return p, ONE, A(6, 11, 2), dict(bias=True), "gfx1250"
+    if i == 13:
+        p = P(N=1, Hi=24, Wi=22, C=36, K=36, Y=5, X=5, pH=2, pW=2, groups=4)
+        return p, A(3, 5), A(3, 5), dict(io_dtype="bf16", bias=True), "gfx950"
     return None
 
 

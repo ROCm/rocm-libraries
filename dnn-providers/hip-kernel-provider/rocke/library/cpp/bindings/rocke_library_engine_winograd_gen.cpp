@@ -59,6 +59,7 @@ rocke_winograd_gen_spec_t wgen_build_spec(const py::dict& d, std::deque<std::str
     s.vec = dict_int(d, "vec", s.vec);
     s.block_size = dict_int(d, "block_size", s.block_size);
     s.nt_stores = dict_bool(d, "nt_stores", s.nt_stores);
+    s.bias = dict_bool(d, "bias", s.bias);
     return s;
 }
 

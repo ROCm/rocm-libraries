@@ -58,6 +58,8 @@ typedef struct rocke_winograd_fwd_spec
     int filter_vec; /* 0 */
     int m_w; /* 0: output tile columns (0 = m) */
     const char* name; /* "conv_winograd_fwd" */
+    bool bias; /* false: K4 adds the per-output-channel conv bias (trailing
+                * Bias / Bias_bytes kernargs; "cbias" in the K4 kernel names) */
 } rocke_winograd_fwd_spec_t;
 
 /* The transform stages (TransformStage.name). */
@@ -92,7 +94,8 @@ bool rocke_winograd_fwd_stage_launch(const rocke_winograd_fwd_spec_t* spec,
                                      char* reason,
                                      size_t reason_cap);
 
-/* spec.kernel_name(tag): kernel_name_join(name, tag, short()). */
+/* spec.kernel_name(tag): kernel_name_join(name, tag, short()), plus "cbias"
+ * with bias when the tag ("output" / "merged_...") includes K4. */
 rocke_status_t rocke_winograd_fwd_kernel_name(const rocke_winograd_fwd_spec_t* spec,
                                               const char* tag,
                                               char* out,

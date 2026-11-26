@@ -1352,6 +1352,7 @@ def conv_winograd_fwd_spec_to_dict(spec: Any, stages: Any) -> Dict[str, Any]:
         filter_rows=spec.filter_rows,
         filter_vec=spec.filter_vec,
         name=spec.name,
+        bias=spec.bias,
     )
     if isinstance(stages, str):
         d["stage"] = stages
@@ -1552,6 +1553,7 @@ def conv_winograd_gen_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
         block_size=spec.block_size,
         nt_stores=spec.nt_stores,
         name=spec.name,
+        bias=spec.bias,
         stage=stage,
     )
 
@@ -1642,6 +1644,7 @@ def conv_winograd_fused_1d_spec_to_dict(spec: Any) -> Dict[str, Any]:
         waves=spec.waves,
         waves_per_eu=spec.waves_per_eu,
         name=spec.name,
+        bias=spec.bias,
     )
 
 

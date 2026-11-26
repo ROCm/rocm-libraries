@@ -160,6 +160,19 @@ static int make_cfg(int idx, rocke_winograd_fused_1d_spec_t* s, const char** arc
         sel(s);
         *arch = "gfx950";
         return 0;
+    case 16:
+        s->problem = make_problem(128, 128, 11, 600, 1, -1, 1, 1);
+        axis(s, 4, 11, 3);
+        sel(s);
+        s->bias = true;
+        return 0;
+    case 17:
+        s->problem = make_problem(64, 64, 11, 600, 1, -1, 1, 1);
+        axis(s, 6, 11, 2);
+        s->q = 2;
+        s->fk = 2;
+        s->bias = true;
+        return 0;
     default:
         return -1;
     }

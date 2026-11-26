@@ -1684,6 +1684,7 @@ bool emit_output(E& e, std::string* err)
     V yb = param(e, "y_bytes", rocke_i32(), 0);
     V m_rsrc = rocke_b_buffer_rsrc(b, mm, mb);
     V y_rsrc = rocke_b_buffer_rsrc(b, y, yb);
+    V bias_rsrc = s->bias ? rocke_wino::bias_rsrc(b, io_dt(s)) : nullptr;
 
     RunCoords rc = run_coords(e, rm);
     V t = rc.t0;
@@ -1718,6 +1719,9 @@ bool emit_output(E& e, std::string* err)
         V ld = rocke_b_global_load_i32(b, ep, t_safe, 4);
         scale = pow2_f32(e, ld);
     }
+    VV bias;
+    if(bias_rsrc != nullptr)
+        bias = rocke_wino::bias_f32(b, bias_rsrc, k, io_dt(s), vec);
     V ho0, wo0, img_row0;
     {
         V k1 = ci(e, (int64_t)p.dH * m);
@@ -1793,6 +1797,9 @@ bool emit_output(E& e, std::string* err)
             if(scale != nullptr)
                 for(auto& x : vals)
                     x = rocke_b_fmul(b, x, scale);
+            if(!bias.empty())
+                for(int ch = 0; ch < vec; ++ch)
+                    vals[ch] = rocke_b_fadd(b, vals[ch], bias[ch]);
             V off = rocke_b_add(b, yrow[i], ycol[j]);
             V pk = rocke_wino::pack_vec_f32(b, vals, io_dt(s));
             pending.push_back({off, pk});
@@ -1838,6 +1845,20 @@ const char* stage_tag(rocke_winograd_fwd_stage_t st)
         return "output";
     }
     return "";
+}
+
+/* _stage_tag_has_output: the tag ("output" or "merged_<stages>") includes K4,
+ * the only stage the bias changes. */
+bool stage_tag_has_output(const char* tag)
+{
+    if(strcmp(tag, "output") == 0)
+        return true;
+    if(strncmp(tag, "merged_", 7) != 0)
+        return false;
+    for(const char* p = tag + 6; p != NULL; p = strchr(p + 1, '_'))
+        if(strncmp(p + 1, "k4", 2) == 0 && (p[3] == '_' || p[3] == '\0'))
+            return true;
+    return false;
 }
 
 /* ------------------------------------------------------------ merged */
@@ -2310,9 +2331,17 @@ rocke_status_t rocke_winograd_fwd_kernel_name(const rocke_winograd_fwd_spec_t* s
                                               size_t out_cap)
 {
     std::string sh = spec_short(spec);
-    const char* parts[] = {tag, sh.c_str()};
-    return rocke_kernel_name_join(
-        spec->name ? spec->name : "conv_winograd_fwd", parts, 2, NULL, NULL, 0, out, out_cap, NULL);
+    const char* parts[] = {tag, sh.c_str(), "cbias"};
+    const int n_parts = (spec->bias && stage_tag_has_output(tag)) ? 3 : 2;
+    return rocke_kernel_name_join(spec->name ? spec->name : "conv_winograd_fwd",
+                                  parts,
+                                  n_parts,
+                                  NULL,
+                                  NULL,
+                                  0,
+                                  out,
+                                  out_cap,
+                                  NULL);
 }
 
 rocke_kernel_def_t* rocke_build_winograd_fwd_stage(rocke_ir_builder_t* b,

@@ -237,6 +237,8 @@ std::string kernel_name(const Spec* s)
             tags.push_back("ps");
         if(!s->nt_stores)
             tags.push_back("rt");
+        if(s->bias)
+            tags.push_back("cbias");
         return join(tags);
     }
     }
@@ -1465,6 +1467,7 @@ void emit_output(E& e)
     V m_rsrc = rocke_b_buffer_rsrc(b, mm, m_bytes);
     V y_rsrc = rocke_b_buffer_rsrc(b, y, y_bytes);
     Coords rc = run_coords(e, 1);
+    V bias_rsrc = s->bias ? rocke_wino::bias_rsrc(b, s->io_dtype) : nullptr;
 
     V K = g[O_K], Ho = g[O_HO], Wo = g[O_WO];
     V kb2;
@@ -1502,6 +1505,9 @@ void emit_output(E& e)
         V ld = rocke_b_global_load_i32(b, e_ptr, t_safe, 4);
         scale = rocke_wino::pow2_f32(b, ld);
     }
+    VV bias;
+    if(bias_rsrc != nullptr)
+        bias = rocke_wino::bias_f32(b, bias_rsrc, k, s->io_dtype, vec);
     V ho0;
     {
         V m1 = rocke_b_mul(b, rc.ti, g[O_DHM]);
@@ -1576,6 +1582,9 @@ void emit_output(E& e)
                 for(auto& x_ : vals)
                     x_ = rocke_b_fmul(b, x_, scale);
             }
+            if(!bias.empty())
+                for(int ch = 0; ch < vec; ++ch)
+                    vals[ch] = rocke_b_fadd(b, vals[ch], bias[ch]);
             V ad = rocke_b_add(b, yrow[i], ycol[j]);
             pending.push_back({ad, rocke_wino::pack_vec_f32(b, vals, s->io_dtype)});
         }

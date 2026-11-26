@@ -8,6 +8,7 @@
  * Every helper emits in Python evaluation order, so the SSA sequence matches
  * the Python helpers it ports.
  */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_winograd_internal.h"
 
 #include <math.h>
@@ -803,6 +804,22 @@ std::vector<rocke_value_t*> raw_to_f32(rocke_ir_builder_t* b, rocke_value_t* raw
         out.push_back(rocke_b_cast_to_f32(b, e));
     }
     return out;
+}
+
+rocke_value_t* bias_rsrc(rocke_ir_builder_t* b, const char* io_dtype)
+{
+    rocke_value_t* bias = NULL;
+    rocke_value_t* bias_bytes = NULL;
+    rocke_conv_bias_declare_params(b, ir_dtype(io_dtype), &bias, &bias_bytes);
+    return rocke_conv_bias_rsrc(b, bias, bias_bytes);
+}
+
+std::vector<rocke_value_t*> bias_f32(
+    rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* k, const char* io_dtype, int n)
+{
+    rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+    rocke_value_t* off = rocke_b_mul(b, k, c2);
+    return raw_to_f32(b, load_raw(b, rsrc, off, io_dtype, n), n);
 }
 
 rocke_value_t*

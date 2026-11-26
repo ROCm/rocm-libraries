@@ -71,6 +71,7 @@ WfwdSel wfwd_build(const py::dict& d, std::deque<std::string>& store)
     s.lds_lanes = dict_int(d, "lds_lanes", s.lds_lanes);
     s.filter_rows = dict_int(d, "filter_rows", s.filter_rows);
     s.filter_vec = dict_int(d, "filter_vec", s.filter_vec);
+    s.bias = dict_bool(d, "bias", s.bias);
     if(dict_str(d, "name", v))
         s.name = keep(store, v);
     if(d.contains("merged") && !d["merged"].is_none())

@@ -60,6 +60,8 @@ typedef struct rocke_winograd_rt_spec
     int lds_lanes; /* 16 (K2) */
     bool nt_stores; /* true (K2, K4) */
     bool fused; /* false (K2) */
+    bool bias; /* false (K4): add the per-output-channel conv bias (trailing
+                * Bias / Bias_bytes kernargs, "cbias" name tag) */
 } rocke_winograd_rt_spec_t;
 
 /* Spec with the dataclass defaults for `stage`. */

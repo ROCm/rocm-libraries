@@ -76,6 +76,8 @@ typedef struct rocke_winograd_gen_spec
     int block_size; /* default 256 */
     bool nt_stores; /* default true */
     const char* name; /* default "conv_winograd_gen" */
+    bool bias; /* default false: K4 adds the per-output-channel conv bias
+                * (trailing Bias / Bias_bytes kernargs, "cbias" name tag) */
 } rocke_winograd_gen_spec_t;
 
 /* Spec with the dataclass defaults (problem zeroed, both axes F(1, 1)). */

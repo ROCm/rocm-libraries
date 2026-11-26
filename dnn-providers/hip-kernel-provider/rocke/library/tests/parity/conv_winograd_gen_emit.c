@@ -124,6 +124,23 @@ static int make_case(int i, rocke_winograd_gen_spec_t* s, const char** arch)
         s->ax_y = ax(4, 5, 1);
         s->io_dtype = "bf16";
         return 0;
+    case 12:
+        s->problem = prob(2, 1, 200, 64, 64, 1, 11);
+        s->problem.pW = 5;
+        s->ax_x = ax(6, 11, 2);
+        s->bias = true;
+        return 0;
+    case 13:
+        s->problem = prob(1, 24, 22, 36, 36, 5, 5);
+        s->problem.pH = 2;
+        s->problem.pW = 2;
+        s->problem.groups = 4;
+        s->ax_y = ax(3, 5, 1);
+        s->ax_x = ax(3, 5, 1);
+        s->io_dtype = "bf16";
+        s->bias = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
