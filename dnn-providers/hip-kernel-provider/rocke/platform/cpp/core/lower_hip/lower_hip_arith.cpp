@@ -491,6 +491,27 @@ static rocke_status_t rocke_h_op_arith_xor(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
+/* def _op_arith_bitop3_b32(self, op):
+ *     a, b, c = op.operands
+ *     self._emit(f"int {_name(op.result)} = __builtin_amdgcn_bitop3_b32("
+ *                f"{_name(a)}, {_name(b)}, {_name(c)}, {int(op.attrs['table'])});") */
+static rocke_status_t rocke_h_op_arith_bitop3_b32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    int64_t table = 0;
+    if(!rocke_attr_get_int(&op->attrs, "table", &table))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.bitop3_b32: missing 'table'");
+    }
+    rocke_h_emitf(lw,
+                  "int %s = __builtin_amdgcn_bitop3_b32(%s, %s, %s, %lld);",
+                  rocke_h_name(lw, h_res(op)),
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]),
+                  (long long)table);
+    return lw->status;
+}
+
 /* def _op_arith_shl(self, op): self._binary(op, "<<") */
 static rocke_status_t rocke_h_op_arith_shl(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -980,6 +1001,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_UMIN, rocke_h_op_arith_umin},
         {ROCKE_OP_ARITH_NOT, rocke_h_op_arith_not},
         {ROCKE_OP_ARITH_XOR, rocke_h_op_arith_xor},
+        {ROCKE_OP_ARITH_BITOP3_B32, rocke_h_op_arith_bitop3_b32},
         {ROCKE_OP_ARITH_SHL, rocke_h_op_arith_shl},
         {ROCKE_OP_ARITH_LSHR, rocke_h_op_arith_lshr},
         {ROCKE_OP_ARITH_UMUL_HI_I32, rocke_h_op_arith_umul_hi_i32},

@@ -740,6 +740,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # to fuse four clamped i32s into one i32 in 2 perm calls (lo half +
     # hi half) followed by one perm to interleave.
     "amdgcn.perm": ("declare i32 @llvm.amdgcn.perm(i32, i32, i32)"),
+    "amdgcn.bitop3.i32": (
+        "declare i32 @llvm.amdgcn.bitop3.i32(i32, i32, i32, i32 immarg)"
+    ),
     # gfx950 fused FP8/BF8 dequant + scale. SINGLE instruction
     # ``v_cvt_scalef32_pk_f32_fp8`` does ``<2 x f32> = scale * fp8x2``
     # — the same operation our current path takes 3 separate instructions
@@ -5488,6 +5491,16 @@ class _Lowerer:
         self._current().emit(
             f"  {op.result.name} = xor {_llvm_type(op.result.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
+        )
+
+    def _op_arith_bitop3_b32(self, op: Op) -> None:
+        """``v_bitop3_b32`` via ``llvm.amdgcn.bitop3.i32`` (table immarg)."""
+        a, b, c = op.operands
+        self._need("amdgcn.bitop3.i32")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.bitop3.i32("
+            f"i32 {self._operand(a)}, i32 {self._operand(b)}, "
+            f"i32 {self._operand(c)}, i32 {int(op.attrs['table'])})"
         )
 
     def _op_arith_shl(self, op: Op) -> None:

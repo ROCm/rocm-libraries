@@ -704,6 +704,30 @@ static void _op_arith_xor(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, b));
 }
 
+/* Python _op_arith_bitop3_b32: v_bitop3_b32, the truth table an immarg. */
+static void _op_arith_bitop3_b32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t table = 0;
+    const char* a_s;
+    const char* b_s;
+    const char* c_s;
+    if(!rocke_attr_get_int(&op->attrs, "table", &table))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arith.bitop3_b32: missing 'table'");
+    }
+    rocke_ll_need(L, "amdgcn.bitop3.i32");
+    a_s = rocke_ll_operand(L, op->operands[0]);
+    b_s = rocke_ll_operand(L, op->operands[1]);
+    c_s = rocke_ll_operand(L, op->operands[2]);
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.bitop3.i32(i32 %s, i32 %s, i32 %s, i32 %lld)",
+                   ll_result(op)->name,
+                   a_s,
+                   b_s,
+                   c_s,
+                   (long long)table);
+}
+
 /* Python _op_arith_shl (result-typed). */
 static void _op_arith_shl(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -817,6 +841,7 @@ static void _op_math_ldexp(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, op->operands[0]),
                    rocke_ll_operand(L, op->operands[1]));
 }
+
 /* Python _op_math_log2. */
 static void _op_math_log2(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -1028,6 +1053,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_UMAX, _op_arith_umax);
     rocke_ll_set_handler(ROCKE_OP_ARITH_UMIN, _op_arith_umin);
     rocke_ll_set_handler(ROCKE_OP_ARITH_XOR, _op_arith_xor);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_BITOP3_B32, _op_arith_bitop3_b32);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SHL, _op_arith_shl);
     rocke_ll_set_handler(ROCKE_OP_ARITH_LSHR, _op_arith_lshr);
     rocke_ll_set_handler(ROCKE_OP_ARITH_UMUL_HI_I32, _op_arith_umul_hi_i32);

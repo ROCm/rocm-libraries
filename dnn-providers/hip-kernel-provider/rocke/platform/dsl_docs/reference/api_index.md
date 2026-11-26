@@ -147,11 +147,15 @@ load_sorted_topk_weight # f32 global load with align=4
 # Rotary position embedding (helpers/rotary.py)
 RotaryLayout, RotarySpec # "interleaved" / "half"
 pair_indices, load_cos_sin, apply_rotary_pair_f32
-# Philox4x32-10 RNG for dropout (helpers/rng.py)
+# Philox4x32-10 RNG (helpers/rng.py)
 PHILOX_M0, PHILOX_M1, PHILOX_W0, PHILOX_W1, PHILOX_ROUNDS
-philox_u32_quartet # 4 u32 from one counter
-philox_uniform_f32_quartet # 4 f32 in [0, 1)
-dropout_mask_pair_f32 # (keep, scale, keep, scale)
+philox4x32_10 # 4 u32 words of a counter and key
+PhiloxCall # one call emitted a round at a time
+philox_counter_add, add_u32_wrap, mul_lo_u32_const, mulhilo_u32_wide
+# SDPA dropout mask, hipDNN SEM-015 (helpers/attention_dropout.py)
+dropout_row_counter # counter of a row's key 0
+dropout_words # 4 words = 4 consecutive keys
+dropout_keep # keep flag of one word
 # Extended attention masks (helpers/attention.py)
 alibi_bias_log2 # slope * (k_pos - q_pos)
 alibi_bias_matrix # precomputed (H, Q, K) bias

@@ -3010,6 +3010,74 @@ void case_ldexp()
     rocke_ir_builder_free(&b);
 }
 
+/* bitop3_b32: the C++ builder's op lowers to one call of
+ * llvm.amdgcn.bitop3.i32 with the truth table as its immarg, declared once,
+ * and to __builtin_amdgcn_bitop3_b32 in HIP source; it is pure; the builder
+ * refuses non-i32 operands and a table outside a byte with the Python
+ * builder's texts (tests/core/test_bitop3_b32.py). */
+void build_bitop3_b32(rocke_ir_builder_t* b)
+{
+    rocke_value_t* a = rocke_b_param(b, "A", rocke_ptr_type(b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* y = rocke_b_param(b, "Y", rocke_ptr_type(b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* t = rocke_b_thread_id_x(b);
+    rocke_value_t* v = rocke_b_global_load_i32(b, a, t, 4);
+    rocke_b_global_store(b, y, t, rocke_b_bitop3_b32(b, v, t, rocke_b_const_i32(b, 7), 0x96), 4);
+}
+
+/* The builder's error text for rocke_b_bitop3_b32 on these operands, or "" if it built. */
+std::string bitop3_b32_error(bool f32_operand, int table)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "bitop3_b32_bad");
+    std::string err;
+    try
+    {
+        rocke_value_t* c = f32_operand ? rocke_b_const_f32(&b, 1.0) : rocke_b_const_i32(&b, 1);
+        rocke_value_t* r
+            = rocke_b_bitop3_b32(&b, rocke_b_const_i32(&b, 1), rocke_b_const_i32(&b, 2), c, table);
+        if(rocke_ir_builder_status(&b) != ROCKE_OK)
+        {
+            const char* msg = rocke_ir_builder_error(&b);
+            err = msg ? msg : "(no message)";
+        }
+        else if(r == nullptr)
+            err = "(NULL without an error)";
+    }
+    catch(const std::exception& e)
+    {
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    return err;
+}
+
+void case_bitop3_b32()
+{
+    const std::string ir = lower_one("bitop3_b32", build_bitop3_b32, "gfx950");
+    EXPECT_IR_COUNT(ir, " = call i32 @llvm.amdgcn.bitop3.i32(i32 ", 1);
+    EXPECT_IR_COUNT(ir, ", i32 150)\n", 1);
+    EXPECT_IR_COUNT(ir, "declare i32 @llvm.amdgcn.bitop3.i32(i32, i32, i32, i32 immarg)\n", 1);
+
+    const std::string hip = lower_one_hip("bitop3_b32_hip", build_bitop3_b32, "gfx950");
+    EXPECT_IR_COUNT(hip, " = __builtin_amdgcn_bitop3_b32(", 1);
+
+    if(!rocke_opcode_is_pure(ROCKE_OP_ARITH_BITOP3_B32))
+        fail("arith.bitop3_b32 must be pure", __LINE__);
+    if(std::string(rocke_opcode_name(ROCKE_OP_ARITH_BITOP3_B32)) != "arith.bitop3_b32")
+        fail("ROCKE_OP_ARITH_BITOP3_B32 must be named arith.bitop3_b32", __LINE__);
+
+    if(bitop3_b32_error(true, 0x96).find("bitop3_b32 requires i32 operands") == std::string::npos)
+        fail("rocke_b_bitop3_b32 must refuse an f32 operand", __LINE__);
+    if(bitop3_b32_error(false, 256).find("bitop3_b32 table must be 0..255, got 256")
+       == std::string::npos)
+        fail("rocke_b_bitop3_b32 must refuse table 256", __LINE__);
+    if(bitop3_b32_error(false, -1).find("bitop3_b32 table must be 0..255, got -1")
+       == std::string::npos)
+        fail("rocke_b_bitop3_b32 must refuse table -1", __LINE__);
+    if(!bitop3_b32_error(false, 0xFF).empty())
+        fail("rocke_b_bitop3_b32 must accept table 255", __LINE__);
+}
+
 void case_gfx1250_tdm_gated()
 {
     const struct
@@ -4514,6 +4582,7 @@ const TestCase k_cases[] = {
     {"global_ptr_offset", case_global_ptr_offset},
     {"trap", case_trap},
     {"ldexp", case_ldexp},
+    {"bitop3_b32", case_bitop3_b32},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},

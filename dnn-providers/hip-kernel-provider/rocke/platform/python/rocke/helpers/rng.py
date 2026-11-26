@@ -1,22 +1,22 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Philox4x32 RNG for FMHA dropout.
+"""Philox4x32-10 counter-based RNG in IR.
 
-Philox4x32-10 is a counter-based RNG: each ``(seed, subseq, offset,
-counter)`` quadruple deterministically produces four independent
-uniform ``u32`` outputs after 10 rounds of a Feistel-like
-permutation. Because there is no per-thread state, the same RNG
-output is reproducible from the kernel arguments alone -- the FMHA
-forward and backward passes can independently regenerate the same
-dropout mask without explicit state hand-off.
+A (key, counter) pair gives four uniform ``u32`` words after 10 rounds, with no
+per-thread state, so a kernel can regenerate any word from its arguments alone.
+
+The IR's i32 ``add`` / ``mul`` carry ``nsw``, so a wrapping u32 sum or product
+written with them is poison. Philox wraps on nearly every call, so its low
+product and key schedule are built in i64 with operands small enough that no
+step overflows, then truncated; LLVM narrows the sequence back to 32-bit ops.
 """
 
 from __future__ import annotations
 
 from typing import Tuple
 
-from ..core.ir import IRBuilder, Value
+from ..core.ir import I32, I64, IRBuilder, Value
 
 
 __all__ = [
@@ -25,13 +25,16 @@ __all__ = [
     "PHILOX_W0",
     "PHILOX_W1",
     "PHILOX_ROUNDS",
-    "dropout_mask_pair_f32",
-    "philox_u32_quartet",
-    "philox_uniform_f32_quartet",
+    "PhiloxCall",
+    "add_u32_wrap",
+    "mul_lo_u32_const",
+    "mulhilo_u32_wide",
+    "philox4x32_10",
+    "philox_counter_add",
 ]
 
 
-# Philox4x32-10 round constants -- match PyTorch + CK Tile bit-for-bit.
+# Philox4x32-10 multipliers and key increments (Random123).
 PHILOX_M0 = 0xD2511F53
 PHILOX_M1 = 0xCD9E8D57
 PHILOX_W0 = 0x9E3779B9
@@ -52,96 +55,165 @@ def _u32_const(b: IRBuilder, value: int) -> Value:
     return b.const_i32(masked)
 
 
+def add_u32_wrap(b: IRBuilder, a: Value, c: Value) -> Value:
+    """``(a + c) mod 2**32`` of two i32 values read as u32, free of ``nsw`` poison.
+
+    The sum of two zero-extended words is below ``2**33``, so the i64 ``add nsw``
+    cannot overflow; the truncation drops the carry.
+    """
+    s = b.add(b.zext(a, I64), b.zext(c, I64))
+    return b.trunc(s, I32)
+
+
+def mul_lo_u32_const(b: IRBuilder, a: Value, c: int) -> Value:
+    """Low 32 bits of ``a * c`` for i32 ``a`` read as u32 and a u32 constant ``c``.
+
+    Split ``c`` into 16-bit halves: ``a * c_lo`` and ``a * c_hi`` stay below
+    ``2**48`` in i64, and only the low 16 bits of the second product reach the
+    low word. No step overflows, so no ``nsw`` poison.
+    """
+    c &= 0xFFFFFFFF
+    a64 = b.zext(a, I64)
+    p_lo = b.mul(a64, b.const_i64(c & 0xFFFF))
+    p_hi = b.mul(a64, b.const_i64(c >> 16))
+    p_hi16 = b.shl(b.land(p_hi, b.const_i64(0xFFFF)), b.const_i64(16))
+    return b.trunc(b.add(p_lo, p_hi16), I32)
+
+
 def _mulhilo32(b: IRBuilder, a: Value, c: int) -> Tuple[Value, Value]:
     """``(hi, lo) = a * c`` for i32 ``a`` and unsigned constant ``c``.
 
-    Both halves lower to single AMDGPU instructions (``v_mul_hi_u32`` +
-    ``v_mul_lo_u32``).
+    ``umul_hi_i32`` lowers to a flag-free i64 multiply (``v_mul_hi_u32``);
+    the low word is :func:`mul_lo_u32_const` (``v_mul_lo_u32`` after LLVM
+    narrows it).
     """
-    c_v = _u32_const(b, c)
-    lo = b.mul(a, c_v)
-    hi = b.umul_hi_i32(a, c_v)
+    hi = b.umul_hi_i32(a, _u32_const(b, c))
+    lo = mul_lo_u32_const(b, a, c)
     return hi, lo
 
 
-def philox_u32_quartet(
-    b: IRBuilder,
-    *,
-    seed_lo: Value,
-    seed_hi: Value,
-    subseq: Value,
-    offset: Value,
-) -> Tuple[Value, Value, Value, Value]:
-    """One Philox4x32-10 round bank.
+def mulhilo_u32_wide(b: IRBuilder, a: Value, c: int) -> Tuple[Value, Value]:
+    """``(hi, lo)`` of ``a * c`` (u32 ``a``, u32 constant ``c``) from one u64 product.
 
-    Inputs: four i32 values forming the seed + counter.
-    Outputs: four i32 uniform-random outputs.
-
-    Pure function: bit-for-bit reproducible from the inputs.
+    With both halves cut from the same i64 product LLVM selects one
+    ``v_mad_u64_u32`` instead of ``v_mul_hi_u32`` + ``v_mul_lo_u32``. The i64
+    ``mul`` carries ``nsw``, so the product is built from parts that cannot
+    overflow: ``a * (c >> 1)`` stays below ``2**63``, doubled by a shift and
+    completed by ``add nuw`` (below ``2**64``); LLVM folds it back to one multiply.
     """
-    c0, c1, c2, c3 = offset, b.const_i32(0), subseq, b.const_i32(0)
-    k0, k1 = seed_lo, seed_hi
+    c &= 0xFFFFFFFF
+    a64 = b.zext(a, I64)
+    prod = b.shl(b.mul(a64, b.const_i64(c >> 1)), b.const_i64(1))
+    if c & 1:
+        prod = b.add_nuw(prod, a64)
+    return b.trunc(b.lshr(prod, b.const_i64(32)), I32), b.trunc(prod, I32)
 
+
+def philox4x32_10(
+    b: IRBuilder,
+    c0: Value,
+    c1: Value,
+    c2: Value,
+    c3: Value,
+    k0: Value,
+    k1: Value,
+) -> Tuple[Value, Value, Value, Value]:
+    """Philox4x32-10 of counter words ``c0..c3`` and key words ``k0, k1`` (all i32 as u32).
+
+    Bit-exact against ``rocke.numeric.philox_dropout.philox4x32_10``.
+    """
     for _ in range(PHILOX_ROUNDS):
         hi0, lo0 = _mulhilo32(b, c0, PHILOX_M0)
         hi1, lo1 = _mulhilo32(b, c2, PHILOX_M1)
-        new_c0 = b.xor(b.xor(hi1, c1), k0)
-        new_c1 = lo1
-        new_c2 = b.xor(b.xor(hi0, c3), k1)
-        new_c3 = lo0
-        c0, c1, c2, c3 = new_c0, new_c1, new_c2, new_c3
-        k0 = b.add(k0, _u32_const(b, PHILOX_W0))
-        k1 = b.add(k1, _u32_const(b, PHILOX_W1))
-
+        c0, c1, c2, c3 = (
+            b.xor(b.xor(hi1, c1), k0),
+            lo1,
+            b.xor(b.xor(hi0, c3), k1),
+            lo0,
+        )
+        k0 = add_u32_wrap(b, k0, _u32_const(b, PHILOX_W0))
+        k1 = add_u32_wrap(b, k1, _u32_const(b, PHILOX_W1))
     return c0, c1, c2, c3
 
 
-def philox_uniform_f32_quartet(
-    b: IRBuilder,
-    *,
-    seed_lo: Value,
-    seed_hi: Value,
-    subseq: Value,
-    offset: Value,
-) -> Tuple[Value, Value, Value, Value]:
-    """Four uniform ``[0, 1)`` f32 values from one Philox quartet.
+def philox_counter_add(
+    b: IRBuilder, base_lo: Value, base_hi: Value, k: Value
+) -> Tuple[Value, Value]:
+    """Words ``(lo, hi)`` of the u64 counter ``base + k`` (``k`` an i32 read as u32), wrapping mod ``2**64``.
 
-    Conversion is ``(u >> 8) * 2^-24`` -- 24 bits of randomness
-    matching IEEE-754 single-precision significand.
+    Per-element counters differ from a hoisted row counter by ``kv // 4``; the
+    carry into the high word is ``lo < k``.
     """
-    r0, r1, r2, r3 = philox_u32_quartet(
-        b, seed_lo=seed_lo, seed_hi=seed_hi, subseq=subseq, offset=offset
-    )
-    inv24 = b.const_f32(2.0**-24)
-    shift8 = b.const_i32(8)
-
-    def to_f32(u: Value) -> Value:
-        shifted = b.lshr(u, shift8)
-        return b.fmul(b.sitofp_f32(shifted), inv24)
-
-    return to_f32(r0), to_f32(r1), to_f32(r2), to_f32(r3)
+    lo = add_u32_wrap(b, base_lo, k)
+    carry = b.zext(b.cmp_ult(lo, k), I32)
+    return lo, add_u32_wrap(b, base_hi, carry)
 
 
-def dropout_mask_pair_f32(
-    b: IRBuilder,
-    *,
-    seed_lo: Value,
-    seed_hi: Value,
-    subseq: Value,
-    offset: Value,
-    keep_prob_f32: Value,
-) -> Tuple[Value, Value, Value, Value]:
-    """Two ``(keep, scale)`` masks from one Philox quartet.
+class PhiloxCall:
+    """One Philox4x32-10 call of the counter ``(ctr_lo, ctr_hi, 0, 0)``, emitted a
+    round at a time.
 
-    Returns ``(keep0, scale, keep1, scale)``. The kernel applies the
-    mask via one ``score = score * keep * scale`` per element.
+    A body can spread a tile's calls over its MFMA sequence (``step``) and take
+    the words once all rounds are emitted (``finish``); the result equals
+    :func:`philox4x32_10` of the counter ``(ctr_lo, ctr_hi, 0, 0)``.
+
+    ``xor3`` (targets with ``v_bitop3_b32``): each round's two ``hi ^ c ^ k``
+    become one ``v_bitop3_b32`` (LLVM forms none from the xor pair). ``mad64``:
+    each product's two halves come from one u64 product (one ``v_mad_u64_u32``).
+    Counter words 2 and 3 start at zero, and the round-0 products of word 2 stay
+    zero: those words are tracked here so no multiply or xor is emitted for them.
     """
-    u0, u1, _u2, _u3 = philox_uniform_f32_quartet(
-        b, seed_lo=seed_lo, seed_hi=seed_hi, subseq=subseq, offset=offset
-    )
-    scale = b.rcp(keep_prob_f32)
-    one_f = b.const_f32(1.0)
-    zero_f = b.const_f32(0.0)
-    keep0 = b.select(b.fcmp("olt", u0, keep_prob_f32), one_f, zero_f)
-    keep1 = b.select(b.fcmp("olt", u1, keep_prob_f32), one_f, zero_f)
-    return keep0, scale, keep1, scale
+
+    def __init__(
+        self, b: IRBuilder, *, seed_lo, seed_hi, ctr_lo, ctr_hi, xor3=False, mad64=False
+    ):
+        self.b = b
+        self.xor3 = xor3
+        self.mad64 = mad64
+        self.c = (ctr_lo, ctr_hi, None, None)  # None = known zero
+        self.k = (seed_lo, seed_hi)
+        self.rounds = 0
+
+    @property
+    def done(self) -> bool:
+        return self.rounds == PHILOX_ROUNDS
+
+    def _mulhilo(self, a, m):
+        if a is None:
+            return None, None
+        if not self.mad64:
+            return _mulhilo32(self.b, a, m)
+        return mulhilo_u32_wide(self.b, a, m)
+
+    def _xor(self, *vals):
+        vals = [v for v in vals if v is not None]
+        b = self.b
+        if len(vals) == 3 and self.xor3:
+            return b.bitop3_b32(*vals, 0x96)
+        out = vals[0]
+        for v in vals[1:]:
+            out = b.xor(out, v)
+        return out
+
+    def step(self) -> None:
+        """Emit the next round (no-op once all rounds are emitted)."""
+        if self.done:
+            return
+        b = self.b
+        c0, c1, c2, c3 = self.c
+        k0, k1 = self.k
+        hi0, lo0 = self._mulhilo(c0, PHILOX_M0)
+        hi1, lo1 = self._mulhilo(c2, PHILOX_M1)
+        self.c = (self._xor(hi1, c1, k0), lo1, self._xor(hi0, c3, k1), lo0)
+        self.k = (
+            add_u32_wrap(b, k0, _u32_const(b, PHILOX_W0)),
+            add_u32_wrap(b, k1, _u32_const(b, PHILOX_W1)),
+        )
+        self.rounds += 1
+
+    def finish(self) -> Tuple[Value, Value, Value, Value]:
+        """Emit the remaining rounds; the four output words."""
+        while not self.done:
+            self.step()
+        zero = self.b.const_i32(0)
+        return tuple(zero if c is None else c for c in self.c)

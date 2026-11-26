@@ -8501,30 +8501,6 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         self.assertIn("fsub float", ll)
 
     @arch_specific(("gfx950",), reason=_SAME_IR)
-    def test_dropout_mask_pair_runs_full_philox(self):
-        from rocke.core.ir import F32, I32, IRBuilder
-        from rocke.helpers.rng import dropout_mask_pair_f32
-
-        b = IRBuilder("drop")
-        seed_lo = b.param("sl", I32)
-        seed_hi = b.param("sh", I32)
-        subseq = b.param("ss", I32)
-        offset = b.param("off", I32)
-        keep = b.param("keep", F32)
-        dropout_mask_pair_f32(
-            b,
-            seed_lo=seed_lo,
-            seed_hi=seed_hi,
-            subseq=subseq,
-            offset=offset,
-            keep_prob_f32=keep,
-        )
-        b.ret()
-        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
-        # 10 rounds of mulhilo = 20 mul i64 operations.
-        self.assertGreaterEqual(ll.count("mul i64"), 20)
-
-    @arch_specific(("gfx950",), reason=_SAME_IR)
     def test_codebook_i8_emits_fp8_round(self):
         from rocke.core.ir import F32, I32, IRBuilder, PtrType
         from rocke.helpers.codebook import codebook_lookup_i8_to_fp8

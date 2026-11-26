@@ -2310,6 +2310,14 @@ class _Lowerer:
     def _op_arith_xor(self, op: Op) -> None:
         self._binary(op, "^")
 
+    def _op_arith_bitop3_b32(self, op: Op) -> None:
+        """``v_bitop3_b32`` via ``__builtin_amdgcn_bitop3_b32``."""
+        a, b, c = op.operands
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_bitop3_b32("
+            f"{_name(a)}, {_name(b)}, {_name(c)}, {int(op.attrs['table'])});"
+        )
+
     def _op_arith_shl(self, op: Op) -> None:
         self._binary(op, "<<")
 

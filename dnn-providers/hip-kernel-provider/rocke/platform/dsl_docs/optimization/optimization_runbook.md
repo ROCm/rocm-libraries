@@ -1498,7 +1498,7 @@ not the clock. See §10.5 (limits vs hand assembly) and the
 - Type conversion (`vec_trunc_f32_to_f16`, `cvt_pk_f32_fp8`).
 - Row / column scale (`helpers/mx_scale.py` for MX).
 - Clamp.
-- Dropout (`helpers/rng.py::dropout_mask_pair_f32`).
+- Dropout (`helpers/attention_dropout.py`, SEM-015 mask).
 - Store transpose (`instances/transpose*` + LDS reader formula).
 
 ### 9.2 Direct Epilogue

@@ -4431,6 +4431,24 @@ class IRBuilder:
         integers or ``i1`` of one type."""
         return self._binary_op("arith.xor", a, b_v, "xor")
 
+    def bitop3_b32(self, a: Value, b_v: Value, c: Value, table: int) -> Value:
+        """``v_bitop3_b32`` (``llvm.amdgcn.bitop3.i32``): bit ``i`` of the result is
+        bit ``(a_i << 2) | (b_i << 1) | c_i`` of the 8-bit truth table ``table``.
+        One VALU op where a chain of two-input logic ops takes two; LLVM forms it
+        from such chains only in some cases.
+        """
+        if a.type.name != "i32" or b_v.type.name != "i32" or c.type.name != "i32":
+            raise ValueError("bitop3_b32 requires i32 operands")
+        if not 0 <= int(table) <= 0xFF:
+            raise ValueError(f"bitop3_b32 table must be 0..255, got {table}")
+        return self._op(
+            "arith.bitop3_b32",
+            [a, b_v, c],
+            [I32],
+            attrs={"table": int(table)},
+            result_name_hint="bitop",
+        ).result
+
     def shl(self, a: Value, b_v: Value) -> Value:
         """Logical left shift ``a << b_v``. Lowers to LLVM ``shl``.
         AMDGPU folds constant shifts into ``v_lshlrev_b32`` with the
@@ -8791,6 +8809,7 @@ PURE_OP_NAMES = {
     "tile.ds_read_tr16_b64",
     "arith.bitcast",
     "arith.xor",
+    "arith.bitop3_b32",
     "arith.shl",
     "arith.lshr",
     "arith.umul_hi_i32",

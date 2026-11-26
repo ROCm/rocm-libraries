@@ -585,23 +585,32 @@ pair-index function differs. Interleaved (GPT-J / LLaMA-1) pairs
 ``(2*i, 2*i+1)``; half (LLaMA-2 / 3 / Qwen) pairs
 ``(i, i + H/2)``.
 
-### Philox4x32 RNG helpers (`helpers/rng.py`)
+### Philox4x32 RNG helpers (`helpers/rng.py`, `helpers/attention_dropout.py`)
 
 ```text
-PHILOX_M0 / M1 / W0 / # round constants (match PyTorch + CK Tile)
+PHILOX_M0 / M1 / W0 / W1     # round constants
 PHILOX_ROUNDS = 10
 
-philox_u32_quartet(b, seed_lo=, seed_hi=, subseq=, offset=)
- # -> (r0, r1, r2, r3) i32
-philox_uniform_f32_quartet(b, seed_lo=, seed_hi=, subseq=, offset=)
- # -> (u0, u1, u2, u3) f32 in [0, 1) via (u >> 8) * 2^-24
-dropout_mask_pair_f32(b, seed_lo=, seed_hi=, subseq=, offset=, keep_prob_f32=)
- # -> (keep0, scale, keep1, scale) -- canonical FMHA-fwd dropout pair
+philox4x32_10(b, c0, c1, c2, c3, k0, k1)
+ # -> four i32 words (u32) of the counter and key
+PhiloxCall(b, seed_lo=, seed_hi=, ctr_lo=, ctr_hi=, xor3=, mad64=)
+ # the call of counter (ctr_lo, ctr_hi, 0, 0) a round at a time (step / finish)
+philox_counter_add(b, base_lo, base_hi, k)
+ # -> (lo, hi) of the u64 counter base + k
+
+# SDPA dropout mask, hipDNN SEM-015 (helpers/attention_dropout.py)
+dropout_row_counter(b, offset_lo=, offset_hi=, row_base=)
+ # -> (lo, hi) counter of a row's key 0
+dropout_words(b, seed_lo=, seed_hi=, ctr_lo=, ctr_hi=, xor3=, mad64=)
+ # -> words of keys 4 * (kv // 4) + 0..3
+dropout_keep(b, word, threshold)
+ # -> i1 keep flag: int32(word) > threshold
 ```
 
-Pure functions -- no per-thread state. Reproducible bit-for-bit
-from ``(seed, subseq, offset)``; FMHA fwd + bwd can regenerate the
-same mask independently without explicit state hand-off.
+Pure functions -- no per-thread state. A forward and a backward kernel
+regenerate the same mask from the seed, the offset and the element's position
+without passing it between them; the host oracle is
+`rocke.numeric.philox_dropout`.
 
 ### Extra attention masks (`helpers/attention.py` extension)
 

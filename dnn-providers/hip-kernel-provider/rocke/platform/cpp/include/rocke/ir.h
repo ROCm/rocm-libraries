@@ -510,6 +510,11 @@ typedef enum rocke_opcode
      * existing index shifts. */
     ROCKE_OP_MATH_LDEXP,
 
+    /* v_bitop3_b32: a bitwise function of three i32 values given by an 8-bit
+     * truth table (Python IRBuilder.bitop3_b32). Appended so no existing index
+     * shifts. */
+    ROCKE_OP_ARITH_BITOP3_B32,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -935,6 +940,10 @@ rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
 rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* llvm.amdgcn.bitop3.i32 (v_bitop3_b32): bit i of the result is bit
+ * (a_i << 2 | b_i << 1 | c_i) of `table` (0..255). */
+rocke_value_t* rocke_b_bitop3_b32(
+    rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, rocke_value_t* c, int table);
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_umul_hi_i32(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);

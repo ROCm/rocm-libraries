@@ -315,6 +315,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"umax.i8", "declare i8 @llvm.umax.i8(i8, i8)"},
     {"umin.i8", "declare i8 @llvm.umin.i8(i8, i8)"},
     {"amdgcn.perm", "declare i32 @llvm.amdgcn.perm(i32, i32, i32)"},
+    {"amdgcn.bitop3.i32", "declare i32 @llvm.amdgcn.bitop3.i32(i32, i32, i32, i32 immarg)"},
     {"amdgcn.cvt.scalef32.pk.f32.fp8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
     {"amdgcn.cvt.scalef32.pk.f32.bf8",

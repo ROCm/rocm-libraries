@@ -283,15 +283,23 @@ from .rotary import (
     load_cos_sin,
     pair_indices,
 )
+from .attention_dropout import (
+    dropout_keep,
+    dropout_row_counter,
+    dropout_words,
+)
 from .rng import (
     PHILOX_M0,
     PHILOX_M1,
     PHILOX_ROUNDS,
     PHILOX_W0,
     PHILOX_W1,
-    dropout_mask_pair_f32,
-    philox_u32_quartet,
-    philox_uniform_f32_quartet,
+    PhiloxCall,
+    add_u32_wrap,
+    mul_lo_u32_const,
+    mulhilo_u32_wide,
+    philox4x32_10,
+    philox_counter_add,
 )
 from .qk_scale import (
     QkScaleLayout,
@@ -716,15 +724,22 @@ __all__ = [
     "apply_rotary_pair_f32",
     "load_cos_sin",
     "pair_indices",
-    # Philox RNG helpers (dropout)
+    # Philox RNG helpers
     "PHILOX_M0",
     "PHILOX_M1",
     "PHILOX_ROUNDS",
     "PHILOX_W0",
     "PHILOX_W1",
-    "dropout_mask_pair_f32",
-    "philox_u32_quartet",
-    "philox_uniform_f32_quartet",
+    "PhiloxCall",
+    "add_u32_wrap",
+    "mul_lo_u32_const",
+    "mulhilo_u32_wide",
+    "philox4x32_10",
+    "philox_counter_add",
+    # SDPA dropout mask (hipDNN SEM-015)
+    "dropout_keep",
+    "dropout_row_counter",
+    "dropout_words",
     # QK scale (per-block / per-token attention scales)
     "QkScaleLayout",
     "QkScaleSpec",

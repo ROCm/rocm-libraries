@@ -276,6 +276,31 @@ rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
     return rocke_i_binop(b, ROCKE_OP_ARITH_XOR, a, c, "xor");
 }
 
+/* Python IRBuilder.bitop3_b32; the error texts are the Python builder's. */
+rocke_value_t* rocke_b_bitop3_b32(
+    rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, rocke_value_t* c, int table)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!a || !bb || !c)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "bitop3_b32: NULL operand");
+    if(!rocke_i_type_is(a->type, "i32") || !rocke_i_type_is(bb->type, "i32")
+       || !rocke_i_type_is(c->type, "i32"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "bitop3_b32 requires i32 operands");
+    if(table < 0 || table > 0xFF)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "bitop3_b32 table must be 0..255, got %d", table);
+    ops[0] = a;
+    ops[1] = bb;
+    ops[2] = c;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "table", (int64_t)table);
+    return rocke_i_op1(b, ROCKE_OP_ARITH_BITOP3_B32, ops, 3, rocke_i32(), &attrs, "bitop");
+}
+
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     return rocke_i_binop(b, ROCKE_OP_ARITH_SHL, a, c, "shl");

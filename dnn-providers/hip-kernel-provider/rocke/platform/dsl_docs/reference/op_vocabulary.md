@@ -28,6 +28,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.and`            | `land`                            | `and`                                  |
 | `arith.or`             | `lor`                             | `or`                                   |
 | `arith.xor`            | (internal)                        | `xor`                                  |
+| `arith.bitop3_b32`     | `bitop3_b32(a, b, c, table)`      | `llvm.amdgcn.bitop3.i32` (`v_bitop3_b32`, truth table `table` as immarg); HIP `__builtin_amdgcn_bitop3_b32` |
 | `arith.not`            | `lnot`                            | `xor` against all-ones                 |
 | `arith.zext`           | `zext`                            | `zext`                                 |
 | `arith.sext`           | `sext`                            | `sext`                                 |
