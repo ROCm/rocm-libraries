@@ -23,6 +23,7 @@ sys.path.insert(0, str(_FMHA_EXAMPLE_DIR))
 
 from codegen.ops.fmha_fwd_splitkv import get_fwd_splitkv_blobs  # noqa: E402
 from codegen.ops.fmha_fwd import (  # noqa: E402
+    QR_TDM_SCHED_FP8_DTYPES,
     CppConstraint,
     FMHA_FWD_API_FOOTER,
     FMHA_FWD_API_HEADER,
@@ -501,6 +502,51 @@ endforeach()
                         self.assertGreater(seen[(tag, want)], 0)
             self.assertEqual(seen[("qr_tdm", True)], 0)
             self.assertGreater(seen[("qr_tdm", False)], 0)
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_sched_dtypes_match_codegen(self):
+        # The cmake dtype allow-lists must match the dtypes codegen runs on qr_tdm_sched.
+        helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
+        _, kernels = get_fwd_blobs(["gfx1250"], "*", 0, [-1], "simplified")
+        sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched"]
+        self.assertEqual(
+            {k.F_dtype for k in sched}, {"fp16", "bf16", *QR_TDM_SCHED_FP8_DTYPES}
+        )
+        template = next(
+            k.filename for k in sched if k.F_dtype == "fp8" and k.F_hdim == 128
+        )
+        # Every FP8 main-loop dtype, plus ones outside it that must stay unflagged.
+        synthetic = {
+            template.replace("_fp8_", f"_{dtype}_"): dtype in QR_TDM_SCHED_FP8_DTYPES
+            for dtype in (*QR_TDM_SCHED_FP8_DTYPES, "bf8", "fp8fp32", "mxbf8")
+        }
+        expected = {k.filename: True for k in sched} | synthetic
+        names = list(expected)
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "flags.cmake"
+            script.write_text(
+                f'include("{helper}")\n'
+                + "\n".join(
+                    f'ck_tile_fmha_fwd_get_source_compile_options("{name}" flags)\n'
+                    f'message("{i}:${{flags}}")'
+                    for i, name in enumerate(names)
+                )
+            )
+            process = subprocess.run(
+                ["cmake", "-P", str(script)],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+            )
+        lines = process.stderr.strip().splitlines()
+        self.assertEqual(len(lines), len(names))
+        for i, (name, line) in enumerate(zip(names, lines)):
+            with self.subTest(source=name):
+                self.assertTrue(line.startswith(f"{i}:"))
+                self.assertEqual(
+                    "-amdgpu-expert-scheduling-mode" in line.split(";"), expected[name]
+                )
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_source_flags_follow_gfx125_family_targets(self):

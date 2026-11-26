@@ -1648,4 +1648,54 @@ TEST(TestCkTileFmhaFwd, QuantScaleMxFromFp8)
         EXPECT_TRUE(SameBits(alias.lse, mx.lse));
     }
 }
+
+// Round-to-nearest P drops small probabilities on long rows; the runner's gain check catches it.
+TEST(TestCkTileFmhaFwd, QuantScaleLongRowNoGain)
+{
+    if(!kIsFp8Config || !ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "gfx125x FP8 qr_tdm_sched only";
+    std::string kernel_name;
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        1, // batch
+        1, // nhead
+        1, // nhead_k
+        {8192},
+        {32768},
+        128,
+        128,
+        0,     // seqlen_knew
+        {-1},  // seqlen_qpads
+        {-1},  // seqlen_kpads
+        {},    // q_eff_lens_per_batch
+        {},    // kv_eff_lens_per_batch
+        0,     // rotary_dim
+        true,  // i_perm
+        true,  // o_perm
+        0,     // scale_s
+        0,     // logits_soft_cap
+        true,  // is_v_rowmajor
+        false, // lse
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        "0",   // mask
+        "pt",
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink_value
+        0, // pack_gqa
+        stream_config,
+        std::nullopt,
+        &kernel_name);
+    CHECK_FP8_SCHED_RESULT(result, true);
+    EXPECT_EQ(DecodeKernelOf(kernel_name), "sched") << kernel_name;
+}
 #endif
