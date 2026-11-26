@@ -17,8 +17,10 @@ import jinja2
 
 log = logging.getLogger("confgen.generate")
 
-# Used when no block_sort config is found for a block_merge type.
-MERGE_SORT_DEFAULT_SORTED_TILE = 1024
+# Largest merge tile of a block_merge config: radix sort's merge sort sorts tiles of
+# 1024 items (radix_sort_block_sort_config_params_base, for items up to 32 bytes) and
+# uses the same block_merge config, and merge sort's block_sort tiles are never smaller.
+MERGE_SORT_MAX_MERGE_TILE = 1024
 
 # Benchmarks whose name differs from the tuned algorithm (see benchmark/CMakeLists.txt).
 BENCHMARK_NAMES = {
@@ -253,6 +255,21 @@ def resolve_shadowed_configs(targets, new_type_hashes):
         targets[target_hash] = {h: c for h, c in configs.items() if h not in dropped}
 
 
+def find_entry(
+    data: dict[str, ty.Any], candidates: list[dict[str, ty.Any]], config: dict
+) -> dict[str, ty.Any] | None:
+    """Returns the candidate entry with the tune parameters of 'config', or None."""
+    keys = data.get("tune_params_keys", [])
+    return next(
+        (
+            c
+            for c in candidates
+            if all(str(c.get(k)) == str(config.get(k)) for k in keys)
+        ),
+        None,
+    )
+
+
 def keep_baseline_if_close(
     data: dict[str, ty.Any],
     candidates: list[dict[str, ty.Any]],
@@ -262,17 +279,14 @@ def keep_baseline_if_close(
     """Returns the fastest baseline entry (the configs the library used on this arch
     when tuning, recorded by the tuner) unless the tuned winner is more than 'margin'
     faster than it. Times are in ms/GiB, so lower is better."""
-    keys = data.get("tune_params_keys", [])
-    best_name = None
-    best = None
-    for name, baseline in data.get("baselines", {}).items():
-        for c in candidates:
-            if all(str(c.get(k)) == str(baseline["config"].get(k)) for k in keys):
-                if best is None or c["time"] < best["time"]:
-                    best_name = name
-                    best = c
-    if best is None:
+    entries = [
+        (name, find_entry(data, candidates, baseline["config"]))
+        for name, baseline in data.get("baselines", {}).items()
+    ]
+    entries = [(name, entry) for name, entry in entries if entry is not None]
+    if not entries:
         return winner
+    best_name, best = min(entries, key=lambda e: e[1]["time"])
 
     speedup = best["time"] / winner["time"] - 1
     if speedup > margin:
@@ -290,65 +304,7 @@ def find_current_entry(
     """Returns the entry of the config the library uses on the tuned arch (the
     "current" baseline recorded by the tuner), which the baseline benchmarks measure."""
     current = data.get("baselines", {}).get("current")
-    if current is None:
-        return None
-    keys = data.get("tune_params_keys", [])
-    return next(
-        (
-            c
-            for c in candidates
-            if all(str(c.get(k)) == str(current["config"].get(k)) for k in keys)
-        ),
-        None,
-    )
-
-
-def get_radix_merge_sort_tile(key_size: int, value_size: int) -> int:
-    """Returns the items per block that radix sort's merge sort sorts before merging
-    with the block_merge config (radix_sort_block_sort_config_params_base in
-    device_config_helper.hpp). It's not tuned, and the merge tiles must fit in it too
-    (device_radix_merge_sort.hpp)."""
-    item_scale = max(key_size, value_size, 1)
-    block_size = 128 if item_scale <= 32 else 64 if item_scale <= 128 else 32
-    items_per_thread = (
-        8
-        if item_scale <= 4
-        else 4 if item_scale <= 64 else 2 if item_scale <= 256 else 1
-    )
-    return block_size * 2 * min(4, items_per_thread)
-
-
-def get_sorted_tile(
-    algs, existing_block_sort, target_info: dict[str, str], data: dict[str, ty.Any]
-) -> int:
-    """Returns the largest items per block the merge tiles of a block_merge config can
-    have: those of the block_sort config the library uses with it (the newly tuned one
-    if block_sort was tuned for this target too, otherwise the existing one), and of
-    radix sort's merge sort, which uses the same block_merge config
-    (device_merge_sort.hpp)."""
-    type_hash, type_config = make_config(data)
-    type_sizes = {name: t["size"] for name, t in type_config["type"].items()}
-    radix_tile = get_radix_merge_sort_tile(
-        type_sizes.get("key_type", 0), type_sizes.get("value_type", 0)
-    )
-    tuned = (
-        algs.get("device_merge_sort_block_sort", {})
-        .get(frozenset(target_info.items()), {})
-        .get(type_hash)
-    )
-    config = tuned["config"] if tuned else None
-    if config is None and existing_block_sort is not None:
-        import parse as config_parser
-
-        types = {k: data[k] for k in ("key_type", "value_type") if k in data}
-        config = config_parser.find_config(*existing_block_sort, target_info, types)
-    if config is None:
-        log.warning(
-            f"No block_sort config found, limiting merge tiles to "
-            f"{MERGE_SORT_DEFAULT_SORTED_TILE} items"
-        )
-        return min(MERGE_SORT_DEFAULT_SORTED_TILE, radix_tile)
-    return min(int(config["block_size_x"]) * int(config["ipt"]), radix_tile)
+    return find_entry(data, candidates, current["config"]) if current else None
 
 
 def get_benchmark_names(alg: str) -> list[str]:
@@ -719,12 +675,8 @@ def main():
     if not input_glob.endswith(".json"):
         input_glob = f"{input_glob}/*.json"
 
-    # Find all files. block_sort goes first, because block_merge configs must fit in
-    # its sorted tile.
-    file_paths = sorted(
-        glob.glob(input_glob),
-        key=lambda p: "device_merge_sort_block_merge" in os.path.basename(p),
-    )
+    # Find all files.
+    file_paths = glob.glob(input_glob)
 
     # Find existing configs
     existing_dir = None
@@ -733,16 +685,6 @@ def main():
         if not existing_dir.exists():
             log.error(f"Could not find directory: {existing_dir}")
             quit()
-
-    existing_block_sort = None
-    if existing_dir and (existing_dir / "device_merge_sort_block_sort.hpp").exists():
-        import parse as config_parser
-
-        header = (existing_dir / "device_merge_sort_block_sort.hpp").read_text()
-        existing_block_sort = (
-            config_parser.parse_lines(header.splitlines()),
-            config_parser.parse_fallback_target(header),
-        )
 
     # Load the baseline results of the benchmarks that measure the tuned algorithms.
     baselines = {}
@@ -810,7 +752,7 @@ def main():
             if filter_dif > 0:
                 log.warning(f"Skipping failed compilations: {filter_dif}")
 
-            # Skip configs that still hit the noise timeout after the tuner's retries
+            # Skip configs that hit the noise timeout
             noise_timeouts = set(data.get("noise_timeouts", []))
             if noise_timeouts:
                 data_filter = [
@@ -823,16 +765,14 @@ def main():
                 )
 
             if data["algo_name"] == "device_merge_sort_block_merge":
-                sorted_tile = get_sorted_tile(
-                    algs, existing_block_sort, target_info, data
-                )
                 temp = [
                     c
                     for c in data_filter
-                    if int(c["block_size_x"]) * int(c["ipt"]) <= sorted_tile
+                    if int(c["block_size_x"]) * int(c["ipt"])
+                    <= MERGE_SORT_MAX_MERGE_TILE
                     and int(c.get("odd_even_block_size", 0))
                     * int(c.get("odd_even_ipt", 0))
-                    <= sorted_tile
+                    <= MERGE_SORT_MAX_MERGE_TILE
                 ]
                 if len(temp) < len(data_filter):
                     log.info(

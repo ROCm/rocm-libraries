@@ -139,24 +139,6 @@ def select_target(targets, target: dict[str, str]) -> frozenset | None:
     return best
 
 
-def find_config(
-    configs, fallback_target, target: dict[str, str], types: dict[str, ty.Any]
-) -> dict[str, ty.Any] | None:
-    """Returns the config the library uses for 'types' on 'target', given the parsed
-    configs and fallback target of a config header."""
-    selected = select_target(configs.keys(), target) or fallback_target
-    if selected is None:
-        return None
-    return next(
-        (
-            c
-            for c in configs.get(selected, [])
-            if all(str(c.get(k, "empty_type")) == str(v) for k, v in types.items())
-        ),
-        None,
-    )
-
-
 def parse_gpu_names(config_types: str) -> list[tuple[str, str]]:
     """Returns the (device name substring, gpu enum) pairs of target_gpu_names in
     config_types.hpp, which the library uses to detect the GPU."""

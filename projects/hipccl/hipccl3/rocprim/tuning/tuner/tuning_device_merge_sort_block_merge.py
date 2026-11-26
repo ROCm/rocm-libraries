@@ -24,17 +24,12 @@ from typing import OrderedDict, Callable, Dict, Any
 from math import log2
 import sys
 import os
-import warnings
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
-import confgen.generate
-import confgen.parse
-
-# Used when no block_sort config is found for a type.
-DEFAULT_SORTED_TILE = 1024
+from confgen.generate import MERGE_SORT_MAX_MERGE_TILE
 
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
@@ -50,31 +45,6 @@ class Tuner(BaseTuner):
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
-        (self.block_sort_configs, self.block_sort_fallback) = self._read_config_header(
-            "device_merge_sort_block_sort"
-        )
-
-    def _get_sorted_tile(self, types: Dict[str, Any]) -> int:
-        """Returns the largest items per block the merge tiles can have: those of the
-        block_sort config the library uses for these types on the tuned arch (the
-        benchmark pre-sorts with it), and of radix sort's merge sort, which uses the
-        same block_merge config (see confgen.generate.get_radix_merge_sort_tile)."""
-        radix_tile = confgen.generate.get_radix_merge_sort_tile(
-            TYPE_CONFIGS[types["key_type"]].size, TYPE_CONFIGS[types["value_type"]].size
-        )
-        config = confgen.parse.find_config(
-            self.block_sort_configs,
-            self.block_sort_fallback,
-            self._get_target_info(),
-            types,
-        )
-        if config is None:
-            warnings.warn(
-                f"No block_sort config found for '{types}', limiting merge tiles to "
-                f"{DEFAULT_SORTED_TILE} items"
-            )
-            return min(DEFAULT_SORTED_TILE, radix_tile)
-        return min(int(config["block_size_x"]) * int(config["ipt"]), radix_tile)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
@@ -97,7 +67,6 @@ class Tuner(BaseTuner):
 
         max_shared_memory = 65536
         max_size_per_element = key_size + val_size
-        sorted_tile = self._get_sorted_tile(types)
 
         def validate(params):
             block_size = params["block_size_x"]
@@ -106,13 +75,12 @@ class Tuner(BaseTuner):
 
             max_ipt_exponent = log2(max_ipt) - 1
 
-            # The merge tiles must fit in the sorted tile of block_sort, otherwise the
-            # library returns hipErrorAssert (device_merge_sort.hpp).
+            # The merge tiles must fit in the sorted tiles (see MERGE_SORT_MAX_MERGE_TILE).
             odd_even_tile = params["odd_even_block_size"] * params["odd_even_ipt"]
             return (
                 ipt <= (2**max_ipt_exponent)
-                and block_size * ipt <= sorted_tile
-                and odd_even_tile <= sorted_tile
+                and block_size * ipt <= MERGE_SORT_MAX_MERGE_TILE
+                and odd_even_tile <= MERGE_SORT_MAX_MERGE_TILE
             )
 
         return validate

@@ -25,7 +25,6 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * It compiles with `-O3 -DNDEBUG` like the benchmarks, and with `-O1` for `adjacent_difference`, whose benchmark is built at `-O1` to work around an LLVM issue.
   * It detects the GPU from the device name like rocPRIM does and records it in the results, so the config generator no longer needs `--map-gfx` for new results.
   * `histogram` is also tuned on the range and multi-range benchmarks.
-  * `merge_sort_block_merge` configs are limited to the block sort tile rocPRIM uses for each type instead of 1024 items.
   * `adjacent_difference` configs are limited by their actual shared memory use.
 
 ### Optimizations
