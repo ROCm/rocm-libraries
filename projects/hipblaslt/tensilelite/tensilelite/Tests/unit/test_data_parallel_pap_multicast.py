@@ -71,6 +71,39 @@ def test_pap_handoff_completes_one_cluster_phase_before_issue(monkeypatch, wave,
     assert text.index("s_barrier_wait -3") < text.index("s[sgprLoads]")
 
 
+@pytest.mark.parametrize("wave", range(4))
+@pytest.mark.parametrize("shape", [(2, 2), (4, 4)])
+def test_late_pap_handoff_splits_release_from_issue(monkeypatch, wave, shape):
+    from rocisa.container import sgpr
+    from rocisa.instruction import SMovB32
+    kernel, assignment, writer = _setup(monkeypatch, shape)
+    kernel["ScheduleIterAlg"] = 4
+    writer.papTdmSupportsIncrementalUpdate = lambda kernel: True
+    processing = Component.TileProcessingStrategy.find(writer)
+    setup = Module("observable next-tile mapping")
+    setup.add(SMovB32(sgpr("Mapped"), 1))
+    monkeypatch.setattr(processing, "prefetchAcrossPersistentSetupNextTile", lambda *args, **kwargs: setup)
+    prefetch = PersistentLoopOn().prefetch(writer, kernel, {}, {})
+    machine = Machine(NextTile=8, TotalTiles=32)
+    machine.registers[str(vgpr("Serial"))] = wave * 32
+    machine.run(prefetch)
+    assert machine["Loads"] == 1 and machine["Mapped"] == 1
+    expected = [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]
+    if wave == 0:
+        expected.append(("s_barrier_signal", "-3"))
+    expected.append(("s_barrier_wait", "-3"))
+    assert machine.barrier_operations == expected
+    text = str(prefetch)
+    release, mapped = text.index("s_barrier_wait -1"), text.index("s[sgprMapped]")
+    counters, acquire = text.index("s[sgprLoopCounter], 999"), text.index("s_barrier_wait -3")
+    assert text.index("s_wait_dscnt") < text.index("s_barrier_signal -1") < release
+    assert acquire < text.index("s[sgprLoads]")
+    assert release < mapped < counters < acquire
+    # A primed re-entry must not open another cluster phase.
+    machine.run(prefetch)
+    assert machine["Loads"] == 1 and machine.barrier_operations == expected
+
+
 @pytest.mark.parametrize("state", [0, RESERVED_MASK, 1, 3])
 @pytest.mark.parametrize("has_next", [False, True])
 @pytest.mark.parametrize("wave", range(4))

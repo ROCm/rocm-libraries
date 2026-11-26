@@ -160,10 +160,19 @@ def test_preparation_and_handoff_follow_supported_order(monkeypatch, multicast, 
     assert machine.run(close) is None
     assert machine.barrier_operations == before
     text = str(module)
-    handoff = text.index("s_wait_dscnt" if multicast else "s_barrier_signal -1")
-    assert text.rindex("s[sgprDescriptorJoined]") < handoff
-    assert text.index("sgprOrigLoopCounter], 998") < handoff
-    assert handoff < text.index("establish first-PGR predicate") < text.index("s[sgprLoads]")
+    issue = text.index("establish first-PGR predicate")
+    assert issue < text.index("s[sgprLoads]")
+    descriptors, counters = text.rindex("s[sgprDescriptorJoined]"), text.index("sgprOrigLoopCounter], 998")
+    if not multicast:
+        handoff = text.index("s_barrier_signal -1")
+        assert descriptors < handoff and counters < handoff < issue
+        return
+    # The multicast release (drain, local join, elected arrive) runs ahead of
+    # the setup; the all-peer wait stays after it, before the issue.
+    release, acquire = text.index("s_wait_dscnt"), text.index("s_barrier_wait -3")
+    assert release < text.index("s_barrier_signal -3") < acquire
+    assert descriptors < acquire and counters < acquire < issue
+    assert release < text.index("s[sgprMapped]")
 
 
 @pytest.mark.parametrize("multicast", [False, True])

@@ -72,11 +72,13 @@ def _assert_pap_handoff(src, *, late=False):
     # The issue helper can add its own automatic cluster phases, and SIA4
     # can remove the setup module comment. Bound the explicit PAP phase by
     # its elected-wave join and the following all-peer cluster wait instead.
-    phase = re.search(
-        r"^label_PersistentMC_SkipPapSignal\w*:\s*\n\s*s_barrier_wait\s+-3\b",
-        src[start:issue], re.MULTILINE)
-    assert phase is not None
-    phase_end = start + phase.end() if late else checkpoint
+    arrive = re.search(r"^label_PersistentMC_SkipPapSignal\w*:", src[start:issue], re.MULTILINE)
+    assert arrive is not None
+    if not late:
+        assert re.match(r"\s*\n\s*s_barrier_wait\s+-3\b", src[start + arrive.end():])
+    wait = re.search(r"^\s*s_barrier_wait\s+-3\b", src[start + arrive.end():issue], re.MULTILINE)
+    assert wait is not None
+    phase_end = start + arrive.end() + wait.end() if late else checkpoint
     assert phase_end < issue
     region = src[start:phase_end]
     barriers = list(re.finditer(r"s_barrier_(signal|wait)\s+(-[13])", region))
@@ -86,14 +88,16 @@ def _assert_pap_handoff(src, *, late=False):
     handoff_end = start + barriers[-1].end()
     if late:
         # Both parity alternatives, including the scale-address pair, and
-        # the next-loop alpha check must join before every wave rendezvous.
+        # the next-loop alpha check must join before the all-peer wait. The
+        # local release and elected arrive may run ahead of that setup.
         joins = list(re.finditer(
             r"^label_TDM(?:Init|GlobalOffset)\w*End\w*:\s*$", region, re.MULTILINE))
         assert len(joins) >= 4
         alpha_join = re.search(r"^label_PersistentAlphaCheck\w*:\s*$", region, re.MULTILINE)
         assert alpha_join is not None
-        assert checkpoint < start + joins[-1].end() < handoff_start
-        assert start + alpha_join.end() < handoff_start
+        acquire = start + barriers[-1].start()
+        assert checkpoint < start + joins[-1].end() < acquire
+        assert start + alpha_join.end() < acquire
     else:
         # SIA0 and unsupported layouts retain their original early handoff.
         assert handoff_end < checkpoint

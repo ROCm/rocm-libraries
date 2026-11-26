@@ -161,11 +161,31 @@ class WorkAssignment(Component):
         module = Module('Persistent cluster PAP handoff')
         if not persistentSpatialCluster(kernel):
             return module
+        module.add(self.persistentClusterPrefetchRelease(writer, kernel))
+        module.add(self.persistentClusterPrefetchAcquire(writer, kernel))
+        return module
+
+    def persistentClusterPrefetchRelease(self, writer, kernel):
+        """First half of the PAP handoff: this workgroup releases the destination bank.
+
+        Every path that emits this must reach persistentClusterPrefetchAcquire.
+        """
+        module = Module('Persistent cluster PAP release')
+        if not persistentSpatialCluster(kernel):
+            return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         module.add(SWaitCnt(dscnt=0, comment='PAP: finish reads of the next-tile LDS bank'))
         module.add(SBarrier(comment='PAP: all waves release the multicast destination bank'))
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipPapSignal',
-                                       electTag='PersistentMulticastPapElect', wait=True)
+                                       electTag='PersistentMulticastPapElect')
+        return module
+
+    def persistentClusterPrefetchAcquire(self, writer, kernel):
+        """Second half of the PAP handoff: every peer has released the bank."""
+        module = Module('Persistent cluster PAP acquire')
+        if not persistentSpatialCluster(kernel):
+            return module
+        module.add(SBarrier(True, True, True, comment='cluster_barrier wait'))
         return module
 
     def persistentTileHandoff(self, writer, kernel):

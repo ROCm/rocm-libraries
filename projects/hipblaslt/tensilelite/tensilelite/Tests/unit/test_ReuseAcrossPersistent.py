@@ -497,23 +497,24 @@ _K_FIELD_REJECT = ("ReuseAcrossPersistent with AssertSummationElementMultiple % 
                    "requires TDM descriptor sets that keep K in one field")
 
 
+@pytest.mark.parametrize("asem, folds", [(256, False), (32, True)])
 def test_tail_folding_sees_the_asem_the_fp4_override_leaves(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, asem, folds
 ):
-    """Asked for 256, an F8xF4 kernel ends up at 32 and has to fold.
+    """An F8xF4 kernel keeps the requested ASEM and folds only below DepthU.
 
-    The FP4 override runs after depthUIteration, where NoTailLoop is derived, so
-    _TailFolding is derived after the override instead. Read off the config's
-    256 it would come out False, and the partial last k-tile the predicate
-    admits would load past K with no K dim shrink to clamp it. F8xF4 can fold at
-    all because A and B, though they step K by different amounts, both count it
-    in bytes: each wave steps by its own address increment.
+    The FP4 override raises ASEM to its floor of 8 (32 after the MX block)
+    and never lowers it, so _TailFolding, derived after the override, reads the
+    final value. Below DepthU the partial last k-tile the predicate admits must
+    fold, or it would load past K with no K dim shrink to clamp it. F8xF4 can
+    fold at all because A and B, though they step K by different amounts, both
+    count it in bytes: each wave steps by its own address increment.
     """
-    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=256,
+    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=asem,
                        ProblemType=dict(_MX_PROBLEM_TYPE, MacDataTypeB="F4"))
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
-    assert sol["AssertSummationElementMultiple"] == 32
-    assert sol["_TailFolding"] is True
+    assert sol["AssertSummationElementMultiple"] == asem
+    assert sol["_TailFolding"] is folds
     assert sol["NoTailLoop"] is True
 
 
@@ -547,26 +548,30 @@ def test_rap_rejects_a_k_remainder_its_descriptors_cannot_clamp(
     assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
 
 
+@pytest.mark.parametrize("asem, final", [(256, 256), (1, 8)])
 def test_rap_checks_the_k_remainder_against_the_final_asem(
-    _gp_gfx1250, gfx1250_iim, assembler, capsys
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, asem, final
 ):
     """The FP4 ASEM override lands after RAP's other checks have run.
 
-    Asked for 256 -- a clean multiple of DepthU -- an FP4 kernel still ends up
-    at 8, so it carries a remainder whatever the config said. Checked against
-    the config's value this grouping would pass derivation and fail in codegen
-    instead. test_tail_folding_sees_the_asem_the_fp4_override_leaves pins the
-    same ordering on the accepting side; this one pins it on the rejecting side,
-    so it needs a grouping the clamp cannot track -- a tile-major B, which keeps
-    no K field at all.
+    The override raises ASEM to its floor of 8 and never lowers it. Asked for
+    256 -- a clean multiple of DepthU -- an FP4 kernel keeps it and carries no
+    remainder; asked for 1 it ends up at 8 and carries one. The remainder check
+    must read the final value either way, so it needs a grouping the clamp
+    cannot track -- a tile-major B, which keeps no K field at all.
+    test_tail_folding_sees_the_asem_the_fp4_override_leaves pins the same
+    ordering for _TailFolding.
     """
-    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=256,
+    sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=asem,
                        PrefetchAcrossPersistent=0,
                        ProblemType={"TransposeB": True, "MacDataTypeB": "F4"},
                        LDSTrInst=True)
-    assert sol["AssertSummationElementMultiple"] == 8
-    assert sol.get("Valid") is False, "the remainder check saw the config's ASEM"
-    assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
+    assert sol["AssertSummationElementMultiple"] == final
+    if final % sol["DepthU"] == 0:
+        assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    else:
+        assert sol.get("Valid") is False, "the remainder check saw the config's ASEM"
+        assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
 
 
 # ---------------------------------------------------------------------------

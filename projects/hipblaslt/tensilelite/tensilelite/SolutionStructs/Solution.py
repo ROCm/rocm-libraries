@@ -2924,8 +2924,8 @@ class Solution(collections.abc.Mapping):
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
         # HalfPLR + PAP is decided in the HalfPLR block (HalfPLR forces
-        # SuppressNoLoadLoop after this guard). Accepted only for
-        # StreamK==3 and StreamKForceDPOnly==1.
+        # SuppressNoLoadLoop after this guard). Accepted for static
+        # DataParallel and static StreamK.
         if not isPersistent(state):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires a persistent TileProcessingStrategy")
         if not state["BufferLoad"]:
@@ -4183,13 +4183,15 @@ class Solution(collections.abc.Mapping):
         state["AssertFree1ElementMultiple"] = 2
 
         # Currently we only support fp4 tail-loop with AssertSummationElementMultiple = 8.
+        # Raise, never lower: a larger power-of-two assertion is still a multiple of 8
+        # and can remove the tail loop (NoTailLoop).
         # TODO: Enalbe tail-loop with arbitrary number
-        state["AssertSummationElementMultiple"] = 8
+        state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], 8)
 
       if state["ProblemType"]["MacDataTypeA"].is6bitFloat() or state["ProblemType"]["MacDataTypeB"].is6bitFloat():
         state["AssertFree0ElementMultiple"] = 1
         state["AssertFree1ElementMultiple"] = 1
-        state["AssertSummationElementMultiple"] = 16
+        state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], 16)
         if not state["ProblemType"]["TransposeA"]:
           state["AssertFree0ElementMultiple"] = 16
         if state["ProblemType"]["TransposeB"]:
@@ -8151,10 +8153,9 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      if state.get("PrefetchAcrossPersistent", 0):
-        if not isPersistentDataParallel(state):
-          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
-          return
+      state["ExpandPointerSwap"] = False
+      # TDM PAP already requires StaticGrid above. Its shared HalfPLR
+      # handoff supports both full-K tiles and StreamK's local K ranges.
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
       # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
       if state["UseSubtileImpl"]:
