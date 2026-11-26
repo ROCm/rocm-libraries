@@ -1366,14 +1366,20 @@ namespace TensileLite
                                                bool const* effectiveDynamicHint = nullptr) const;
 
         // streamKDynamicDecomposition() on the dynamic-queue path, else all tiles
-        // whole. A split (tiles > 0) reserves partialTileSize(partialSlots())
-        // of workspace in place of the grid-sized partials, in
-        // requiredWorkspaceSize(), resolveStreamKSettings() and
+        // whole. Where streamKDynamicSizesPartials() holds, it alone sizes the
+        // partials: partialTileSize(partialSlots()), none when no tile is split,
+        // in requiredWorkspaceSize(), resolveStreamKSettings() and
         // computeStreamKDecisions() alike.
         StreamK::Dynamic::KernelArguments resolveStreamKDynamicSplit(Problem const&  problem,
                                                                      Hardware const& hardware,
                                                                      size_t          tiles,
                                                                      bool effectiveDynamic) const;
+
+        // On the dynamic-queue path a work item is a whole tile, which writes no
+        // partial, or one part of a split tile, which writes one, so the
+        // decomposition, not the grid, sizes the partials. Handwritten kernels
+        // keep the grid rule.
+        bool streamKDynamicSizesPartials(bool effectiveDynamic) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
