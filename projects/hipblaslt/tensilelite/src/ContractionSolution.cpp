@@ -4370,7 +4370,7 @@ namespace TensileLite
 
         rv.args.reserve(512, 64);
 
-        rv.workGroupSize.x = 256;
+        rv.workGroupSize.x = OutputConversionWorkGroupSize;
         rv.workGroupSize.y = 1;
         rv.workGroupSize.z = 1;
 
@@ -4562,7 +4562,7 @@ namespace TensileLite
 
             rv.args.reserve(512, 64);
 
-            rv.workGroupSize.x = 256;
+            rv.workGroupSize.x = OutputConversionWorkGroupSize;
             rv.workGroupSize.y = 1;
             rv.workGroupSize.z = 1;
 
@@ -4631,7 +4631,7 @@ namespace TensileLite
 
         size_t vw = 1;
 
-        rv.workGroupSize.x = 256;
+        rv.workGroupSize.x = OutputConversionWorkGroupSize;
         rv.workGroupSize.y = 1;
         rv.workGroupSize.z = 1;
 
