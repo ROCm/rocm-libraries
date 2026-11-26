@@ -439,19 +439,21 @@ repos:
       # reason, in rocke.tests.pending_lanes (rocke_pending_lanes_check). An
       # assigned file runs only in a CI job that builds rocKE. The hook also
       # runs test_gpu_work_placement.py, as rocke_pending_lanes_check does: no
-      # CTest entry without the GPU lock selects a test module that marks a
-      # test gpu, or that imports a GPU launch entry point and marks none. Needs
-      # cmake, ctest and a C++ compiler on PATH. It also reads
-      # shared/ctest/parse_ctest_categories.py, but a change to that file alone
-      # cannot trigger it: CI checks out only the directories a change touches,
-      # so the hook's own files under rocke/ would be missing. It reads
-      # Python, JSON, YAML and ini files, and the configure reads CMake files
-      # and lists C/C++ sources and reference files; no check, configure step
-      # or glob reads rocKE's documentation, so a change to it alone skips the
-      # hook.
+      # CTest entry without the GPU lock selects a test module that marks a test
+      # gpu, or that imports a GPU launch entry point and marks none. And it
+      # runs test_quick_tier.py: the quick tier keeps to its rules (budget, item
+      # budget, no GPU entry; rocke/TESTING.md section 5.0.3), so a new quick
+      # entry fails until its time is recorded. Needs cmake, ctest and a C++
+      # compiler on PATH. It also reads shared/ctest/parse_ctest_categories.py,
+      # but a change to that file alone cannot trigger it: CI checks out only
+      # the directories a change touches, so the hook's own files under rocke/
+      # would be missing. It reads Python, JSON, YAML and ini files, and the
+      # configure reads CMake files and lists C/C++ sources and reference files;
+      # no check, configure step or glob reads rocKE's documentation, so a
+      # change to it alone skips the hook.
       - id: rocke-pending-lanes
         name: rocKE every test file is assigned to a CI entry or has a recorded reason
-        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_pending_lanes.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_limbo_audit.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_gpu_work_placement.py
+        entry: python -B -m pytest -p no:cacheprovider -q dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_pending_lanes.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_limbo_audit.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_gpu_work_placement.py dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_quick_tier.py
         language: python
         additional_dependencies: *rocke_dependencies
         files: ^dnn-providers/hip-kernel-provider/(rocke/|ROCKE_ENGINE_test_categories_external\.yaml$)

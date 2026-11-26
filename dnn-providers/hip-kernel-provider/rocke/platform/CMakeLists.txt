@@ -687,7 +687,9 @@ if(ROCKE_INSTALL_TESTS)
     # the tree-wide checks of rocke.tests.torch_uses and
     # rocke.tests.toolchain_pins and their allowlists (they list the source
     # checkout), the compliance-pattern test (reads rocke/tools/ and lists
-    # the source checkout), and the arch-domain artifact/probe unit tests. The host-only support-policy
+    # the source checkout), the registration checks of rocke_pending_lanes_check
+    # (they configure the source tree), and the arch-domain artifact/probe unit
+    # tests. The host-only support-policy
     # units are installed with the rest of tests/tools; the full regeneration
     # sweep has its own CTest timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
@@ -719,6 +721,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_pending_lanes.py" EXCLUDE
               PATTERN "test_limbo_audit.py" EXCLUDE
               PATTERN "test_gpu_work_placement.py" EXCLUDE
+              PATTERN "test_quick_tier.py" EXCLUDE
               PATTERN "test_no_torch.py" EXCLUDE
               PATTERN "no_torch_allowlist.txt" EXCLUDE
               PATTERN "test_toolchain_pins.py" EXCLUDE

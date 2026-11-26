@@ -5,41 +5,12 @@
 from __future__ import annotations
 
 import gzip
-import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import SOURCE_TREE, skip_until
-
-
-def _load_check_module():
-    """The production check: in the source tree, or beside this test in an
-    installed tree, which stages ``tools/check_entry_times.py`` and
-    ``entry_times.json`` into ``tests/tools``."""
-    test_file = Path(__file__).resolve()
-    for candidate in (
-        test_file.parents[3] / "tools" / "check_entry_times.py",
-        test_file.with_name("check_entry_times.py"),
-    ):
-        if candidate.is_file():
-            spec = importlib.util.spec_from_file_location(
-                "check_entry_times", candidate
-            )
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module  # dataclasses resolve their module
-            spec.loader.exec_module(module)
-            return module
-    skip_until(
-        SOURCE_TREE,
-        reason="rocke/tools/check_entry_times.py is absent from this platform-only tree",
-    )
-
-
-check = _load_check_module()
-# The check puts the rocke package on the path, so these follow it.
 import rocke
 from rocke.tests.ci_shard import (
     ACTIVATION_FLAG,
@@ -48,7 +19,17 @@ from rocke.tests.ci_shard import (
     place_keys,
     shard_of,
 )
+from rocke.tests.ctest_listing import GPU_LABEL, GPU_RESOURCE_LOCK
 from rocke.tests.ctest_workers import WORKERS_OPTION, worker_keys
+from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.source_modules import load_entry_time_check
+
+check = load_entry_time_check(Path(__file__).resolve().parent)
+if check is None:
+    skip_until(
+        SOURCE_TREE,
+        reason="rocke/tools/check_entry_times.py is absent from this platform-only tree",
+    )
 
 QUICK, STANDARD = check.CI_TIERS
 SPLIT_COMMAND = [
@@ -62,6 +43,7 @@ SPLIT_COMMAND = [
 ]
 SPLIT_RUNNER_COMMAND = ["python", "tests/run_golden.py", ACTIVATION_FLAG]
 WHOLE_COMMAND = ["python", "tests/run_golden.py"]
+PYTEST_COMMAND = ["python", "-m", "pytest", "tests/contracts"]
 
 
 def _test(name: str, labels: list[str], command: list[str], **properties) -> dict:
@@ -331,18 +313,18 @@ def test_a_tier_over_budget_names_the_shard_and_the_entry_alone() -> None:
     )
     verdict = _verdict(
         check.evaluate_tiers(
-            entries, _column(rocke_pytest_core=1900.0, rocke_golden_static=40.0)
+            entries, _column(rocke_pytest_core=1900.0, rocke_golden_static=20.0)
         ),
         QUICK,
     )
     entry_alone = (
         "linux quick shard 1 of 1: rocke_pytest_core alone takes 1900 s, over the "
-        "300 s budget"
+        "30 s budget"
     )
     whole_shard = (
-        "linux quick shard 1 of 1 takes 1940 s, over the 300 s budget and over the "
+        "linux quick shard 1 of 1 takes 1920 s, over the 30 s budget and over the "
         "1800 s step limit; largest: rocke_pytest_core 1900 s, "
-        "rocke_golden_static 40 s"
+        "rocke_golden_static 20 s"
     )
     assert verdict.breaches() == [entry_alone, whole_shard]
 
@@ -409,6 +391,169 @@ def test_an_entry_a_tier_runs_without_a_time_fails_once_per_column() -> None:
         'dates>" LOG...'
     )
     assert check.untimed_entries(entries, _column()) == [untimed]
+
+
+def test_the_test_seconds_floor_is_within_every_item_budget() -> None:
+    """``record`` keeps the times of the tests of at least the floor, so a test
+    over an item budget is always recorded."""
+    budgets = [t.item_budget_seconds for t in check.CI_TIERS if t.item_budget_seconds]
+    assert budgets
+    assert all(check.TEST_SECONDS_FLOOR <= budget for budget in budgets)
+
+
+def test_the_gpu_allowlist_names_at_most_one_entry_each_with_a_reason() -> None:
+    """Only the quick tier's one end-to-end enablement check may use the GPU
+    there, and only with a stated reason."""
+    assert check.gpu_allowlist_breaches(check.GPU_ENTRY_ALLOWLIST) == []
+    two = {"rocke_a": "launches a kernel", "rocke_b": "launches a kernel"}
+    refused = (
+        "GPU_ENTRY_ALLOWLIST check failed - names=['rocke_a', 'rocke_b'], expected "
+        "at most one: the quick tier's one end-to-end enablement check"
+    )
+    assert check.gpu_allowlist_breaches(two) == [refused]
+
+
+@pytest.mark.parametrize(
+    ("budget", "item_budget", "refused"),
+    [
+        (30.0, 0.0, "item_budget_seconds=0, expected a positive budget"),
+        (30.0, 31.0, "item_budget_seconds=31, expected a positive budget"),
+        (0.0, None, "budget_seconds=0, expected at least one shard"),
+    ],
+    ids=["zero-item-budget", "item-budget-over-tier-budget", "zero-budget"],
+)
+def test_a_tier_layout_refuses_budgets_that_cannot_hold(
+    budget: float, item_budget: float | None, refused: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(refused)):
+        check.TierLayout(
+            "quick", shards=1, budget_seconds=budget, item_budget_seconds=item_budget
+        )
+
+
+def _not_measured(name: str) -> str:
+    return (
+        f"linux quick: {name} takes 3.0 s and its tests were not all measured, so "
+        "no item is known to be within the 2 s item budget of quick; record them "
+        "from the logs of every shard of a CI run with pytest's --durations "
+        "report (check_entry_times.py record), or move it to standard"
+    )
+
+
+def test_an_entry_over_the_item_budget_is_refused_unless_its_tests_fit() -> None:
+    entries = check.registered_entries(
+        [
+            _test("rocke_binary", ["quick"], WHOLE_COMMAND),
+            _test("rocke_unmeasured", ["quick"], PYTEST_COMMAND),
+            _test("rocke_partly_measured", ["quick"], PYTEST_COMMAND),
+            _test("rocke_measured_fast", ["quick"], PYTEST_COMMAND),
+            _test("rocke_measured_slow", ["quick"], PYTEST_COMMAND),
+            _test("rocke_measured_none_slow", ["quick"], PYTEST_COMMAND),
+            _test("rocke_small", ["quick"], WHOLE_COMMAND),
+            _test("rocke_standard_only", ["standard"], WHOLE_COMMAND),
+        ]
+    )
+    times = _column(
+        test_seconds={
+            "rocke_partly_measured": {"t.py::test_a": 1.5},
+            "rocke_measured_fast": {"t.py::test_a": 1.5},
+            "rocke_measured_slow": {"t.py::test_a": 1.5, "t.py::test_b": 2.5},
+        },
+        rocke_binary=3.0,
+        rocke_unmeasured=3.0,
+        rocke_partly_measured=3.0,
+        rocke_measured_fast=3.0,
+        rocke_measured_slow=4.5,
+        rocke_measured_none_slow=3.0,
+        rocke_small=2.0,
+        rocke_standard_only=90.0,
+    )
+    times["linux"]["tests_measured"] = [
+        "rocke_measured_fast",
+        "rocke_measured_none_slow",
+        "rocke_measured_slow",
+    ]
+    assert check.item_budget_breaches(entries, times) == [
+        (
+            "linux quick: rocke_binary takes 3.0 s, and it is not a pytest entry, "
+            "so it is one item, over the 2 s item budget of quick; make it "
+            "cheaper or move it to standard"
+        ),
+        _not_measured("rocke_unmeasured"),
+        _not_measured("rocke_partly_measured"),
+        (
+            "linux quick: rocke_measured_slow test t.py::test_b takes 2.5 s, over "
+            "the 2 s item budget of quick; make it cheaper or move it to standard"
+        ),
+    ]
+    assert check.item_budget_breaches(entries, times, tiers=[STANDARD]) == []
+    both_columns = {**times, "windows": times["linux"]}
+    breaches = check.item_budget_breaches(entries, both_columns)
+    columns = [breach.split(" ")[0] for breach in breaches]
+    assert columns == ["linux"] * 4 + ["windows"] * 4
+
+
+@pytest.mark.parametrize(
+    ("labels", "properties"),
+    [
+        (["quick", "standard", GPU_LABEL], {}),
+        (["quick", "standard"], {"RESOURCE_LOCK": [GPU_RESOURCE_LOCK]}),
+    ],
+    ids=["gpu-label", "gpu-lock"],
+)
+def test_a_tier_that_runs_no_gpu_entries_refuses_one(
+    labels: list[str], properties: dict[str, list[str]]
+) -> None:
+    entries = check.registered_entries(
+        [
+            _test("rocke_device", labels, PYTEST_COMMAND, **properties),
+            _test("rocke_host", ["quick", "standard"], PYTEST_COMMAND),
+            _test("rocke_other_lock", ["quick"], WHOLE_COMMAND, RESOURCE_LOCK=["x"]),
+            _test(
+                "rocke_excluded",
+                [*labels, check.EXCLUDED_LABEL],
+                PYTEST_COMMAND,
+                **properties,
+            ),
+        ]
+    )
+    [refused] = check.gpu_entry_breaches(entries)
+    assert refused.startswith("quick: rocke_device uses the GPU, and quick runs no")
+    assert check.gpu_entry_breaches(entries, tiers=[STANDARD]) == []
+    allowed = {"rocke_device": "the one kernel launch of the enablement check"}
+    assert check.gpu_entry_breaches(entries, allowlist=allowed) == []
+
+
+def test_an_allowlisted_gpu_entry_needs_a_reason() -> None:
+    refused = (
+        "GPU_ENTRY_ALLOWLIST check failed - rocke_device: reason=' ', expected "
+        "why the entry must use the GPU"
+    )
+    assert check.gpu_allowlist_breaches({"rocke_device": " "}) == [refused]
+    assert check.gpu_allowlist_breaches({"rocke_device": "launches a kernel"}) == []
+
+
+def test_check_fails_a_gpu_entry_or_a_slow_item_in_quick(tmp_path, capsys) -> None:
+    listing = tmp_path / "listing.json"
+    times = tmp_path / "entry_times.json"
+    times.write_text(
+        json.dumps(_column(rocke_device=1.0, rocke_binary=3.0)), encoding="utf-8"
+    )
+    argv = [*_data_options(times), "check", "--column", "linux"]
+    argv += ["--listing", str(listing)]
+    for planted, message in [
+        (
+            _test("rocke_device", ["quick", GPU_LABEL], WHOLE_COMMAND),
+            "FAIL quick: rocke_device uses the GPU",
+        ),
+        (
+            _test("rocke_binary", ["quick"], WHOLE_COMMAND),
+            "FAIL linux quick: rocke_binary takes 3.0 s",
+        ),
+    ]:
+        listing.write_text(json.dumps(_listing(planted)), encoding="utf-8")
+        assert check.main(argv) == 1
+        assert message in capsys.readouterr().out
 
 
 # Lines in the form a CI job log shows `ctest -V` output: a timestamp, then the
@@ -644,9 +789,11 @@ def _data_options(times: Path) -> list[str]:
 
 
 def _write_inputs(tmp_path: Path, seconds: float) -> tuple[Path, Path]:
+    """A registration of one standard entry that runs whole on every shard,
+    and data giving it ``seconds``."""
     listing = tmp_path / "listing.json"
     listing.write_text(
-        json.dumps(_listing(_test("rocke_golden_static", ["quick"], WHOLE_COMMAND))),
+        json.dumps(_listing(_test("rocke_golden_static", ["standard"], WHOLE_COMMAND))),
         encoding="utf-8",
     )
     times = tmp_path / "entry_times.json"
@@ -654,7 +801,7 @@ def _write_inputs(tmp_path: Path, seconds: float) -> tuple[Path, Path]:
     return listing, times
 
 
-@pytest.mark.parametrize("seconds, exit_code", [(250.0, 0), (350.0, 1)])
+@pytest.mark.parametrize("seconds, exit_code", [(500.0, 0), (600.0, 1)])
 def test_check_exits_nonzero_exactly_when_a_tier_is_over_budget(
     tmp_path, capsys, seconds: float, exit_code: int
 ) -> None:
@@ -668,7 +815,7 @@ def test_check_exits_nonzero_exactly_when_a_tier_is_over_budget(
         str(listing),
     ]
     assert check.main(argv) == exit_code
-    assert ("FAIL linux quick" in capsys.readouterr().out) == bool(exit_code)
+    assert ("FAIL linux standard" in capsys.readouterr().out) == bool(exit_code)
 
 
 def test_check_fails_a_new_entry_until_its_time_is_recorded(tmp_path, capsys) -> None:
@@ -676,7 +823,7 @@ def test_check_fails_a_new_entry_until_its_time_is_recorded(tmp_path, capsys) ->
     listing.write_text(
         json.dumps(
             _listing(
-                _test("rocke_golden_static", ["quick"], WHOLE_COMMAND),
+                _test("rocke_golden_static", ["standard"], WHOLE_COMMAND),
                 _test("rocke_new_entry", ["standard"], WHOLE_COMMAND),
             )
         ),
