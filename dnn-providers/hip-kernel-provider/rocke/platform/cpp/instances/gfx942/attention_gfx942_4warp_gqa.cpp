@@ -26,6 +26,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_decode_mfma_lanes */
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/helper_rocke.instances.common._attention_alibi.h" /* rocke_attn_alibi_slope */
 #include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 
@@ -39,6 +40,11 @@
 #define FWG_MAX_CPL 16
 #define FWG_MAX_APL 4
 #define FWG_MAX_NLOADS 8
+
+/* Python _4WGQA_ALIBI_DESIGN_REFUSAL. */
+#define FWG_ALIBI_DESIGN_REFUSAL                                                  \
+    "4-warp GQA kernel does not support alibi_design: it adds the ALiBi term to " \
+    "each QK score only"
 
 /* Head sizes the lean body is validated for (Python _4WGQA_LEAN_HEAD_SIZES). */
 static bool fwg_lean_head_size(int hd)
@@ -388,9 +394,9 @@ static const char* fwg_name(rocke_ir_builder_t* b, const char* prefix, int idx)
 
 /* The production paged ABI (_attn_signature), then the unused qq_bias_stride_0
  * and the RUNTIME_KERNARG_FIELDS kernargs. Writes C, Q, K, V, BT, KL, CUQ, scale,
- * num_seqs, block_table_stride, num_query_heads, num_kv_heads, sliding_window
- * into out[0..12]. */
-static void fwg_params(rocke_ir_builder_t* b, const rocke_type_t* dtype, rocke_value_t* out[13])
+ * num_seqs, block_table_stride, num_query_heads, num_kv_heads, sliding_window,
+ * alibi_slopes_ptr into out[0..13]. */
+static void fwg_params(rocke_ir_builder_t* b, const rocke_type_t* dtype, rocke_value_t* out[14])
 {
     rocke_param_opts_t o;
     const rocke_type_t* ptr_dt = rocke_ptr_type(b, dtype, "global");
@@ -425,7 +431,7 @@ static void fwg_params(rocke_ir_builder_t* b, const rocke_type_t* dtype, rocke_v
     o.align = 4;
     o.align_set = true;
     out[5] = rocke_b_param(b, "seq_lens_ptr", ptr_i32, &o);
-    rocke_b_param(b, "alibi_slopes_ptr", ptr_f32, &o);
+    out[13] = rocke_b_param(b, "alibi_slopes_ptr", ptr_f32, &o);
     rocke_b_param(b, "qq_bias_ptr", ptr_f32, &o);
 
     memset(&o, 0, sizeof(o));
@@ -546,6 +552,42 @@ static void fwg_geometry(fwg_ctx_t* c, int BN)
     c->NKpv = BN / c->K;
 }
 
+/* _4wgqa_alibi_add: u * (key - anchor) on each QK score (hipDNN SEM-021), with
+ * u = slope / scale so the later * scale * log2(e) yields log2 units. The key
+ * offset stays an integer until its use: a float u * c_i per element would be
+ * loop-invariant, and LLVM hoists those products out of the KV loop, which
+ * spills these register-bound bodies. */
+static void fwg_alibi_add(fwg_ctx_t* c,
+                          rocke_value_t* S_T[FWG_MAX_NKEYT],
+                          rocke_value_t* u,
+                          rocke_value_t* kv,
+                          rocke_value_t* anchor)
+{
+    rocke_ir_builder_t* b = c->b;
+    rocke_value_t* kb = rocke_b_mul(b, kv, ci(c, c->BN));
+    rocke_value_t* half = rocke_b_div(b, c->lane, ci(c, 32));
+    rocke_value_t* off = rocke_b_mul(b, half, ci(c, 4));
+    off = rocke_b_sub(b, off, anchor);
+    rocke_value_t* d0 = rocke_b_add(b, kb, off);
+    for(int kt = 0; kt < c->NKEYT; kt++)
+    {
+        rocke_value_t* acc = S_T[kt];
+        rocke_value_t* v = acc;
+        for(int i = 0; i < 16; i++)
+        {
+            int k = kt * 32 + (i / 4) * 8 + i % 4;
+            rocke_value_t* d = d0;
+            if(k != 0)
+                d = rocke_b_add(b, d0, ci(c, k));
+            rocke_value_t* df = rocke_b_sitofp_f32(b, d);
+            rocke_value_t* e = rocke_b_vec_extract(b, acc, i);
+            rocke_value_t* t = rocke_b_fma(b, u, df, e);
+            v = rocke_b_vec_insert(b, v, t, i);
+        }
+        S_T[kt] = v;
+    }
+}
+
 /* The output epilogue: acc * (1/l), 0 for a row that sees no key, cast,
  * masked per-lane store. */
 static void fwg_epilogue(fwg_ctx_t* c,
@@ -626,7 +668,7 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
     const int v_fill_epw = (c->BN * c->HD) / 256;
 
     fwg_kernel_attrs(b, spec);
-    rocke_value_t* P[13];
+    rocke_value_t* P[14];
     fwg_params(b, c->dtype, P);
     rocke_value_t* Cout = P[0];
     c->Q = P[1];
@@ -670,6 +712,19 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
     rocke_value_t* kl = rocke_b_add(b, s.klen, ci(c, c->BN - 1));
     rocke_value_t* klen_t = rocke_b_div(b, kl, ci(c, c->BN));
     rocke_value_t* kvend = rocke_b_select(b, rocke_b_cmp_lt(b, causal_t, klen_t), causal_t, klen_t);
+    rocke_value_t* alibi_u = NULL;
+    rocke_value_t* alibi_anchor = NULL;
+    if(spec->use_alibi)
+    {
+        /* One query head per CTA, one query per lane (lane % 32). */
+        rocke_value_t* slope = rocke_attn_alibi_slope(b, c->qhead, c->hq, P[13]);
+        alibi_u = rocke_b_fdiv(b, slope, P[7]);
+        rocke_value_t *r0, *col0;
+        fwg_lane_to_output(c, 0, &r0, &col0);
+        rocke_value_t* q = rocke_b_add(b, c->wq, col0);
+        q = rocke_b_add(b, s.qbase, q);
+        alibi_anchor = rocke_b_add(b, context_off, q);
+    }
     rocke_value_t* lo = ci(c, 0);
     rocke_value_t* step = ci(c, 1);
     rocke_for_t loop
@@ -719,6 +774,8 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
                 S_T[kt] = fwg_mma(c, kf, q, S_T[kt]);
             }
         }
+        if(spec->use_alibi)
+            fwg_alibi_add(c, S_T, alibi_u, kv, alibi_anchor);
         rocke_value_t* Sm[FWG_MAX_NKEYT][FWG_MAX_CPL];
         for(int kt = 0; kt < c->NKEYT; kt++)
         {
@@ -803,6 +860,8 @@ typedef struct fwg_gen
     rocke_value_t* K_lds;
     rocke_value_t* context_off;
     rocke_value_t* kvend;
+    rocke_value_t* alibi_u; /* NULL without ALiBi */
+    rocke_value_t* alibi_anchor;
     rocke_value_t* SWZ_ST[FWG_MAX_NLOADS];
     rocke_value_t* SWZ_K[FWG_MAX_NK][FWG_MAX_NKEYT];
     rocke_value_t* SWZ_V[FWG_MAX_NKPV][FWG_MAX_NDDIM][FWG_MAX_APL];
@@ -973,6 +1032,8 @@ static void fwg_body(
             S_T[kt] = fwg_mma(c, kf, q, S_T[kt]);
         }
     }
+    if(g->alibi_u != NULL)
+        fwg_alibi_add(c, S_T, g->alibi_u, kv, g->alibi_anchor);
     rocke_value_t* Sm[FWG_MAX_NKEYT][FWG_MAX_CPL];
     for(int kt = 0; kt < c->NKEYT; kt++)
     {
@@ -1146,7 +1207,7 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     const int TOKBLK = fold ? 128 / FWG_FOLD_HEADS : 128;
 
     fwg_kernel_attrs(b, spec);
-    rocke_value_t* P[13];
+    rocke_value_t* P[14];
     fwg_params(b, c->dtype, P);
     rocke_value_t* Cout = P[0];
     c->Q = P[1];
@@ -1245,6 +1306,19 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     }
     g->context_off = rocke_b_sub(b, s.klen, s.qlen);
     g->window = spec->sliding_window;
+    if(spec->use_alibi)
+    {
+        /* Per lane: its query's head and causal diagonal (the masks' q_g). */
+        rocke_value_t* slope = rocke_attn_alibi_slope(b, c->q_row_head, c->hq, P[13]);
+        g->alibi_u = rocke_b_fdiv(b, slope, P[7]);
+        rocke_value_t *r0, *col0;
+        fwg_lane_to_output(c, 0, &r0, &col0);
+        rocke_value_t* q = rocke_b_add(b, c->wq, col0);
+        if(fold)
+            q = rocke_b_div(b, q, ci(c, FWG_FOLD_HEADS));
+        q = rocke_b_add(b, s.qbase, q);
+        g->alibi_anchor = rocke_b_add(b, g->context_off, q);
+    }
     const int BN = c->BN;
     rocke_value_t* cq = rocke_b_add(b, g->context_off, s.qbase);
     cq = rocke_b_add(b, cq, ci(c, TOKBLK + BN - 1));
@@ -1400,6 +1474,11 @@ static rocke_kernel_def_t*
         return NULL;
     if(!rocke_require_tiled_attention_arch(b, arch))
         return NULL;
+    if(spec->alibi_design != NULL)
+    {
+        fwg_fail(b, ROCKE_ERR_VALUE, FWG_ALIBI_DESIGN_REFUSAL);
+        return NULL;
+    }
     if(spec->emit_lse)
     {
         /* This body has no LSE store; refuse rather than build a kernel that

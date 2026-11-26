@@ -11,7 +11,8 @@
 # The specs are the ones _tiled_spec_from_problem produces for the routed
 # cohorts (num_warps=1, tile_size=max(32, block_size), block_m_per_warp=32,
 # waves_per_eu=2), covering the D256 lean body, the D128 double-buffer pipe with
-# and without the GQA head-fold, and the D128 block_size=64 single-buffer body.
+# and without the GQA head-fold, and the D128 block_size=64 single-buffer body,
+# each also with ALiBi.
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_gfx942_4warp_gqa,
@@ -137,6 +138,45 @@ _CONFIGS = {
         num_seqs=1,
         tile_size=32,
         waves_per_eu=None,
+    ),
+    # ALiBi (hipDNN SEM-021) in the D256 lean body.
+    9: dict(
+        _ROUTE,
+        head_size=256,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        sliding_window=0,
+        num_seqs=4,
+        tile_size=32,
+        use_alibi=True,
+    ),
+    # ALiBi in the D128 pipe with the head-fold (per-lane head, folded diagonal).
+    10: dict(
+        _ROUTE,
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        sliding_window=4096,
+        num_seqs=1,
+        tile_size=32,
+        use_alibi=True,
+    ),
+    # ALiBi in the D128 bs64 single-buffer body, causal, no fold.
+    11: dict(
+        _ROUTE,
+        head_size=128,
+        block_size=64,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        sliding_window=0,
+        num_seqs=2,
+        tile_size=64,
+        use_alibi=True,
     ),
 }
 

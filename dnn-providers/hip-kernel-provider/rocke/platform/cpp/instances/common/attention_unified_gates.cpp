@@ -103,6 +103,18 @@ bool rocke_attn_unified_reject_mask_semantics(const rocke_unified_attention_prob
         gate_reason(reason, reason_cap, "ALiBi / QQ-bias are only defined for causal masks");
         return true;
     }
+    if(p->use_alibi && p->use_sinks && !p->causal_top_left)
+    {
+        gate_reason(
+            reason, reason_cap, "ALiBi with sinks is only defined on the top-left diagonal");
+        return true;
+    }
+    if(p->use_alibi && !p->causal_top_left && p->emit_lse)
+    {
+        gate_reason(
+            reason, reason_cap, "ALiBi with LSE output is only defined on the top-left diagonal");
+        return true;
+    }
     return false;
 }
 
