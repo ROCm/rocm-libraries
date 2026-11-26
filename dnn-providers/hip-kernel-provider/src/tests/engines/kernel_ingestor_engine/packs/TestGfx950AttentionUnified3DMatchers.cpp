@@ -283,13 +283,68 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAKeyLengthNotAWholeNumberOfBl
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAnAdditiveMask)
+// =============================================================================
+// attn_mask: an FP32 additive bias, served only by the bias kernels
+// =============================================================================
+
+TEST(TestGfx950AttentionUnified3DMatchers, AcceptsEveryAttnMaskLayoutTheKernelsRead)
 {
-    GraphSpec spec;
-    spec.extra = [](data_objects::SdpaAttributesBuilder& builder) {
-        builder.add_attn_mask_tensor_uid(EXTRA_UID);
-    };
-    EXPECT_FALSE(matchGraph(spec).has_value());
+    for(const auto& biasCase : servedBiasCases(GraphSpec{}))
+    {
+        EXPECT_TRUE(matchGraph(biasCase.spec).has_value()) << biasCase.name;
+    }
+}
+
+/// The bias uid and its batch, head and query-row strides are bound for kernelMatches and
+/// the launch, each broadcast axis (the single query row among them) at stride 0; a graph
+/// without one binds NO_BIAS.
+TEST(TestGfx950AttentionUnified3DMatchers, BindsTheAttnMaskAndItsStrides)
+{
+    const auto bound = matchGraph(withBias(GraphSpec{}));
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_UID_TOKEN), BIAS_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_BATCH_TOKEN), 8 * 256);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_HEAD_TOKEN), 256);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_QUERY_TOKEN), 0);
+
+    const auto plain = matchGraph(GraphSpec{});
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(tryGetBoundInt(*plain, BIAS_UID_TOKEN), -1);
+}
+
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAnAttnMaskTheKernelCannotRead)
+{
+    std::vector<DeclineCase> cases;
+    for(const auto& biasCase : declinedBiasCases(GraphSpec{}))
+    {
+        cases.push_back({biasCase.name, biasCase.spec});
+    }
+    GraphSpec ragged = withBias(GraphSpec{});
+    ragged.raggedOperand = BIAS_UID;
+    cases.push_back({"ragged attn_mask", ragged});
+    expectEveryCaseDeclines(cases);
+}
+
+/// No bias kernel writes the LSE: a graph asking for both is declined, though each alone is
+/// served.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAnAttnMaskWithTheStatsOutput)
+{
+    GraphSpec both = withBias(GraphSpec{});
+    both.stats = true;
+    EXPECT_FALSE(matchGraph(both).has_value());
+
+    GraphSpec stats;
+    stats.stats = true;
+    EXPECT_TRUE(matchGraph(stats).has_value());
+    EXPECT_TRUE(matchGraph(withBias(GraphSpec{})).has_value());
+}
+
+/// The kernel addresses the bias with 32-bit element offsets: the last element a launch
+/// reads may be 2^31 - 1, not 2^31.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAnAttnMaskReachingPastThirtyTwoBitOffsets)
+{
+    EXPECT_TRUE(matchGraph(biasReachingElement(GraphSpec{}, true)).has_value());
+    EXPECT_FALSE(matchGraph(biasReachingElement(GraphSpec{}, false)).has_value());
 }
 
 // =============================================================================
@@ -507,6 +562,41 @@ TEST(TestGfx950AttentionUnified3DMatchers, PairsTheLseOnKernelWithTheStatsGraph)
     EXPECT_FALSE(matchesKernel(stats, KernelSpec{}));
     EXPECT_FALSE(matchesKernel(GraphSpec{}, lse));
     EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
+}
+
+/// A bias kernel serves only a graph with an attn_mask, and every other kernel only a graph
+/// without one: the segment's bias kernarg slots are baked in.
+TEST(TestGfx950AttentionUnified3DMatchers, PairsTheBiasKernelWithTheAttnMaskGraph)
+{
+    const GraphSpec bias = withBias(GraphSpec{});
+    KernelSpec biasKernel;
+    biasKernel.useAdditiveBias = 1;
+
+    EXPECT_TRUE(matchesKernel(bias, biasKernel));
+    EXPECT_FALSE(matchesKernel(bias, KernelSpec{}));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, biasKernel));
+}
+
+/// use_additive_bias reads as 0 when a record omits it; a value other than 0 or 1, or a bias
+/// record that also writes the LSE (rocKE builds none), is malformed.
+TEST(TestGfx950AttentionUnified3DMatchers, DeclinesARecordWithAnInvalidUseAdditiveBias)
+{
+    auto kernel = makeKernel(KernelSpec{});
+    kernel.metadata.erase("use_additive_bias");
+    EXPECT_TRUE(matchesKernel(Graph(GraphSpec{}), kernel));
+    EXPECT_FALSE(matchesKernel(Graph(withBias(GraphSpec{})), kernel));
+
+    KernelSpec two;
+    two.useAdditiveBias = 2;
+    EXPECT_FALSE(matchesKernel(withBias(GraphSpec{}), two));
+
+    KernelSpec withLse;
+    withLse.useAdditiveBias = 1;
+    withLse.emitLse = 1;
+    GraphSpec stats;
+    stats.stats = true;
+    EXPECT_FALSE(matchesKernel(stats, withLse));
+    EXPECT_FALSE(matchesKernel(withBias(GraphSpec{}), withLse));
 }
 
 TEST(TestGfx950AttentionUnified3DMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)

@@ -227,14 +227,19 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
             << " kernel computes the bottom-right causal band only");
         return std::nullopt;
     }
-    return bindGraph(
-        *operands->attributes, matched->mask, matched->scale, matched->stats, arch.tokens);
+    return bindGraph(*operands->attributes,
+                     matched->mask,
+                     matched->scale,
+                     matched->stats,
+                     matched->bias,
+                     arch.tokens);
 }
 
 /// What the kernel match and the handler ask of one architecture's engine, over its candidate
 /// record @p Candidate (which must carry `headSize`, `blockSize`, `maskType`, `slidingWindow`,
-/// `numWarps`, `blockMPerWarp` and `emitLse`: whether the kernel also writes the stats output,
-/// always false where no LSE-on kernel ships).
+/// `numWarps`, `blockMPerWarp`, `emitLse`: whether the kernel also writes the stats output,
+/// always false where no LSE-on kernel ships, and `useAdditiveBias`: whether it adds an
+/// attn_mask).
 template <typename Candidate>
 struct Unified2DArch
 {
@@ -279,6 +284,7 @@ inline std::string errorPrefix(std::string_view label)
  *     the sliding window;
  *   - the stats output: a candidate that writes it (emit_lse) serves only a graph that asks
  *     for it, and every other candidate only a graph that does not;
+ *   - the attn_mask, likewise: a bias kernel (use_additive_bias) serves only a graph with one;
  *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
  */
 template <typename Candidate>
@@ -344,6 +350,13 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // Likewise the attn_mask: the bias kernel's four extra kernargs are baked in.
+    const auto bias = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.graph.tokens.biasUid);
+    if(!bias.has_value() || candidate->useAdditiveBias != (*bias != NO_BIAS))
+    {
+        return false;
+    }
+
     // The identity cache must be whole blocks of THIS candidate's size, and small enough for
     // the table the kernel indexes in 32 bits.
     return unifiedAttentionWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
@@ -364,9 +377,11 @@ bool kernelMatches(const MatchContext& context,
 /// dispatch rather than silently weakening the check.
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared; they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one. An LSE-on kernel
-/// (@p emitLse) appends lse_ptr.
-inline std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false)
+/// mismatch diagnostic prints the real layout beside the recorded one. A bias kernel
+/// (@p additiveBias) appends the attn_mask pointer and its three strides, and an LSE-on kernel
+/// (@p emitLse) lse_ptr after them.
+inline std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false,
+                                                            bool additiveBias = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
@@ -394,10 +409,23 @@ inline std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false
         KernelArgument{"by_value", I32, 112, "num_query_heads"},
         KernelArgument{"by_value", I32, 116, "num_kv_heads"},
         KernelArgument{"by_value", I32, 120, "sliding_window"}};
+    // Each pointer after the runtime kernargs starts 8-byte aligned (read off the compiled
+    // kernels); rocKE declares the bias params before lse_ptr.
+    uint32_t offset = 128;
+    if(additiveBias)
+    {
+        arguments.push_back(KernelArgument{"global_buffer", PTR, offset, "additive_bias_ptr"});
+        arguments.push_back(
+            KernelArgument{"by_value", I32, offset + 8, "additive_bias_batch_stride"});
+        arguments.push_back(
+            KernelArgument{"by_value", I32, offset + 12, "additive_bias_head_stride"});
+        arguments.push_back(
+            KernelArgument{"by_value", I32, offset + 16, "additive_bias_sq_stride"});
+        offset += 24;
+    }
     if(emitLse)
     {
-        // After the runtime kernargs, 8-byte aligned (read off the compiled LSE kernel).
-        arguments.push_back(KernelArgument{"global_buffer", PTR, 128, "lse_ptr"});
+        arguments.push_back(KernelArgument{"global_buffer", PTR, offset, "lse_ptr"});
     }
     return arguments;
 }
@@ -551,7 +579,27 @@ public:
                        + (candidate.emitLse ? "' writes stats, but the graph asks for none"
                                             : "' writes no stats, but the graph asks for them"));
         }
+        if(candidate.useAdditiveBias != binding.bias.has_value())
+        {
+            refuse(_arch.graph.label,
+                   "kernel '" + hipdnn_plugin_sdk::ingestor::toString(kernel.kernelId)
+                       + (candidate.useAdditiveBias
+                              ? "' adds an attn_mask, but the graph has none"
+                              : "' adds no attn_mask, but the graph has one"));
+        }
         const auto problem = boundProblem(context, binding, _arch.graph.label);
+        if(binding.bias.has_value())
+        {
+            // The graph match bounds this for the graph it saw; the problem is re-read here.
+            const auto largest
+                = sdpa_graph::largestAdditiveBiasIndex(problem, binding.bias->strides);
+            if(!largest.has_value() || *largest > sdpa_graph::MAX_BIAS_INDEX)
+            {
+                refuse(_arch.graph.label,
+                       "the attn_mask reaches element 2^31 or beyond; the kernel addresses it "
+                       "with 32-bit element offsets");
+            }
+        }
         if(_arch.prepareChecks != nullptr)
         {
             _arch.prepareChecks(candidate, problem, kernel);
@@ -570,7 +618,10 @@ public:
         }
 
         auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, unified2DKernelSignature(candidate.emitLse));
+            _kpackLoader,
+            context,
+            kernel,
+            unified2DKernelSignature(candidate.emitLse, candidate.useAdditiveBias));
 
         // Grid from the SELECTED CANDIDATE'S geometry and the GRAPH PROBLEM, not from
         // descriptor shape metadata: the binary takes its shape at runtime.
@@ -645,8 +696,9 @@ public:
         const int32_t noQqBiasStride = 0;
 
         const auto& p = preparedUnified.problem();
-        // The kernarg list, which an LSE-on kernel ends with the stats output.
-        const auto launchWith = [&](auto... statsArgument) {
+        // The kernarg list, which a bias kernel ends with the attn_mask and its strides and an
+        // LSE-on kernel with the stats output.
+        const auto launchWith = [&](auto... tailArguments) {
             preparedUnified.kernelForStream(stream).launch(
                 stream,
                 o.ptr,
@@ -670,8 +722,18 @@ public:
                 static_cast<int32_t>(p.numQueryHeads),
                 static_cast<int32_t>(p.numKvHeads),
                 static_cast<int32_t>(preparedUnified.slidingWindow()),
-                statsArgument...);
+                tailArguments...);
         };
+        if(binding.bias.has_value())
+        {
+            const auto bias = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.bias->uid, deviceBuffers, numDeviceBuffers);
+            launchWith(bias.ptr,
+                       binding.bias->strides[0],
+                       binding.bias->strides[1],
+                       binding.bias->strides[2]);
+            return;
+        }
         if(binding.stats != NO_STATS)
         {
             const auto stats = hipdnn_plugin_sdk::findDeviceBuffer(

@@ -131,6 +131,10 @@ constexpr std::array<Geometry, 6> D128_GEOMETRIES{{
     {"Production4x32T64Ring", 64, 4, 32, 1, 1, 1, 0, 1, 1, 1},
 }};
 
+/// Each head size's bias kernel: its default tile, warps and rows on the narrow 16x16 path,
+/// the only one rocKE adds the bias on. D128's is also a geometry of its own (Narrow2x32T32).
+constexpr Geometry D64_BIAS_GEOMETRY{"Narrow4x32T64", 64, 4, 32, 0, 0};
+
 /// A (query heads, KV heads) pair. Several forced cases use pairs no manifest cell lists,
 /// since one kernel serves every pair of its GQA ratio.
 struct Heads
@@ -210,6 +214,32 @@ std::vector<KnobCase> knobCases()
                          knobsOf(g)});
     }
 
+    // The additive-bias class: one bias kernel per cell, forced once per head size and dtype,
+    // each bias layout in turn.
+    const std::array<std::tuple<int64_t, const Geometry*, DataType, Heads, IngestorSdpaBias>, 4>
+        biasClasses{{
+            {64, &D64_BIAS_GEOMETRY, BF16, {32, 8}, IngestorSdpaBias::FULL},
+            {64, &D64_BIAS_GEOMETRY, FP16, {8, 8}, IngestorSdpaBias::PER_BATCH},
+            {128, &D128_GEOMETRIES[3], BF16, {16, 1}, IngestorSdpaBias::PER_HEAD},
+            {128, &D128_GEOMETRIES[3], FP16, {64, 8}, IngestorSdpaBias::KEY_ROW},
+        }};
+    for(const auto& [headSize, geometry, dataType, h, bias] : biasClasses)
+    {
+        IngestorSdpaGraphSpec shape{
+            dataType, headSize, h.queryHeads, h.kvHeads, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 96, 256};
+        shape.bias = bias;
+        cases.push_back({"D" + std::to_string(headSize) + "_" + geometry->name + "_"
+                             + dtypeSuffix(dataType) + "_Bias",
+                         shape,
+                         knobsOf(*geometry),
+                         knobsOf(*geometry)});
+    }
+    IngestorSdpaGraphSpec coldBias{
+        DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 512, 2048};
+    coldBias.bias = IngestorSdpaBias::FULL;
+    cases.push_back(
+        {"D128_Bf16_Cold_BiasSelectsTheBiasKernel", coldBias, {}, knobsOf(D128_GEOMETRIES[3])});
+
     cases.push_back({"D64_Cold_SelectsTheProductionStack",
                      {DataType::BFLOAT16, 64, 32, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 3, 512, 512},
                      {},
@@ -283,6 +313,8 @@ std::vector<std::string> kernelIdsFor(const KnobCase& knobCase)
         {"num_queries_per_kv", knobCase.shape.queryHeads / knobCase.shape.kvHeads},
         {"mask_type", BOTTOM_RIGHT_MASK_TYPE},
         {"sliding_window", int64_t{0}},
+        // A graph with an attn_mask is served by its cell's bias kernel only.
+        {"use_additive_bias", int64_t{knobCase.shape.bias == IngestorSdpaBias::NONE ? 0 : 1}},
     };
     for(const auto& [field, value] : knobCase.expected)
     {
@@ -343,7 +375,7 @@ TEST_F(IntegrationGpuGfx942AttentionUnified2DKnobCoverage, CoversEveryCatalogKer
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set";
 
-    using KernelClass = std::tuple<int64_t, std::string, int64_t, Knobs>;
+    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, Knobs>;
     const std::vector<std::string> classKnobs{"tile_size",
                                               "num_warps",
                                               "block_m_per_warp",
@@ -363,6 +395,7 @@ TEST_F(IntegrationGpuGfx942AttentionUnified2DKnobCoverage, CoversEveryCatalogKer
             tableClasses.emplace(knobCase.shape.headSize,
                                  detail::catalogDtypeName(knobCase.shape.dataType),
                                  BOTTOM_RIGHT_MASK_TYPE,
+                                 knobCase.shape.bias == IngestorSdpaBias::NONE ? 0 : 1,
                                  knobCase.knobs);
         }
     }
@@ -382,6 +415,8 @@ TEST_F(IntegrationGpuGfx942AttentionUnified2DKnobCoverage, CoversEveryCatalogKer
                                         : std::get_if<std::string>(&dtype->second);
             const auto* mask = intField("mask_type");
             const auto* headSize = intField("head_size");
+            const auto* bias = intField("use_additive_bias");
+            const int64_t biasValue = bias == nullptr ? 0 : *bias;
             Knobs knobs;
             for(const auto& knob : classKnobs)
             {
@@ -397,9 +432,9 @@ TEST_F(IntegrationGpuGfx942AttentionUnified2DKnobCoverage, CoversEveryCatalogKer
             ASSERT_TRUE(dtypeName != nullptr && mask != nullptr && headSize != nullptr)
                 << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
                 << " carries no string dtype and integer mask_type and head_size";
-            EXPECT_EQ(tableClasses.count({*headSize, *dtypeName, *mask, knobs}), 1U)
+            EXPECT_EQ(tableClasses.count({*headSize, *dtypeName, *mask, biasValue, knobs}), 1U)
                 << ENGINE.name << " ships kernel class (D" << *headSize << ", " << *dtypeName
-                << ", mask_type " << *mask << ", "
+                << ", mask_type " << *mask << ", use_additive_bias " << biasValue << ", "
                 << detail::describeKey(detail::MetadataKey(knobs.begin(), knobs.end()))
                 << ") that no forced case runs";
         });

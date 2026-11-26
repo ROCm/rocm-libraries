@@ -41,6 +41,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/AttentionDenseCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaAdditiveBias.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
@@ -92,13 +93,9 @@ constexpr std::string_view KV_SEGMENTS_FIELD = "kv_segments";
 // completes a record without it.
 constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
 
-/// The largest bias stride and bias element index a launch may use: the kernel takes each
-/// stride as an int32_t and addresses the bias with 32-bit element offsets. rocKE states the
-/// same bound as ADDITIVE_BIAS_INDEX_LIMIT (an exclusive 2^31) in
-/// kernels/common/_attention_additive_bias.py. additiveBiasFor(), the dispatch's bound-token
-/// reader (attentionDenseBinding()) and the saved-plan reader all check against this one
-/// constant; test_registry_regeneration.py ties it to the rocKE limit.
-constexpr int64_t MAX_BIAS_INDEX = std::numeric_limits<int32_t>::max();
+// The i32 bias bounds and the attn_mask match are shared with the unified attention packs.
+using sdpa_graph::largestAdditiveBiasIndex;
+using sdpa_graph::MAX_BIAS_INDEX;
 
 // sdpa_graph's single-node SDPA-forward helpers this pack reads the graph with.
 using sdpa_graph::BATCH_AXIS;
@@ -305,30 +302,6 @@ bool isServableStatsTensor(const data_objects::TensorAttributes& stats,
            && axisOk(HEAD_AXIS, problem.seqLenQ) && axisOk(SEQ_AXIS, 1);
 }
 
-/// The largest bias element index a launch reaches: (seqlen_kv - 1) plus, for each
-/// leading axis, (extent - 1) * stride, with the problem's batch, query-head and query-row
-/// extents. nullopt when a product or the sum overflows int64_t. The kernel addresses the
-/// bias with 32-bit element offsets, so a launch needs this at most MAX_BIAS_INDEX.
-///
-/// Not checkedProduct: that one refuses a non-positive factor, and a broadcast axis has a
-/// zero stride (and an extent of 1 makes the other factor zero), both legitimate here.
-std::optional<int64_t> largestAdditiveBiasIndex(const AttentionDenseProblem& problem,
-                                                const std::array<int32_t, 3>& strides)
-{
-    const std::array<int64_t, 3> extents{problem.batch, problem.numQueryHeads, problem.seqLenQ};
-    int64_t largest = problem.seqLenKv - 1;
-    for(size_t axis = 0; axis < extents.size(); ++axis)
-    {
-        int64_t reach = 0;
-        if(__builtin_mul_overflow(extents[axis] - 1, int64_t{strides[axis]}, &reach)
-           || __builtin_add_overflow(largest, reach, &largest))
-        {
-            return std::nullopt;
-        }
-    }
-    return largest;
-}
-
 /// The mask the kernel is built for: causal or not, and the window in keys (0 = none).
 struct AttentionDenseMask
 {
@@ -440,83 +413,6 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
                                                       << " is not supported");
         return std::nullopt;
     }
-}
-
-/**
- * @brief The graph's additive bias as the kernel reads it, or nullopt (logged) when the
- *        kernel cannot read it.
- *
- * For an arch that serves a bias. hipDNN's attn_mask is an additive bias on the scaled
- * scores. The kernel reads it as fp32 [B|1, Hq|1, Sq|1, Skv] with a unit-stride key axis,
- * indexed by the query head, through one runtime stride per leading axis; an extent-1 axis
- * broadcasts through stride 0. It indexes in i32, so the largest element it can reach must
- * be at most MAX_BIAS_INDEX.
- *
- * Gfx1151WmmaAttentionNative.cpp's biasFor checks the same layout with two differences: it
- * range-checks a broadcast axis's stride before replacing it with 0 (this pack ignores it:
- * a size-1 axis is never stepped along), and it bounds the tensor's byte address where this
- * pack bounds the largest element index the kernel reads (the rocKE kernels index the bias
- * in i32 elements). Merging the two is a follow-up (see the rocKE known_gaps.md).
- */
-std::optional<AttentionDenseBias> additiveBiasFor(const MatchContext& context,
-                                                  int64_t uid,
-                                                  const AttentionDenseProblem& problem,
-                                                  const AttentionDenseArch& arch)
-{
-    const auto* tensor = findTensor(context, uid);
-    if(tensor == nullptr || !isWellFormedOperand(*tensor))
-    {
-        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "attn_mask")
-                               << "the attn_mask tensor (uid " << uid
-                               << ") must be a rank-4 tensor in the graph with positive "
-                                  "extents, not virtual, not ragged and not pass-by-value");
-        return std::nullopt;
-    }
-    const auto* dims = tensor->dims();
-    const auto* strides = tensor->strides();
-    if(dims->Get(HEAD_SIZE_AXIS) != problem.seqLenKv
-       || (problem.seqLenKv > 1 && strides->Get(HEAD_SIZE_AXIS) != 1))
-    {
-        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "attn_mask")
-                               << describeOperand("attn_mask", *tensor)
-                               << " must be rank-4 [B|1, Hq|1, Sq|1, Skv] with Skv = "
-                               << problem.seqLenKv << " at unit stride");
-        return std::nullopt;
-    }
-    if(tensor->data_type() != data_objects::DataType::FLOAT)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "attn_mask")
-                               << "attn_mask data type " << tensor->data_type()
-                               << " is not supported; the kernel reads an FP32 bias");
-        return std::nullopt;
-    }
-
-    const std::array<int64_t, 3> extents{problem.batch, problem.numQueryHeads, problem.seqLenQ};
-    AttentionDenseBias bias;
-    bias.uid = uid;
-    for(uint32_t axis = 0; axis < extents.size(); ++axis)
-    {
-        const int64_t extent = dims->Get(axis);
-        const int64_t stride = extent == 1 ? 0 : strides->Get(axis);
-        if((extent != 1 && extent != extents[axis]) || stride < 0 || stride > MAX_BIAS_INDEX)
-        {
-            HIPDNN_PLUGIN_LOG_INFO(declined(arch, "attn_mask")
-                                   << describeOperand("attn_mask", *tensor) << " axis " << axis
-                                   << " must have extent 1 or " << extents[axis]
-                                   << " and a stride in [0, 2^31)");
-            return std::nullopt;
-        }
-        bias.strides[axis] = static_cast<int32_t>(stride);
-    }
-    const auto maxIndex = largestAdditiveBiasIndex(problem, bias.strides);
-    if(!maxIndex.has_value() || *maxIndex > MAX_BIAS_INDEX)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "size_limit")
-                               << "attn_mask reaches element 2^31 or beyond; the kernel "
-                                  "addresses the bias with 32-bit element offsets");
-        return std::nullopt;
-    }
-    return bias;
 }
 
 /**
@@ -788,7 +684,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                       "supported");
             return std::nullopt;
         }
-        bias = additiveBiasFor(context, *maskUid, problem, arch);
+        bias = sdpa_graph::additiveBiasFor(context, *maskUid, problem, arch.engineName);
         if(!bias.has_value())
         {
             return std::nullopt;

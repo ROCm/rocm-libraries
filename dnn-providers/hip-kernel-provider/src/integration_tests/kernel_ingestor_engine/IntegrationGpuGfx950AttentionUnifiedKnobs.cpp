@@ -82,6 +82,7 @@ constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
+constexpr int64_t BIAS_UID = 6;
 
 /// The masks both engines serve, spelled as diagonal bounds. mask_type numbering is
 /// AttentionMaskType's: 0 none, 1 top-left causal, 2 bottom-right causal.
@@ -107,6 +108,17 @@ int64_t maskType(Mask mask)
     }
 }
 
+/// The additive bias (attn_mask) a graph carries: none, or fp32 with each leading axis full or
+/// broadcast (extent 1). Packed, key axis innermost.
+enum class Bias
+{
+    NONE,
+    FULL, // [B, Hq, Sq, Skv]
+    PER_BATCH, // [B, 1, Sq, Skv]
+    PER_HEAD, // [1, Hq, Sq, Skv]
+    KEY_ROW // [1, 1, 1, Skv]
+};
+
 struct GraphShape
 {
     DataType dataType;
@@ -117,6 +129,7 @@ struct GraphShape
     int64_t batch;
     int64_t seqQ;
     int64_t seqKv;
+    Bias bias = Bias::NONE;
 };
 
 /// One forced knob value, as a (KMD field = knob id, value) pair.
@@ -232,6 +245,28 @@ std::string dtypeName(DataType dataType)
     return dataType == DataType::HALF ? "Fp16" : "Bf16";
 }
 
+std::string biasName(Bias bias)
+{
+    switch(bias)
+    {
+    case Bias::NONE:
+        return "";
+    case Bias::FULL:
+        return "_BiasFull";
+    case Bias::PER_BATCH:
+        return "_BiasPerBatch";
+    case Bias::PER_HEAD:
+        return "_BiasPerHead";
+    case Bias::KEY_ROW:
+        return "_BiasKeyRow";
+    default:
+        throw std::invalid_argument("biasName: unhandled Bias value");
+    }
+}
+
+constexpr std::array<Bias, 4> BIAS_LAYOUTS{
+    {Bias::FULL, Bias::PER_BATCH, Bias::PER_HEAD, Bias::KEY_ROW}};
+
 std::string maskName(Mask mask)
 {
     switch(mask)
@@ -285,6 +320,29 @@ std::vector<KnobCase> knobCases2D()
                          knobsOf(*g),
                          knobsOf(*g)});
     }
+    // The additive-bias class: each cell's bias kernel is its default geometry, forced once
+    // per dtype and mask, each bias layout in turn.
+    std::size_t layout = 0;
+    for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
+    {
+        for(const auto mask : {Mask::NO_MASK, Mask::TOP_LEFT, Mask::BOTTOM_RIGHT})
+        {
+            const auto bias = BIAS_LAYOUTS[layout % std::size(BIAS_LAYOUTS)];
+            const auto& h = HEADS_2D[layout++ % std::size(HEADS_2D)];
+            cases.push_back(
+                {std::string("Unified2D_") + NARROW_4X16.name + "_" + dtypeName(dataType) + "_"
+                     + maskName(mask) + biasName(bias),
+                 ENGINE_2D,
+                 {dataType, h.headSize, h.queryHeads, h.kvHeads, mask, 2, 96, 256, bias},
+                 knobsOf(NARROW_4X16),
+                 knobsOf(NARROW_4X16)});
+        }
+    }
+    cases.push_back({"Unified2D_Cold_BiasSelectsTheBiasKernel",
+                     ENGINE_2D,
+                     {DataType::BFLOAT16, 128, 64, 8, Mask::TOP_LEFT, 2, 384, 512, Bias::FULL},
+                     {},
+                     knobsOf(NARROW_4X16)});
     cases.push_back({"Unified2D_Cold_SelectsTheBaselineGeometry",
                      ENGINE_2D,
                      {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 3, 512, 512},
@@ -328,6 +386,29 @@ std::vector<KnobCase> knobCases3D()
     {
         add(c.segments, c.dataType, c.mask, c.heads);
     }
+    // The additive-bias class: each cell's bias kernel is its 16-segment kernel, forced once per
+    // dtype and causal mask, each bias layout in turn.
+    std::size_t layout = 0;
+    for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
+    {
+        for(const auto mask : {Mask::TOP_LEFT, Mask::BOTTOM_RIGHT})
+        {
+            const auto bias = BIAS_LAYOUTS[layout % std::size(BIAS_LAYOUTS)];
+            const auto& h = HEADS_3D[layout++ % std::size(HEADS_3D)];
+            const Knobs knobs{{"num_segments", DEFAULT_SEGMENTS_3D}};
+            cases.push_back(
+                {"Unified3D_Seg16_" + dtypeName(dataType) + "_" + maskName(mask) + biasName(bias),
+                 ENGINE_3D,
+                 {dataType, h.headSize, h.queryHeads, h.kvHeads, mask, 3, 1, 1024, bias},
+                 knobs,
+                 knobs});
+        }
+    }
+    cases.push_back({"Unified3D_Cold_NoMaskDecodeWithBias",
+                     ENGINE_3D,
+                     {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 4, 1, 768, Bias::PER_HEAD},
+                     {},
+                     {}});
     cases.push_back({"Unified3D_NoMaskDecodeIsTheBottomRightKernel",
                      ENGINE_3D,
                      {DataType::BFLOAT16, 128, 8, 2, Mask::NO_MASK, 2, 1, 512},
@@ -426,6 +507,23 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         attributes.set_diagonal_alignment(shape.mask == Mask::TOP_LEFT
                                               ? DiagonalAlignment::TOP_LEFT
                                               : DiagonalAlignment::BOTTOM_RIGHT);
+    }
+
+    if(shape.bias != Bias::NONE)
+    {
+        const bool fullBatch = shape.bias == Bias::FULL || shape.bias == Bias::PER_BATCH;
+        const bool fullHeads = shape.bias == Bias::FULL || shape.bias == Bias::PER_HEAD;
+        const std::vector<int64_t> dims{fullBatch ? shape.batch : 1,
+                                        fullHeads ? shape.queryHeads : 1,
+                                        shape.bias == Bias::KEY_ROW ? 1 : shape.seqQ,
+                                        shape.seqKv};
+        auto bias = std::make_shared<TensorAttributes>();
+        bias->set_uid(BIAS_UID)
+            .set_name("Bias")
+            .set_dim(dims)
+            .set_stride({dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1})
+            .set_data_type(DataType::FLOAT);
+        attributes.set_bias(bias);
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
@@ -546,6 +644,8 @@ std::vector<std::string> kernelIdsFor(const KnobCase& knobCase)
         // These graphs ask for no stats, so each cell's LSE-on twin, which shares its
         // geometry and knobs, is not one of their kernels (kernelMatches declines it).
         {"emit_lse", int64_t{0}},
+        // A graph with an attn_mask is served by its cell's bias kernel only.
+        {"use_additive_bias", int64_t{knobCase.shape.bias == Bias::NONE ? 0 : 1}},
     };
     for(const auto& [field, value] : knobCase.expected)
     {
@@ -708,7 +808,7 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set";
 
-    using KernelClass = std::tuple<std::string, std::string, int64_t, Knobs>;
+    using KernelClass = std::tuple<std::string, std::string, int64_t, int64_t, Knobs>;
     const auto classKnobs = [](const char* engine) -> std::vector<std::string> {
         if(std::string_view(engine) == ENGINE_3D)
         {
@@ -729,6 +829,7 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
             tableClasses.emplace(knobCase.engine,
                                  catalogDtypeName(knobCase.shape.dataType),
                                  catalogMaskType(knobCase),
+                                 knobCase.shape.bias == Bias::NONE ? 0 : 1,
                                  knobCase.knobs);
         }
     }
@@ -749,6 +850,8 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
                                             ? nullptr
                                             : std::get_if<std::string>(&dtype->second);
                 const auto* mask = intField("mask_type");
+                const auto* bias = intField("use_additive_bias");
+                const int64_t biasValue = bias == nullptr ? 0 : *bias;
                 Knobs knobs;
                 for(const auto& knob : classKnobs(engine))
                 {
@@ -765,9 +868,10 @@ TEST_F(IntegrationGpuGfx950AttentionUnifiedKnobCoverage, CoversEveryCatalogKerne
                 ASSERT_TRUE(dtypeName != nullptr && mask != nullptr)
                     << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
                     << " carries no string dtype and integer mask_type";
-                EXPECT_EQ(tableClasses.count({engine, *dtypeName, *mask, knobs}), 1U)
+                EXPECT_EQ(tableClasses.count({engine, *dtypeName, *mask, biasValue, knobs}), 1U)
                     << engine << " ships kernel class (" << *dtypeName << ", mask_type " << *mask
-                    << ", " << describeKey(MetadataKey(knobs.begin(), knobs.end()))
+                    << ", use_additive_bias " << biasValue << ", "
+                    << describeKey(MetadataKey(knobs.begin(), knobs.end()))
                     << ") that no forced case runs";
             });
         EXPECT_GT(served, 0U) << engine << " serves no kernel on " << SERVED_ARCH

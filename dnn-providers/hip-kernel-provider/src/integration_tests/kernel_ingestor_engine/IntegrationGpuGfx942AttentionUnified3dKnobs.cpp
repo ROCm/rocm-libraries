@@ -68,9 +68,11 @@ struct DecodeCase
     int64_t headSize;
     SdpaLayout kLayout;
     SdpaLayout vLayout;
+    /// The forced knobs; 0 leaves the knob to the engine (each cell's one bias kernel).
     int64_t blockSize;
     int64_t numSegments;
     bool poisonWorkspace;
+    IngestorSdpaBias bias = IngestorSdpaBias::NONE;
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming) -- gtest customization point
@@ -163,6 +165,59 @@ std::vector<DecodeCase> decodeCases()
          32,
          16,
          false},
+        // The additive-bias class: each cell's one bias kernel, each bias layout in turn.
+        {"Bf16D128Gqa4BiasFullPoisonedWorkspace",
+         BF16,
+         3,
+         32,
+         8,
+         777,
+         128,
+         SdpaLayout::BHSD,
+         SdpaLayout::BHSD,
+         0,
+         0,
+         true,
+         IngestorSdpaBias::FULL},
+        {"Fp16D128Gqa16BiasPerBatchMixedKBshdVBhsd",
+         FP16,
+         2,
+         128,
+         8,
+         1000,
+         128,
+         SdpaLayout::BSHD,
+         SdpaLayout::BHSD,
+         0,
+         0,
+         true,
+         IngestorSdpaBias::PER_BATCH},
+        {"Fp16D64MqaBiasPerHeadPaddedRowPoisonedWorkspace",
+         FP16,
+         3,
+         8,
+         1,
+         33,
+         64,
+         SdpaLayout::PADDED_BHSD,
+         SdpaLayout::PADDED_BHSD,
+         0,
+         0,
+         true,
+         IngestorSdpaBias::PER_HEAD},
+        {"Bf16D256BiasKeyRowBshd",
+         BF16,
+         1,
+         8,
+         8,
+         4096,
+         256,
+         SdpaLayout::BSHD,
+         SdpaLayout::BSHD,
+         0,
+         0,
+         false,
+         IngestorSdpaBias::KEY_ROW},
     };
 }
 
@@ -181,30 +236,45 @@ IngestorSdpaGraphSpec decodeGraphSpec(const DecodeCase& c)
                                c.seqKv};
     spec.kLayout = c.kLayout;
     spec.vLayout = c.vLayout;
+    spec.bias = c.bias;
     return spec;
 }
 
 std::vector<KnobSetting> knobSettingsFor(const DecodeCase& c)
 {
     std::vector<KnobSetting> settings;
-    settings.emplace_back(BLOCK_SIZE_KNOB, c.blockSize);
-    settings.emplace_back(NUM_SEGMENTS_KNOB, c.numSegments);
+    if(c.blockSize > 0)
+    {
+        settings.emplace_back(BLOCK_SIZE_KNOB, c.blockSize);
+    }
+    if(c.numSegments > 0)
+    {
+        settings.emplace_back(NUM_SEGMENTS_KNOB, c.numSegments);
+    }
     return settings;
 }
 
 /// The id of the one kernel a forced (block_size, num_segments) leaves for @p c's graph cell
-/// (dtype, head_size, num_queries_per_kv = Hq / Hkv), or nullopt (with a recorded failure)
-/// when that is not exactly one.
+/// (dtype, head_size, num_queries_per_kv = Hq / Hkv) and its bias (a graph with an attn_mask
+/// is served only by the cell's one bias kernel), or nullopt (with a recorded failure) when
+/// that is not exactly one.
 std::optional<std::string> expectedKernelId(const DecodeCase& c)
 {
-    const detail::MetadataKey key{
+    detail::MetadataKey key{
         {"dtype", detail::catalogDtypeName(c.dataType)},
         {"head_size", c.headSize},
         {"num_queries_per_kv", c.queryHeads / c.kvHeads},
         {"sliding_window", int64_t{0}},
-        {"block_size", c.blockSize},
-        {"num_segments", c.numSegments},
+        {"use_additive_bias", int64_t{c.bias == IngestorSdpaBias::NONE ? 0 : 1}},
     };
+    if(c.blockSize > 0)
+    {
+        key.emplace_back("block_size", c.blockSize);
+    }
+    if(c.numSegments > 0)
+    {
+        key.emplace_back("num_segments", c.numSegments);
+    }
     return detail::onlyServedKernelCarrying(ENGINE, key);
 }
 

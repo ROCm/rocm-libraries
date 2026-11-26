@@ -104,6 +104,9 @@ constexpr std::string_view NUM_SEGMENTS_FIELD = "num_segments";
 constexpr std::string_view USE_DECODE_GRID_FIELD = "use_decode_grid";
 /// 1 for an LSE-on kernel, whose reduce also writes the stats output.
 constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
+/// 1 for a kernel whose segment adds an fp32 attn_mask. The KMD declares it with the default
+/// 0, and a record without it reads as 0.
+constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
 
 /// head_size 256 is rocKE's d256_decode cohort: bf16 only.
 constexpr int64_t D256_HEAD_SIZE = 256;
@@ -121,6 +124,13 @@ constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_3d.s
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_3d.scale_bits";
 /// The stats output's uid, or NO_STATS for a graph that asks for none.
 constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_3d.stats.uid";
+/// The attn_mask's uid, or NO_BIAS, and its batch, query-head and query-row strides.
+constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_unified_3d.bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN
+    = "gfx950_attention_unified_3d.bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx950_attention_unified_3d.bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN
+    = "gfx950_attention_unified_3d.bias.stride_query";
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -194,6 +204,10 @@ constexpr unified_attention::BoundTokenNames tokenNames()
     names.slidingWindow = SLIDING_WINDOW_TOKEN;
     names.scaleBits = SCALE_BITS_TOKEN;
     names.stats = STATS_TOKEN;
+    names.biasUid = BIAS_UID_TOKEN;
+    names.biasStrideBatch = BIAS_STRIDE_BATCH_TOKEN;
+    names.biasStrideHead = BIAS_STRIDE_HEAD_TOKEN;
+    names.biasStrideQuery = BIAS_STRIDE_QUERY_TOKEN;
     names.dispatchLabel = "gfx950 attention_unified_3d";
     return names;
 }
@@ -277,6 +291,7 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
                                         decodeMaskKey(matched->mask),
                                         matched->scale,
                                         matched->stats,
+                                        matched->bias,
                                         TOKEN_NAMES);
 }
 
@@ -292,6 +307,9 @@ struct AttentionUnified3DCandidate
     int64_t numSegments = 0;
     /// The reduce also writes the stats output; its kernarg list ends in lse_ptr.
     bool emitLse = false;
+    /// The segment adds an attn_mask; its kernarg list ends in the bias pointer and three
+    /// strides.
+    bool useAdditiveBias = false;
 };
 
 /**
@@ -325,7 +343,9 @@ std::optional<AttentionUnified3DCandidate> candidateFor(const KernelDefinition& 
     {
         return std::nullopt;
     }
-    if(*emitLse != 0 && *emitLse != 1)
+    const int64_t useAdditiveBias = integerMetadata(kernel, USE_ADDITIVE_BIAS_FIELD).value_or(0);
+    if((*emitLse != 0 && *emitLse != 1) || useAdditiveBias < 0 || useAdditiveBias > 1
+       || (useAdditiveBias != 0 && *emitLse != 0))
     {
         return std::nullopt;
     }
@@ -352,7 +372,8 @@ std::optional<AttentionUnified3DCandidate> candidateFor(const KernelDefinition& 
                                        *maskType,
                                        *slidingWindow,
                                        *numSegments,
-                                       *emitLse != 0};
+                                       *emitLse != 0,
+                                       useAdditiveBias != 0};
 }
 
 /**
@@ -437,6 +458,13 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // Likewise the attn_mask: the segment's four extra kernargs are baked in.
+    const auto bias = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, BIAS_UID_TOKEN);
+    if(!bias.has_value() || candidate->useAdditiveBias != (*bias != unified_attention::NO_BIAS))
+    {
+        return false;
+    }
+
     // The identity cache must be whole blocks of THIS candidate's size, and the scratch
     // small enough for the kernels' 32-bit indexing.
     return gfx950Unified3DWorkspaceLayout(problem.batch,
@@ -483,41 +511,51 @@ double scoreKernel(const MatchContext& /*context*/,
 
 /// The segment kernel's signature: 12 pointers (the three scratch outputs first), 4 f32
 /// scalars, three i32 and the runtime shape kernargs (`_tiled_3d_signatures`: head counts and
-/// window).
+/// window); a bias kernel (@p additiveBias) then the attn_mask pointer and its three strides.
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one; kind and size alone cannot tell the twelve pointers
 /// apart, so without names an operand permutation passes and the kernel reads the wrong
 /// buffers. Keep these spellings identical to build_unified_attention_3d_tiled's `b.param`
 /// calls. Offsets are printed in a mismatch diagnostic and never compared.
-std::vector<KernelArgument> unified3DSegmentSignature()
+std::vector<KernelArgument> unified3DSegmentSignature(bool additiveBias = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
     constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
 
-    return {KernelArgument{"global_buffer", PTR, 0, "segm_output_ptr"},
-            KernelArgument{"global_buffer", PTR, 8, "segm_max_ptr"},
-            KernelArgument{"global_buffer", PTR, 16, "segm_expsum_ptr"},
-            KernelArgument{"global_buffer", PTR, 24, "query_ptr"},
-            KernelArgument{"global_buffer", PTR, 32, "key_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 40, "value_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 48, "sink_ptr"},
-            KernelArgument{"global_buffer", PTR, 56, "block_tables_ptr"},
-            KernelArgument{"global_buffer", PTR, 64, "seq_lens_ptr"},
-            KernelArgument{"global_buffer", PTR, 72, "alibi_slopes_ptr"},
-            KernelArgument{"global_buffer", PTR, 80, "qq_bias_ptr"},
-            KernelArgument{"global_buffer", PTR, 88, "query_start_len_ptr"},
-            KernelArgument{"by_value", F32, 96, "scale"},
-            KernelArgument{"by_value", F32, 100, "k_scale"},
-            KernelArgument{"by_value", F32, 104, "v_scale"},
-            KernelArgument{"by_value", F32, 108, "softcap"},
-            KernelArgument{"by_value", I32, 112, "num_seqs"},
-            KernelArgument{"by_value", I32, 116, "block_table_stride"},
-            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"},
-            KernelArgument{"by_value", I32, 124, "num_query_heads"},
-            KernelArgument{"by_value", I32, 128, "num_kv_heads"},
-            KernelArgument{"by_value", I32, 132, "sliding_window"}};
+    std::vector<KernelArgument> arguments{
+        KernelArgument{"global_buffer", PTR, 0, "segm_output_ptr"},
+        KernelArgument{"global_buffer", PTR, 8, "segm_max_ptr"},
+        KernelArgument{"global_buffer", PTR, 16, "segm_expsum_ptr"},
+        KernelArgument{"global_buffer", PTR, 24, "query_ptr"},
+        KernelArgument{"global_buffer", PTR, 32, "key_cache_ptr"},
+        KernelArgument{"global_buffer", PTR, 40, "value_cache_ptr"},
+        KernelArgument{"global_buffer", PTR, 48, "sink_ptr"},
+        KernelArgument{"global_buffer", PTR, 56, "block_tables_ptr"},
+        KernelArgument{"global_buffer", PTR, 64, "seq_lens_ptr"},
+        KernelArgument{"global_buffer", PTR, 72, "alibi_slopes_ptr"},
+        KernelArgument{"global_buffer", PTR, 80, "qq_bias_ptr"},
+        KernelArgument{"global_buffer", PTR, 88, "query_start_len_ptr"},
+        KernelArgument{"by_value", F32, 96, "scale"},
+        KernelArgument{"by_value", F32, 100, "k_scale"},
+        KernelArgument{"by_value", F32, 104, "v_scale"},
+        KernelArgument{"by_value", F32, 108, "softcap"},
+        KernelArgument{"by_value", I32, 112, "num_seqs"},
+        KernelArgument{"by_value", I32, 116, "block_table_stride"},
+        KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"},
+        KernelArgument{"by_value", I32, 124, "num_query_heads"},
+        KernelArgument{"by_value", I32, 128, "num_kv_heads"},
+        KernelArgument{"by_value", I32, 132, "sliding_window"}};
+    if(additiveBias)
+    {
+        // 8-byte aligned after the runtime kernargs (read off the compiled bias kernel).
+        arguments.push_back(KernelArgument{"global_buffer", PTR, 136, "additive_bias_ptr"});
+        arguments.push_back(KernelArgument{"by_value", I32, 144, "additive_bias_batch_stride"});
+        arguments.push_back(KernelArgument{"by_value", I32, 148, "additive_bias_head_stride"});
+        arguments.push_back(KernelArgument{"by_value", I32, 152, "additive_bias_sq_stride"});
+    }
+    return arguments;
 }
 
 /// The reduce kernel's signature: the output then the three scratch arrays it folds,
@@ -735,7 +773,28 @@ public:
                     + (candidate.emitLse ? "' writes stats, but the graph asks for none"
                                          : "' writes no stats, but the graph asks for them"));
         }
+        if(candidate.useAdditiveBias != binding.bias.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_unified_3d: kernel '" + toString(kernel.kernelId)
+                    + (candidate.useAdditiveBias ? "' adds an attn_mask, but the graph has none"
+                                                 : "' adds no attn_mask, but the graph has one"));
+        }
         const auto problem = boundProblem(context, binding);
+        if(binding.bias.has_value())
+        {
+            // The graph match bounds this for the graph it saw; the problem is re-read here.
+            const auto largest
+                = sdpa_graph::largestAdditiveBiasIndex(problem, binding.bias->strides);
+            if(!largest.has_value() || *largest > sdpa_graph::MAX_BIAS_INDEX)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "gfx950 attention_unified_3d: the attn_mask reaches element 2^31 or beyond; "
+                    "the kernel addresses it with 32-bit element offsets");
+            }
+        }
         const auto layout = requireLayout(candidate, problem, kernel);
 
         // The host-side metadata is built before either code object is loaded, so a graph
@@ -768,8 +827,11 @@ public:
                                       reduceDefinition.name + " (launch '" + REDUCE_LAUNCH + "')",
                                       reduceDefinition.kernelId));
         }
-        auto segment = buildIngestorKernelCode(
-            _kpackLoader, context, segmentDefinition, unified3DSegmentSignature());
+        auto segment
+            = buildIngestorKernelCode(_kpackLoader,
+                                      context,
+                                      segmentDefinition,
+                                      unified3DSegmentSignature(candidate.useAdditiveBias));
         auto reduce = buildIngestorKernelCode(
             _kpackLoader, context, reduceDefinition, unified3DReduceSignature(candidate.emitLse));
 
@@ -853,30 +915,48 @@ public:
         const int32_t noQqBiasStride = 0;
 
         const auto& p = preparedUnified.problem();
-        preparedUnified.segmentForStream(stream).launch(
-            stream,
-            segmOutput,
-            segmMax,
-            segmExpsum,
-            q.ptr,
-            k.ptr,
-            v.ptr,
-            unused,
-            blockTables,
-            seqLens,
-            unused,
-            unused,
-            queryStartLen,
-            binding.scale,
-            neutralScale,
-            neutralScale,
-            noSoftcap,
-            static_cast<int32_t>(p.batch),
-            static_cast<int32_t>(layout.identity.blocksPerSeq),
-            noQqBiasStride,
-            static_cast<int32_t>(p.numQueryHeads),
-            static_cast<int32_t>(p.numKvHeads),
-            static_cast<int32_t>(preparedUnified.slidingWindow()));
+        // The segment's kernarg list, which a bias kernel ends with the attn_mask and its
+        // strides.
+        const auto launchSegment = [&](auto... tailArguments) {
+            preparedUnified.segmentForStream(stream).launch(
+                stream,
+                segmOutput,
+                segmMax,
+                segmExpsum,
+                q.ptr,
+                k.ptr,
+                v.ptr,
+                unused,
+                blockTables,
+                seqLens,
+                unused,
+                unused,
+                queryStartLen,
+                binding.scale,
+                neutralScale,
+                neutralScale,
+                noSoftcap,
+                static_cast<int32_t>(p.batch),
+                static_cast<int32_t>(layout.identity.blocksPerSeq),
+                noQqBiasStride,
+                static_cast<int32_t>(p.numQueryHeads),
+                static_cast<int32_t>(p.numKvHeads),
+                static_cast<int32_t>(preparedUnified.slidingWindow()),
+                tailArguments...);
+        };
+        if(binding.bias.has_value())
+        {
+            const auto bias = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.bias->uid, deviceBuffers, numDeviceBuffers);
+            launchSegment(bias.ptr,
+                          binding.bias->strides[0],
+                          binding.bias->strides[1],
+                          binding.bias->strides[2]);
+        }
+        else
+        {
+            launchSegment();
+        }
         if(binding.stats != unified_attention::NO_STATS)
         {
             // The LSE-on reduce: the same arguments, then the stats output.

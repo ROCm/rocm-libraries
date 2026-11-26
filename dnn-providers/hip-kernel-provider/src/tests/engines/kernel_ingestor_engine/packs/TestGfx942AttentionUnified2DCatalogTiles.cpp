@@ -37,7 +37,7 @@
  * TestGfx942AttentionUnified2DDecodeHandoff checks the decode boundary between the two gfx942
  * unified engines: Unified2D declines every decode graph whose GQA group Unified3d ships and
  * leaves it to Unified3d, so every such cell the 2D catalog ships must have a Unified3d kernel
- * with the same head_size, ratio and dtype.
+ * with the same head_size, ratio, dtype and use_additive_bias.
  *
  * Hand-written, not generated: it belongs to the census binary beside the generated
  * TestGfx942AttentionUnified2DPacks, and is registered with its own
@@ -226,10 +226,12 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, TheShippedGqaRatioListIsTheCatalo
     EXPECT_EQ(shipped, listed);
 }
 
-/// The cell a decode graph is served in: (head_size, num_queries_per_kv, dtype).
-using HeadCell = std::tuple<int64_t, int64_t, std::string>;
+/// The cell a decode graph is served in: (head_size, num_queries_per_kv, dtype,
+/// use_additive_bias). A graph with an attn_mask is served only by a bias kernel.
+using HeadCell = std::tuple<int64_t, int64_t, std::string, int64_t>;
 
-/// A kernel's cell, or nullopt when it does not carry all three fields.
+/// A kernel's cell, or nullopt when it does not carry the first three fields
+/// (use_additive_bias reads as 0 when absent, as the engines read it).
 std::optional<HeadCell> headCell(const ingestor::KernelDescriptor& kernel)
 {
     const auto headSize = integerField(kernel, "head_size");
@@ -239,7 +241,8 @@ std::optional<HeadCell> headCell(const ingestor::KernelDescriptor& kernel)
     {
         return std::nullopt;
     }
-    return HeadCell{*headSize, *ratio, *dtype};
+    return HeadCell{
+        *headSize, *ratio, *dtype, integerField(kernel, "use_additive_bias").value_or(0)};
 }
 
 /// The decode boundary between the two gfx942 unified engines: Unified2D declines every decode
@@ -276,16 +279,50 @@ TEST(TestGfx942AttentionUnified2DDecodeHandoff, EveryDecodeCellHandedToUnified3d
                 continue;
             }
             handedOff.insert(*cell);
-            const auto& [headSize, ratio, dtype] = *cell;
+            const auto& [headSize, ratio, dtype, bias] = *cell;
             EXPECT_EQ(unified3dCells.count(*cell), 1U)
                 << "Unified2D declines decode for head_size " << headSize << ", a GQA group of "
-                << ratio << ", " << dtype << " (kernel '" << kernel.name
+                << ratio << ", " << dtype << (bias != 0 ? ", attn_mask" : "") << " (kernel '"
+                << kernel.name
                 << "') and hands it to Unified3d, which ships no kernel for that cell";
         }
     }
     // Every group the 2D catalog ships is one Unified3d serves, so every cell is handed off:
     // none handed off means the rule or a catalog changed.
     EXPECT_FALSE(handedOff.empty()) << "no Unified2D cell is handed to Unified3d at decode";
+}
+
+/// A graph with an attn_mask is served only by a bias kernel (use_additive_bias 1), so every cell
+/// (dtype, head size, GQA ratio, block size, mask and window) must ship one; and exactly one, so
+/// the ranker has no bias choice to make that it was never trained on.
+TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryCellShipsExactlyOneBiasKernel)
+{
+    std::map<std::string, std::size_t> biasKernels;
+    for(const auto& pack : loadedSet(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto dtype = stringField(kernel, "dtype");
+            ASSERT_TRUE(dtype.has_value()) << "kernel '" << kernel.name << "' carries no dtype";
+            std::string cell = *dtype;
+            for(const char* field :
+                {"head_size", "num_queries_per_kv", "block_size", "mask_type", "sliding_window"})
+            {
+                const auto value = integerField(kernel, field);
+                ASSERT_TRUE(value.has_value())
+                    << "kernel '" << kernel.name << "' carries no " << field;
+                cell += std::string(" ") + field + "=" + std::to_string(*value);
+            }
+            const auto bias = integerField(kernel, "use_additive_bias").value_or(0);
+            ASSERT_TRUE(bias == 0 || bias == 1) << "kernel '" << kernel.name << "'";
+            biasKernels[cell] += static_cast<std::size_t>(bias);
+        }
+    }
+    ASSERT_FALSE(biasKernels.empty()) << "the loaded set holds no kernels";
+    for(const auto& [cell, count] : biasKernels)
+    {
+        EXPECT_EQ(count, 1U) << "cell " << cell << " ships " << count << " bias kernels";
+    }
 }
 
 } // namespace

@@ -36,6 +36,10 @@ namespace
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified3d.scale_bits";
+constexpr std::string_view BIAS_UID_TOKEN = "gfx942_attention_unified3d.bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = "gfx942_attention_unified3d.bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx942_attention_unified3d.bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx942_attention_unified3d.bias.stride_query";
 
 GraphSpec base()
 {
@@ -350,7 +354,6 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesEveryUnsupportedOptionalFeatu
 {
     using Builder = data_objects::SdpaAttributesBuilder;
     const std::vector<std::pair<const char*, std::function<void(Builder&)>>> cases = {
-        {"attn_mask", [](Builder& b) { b.add_attn_mask_tensor_uid(EXTRA_UID); }},
         {"scale tensor", [](Builder& b) { b.add_scale_tensor_uid(EXTRA_UID); }},
         {"dropout probability", [](Builder& b) { b.add_dropout_probability(0.1F); }},
         {"dropout seed", [](Builder& b) { b.add_seed_tensor_uid(EXTRA_UID); }},
@@ -626,6 +629,88 @@ TEST(TestGfx942AttentionUnified3dMatchers, ComputeDataTypeMustBeServedByFloatAcc
         spec.computeDataType = computeType;
         EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
     }
+}
+
+// =============================================================================
+// attn_mask: an FP32 additive bias, served only by the bias kernels
+// =============================================================================
+
+TEST(TestGfx942AttentionUnified3dMatchers, AcceptsEveryAttnMaskLayoutTheKernelsRead)
+{
+    for(const auto& biasCase : unified_attention::servedBiasCases(base()))
+    {
+        EXPECT_TRUE(graphMatches(biasCase.spec)) << biasCase.name;
+    }
+}
+
+/// The bias uid and its batch, head and query-row strides are bound for kernelMatches and
+/// the launch, each broadcast axis (the single query row among them) at stride 0; a graph
+/// without one binds NO_BIAS.
+TEST(TestGfx942AttentionUnified3dMatchers, BindsTheAttnMaskAndItsStrides)
+{
+    const auto graph = fixture(unified_attention::withBias(base()));
+    const auto bound = matchesGraph(PACK, graph.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_UID_TOKEN), unified_attention::BIAS_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_BATCH_TOKEN), 32 * 512);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_HEAD_TOKEN), 512);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_QUERY_TOKEN), 0);
+
+    const auto plainGraph = fixture(base());
+    const auto plain = matchesGraph(PACK, plainGraph.context());
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(tryGetBoundInt(*plain, BIAS_UID_TOKEN), -1);
+}
+
+TEST(TestGfx942AttentionUnified3dMatchers, DeclinesAnAttnMaskTheKernelCannotRead)
+{
+    for(const auto& biasCase : unified_attention::declinedBiasCases(base()))
+    {
+        EXPECT_FALSE(graphMatches(biasCase.spec)) << biasCase.name;
+    }
+}
+
+/// The kernel addresses the bias with 32-bit element offsets: the last element a launch
+/// reads may be 2^31 - 1, not 2^31.
+TEST(TestGfx942AttentionUnified3dMatchers, DeclinesAnAttnMaskReachingPastThirtyTwoBitOffsets)
+{
+    auto twoBatches = base();
+    twoBatches.batch = 2;
+    EXPECT_TRUE(graphMatches(unified_attention::biasReachingElement(twoBatches, true)));
+    EXPECT_FALSE(graphMatches(unified_attention::biasReachingElement(twoBatches, false)));
+}
+
+/// A bias kernel serves only a graph with an attn_mask, and every other kernel only a graph
+/// without one: the segment's four bias arguments are baked in.
+TEST(TestGfx942AttentionUnified3dMatchers, PairsTheBiasKernelWithTheAttnMaskGraph)
+{
+    const auto bias = unified_attention::withBias(base());
+    KernelSpec biasKernel;
+    biasKernel.useAdditiveBias = 1;
+
+    EXPECT_TRUE(kernelMatchesGraph(bias, biasKernel));
+    EXPECT_FALSE(kernelMatchesGraph(bias, KernelSpec{}));
+    EXPECT_FALSE(kernelMatchesGraph(base(), biasKernel));
+}
+
+/// use_additive_bias reads as 0 when a record omits it; a value other than 0 or 1 is
+/// malformed.
+TEST(TestGfx942AttentionUnified3dMatchers, DeclinesARecordWithAnInvalidUseAdditiveBias)
+{
+    for(const bool withBias : {false, true})
+    {
+        const auto graph = fixture(withBias ? unified_attention::withBias(base()) : base());
+        const auto bound = matchesGraph(PACK, graph.context());
+        ASSERT_TRUE(bound.has_value());
+        auto definition = makeKernel(KernelSpec{});
+        definition.metadata.erase("use_additive_bias");
+        EXPECT_EQ(matchesKernel(PACK, graph.context(), definition, *bound), !withBias);
+    }
+
+    KernelSpec two;
+    two.useAdditiveBias = 2;
+    EXPECT_FALSE(kernelMatchesGraph(unified_attention::withBias(base()), two));
+    EXPECT_FALSE(kernelMatchesGraph(base(), two));
 }
 
 } // namespace

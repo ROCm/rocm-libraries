@@ -65,6 +65,13 @@ inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx950_attention_unified_3d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_3d.scale_bits";
 inline constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_3d.stats.uid";
+inline constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_unified_3d.bias.uid";
+inline constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN
+    = "gfx950_attention_unified_3d.bias.stride_batch";
+inline constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN
+    = "gfx950_attention_unified_3d.bias.stride_head";
+inline constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN
+    = "gfx950_attention_unified_3d.bias.stride_query";
 
 using namespace unified_attention;
 
@@ -103,6 +110,8 @@ struct KernelSpec
     int64_t useDecodeGrid = 1;
     /// 1 for an LSE-on kernel, which serves only graphs that ask for stats.
     int64_t emitLse = 0;
+    /// 1 for a bias kernel, which serves only graphs with an attn_mask.
+    int64_t useAdditiveBias = 0;
     /// The launch names the record's `sources` carries; the engine needs exactly `segment`
     /// and `reduce`. Empty is a single-launch record.
     std::vector<std::string> launches = {"segment", "reduce"};
@@ -124,6 +133,7 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("num_segments"), spec.numSegments},
         {std::string("use_decode_grid"), spec.useDecodeGrid},
         {std::string("emit_lse"), spec.emitLse},
+        {std::string("use_additive_bias"), spec.useAdditiveBias},
     };
 }
 
@@ -210,6 +220,17 @@ inline std::vector<KernelArgument> pythonSegmentAbi()
 }
 
 /// The reduce-kernel ABI: 5 pointers and the query head count.
+/// @p segment with the four params rocKE's declare_additive_bias_params appends for a bias
+/// kernel.
+inline std::vector<KernelArgument> withAdditiveBias(std::vector<KernelArgument> segment)
+{
+    segment.push_back(KernelArgument{"global_buffer", 8, 0, "additive_bias_ptr"});
+    segment.push_back(KernelArgument{"by_value", 4, 0, "additive_bias_batch_stride"});
+    segment.push_back(KernelArgument{"by_value", 4, 0, "additive_bias_head_stride"});
+    segment.push_back(KernelArgument{"by_value", 4, 0, "additive_bias_sq_stride"});
+    return segment;
+}
+
 inline std::vector<KernelArgument> pythonReduceAbi()
 {
     constexpr uint32_t POINTER_BYTES = 8;

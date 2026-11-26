@@ -64,6 +64,13 @@ inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx942_attention_unified_2d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified_2d.scale_bits";
 inline constexpr std::string_view STATS_TOKEN = "gfx942_attention_unified_2d.stats.uid";
+inline constexpr std::string_view BIAS_UID_TOKEN = "gfx942_attention_unified_2d.bias.uid";
+inline constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN
+    = "gfx942_attention_unified_2d.bias.stride_batch";
+inline constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN
+    = "gfx942_attention_unified_2d.bias.stride_head";
+inline constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN
+    = "gfx942_attention_unified_2d.bias.stride_query";
 
 using namespace unified_attention;
 
@@ -124,6 +131,8 @@ struct KernelSpec
     int64_t useConflictFreeVStore = 0;
     int64_t useTransposedMaskLimit = 0;
     int64_t useTransposedInvariantHoist = 0;
+    /// 1 for a bias kernel, which serves only graphs with an attn_mask.
+    int64_t useAdditiveBias = 0;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -149,6 +158,17 @@ inline KernelSpec narrowKernel()
     return spec;
 }
 
+/// The D128 cells' bias kernel: the default's T32, 2 warps x 32 rows on the 16x16 atom (the
+/// 32x32x8 atom takes no bias).
+inline KernelSpec biasKernel()
+{
+    KernelSpec spec;
+    spec.useMfma32x32x8 = 0;
+    spec.useTransposedQk32x32 = 0;
+    spec.useAdditiveBias = 1;
+    return spec;
+}
+
 /// The metadata of a completed record, as the descriptor loader hands it over.
 inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& spec)
 {
@@ -169,6 +189,7 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("use_conflict_free_v_store"), spec.useConflictFreeVStore},
         {std::string("use_transposed_mask_limit"), spec.useTransposedMaskLimit},
         {std::string("use_transposed_invariant_hoist"), spec.useTransposedInvariantHoist},
+        {std::string("use_additive_bias"), spec.useAdditiveBias},
     };
 }
 

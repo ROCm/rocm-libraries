@@ -109,6 +109,13 @@ struct GraphSpec
     /// field twice.
     std::function<void(data_objects::SdpaAttributesBuilder&)> extra;
     bool twoNodes = false;
+
+    /// An attn_mask (uid unified_attention::BIAS_UID): FP32 [B, Hq, Sq, Skv] at packed
+    /// strides. biasDims and biasStrides replace its shape, biasDataType its type.
+    bool bias = false;
+    std::optional<std::vector<int64_t>> biasDims;
+    std::optional<std::vector<int64_t>> biasStrides;
+    data_objects::DataType biasDataType = data_objects::DataType::FLOAT;
 };
 
 inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
@@ -142,6 +149,14 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     add(K_UID, spec.dataType, kStrides, kDims);
     add(V_UID, spec.dataType, vStrides, vDims);
     add(O_UID, spec.oDataType.value_or(spec.dataType), oStrides, oDims);
+    if(spec.bias)
+    {
+        const std::vector<int64_t> biasDims = spec.biasDims.value_or(
+            std::vector<int64_t>{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.seqLenKv});
+        const std::vector<int64_t> biasStrides = spec.biasStrides.value_or(std::vector<int64_t>{
+            biasDims[1] * biasDims[2] * biasDims[3], biasDims[2] * biasDims[3], biasDims[3], 1});
+        add(unified_attention::BIAS_UID, spec.biasDataType, biasStrides, biasDims);
+    }
 
     const auto attributesFor = [&]() {
         data_objects::SdpaAttributesBuilder attributes(builder);
@@ -192,6 +207,10 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         attributes.add_padding_mask(spec.paddingMask);
         attributes.add_mma_core_mode(spec.mmaCoreMode);
         attributes.add_implementation(data_objects::AttentionImplementation::AUTO);
+        if(spec.bias)
+        {
+            attributes.add_attn_mask_tensor_uid(unified_attention::BIAS_UID);
+        }
         if(spec.extra)
         {
             spec.extra(attributes);
@@ -248,6 +267,8 @@ struct KernelSpec
     int64_t blockSize = 16;
     std::optional<int64_t> tileSizeOverride;
     int64_t numSegments = 16;
+    /// 1 for a bias kernel, which serves only graphs with an attn_mask.
+    int64_t useAdditiveBias = 0;
     unsigned idByte = 0xa1;
 };
 
@@ -274,6 +295,7 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec
         {std::string("tile_size_override"),
          spec.tileSizeOverride.value_or(resolvedTile(spec.headSize, spec.blockSize))},
         {std::string("num_segments"), spec.numSegments},
+        {std::string("use_additive_bias"), spec.useAdditiveBias},
     };
     return kernel;
 }

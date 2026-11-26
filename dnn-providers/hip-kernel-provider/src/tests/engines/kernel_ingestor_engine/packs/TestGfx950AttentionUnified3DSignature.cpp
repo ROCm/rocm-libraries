@@ -38,24 +38,30 @@ constexpr std::size_t SEGMENT_ARGUMENTS = 22;
 constexpr std::size_t REDUCE_ARGUMENTS = 6;
 constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
+/// prepare()'s failure over the default graph and a kernel recording @p segment and
+/// @p reduce; with @p bias, over the graph with an attn_mask and a bias kernel.
 std::string prepareFailureFor(const std::vector<KernelArgument>& segment,
-                              const std::vector<KernelArgument>& reduce)
+                              const std::vector<KernelArgument>& reduce,
+                              bool bias = false)
 {
-    const Graph graph;
+    const Graph graph(bias ? withBias(GraphSpec{}) : GraphSpec{});
     const auto bound = matchGraph(graph);
     EXPECT_TRUE(bound.has_value());
     if(!bound.has_value())
     {
         return {};
     }
-    return prepareFailure(graph, *bound, makeKpackKernel(KernelSpec{}, segment, reduce));
+    KernelSpec spec;
+    spec.useAdditiveBias = bias ? 1 : 0;
+    return prepareFailure(graph, *bound, makeKpackKernel(spec, segment, reduce));
 }
 
 void expectRefused(const std::vector<KernelArgument>& segment,
                    const std::vector<KernelArgument>& reduce,
-                   const std::string& what)
+                   const std::string& what,
+                   bool bias = false)
 {
-    const std::string failure = prepareFailureFor(segment, reduce);
+    const std::string failure = prepareFailureFor(segment, reduce, bias);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
@@ -161,6 +167,40 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesTheReduceOutputMovedOffItsSlo
 TEST(TestGfx950AttentionUnified3DSignature, RefusesTheSegmentListAsTheReduceLaunch)
 {
     expectRefused(pythonSegmentAbi(), pythonSegmentAbi(), "the segment kernel is not a reduce");
+}
+
+/// A bias kernel's segment ends with the attn_mask and its three strides; the reduce is
+/// unchanged.
+TEST(TestGfx950AttentionUnified3DSignature, AcceptsTheBiasAbiThePythonDeclares)
+{
+    const std::string failure
+        = prepareFailureFor(withAdditiveBias(pythonSegmentAbi()), pythonReduceAbi(), true);
+    ASSERT_FALSE(failure.empty());
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the bias segment list the rocKE builder declares: " << failure;
+}
+
+/// A bias kernel built without its four params would read them past the end of the segment,
+/// and a plain kernel handed them would ignore the attn_mask: each is refused.
+TEST(TestGfx950AttentionUnified3DSignature, RefusesTheBiasArgumentsOnTheWrongKernel)
+{
+    expectRefused(
+        pythonSegmentAbi(), pythonReduceAbi(), "a bias segment ends with the attn_mask", true);
+    expectRefused(withAdditiveBias(pythonSegmentAbi()),
+                  pythonReduceAbi(),
+                  "a plain segment has no attn_mask slots");
+}
+
+/// The three strides are like i32 slots; only their names tell batch, head and query row
+/// apart.
+TEST(TestGfx950AttentionUnified3DSignature, RefusesExchangedBiasStrides)
+{
+    const auto segment = withAdditiveBias(pythonSegmentAbi());
+    const std::size_t batch = SEGMENT_ARGUMENTS + 1;
+    expectRefused(swapped(segment, batch, batch + 1), pythonReduceAbi(), "batch/head stride", true);
+    expectRefused(
+        swapped(segment, batch + 1, batch + 2), pythonReduceAbi(), "head/sq stride", true);
+    expectRefused(swapped(segment, batch, batch + 2), pythonReduceAbi(), "batch/sq stride", true);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

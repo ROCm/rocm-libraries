@@ -82,6 +82,9 @@ constexpr std::string_view USE_Q_DIRECT_GLOBAL_FIELD = "use_q_direct_global";
 constexpr std::string_view USE_CONFLICT_FREE_V_STORE_FIELD = "use_conflict_free_v_store";
 constexpr std::string_view USE_TRANSPOSED_MASK_LIMIT_FIELD = "use_transposed_mask_limit";
 constexpr std::string_view USE_TRANSPOSED_INVARIANT_HOIST_FIELD = "use_transposed_invariant_hoist";
+/// 1 for a kernel that adds an fp32 attn_mask, built on the narrow 16x16 path only. The KMD
+/// declares it with the default 0, and a record without it reads as 0.
+constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
 
 /// Each head size's default geometry in the catalog: transposed 32x32x8, 32 rows per warp,
 /// 4 warps and a 64-token KV tile at D64, 2 warps and a 32-token KV tile at D128.
@@ -107,6 +110,13 @@ constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx942_attention_unified_2d.s
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified_2d.scale_bits";
 /// Always NO_STATS: graph_match declines a graph that asks for a stats output.
 constexpr std::string_view STATS_TOKEN = "gfx942_attention_unified_2d.stats.uid";
+/// The attn_mask's uid, or NO_BIAS, and its batch, query-head and query-row strides.
+constexpr std::string_view BIAS_UID_TOKEN = "gfx942_attention_unified_2d.bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN
+    = "gfx942_attention_unified_2d.bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx942_attention_unified_2d.bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN
+    = "gfx942_attention_unified_2d.bias.stride_query";
 
 /// The engine's bound-token names, field by field.
 constexpr unified_attention::BoundTokenNames tokenNames()
@@ -120,6 +130,10 @@ constexpr unified_attention::BoundTokenNames tokenNames()
     names.slidingWindow = SLIDING_WINDOW_TOKEN;
     names.scaleBits = SCALE_BITS_TOKEN;
     names.stats = STATS_TOKEN;
+    names.biasUid = BIAS_UID_TOKEN;
+    names.biasStrideBatch = BIAS_STRIDE_BATCH_TOKEN;
+    names.biasStrideHead = BIAS_STRIDE_HEAD_TOKEN;
+    names.biasStrideQuery = BIAS_STRIDE_QUERY_TOKEN;
     names.dispatchLabel = "gfx942 attention_unified_2d";
     return names;
 }
@@ -149,6 +163,8 @@ struct AttentionUnified2DCandidate
     /// No LSE-on kernel ships on gfx942: graph_match declines a stats output, so every
     /// candidate is judged against a graph that binds NO_STATS. Never set by candidateFor.
     bool emitLse = false;
+    /// Adds an attn_mask; its kernarg list ends in the bias pointer and three strides.
+    bool useAdditiveBias = false;
 };
 
 /**
@@ -212,6 +228,12 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
             return std::nullopt;
         }
     }
+    // rocKE adds the bias on the narrow 16x16 score path only.
+    const int64_t useAdditiveBias = integerMetadata(kernel, USE_ADDITIVE_BIAS_FIELD).value_or(0);
+    if(useAdditiveBias < 0 || useAdditiveBias > 1 || (useAdditiveBias != 0 && *useMfma32x32x8 != 0))
+    {
+        return std::nullopt;
+    }
     const Gfx942Unified2DGeometryFields geometry{*headSize,
                                                  *blockSize,
                                                  *tileSize,
@@ -238,7 +260,9 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *useQDirectGlobal != 0,
                                        *useConflictFreeVStore != 0,
                                        *useTransposedMaskLimit != 0,
-                                       *useTransposedInvariantHoist != 0};
+                                       *useTransposedInvariantHoist != 0,
+                                       false,
+                                       useAdditiveBias != 0};
 }
 
 /// The ratio is the only head-count fact the binary bakes: it maps query rows to KV heads and

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -57,6 +58,8 @@ inline constexpr int64_t EXTRA_UID = 99;
 inline constexpr int64_t STATS_UID = 66;
 /// The RFC-0014 offsets tensor a ragged operand names.
 inline constexpr int64_t RAGGED_OFFSET_UID = 55;
+/// The attn_mask's uid, when BasicGraphSpec::bias is set.
+inline constexpr int64_t BIAS_UID = 77;
 
 /// The mask kinds in the catalog's `mask_type` numbering.
 inline constexpr int64_t NO_MASK = 0;
@@ -116,7 +119,14 @@ struct BasicGraphSpec
     data_objects::DataType statsDataType = data_objects::DataType::FLOAT;
     std::optional<int64_t> statsHeads;
 
-    /// Operand uid (Q/K/V/O) that carries a ragged offsets tensor, if any.
+    /// An attn_mask (uid BIAS_UID): FP32 [B, Hq, Sq, Skv] at packed strides. biasDims and
+    /// biasStrides replace its shape, biasDataType its type.
+    bool bias = false;
+    std::optional<std::vector<int64_t>> biasDims;
+    std::optional<std::vector<int64_t>> biasStrides;
+    data_objects::DataType biasDataType = data_objects::DataType::FLOAT;
+
+    /// Operand uid (Q/K/V/O, or BIAS_UID) that carries a ragged offsets tensor, if any.
     std::optional<int64_t> raggedOperand;
 
     bool twoNodes = false;
@@ -204,6 +214,14 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
     tensors.push_back(tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStrides, kDims));
     tensors.push_back(tensorFor(V_UID, spec.dataType, vStrides, vDims));
     tensors.push_back(tensorFor(O_UID, spec.dataType, oStrides, oDims));
+    if(spec.bias)
+    {
+        const std::vector<int64_t> biasDims = spec.biasDims.value_or(
+            std::vector<int64_t>{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.seqLenKv});
+        const std::vector<int64_t> biasStrides = spec.biasStrides.value_or(std::vector<int64_t>{
+            biasDims[1] * biasDims[2] * biasDims[3], biasDims[2] * biasDims[3], biasDims[3], 1});
+        tensors.push_back(tensorFor(BIAS_UID, spec.biasDataType, biasStrides, biasDims));
+    }
     if(spec.raggedOperand.has_value())
     {
         const std::vector<int64_t> offsetDims{spec.batch + 1, 1, 1, 1};
@@ -241,6 +259,10 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
         {
             attributesBuilder.add_generate_stats(true);
             attributesBuilder.add_stats_tensor_uid(STATS_UID);
+        }
+        if(spec.bias)
+        {
+            attributesBuilder.add_attn_mask_tensor_uid(BIAS_UID);
         }
         if(spec.extra)
         {
@@ -327,6 +349,126 @@ private:
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
     DeviceProperties _properties;
 };
+
+/// A named variant of an engine's default graph carrying an attn_mask.
+template <typename Spec>
+struct BiasCase
+{
+    std::string name;
+    Spec spec;
+};
+
+/// @p base with a packed FP32 [B, Hq, Sq, Skv] attn_mask.
+template <typename Spec>
+Spec withBias(Spec base)
+{
+    base.bias = true;
+    return base;
+}
+
+/// The attn_mask layouts the bias kernels serve: the full tensor, each broadcast the
+/// frontend writes (an axis of extent 1), and a padded query-row pitch.
+template <typename Spec>
+std::vector<BiasCase<Spec>> servedBiasCases(const Spec& base)
+{
+    const auto shaped = [&base](std::vector<int64_t> dims,
+                                std::optional<std::vector<int64_t>> strides = std::nullopt) {
+        Spec spec = withBias(base);
+        spec.biasDims = std::move(dims);
+        spec.biasStrides = std::move(strides);
+        return spec;
+    };
+    const int64_t b = base.batch;
+    const int64_t h = base.numQueryHeads;
+    const int64_t sq = base.seqLenQ;
+    const int64_t skv = base.seqLenKv;
+    return {
+        {"full [B, Hq, Sq, Skv]", withBias(base)},
+        {"per batch [B, 1, 1, Skv]", shaped({b, 1, 1, skv})},
+        {"per head [1, Hq, 1, Skv]", shaped({1, h, 1, skv})},
+        {"key row [1, 1, 1, Skv]", shaped({1, 1, 1, skv})},
+        {"per query row [1, 1, Sq, Skv]", shaped({1, 1, sq, skv})},
+        {"padded query-row pitch",
+         shaped({b, h, sq, skv},
+                std::vector<int64_t>{h * sq * (skv + 64), sq * (skv + 64), skv + 64, 1})},
+    };
+}
+
+/// attn_mask variants the bias kernels cannot read: each must decline the graph, since the
+/// kernel would read them wrong in bounds or past 2^31 elements. Spec needs only the bias
+/// fields, so the ragged and stats cases are each engine's own.
+template <typename Spec>
+std::vector<BiasCase<Spec>> declinedBiasCases(const Spec& base)
+{
+    const int64_t b = base.batch;
+    const int64_t h = base.numQueryHeads;
+    const int64_t sq = base.seqLenQ;
+    const int64_t skv = base.seqLenKv;
+    std::vector<BiasCase<Spec>> cases;
+    const auto add = [&cases](std::string name, Spec spec) {
+        cases.push_back({std::move(name), std::move(spec)});
+    };
+
+    for(const auto type : {data_objects::DataType::HALF,
+                           data_objects::DataType::BFLOAT16,
+                           data_objects::DataType::DOUBLE})
+    {
+        Spec spec = withBias(base);
+        spec.biasDataType = type;
+        add(std::string("attn_mask of type ") + data_objects::EnumNameDataType(type), spec);
+    }
+    {
+        Spec spec = withBias(base);
+        spec.biasDims = std::vector<int64_t>{b, h, sq, skv / 2};
+        add("attn_mask with half the keys", spec);
+    }
+    {
+        Spec spec = withBias(base);
+        spec.biasDims = std::vector<int64_t>{b, base.numKvHeads, sq, skv};
+        add("attn_mask with the KV head count", spec);
+    }
+    {
+        Spec spec = withBias(base);
+        spec.biasDims = std::vector<int64_t>{b, h, sq, skv};
+        spec.biasStrides = std::vector<int64_t>{h * sq * skv * 2, sq * skv * 2, skv * 2, 2};
+        add("attn_mask with a strided key axis", spec);
+    }
+    {
+        Spec spec = withBias(base);
+        spec.biasDims = std::vector<int64_t>{b, h, sq, skv};
+        spec.biasStrides = std::vector<int64_t>{-h * sq * skv, sq * skv, skv, 1};
+        add("attn_mask with a negative batch stride", spec);
+    }
+    {
+        Spec spec = withBias(base);
+        spec.biasDims = std::vector<int64_t>{b, h, sq, skv};
+        spec.biasStrides = std::vector<int64_t>{int64_t{1} << 31, sq * skv, skv, 1};
+        add("attn_mask with a batch stride of 2^31", spec);
+    }
+    {
+        Spec spec = base;
+        spec.extra = [](data_objects::SdpaAttributesBuilder& builder) {
+            builder.add_attn_mask_tensor_uid(EXTRA_UID);
+        };
+        add("attn_mask uid naming no tensor", spec);
+    }
+    return cases;
+}
+
+/// A graph whose attn_mask's last read element is 2^31 - 1 (served, @p atLimit true) or 2^31
+/// (declined): a batch stride that puts batch B - 1's last key on that element. @p base must
+/// have B = 2.
+template <typename Spec>
+Spec biasReachingElement(const Spec& base, bool atLimit)
+{
+    constexpr int64_t MAX_INDEX = std::numeric_limits<int32_t>::max();
+    Spec spec = withBias(base);
+    spec.biasDims = std::vector<int64_t>{base.batch, 1, 1, base.seqLenKv};
+    const int64_t last = atLimit ? MAX_INDEX : MAX_INDEX + 1;
+    spec.biasStrides
+        = std::vector<int64_t>{(last - (base.seqLenKv - 1)) / (base.batch - 1), 0, 0, 1};
+    return spec;
+}
 
 /// A descriptor id ending in @p lastByte, ordered by the byte.
 inline hipdnn_plugin_sdk::ingestor::DescriptorId idEndingIn(unsigned lastByte)

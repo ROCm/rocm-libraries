@@ -49,6 +49,29 @@ struct SignatureArch
     }
 };
 
+/// SignatureArch over a graph with an attn_mask and a bias kernel.
+struct BiasSignatureArch
+{
+    static std::vector<KernelArgument> pythonAbi()
+    {
+        return gfx942_unified2d::pythonAbi();
+    }
+
+    static std::string prepareFailureFor(const std::vector<KernelArgument>& recorded)
+    {
+        using namespace gfx942_unified2d;
+        const Graph graph(withBias(GraphSpec{}));
+        const auto bound = matchGraph(graph);
+        EXPECT_TRUE(bound.has_value()) << "graph_match declined the bias fixture graph";
+        if(!bound.has_value())
+        {
+            return {};
+        }
+        const KernelSpec spec = biasKernel();
+        return prepareFailure(graph, *bound, makeKpackKernel(spec, recorded));
+    }
+};
+
 } // namespace
 
 namespace signature = unified2d_signature;
@@ -106,6 +129,21 @@ TEST(TestGfx942AttentionUnified2DSignature, RefusesEachSlotUnderAnotherName)
 TEST(TestGfx942AttentionUnified2DSignature, RefusesEachExchangeOfTwoLikeSlots)
 {
     signature::refusesEachExchangeOfTwoLikeSlots<SignatureArch>();
+}
+
+TEST(TestGfx942AttentionUnified2DSignature, AcceptsTheBiasAbiThePythonDeclares)
+{
+    signature::acceptsTheBiasAbiThePythonDeclares<BiasSignatureArch>();
+}
+
+TEST(TestGfx942AttentionUnified2DSignature, RefusesTheBiasArgumentsOnTheWrongKernel)
+{
+    signature::refusesTheBiasArgumentsOnTheWrongKernel<SignatureArch, BiasSignatureArch>();
+}
+
+TEST(TestGfx942AttentionUnified2DSignature, RefusesEachBiasSlotRenamedOrItsStridesExchanged)
+{
+    signature::refusesEachBiasSlotRenamedOrItsStridesExchanged<BiasSignatureArch>();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -26,6 +27,7 @@
 
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaAdditiveBias.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGeometry.hpp"
 
@@ -41,9 +43,10 @@
  *   matchOperands()   node, operands, layout, dtype and shape consistency
  *   (engine rules)    GQA group, head size, seqlen_q, and anything else the engine adds
  *   matchAttributes() whole paged-KV blocks, 32-bit addressing, the mask, every optional
- *                     attribute the kernels cannot honour, the stats output (matchStats(), for
- *                     an arch that ships LSE-on kernels; any other declines it) and the scale
- *   bindGraph()       the bound tokens, with the engine's catalog mask key and stats uid
+ *                     attribute the kernels cannot honour, the attn_mask (additiveBiasFor()),
+ *                     the stats output (matchStats(), for an arch that ships LSE-on kernels;
+ *                     any other declines it; never with an attn_mask) and the scale
+ *   bindGraph()       the bound tokens, with the engine's catalog mask key, stats uid and bias
  *
  * A matcher fix is one edit here; decline lines name their engine through DeclinedBy.
  */
@@ -55,6 +58,7 @@ using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 
+using sdpa_graph::AdditiveBias;
 using sdpa_graph::BATCH_AXIS;
 using sdpa_graph::DeclinedBy;
 using sdpa_graph::describeOperand;
@@ -86,6 +90,9 @@ inline std::string notBshdReason(std::string_view role,
 
 /// The bound stats uid of a graph that asks for no softmax statistics.
 inline constexpr int64_t NO_STATS = -1;
+
+/// The bound attn_mask uid of a graph that carries no additive bias.
+inline constexpr int64_t NO_BIAS = -1;
 
 /**
  * @brief Is this stats tensor head-major [B, H, S, 1] and gap-free, the layout the LSE-on
@@ -368,6 +375,9 @@ struct MatchedAttributes
     float scale = 0.0F;
     /// The stats output's uid, or NO_STATS. Only an LSE-on kernel serves a graph with one.
     int64_t stats = NO_STATS;
+    /// The attn_mask the kernel adds to the scaled scores. Only a bias kernel serves a graph
+    /// with one.
+    std::optional<AdditiveBias> bias = std::nullopt;
 };
 
 /**
@@ -490,13 +500,16 @@ inline std::optional<MatchedAttributes>
     // kernels have softcap, ALiBi and qq-bias variants, none shipped; hipDNN's SDPA node has no
     // softcap attribute to decline.)
 
-    // Additive attention bias.
-    if(attributes.attn_mask_tensor_uid().has_value())
+    // Additive attention bias: an FP32 attn_mask the bias kernels read through runtime
+    // strides (see additiveBiasFor, which logs its own declines).
+    std::optional<AdditiveBias> bias;
+    if(const auto maskUid = attributes.attn_mask_tensor_uid(); maskUid.has_value())
     {
-        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "attn_mask"})
-                               << "an additive attention mask (attn_mask tensor) is not "
-                                  "supported");
-        return std::nullopt;
+        bias = sdpa_graph::additiveBiasFor(context, *maskUid, problem, engine);
+        if(!bias.has_value())
+        {
+            return std::nullopt;
+        }
     }
     // Device-resident scale: the ABI takes `scale` as an f32 kernarg.
     if(attributes.scale_tensor_uid().has_value())
@@ -586,6 +599,14 @@ inline std::optional<MatchedAttributes>
                                   "generate_stats) are not supported");
         return std::nullopt;
     }
+    // No bias kernel also writes the LSE.
+    if(bias.has_value() && statsUid != NO_STATS)
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "attn_mask"})
+                               << "an attn_mask together with the stats output is not "
+                                  "supported; no bias kernel writes the LSE");
+        return std::nullopt;
+    }
     // ALiBi slopes and padding masks.
     if(attributes.alibi_mask())
     {
@@ -640,7 +661,7 @@ inline std::optional<MatchedAttributes>
         return std::nullopt;
     }
 
-    return MatchedAttributes{*mask, scale, statsUid};
+    return MatchedAttributes{*mask, scale, statsUid, bias};
 }
 
 /// An engine's bound-token names: each engine prefixes its own, so two engines' bindings
@@ -661,6 +682,13 @@ struct BoundTokenNames
     /// The stats output's uid, or NO_STATS: kernelMatches pairs it with the candidate's
     /// emit_lse.
     std::string_view stats;
+    /// The attn_mask's uid, or NO_BIAS: kernelMatches pairs it with the candidate's
+    /// use_additive_bias. Its batch, query-head and query-row element strides follow (0 when
+    /// there is no bias).
+    std::string_view biasUid;
+    std::string_view biasStrideBatch;
+    std::string_view biasStrideHead;
+    std::string_view biasStrideQuery;
     std::string_view dispatchLabel;
 };
 
@@ -671,6 +699,7 @@ inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
                              MaskType maskKey,
                              float scale,
                              int64_t stats,
+                             const std::optional<AdditiveBias>& bias,
                              const BoundTokenNames& names)
 {
     BoundTokens bound;
@@ -688,6 +717,12 @@ inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(names.scaleBits)] = static_cast<int64_t>(scaleBits);
     bound[std::string(names.stats)] = stats;
+    const AdditiveBias none{NO_BIAS, {0, 0, 0}};
+    const AdditiveBias& boundBias = bias.has_value() ? *bias : none;
+    bound[std::string(names.biasUid)] = boundBias.uid;
+    bound[std::string(names.biasStrideBatch)] = int64_t{boundBias.strides[0]};
+    bound[std::string(names.biasStrideHead)] = int64_t{boundBias.strides[1]};
+    bound[std::string(names.biasStrideQuery)] = int64_t{boundBias.strides[2]};
     return bound;
 }
 
@@ -703,9 +738,12 @@ struct UnifiedAttentionBinding
     float scale = 0.0F;
     /// The stats output's uid, or NO_STATS.
     int64_t stats = NO_STATS;
+    /// The attn_mask, or nullopt.
+    std::optional<AdditiveBias> bias = std::nullopt;
 };
 
-/// Re-reads the bindings bindGraph() established. Throws if one is missing.
+/// Re-reads the bindings bindGraph() established. Throws if one is missing or a bias stride
+/// is outside [0, MAX_BIAS_INDEX], the range the graph match binds.
 inline UnifiedAttentionBinding readBinding(const BoundTokens& bound, const BoundTokenNames& names)
 {
     const auto read = [&bound, &names](std::string_view token) {
@@ -728,6 +766,26 @@ inline UnifiedAttentionBinding readBinding(const BoundTokens& bound, const Bound
     binding.maskType = read(names.maskType);
     binding.slidingWindow = read(names.slidingWindow);
     binding.stats = read(names.stats);
+    AdditiveBias bias;
+    bias.uid = read(names.biasUid);
+    const std::array<std::string_view, 3> strideNames{
+        names.biasStrideBatch, names.biasStrideHead, names.biasStrideQuery};
+    for(size_t axis = 0; axis < strideNames.size(); ++axis)
+    {
+        const int64_t stride = read(strideNames[axis]);
+        if(stride < 0 || stride > sdpa_graph::MAX_BIAS_INDEX)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string(names.dispatchLabel) + " bound token '" + std::string(strideNames[axis])
+                    + "' is outside [0, 2^31)");
+        }
+        bias.strides[axis] = static_cast<int32_t>(stride);
+    }
+    if(bias.uid != NO_BIAS)
+    {
+        binding.bias = bias;
+    }
 
     const auto scaleBits = static_cast<int32_t>(read(names.scaleBits));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));

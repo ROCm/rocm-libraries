@@ -64,6 +64,13 @@ inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx950_attention_unified_2d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
 inline constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
+inline constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_unified_2d.bias.uid";
+inline constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN
+    = "gfx950_attention_unified_2d.bias.stride_batch";
+inline constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN
+    = "gfx950_attention_unified_2d.bias.stride_head";
+inline constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN
+    = "gfx950_attention_unified_2d.bias.stride_query";
 
 using namespace unified_attention;
 
@@ -107,6 +114,8 @@ struct KernelSpec
     int64_t useTransposedQk32x32 = 0;
     /// 1 for an LSE-on kernel, which serves only graphs that ask for stats.
     int64_t emitLse = 0;
+    /// 1 for a bias kernel, which serves only graphs with an attn_mask.
+    int64_t useAdditiveBias = 0;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -129,6 +138,7 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("use_mfma_32x32"), spec.useMfma32x32},
         {std::string("use_transposed_qk_32x32"), spec.useTransposedQk32x32},
         {std::string("emit_lse"), spec.emitLse},
+        {std::string("use_additive_bias"), spec.useAdditiveBias},
     };
 }
 

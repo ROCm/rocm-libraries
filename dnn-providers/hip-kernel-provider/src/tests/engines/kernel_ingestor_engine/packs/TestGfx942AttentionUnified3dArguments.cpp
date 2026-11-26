@@ -4,10 +4,12 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,7 +58,11 @@ struct ArgumentsRow
     std::array<int64_t, 4> kStrides;
     std::array<int64_t, 4> vDims;
     std::array<int64_t, 4> vStrides;
-    std::array<ExpectedArgument, GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT> arguments;
+    /// A bias kernel's row, with the attn_mask's (batch, head, sq) element strides.
+    bool bias;
+    std::array<int32_t, 3> biasStrides;
+    size_t argumentCount;
+    std::array<ExpectedArgument, GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT> arguments;
 };
 
 const std::vector<ArgumentsRow> ARGUMENTS_TABLE = {
@@ -102,6 +108,8 @@ const char* bufferName(Gfx942Unified3dBuffer buffer)
         return "seqused_k";
     case Gfx942Unified3dBuffer::CU_SEQLENS_Q:
         return "cu_seqlens_q";
+    case Gfx942Unified3dBuffer::ADDITIVE_BIAS:
+        return "additive_bias";
     default:
         return "?";
     }
@@ -116,24 +124,34 @@ uint32_t floatBits(float value)
 
 Gfx942Unified3dSegmentArguments argumentsFor(const ArgumentsRow& row)
 {
+    const auto bias = row.bias
+                          ? std::optional<Gfx942AdditiveBiasArguments>(Gfx942AdditiveBiasArguments{
+                                row.biasStrides[0], row.biasStrides[1], row.biasStrides[2]})
+                          : std::nullopt;
     return gfx942Unified3dSegmentArguments(row.batch,
                                            row.numQueryHeads,
                                            row.numKvHeads,
                                            row.scale,
                                            gfx942StridedKvArguments(row.kDims, row.kStrides),
-                                           gfx942StridedKvArguments(row.vDims, row.vStrides));
+                                           gfx942StridedKvArguments(row.vDims, row.vStrides),
+                                           bias);
 }
 
 } // namespace
 
 TEST(TestGfx942AttentionUnified3dArguments, MatchesRockeOnEveryGeneratedRow)
 {
-    // BHSD x3, BSHD x3, padded row x2, padded capacity x1, mixed K-vs-V x3.
-    ASSERT_EQ(std::size(ARGUMENTS_TABLE), 12u);
+    // BHSD x3, BSHD x3, padded row x2, padded capacity x1, mixed K-vs-V x3; then the bias
+    // kernel's full, per-head and key-row masks.
+    ASSERT_EQ(std::size(ARGUMENTS_TABLE), 15u);
     for(const auto& row : ARGUMENTS_TABLE)
     {
         SCOPED_TRACE(row.label);
         const auto actual = argumentsFor(row);
+        ASSERT_EQ(actual.size(), row.argumentCount);
+        ASSERT_EQ(row.argumentCount,
+                  row.bias ? GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT
+                           : GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT);
         for(size_t i = 0; i < actual.size(); ++i)
         {
             const auto& want = row.arguments[i];
@@ -212,10 +230,30 @@ TEST(TestGfx942AttentionUnified3dArguments, WordsResolvePointersAndKeepScalars)
     {
         EXPECT_EQ(words[i], pointers[i]) << arguments[i].name;
     }
-    for(size_t i = pointers.size(); i < words.size(); ++i)
+    for(size_t i = pointers.size(); i < arguments.size(); ++i)
     {
         EXPECT_EQ(words[i], arguments[i].bits) << arguments[i].name;
     }
+    for(size_t i = arguments.size(); i < words.size(); ++i)
+    {
+        EXPECT_EQ(words[i], 0u) << "word " << i << " is past the plain kernel's arguments";
+    }
+}
+
+/// A bias kernel's attn_mask pointer resolves to its address, after the runtime kernargs.
+TEST(TestGfx942AttentionUnified3dArguments, WordsResolveTheAttnMaskPointer)
+{
+    const auto& row = ARGUMENTS_TABLE.at(12);
+    ASSERT_TRUE(row.bias);
+    const auto arguments = argumentsFor(row);
+    std::array<std::byte, 2> storage{};
+    Gfx942Unified3dBufferAddresses addresses;
+    addresses.query = storage.data();
+    addresses.additiveBias = &storage[1];
+    const auto words = gfx942Unified3dArgumentWords(arguments, addresses);
+    ASSERT_STREQ(arguments[22].name, "additive_bias_ptr");
+    EXPECT_EQ(words[22], reinterpret_cast<uintptr_t>(&storage[1]));
+    EXPECT_EQ(words[3], reinterpret_cast<uintptr_t>(storage.data()));
 }
 
 // ---------------------------------------------------------------------------

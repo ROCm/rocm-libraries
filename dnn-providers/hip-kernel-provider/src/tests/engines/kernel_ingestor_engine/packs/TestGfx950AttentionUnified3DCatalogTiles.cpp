@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -91,6 +92,7 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndRe
 
     std::size_t checked = 0;
     std::size_t lseOn = 0;
+    std::size_t biasOn = 0;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
@@ -116,7 +118,18 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndRe
                                                          LSE_SUFFIX)
                                          == 0;
             lseOn += emitsLse ? 1U : 0U;
-            ASSERT_EQ(segment.signature.size(), SEGMENT_ARGUMENTS);
+            // A bias kernel's segment ends with the attn_mask pointer and its three strides.
+            const bool addsBias = integerField(kernel, "use_additive_bias").value_or(0) == 1;
+            biasOn += addsBias ? 1U : 0U;
+            ASSERT_EQ(segment.signature.size(), SEGMENT_ARGUMENTS + (addsBias ? 4U : 0U));
+            if(addsBias)
+            {
+                const auto& args = segment.signature;
+                EXPECT_EQ(args.at(SEGMENT_ARGUMENTS).name, "additive_bias_ptr");
+                EXPECT_EQ(args.at(SEGMENT_ARGUMENTS + 1).name, "additive_bias_batch_stride");
+                EXPECT_EQ(args.at(SEGMENT_ARGUMENTS + 2).name, "additive_bias_head_stride");
+                EXPECT_EQ(args.at(SEGMENT_ARGUMENTS + 3).name, "additive_bias_sq_stride");
+            }
             ASSERT_EQ(reduce.signature.size(), REDUCE_ARGUMENTS + (emitsLse ? 1U : 0U));
             EXPECT_EQ(segment.signature.front().name, "segm_output_ptr");
             EXPECT_EQ(reduce.signature.front().name, "output_ptr");
@@ -124,8 +137,46 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndRe
         }
     }
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
-    // One LSE-on twin per cell: the catalog's 116 cells.
+    // One LSE-on twin and one bias twin per cell: the catalog's 116 cells.
     EXPECT_EQ(lseOn, 116U);
+    EXPECT_EQ(biasOn, 116U);
+}
+
+/// A graph with an attn_mask is served only by a bias kernel (use_additive_bias 1), so every cell
+/// (dtype, head size, head counts, block size, mask and window) must ship one; and exactly one, so
+/// the ranker has no bias choice to make that it was never trained on.
+TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryCellShipsExactlyOneBiasKernel)
+{
+    std::map<std::string, std::size_t> biasKernels;
+    for(const auto& pack : loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto dtype = stringField(kernel, "dtype");
+            ASSERT_TRUE(dtype.has_value()) << "kernel '" << kernel.name << "' carries no dtype";
+            std::string cell = *dtype;
+            for(const char* field : {"head_size",
+                                     "num_query_heads",
+                                     "num_kv_heads",
+                                     "block_size",
+                                     "mask_type",
+                                     "sliding_window"})
+            {
+                const auto value = integerField(kernel, field);
+                ASSERT_TRUE(value.has_value())
+                    << "kernel '" << kernel.name << "' carries no " << field;
+                cell += std::string(" ") + field + "=" + std::to_string(*value);
+            }
+            const auto bias = integerField(kernel, "use_additive_bias").value_or(0);
+            ASSERT_TRUE(bias == 0 || bias == 1) << "kernel '" << kernel.name << "'";
+            biasKernels[cell] += static_cast<std::size_t>(bias);
+        }
+    }
+    ASSERT_FALSE(biasKernels.empty()) << "the loaded set holds no kernels";
+    for(const auto& [cell, count] : biasKernels)
+    {
+        EXPECT_EQ(count, 1U) << "cell " << cell << " ships " << count << " bias kernels";
+    }
 }
 
 } // namespace

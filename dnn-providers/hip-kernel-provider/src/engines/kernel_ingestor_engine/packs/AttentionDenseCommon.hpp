@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaAdditiveBias.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
@@ -54,14 +55,8 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 /// The stats uid of a graph that binds no stats (LSE) output.
 inline constexpr int64_t ATTENTION_DENSE_NO_STATS = -1;
 
-/// An additive bias the graph carries (its attn_mask): its uid and the element strides of
-/// its batch, query-head and query-row axes. The key axis is unit stride, and an axis of
-/// extent 1 broadcasts through stride 0.
-struct AttentionDenseBias
-{
-    int64_t uid = 0;
-    std::array<int32_t, 3> strides{0, 0, 0};
-};
+/// An additive bias the graph carries (its attn_mask).
+using AttentionDenseBias = sdpa_graph::AdditiveBias;
 
 /// The tensor uids and derived scalars a matched dense-attention graph binds.
 struct AttentionDenseBinding

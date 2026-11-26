@@ -383,7 +383,8 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesEveryOptionalFeatureTheKernel
               cases.push_back({name, spec});
           };
 
-    withExtra("attn_mask tensor", [](auto& b) { b.add_attn_mask_tensor_uid(EXTRA_UID); });
+    withExtra("attn_mask uid naming no tensor",
+              [](auto& b) { b.add_attn_mask_tensor_uid(EXTRA_UID); });
     withExtra("scale tensor", [](auto& b) { b.add_scale_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_q tensor", [](auto& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_kv tensor", [](auto& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); });
@@ -632,6 +633,10 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchDeclinesAnIncompleteOrMist
         {
             continue; // declared by the KMD, not read: the batch is a kernarg
         }
+        if(entry.first == "use_additive_bias")
+        {
+            continue; // reads as 0 when omitted (DeclinesARecordWithAnInvalidUseAdditiveBias)
+        }
         SCOPED_TRACE(entry.first);
         auto kernel = makeKernel(KernelSpec{});
         kernel.metadata.erase(entry.first);
@@ -822,6 +827,114 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesARecordWithoutAValidEmitLse)
     auto kernel = makeKernel(KernelSpec{});
     kernel.metadata.erase("emit_lse");
     EXPECT_FALSE(matchesKernel(Graph(GraphSpec{}), kernel));
+}
+
+// =============================================================================
+// attn_mask: an FP32 additive bias, served only by the bias kernels
+// =============================================================================
+
+TEST(TestGfx950AttentionUnified2DMatchers, AcceptsEveryAttnMaskLayoutTheKernelsRead)
+{
+    for(const auto& biasCase : servedBiasCases(GraphSpec{}))
+    {
+        EXPECT_TRUE(graphMatches(biasCase.spec)) << biasCase.name;
+    }
+}
+
+/// The bias uid and its batch, head and query-row strides are bound for kernelMatches and
+/// the launch, a broadcast axis at stride 0; a graph without one binds NO_BIAS.
+TEST(TestGfx950AttentionUnified2DMatchers, BindsTheAttnMaskAndItsStrides)
+{
+    GraphSpec spec = withBias(GraphSpec{});
+    spec.biasDims = std::vector<int64_t>{2, 1, 128, 256};
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_UID_TOKEN), BIAS_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_BATCH_TOKEN), 128 * 256);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_HEAD_TOKEN), 0);
+    EXPECT_EQ(tryGetBoundInt(*bound, BIAS_STRIDE_QUERY_TOKEN), 256);
+
+    const auto plain = matchGraph(GraphSpec{});
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(tryGetBoundInt(*plain, BIAS_UID_TOKEN), -1);
+}
+
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAnAttnMaskTheKernelCannotRead)
+{
+    std::vector<DeclineCase> cases;
+    for(const auto& biasCase : declinedBiasCases(GraphSpec{}))
+    {
+        cases.push_back({biasCase.name, biasCase.spec});
+    }
+    GraphSpec ragged = withBias(GraphSpec{});
+    ragged.raggedOperand = BIAS_UID;
+    cases.push_back({"ragged attn_mask", ragged});
+    expectEveryCaseDeclines(cases);
+}
+
+/// No bias kernel writes the LSE: a graph asking for both is declined, though each alone is
+/// served.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAnAttnMaskWithTheStatsOutput)
+{
+    GraphSpec both = withBias(GraphSpec{});
+    both.stats = true;
+    EXPECT_FALSE(graphMatches(both));
+
+    GraphSpec stats;
+    stats.stats = true;
+    EXPECT_TRUE(graphMatches(stats));
+    EXPECT_TRUE(graphMatches(withBias(GraphSpec{})));
+}
+
+/// The kernel addresses the bias with 32-bit element offsets: the last element a launch
+/// reads may be 2^31 - 1, not 2^31.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAnAttnMaskReachingPastThirtyTwoBitOffsets)
+{
+    EXPECT_TRUE(graphMatches(biasReachingElement(GraphSpec{}, true)));
+    EXPECT_FALSE(graphMatches(biasReachingElement(GraphSpec{}, false)));
+}
+
+/// A bias kernel serves only a graph with an attn_mask, and every other kernel only a graph
+/// without one: the bias kernarg slots are baked into the kernel.
+TEST(TestGfx950AttentionUnified2DMatchers, PairsTheBiasKernelWithTheAttnMaskGraph)
+{
+    const GraphSpec bias = withBias(GraphSpec{});
+    KernelSpec biasKernel;
+    biasKernel.useAdditiveBias = 1;
+
+    EXPECT_TRUE(matchesKernel(bias, biasKernel));
+    EXPECT_FALSE(matchesKernel(bias, KernelSpec{}));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, biasKernel));
+
+    KernelSpec transposed = biasKernel;
+    transposed.blockMPerWarp = 32;
+    transposed.useMfma32x32 = 1;
+    transposed.useTransposedQk32x32 = 1;
+    EXPECT_TRUE(matchesKernel(bias, transposed));
+}
+
+/// use_additive_bias reads as 0 when a record omits it; a value other than 0 or 1, or a bias
+/// record that also writes the LSE (rocKE builds none), is malformed.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesARecordWithAnInvalidUseAdditiveBias)
+{
+    auto kernel = makeKernel(KernelSpec{});
+    kernel.metadata.erase("use_additive_bias");
+    EXPECT_TRUE(matchesKernel(Graph(GraphSpec{}), kernel));
+    EXPECT_FALSE(matchesKernel(Graph(withBias(GraphSpec{})), kernel));
+
+    KernelSpec two;
+    two.useAdditiveBias = 2;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, two));
+    EXPECT_FALSE(matchesKernel(withBias(GraphSpec{}), two));
+
+    KernelSpec withLse;
+    withLse.useAdditiveBias = 1;
+    withLse.emitLse = 1;
+    GraphSpec stats;
+    stats.stats = true;
+    EXPECT_FALSE(matchesKernel(stats, withLse));
+    EXPECT_FALSE(matchesKernel(withBias(GraphSpec{}), withLse));
 }
 
 TEST(TestGfx950AttentionUnified2DMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)

@@ -3,7 +3,8 @@
 # SPDX-License-Identifier:  MIT
 """Print Gfx942AttentionUnified3dArgumentsTable.inc.
 
-Every row is one strided decode case (K and V layouts, batch, Hq, Hkv, scale) and
+Every row is one strided decode case (K and V layouts, batch, Hq, Hkv, scale, and for a
+bias kernel the attn_mask's strides) and
 the segment kernel's full ordered argument list rocKE would pass for it:
 
 * names and types, in order: ``kernels.common.attention_unified
@@ -11,6 +12,8 @@ the segment kernel's full ordered argument list rocKE would pass for it:
   the spec class's runtime fields num_query_heads, num_kv_heads, sliding_window);
 * the runtime head counts and sliding_window (0):
   ``_runtime_kernarg_values(problem)``;
+* for a bias row (``include_additive_bias=True``), the attn_mask's three strides:
+  ``_attention_additive_bias.additive_bias_launch_values``;
 * the 8 strided K/V values: ``kernels.common.attention_kv_cache
   .StridedKvCacheLayout(KvTensorLayout(...), KvTensorLayout(...)).arguments()``
   (constructing the layouts also runs rocKE's admission checks);
@@ -36,6 +39,7 @@ it is never committed. To print it by hand, from the provider root:
 import struct
 from types import SimpleNamespace
 
+from kernels.common._attention_additive_bias import additive_bias_launch_values
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
 from kernels.common.attention_unified import (
     _runtime_kernarg_values,
@@ -57,6 +61,7 @@ POINTER_BUFFERS = {
     "alibi_slopes_ptr": "null",
     "qq_bias_ptr": "null",
     "query_start_len_ptr": "cu_seqlens_q",
+    "additive_bias_ptr": "additive_bias",
 }
 
 
@@ -176,6 +181,42 @@ CASES = (
 )
 
 
+# (label, batch, Hq, Hkv, scale, K layout, V layout, attn_mask (batch, head, sq) element
+# strides): the bias kernel's rows. Sq is 1, so the sq stride is 0 (a broadcast axis).
+BIAS_CASES = (
+    (
+        "bias_full_bhsd_b4_h8_s4096_d128",
+        4,
+        32,
+        8,
+        0.08838834764831845,
+        bhsd(4, 8, 4096, 128),
+        bhsd(4, 8, 4096, 128),
+        (32 * 4096, 4096, 0),
+    ),
+    (
+        "bias_per_head_bshd_b2_h1_s300_d64",
+        2,
+        4,
+        1,
+        0.125,
+        bshd(2, 1, 300, 64),
+        bshd(2, 1, 300, 64),
+        (0, 304, 0),
+    ),
+    (
+        "bias_key_row_padcap_b1_h8_s7_d256",
+        1,
+        16,
+        8,
+        0.0625,
+        padded_capacity(1, 8, 7, 256, 64),
+        bshd(1, 8, 7, 256),
+        (0, 0, 0),
+    ),
+)
+
+
 def f32(x):
     return struct.unpack("<f", struct.pack("<f", x))[0]
 
@@ -188,9 +229,11 @@ def c_array(values):
     return "{" + ", ".join(str(v) for v in values) + "}"
 
 
-def _signatures():
+def _signatures(bias=False):
     """rocKE's gfx942 strided segment and reduce signatures (runtime fields included)."""
-    return _tiled_3d_signatures("gfx942", "fp16", strided_kv=True)
+    return _tiled_3d_signatures(
+        "gfx942", "fp16", strided_kv=True, include_additive_bias=bias
+    )
 
 
 # hipDNN's reduce launch: no LSE, num_query_heads read at runtime.
@@ -214,7 +257,7 @@ def check_reduce():
     assert got == REDUCE_ARGUMENTS, f"rocKE reduce signature changed: {got}"
 
 
-def arguments(batch, hq, hkv, scale, k_layout, v_layout):
+def arguments(batch, hq, hkv, scale, k_layout, v_layout, bias=None):
     assert k_layout[0][1] == hkv and v_layout[0][1] == hkv and hq % hkv == 0
     kv = StridedKvCacheLayout(
         KvTensorLayout(*k_layout), KvTensorLayout(*v_layout)
@@ -231,7 +274,10 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
         **_runtime_kernarg_values(problem),
         **kv,
     }
-    segment, _ = _signatures()
+    if bias is not None:
+        scalars.update(additive_bias_launch_values(None, bias))
+        del scalars["additive_bias_ptr"]
+    segment, _ = _signatures(bias is not None)
     out = []
     for param in segment:
         name, ty = param["name"], param["type"]
@@ -247,13 +293,16 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
 
 def main():
     check_reduce()
-    for label, batch, hq, hkv, scale, k_layout, v_layout in CASES:
-        args = ",\n  ".join(arguments(batch, hq, hkv, scale, k_layout, v_layout))
+    rows = [(*case, None) for case in CASES] + list(BIAS_CASES)
+    for label, batch, hq, hkv, scale, k_layout, v_layout, bias in rows:
+        args = arguments(batch, hq, hkv, scale, k_layout, v_layout, bias)
+        has_bias = "true" if bias is not None else "false"
         print(
             f'{{"{label}", {batch}, {hq}, {hkv}, {c_float(scale)},\n'
             f" {c_array(k_layout[0])}, {c_array(k_layout[1])},\n"
             f" {c_array(v_layout[0])}, {c_array(v_layout[1])},\n"
-            f" {{{{\n  {args}}}}}}},"
+            f" {has_bias}, {c_array(bias or (0, 0, 0))}, {len(args)},\n"
+            f" {{{{\n  " + ",\n  ".join(args) + "}}},"
         )
 
 

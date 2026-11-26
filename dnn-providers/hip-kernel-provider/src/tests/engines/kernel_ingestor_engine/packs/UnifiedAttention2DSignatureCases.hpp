@@ -214,6 +214,70 @@ void refusesEachExchangeOfTwoLikeSlots()
     EXPECT_EQ(exchanged, POINTER_PAIRS + SCALAR_PAIRS);
 }
 
+// =============================================================================
+// The bias kernel's ABI: the plain one plus the attn_mask and its three strides
+// =============================================================================
+//
+// A `BiasArch` supplies the same two functions over a bias graph and a bias kernel
+// (use_additive_bias 1); its pythonAbi() is the plain ABI, which withAdditiveBias() extends.
+
+inline constexpr std::size_t BIAS_ARGUMENT_COUNT = ARGUMENT_COUNT + 4;
+
+/// @p abi with the four params rocKE's declare_additive_bias_params appends.
+inline std::vector<KernelArgument> withAdditiveBias(std::vector<KernelArgument> abi)
+{
+    abi.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "additive_bias_ptr"});
+    abi.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "additive_bias_batch_stride"});
+    abi.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "additive_bias_head_stride"});
+    abi.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "additive_bias_sq_stride"});
+    return abi;
+}
+
+template <typename BiasArch>
+void acceptsTheBiasAbiThePythonDeclares()
+{
+    const auto abi = withAdditiveBias(BiasArch::pythonAbi());
+    ASSERT_EQ(abi.size(), BIAS_ARGUMENT_COUNT);
+    const std::string failure = BiasArch::prepareFailureFor(abi);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the bias argument list the rocKE builder declares: " << failure;
+}
+
+/// A bias kernel built without its four params would read them past the end of the segment,
+/// and a plain kernel handed them would ignore the attn_mask: each is refused.
+template <typename Arch, typename BiasArch>
+void refusesTheBiasArgumentsOnTheWrongKernel()
+{
+    expectRefused<BiasArch>(BiasArch::pythonAbi(), "a bias kernel ends with the attn_mask");
+    expectRefused<Arch>(withAdditiveBias(Arch::pythonAbi()),
+                        "a plain kernel has no attn_mask slots");
+}
+
+/// The three strides are like slots (i32 by value): only their names tell batch, head and
+/// query row apart, so a renamed or exchanged one is refused.
+template <typename BiasArch>
+void refusesEachBiasSlotRenamedOrItsStridesExchanged()
+{
+    const auto abi = withAdditiveBias(BiasArch::pythonAbi());
+    for(std::size_t index = ARGUMENT_COUNT; index < abi.size(); ++index)
+    {
+        auto renamed = abi;
+        renamed.at(index).name += "_renamed";
+        expectRefused<BiasArch>(renamed, abi.at(index).name);
+    }
+    for(std::size_t first = ARGUMENT_COUNT + 1; first < abi.size(); ++first)
+    {
+        for(std::size_t second = first + 1; second < abi.size(); ++second)
+        {
+            auto swapped = abi;
+            std::swap(swapped.at(first), swapped.at(second));
+            expectRefused<BiasArch>(swapped, abi.at(first).name + " <-> " + abi.at(second).name);
+        }
+    }
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing::unified2d_signature
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

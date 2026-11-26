@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,6 +19,7 @@
 
 #include "core/Handle.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/UnifiedAttention2DSignatureCases.hpp"
 
 /**
  * @file TestGfx950AttentionUnified2DDispatch.cpp
@@ -58,7 +60,11 @@ const std::vector<std::string_view>& allTokens()
                                                         MASK_TOKEN,
                                                         SLIDING_WINDOW_TOKEN,
                                                         SCALE_BITS_TOKEN,
-                                                        STATS_TOKEN};
+                                                        STATS_TOKEN,
+                                                        BIAS_UID_TOKEN,
+                                                        BIAS_STRIDE_BATCH_TOKEN,
+                                                        BIAS_STRIDE_HEAD_TOKEN,
+                                                        BIAS_STRIDE_QUERY_TOKEN};
     return s_tokens;
 }
 
@@ -395,6 +401,10 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareACandidateMissingAFie
         {
             continue; // declared by the KMD, not read: the batch is a kernarg
         }
+        if(field == "use_additive_bias")
+        {
+            continue; // reads as 0 when omitted
+        }
         SCOPED_TRACE(field);
         auto kernel = makeKpackKernel(KernelSpec{}, pythonAbi());
         kernel.metadata.erase(field);
@@ -454,6 +464,66 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareACandidateThatIsNotKp
     const std::string failure = prepareFailure(graph, bindingsFor(graph), kernel);
     ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
     EXPECT_NE(failure.find("'embedded_source'"), std::string::npos) << failure;
+}
+
+// =============================================================================
+// attn_mask
+// =============================================================================
+
+namespace
+{
+
+/// The cell's bias kernel, recorded with the bias ABI.
+KernelDefinition biasKpackKernel()
+{
+    const KernelSpec spec = [] {
+        KernelSpec spec;
+        spec.useAdditiveBias = 1;
+        return spec;
+    }();
+    return makeKpackKernel(spec, unified2d_signature::withAdditiveBias(pythonAbi()));
+}
+
+} // namespace
+
+/// The positive control for the bias cases below: a bias kernel over a graph with an
+/// attn_mask passes every check before the loader.
+TEST(TestGfx950AttentionUnified2DDispatch, ReachesTheLoaderForABiasKernelAndAnAttnMaskGraph)
+{
+    const Graph graph(withBias(GraphSpec{}));
+    const std::string failure = prepareFailure(graph, bindingsFor(graph), biasKpackKernel());
+    ASSERT_FALSE(failure.empty());
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// prepare() is reachable without kernel_match: a bias kernel launched for a graph without an
+/// attn_mask would read a null bias, and a plain kernel for a graph with one would drop it.
+TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareAKernelOnTheOtherSideOfTheBiasPairing)
+{
+    const Graph plain;
+    EXPECT_NE(prepareFailure(plain, bindingsFor(plain), biasKpackKernel())
+                  .find("adds an attn_mask, but the graph has none"),
+              std::string::npos);
+
+    const Graph bias(withBias(GraphSpec{}));
+    EXPECT_NE(prepareFailure(bias, bindingsFor(bias), makeKpackKernel(KernelSpec{}, pythonAbi()))
+                  .find("adds no attn_mask, but the graph has one"),
+              std::string::npos);
+}
+
+/// The bound strides are re-checked: each must be an i32 kernarg, and with the graph's
+/// extents the last element read must stay below 2^31.
+TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareAnAttnMaskPastThirtyTwoBitOffsets)
+{
+    const Graph graph(withBias(GraphSpec{}));
+    auto tampered = bindingsFor(graph);
+    tampered[std::string(BIAS_STRIDE_BATCH_TOKEN)] = int64_t{1} << 31;
+    EXPECT_NE(prepareFailure(graph, tampered, biasKpackKernel()).find("outside [0, 2^31)"),
+              std::string::npos);
+
+    tampered[std::string(BIAS_STRIDE_BATCH_TOKEN)] = std::numeric_limits<int32_t>::max();
+    EXPECT_NE(prepareFailure(graph, tampered, biasKpackKernel()).find("reaches element 2^31"),
+              std::string::npos);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

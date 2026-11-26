@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 
@@ -36,6 +37,9 @@ inline constexpr int64_t GFX942_UNIFIED_3D_KV_ELEMENT_BYTES = 2;
 
 /// The segment kernel's argument count with strided K/V: 19 base + 3 runtime + 8 strided.
 inline constexpr size_t GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT = 30;
+/// A bias kernel's segment adds the attn_mask pointer and its three strides.
+inline constexpr size_t GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT
+    = GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT + 4;
 
 /// One K or V tensor's token stride and per-head span, in bytes.
 struct Gfx942KvHeadSpan
@@ -144,6 +148,7 @@ enum class Gfx942Unified3dBuffer : uint8_t
     VALUE, // graph V
     SEQUSED_K, // workspace region sequsedK
     CU_SEQLENS_Q, // workspace region cuSeqlensQ
+    ADDITIVE_BIAS, // graph attn_mask
 };
 
 /// One kernel argument. For scalars, @c bits holds the value's bytes zero-extended to
@@ -180,8 +185,57 @@ struct Gfx942Unified3dArgument
     }
 };
 
-using Gfx942Unified3dSegmentArguments
-    = std::array<Gfx942Unified3dArgument, GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT>;
+/// The segment launch's arguments in kernel order: GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT,
+/// or GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT for a bias kernel.
+class Gfx942Unified3dSegmentArguments
+{
+public:
+    Gfx942Unified3dSegmentArguments() = default;
+    Gfx942Unified3dSegmentArguments(std::initializer_list<Gfx942Unified3dArgument> arguments)
+    {
+        for(const auto& argument : arguments)
+        {
+            append(argument);
+        }
+    }
+
+    void append(const Gfx942Unified3dArgument& argument)
+    {
+        _arguments.at(_count++) = argument;
+    }
+
+    size_t size() const
+    {
+        return _count;
+    }
+
+    const Gfx942Unified3dArgument& operator[](size_t i) const
+    {
+        return _arguments[i];
+    }
+
+    const Gfx942Unified3dArgument* begin() const
+    {
+        return _arguments.data();
+    }
+
+    const Gfx942Unified3dArgument* end() const
+    {
+        return _arguments.data() + _count;
+    }
+
+private:
+    std::array<Gfx942Unified3dArgument, GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT> _arguments{};
+    size_t _count = 0;
+};
+
+/// The attn_mask's batch, query-head and query-row element strides (0 broadcasts).
+struct Gfx942AdditiveBiasArguments
+{
+    int32_t strideBatch = 0;
+    int32_t strideHead = 0;
+    int32_t strideQuery = 0;
+};
 
 namespace detail
 {
@@ -217,14 +271,15 @@ inline Gfx942Unified3dArgument gfx942I64(const char* name, int64_t value)
 } // namespace detail
 
 /**
- * @brief The segment launch's 30 arguments, in kernel order.
+ * @brief The segment launch's arguments, in kernel order: 30, or 34 with @p bias.
  *
  * Sinks, block tables, ALiBi and QQ bias are null (graph_match refuses them);
  * `block_table_stride` is 0 as the strided entry passes; k_scale = v_scale = 1 and
  * softcap = 0 (no FP8, no softcap). seq_lens_ptr is the engine's seqused_k[B] and
  * query_start_len_ptr its cu_seqlens_q[B+1]. The kernel is built for one GQA ratio and
  * reads the graph's head counts at runtime (num_query_heads, num_kv_heads);
- * sliding_window is 0 (graph_match refuses every window).
+ * sliding_window is 0 (graph_match refuses every window). A bias kernel takes the attn_mask
+ * pointer and its strides after the runtime kernargs, before the strided K/V arguments.
  */
 inline Gfx942Unified3dSegmentArguments
     gfx942Unified3dSegmentArguments(int32_t numSeqs,
@@ -232,43 +287,56 @@ inline Gfx942Unified3dSegmentArguments
                                     int32_t numKvHeads,
                                     float scale,
                                     const Gfx942StridedKvArguments& k,
-                                    const Gfx942StridedKvArguments& v)
+                                    const Gfx942StridedKvArguments& v,
+                                    const std::optional<Gfx942AdditiveBiasArguments>& bias
+                                    = std::nullopt)
 {
     using B = Gfx942Unified3dBuffer;
     using detail::gfx942F32;
     using detail::gfx942I32;
     using detail::gfx942I64;
     using detail::gfx942Pointer;
-    return {gfx942Pointer("segm_output_ptr", B::SEGM_OUTPUT),
-            gfx942Pointer("segm_max_ptr", B::SEGM_MAX),
-            gfx942Pointer("segm_expsum_ptr", B::SEGM_EXPSUM),
-            gfx942Pointer("query_ptr", B::QUERY),
-            gfx942Pointer("key_cache_ptr", B::KEY),
-            gfx942Pointer("value_cache_ptr", B::VALUE),
-            gfx942Pointer("sink_ptr", B::NONE),
-            gfx942Pointer("block_tables_ptr", B::NONE),
-            gfx942Pointer("seq_lens_ptr", B::SEQUSED_K),
-            gfx942Pointer("alibi_slopes_ptr", B::NONE),
-            gfx942Pointer("qq_bias_ptr", B::NONE),
-            gfx942Pointer("query_start_len_ptr", B::CU_SEQLENS_Q),
-            gfx942F32("scale", scale),
-            gfx942F32("k_scale", 1.0F),
-            gfx942F32("v_scale", 1.0F),
-            gfx942F32("softcap", 0.0F),
-            gfx942I32("num_seqs", numSeqs),
-            gfx942I32("block_table_stride", 0),
-            gfx942I32("qq_bias_stride_0", 0),
-            gfx942I32("num_query_heads", numQueryHeads),
-            gfx942I32("num_kv_heads", numKvHeads),
-            gfx942I32("sliding_window", 0),
-            gfx942I64("k_stride_batch_bytes", k.strideBatchBytes),
-            gfx942I64("k_stride_head_bytes", k.strideHeadBytes),
-            gfx942I32("k_stride_token_bytes", k.strideTokenBytes),
-            gfx942I32("k_span_bytes", k.spanBytes),
-            gfx942I64("v_stride_batch_bytes", v.strideBatchBytes),
-            gfx942I64("v_stride_head_bytes", v.strideHeadBytes),
-            gfx942I32("v_stride_token_bytes", v.strideTokenBytes),
-            gfx942I32("v_span_bytes", v.spanBytes)};
+    Gfx942Unified3dSegmentArguments arguments{gfx942Pointer("segm_output_ptr", B::SEGM_OUTPUT),
+                                              gfx942Pointer("segm_max_ptr", B::SEGM_MAX),
+                                              gfx942Pointer("segm_expsum_ptr", B::SEGM_EXPSUM),
+                                              gfx942Pointer("query_ptr", B::QUERY),
+                                              gfx942Pointer("key_cache_ptr", B::KEY),
+                                              gfx942Pointer("value_cache_ptr", B::VALUE),
+                                              gfx942Pointer("sink_ptr", B::NONE),
+                                              gfx942Pointer("block_tables_ptr", B::NONE),
+                                              gfx942Pointer("seq_lens_ptr", B::SEQUSED_K),
+                                              gfx942Pointer("alibi_slopes_ptr", B::NONE),
+                                              gfx942Pointer("qq_bias_ptr", B::NONE),
+                                              gfx942Pointer("query_start_len_ptr", B::CU_SEQLENS_Q),
+                                              gfx942F32("scale", scale),
+                                              gfx942F32("k_scale", 1.0F),
+                                              gfx942F32("v_scale", 1.0F),
+                                              gfx942F32("softcap", 0.0F),
+                                              gfx942I32("num_seqs", numSeqs),
+                                              gfx942I32("block_table_stride", 0),
+                                              gfx942I32("qq_bias_stride_0", 0),
+                                              gfx942I32("num_query_heads", numQueryHeads),
+                                              gfx942I32("num_kv_heads", numKvHeads),
+                                              gfx942I32("sliding_window", 0)};
+    if(bias.has_value())
+    {
+        arguments.append(gfx942Pointer("additive_bias_ptr", B::ADDITIVE_BIAS));
+        arguments.append(gfx942I32("additive_bias_batch_stride", bias->strideBatch));
+        arguments.append(gfx942I32("additive_bias_head_stride", bias->strideHead));
+        arguments.append(gfx942I32("additive_bias_sq_stride", bias->strideQuery));
+    }
+    for(const auto& argument : {gfx942I64("k_stride_batch_bytes", k.strideBatchBytes),
+                                gfx942I64("k_stride_head_bytes", k.strideHeadBytes),
+                                gfx942I32("k_stride_token_bytes", k.strideTokenBytes),
+                                gfx942I32("k_span_bytes", k.spanBytes),
+                                gfx942I64("v_stride_batch_bytes", v.strideBatchBytes),
+                                gfx942I64("v_stride_head_bytes", v.strideHeadBytes),
+                                gfx942I32("v_stride_token_bytes", v.strideTokenBytes),
+                                gfx942I32("v_span_bytes", v.spanBytes)})
+    {
+        arguments.append(argument);
+    }
+    return arguments;
 }
 
 /// The addresses the pointer arguments take, by Gfx942Unified3dBuffer.
@@ -282,20 +350,22 @@ struct Gfx942Unified3dBufferAddresses
     const void* value = nullptr;
     const void* sequsedK = nullptr;
     const void* cuSeqlensQ = nullptr;
+    const void* additiveBias = nullptr;
 };
 
 /**
  * @brief One 64-bit word per argument, in order: scalars' @c bits, pointers' addresses
  *        (NONE -> 0). The launch passes each word's address as that argument's
  *        kernelParams entry; the runtime copies the argument's size from the low bytes.
+ *        Words past @p arguments' size are 0.
  */
-inline std::array<uint64_t, GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT>
+inline std::array<uint64_t, GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT>
     gfx942Unified3dArgumentWords(const Gfx942Unified3dSegmentArguments& arguments,
                                  const Gfx942Unified3dBufferAddresses& addresses)
 {
     static_assert(sizeof(void*) == sizeof(uint64_t), "64-bit pointers");
     using B = Gfx942Unified3dBuffer;
-    std::array<uint64_t, GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT> words{};
+    std::array<uint64_t, GFX942_UNIFIED_3D_BIAS_SEGMENT_ARGUMENT_COUNT> words{};
     for(size_t i = 0; i < arguments.size(); ++i)
     {
         const auto& argument = arguments[i];
@@ -334,6 +404,9 @@ inline std::array<uint64_t, GFX942_UNIFIED_3D_SEGMENT_ARGUMENT_COUNT>
             break;
         case B::CU_SEQLENS_Q:
             address = addresses.cuSeqlensQ;
+            break;
+        case B::ADDITIVE_BIAS:
+            address = addresses.additiveBias;
             break;
         }
         words[i] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(address));

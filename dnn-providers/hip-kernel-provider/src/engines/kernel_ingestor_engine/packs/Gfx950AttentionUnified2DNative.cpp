@@ -71,6 +71,9 @@ constexpr std::string_view USE_MFMA_32X32_FIELD = "use_mfma_32x32";
 constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32x32";
 /// 1 for an LSE-on kernel, which also writes the stats output head-major ([B, Hq, Sq, 1]).
 constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
+/// 1 for a kernel that adds an fp32 attn_mask. The KMD declares it with the default 0, and a
+/// record without it reads as 0.
+constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
 
 /// The geometry cold selection prefers: narrow 16x16, 4 warps x 16 rows, a 64-token KV tile.
 constexpr int64_t BASELINE_TILE_SIZE = 64;
@@ -90,6 +93,13 @@ constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_2d.s
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
 /// The stats output's uid, or NO_STATS for a graph that asks for none.
 constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
+/// The attn_mask's uid, or NO_BIAS, and its batch, query-head and query-row strides.
+constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_unified_2d.bias.uid";
+constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN
+    = "gfx950_attention_unified_2d.bias.stride_batch";
+constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx950_attention_unified_2d.bias.stride_head";
+constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN
+    = "gfx950_attention_unified_2d.bias.stride_query";
 
 /// The engine's bound-token names, field by field.
 constexpr unified_attention::BoundTokenNames tokenNames()
@@ -103,6 +113,10 @@ constexpr unified_attention::BoundTokenNames tokenNames()
     names.slidingWindow = SLIDING_WINDOW_TOKEN;
     names.scaleBits = SCALE_BITS_TOKEN;
     names.stats = STATS_TOKEN;
+    names.biasUid = BIAS_UID_TOKEN;
+    names.biasStrideBatch = BIAS_STRIDE_BATCH_TOKEN;
+    names.biasStrideHead = BIAS_STRIDE_HEAD_TOKEN;
+    names.biasStrideQuery = BIAS_STRIDE_QUERY_TOKEN;
     names.dispatchLabel = "gfx950 attention_unified_2d";
     return names;
 }
@@ -127,6 +141,8 @@ struct AttentionUnified2DCandidate
     bool useTransposedQk32x32 = false;
     /// Also writes the stats output; its kernarg list ends in lse_ptr.
     bool emitLse = false;
+    /// Adds an attn_mask; its kernarg list ends in the bias pointer and three strides.
+    bool useAdditiveBias = false;
 };
 
 /**
@@ -173,8 +189,17 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     {
         return std::nullopt;
     }
+    const int64_t useAdditiveBias = integerMetadata(kernel, USE_ADDITIVE_BIAS_FIELD).value_or(0);
     if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
-       || *useTransposedQk32x32 > 1 || *emitLse < 0 || *emitLse > 1)
+       || *useTransposedQk32x32 > 1 || *emitLse < 0 || *emitLse > 1 || useAdditiveBias < 0
+       || useAdditiveBias > 1)
+    {
+        return std::nullopt;
+    }
+    // rocKE builds no bias kernel on the non-transposed 32x32 path, nor one that also writes
+    // the LSE into this catalog.
+    if(useAdditiveBias != 0
+       && ((*useMfma32x32 != 0 && *useTransposedQk32x32 == 0) || *emitLse != 0))
     {
         return std::nullopt;
     }
@@ -201,7 +226,8 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *blockMPerWarp,
                                        *useMfma32x32 != 0,
                                        *useTransposedQk32x32 != 0,
-                                       *emitLse != 0};
+                                       *emitLse != 0,
+                                       useAdditiveBias != 0};
 }
 
 /// This catalog lists each head configuration as its own entry, so a candidate bakes both head

@@ -103,6 +103,20 @@ std::vector<KernelArgument> pythonReduceAbi()
             KernelArgument{BY_VALUE, 4, 0, "num_query_heads"}};
 }
 
+/// The bias kernel's segment ABI: rocKE's declare_additive_bias_params puts the attn_mask
+/// and its three strides after the runtime fields, before the strided-K/V block.
+std::vector<KernelArgument> pythonBiasSegmentAbi()
+{
+    auto abi = pythonSegmentAbi();
+    const std::vector<KernelArgument> bias{
+        KernelArgument{BUFFER, 8, 0, "additive_bias_ptr"},
+        KernelArgument{BY_VALUE, 4, 0, "additive_bias_batch_stride"},
+        KernelArgument{BY_VALUE, 4, 0, "additive_bias_head_stride"},
+        KernelArgument{BY_VALUE, 4, 0, "additive_bias_sq_stride"}};
+    abi.insert(abi.begin() + 22, bias.begin(), bias.end());
+    return abi;
+}
+
 constexpr const char* SEGMENT_SYMBOL = "attention_unified_3d_segment_test";
 constexpr const char* REDUCE_SYMBOL = "attention_unified_3d_reduce_test";
 
@@ -117,11 +131,15 @@ KernelSource launchSource(const char* symbol, std::vector<KernelArgument> signat
     return source;
 }
 
-/// A two-launch record of the base graph's cell recording @p segment and @p reduce.
+/// A two-launch record of the base graph's cell recording @p segment and @p reduce; with
+/// @p bias, its bias kernel.
 KernelDefinition makeTwoLaunchKernel(std::vector<KernelArgument> segment,
-                                     std::vector<KernelArgument> reduce)
+                                     std::vector<KernelArgument> reduce,
+                                     bool bias = false)
 {
-    KernelDefinition kernel = makeKernel(KernelSpec{});
+    KernelSpec spec;
+    spec.useAdditiveBias = bias ? 1 : 0;
+    KernelDefinition kernel = makeKernel(spec);
     kernel.sources = {{"segment", launchSource(SEGMENT_SYMBOL, std::move(segment))},
                       {"reduce", launchSource(REDUCE_SYMBOL, std::move(reduce))}};
     kernel.originDirectory = "/nonexistent";
@@ -129,10 +147,11 @@ KernelDefinition makeTwoLaunchKernel(std::vector<KernelArgument> segment,
     return kernel;
 }
 
-/// The message prepare() throws for this record; empty if it returned.
-std::string prepareFailure(const KernelDefinition& kernel)
+/// The message prepare() throws for this record over the base graph, with an attn_mask when
+/// @p bias; empty if it returned.
+std::string prepareFailure(const KernelDefinition& kernel, bool bias = false)
 {
-    const auto graph = fixture(GraphSpec{});
+    const auto graph = fixture(bias ? unified_attention::withBias(GraphSpec{}) : GraphSpec{});
     const auto bound = matchesGraph(PACK, graph.context());
     EXPECT_TRUE(bound.has_value());
     if(!bound.has_value())
@@ -152,9 +171,12 @@ std::string prepareFailure(const KernelDefinition& kernel)
 
 constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
-void expectRefused(const KernelDefinition& kernel, const char* symbol, const std::string& what)
+void expectRefused(const KernelDefinition& kernel,
+                   const char* symbol,
+                   const std::string& what,
+                   bool bias = false)
 {
-    const std::string failure = prepareFailure(kernel);
+    const std::string failure = prepareFailure(kernel, bias);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos) << what << ": " << failure;
     EXPECT_NE(failure.find(std::string("symbol '") + symbol + "'"), std::string::npos)
@@ -280,6 +302,64 @@ TEST(TestGfx942AttentionUnified3dSignature, RefusesTheTwoLaunchesSwapped)
     expectRefused(makeTwoLaunchKernel(pythonReduceAbi(), pythonSegmentAbi()),
                   SEGMENT_SYMBOL,
                   "launch lists swapped");
+}
+
+TEST(TestGfx942AttentionUnified3dSignature, AcceptsTheBiasAbiThePythonDeclares)
+{
+    EXPECT_EQ(pythonBiasSegmentAbi().size(), 34U); // + additive_bias_ptr and 3 strides
+    const std::string failure = prepareFailure(
+        makeTwoLaunchKernel(pythonBiasSegmentAbi(), pythonReduceAbi(), true), true);
+    ASSERT_FALSE(failure.empty()) << "the archive does not exist, so prepare() cannot succeed";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the bias argument lists the rocKE builder declares: " << failure;
+}
+
+/// A bias kernel built without its four params would read the strided-K/V block from their
+/// slots, and a plain kernel handed them would read them as K/V strides: each is refused.
+TEST(TestGfx942AttentionUnified3dSignature, RefusesTheBiasArgumentsOnTheWrongKernel)
+{
+    expectRefused(makeTwoLaunchKernel(pythonSegmentAbi(), pythonReduceAbi(), true),
+                  SEGMENT_SYMBOL,
+                  "a bias segment carries the attn_mask",
+                  true);
+    expectSegmentRefused(pythonBiasSegmentAbi(), "a plain segment has no attn_mask slots");
+
+    // The bias params appended after the strided-K/V block instead of before it.
+    auto appended = pythonSegmentAbi();
+    const auto bias = pythonBiasSegmentAbi();
+    appended.insert(appended.end(), bias.begin() + 22, bias.begin() + 26);
+    expectRefused(makeTwoLaunchKernel(appended, pythonReduceAbi(), true),
+                  SEGMENT_SYMBOL,
+                  "the bias params sit before the strided-K/V block",
+                  true);
+}
+
+/// The three strides are like i32 slots; only their names tell batch, head and query row
+/// apart.
+TEST(TestGfx942AttentionUnified3dSignature, RefusesExchangedBiasStrides)
+{
+    for(const auto& [first, second] :
+        std::vector<std::pair<std::size_t, std::size_t>>{{23, 24}, {24, 25}, {23, 25}})
+    {
+        auto swapped = pythonBiasSegmentAbi();
+        std::swap(swapped.at(first), swapped.at(second));
+        expectRefused(makeTwoLaunchKernel(swapped, pythonReduceAbi(), true),
+                      SEGMENT_SYMBOL,
+                      swapped.at(second).name + " <-> " + swapped.at(first).name,
+                      true);
+    }
+}
+
+/// prepare() is reachable without kernel_match: a bias kernel launched for a graph without an
+/// attn_mask would read a null bias, and a plain kernel for a graph with one would drop it.
+TEST(TestGfx942AttentionUnified3dSignature, PrepareRefusesAKernelOnTheOtherSideOfTheBiasPairing)
+{
+    EXPECT_NE(prepareFailure(makeTwoLaunchKernel(pythonBiasSegmentAbi(), pythonReduceAbi(), true))
+                  .find("adds an attn_mask, but the graph has none"),
+              std::string::npos);
+    EXPECT_NE(prepareFailure(makeTwoLaunchKernel(pythonSegmentAbi(), pythonReduceAbi()), true)
+                  .find("adds no attn_mask, but the graph has one"),
+              std::string::npos);
 }
 
 } // namespace
