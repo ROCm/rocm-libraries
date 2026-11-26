@@ -505,8 +505,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
     const bool page_prefetch = rocke_gfx942_attn2d_page_prefetch(ctx);
-    if(page_prefetch)
-        ctx->page_next_tile = safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket (filled by the narrow
      * path below; alpha/new_l/m_carry per softmax state slot, where m_carry is
@@ -558,11 +556,12 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
      * prefetch QK1's K tile into nxt_buf. */
     if(ctx->EARLY_V_SCHEDULE)
     {
-        rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, ctx->cur_buf);
+        rocke_gfx942_attn2d_issue_v(
+            ctx, ctx->kv_tile_iv, ctx->cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
     }
     if(ctx->GROUPED_KV2)
     {
-        rocke_gfx942_attn2d_issue_k(ctx, safe_tile1, ctx->nxt_buf_v);
+        rocke_gfx942_attn2d_issue_k(ctx, safe_tile1, ctx->nxt_buf_v, NULL);
     }
 
     /* ============================================================ *
@@ -943,27 +942,35 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             }
             else if(!ctx->EARLY_V_SCHEDULE)
             {
-                rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+                rocke_gfx942_attn2d_issue_v(
+                    ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
             }
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->GROUPED_KV2)
         {
-            rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
+            rocke_gfx942_attn2d_issue_v(
+                ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->EARLY_V_SCHEDULE)
         {
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
         {
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else
         {
-            rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_v(
+                ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
 
         /* ============================================================ *
@@ -1042,27 +1049,35 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             }
             else if(!ctx->EARLY_V_SCHEDULE)
             {
-                rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+                rocke_gfx942_attn2d_issue_v(
+                    ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
             }
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->GROUPED_KV2)
         {
-            rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
+            rocke_gfx942_attn2d_issue_v(
+                ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->EARLY_V_SCHEDULE)
         {
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
         {
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else
         {
-            rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_v(
+                ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
 
         /* ---- mask / scale / softcap / alibi / qq-bias (Python 4315-4359) ---- */
@@ -1258,27 +1273,35 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             }
             else if(!ctx->EARLY_V_SCHEDULE)
             {
-                rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+                rocke_gfx942_attn2d_issue_v(
+                    ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
             }
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->GROUPED_KV2)
         {
-            rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
+            rocke_gfx942_attn2d_issue_v(
+                ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->EARLY_V_SCHEDULE)
         {
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
         {
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
         else
         {
-            rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
-            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            rocke_gfx942_attn2d_issue_v(
+                ctx, ctx->kv_tile_iv, cur_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_cur));
+            rocke_gfx942_attn2d_issue_k(
+                ctx, safe_next_tile, nxt_buf, rocke_gfx942_attn2d_carried(ctx, ctx->page_next));
         }
 
         /* ============================================================ *

@@ -42,7 +42,8 @@ typedef struct rocke_kv_page_copies
     bool i64;
     bool page_base_in_soffset;
     /* One buffer resource per page also under 32-bit offsets; a page at or above the 32-bit
-     * whole-cache bound cache_bytes (NULL: none) then gets an empty resource. */
+     * whole-cache bound cache_bytes (NULL: none) then gets an empty resource, so its buffer
+     * copies read zeros. A copy through the page's pointer (global_load_lds) is not bounded. */
     bool page_resources;
     rocke_value_t* cache_bytes;
     /* derived by init */

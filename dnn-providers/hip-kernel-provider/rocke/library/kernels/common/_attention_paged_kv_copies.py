@@ -74,7 +74,9 @@ class PagedKVCopies:
         self.page_base_in_soffset = page_base_in_soffset
         # One buffer resource per page, also under 32-bit offsets. A page at or above the
         # 32-bit whole-cache bound ``cache_bytes`` (a corrupt or padding id) then gets an empty
-        # resource and reads zeros, as the whole-cache resource did, rather than faulting.
+        # resource and its buffer copies read zeros, as through the whole-cache resource,
+        # rather than faulting. A copy through the page's pointer (global_load_lds) is not
+        # bounded.
         self.page_resources = page_resources or i64
         self.cache_bytes = None if i64 else cache_bytes
         page_halves = block_size * head_size
