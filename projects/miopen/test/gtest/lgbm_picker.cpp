@@ -378,8 +378,8 @@ TEST_P(CPU_LgbmForest_NONE, MatchesGoldenVectors)
 
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmMetadata_NONE, ::testing::Values(0));
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPicker_NONE, ::testing::Values(0));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LgbmPickerStrictArch_FP16, ::testing::Values(0));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LgbmPickerStrictArch_FP32, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_LgbmPickerStrictArch_FP16, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_LgbmPickerStrictArch_FP32, ::testing::Values(0));
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmForest_NONE, ::testing::Values(0));
 
 } // namespace

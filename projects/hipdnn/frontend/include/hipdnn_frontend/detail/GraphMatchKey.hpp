@@ -252,8 +252,14 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         appendOptionalMatchTensor(key,
                                   config_tensor::PREV_RUNNING_VARIANCE,
                                   batchnorm.attributes.get_prev_running_variance());
-        appendOptionalMatchTensor(
-            key, config_tensor::MOMENTUM, batchnorm.attributes.get_momentum());
+        // Momentum is left out of the lowered operation unless both previous running stats are
+        // present (the packer sends it only then), so the key leaves it out too.
+        if(batchnorm.attributes.get_prev_running_mean()
+           && batchnorm.attributes.get_prev_running_variance())
+        {
+            appendOptionalMatchTensor(
+                key, config_tensor::MOMENTUM, batchnorm.attributes.get_momentum());
+        }
         return PrioritizedAutotuneConfigMatchKey{match_priority::BATCHNORM, std::move(key)};
     }
     case graph::NodeType::BATCHNORM_INFERENCE:
@@ -398,8 +404,18 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        appendOptionalMatchTensor(key, config_tensor::IN_1, pointwise.attributes.get_input_1());
-        appendOptionalMatchTensor(key, config_tensor::IN_2, pointwise.attributes.get_input_2());
+        // Inputs beyond the mode's operand count are left out of the lowered operation, so the
+        // key leaves them out too.
+        const size_t usedInputCount
+            = graph::PointwiseNode::modeInputCount(pointwise.attributes.get_mode());
+        if(usedInputCount >= 2)
+        {
+            appendOptionalMatchTensor(key, config_tensor::IN_1, pointwise.attributes.get_input_1());
+        }
+        if(usedInputCount >= 3)
+        {
+            appendOptionalMatchTensor(key, config_tensor::IN_2, pointwise.attributes.get_input_2());
+        }
         return PrioritizedAutotuneConfigMatchKey{match_priority::POINTWISE, std::move(key)};
     }
     case graph::NodeType::UNKNOWN:

@@ -1,4 +1,104 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": [
+      {
+        "cases": [
+          "bf16_0071df890d2cafaf",
+          "bf16_0b94e9a2e5764569",
+          "bf16_34b6672cc8e64e37",
+          "bf16_3aaa59b6e14dc34a",
+          "bf16_4adfe0628c456246",
+          "bf16_4b296c472e4e455d",
+          "bf16_8da2bbc0cbaf857b",
+          "bf16_a0ec55a0af8d8498",
+          "bf16_c0f0c419b76c1170",
+          "bf16_cd8c709d176445d5",
+          "bf16_d0be6f9087b7b394",
+          "bf16_e4fc0ca4239f27ca"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_decode": [
+      {
+        "cases": [
+          "bf16_0071df890d2cafaf",
+          "bf16_4adfe0628c456246",
+          "bf16_4b296c472e4e455d",
+          "bf16_8da2bbc0cbaf857b",
+          "bf16_a0ec55a0af8d8498",
+          "bf16_c0f0c419b76c1170",
+          "bf16_cd8c709d176445d5",
+          "bf16_d0be6f9087b7b394",
+          "bf16_e4fc0ca4239f27ca"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_0071df890d2cafaf",
+          "bf16_0b94e9a2e5764569",
+          "bf16_34b6672cc8e64e37",
+          "bf16_3aaa59b6e14dc34a",
+          "bf16_4adfe0628c456246",
+          "bf16_4b296c472e4e455d",
+          "bf16_6cf6aaf9b5b93fb2",
+          "bf16_8da2bbc0cbaf857b",
+          "bf16_a0ec55a0af8d8498",
+          "bf16_c0f0c419b76c1170",
+          "bf16_c94ce96c02f026d1",
+          "bf16_cd8c709d176445d5",
+          "bf16_d0be6f9087b7b394",
+          "bf16_e4fc0ca4239f27ca"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_rdna_decode": [
+      {
+        "cases": [
+          "bf16_0071df890d2cafaf",
+          "bf16_3aaa59b6e14dc34a",
+          "bf16_4adfe0628c456246",
+          "bf16_4b296c472e4e455d",
+          "bf16_6cf6aaf9b5b93fb2",
+          "bf16_8da2bbc0cbaf857b",
+          "bf16_a0ec55a0af8d8498",
+          "bf16_c0f0c419b76c1170",
+          "bf16_c94ce96c02f026d1",
+          "bf16_cd8c709d176445d5",
+          "bf16_d0be6f9087b7b394",
+          "bf16_e4fc0ca4239f27ca"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux",
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }
