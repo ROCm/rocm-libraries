@@ -35,7 +35,7 @@ from rocke.runtime.device_array import (
     strided_view,
     zero_elements,
 )
-from rocke.runtime.torch_interop import torch_array_info
+from rocke.runtime.torch_interop import is_torch_tensor, torch_array_info
 from rocke.tests.gpu import current_device_arch
 from rocke.tests.host_arrays import HostArray
 from rocke.tests.lanes import TICKET, import_or_skip_until
@@ -110,6 +110,28 @@ def test_torch_tensor_info_maps_dtype_and_device():
         backed_elements=56,
     )
     assert not info.is_contiguous()
+
+
+class _TensorSubclass(_TorchTensorAttributes):
+    """A subclass of a torch type defined outside torch, as a user's tensor
+    subclass is."""
+
+    __module__ = __name__
+
+
+def test_a_subclass_of_a_torch_type_is_a_torch_tensor():
+    assert not is_torch_tensor(np.zeros(4, np.float32))
+    assert is_torch_tensor(_TensorSubclass())
+    assert array_info(_TensorSubclass()).shape == (4, 8)
+
+
+def test_a_real_torch_tensor_subclass_is_a_torch_tensor():
+    torch = import_or_skip_until("torch", TICKET)
+
+    class Subclass(torch.Tensor):
+        pass
+
+    assert is_torch_tensor(torch.zeros(2).as_subclass(Subclass))
 
 
 def test_torch_tensor_info_refuses_a_dtype_without_an_element_type():
