@@ -78,6 +78,7 @@ from ...core.ir import (
 )
 from ...helpers.asm import mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster
 from ...helpers.atoms import MfmaAtom
+from ...helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
     validate_arch_and_block_size,
@@ -220,9 +221,16 @@ def _emit_loop_cadence_hint(b: IRBuilder, cadence: str | None = None) -> None:
     ``cadence`` (level 9 flag) overrides the import-time ``_SCHED_CADENCE`` env
     default when the spec pins it; ``None`` => use the env default (so the
     default build is byte-identical).
+
+    ``iglp_opt(1)`` also marks the kernel to compile in a fresh process
+    (``COMGR_FRESH_PROCESS_ATTR``; the LLVM IR is unchanged): LLVM's strategy
+    behind it keeps counts across the compiles of a process, and on a compiler
+    older than ROCm 7.11 it can allocate without bound, which the fresh
+    process's memory cap turns into ``ComgrOutOfMemory``.
     """
     if (cadence if cadence is not None else _SCHED_CADENCE) == "iglp1":
         b.iglp_opt(1)
+        b.kernel.attrs[COMGR_FRESH_PROCESS_ATTR] = True
 
 
 # sched_group_barrier mask bits.

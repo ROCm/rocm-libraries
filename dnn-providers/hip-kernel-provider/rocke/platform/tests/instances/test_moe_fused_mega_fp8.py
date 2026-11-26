@@ -189,5 +189,23 @@ def test_requantizes_to_the_largest_value_of_the_target_encoding(
     assert reciprocal_of(other) not in text
 
 
+@pytest.mark.parametrize("cadence", ["iglp1", "none", "sgb"])
+def test_compiles_in_a_fresh_process_exactly_when_it_emits_iglp_opt_1(cadence):
+    """A kernel that emits ``iglp_opt(1)`` is marked to compile in the fresh,
+    memory-capped process (on a compiler without the fix the hint can
+    allocate without bound); a kernel without it compiles in-process."""
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.helpers.compile import COMGR_FRESH_PROCESS_ATTR
+    from rocke.instances.common.moe_fused_mega_fp8 import (
+        build_moe_fused_mega_gemm_fp8,
+    )
+
+    kernel = build_moe_fused_mega_gemm_fp8(_spec(sched_cadence=cadence), "gfx950")
+    text = lower_kernel_to_llvm(kernel, arch="gfx950")
+    emits_hint = "call void @llvm.amdgcn.iglp.opt(i32 1)" in text
+    assert emits_hint is (cadence == "iglp1")
+    assert kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR, False) is emits_hint
+
+
 if __name__ == "__main__":
     unittest.main()

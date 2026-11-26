@@ -167,8 +167,8 @@ otherwise raises `ComgrProcessDied`. Both are `ComgrError`s, and
 `compile_kernel` does this for a kernel whose builder set the kernel attribute
 `COMGR_FRESH_PROCESS_ATTR` (`"comgr_fresh_process"`, compile policy only: no
 lowerer reads it, so the LLVM IR is unchanged). The attention backward main
-kernel sets it whenever it emits `iglp_opt(1)`; other families compile in-process
-as before. The cost is one short process start per such kernel. `compile_module`
+kernel and the fp8 fused-MoE kernel set it whenever they emit `iglp_opt(1)`;
+other families compile in-process as before. The cost is one short process start per such kernel. `compile_module`
 links its modules in-process, so it refuses a kernel carrying the attribute
 (`ValueError`); compile such a kernel with `compile_kernel`.
 
