@@ -774,6 +774,7 @@ class SupportComparisonTest(unittest.TestCase):
             "invalid",
             "unknown_changed",
             "unavailable_changed",
+            "timed_out",
         }
         for before, row in G._CELL_TRANSITIONS.items():
             with self.subTest(before=before):
@@ -830,7 +831,7 @@ class SupportComparisonTest(unittest.TestCase):
         toolchain lost support: the cell is reported as timed out, and no
         failure is recorded."""
         self.assertEqual(
-            G._cell_transition(G.STATUS_OK, G.STATUS_TOOLCHAIN_TIMEOUT), "loss"
+            G._cell_transition(G.STATUS_OK, G.STATUS_TOOLCHAIN_TIMEOUT), "timed_out"
         )
         comparison = G._compare_support(
             self._doc(), self._doc(G.STATUS_TOOLCHAIN_TIMEOUT)
@@ -840,6 +841,8 @@ class SupportComparisonTest(unittest.TestCase):
             comparison.timed_out,
             [f"a.b/{self.ARCH}: ok -> {G.STATUS_TOOLCHAIN_TIMEOUT}"],
         )
+        # Reported once, as timed out, not again as no-data.
+        self.assertEqual(comparison.changes["unvalidated"], [])
 
     def test_gains_and_measurement_improvements_pass(self):
         for before, after, category in (

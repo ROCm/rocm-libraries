@@ -1618,7 +1618,7 @@ sys.exit(0)
                         mock.patch.object(
                             G,
                             "_compare_support",
-                            return_value=G._SupportComparison([], changes),
+                            return_value=G._SupportComparison([], changes, []),
                         ),
                     ):
                         rc = self._run(
@@ -1672,7 +1672,8 @@ sys.exit(0)
                     )
                 text = stdout.getvalue()
                 self.assertEqual(rc, expected)
-                self.assertIn("UNVALIDATED: 1 probes of working cells", text)
+                self.assertIn("TIMED OUT: 1 probes of working cells", text)
+                self.assertIn("UNVALIDATED:", text)
                 self.assertIn(timed_out[0], text)
                 self.assertNotIn("SUPPORT OK", text)
                 self.assertEqual(out.read_text(), before)
@@ -1691,7 +1692,7 @@ sys.exit(0)
                     mock.patch.object(
                         G,
                         "_compare_support",
-                        return_value=G._SupportComparison(failures, empty),
+                        return_value=G._SupportComparison(failures, empty, []),
                     ),
                 ):
                     rc = self._run(tools, out, "--only", "fabs.f32", "--check")

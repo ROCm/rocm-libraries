@@ -107,7 +107,6 @@ import re
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
 from importlib.resources import files as resource_files
 from pathlib import Path
 from typing import Callable, Iterator, NamedTuple
@@ -1113,15 +1112,17 @@ def _decl_table(flavor: str) -> dict[str, str]:
 class _SupportComparison(NamedTuple):
     failures: list[str]
     changes: dict[str, list[str]]
-    # Working cells whose probe did not finish within PROBE_TIMEOUT_S: the
-    # host was too slow to answer, which leaves the check unvalidated rather
-    # than showing a loss of support.
-    timed_out: Sequence[str] = ()
+    # The "timed_out" transitions: working cells whose probe did not finish
+    # within PROBE_TIMEOUT_S. The host was too slow to answer, which leaves the
+    # check unvalidated rather than showing a loss of support.
+    timed_out: list[str]
 
 
 # Rows are recorded states; columns are freshly measured states. Unknown
 # answers are not ordered support levels: resolving one to unavailable improves
 # measurement, while losing a definite negative does not lose working support.
+# A working cell whose probe timed out is "timed_out", not a loss: not
+# finishing on a slow host says nothing about the toolchain's support.
 _CELL_TRANSITIONS: dict[str, dict[str, str]] = {
     STATUS_OK: {
         STATUS_OK: "unchanged",
@@ -1129,7 +1130,7 @@ _CELL_TRANSITIONS: dict[str, dict[str, str]] = {
         STATUS_NAME_ABSENT: "loss",
         STATUS_TARGET_UNSUPPORTED: "loss",
         STATUS_TOOLCHAIN_CRASH: "loss",
-        STATUS_TOOLCHAIN_TIMEOUT: "loss",
+        STATUS_TOOLCHAIN_TIMEOUT: "timed_out",
         STATUS_PROBE_ERROR: "invalid",
     },
     STATUS_ARCH_ABSENT: {
@@ -1575,13 +1576,13 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             before, after = before_cell.get("status"), after_cell.get("status")
             transition = _cell_transition(before, after)
             change = f"{key}/{arch}: {before} -> {after}"
-            if transition == "loss" and after == STATUS_TOOLCHAIN_TIMEOUT:
+            if transition == "timed_out":
                 result.timed_out.append(change)
             elif transition in ("invalid", "loss"):
                 result.failures.append(f"{transition} -- {change}")
             elif transition != "unchanged":
                 result.changes[transition].append(change)
-            if after in (
+            if transition != "timed_out" and after in (
                 STATUS_TARGET_UNSUPPORTED,
                 STATUS_TOOLCHAIN_CRASH,
                 STATUS_TOOLCHAIN_TIMEOUT,
@@ -1605,6 +1606,15 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
         elif after["accepted"] and not before["accepted"]:
             result.changes["gain"].append(f"processor {arch}: unsupported -> accepted")
     return result
+
+
+def _observation_summary(observations: list[str], verbose: bool) -> str:
+    """The observations joined, the first five unless ``verbose``, with the
+    count of the rest."""
+    summary = "; ".join(observations if verbose else observations[:5])
+    if not verbose and len(observations) > 5:
+        summary += f" (+{len(observations) - 5} more)"
+    return summary
 
 
 def _print_support_failures(out: Path, failures: list[str]) -> None:
@@ -2493,22 +2503,22 @@ def main() -> int:
         ):
             changes = comparison.changes[kind]
             if changes:
-                summary = "; ".join(changes if args.verbose else changes[:5])
-                if not args.verbose and len(changes) > 5:
-                    summary += f" (+{len(changes) - 5} more)"
-                print(f"\n{label}: {len(changes)} -- {summary}")
+                print(
+                    f"\n{label}: {len(changes)} -- "
+                    f"{_observation_summary(changes, args.verbose)}"
+                )
+        if comparison.timed_out:
+            print(
+                f"\nTIMED OUT: {len(comparison.timed_out)} probes of working cells "
+                f"did not finish within {PROBE_TIMEOUT_S:g}s on this host, so their "
+                "support was not checked -- "
+                f"{_observation_summary(comparison.timed_out, args.verbose)}"
+            )
         if comparison.failures:
             _print_support_failures(out, comparison.failures)
             return 1
         if comparison.timed_out:
-            summary = "; ".join(comparison.timed_out[:5])
-            if len(comparison.timed_out) > 5:
-                summary += f" (+{len(comparison.timed_out) - 5} more)"
-            print(
-                f"\nUNVALIDATED: {len(comparison.timed_out)} probes of working "
-                f"cells did not finish within {PROBE_TIMEOUT_S:g}s on this host, "
-                f"so their support was not checked -- {summary}"
-            )
+            print(f"\nUNVALIDATED: {out.name} was not checked in full on this host.")
             return _unvalidated_exit(args.unvalidated_exit_code, 1)
         print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
         return 0
