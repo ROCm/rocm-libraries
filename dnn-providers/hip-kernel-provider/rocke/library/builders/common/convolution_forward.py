@@ -851,8 +851,9 @@ AOT_REFUSED_SPLIT_REDUCE = (
 #: Instance families (:func:`aot_bias_family`) whose bias twin (``bias`` = 1:
 #: the per-output-channel bias added to the fp32 accumulator, and the trailing
 #: ``(Bias, Bias_bytes)`` kernargs) is packaged. The others are refused with
-#: :func:`aot_bias_error`'s reason; packaging one is adding it here.
-AOT_BIAS_FAMILIES = ("implicit_gemm",)
+#: :func:`aot_bias_error`'s reason; packaging one is adding it here. A split-C
+#: instance's conv pass and fold both take the tail, and only the fold adds it.
+AOT_BIAS_FAMILIES = ("implicit_gemm", "direct", "split_c")
 
 
 def aot_bias_family(*, direct: bool, split_c: int = 1) -> str:

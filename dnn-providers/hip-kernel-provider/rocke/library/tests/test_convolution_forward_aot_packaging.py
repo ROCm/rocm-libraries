@@ -1573,25 +1573,71 @@ def test_a_bias_instance_is_the_sweeps_bias_twin_up_to_its_symbol(
         assert ours != _ir(build_gfx950_conv_fwd_aot(plain)), identity.label()
 
 
-def test_direct_and_split_c_bias_twins_are_refused_by_family(catalog_identities):
-    assert AOT_BIAS_FAMILIES == ("implicit_gemm",)
-    families = set()
+def test_every_catalog_direct_and_split_c_bias_twin_is_packaged(catalog_identities):
+    assert AOT_BIAS_FAMILIES == ("implicit_gemm", "direct", "split_c")
+    families: dict = {}
     for identity in catalog_identities:
         if identity.algorithm == "implicit_gemm":
             continue
         plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
         family = aot_bias_family(direct=True, split_c=plain.split_c)
         assert family == plain.bias_family
-        families.add(family)
-        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(
-            replace(identity, bias=True)
-        )
-        assert spec is None and reason == aot_bias_error(family), identity.label()
-        ok, why = supports_gfx950_conv_fwd_aot(replace(plain, bias=1))
-        assert not ok and why == aot_bias_error(family)
-    assert families == {"direct", "split_c"}
-    assert "not packaged for split_c" in aot_bias_error("split_c")
-    assert aot_bias_error("implicit_gemm") == ""
+        families[family] = families.get(family, 0) + 1
+        twin = replace(identity, bias=True)
+        spec, reason = gfx950_conv_fwd_aot_spec_for_identity(twin)
+        assert reason == "" and spec.bias == 1, (twin.label(), reason)
+        assert spec == replace(plain, bias=1, instance_id=twin.stable_hash())
+        assert spec.identity() == twin
+        assert spec.to_direct_spec().bias and not plain.to_direct_spec().bias
+        names = [a["name"] for a in spec.launch_signature()]
+        assert names == [a["name"] for a in plain.launch_signature()] + [
+            "Bias",
+            "Bias_bytes",
+        ]
+        assert [p.name for p in build_gfx950_conv_fwd_aot(spec).params] == names
+        if spec.is_split_c:
+            # One kernarg block for both launches: the fold takes the conv
+            # pass's arguments, bias tail included, and adds the bias.
+            assert spec.split_reduce_spec().bias
+            fold = build_gfx950_conv_fwd_aot_split_reduce(spec)
+            assert [p.name for p in fold.params] == names
+    assert families == {"direct": 222, "split_c": 66}
+    assert "not packaged for winograd" in aot_bias_error("winograd")
+    assert aot_bias_error("direct") == aot_bias_error("split_c") == ""
+
+
+def test_a_direct_bias_instance_is_the_sweeps_bias_kernel_up_to_its_symbol(
+    catalog_identities,
+):
+    """One instance per direct variant and split form of the catalog: the
+    packaged bias kernel (and a split-C instance's fold) is the direct sweep's
+    kernel of the bias identity, and not the plain one."""
+    picked = {}
+    for identity in catalog_identities:
+        if identity.algorithm != "implicit_gemm":
+            split = "split_c" in json.loads(identity.knobs or "{}")
+            picked.setdefault((identity.algorithm, split), identity)
+    assert len(picked) >= 7
+    for identity in picked.values():
+        spec, _ = gfx950_conv_fwd_aot_spec_for_identity(replace(identity, bias=True))
+        job = direct_kernel_sweep.direct_job_for_identity(spec.identity())
+        theirs, _ = direct_kernel_sweep.direct_kernel_for_job(job, "gfx950", spec.dtype)
+        ours = _ir(build_gfx950_conv_fwd_aot(spec))
+        assert ours == _ir(theirs), identity.label()
+        plain, _ = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        assert ours != _ir(build_gfx950_conv_fwd_aot(plain)), identity.label()
+        if spec.is_split_c:
+            fold = direct_kernel_sweep._split_reduce_identity(
+                "gfx950", spec.wave_size, spec.split_c, spec.dtype, True
+            )
+            theirs, _ = direct_kernel_sweep.direct_kernel_for_job(
+                direct_kernel_sweep.direct_job_for_identity(fold),
+                "gfx950",
+                spec.dtype,
+            )
+            ours = _ir(build_gfx950_conv_fwd_aot_split_reduce(spec))
+            assert ours == _ir(theirs), identity.label()
+            assert ours != _ir(build_gfx950_conv_fwd_aot_split_reduce(plain))
 
 
 def test_a_bias_instance_launches_with_the_bias_tail(catalog_identities):
