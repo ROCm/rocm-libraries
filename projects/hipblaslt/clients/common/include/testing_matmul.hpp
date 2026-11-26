@@ -7070,9 +7070,12 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(verifyD)
             for(auto& d : dD)
                 fillWithSentinel(d, To);
-        // uniform_check alone: an element of D the kernel leaves unwritten keeps its row index,
-        // which differs from row 0.
-        else if(ucInputs && !arg.c_equal_d)
+        // When uniform_check is the only check, an element of D the kernel leaves unwritten keeps
+        // its row index (see uniform_check_fill_row_index_device). With c_equal_d beta is 0 (else
+        // uniform_check is skipped), so C, which is D, is not read. With c_equal_d and a value
+        // check, the later C restore replaces this fill and the value check catches unwritten
+        // elements.
+        else if(ucInputs)
         {
             const size_t elem = realDataTypeSize(To);
             if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
