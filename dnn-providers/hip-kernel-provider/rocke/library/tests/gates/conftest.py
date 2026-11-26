@@ -37,21 +37,44 @@ def _stop(message: str) -> NoReturn:
     pytest.exit(message + suffix, returncode=77 if optional else 1)
 
 
+def _skip_off_reference(message: str) -> NoReturn:
+    """End the session as skipped (exit 77, which the CTest entry's
+    SKIP_RETURN_CODE reports as a skip): the toolchain is not the gate's
+    reference toolchain, a fact about the host, so the gate has nothing to
+    judge there. A run that requires the gate (``run_all.py
+    --require-compiler-gate``) counts the 77 as a failure."""
+    pytest.exit(
+        f"{message}; the gate runs only on its reference toolchain (skipped)",
+        returncode=77,
+    )
+
+
+def _unanswered_query(
+    active_flavor: str | None, targets: frozenset[str] | None
+) -> str | None:
+    """Which toolchain query failed, or ``None``: a broken toolchain, not
+    merely another one, fails the gate."""
+    if active_flavor is None:
+        return "could not query the active comgr compiler flavor"
+    if targets is None:
+        return "could not query comgr ISA targets"
+    return None
+
+
 def _qualification_gap(
     requested_flavor: str,
-    active_flavor: str | None,
+    active_flavor: str,
     comgr: str | None,
-    targets: frozenset[str] | None,
+    targets: frozenset[str],
     arches: tuple[str, ...],
 ) -> str | None:
-    """Why a compiler cannot run the counted gate, or ``None`` when qualified."""
+    """How the toolchain differs from the gate's reference toolchain, or
+    ``None`` when it is the reference toolchain."""
     if requested_flavor != GATE_FLAVOR:
         return (
             f"resource gate requires LLVM flavor {GATE_FLAVOR}, "
             f"got {requested_flavor!r}"
         )
-    if active_flavor is None:
-        return "could not query the active comgr compiler flavor"
     if requested_flavor != active_flavor:
         return (
             f"requested flavor {requested_flavor} does not match active comgr "
@@ -59,8 +82,6 @@ def _qualification_gap(
         )
     if not comgr_is_production(comgr):
         return f"resource gate requires ROCm {GATE_COMGR_ROCM} comgr, got {comgr}"
-    if targets is None:
-        return "could not query comgr ISA targets"
     missing = [arch for arch in arches if arch not in targets]
     if missing:
         return f"comgr {comgr} does not support {', '.join(missing)}"
@@ -204,8 +225,10 @@ def pytest_collection_finish(session) -> None:
         targets = comgr_targets()
     except Exception as exc:  # noqa: BLE001 - one gate-level diagnostic
         _stop(f"counted ISA gate toolchain preflight failed: {exc}")
+    if failed := _unanswered_query(active_flavor, targets):
+        _stop(f"counted ISA gate {failed}")
     if gap := _qualification_gap(flavor, active_flavor, comgr, targets, arches):
-        _stop(f"counted ISA gate {gap}")
+        _skip_off_reference(f"counted ISA gate {gap}")
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(

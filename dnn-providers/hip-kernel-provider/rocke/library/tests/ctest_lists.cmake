@@ -487,6 +487,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
+       "  SKIP_RETURN_CODE 77\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE})\n")
 
 # DSA lightning-indexer CPU tests (no GPU: validator and dispatch wiring; the

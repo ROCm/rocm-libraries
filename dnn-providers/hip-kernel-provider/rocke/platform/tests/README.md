@@ -321,11 +321,14 @@ LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/pari
 profiles, not qualified code-object resource lanes; their scheduling and register
 allocation cannot be judged against thresholds calibrated on the reference compiler.
 The two counted gates share the `rocke_counted_sync_gate` CTest resource
-lock. The installed compiler gate forces required mode; a mismatched compiler,
-missing target support, or missing `llvm-objdump` fails once at preflight. The
-source runner treats that gate as optional unless passed
-`--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
-plain `GREEN`.
+lock. On a toolchain that is not its reference toolchain (another LLVM flavor
+or comgr, or one without the target) the gate ends at preflight with exit 77,
+which the installed entry reports as a skip that names the difference. The
+installed gate forces required mode for the rest: a toolchain query that fails
+or a missing `llvm-objdump` fails once at preflight. The source runner treats
+that gate as optional unless passed `--require-compiler-gate`, which counts the
+skip as a failure; an accepted optional skip reports `INCOMPLETE`, never plain
+`GREEN`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
 for the reusable placement contract.
 

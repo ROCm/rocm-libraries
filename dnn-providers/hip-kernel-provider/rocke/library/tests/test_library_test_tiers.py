@@ -417,20 +417,12 @@ def test_compiler_preflight_accepts_reference_toolchain():
         ),
         (
             "llvm22",
-            None,
-            "comgr3.0/rocm7.2",
-            frozenset(("gfx942",)),
-            "could not query",
-        ),
-        (
-            "llvm22",
             "llvm22",
             "comgr3.5/rocm10.3",
             frozenset(("gfx942",)),
             "requires ROCm 7.2 comgr",
         ),
         ("llvm22", "llvm22", None, frozenset(("gfx942",)), "requires ROCm 7.2"),
-        ("llvm22", "llvm22", "comgr3.0/rocm7.2", None, "ISA targets"),
         (
             "llvm22",
             "llvm22",
@@ -445,6 +437,28 @@ def test_compiler_preflight_rejects_unqualified_toolchain(
 ):
     gap = gate_config._qualification_gap(requested, active, comgr, targets, ("gfx942",))
     assert match in gap
+
+
+def test_a_toolchain_that_is_not_the_reference_skips_the_gate():
+    """Another toolchain is a fact about the host, not a defect: the session
+    ends with exit 77, which the CTest entry reports as a skip, and says why."""
+    with pytest.raises(pytest.exit.Exception) as ended:
+        gate_config._skip_off_reference("counted ISA gate requires LLVM flavor llvm22")
+    assert ended.value.returncode == 77
+    assert "runs only on its reference toolchain (skipped)" in str(ended.value)
+
+
+@pytest.mark.parametrize(
+    "active,targets,match",
+    [
+        (None, frozenset(("gfx942",)), "could not query the active comgr"),
+        ("llvm22", None, "could not query comgr ISA targets"),
+    ],
+)
+def test_a_toolchain_query_that_fails_fails_the_gate(active, targets, match):
+    """A toolchain that cannot answer is broken, not merely another one."""
+    assert match in gate_config._unanswered_query(active, targets)
+    assert gate_config._unanswered_query("llvm22", frozenset(("gfx942",))) is None
 
 
 @pytest.mark.parametrize(

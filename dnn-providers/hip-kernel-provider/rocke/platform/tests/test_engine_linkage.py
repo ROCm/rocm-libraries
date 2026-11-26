@@ -876,6 +876,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             }
             assert counted_properties["PROCESSORS"] == 4
             assert counted_properties["RESOURCE_LOCK"] == ["rocke_counted_sync_gate"]
+            # Off its reference toolchain the gate ends with 77, a skip.
+            assert counted_properties["SKIP_RETURN_CODE"] == 77
         # COMGR-only gates get the package and nothing compiler-specific.
         comgr_only_environment = environment_for(
             tests, "rocke_arch_domain_reproducibility"
