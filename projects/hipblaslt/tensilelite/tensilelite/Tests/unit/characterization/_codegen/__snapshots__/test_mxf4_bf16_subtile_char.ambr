@@ -2,11 +2,11 @@
 # name: test_mxf4_bf16_subtile_epilogue_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAfQMcxFsB6XFvBypHbDxbmcz9RYMA6AJuzZ6WknL7d00=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HA421rNeJvu8BWNUEmx6dOFvcQ2Rs1TYU-HG1HdkYKPYA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAl7otjSRrd6ZowCYMVI42J3e08Jpa5WHYcDY5_ZcLwyU=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAdrAocrJYJV5WCegq9R8sR3M_E3OyCUvc_B419h-df7s=',
       'err': 0,
     }),
   ])
@@ -14,11 +14,11 @@
 # name: test_mxf4_bf16_subtile_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgGf9nqScRhdaGCTrN_ReZ2aqYM-JZg6qIwC05OCgk020=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgXVtcI2hdJ13dEOvwPSXo6kwFQZnkIzzPR94E-IPybCw=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgSIHPjtHWI6aAEF-2p2JTT_uUVYUWNsu6teI5-1sAwXU=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArg_G9cK3cKtHkm1byl5OkcWbwIiua4stPvlmlmwP3wUAY=',
       'err': 0,
     }),
   ])

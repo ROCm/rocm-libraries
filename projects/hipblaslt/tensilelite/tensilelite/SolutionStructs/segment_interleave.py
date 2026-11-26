@@ -401,6 +401,11 @@ def evaluate(state):
     # Auto takes only the no-trade-off tight branch; the LDS-growing aligned branch needs 1.
     mode = state.get("LDSSegmentInterleave", -1)
     if mode == 0:                                              return _no("parameter off")
+    # Swizzled operands interleave: the TDM write already places component c at ldsBase + c*writeStrideBytes,
+    # and the swizzle read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM) for either operand. Swizzle-A
+    # is always the coarse case (A must span its component, see below); swizzle-B is validated for the tight
+    # MIWaveGroup=[2,2] symmetric case, gated below.
+    _swzB = bool(pt.get("SwizzleTensorB"))
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")
@@ -431,6 +436,7 @@ def evaluate(state):
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
     if (wgM == 1) ^ (wgN == 1):
+        if _swzB:                                             return _no("swizzle-B LSI: only MIWaveGroup=[2,2] symmetric supported")
         return _evaluate_asymmetric(state)
     if [wgM, wgN] != [2, 2]:
         return _no("MIWaveGroup unsupported")
@@ -438,8 +444,19 @@ def evaluate(state):
     # [2,2]: A uses adjacent rows, coarse tiles, or TDMSplit port-split tiles.
     _portSplit = _port_split_a(state)
     if not (_coarse(state, "A") or _portSplit or state.get("WaveTileContiguousA")):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
+    # Swizzle-B: either B spans its whole LDS component (the read's wtid0*strideWaveN term is a pure
+    # REPLACE by wtid0*writeStrideBytes), or the vIdx groups split evenly over the components (the read
+    # adds the component jump per vIdx, like the normal reader). portSplit needs TDMSplit; defer.
+    if _swzB:
+        if _portSplit:                                        return _no("swizzle-B LSI: portSplit (TDMSplit) path unsupported")
+        _compColsB = state["MacroTile1"] // (state["NumWaves"] // 2)
+        if wave_tile_span(state, "B") < _compColsB:   # B's whole tile (a stacked 32-row one included)
+            _compNO = _compColsB // state["MatrixInstN"]
+            if _compNO % (state["VectorWidthB"] * state["MIWaveGroup"][1]) != 0:
+                return _no("swizzle-B LSI: a vIdx group straddles an LDS component (MIWaveTile[1]/VectorWidthB must be even)")
 
     bWhole = not _b_readable(state)
+    if _swzB and bWhole:                                      return _no("swizzle-B LSI: B-not-readable (bcontig) path unsupported")
     offsets, end, aligned = _component_offsets(state, bWhole, _portSplit)
     if aligned:
         # Auto retains its existing rule: segment gaps require an explicit request.
@@ -514,6 +531,9 @@ def b_rotate_reason(state, persistent=False):
         else:
             return "MX: needs MatrixInstN == WavefrontSize/2 or WavefrontSize"
     if pt.get("Sparse"):                                      return "sparse not supported"
+    # Swizzle-B: the swizzled read maps vIdx group h to component h through LocalReadAddrB+h
+    # (LocalRead._localReadSwizzledTDM), so the register swap applies as is. Swizzle-A has no LSI.
+    if pt.get("SwizzleTensorA"):                              return "SwizzleTensorA not supported"
     for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
                 "PrefetchAcrossPersistent", "TDMFuse"):

@@ -429,3 +429,9 @@ TEST(PredictionLibraryTest, Gfx950ConfigsKeepTheirDeclaredValues)
     EXPECT_EQ(config.cache_hints_a, 4);
     EXPECT_EQ(config.cache_hints_b, 0);
 }
+
+// W4A16 Prediction libraries rank problems whose A is Int4.
+TEST(PredictionLibraryTest, Int4MapsToOrigamiInt4)
+{
+    EXPECT_EQ(datatypeToAnalyticalDatatype(rocisa::DataType::Int4), origami::data_type_t::Int4);
+}

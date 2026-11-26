@@ -441,6 +441,16 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+def _isFloatWithAtMostBits(dataType, nBits):
+    """Return True if dataType is a floating-point type with at most nBits bits.
+
+    For example, with nBits=8 it returns True for FP8, BF8, FP6, BF6 and FP4,
+    and False for FP16 and INT8.
+    """
+    isInt = dataType.isInt8() or dataType.isInt8x4() or dataType.isInt32() \
+        or dataType.isInt64() or dataType.isInt4()
+    return not isInt and dataType.numBytes() * 8 <= nBits
+
 _INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
 
 ################################################################################
@@ -701,6 +711,34 @@ _validGEMMTypes = [
     ("B6", "F6", "B", "S"),
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
+    ("F8", "F6", "B", "S"),
+    ("F8", "F6", "H", "S"),
+    ("F8", "B6", "B", "S"),
+    ("F8", "B6", "H", "S"),
+    ("F8", "F4", "H", "S"),
+    ("B8", "F6", "B", "S"),
+    ("B8", "F6", "H", "S"),
+    ("B8", "B6", "S", "S"),
+    ("B8", "B6", "B", "S"),
+    ("B8", "B6", "H", "S"),
+    ("B8", "F4", "B", "S"),
+    ("B8", "F4", "H", "S"),
+    ("F6", "F8", "B", "S"),
+    ("F6", "F8", "H", "S"),
+    ("F6", "B8", "B", "S"),
+    ("F6", "B8", "H", "S"),
+    ("F6", "F4", "H", "S"),
+    ("B6", "F8", "B", "S"),
+    ("B6", "F8", "H", "S"),
+    ("B6", "B8", "S", "S"),
+    ("B6", "B8", "B", "S"),
+    ("B6", "B8", "H", "S"),
+    ("B6", "F4", "H", "S"),
+    ("F4", "F8", "H", "S"),
+    ("F4", "B8", "B", "S"),
+    ("F4", "B8", "H", "S"),
+    ("F4", "F6", "H", "S"),
+    ("F4", "B6", "H", "S"),
 ]
 
 
@@ -796,6 +834,34 @@ _HPATypes = [
     ("B6", "F6", "B", "S"),
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
+    ("F8", "F6", "B", "S"),
+    ("F8", "F6", "H", "S"),
+    ("F8", "B6", "B", "S"),
+    ("F8", "B6", "H", "S"),
+    ("F8", "F4", "H", "S"),
+    ("B8", "F6", "B", "S"),
+    ("B8", "F6", "H", "S"),
+    ("B8", "B6", "S", "S"),
+    ("B8", "B6", "B", "S"),
+    ("B8", "B6", "H", "S"),
+    ("B8", "F4", "B", "S"),
+    ("B8", "F4", "H", "S"),
+    ("F6", "F8", "B", "S"),
+    ("F6", "F8", "H", "S"),
+    ("F6", "B8", "B", "S"),
+    ("F6", "B8", "H", "S"),
+    ("F6", "F4", "H", "S"),
+    ("B6", "F8", "B", "S"),
+    ("B6", "F8", "H", "S"),
+    ("B6", "B8", "S", "S"),
+    ("B6", "B8", "B", "S"),
+    ("B6", "B8", "H", "S"),
+    ("B6", "F4", "H", "S"),
+    ("F4", "F8", "H", "S"),
+    ("F4", "B8", "B", "S"),
+    ("F4", "B8", "H", "S"),
+    ("F4", "F6", "H", "S"),
+    ("F4", "B6", "H", "S"),
 ]
 
 def problemTypeToEnum(problemType):
@@ -1001,6 +1067,17 @@ class ProblemType(Mapping):
     else:
       self["DataTypeB"] = self["MacDataTypeB"]
     self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
+
+    # Kernels cannot convert between two floats of 8 bits or fewer, so an operand stored in
+    # one is also its MAC type (e.g. DataType F4 with DataTypeB F8 is an F4 x F8 MFMA).
+    for tc in ("A", "B"):
+      dataType, macDataType = self["DataType%s"%tc], self["MacDataType%s"%tc]
+      if dataType != macDataType and _isFloatWithAtMostBits(dataType, 8) \
+          and _isFloatWithAtMostBits(macDataType, 8):
+        if "MacDataType%s"%tc in config:
+          raise Exception("Unsupported input conversion DataType%s (%s) -> MacDataType%s (%s)" \
+                          % (tc, dataType.toChar(), tc, macDataType.toChar()))
+        self["MacDataType%s"%tc] = dataType
 
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])

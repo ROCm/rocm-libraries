@@ -258,7 +258,7 @@ if("amdgcnspirv" IN_LIST GPU_TARGETS)
 endif()
 
 # Setup version
-set(VERSION_STRING "5.2.0")
+set(VERSION_STRING "5.3.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")

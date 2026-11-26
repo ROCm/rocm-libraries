@@ -1,11 +1,9 @@
 {
   "version": "1.0",
-  "id": "e54e1173-7164-44ff-831a-5974872187de",
-  "name": "hipkernel:flydsl_sdpa_bwd_merged (gfx950, 58 contribution(s))",
+  "id": "7d10560e-7a2c-418c-bf32-0fbe607c1e88",
+  "name": "hipkernel:flydsl_sdpa_bwd_merged (gfx950, 68 contribution(s))",
   "adapter": "mlp_data",
   "features_signature": [
-    "$device.memory_clock_rate",
-    "$device.peak_memory_bandwidth",
     "$flydsl_sdpa_bwd_merged.batch",
     "$flydsl_sdpa_bwd_merged.bias_row_broadcast",
     "$flydsl_sdpa_bwd_merged.class",
@@ -505,7 +503,7 @@
     "$graph.nodes[0].v.strides[2]",
     "$graph.tensor_count"
   ],
-  "features_hash": "sha256:ff6b0acecf22330d",
+  "features_hash": "sha256:d03d38f9164ff633",
   "trained_against": {
     "ued": {
       "id": "f7ea7021-d005-538d-8db5-22a9ea6d9cd3",
@@ -521,7 +519,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/c3366f45a324646d0974856a26dc1128b94327cda88b2bf0c2e5778006736fa8",
+    "selector_revision": "generic-untuned-v1/918696cd88bc04a3439284698a901840f6af90dd13eafbc8206c837c3c823502",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -532,7 +530,7 @@
   },
   "mlp_data": {
     "artifact": "model.bin",
-    "hash": "b5049c4c94080b7ce34c1010b1d90c0167fc496ce7a2202c6d722aba25935632"
+    "hash": "1c1c5cc82fe56cfdd65641aa6aec691eb830a23d6c327e2e9c54a95f1c38a545"
   },
   "categorical_encoding": {
     "$flydsl_sdpa_bwd_merged.dtype": {

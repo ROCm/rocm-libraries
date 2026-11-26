@@ -1782,7 +1782,7 @@ namespace hipblaslt_ext
                                                       (rocblaslt_matrix_layout)matD);
                status != HIPBLAS_STATUS_SUCCESS)
                 return status;
-        if(heuristicResultsArray[0].algo.data[0] != 0)
+        if(getIndexFromAlgo(heuristicResultsArray[0].algo) != 0)
         {
             rocblaslt_status status = rocblaslt_matmul_is_algo_supported((rocblaslt_handle)handle,
                                                                          (rocblaslt_matmul_desc)matmulDesc,

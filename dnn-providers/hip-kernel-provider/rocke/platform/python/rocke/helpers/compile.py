@@ -109,6 +109,8 @@ class KernelArtifact:
 
     ``isa`` records the COMGR ISA name for the compiler target used to build
     ``hsaco``, including any target features. It is not a device query result.
+    ``options`` records the COMGR options it was compiled with (empty from
+    ``compile_kernel_via_hipcc``, which does not compile through COMGR).
     """
 
     kernel: KernelDef
@@ -118,6 +120,7 @@ class KernelArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: PassStats = field(default_factory=PassStats)
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    options: Tuple[str, ...] = ()
 
     @property
     def kernel_name(self) -> str:
@@ -223,6 +226,7 @@ def compile_kernel(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+        options=tuple(options),
     )
 
 
@@ -291,7 +295,8 @@ class ModuleArtifact:
     """Output from :func:`compile_module`: one code object, several kernels.
 
     ``ir_texts`` and ``llvm_texts`` follow ``module.kernels`` order. ``isa``
-    is the COMGR ISA name, as in :class:`KernelArtifact`.
+    is the COMGR ISA name and ``options`` the COMGR options the module was
+    linked and compiled with, as in :class:`KernelArtifact`.
     """
 
     module: KernelModule
@@ -301,6 +306,7 @@ class ModuleArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: Tuple[PassStats, ...] = ()
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    options: Tuple[str, ...] = ()
 
     @property
     def kernel_name(self) -> str:
@@ -400,6 +406,7 @@ def compile_module(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+        options=tuple(options[0]),
     )
 
 

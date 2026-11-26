@@ -6,8 +6,11 @@
 #include "engines/hip_mlops_engine/plans/ApplicabilityChecks.hpp"
 
 #include <array>
+#include <cstdint>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
@@ -16,6 +19,7 @@
 
 namespace hip_kernel_provider::layernorm
 {
+using NamedTensorId = std::pair<const char*, int64_t>;
 
 class LayernormValidator : public IValidator
 {
@@ -45,6 +49,26 @@ public:
     void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
                                     const std::vector<int64_t>& affineTensorIds,
                                     const std::vector<int64_t>& statTensorIds);
+
+    // Affine tensors align to x's trailing dims, stat tensors to x's leading dims.
+    // Each must be a device buffer, not pass-by-value, packed with no two indices sharing an
+    // element and, over its dims of size > 1, ordered in memory as x is.
+    void checkTensorMemoryOrderSupported(int64_t xTensorId,
+                                         const std::vector<NamedTensorId>& affineTensors,
+                                         const std::vector<NamedTensorId>& statTensors);
+
+    // With normalizedDim taken from scale and mean as the plans take it, each affine tensor
+    // (leading 1s added up to x's rank) must be 1 before normalizedDim and equal x from it on,
+    // and each stat tensor (trailing 1s added) must equal x before normalizedDim and be 1 from
+    // it on. The kernels index affine tensors over x's normalized extent and stat tensors over
+    // the rest.
+    void checkOperandDimsMatchNormalizedDims(int64_t xTensorId,
+                                             const std::vector<NamedTensorId>& affineTensors,
+                                             std::optional<int64_t> meanTensorId,
+                                             const std::vector<NamedTensorId>& statTensors);
+
+    // The backward kernel writes dx with x's data type.
+    void checkDxDataTypeSupported(int64_t xTensorId, int64_t dxTensorId);
 
     // --- High-level Configuration Validators ---
 
