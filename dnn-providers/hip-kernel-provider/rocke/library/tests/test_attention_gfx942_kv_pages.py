@@ -29,6 +29,8 @@ from rocke.runtime.device_array import DeviceArray
 from rocke.tests.gpu import current_device_arch_in, skip_without_device_memory
 
 from ._attention_paged_reference import (
+    PAGED_OUTPUT_ATOL,
+    PAGED_OUTPUT_RTOL,
     decode_half,
     encode_half,
     paged_attention_reference,
@@ -162,11 +164,9 @@ def _assert_matches_reference(out, q, k, v, block_table, lengths):
             compact_table[b],
             _SCALE,
         )
-        # On long sequences the output's spread is about 0.05 (max |o| about
-        # 0.2), so a looser absolute bound could hide one misaddressed page.
-        # rtol covers the bf16 rounding of the output, which grows with |o| on
-        # short sequences (half an ulp is at most |o| / 256).
-        np.testing.assert_allclose(out[b], ref[0], atol=2e-3, rtol=2**-8)
+        np.testing.assert_allclose(
+            out[b], ref[0], atol=PAGED_OUTPUT_ATOL, rtol=PAGED_OUTPUT_RTOL
+        )
 
 
 @pytest.mark.parametrize("num_query_heads,num_kv_heads", [(32, 8), (64, 4)])
