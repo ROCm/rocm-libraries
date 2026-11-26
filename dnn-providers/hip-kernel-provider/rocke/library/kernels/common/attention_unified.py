@@ -4252,6 +4252,7 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
         ),
         kv_layout="strided",
         use_decode_grid=_use_decode_grid(problem, arch=arch),
+        use_additive_bias=problem.use_additive_bias,
         **(
             {"kv_cache_policy": _kv_cache_policy_3d(problem, arch=arch)}
             if arch in ("gfx942", "gfx950")
@@ -4289,6 +4290,7 @@ def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> 
         ("use_sinks", False),
         ("use_alibi", False),
         ("use_qq_bias", False),
+        ("use_additive_bias", problem.use_additive_bias),
         ("kv_storage_dtype", None),
     ):
         if not hasattr(segment, name):
@@ -6517,15 +6519,12 @@ def run_unified_attention_torch(
             or problem.use_sinks
             or problem.use_alibi
             or problem.use_qq_bias
-            or problem.use_additive_bias
             or sinks is not None
             or alibi_slopes is not None
             or qq_bias is not None
-            or additive_bias is not None
         ):
             raise ValueError(
-                "strided KV decode does not support fp8, sinks, alibi, qq_bias "
-                "or additive bias"
+                "strided KV decode does not support fp8, sinks, alibi or qq_bias"
             )
         if k_scale != 1.0 or v_scale != 1.0 or out_scale != 1.0:
             raise ValueError("strided decode does not support K/V/output scaling")
@@ -6596,6 +6595,10 @@ def run_unified_attention_torch(
             attempts=attempts,
             stream=int(stream),
             tuning_spec=tuning_spec,
+            additive_bias=additive_bias,
+            additive_bias_batch_stride=additive_bias_batch_stride,
+            additive_bias_head_stride=additive_bias_head_stride,
+            additive_bias_sq_stride=additive_bias_sq_stride,
             kv_cache_layout=layout,
             execution=execution,
             use_graph=use_graph,

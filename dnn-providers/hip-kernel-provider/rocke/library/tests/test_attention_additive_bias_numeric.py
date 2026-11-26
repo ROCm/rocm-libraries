@@ -550,8 +550,9 @@ _NEG_INF_CASES = {
 }
 
 
-def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k):
-    """A full-layout bias with -inf entries; returns (bias, masked segment).
+def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k, value=float("-inf")):
+    """A full-layout bias with ``value`` (default -inf) entries; returns (bias,
+    masked segment).
 
     The segment is ``(seq, first key, end key)`` of split-KV segment 1 of the
     longest sequence on 3D (segments cover ``cdiv(kv_len, num_segments * T)``
@@ -559,8 +560,8 @@ def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k):
     bias = torch.randn(
         len(seq_lens), hq, max_q, max_k, dtype=torch.float32, device="cuda"
     )
-    bias[:, :, :, [0, 7]] = float("-inf")
-    bias[0, :, 0, :] = float("-inf")
+    bias[:, :, :, [0, 7]] = value
+    bias[0, :, 0, :] = value
     if backend != "3d":
         return bias, None
     from kernels.common.attention_unified import _tiled_3d_spec_from_problem
@@ -570,7 +571,7 @@ def _neg_inf_bias(problem, backend, seq_lens, hq, max_q, max_k):
     kv_len = seq_lens[seq][1]
     seg_keys = -(-kv_len // (spec.num_segments * spec.tile_size)) * spec.tile_size
     assert 2 * seg_keys <= kv_len, (seg_keys, kv_len)
-    bias[seq, :, :, seg_keys : 2 * seg_keys] = float("-inf")
+    bias[seq, :, :, seg_keys : 2 * seg_keys] = value
     return bias, (seq, seg_keys, 2 * seg_keys)
 
 
@@ -649,6 +650,158 @@ def test_neg_inf_bias_masks_rows_and_segments(case, dtype):
         assert torch.equal(torch.isneginf(lse[..., 0]), empty), label
         lse_err = (lse[..., 0] - ref_lse[..., 0])[~empty].abs().max().item()
         assert lse_err < _TOL[dtype], f"{label}: LSE max_abs={lse_err:.3e}"
+
+
+# finfo(float32).min entries (HF's padding) at the same places as the -inf ones.
+# They are finite, so unlike -inf a row of them is live: the reference gives it
+# the uniform softmax over its visible keys, which the bias floor keeps (without
+# it finfo.min * log2 e overflows to -inf and the row reads as dead).
+_FINFO_MIN_CASES = {
+    "2d": ("tiled", [(37, 101), (64, 64), (5, 130)]),
+    "3d": ("3d", [(1, 300), (3, 517), (1, 64)]),
+}
+
+
+@requires_bias_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("case", list(_FINFO_MIN_CASES))
+def test_finfo_min_bias_keeps_rows_live(case, dtype):
+    backend, seq_lens = _FINFO_MIN_CASES[case]
+    hq, hkv = _HEADS["gqa"]
+    q, k, v, block_table, cu_q, seqused_k = _make_inputs(seq_lens, hq, hkv, dtype)
+    max_q = max(s[0] for s in seq_lens)
+    max_k = max(s[1] for s in seq_lens)
+    scale = _HEAD_SIZE**-0.5
+    problem = UnifiedAttentionProblem(
+        total_q=q.shape[0],
+        num_seqs=len(seq_lens),
+        num_query_heads=hq,
+        num_kv_heads=hkv,
+        head_size=_HEAD_SIZE,
+        block_size=_BLOCK_SIZE,
+        max_seqlen_q=max_q,
+        max_seqlen_k=max_k,
+        dtype=dtype,
+        use_additive_bias=True,
+        num_kv_blocks=int(k.shape[0]),
+    )
+    finfo_min = float(torch.finfo(torch.float32).min)
+    bias, _ = _neg_inf_bias(
+        problem, backend, seq_lens, hq, max_q, max_k, value=finfo_min
+    )
+    out = torch.empty_like(q)
+    run_unified_attention_torch(
+        problem=problem,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=cu_q,
+        seqused_k=seqused_k,
+        softmax_scale=scale,
+        block_table=block_table,
+        softcap=0.0,
+        additive_bias=bias,
+        additive_bias_batch_stride=hq * max_q * max_k,
+        additive_bias_head_stride=max_q * max_k,
+        additive_bias_sq_stride=max_k,
+        backend=backend,
+    )
+    torch.cuda.synchronize()
+
+    ref, ref_lse = _reference(
+        q, k, v, block_table, seq_lens, scale, bias, return_lse=True
+    )
+    label = f"{case}/{dtype}"
+    assert not torch.isneginf(ref_lse).any(), f"{label}: reference has a dead row"
+    assert not torch.isnan(out).any(), f"{label}: NaN in the output"
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < _TOL[dtype], f"{label}: max_abs={max_abs:.3e}"
+
+
+# Strided (non-paged) K/V decode, the layout of the gfx942 split-KV AOT catalog:
+# one query per sequence, so the bias is [B, Hq, 1, Sk] with sq_stride 0.
+_STRIDED_BIAS_MODES = ("full", "per_head", "finfo_min_row")
+
+
+@requires_bias_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("bias_mode", _STRIDED_BIAS_MODES)
+def test_strided_decode_additive_bias_matches_reference(dtype, bias_mode):
+    torch.manual_seed(11)
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    hq, hkv, dim, block = 32, 8, _HEAD_SIZE, _BLOCK_SIZE
+    lengths = [64, 300, 517]
+    batch, max_k = len(lengths), max(lengths)
+    capacity = -(-max_k // block) * block
+    q = torch.randn(batch, hq, dim, dtype=tdt, device="cuda")
+    k = torch.randn(batch, hkv, capacity, dim, dtype=tdt, device="cuda")
+    v = torch.randn_like(k)
+    if bias_mode == "per_head":
+        storage = torch.randn(1, hq, 1, max_k, dtype=torch.float32, device="cuda")
+        batch_stride, full = 0, storage.expand(batch, hq, 1, max_k)
+    else:
+        storage = torch.randn(batch, hq, 1, max_k, dtype=torch.float32, device="cuda")
+        if bias_mode == "finfo_min_row":
+            storage[0, 3, 0, :] = torch.finfo(torch.float32).min
+        batch_stride, full = hq * max_k, storage
+    problem = UnifiedAttentionProblem(
+        total_q=batch,
+        num_seqs=batch,
+        num_query_heads=hq,
+        num_kv_heads=hkv,
+        head_size=dim,
+        block_size=block,
+        max_seqlen_q=1,
+        max_seqlen_k=max_k,
+        dtype=dtype,
+        use_additive_bias=True,
+    )
+    out = torch.empty_like(q)
+    scale = dim**-0.5
+    run_unified_attention_torch(
+        problem=problem,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32, device="cuda"),
+        seqused_k=torch.tensor(lengths, dtype=torch.int32, device="cuda"),
+        softmax_scale=scale,
+        block_table=None,
+        softcap=0.0,
+        additive_bias=storage,
+        additive_bias_batch_stride=batch_stride,
+        additive_bias_head_stride=max_k,
+        additive_bias_sq_stride=0,
+        backend="3d",
+        kv_layout="strided",
+    )
+    torch.cuda.synchronize()
+
+    ks = np.concatenate(
+        [_host(k[b, :, :n].permute(1, 0, 2)) for b, n in enumerate(lengths)]
+    )
+    vs = np.concatenate(
+        [_host(v[b, :, :n].permute(1, 0, 2)) for b, n in enumerate(lengths)]
+    )
+    ref, _ = sdpa_reference(
+        _host(q),
+        ks,
+        vs,
+        scale=scale,
+        bias=_host(_unexpanded(full)),
+        right_bound=0,
+        top_left=False,
+        q_offsets=np.arange(batch + 1),
+        kv_offsets=np.cumsum([0] + lengths),
+    )
+    label = f"strided/{bias_mode}/{dtype}"
+    assert not torch.isnan(out).any(), f"{label}: NaN in the output"
+    max_abs = np.abs(ref - _host(out)).max()
+    assert max_abs < _TOL[dtype], f"{label}: max_abs={max_abs:.3e}"
 
 
 @requires_gfx950_gpu

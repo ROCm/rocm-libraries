@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType, Value
 
@@ -52,6 +52,9 @@ _STRIDES = ("batch", "head", "sq")
 # it once, as the inclusive MAX_BIAS_INDEX = 2**31 - 1.
 ADDITIVE_BIAS_INDEX_LIMIT = 2**31
 
+# log2 e, the natural-log to log2 conversion of the floored bias path.
+_LOG2E = 1.4426950408889634
+
 
 @dataclass(frozen=True)
 class AdditiveBiasParams:
@@ -59,14 +62,24 @@ class AdditiveBiasParams:
     batch_stride: Value
     head_stride: Value
     sq_stride: Value
+    # Set by ``declare_additive_bias_params(floored=True)``; add_additive_bias then
+    # raises a finite bias to BIAS_FLOOR.
+    floor: Optional["BiasFloor"] = None
 
 
-def declare_additive_bias_params(b: IRBuilder) -> AdditiveBiasParams:
+def declare_additive_bias_params(
+    b: IRBuilder, *, floored: bool = False
+) -> AdditiveBiasParams:
     """The four kernel params, appended after all others; must match
-    :func:`append_additive_bias_signature`."""
+    :func:`append_additive_bias_signature`. ``floored`` also builds the
+    :class:`BiasFloor` constants once, for kernels whose masked score is -inf:
+    without it a finite bias below about -2.36e38 (``finfo(float32).min`` padding)
+    overflows to -inf in log2 units, and a row of such keys reads as dead instead
+    of the uniform softmax the reference computes."""
     ptr = b.param("additive_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
     strides = [b.param(f"additive_bias_{s}_stride", I32) for s in _STRIDES]
-    return AdditiveBiasParams(ptr, *strides)
+    floor = make_bias_floor(b, BIAS_FLOOR, _LOG2E) if floored else None
+    return AdditiveBiasParams(ptr, *strides, floor=floor)
 
 
 def append_additive_bias_signature(sb) -> None:
@@ -285,12 +298,12 @@ def add_additive_bias(
     mask: Value,
     rcp_ln2: Value,
 ) -> Value:
-    """Return ``score + bias[idx] / ln2``. Where ``mask`` is false (padding rows,
-    tail columns) the lane loads element 0 instead of an out-of-range index and
-    adds 0."""
+    """Return ``score + bias[idx] / ln2``, floored when ``p`` carries a floor.
+    Where ``mask`` is false (padding rows, tail columns) the lane loads element 0
+    instead of an out-of-range index and adds 0."""
     row = additive_bias_row(b, p, seq_idx=seq_idx, q_head=q_head, q_row=q_row)
     return add_additive_bias_at(
-        b, score, p, row=row, col=col, mask=mask, rcp_ln2=rcp_ln2
+        b, score, p, row=row, col=col, mask=mask, rcp_ln2=rcp_ln2, floor=p.floor
     )
 
 

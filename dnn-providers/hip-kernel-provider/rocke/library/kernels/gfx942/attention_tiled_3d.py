@@ -207,8 +207,6 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
-        if self.kv_layout == "strided" and self.use_additive_bias:
-            raise ValueError("strided KV does not support use_additive_bias")
         if self.kv_layout == "strided" and (
             self.kv_storage_dtype is not None
             or self.use_i64_kv_addr
@@ -512,7 +510,9 @@ def build_unified_attention_3d_tiled(
     num_kv_p = rt["num_kv_heads"]
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
-    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    additive_bias = (
+        declare_additive_bias_params(b, floored=True) if USE_ADDITIVE_BIAS else None
+    )
     if spec.kv_layout == "strided":
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")

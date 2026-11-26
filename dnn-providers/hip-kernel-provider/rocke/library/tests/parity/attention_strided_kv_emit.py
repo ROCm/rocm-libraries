@@ -3,20 +3,11 @@
 
 """Paired paged/strided segment cases for both tiled decode targets, plus a
 strided case with swizzled K/V LDS tiles per target (12: gfx942, 13: gfx950)
-and a strided case with additive bias per target, which both engines reject
-(14: gfx942, 15: gfx950)."""
+and a strided case with additive bias per target (14: gfx942, 15: gfx950)."""
 
 from importlib import import_module
 
 from _emit_common import run_emit
-
-# Configs both engines must reject, with the reason each one pins: run_diff
-# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
-# reason, a typo included).
-_EXPECTED_REJECTIONS = {
-    14: r"strided KV does not support use_additive_bias",
-    15: r"strided KV does not support use_additive_bias",
-}
 
 
 def spec_for_index(idx):

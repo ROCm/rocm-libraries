@@ -266,8 +266,6 @@ class UnifiedAttention3DTiledSpec:
                 "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
                 "(their offsets are defined on the causal diagonal)"
             )
-        if self.kv_layout == "strided" and self.use_additive_bias:
-            raise ValueError("strided KV does not support use_additive_bias")
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -591,7 +589,9 @@ def build_unified_attention_3d_tiled(
     num_kv_p = rt["num_kv_heads"]
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
-    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    additive_bias = (
+        declare_additive_bias_params(b, floored=True) if USE_ADDITIVE_BIAS else None
+    )
     if spec.kv_layout == "strided":
         k_strides = declare_strided_kv_params(b, "k")
         v_strides = declare_strided_kv_params(b, "v")

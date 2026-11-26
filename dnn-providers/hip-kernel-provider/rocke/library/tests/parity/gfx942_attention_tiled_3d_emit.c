@@ -601,6 +601,11 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_additive_bias = true;
         s->kv_storage_dtype = "fp8e4m3";
         break;
+    /* idx43: additive bias on the strided decode spec the AOT catalog ships. */
+    case 43:
+        strided_decode(s, 128, 16, 16, "bf16", 4, 32, 8);
+        s->use_additive_bias = true;
+        break;
     default:
         return -1;
     }

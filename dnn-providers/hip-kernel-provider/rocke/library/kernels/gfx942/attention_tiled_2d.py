@@ -1664,7 +1664,9 @@ def build_unified_attention_2d_tiled(
     num_kv_p = rt["num_kv_heads"]
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
-    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    additive_bias = (
+        declare_additive_bias_params(b, floored=True) if USE_ADDITIVE_BIAS else None
+    )
     # Appended LAST and only when requested, so the LSE-off ABI is unchanged.
     lse = (
         b.param(

@@ -586,6 +586,13 @@ _CONFIGS[36] = dict(
 )
 
 
+# idx43: additive bias on the strided decode spec the AOT catalog ships (D128 bf16,
+# block 16, tile 16, 4 segments).
+_CONFIGS[43] = dict(
+    _strided_decode(128, 16, 16, "bf16", 4, heads=(32, 8)), use_additive_bias=True
+)
+
+
 def _kernels(idx: int):
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")

@@ -168,11 +168,6 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "kv_layout must be 'paged' or 'strided'");
         return false;
     }
-    if(rocke_attn3d_strided_kv(s) && s->use_additive_bias)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV does not support use_additive_bias");
-        return false;
-    }
     if(rocke_attn3d_strided_kv(s)
        && (s->kv_storage_dtype != NULL || s->use_i64_kv_addr || s->use_wide_kv_load))
     {

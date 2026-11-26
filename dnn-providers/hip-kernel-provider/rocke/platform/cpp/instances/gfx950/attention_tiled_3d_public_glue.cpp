@@ -216,11 +216,6 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
                         "(their offsets are defined on the causal diagonal)");
         return false;
     }
-    if(rocke_attn3d950_strided_kv(s) && s->use_additive_bias)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV does not support use_additive_bias");
-        return false;
-    }
     if(s->kv_storage_dtype != NULL && !rocke_attn3d950_streq(s->kv_storage_dtype, "fp8e4m3"))
     {
         rocke_i_set_err(b,

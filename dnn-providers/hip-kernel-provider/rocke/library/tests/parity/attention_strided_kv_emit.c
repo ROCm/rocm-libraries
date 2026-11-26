@@ -1,8 +1,8 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  * Mirrors attention_strided_kv_emit.py (12, 13: strided with swizzled K/V LDS
- * tiles on gfx942, gfx950; 14, 15: strided with additive bias on gfx942, gfx950,
- * which both engines reject). */
+ * tiles on gfx942, gfx950; 14, 15: strided with additive bias on gfx942,
+ * gfx950). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -324,7 +324,7 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
     /* Appended only when on, so the bias-off ABI and IR are unchanged. */
     if(CFG.USE_ADDITIVE_BIAS)
     {
-        ctx->additive_bias = rocke_declare_additive_bias_params(B);
+        ctx->additive_bias = rocke_declare_additive_bias_params(B, true);
     }
     if(ctx->strided_kv)
     {

@@ -1404,13 +1404,15 @@ class TestAttentionHelpers(unittest.TestCase):
                 replace(narrow, use_additive_bias=False, **knobs)
         with self.assertRaisesRegex(NotImplementedError, "additive bias"):
             build_gfx942_4warp_gqa(replace(narrow, head_size=256), arch="gfx942")
-        with self.assertRaisesRegex(ValueError, "strided KV"):
-            UnifiedAttention3DTiledSpec(
-                **common,
-                num_segments=4,
-                kv_layout="strided",
-                use_additive_bias=True,
-            )
+        # The strided-KV decode kernel takes the bias too (its params precede the strided
+        # K/V block), so the spec builds.
+        strided = UnifiedAttention3DTiledSpec(
+            **common,
+            num_segments=4,
+            kv_layout="strided",
+            use_additive_bias=True,
+        )
+        self.assertTrue(strided.use_additive_bias)
 
     def test_gfx942_bias_problems_route_to_the_bias_paths(self):
         from dataclasses import replace

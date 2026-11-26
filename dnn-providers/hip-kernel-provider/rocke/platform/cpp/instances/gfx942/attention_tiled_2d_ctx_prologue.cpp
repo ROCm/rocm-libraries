@@ -350,7 +350,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
         /* Appended only when on, so the bias-off ABI and IR are unchanged. */
         if(spec->use_additive_bias)
-            ctx->additive_bias = rocke_declare_additive_bias_params(b);
+            ctx->additive_bias = rocke_declare_additive_bias_params(b, true);
         /* Appended LAST and only when requested, so the LSE-off ABI is unchanged. */
         if(spec->emit_lse)
         {

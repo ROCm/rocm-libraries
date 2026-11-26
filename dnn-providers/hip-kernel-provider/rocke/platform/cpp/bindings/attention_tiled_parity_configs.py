@@ -3905,6 +3905,24 @@ GFX942_ATTENTION_TILED_3D += [
         "use_additive_bias": True,
         "kv_storage_dtype": "fp8e4m3",
     },
+    {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "num_segments": 4,
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "kv_storage_dtype": None,
+        "num_seqs": 4,
+        "tile_size_override": 16,
+        "kv_layout": "strided",
+        "use_decode_grid": True,
+        "kv_cache_policy": "stream",
+        "use_additive_bias": True,
+    },
 ]
 
 
