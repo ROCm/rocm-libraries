@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -76,6 +77,7 @@ def test_fresh_process_round_trip(no_lib: None) -> None:
     header = json.loads(head)
     assert header["isa"] == "amdgcn-amd-amdhsa--gfx942"
     assert header["options"] == ["-O3", "-x"]
+    assert header["memory_cap_bytes"] == comgr.FRESH_PROCESS_MEMORY_CAP_BYTES
     assert body == b"IR TEXT"
     # the child loads this process's library and imports this rocke package
     assert call.env["ROCKE_COMGR_LIB"] == "/opt/x/libamd_comgr.so.3"
@@ -115,6 +117,43 @@ def test_fresh_process_errors(no_lib, rc, payload, error, match) -> None:
     assert (info.type is comgr.ComgrProcessDied) == (rc not in (1, 2))
 
 
+# What a ROCm 7.2.4 child wrote to stderr when the compile of an
+# iglp_opt(1) region without LDS reads ran into the cap, before it aborted.
+_LLVM_OUT_OF_MEMORY_STDERR = b"LLVM ERROR: out of memory\nAllocation failed\n"
+
+
+@pytest.mark.parametrize("capped", [True, False])
+@pytest.mark.parametrize(
+    ("rc", "stderr", "reported"),
+    [
+        # the compiler: LLVM reports the failed allocation and aborts
+        (-6, _LLVM_OUT_OF_MEMORY_STDERR, "LLVM ERROR: out of memory"),
+        (0xC0000409, _LLVM_OUT_OF_MEMORY_STDERR, "LLVM ERROR: out of memory"),
+        # Python in the child: a MemoryError
+        (child.OUT_OF_MEMORY_EXIT_STATUS, b"MemoryError", "MemoryError"),
+    ],
+    ids=["posix-abort", "windows-abort", "python"],
+)
+def test_running_out_of_memory_names_the_cause(
+    no_lib, monkeypatch, rc, stderr, reported, capped
+) -> None:
+    monkeypatch.setattr(child, "ADDRESS_SPACE_CAP_APPLIES", capped)
+    run, _ = _fake_child(rc, payload=None, stderr=stderr)
+    cap = " under its 4 GiB address-space cap" if capped else ""
+    expected = re.escape(
+        f"the fresh compile process ran out of memory{cap} ({reported})."
+    )
+    with (
+        mock.patch.object(subprocess, "run", run),
+        pytest.raises(comgr.ComgrOutOfMemory, match=f"^{expected}") as info,
+    ):
+        comgr.build_hsaco_from_llvm_ir("IR", fresh_process=True)
+    message = str(info.value)
+    assert "576e1affab35" in message and "gfx_support_audit.md" in message
+    # a dead process to callers that catch that
+    assert isinstance(info.value, comgr.ComgrProcessDied)
+
+
 def test_truncated_result_is_a_dead_process(no_lib: None) -> None:
     def run(cmd, *, input, stdout, stderr, env):  # noqa: A002
         out = json.loads(input.partition(b"\n")[0])["out"]
@@ -144,9 +183,19 @@ def test_child_writes_the_protocol(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
         )
 
     monkeypatch.setattr(comgr, "build_hsaco_from_llvm_ir", build)
-    hdr = {"isa": "amdgcn-amd-amdhsa--gfx950", "options": ["-O3"], "out": str(out)}
+    # capping this test process would cap pytest: record the cap instead (a real
+    # child applies it: test_the_child_caps_its_own_address_space)
+    caps = []
+    monkeypatch.setattr(child, "limit_address_space", caps.append)
+    hdr = {
+        "isa": "amdgcn-amd-amdhsa--gfx950",
+        "options": ["-O3"],
+        "out": str(out),
+        "memory_cap_bytes": 123 << 20,
+    }
     monkeypatch.setattr(sys, "stdin", _stdin(hdr, "ü IR".encode()))
     assert child.main() == 0
+    assert caps == [123 << 20]
     # the child compiles in its own process: it never asks for another one
     assert seen == {
         "ir": "ü IR",
@@ -168,11 +217,74 @@ def test_child_reports_a_compile_error(tmp_path, monkeypatch, capsys) -> None:
         raise comgr.ComgrError("bad IR")
 
     monkeypatch.setattr(comgr, "build_hsaco_from_llvm_ir", build)
-    hdr = {"isa": "i", "options": [], "out": str(tmp_path / "o")}
+    monkeypatch.setattr(child, "limit_address_space", lambda cap_bytes: None)
+    hdr = {"isa": "i", "options": [], "out": str(tmp_path / "o"), "memory_cap_bytes": 1}
     monkeypatch.setattr(sys, "stdin", _stdin(hdr, b"IR"))
     assert child.main() == 2
     assert capsys.readouterr().err == "bad IR"
     assert not (tmp_path / "o").exists()
+
+
+def test_child_reports_running_out_of_memory(tmp_path, monkeypatch, capsys) -> None:
+    def build(ir, *, isa, options):
+        raise MemoryError
+
+    monkeypatch.setattr(comgr, "build_hsaco_from_llvm_ir", build)
+    monkeypatch.setattr(child, "limit_address_space", lambda cap_bytes: None)
+    hdr = {"isa": "i", "options": [], "out": str(tmp_path / "o"), "memory_cap_bytes": 1}
+    monkeypatch.setattr(sys, "stdin", _stdin(hdr, b"IR"))
+    assert child.main() == child.OUT_OF_MEMORY_EXIT_STATUS
+    assert capsys.readouterr().err == "MemoryError"
+    assert not (tmp_path / "o").exists()
+
+
+def _run_in_python(script: str) -> list[str]:
+    """Run ``script`` in a new Python process that imports this rocke
+    package; return its stdout lines."""
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": PKG_ROOT},
+        check=False,
+    )
+    assert out.returncode == 0, out.stderr
+    return out.stdout.splitlines()
+
+
+@pytest.mark.skipif(not child.ADDRESS_SPACE_CAP_APPLIES, reason="no RLIMIT_AS")
+def test_the_child_caps_its_own_address_space() -> None:
+    """In a real process the cap becomes the RLIMIT_AS soft limit and an
+    allocation past it raises MemoryError; a lower limit the process
+    inherited stays, and the hard limit is left as it is."""
+    import resource
+
+    lines = _run_in_python(
+        "import resource\n"
+        "from rocke.runtime._comgr_fresh_process import limit_address_space\n"
+        "limit_address_space(1 << 30)\n"
+        "print(*resource.getrlimit(resource.RLIMIT_AS))\n"
+        "try:\n"
+        "    bytearray(2 << 30)\n"
+        "except MemoryError:\n"
+        "    print('MemoryError')\n"
+        "resource.setrlimit(resource.RLIMIT_AS, (3 << 29, 3 << 29))\n"
+        "limit_address_space(1 << 31)\n"
+        "print(*resource.getrlimit(resource.RLIMIT_AS))\n"
+    )
+    assert lines == [
+        f"{1 << 30} {resource.RLIM_INFINITY}",
+        "MemoryError",
+        f"{3 << 29} {3 << 29}",
+    ]
+
+
+def test_the_child_runs_without_a_cap_where_none_applies(monkeypatch) -> None:
+    """Where the platform cannot cap the address space, the child does not
+    reach for ``resource`` at all (here an import of it would fail)."""
+    monkeypatch.setattr(child, "ADDRESS_SPACE_CAP_APPLIES", False)
+    monkeypatch.setitem(sys.modules, "resource", None)
+    child.limit_address_space(1 << 20)
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
