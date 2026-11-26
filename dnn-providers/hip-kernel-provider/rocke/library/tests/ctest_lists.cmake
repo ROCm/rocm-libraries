@@ -550,7 +550,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_contracts_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/contracts/test_builder_surface.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_contracts_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;host;quick\"\n"
+       "  LABELS \"ckc;python;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 

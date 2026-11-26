@@ -1105,8 +1105,9 @@ gate over the kernel families runs in `tests/run_all.py`, through
 entry (⚠ [G10](#72-platform-quality-gaps-question-b)).
 
 **The quick entries.** The `quick` category of
-`ROCKE_ENGINE_test_categories_external.yaml` lists them; quick runs unsplit on one
-CI shard. The import smoke, `rocke_python_import_smoke`, which builds one GEMM
+`ROCKE_ENGINE_test_categories_external.yaml` lists them, and only that list puts
+an entry in quick: no registration carries the quick label itself. Quick runs
+unsplit on one CI shard. The import smoke, `rocke_python_import_smoke`, which builds one GEMM
 kernel and lowers it to LLVM IR, is its one end-to-end check, and
 `rocke_engine_modules_check` checks that the engine pieces the build made are
 packaged. Both run on the host: launching a kernel would take several seconds of

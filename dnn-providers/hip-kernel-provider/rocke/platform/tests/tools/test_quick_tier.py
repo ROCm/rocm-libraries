@@ -10,7 +10,9 @@ judged on this operating system's column of ``entry_times.json``: every quick
 entry has a recorded time, the tier fits its budget and no item of an entry is
 over the item budget, so a new quick entry fails here until its time is
 recorded from a CI log. Neither the installed nor the build-tree entries of
-quick may be registered as GPU work unless ``GPU_ENTRY_ALLOWLIST`` names them.
+quick may be registered as GPU work unless ``GPU_ENTRY_ALLOWLIST`` names them,
+and no registration may carry the quick label itself: the provider categories'
+quick list is the one place that puts an entry in quick.
 """
 
 from __future__ import annotations
@@ -42,20 +44,29 @@ if check is None:
 
 @dataclasses.dataclass(frozen=True)
 class _Registration:
-    """The configured entries, each with the labels CI selects it by: its own
-    and the provider categories'."""
+    """The configured entries: as registered (``registered_*``), and with the
+    labels CI selects them by, their own and the provider categories'."""
 
+    registered_installed: tuple[check.RegisteredEntry, ...]
+    registered_build_tree: tuple[check.RegisteredEntry, ...]
     installed: tuple[check.RegisteredEntry, ...]
     build_tree: tuple[check.RegisteredEntry, ...]
 
 
-def _labelled(listed: list[dict], scratch: Path) -> tuple[check.RegisteredEntry, ...]:
+def _registered(listed: list[dict]) -> tuple[check.RegisteredEntry, ...]:
     # Nothing is built, so CTest lists no command for the C++ test binaries,
     # whose programs do not exist yet; each runs as one program, not pytest.
-    registered = check.registered_entries(
-        test if "command" in test else {**test, "command": [test["name"]]}
-        for test in listed
+    return tuple(
+        check.registered_entries(
+            test if "command" in test else {**test, "command": [test["name"]]}
+            for test in listed
+        )
     )
+
+
+def _labelled(
+    registered: tuple[check.RegisteredEntry, ...], scratch: Path
+) -> tuple[check.RegisteredEntry, ...]:
     tier_labels = provider_category_labels([e.name for e in registered], scratch)
     return tuple(
         dataclasses.replace(
@@ -73,10 +84,40 @@ def registration(tmp_path_factory: pytest.TempPathFactory) -> _Registration:
     build, ctest_dir = configure_installed_ctest(
         scratch, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
     )
+    installed = _registered(list_installed_ctest_entries(ctest_dir, scratch))
+    build_tree = _registered(list_ctest_entries(build))
     return _Registration(
-        installed=_labelled(list_installed_ctest_entries(ctest_dir, scratch), scratch),
-        build_tree=_labelled(list_ctest_entries(build), scratch),
+        registered_installed=installed,
+        registered_build_tree=build_tree,
+        installed=_labelled(installed, scratch),
+        build_tree=_labelled(build_tree, scratch),
     )
+
+
+def _quick_labels_in_registration(
+    registered: Sequence[check.RegisteredEntry],
+) -> list[str]:
+    """The entries whose own registration carries the quick label: they would
+    join quick without an edit to the provider categories' quick list."""
+    return sorted(entry.name for entry in registered if QUICK.label in entry.labels)
+
+
+def test_no_registration_bakes_in_the_quick_label(registration) -> None:
+    """The provider categories' quick list is the one place that puts an entry
+    in quick."""
+    baked = _quick_labels_in_registration(
+        [*registration.registered_installed, *registration.registered_build_tree]
+    )
+    assert not baked, (
+        f"registered with the quick label: {baked}; register them without it "
+        "and list the ones quick runs in ROCKE_ENGINE_test_categories_external.yaml"
+    )
+
+
+def test_a_registration_with_the_quick_label_is_found(registration) -> None:
+    [entry, *_] = registration.registered_installed
+    planted = dataclasses.replace(entry, labels=entry.labels | {QUICK.label})
+    assert _quick_labels_in_registration([planted]) == [entry.name]
 
 
 def _quick_tier_breaches(installed: Sequence[check.RegisteredEntry]) -> list[str]:

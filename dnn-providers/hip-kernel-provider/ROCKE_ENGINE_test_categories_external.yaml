@@ -11,8 +11,8 @@
 # removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
 # Without an entry here they carry no quick/standard/comprehensive/full
 # label: the install-tree copy has at most a hardcoded tier label baked
-# in by rocke/platform/CMakeLists.txt (nothing gives it
-# standard/comprehensive/full), and the build-tree copies registered by
+# in by rocke/platform/CMakeLists.txt (never quick: the quick list below
+# decides quick), and the build-tree copies registered by
 # rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way
 # they silently drop out of `ctest -L <tier>` selection, which is how
 # TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
@@ -33,12 +33,14 @@
 # in rocke/TESTING.md section 5.0.3; rocke/tools/check_entry_times.py and the
 # registration checks fail a quick entry that is over its budgets or
 # registered as GPU work. The quick category below is the one list of quick
-# entries. The golden, parity, GPU numeric and pinned GPU reference entries
-# start at standard (the python-standard, gpu-standard and
-# pinned-reference-standard categories), where CI splits their tests across
-# its shards. The tier rule gives a category whose name is not a tier only its
-# own name as a label, so those categories list the standard, comprehensive
-# and full labels themselves.
+# entries and the only thing that puts an entry in quick: no registration
+# carries the quick label itself
+# (rocke/platform/tests/tools/test_quick_tier.py checks it). The golden,
+# parity, GPU numeric and pinned GPU reference entries start at standard (the
+# python-standard, gpu-standard and pinned-reference-standard categories),
+# where CI splits their tests across its shards. The tier rule gives a
+# category whose name is not a tier only its own name as a label, so those
+# categories list the standard, comprehensive and full labels themselves.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers

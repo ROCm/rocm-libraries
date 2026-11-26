@@ -790,6 +790,10 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/benchmark")
   endif()
 
+  # No entry registers the quick label: the quick list of the provider
+  # categories (ROCKE_ENGINE_test_categories_external.yaml) alone decides what
+  # quick runs, and tests/tools/test_quick_tier.py fails a registration that
+  # bakes it in (TESTING.md, section 5.0.3).
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
   get_property(_ROCKE_INSTALL_TEST_TARGETS GLOBAL PROPERTY ROCKE_INSTALL_TEST_TARGETS)
   foreach(_test_target ${_ROCKE_INSTALL_TEST_TARGETS})
@@ -797,7 +801,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(${_test_target} \"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;standard\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
@@ -830,7 +834,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;standard\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     # The engine modules and the shared engine the build made load from the
     # installed tree, and lower_kernel_to_llvm lowers through the C++ engine:
@@ -842,7 +846,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_engine_modules_check python -m rocke.tests.engine_modules \"${ROCKE_TEST_CTEST_REL}tests/rocke_engine_modules.json\")\n"
            "set_tests_properties(rocke_engine_modules_check PROPERTIES\n"
-           "  LABELS \"ckc;python;host;quick\"\n"
+           "  LABELS \"ckc;python;host;standard\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
