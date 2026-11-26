@@ -193,11 +193,11 @@ struct _rocblaslt_handle
     // bounds distinct streams per handle rather than concurrent ones. PyTorch
     // draws streams from a fixed pool that tops out at 32 distinct hipStream_t
     // however many it is asked for, and a 32-way fan-out needs 33 (the streams
-    // plus the default one it forks from); 64 is that working set doubled.
-    static constexpr size_t c_syncSkStreamSlots = 64;
+    // plus the default one it forks from); 64 is that working set doubled, which TensorFlow exceeds with multiple GPUs, CPX devices and stream groups; 256 covers that fan-out.
+    static constexpr size_t c_syncSkStreamSlots = 256;
     // Allocated once at handle creation: allocating device memory mid-run would
     // break hipGraph capture, and a fixed layout keeps the lookup lock-free.
-    // This table is 8 MiB, on top of the 25 MiB GSU one.
+    // This table is 32 MiB, on top of the 25 MiB GSU one.
     static constexpr size_t c_syncSkTotalElements
         = c_syncSkStreamSlots * c_syncSkSlotsPerStream * c_syncSkSlotElements;
 
