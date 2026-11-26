@@ -230,6 +230,20 @@ namespace
             }
     }
 
+    TEST(UniformCheck_pre_checkin, FillColsHostMatchesDevice)
+    {
+        // Padded ld and stride: the host fill, like the device one, leaves the padding alone.
+        for(size_t elem : kSizes)
+        {
+            Matrix                     m(elem, 19, 7, 23, 23 * 7 + 5, 3);
+            std::vector<unsigned char> host = m.host;
+            uniform_check_fill_cols_host(
+                host.data(), elem, m.rows, m.cols, m.ld, m.stride, m.batches);
+            m.fillCols();
+            EXPECT_TRUE(host == m.host) << "elem " << elem;
+        }
+    }
+
     TEST(UniformCheck_pre_checkin, CheckFindsOneFlippedBit)
     {
         for(size_t elem : kSizes)
