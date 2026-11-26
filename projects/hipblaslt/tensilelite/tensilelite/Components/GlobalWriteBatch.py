@@ -55,7 +55,7 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from ..Components.TDMStoreInst import emitTDMStoreFlush, emitTDMStoreLoadC, emitTDMStoreLoadCElement, emitTDMStoreSetup, emitTDMStoreStaging, \
-  storeRemapVectorWidth
+  hasEpilogueSideEffects, storeRemapVectorWidth
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
@@ -1475,7 +1475,9 @@ class GlobalWriteBatchWriter:
       else:
         self.gateLoadIssued.append(0)
 
-      if self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel"): # "SingleBuffer" or "MultipleBuffer"
+      # A TDM block stages D in LDS, so only an output beyond C and D still reads the D buffer address.
+      dAddressUnread = self.tdmStoreLdsBase is not None and not hasEpilogueSideEffects(self.kernel["ProblemType"])
+      if not dAddressUnread and (self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel")): # "SingleBuffer" or "MultipleBuffer"
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
