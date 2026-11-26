@@ -506,7 +506,9 @@ class Linker(Component):
             return True
         from os import sysconf
         line_length = sum(len(arg) for arg in args) + len(args) - 1
-        return line_length >= sysconf("SC_ARG_MAX")
+        # SC_ARG_MAX also covers the environment and one pointer per argument,
+        # so a command line just under it can still fail with E2BIG. Keep a margin.
+        return line_length + 8 * len(args) >= sysconf("SC_ARG_MAX") // 4
 
     def __call__(self, srcPaths: List[str], destPath: str, threads: Optional[int] = None):
         """
