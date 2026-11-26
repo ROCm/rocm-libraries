@@ -3197,7 +3197,10 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     if(ucCols)
     {
-        if(arg.partitions > 1)
+        if(std::all_of(N.begin(), N.end(), [](int64_t n) { return n <= 1; }))
+            skipUniformCheck(
+                ucCols, "column", "N is 1: D has a single column, so no column is compared");
+        else if(arg.partitions > 1)
             skipUniformCheck(ucCols,
                              "column",
                              "--partitions: each partition runs its own GEMM on its slice of D");

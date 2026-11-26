@@ -737,6 +737,11 @@ namespace
         expectSingleLineSkips(hipblaslt_uniform_check::row, 1, 64, "M is 1");
     }
 
+    TEST(UniformCheckBench, pre_checkin_OneColumnSkipsColumnCheck)
+    {
+        expectSingleLineSkips(hipblaslt_uniform_check::column, 64, 1, "N is 1");
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
