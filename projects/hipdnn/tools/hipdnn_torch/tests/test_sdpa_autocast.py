@@ -163,6 +163,55 @@ def test_mixed_dtype_autocast_input_casts_per_tensor(torch):
     torch.testing.assert_close(v.grad.float(), v2.grad.float(), **_TOL)
 
 
+def test_mixed_dtype_autocast_q_already_cast_kv_still_cast(torch):
+    """Q already bf16 (the autocast dtype, so no cast is applied to it)
+    and k, v fp32 (so both need casting) under bf16 autocast: proves the
+    cast is decided PER TENSOR, not from q alone -- with q fp32 (the other
+    direction, covered above), a cast decided from q's dtype alone would
+    still correctly cast k too, since k matches q's dtype; only this q
+    bf16 / k,v fp32 combination catches a cast wrongly decided from q and
+    skipped for k/v because q already looked like the autocast dtype --
+    census dtype bf16, a served grad row and a served bwd row, dq bf16
+    (q itself is never cast, so autograd returns its own dtype), dk/dv
+    fp32 (the differentiable cast returns grads in the INPUT dtype), and
+    all three grads equal native autocast SDPA's. MHA, D=128, no mask,
+    p=0: an unmasked shape every build serves."""
+    _require_known_build()
+    import torch.nn.functional as F
+
+    b, hq, sq, skv, d = 2, 4, 64, 64, 128
+
+    def _mk(s, dtype):
+        t = torch.randn(b, s, hq, d, device="cuda", dtype=dtype).transpose(1, 2)
+        t.requires_grad_(True)
+        return t
+
+    q, k, v = _mk(sq, torch.bfloat16), _mk(skv, torch.float32), _mk(skv, torch.float32)
+    q2, k2, v2 = _clone_leaf(q), _clone_leaf(k), _clone_leaf(v)
+
+    with _routed_sdpa() as ov:
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            out = F.scaled_dot_product_attention(q, k, v)
+        out.float().sum().backward()
+
+    row = _grad_row(ov, sq, skv, d, "bf16")
+    bwd = _bwd_row(ov, sq, skv, d, "bf16")
+    assert row is not None and row["aot"] > 0
+    assert bwd is not None and bwd["aot"] > 0
+    assert q.grad.dtype == torch.bfloat16
+    assert k.grad.dtype == torch.float32
+    assert v.grad.dtype == torch.float32
+
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        want = F.scaled_dot_product_attention(q2, k2, v2)
+    want.float().sum().backward()
+
+    torch.testing.assert_close(out.float(), want.float(), **_TOL)
+    torch.testing.assert_close(q.grad.float(), q2.grad.float(), **_TOL)
+    torch.testing.assert_close(k.grad.float(), k2.grad.float(), **_TOL)
+    torch.testing.assert_close(v.grad.float(), v2.grad.float(), **_TOL)
+
+
 def test_mixed_dtype_autocast_real_qwen3_layer(torch):
     """A real Qwen3 attention layer with fp32 parameters under bf16
     autocast: rotary cos/sin promote q, k to fp32 while v stays bf16 -- the

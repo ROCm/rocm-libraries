@@ -524,15 +524,19 @@ def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
 
 @pytest.mark.parametrize("arch", list(_ARCHS))
 def test_padded_mask_matches_native(torch, transformers, arch):
-    """A padded ``attention_mask``: `repeat_kv`'s expanded-MHA path
-    (``enable_gqa=False``, ``is_causal=False``, bias from the bool mask);
-    declines ``grad: fwd+stats:`` with FlyDSL off (both ASM builders reject
-    any bias). For an Hkv=1 arch (qwen3), ``repeat_kv`` broadcasts the one
-    physical KV head across Hq via a stride-0 head axis, which FlyDSL CDNA
-    forward's ``servableStrides`` rejects outright (non-positive stride,
-    FlydslSdpaCdnaCommon.hpp:398); with ASM/dense also taking no bias, this
-    combination declines in every build -- a coverage gap, not a routing
-    bug."""
+    """A padded ``attention_mask``. GQA archs (``hq != hkv``) route through
+    `repeat_kv`'s expanded-MHA path (``enable_gqa=False``, bias from the
+    bool mask); MHA archs (``hq == hkv``: olmo2, gpt2) pass no
+    ``enable_gqa`` and keep their unpadded k/v layout -- `repeat_kv` and
+    `enable_gqa` apply only when ``num_key_value_groups > 1``
+    (sdpa_attention.py:118-127). Declines ``grad: fwd+stats:`` with
+    FlyDSL off (both ASM builders reject any bias). For the Hkv=1 arch
+    (mqa_hkv1), ``repeat_kv`` broadcasts the one physical KV head
+    across Hq via a stride-0 head axis, which FlyDSL CDNA forward's
+    ``servableStrides`` rejects outright (non-positive stride,
+    FlydslSdpaCdnaCommon.hpp:398); with ASM/dense also taking no bias,
+    this combination declines in every build -- a coverage gap, not a
+    routing bug. Uses ``cache=None`` (``use_cache=False``)."""
     builder, head_dim, hq, hkv = _ARCHS[arch]
     config, layer = builder(torch, transformers)
     b, s = 2, 16

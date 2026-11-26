@@ -204,6 +204,15 @@ def _sanitize_for_path(raw):
     return f"{stem}-{h:016x}"
 
 
+def _winner_shard_has_record(path):
+    """True past LineStore's bare version line (first line, LineStore.hpp)
+    there is at least one non-blank record line. A non-empty shard alone
+    does not prove a write: a winner-cache read miss also creates a shard
+    stamped with only the version line and no records (Environment.md:408)."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return any(line.strip() for line in lines[1:])
+
+
 def _misaligned_like(t):
     """A tensor with ``t``'s exact shape/stride/dtype/device and VALUES,
     whose ``data_ptr()`` sits one element off a 16-byte boundary (the
@@ -272,8 +281,10 @@ def _fail_nth_execute(real_execute, n):
     return _patched
 
 
-def _run_subproc(mode, extra_env=None, timeout=300):
+def _run_subproc(mode, extra_env=None, unset_env=(), timeout=300):
     env = dict(os.environ)
+    for key in unset_env:
+        env.pop(key, None)
     if extra_env:
         env.update(extra_env)
     proc = subprocess.run(
@@ -958,10 +969,15 @@ def test_p4_fault_injection_p_zero_recomputes_natively(torch, monkeypatch, caplo
     WARNING logged, ``bwd_recompute=1``, ``bwd_totals()`` native += 1, the
     grad row's aot UNCHANGED by the failure, the bwd row's aot stays 0, and
     the recompute must call the saved native function (sdpa.py's ``_native``
-    closure), never the patched attribute -- so no second grad/bwd row
-    appears. MHA D=128 p=0 is servable in every build state (with or
-    without FlyDSL, with or without #16337), so the fault injection reaches
-    a real backward ``_execute`` call regardless."""
+    closure), never the patched attribute: the grad row (the only row this
+    shape/dtype key can ever address -- a re-entered call updates it, it
+    never creates a second one) must carry no ``recompute`` extra. A
+    buggy re-entrant call into the wrapped attribute would pick one up
+    wrongly: ``recompute`` is set from ``torch._C._current_graph_task_id()
+    != -1`` (sdpa.py), true for any call nested inside this test's own
+    ``.backward()``, recompute or not. MHA D=128 p=0 is servable in every
+    build state (with or without FlyDSL, with or without #16337), so the
+    fault injection reaches a real backward ``_execute`` call regardless."""
     import logging
 
     from hipdnn_torch.base import OpOverride
@@ -990,6 +1006,11 @@ def test_p4_fault_injection_p_zero_recomputes_natively(torch, monkeypatch, caplo
     assert (
         grad_row["aot"] == 1
     ), "the forward served fine; unaffected by the bwd failure"
+    assert grad_row.get("recompute") is None, (
+        "grad row picked up a recompute extra -- the native recompute "
+        "re-entered the wrapped attribute instead of calling the saved "
+        "native function directly"
+    )
     assert bwd_row["aot"] == 0 and bwd_row["native"] == 1
     assert bwd_row.get("bwd_recompute") == 1
     _, bwd_native = ov.bwd_totals()
@@ -1330,12 +1351,16 @@ def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_pa
     must sample BOTH the stats-forward and backward graphs for an
     ingestor-served MHA bf16 D=128 p=0 shape with a non-grad, non-causal
     bias (both ASM builders reject any bias, so only ingestor engines can
-    serve it -- a shape ASM can never claim), and leave a non-empty winner
-    shard for EACH engine; first-execute grads must still match native.
-    Reads the backend's own C++ log from
-    ``HIPDNN_LOG_FILE`` (the alola harness always exports one; a console
-    sink is used only when that var is unset, Logging.cpp:66-67, :249), not
-    the subprocess's stderr."""
+    serve it -- a shape ASM can never claim), and leave a winner RECORD
+    for EACH engine (a non-empty shard alone does not prove a write: a
+    read miss also leaves a version-stamped, otherwise empty shard,
+    Environment.md:408); first-execute grads must still match native.
+    Runs with ``HIPDNN_DISABLE_CACHE`` unset -- it kills on-disk caching
+    outright regardless of ``HIPDNN_CACHE_DIR`` and would make the shard
+    assertions fail for an unrelated reason. Reads the backend's own C++
+    log from ``HIPDNN_LOG_FILE`` (the alola harness always exports one; a
+    console sink is used only when that var is unset, Logging.cpp:66-67,
+    :249), not the subprocess's stderr."""
     if _flydsl_state() != "on":
         pytest.skip(
             "HIPDNN_TORCH_TEST_FLYDSL not 'on'; this benchmarking guard needs "
@@ -1352,6 +1377,7 @@ def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_pa
             "HIPDNN_LOG_LEVEL": "info",
             "HIPDNN_LOG_FILE": str(log_file),
         },
+        unset_env=["HIPDNN_DISABLE_CACHE"],
     )
     payload = json.loads(proc.stdout)
     census = payload["census"]
@@ -1418,10 +1444,13 @@ def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_pa
     for engine_name in engines:
         key = _sanitize_for_path(engine_name)
         matches = shards_by_engine.get(key, [])
-        assert matches and any(p.stat().st_size > 0 for p in matches), (
-            f"no non-empty winner shard for engine {engine_name!r} (expected "
+        assert matches and any(_winner_shard_has_record(p) for p in matches), (
+            f"no winner record for engine {engine_name!r} (expected "
             f"directory segment {key!r}, sanitizeForPath's exact scheme: "
-            f"PathSanitizer.hpp) under {cache_dir}; found: {sorted(shards_by_engine)}"
+            f"PathSanitizer.hpp) under {cache_dir}; a non-empty shard alone "
+            "does not prove a write -- a read miss also leaves a "
+            "version-stamped, otherwise empty shard (Environment.md:408); "
+            f"found: {sorted(shards_by_engine)}"
         )
 
     for step in ("step1", "step2"):
