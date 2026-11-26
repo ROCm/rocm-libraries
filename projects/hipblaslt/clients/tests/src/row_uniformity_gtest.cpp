@@ -3842,18 +3842,18 @@ namespace
     // dynamic-queue path is never reached, so a default bench sweep reports "no change"
     // and validates nothing here.
     //
-    // Pinned: resolveStreamKSettings() must charge the workspace nothing beyond
-    // partialTileSize(grid). The per-XCD queue counters live at the base of
-    // AddressFlags, not AddressWS, so charging for them makes a workspace that exactly
-    // meets requiredWorkspaceSize() look short, fires the workspace-DP fallback
-    // (reduction = tree, grid = tiles) and inflates the launch grid to the full tile
-    // count -- measured at up to 7.8x on 62 of 207 Stream-K problems with uniform
-    // summation order never enabled.
+    // Pinned: on the dynamic-queue path the workspace holds only the partials of
+    // split tiles, so a launch that splits no tile needs none and never takes the
+    // workspace-DP fallback (reduction = tree, grid = tiles). The per-XCD queue
+    // counters live at the base of AddressFlags, not AddressWS, so charging for
+    // them makes a workspace that exactly meets requiredWorkspaceSize() look short
+    // and inflates the launch grid to the full tile count -- measured at up to 7.8x
+    // on 62 of 207 Stream-K problems with uniform summation order never enabled.
     //
     // The test allocates EXACTLY requiredWorkspaceSize() and pins grid and tile count
-    // as distinct literals, so any reintroduced term surfaces as the tile count. The
-    // -1 case must still fall back, or the test would also pass with the threshold
-    // removed outright.
+    // as distinct literals, so any reintroduced term surfaces as the tile count. A
+    // workspace one byte short of the static grid rule's partialTileSize(grid) must
+    // keep the grid too, or that rule is back on the dynamic path.
     //
     // solve() is the instrument because resolveStreamKSettings() is private and
     // computeStreamKDecisions() mirrors the threshold independently and never carried
@@ -3895,18 +3895,16 @@ namespace
         // 256-CU / 8-XCD gfx950 device, from before the per-tile split mapping.
         ASSERT_EQ(tiles, 1248u);
         ASSERT_EQ(selectedGrid, 256u);
-        // Under tree reduction the workspace guard in resolveStreamKSettings() runs
-        // only when the grid leaves partial tiles. Without this the fallback is
-        // unreachable and the test is vacuous.
+        // The grid leaves partial tiles, so the static grid rule would reserve
+        // partialTileSize(grid) here. Without this the case below is vacuous.
         ASSERT_NE(tiles % selectedGrid, 0u);
 
-        // Allocate EXACTLY what the library asks for -- the allocation a phantom
-        // workspace term turns into a fallback.
-        const size_t requested = solution->partialTileSize(selectedGrid);
+        // Every work item is a whole tile, which writes no partial. Allocate EXACTLY
+        // what the library asks for -- the allocation a phantom workspace term turns
+        // into a fallback.
+        const size_t requested = solution->requiredWorkspaceSize(problem, device);
+        ASSERT_EQ(requested, 0u) << "a launch that splits no tile must reserve no partials";
         problem.setWorkspaceSize(requested);
-        ASSERT_EQ(solution->requiredWorkspaceSize(problem, device), requested)
-            << "the workspace query must report the partial-tile bytes it can satisfy; "
-               "if it reports 0 the query itself thinks this allocation is short";
 
         // Dummy addresses: solve() only stores pointers into the kernel argument
         // block, it never dereferences them.
@@ -3943,20 +3941,17 @@ namespace
         EXPECT_EQ(main.numWorkItems.y, main.workGroupSize.y);
         EXPECT_EQ(main.numWorkItems.z, main.workGroupSize.z);
 
-        // One more byte of workspace must not change anything: the threshold is
-        // an inequality against the partial-tile bytes and nothing else.
-        problem.setWorkspaceSize(requested + 1);
-        auto slack = solution->solve(problem, inputs, device);
-        ASSERT_FALSE(slack.empty());
-        EXPECT_EQ(slack.front().numWorkGroups.x, selectedGrid);
-
-        // One byte short must still fall back, or the guard is gone rather than
-        // merely correctly sized.
-        problem.setWorkspaceSize(requested - 1);
-        auto starved = solution->solve(problem, inputs, device);
-        ASSERT_FALSE(starved.empty());
-        EXPECT_EQ(starved.front().numWorkGroups.x, tiles)
-            << "a genuinely insufficient workspace must still take the DP fallback";
+        // Short of the static grid rule's partials, the dynamic launch must still
+        // keep its grid: it has no partials for that workspace to fall short of.
+        const size_t gridRuleBytes = solution->partialTileSize(selectedGrid);
+        ASSERT_GT(gridRuleBytes, 0u);
+        problem.setWorkspaceSize(gridRuleBytes - 1);
+        inputs.workspaceSize = gridRuleBytes - 1;
+        auto belowGridRule   = solution->solve(problem, inputs, device);
+        ASSERT_FALSE(belowGridRule.empty());
+        EXPECT_EQ(belowGridRule.front().numWorkGroups.x, selectedGrid)
+            << "a workspace that holds every partial the launch writes must not take "
+               "the DP fallback";
     }
 
     // MinItersPerCU (ContractionSolution.cpp, mirrors origami::streamk) is the

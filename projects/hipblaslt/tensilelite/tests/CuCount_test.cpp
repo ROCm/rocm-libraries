@@ -696,12 +696,11 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
     env.solution.sizeMapping.streamKAtomic         = 0;
 
-    // Pick M/N so tiles % grid != 0 (partial tiles exist).
+    // Pick M/N so tiles % grid != 0.
     // macroTile=128x128 → tiles = ceil(M/128)*ceil(N/128).
     // 4096x4224: tiles = 32*33 = 1056, grid = min(1056, 256) = 256,
-    // 1056 % 256 != 0 → partial workspace required. K spans several depthU
-    // iterations per tile, without which a workgroup's range would cover whole
-    // tiles only and there would be no partials to size.
+    // 1056 % 256 != 0, yet every dynamic work item is a whole tile, so there
+    // are no partials to size, with any workspace.
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
@@ -715,15 +714,19 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     auto   reduction = env.solution.getSKReduction(problem, env.device);
     size_t grid      = env.solution.getSKGrid(problem, env.device, tiles, reduction);
 
-    ASSERT_NE(tiles % grid, 0u) << "Need partial tiles for this test";
+    ASSERT_NE(tiles % grid, 0u) << "Need tiles % grid != 0 for this test";
 
-    size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
-    EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
+    for(size_t workspace : {std::numeric_limits<size_t>::max(), size_t{0}})
+    {
+        problem.setWorkspaceSize(workspace);
+        size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
+        EXPECT_EQ(ws, 0u) << "Whole dynamic tiles write no partials";
 
-    // The workspace must cover the partial tiles. Query and launch agree
-    // because both size it from partialTileSize(grid).
-    EXPECT_GE(ws, env.solution.partialTileSize(grid))
-        << "Workspace must cover at least partialTileSize(grid)";
+        // Query and launch agree, and the launch keeps the dynamic grid.
+        const auto launch = env.solution.resolvePersistentSettings(problem, env.device);
+        EXPECT_EQ(launch.workspaceBytes, ws);
+        EXPECT_EQ(launch.grid, grid) << "no fallback to grid = tiles";
+    }
 }
 
 TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
@@ -769,9 +772,11 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
     env.solution.sizeMapping.streamKAtomic         = 0;
 
-    // Use dimensions and a K that produce partial tiles.
-    auto problem = makeGemmProblem(4096, 4224, 512);
-    problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
+    // Use dimensions and a K that produce partial tiles on the static path
+    // (see StaticModeWorkspaceIsPartialTilesOnly); the dynamic path reserves
+    // partials only for split tiles, fitted to the workspace.
+    auto problem = makeGemmProblem(4096, 4224, 128);
+    problem.setParams().setStreamKTileSchedulingMode(0); // OFF (static)
 
     size_t wsNeeded = env.solution.requiredWorkspaceSize(
         [&] {
@@ -792,8 +797,8 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
         << "full amount (not 0 from DP fallback). ws=" << wsActual << " needed=" << wsNeeded;
 
     // Providing one byte less must trigger fallback (returns 0 for SK partial).
-    auto problemShort = makeGemmProblem(4096, 4224, 512);
-    problemShort.setParams().setStreamKTileSchedulingMode(1);
+    auto problemShort = makeGemmProblem(4096, 4224, 128);
+    problemShort.setParams().setStreamKTileSchedulingMode(0);
     problemShort.setWorkspaceSize(wsNeeded - 1);
     size_t wsShort = env.solution.requiredWorkspaceSize(problemShort, env.device);
     EXPECT_EQ(wsShort, 0u) << "With workspace < required, must fall back (return 0 for partial)";

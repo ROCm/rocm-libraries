@@ -5816,12 +5816,14 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.hasHybridAssignment())
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
-                // A dynamic split reserves one partial tile per part (see
-                // resolveStreamKDynamicSplit()).
-                const StreamK::Dynamic::KernelArguments dyn
-                    = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
-                if(dyn.tiles > 0)
+                // The dynamic path reserves one partial tile per part of a split
+                // tile and none for whole tiles (see streamKDynamicSizesPartials()).
+                if(streamKDynamicSizesPartials(effectiveDynamic))
+                {
+                    const StreamK::Dynamic::KernelArguments dyn
+                        = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
                     return size + partialTileSize(dyn.partialSlots());
+                }
                 // getSKReduction() decides here for every StreamK mode, unlike
                 // resolveStreamKSettings() / computeStreamKDecisions(), which pin
                 // SK4 and SK5-dynamic to tree, so this query can report the
@@ -6554,11 +6556,13 @@ namespace TensileLite
         // below so that fallback sees the reduction the launch will use.
         sk.reduction = StreamK::reconcileReduction(sk.reduction, sk.grid, tiles);
 
-        // A dynamic split reserves one partial tile per part (see resolveStreamKDynamicSplit()).
-        const StreamK::Dynamic::KernelArguments dyn
-            = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
-        if(dyn.tiles > 0)
+        // The dynamic path reserves one partial tile per part of a split tile and
+        // none for whole tiles, so it never falls back to grid = tiles (see
+        // streamKDynamicSizesPartials()).
+        if(streamKDynamicSizesPartials(effectiveDynamic))
         {
+            const StreamK::Dynamic::KernelArguments dyn
+                = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
             sk.workspaceBytes = partialTileSize(dyn.partialSlots());
             return sk;
         }
@@ -7752,6 +7756,12 @@ namespace TensileLite
         return streamKDynamicDecomposition(problem, hardware, tiles);
     }
 
+    bool ContractionSolution::streamKDynamicSizesPartials(bool effectiveDynamic) const
+    {
+        return StreamK::Dynamic::usesQueue(sizeMapping, effectiveDynamic)
+               && !handwrittenCustomKernel();
+    }
+
     // Single source of truth for the StreamK launch decisions. The reduction, grid,
     // and workspace/DP fallback computed here are the values solve() launches with:
     // solve() reads them straight out of the returned snapshot into StreamKSettings
@@ -7876,18 +7886,19 @@ namespace TensileLite
         // on; also reused by the skTiles / skSplit mirror further down.
         const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
 
-        // Workspace / DP fallback. A dynamic split reserves one partial tile per
-        // part, already fitted to the workspace (see resolveStreamKDynamicSplit());
-        // otherwise reserve iff (reduction==parallel || the grid can straddle a
-        // tile), sized by grid. requiredWorkspaceSize() and resolveStreamKSettings()
-        // apply the grid rule separately, so change all three together.
+        // Workspace / DP fallback. The dynamic path reserves one partial tile per
+        // part of a split tile, already fitted to the workspace, and none for
+        // whole tiles (see streamKDynamicSizesPartials()); otherwise reserve iff
+        // (reduction==parallel || the grid can straddle a tile), sized by grid.
+        // requiredWorkspaceSize() and resolveStreamKSettings() apply the grid rule
+        // separately, so change all three together.
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
         const StreamK::Dynamic::KernelArguments dyn
             = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
-        if(dyn.tiles > 0)
+        if(streamKDynamicSizesPartials(effectiveDynamic))
         {
-            needPartials   = true;
+            needPartials   = dyn.partialSlots() > 0;
             idealWorkspace = partialTileSize(dyn.partialSlots());
         }
         else if(grid > 0
@@ -7950,7 +7961,7 @@ namespace TensileLite
         }
         d.setGrid(grid);
 
-        // Sizes the workspace above when tiles are split.
+        // Sizes the workspace above on the dynamic path.
         d.dynamicPartialsSlots = dyn.partialSlots();
 
         d.partialsPresent = d.skTiles() > 0;

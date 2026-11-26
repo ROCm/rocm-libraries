@@ -257,16 +257,15 @@ TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapabili
 // helpers report, so the summary reflects the REAL decisions (not a re-derivation
 // that could drift). This is the property that makes the summary trustworthy.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicPartialTiles)
+TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicWholeTiles)
 {
     AnalyticalEnv       env;
     ContractionSolution solution;
     initStreamKSolution(solution, 4); // SK4 = unconditionally dynamic (tree, work-queue)
 
-    // 4096x4224 -> tiles = 32*33 = 1056; grid = min(1056, 256) = 256; 1056 % 256
-    // != 0 -> partial tiles -> partials workspace required. K spans several
-    // depthU iterations per tile, without which a workgroup's range would be a
-    // whole number of tiles and no partials would exist to reserve for.
+    // 4096x4224 -> tiles = 32*33 = 1056; grid = min(1056, 256) = 256. 1056 % 256
+    // != 0, but every dynamic work item is a whole tile, so no partials
+    // workspace is required.
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
 
@@ -294,8 +293,8 @@ TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicPartialTiles)
 
     // The authoritative workspace query must agree with the snapshot byte-for-byte.
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, env.device));
-    EXPECT_GT(d.requiredWorkspaceBytes, 0u);
-    EXPECT_TRUE(d.workspaceAllocated);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
     EXPECT_FALSE(d.dpOnly);
     EXPECT_EQ(d.numQueues, 8u) << "gfx950 bakes 8 per-XCD work queues (NUM_XCD)";
 }
@@ -310,8 +309,6 @@ TEST(StreamKLaunchSummaryTest, Sk5OnResolvesDynamicTree)
     ContractionSolution solution;
     initStreamKSolution(solution, 5);
 
-    // Several depthU iterations per tile, so the launch has partial tiles to
-    // reserve for and the workspace assertions below have something to see.
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     problem.setParams().setStreamKTileSchedulingMode(1); // ON
@@ -322,8 +319,8 @@ TEST(StreamKLaunchSummaryTest, Sk5OnResolvesDynamicTree)
     EXPECT_TRUE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.numQueues, 8u);
-    // With plenty of workspace the partials block is taken (no DP fallback).
-    EXPECT_TRUE(d.workspaceAllocated);
+    // Whole-tile work items write no partials (no DP fallback either).
+    EXPECT_FALSE(d.workspaceAllocated);
     EXPECT_FALSE(d.dpOnly);
 }
 
@@ -713,15 +710,19 @@ TEST(PersistentLaunchSummaryTest, DataParallelHasNoReductionOrWorkspace)
 }
 
 // ---------------------------------------------------------------------------
-// Workspace-starved SK4 falls back to a DP grid (grid=tiles, tree reduction):
+// Workspace-starved SK3 falls back to a DP grid (grid=tiles, tree reduction):
 // workspaceDPFallbackFired and dpOnly set, nothing reserved. This is the RUNTIME
 // dp-only source, and it is the fallback that turns selectedGrid into grid().
+// The dynamic path writes partials only for split tiles, sized to fit, so it
+// never takes this fallback; on the static path origami fits its own grid to
+// the workspace, so a fixed grid is what reaches it.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, WorkspaceDpFallbackFires)
 {
     AnalyticalEnv       env;
+    env.device.persistentFixedGrid = 256;
     ContractionSolution solution;
-    initStreamKSolution(solution, 4);
+    initStreamKSolution(solution, 3);
 
     // Several depthU iterations per tile, so the grid really does straddle
     // tiles and the launch wants a partials region it cannot have.
@@ -739,6 +740,7 @@ TEST(StreamKLaunchSummaryTest, WorkspaceDpFallbackFires)
     // selected vs final: the fallback resets the grid to tiles.
     EXPECT_EQ(d.selectedGrid, d.skGridPreFallback) << "no tree-bounds fallback here";
     EXPECT_NE(d.selectedGrid, d.grid()) << "workspace-DP fallback changed the grid";
+    EXPECT_FALSE(d.treeBoundsFallbackFired);
     EXPECT_EQ(d.grid(), d.tiles) << "DP fallback sets grid = tiles";
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
@@ -754,12 +756,13 @@ TEST(StreamKLaunchSummaryTest, WorkspaceDpFallbackFires)
 TEST(StreamKLaunchSummaryTest, SelectedVsFinalGridAttribution)
 {
     AnalyticalEnv       env;
+    env.device.persistentFixedGrid = 256;
     ContractionSolution solution;
-    initStreamKSolution(solution, 4);
+    initStreamKSolution(solution, 3);
 
-    // Enough tiles for a real StreamK grid and several depthU iterations per
-    // tile, but zero workspace forces the DP fallback that overwrites the
-    // selected grid with tiles.
+    // A fixed StreamK grid and several depthU iterations per tile, but zero
+    // workspace forces the DP fallback that overwrites the selected grid with
+    // tiles.
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(0);
 
@@ -769,10 +772,11 @@ TEST(StreamKLaunchSummaryTest, SelectedVsFinalGridAttribution)
     EXPECT_GT(d.selectedGrid, 0u);
     EXPECT_EQ(d.grid(), d.tiles);
     EXPECT_NE(d.selectedGrid, d.grid());
-    // The workspace-DP fallback is the flag responsible for the change here, and
-    // the fixed-grid override did not fire.
+    // The workspace-DP fallback is the flag responsible for the change here; the
+    // fixed grid is the selected one.
     EXPECT_TRUE(d.workspaceDPFallbackFired);
-    EXPECT_FALSE(d.fixedGridUsed);
+    EXPECT_TRUE(d.fixedGridUsed);
+    EXPECT_EQ(d.selectedGrid, 256u);
     EXPECT_FALSE(d.treeBoundsFallbackFired);
     EXPECT_FALSE(d.clusterDPGridClamped);
 }
@@ -805,7 +809,7 @@ TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspac
     EXPECT_NE(launch.grid, launch.totalTiles);
 
     ContractionSolution streamK;
-    initStreamKSolution(streamK, 4);
+    initStreamKSolution(streamK, 3);
     auto fallback = streamK.computeStreamKDecisions(problem, env.device);
     EXPECT_TRUE(fallback.dpOnly);
     EXPECT_TRUE(fallback.workspaceDPFallbackFired);
@@ -818,8 +822,8 @@ TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspac
 // Dynamic-path partials-workspace reservation rule.
 //
 // A dynamic split (dynamicPartialsSlots > 0) reserves one partial tile per
-// part, whatever the grid; otherwise the dynamic path (always tree) reserves
-// iff tiles%grid!=0. The three tests below vary dynamicPartialsSlots (0 vs >0)
+// part, whatever the grid; whole-tile work items reserve nothing, whatever
+// tiles%grid. The three tests below vary dynamicPartialsSlots (0 vs >0)
 // against tiles%grid (==0 vs !=0); slots>0 with tiles%grid!=0 adds nothing.
 //
 // All three use a plain mock AMDGPU with no analyticalHardware, so
@@ -830,9 +834,9 @@ TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspac
 // ---------------------------------------------------------------------------
 
 // Case A: dynamicSlots == 0 (no split stream-k tiles) AND tiles % grid != 0.
-// Workspace IS reserved (because tiles%grid!=0) even though the dynamic packing
-// produced no partial tiles.
-TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace)
+// No workspace: a workgroup that runs past a tile boundary takes the next
+// whole tile from its queue, so no tile is ever left part-done.
+TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_NoWorkspace)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 4); // dynamic
@@ -852,10 +856,8 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace)
     EXPECT_EQ(d.skTiles(), 0u) << "no override -> dynamic packing produces no split tiles";
     EXPECT_EQ(d.dynamicPartialsSlots, 0u) << "skTiles*skSplit == 0";
 
-    // Workspace is reserved because tiles%grid != 0, independent of the zero
-    // dynamic slot count.
-    EXPECT_TRUE(d.workspaceAllocated);
-    EXPECT_GT(d.requiredWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
 }
 
@@ -1028,7 +1030,8 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryReportsFallbackGridChange)
     AnalyticalEnv       env;
     ContractionSolution solution;
     solution.kernelName = "test_streamk_fallback";
-    initStreamKSolution(solution, 4);
+    initStreamKSolution(solution, 3);
+    env.device.persistentFixedGrid = 256; // see WorkspaceDpFallbackFires
 
     // Several depthU iterations per tile, so there are partials to be short of.
     auto problem = makeGemmProblem(4096, 4224, 512);
@@ -2882,8 +2885,8 @@ TEST_F(StreamKDynamicSplitSolveTest, WorkspaceQueriesAgree)
         Shape shape;
         bool  split;
     };
-    // 1 tile, 4 batched tiles, 64 tiles (split 4), 300 tiles (whole, and
-    // 300 % 256 != 0 so the tiles % grid partials reservation applies).
+    // 1 tile, 4 batched tiles, 64 tiles (split 4), 300 tiles (whole, so no
+    // partials although 300 % 256 != 0).
     for(Case c : {Case{longKTiles(1), true},
                   Case{longKTiles(4), true},
                   Case{{1024, 1024, 4096, 1}, true},
@@ -2900,11 +2903,48 @@ TEST_F(StreamKDynamicSplitSolveTest, WorkspaceQueriesAgree)
             const auto   decided  = solution->computeStreamKDecisions(problem, device);
             EXPECT_EQ(launch.workspaceBytes, required) << "pass " << pass;
             EXPECT_EQ(decided.requiredWorkspaceBytes, required) << "pass " << pass;
-            EXPECT_GT(required, 0u);
+            EXPECT_EQ(required > 0, c.split);
             // Second pass: exactly the reported size.
             problem.setWorkspaceSize(required);
         }
     }
+}
+
+// Whole dynamic tiles write no partials, so none are reserved, and a launch
+// without workspace keeps the dynamic grid rather than falling back to one
+// workgroup per tile. Static StreamK keeps its grid-sized partials.
+TEST_F(StreamKDynamicSplitSolveTest, WholeTilesReserveNoPartials)
+{
+    const Shape manyTiles{1280, 3840, 1024, 1}; // 300 tiles, 300 % 256 != 0
+    for(int streamK : {4, 5})
+    {
+        SCOPED_TRACE("StreamK " + std::to_string(streamK));
+        auto         s       = dynamicSplitSolution(streamK);
+        auto         problem = dynamicSplitGemm(manyTiles);
+        const size_t tiles   = problem.getNumTiles(s->sizeMapping, 1);
+        ASSERT_EQ(tiles, 300u);
+        const auto d = s->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_EQ(d.tiles, 0u);
+        ASSERT_LT(size_t{d.grid}, tiles);
+
+        for(size_t workspace : {size_t{1} << 30, size_t{0}})
+        {
+            SCOPED_TRACE("workspace " + std::to_string(workspace));
+            problem.setWorkspaceSize(workspace);
+            EXPECT_EQ(s->requiredWorkspaceSize(problem, device), 0u);
+            const auto launch = s->resolvePersistentSettings(problem, device);
+            EXPECT_EQ(launch.workspaceBytes, 0u);
+            EXPECT_EQ(launch.grid, d.grid) << "no fallback to grid = tiles";
+            const auto decided = s->computeStreamKDecisions(problem, device);
+            EXPECT_EQ(decided.requiredWorkspaceBytes, 0u);
+            EXPECT_FALSE(decided.workspaceDPFallbackFired);
+            EXPECT_EQ(decided.grid(), size_t{d.grid});
+        }
+    }
+
+    auto staticGrid = dynamicSplitSolution(3);
+    auto problem    = dynamicSplitGemm(manyTiles);
+    EXPECT_GT(staticGrid->requiredWorkspaceSize(problem, device), 0u);
 }
 
 // The split is fitted with slots * partialTileSize(1) and reserved as
