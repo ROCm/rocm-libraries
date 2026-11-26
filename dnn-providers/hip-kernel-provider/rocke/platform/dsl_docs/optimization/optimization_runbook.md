@@ -2497,6 +2497,9 @@ sweep CSVs.
 - Scalar loads.
 - Excessive barriers.
 - Excessive waits.
+- Serialized LDS operand reads: an `s_waitcnt lgkmcnt(0)` after every `ds_read`
+  feeding an MFMA, often after an unrelated loop-carry change (empirical case
+  study 9).
 - Register spills (`probe_occupancy.py`: `spill > 0`).
 - Low occupancy (`probe_occupancy.py`: `waves_per_cu < 4`).
 - Bank conflicts (`analyze_lds_conflicts.py`).
@@ -2622,6 +2625,9 @@ An optimization is done when:
   good enough.
 - If compiler flags produce wrong answers, remove them even if
   another codebase uses them safely.
+- If paged copies each read their own page id, read one id per page,
+  carry the next tiles' ids in the loop and share one buffer resource per
+  page (empirical case study 9).
 - If attention PV reads V from LDS with narrow loads, a store-side
   transpose that allows wide LDS reads may pay for its extra
   registers (`use_cfvst` on gfx942 bf16 D128).

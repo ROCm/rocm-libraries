@@ -16,7 +16,10 @@
  *   - the gfx950 2D spec setting use_fp8_mfma_qk over a bf16 KV cache, with the
  *     KQ pad otherwise laid out (the fp8 refusal comes first, as in Python);
  *   - the gfx942 3D spec with use_i64_kv_addr (its loaders have no i64 path, so a
- *     spec built that way would address a cache past 2 GiB with 32 bits).
+ *     spec built that way would address a cache past 2 GiB with 32 bits);
+ *   - the gfx942 2D spec with use_i64_kv_addr where a wave's part of a K/V copy
+ *     crosses a page (the pre-loop refusal), or where a conflict-free V store
+ *     load call spans pages (the cfvst loader's refusal, inside the KV loop).
  *
  * The expected texts are the Python ones: kernels.common._fmha_common
  * check_head_counts and the fastKV module's _NOT_GFX950. The pytest twin,
@@ -43,6 +46,10 @@ static const char* const STAGGERED_EARLY_V
     = "use_staggered_iter_wait does not support use_early_v_schedule";
 static const char* const GFX942_3D_I64
     = "gfx942 tiled 3D kernel does not support use_i64_kv_addr (paged KV cache > 2 GiB) yet";
+static const char* const GFX942_2D_I64_WAVE_PAGE
+    = "i64 K/V copies need a wave's part of a copy in one page";
+static const char* const GFX942_2D_I64_CFVST_PAGE
+    = "i64 K/V cfvst needs each V load call within one page";
 static const char* const FP8_QK_NEEDS_FP8_KV
     = "use_fp8_mfma_qk requires kv_storage_dtype='fp8e4m3'";
 static const char* const KQ_PAD_STAGED_Q
@@ -293,11 +300,55 @@ static int check_gfx942_3d_i64_kv_addr(void)
     return expect_refused("gfx942 3D use_i64_kv_addr", st, ll, err, GFX942_3D_I64);
 }
 
+/* The two gfx942 2D i64 page refusals, with the specs the pytest twin uses. */
+static int check_gfx942_2d_i64_pages(void)
+{
+    int failures = 0;
+    char err[512];
+    char* ll = NULL;
+
+    /* D96 rows in 2-token pages: a wave's 128-half copy part crosses a page. */
+    rocke_attention_tiled_2d_spec_t s = spec_2d(32, 8);
+    s.head_size = 96;
+    s.block_size = 2;
+    s.num_warps = 1;
+    s.has_tile_size = true;
+    s.tile_size = 16;
+    s.use_i64_kv_addr = true;
+    err[0] = '\0';
+    rocke_status_t st = rocke_gfx942_attention_tiled_2d_lower_to_llvm(
+        &s, "gfx942", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    failures += expect_refused(
+        "gfx942 2D i64 wave part across pages", st, ll, err, GFX942_2D_I64_WAVE_PAGE);
+
+    /* 8-token pages: the pre-loop accepts the spec and the cfvst loader
+     * refuses its 16-token load calls. */
+    s = spec_2d(32, 8);
+    s.head_size = 64;
+    s.block_size = 8;
+    s.num_warps = 4;
+    s.block_m_per_warp = 32;
+    s.has_tile_size = true;
+    s.tile_size = 64;
+    s.use_mfma_32x32x8 = true;
+    s.use_transposed_qk_32x32 = true;
+    s.use_conflict_free_v_store = true;
+    s.use_i64_kv_addr = true;
+    ll = NULL;
+    err[0] = '\0';
+    st = rocke_gfx942_attention_tiled_2d_lower_to_llvm(
+        &s, "gfx942", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    failures += expect_refused(
+        "gfx942 2D i64 cfvst call across pages", st, ll, err, GFX942_2D_I64_CFVST_PAGE);
+    return failures;
+}
+
 int main(void)
 {
     const int failures = check_head_counts() + check_fastkv_arch()
                          + check_gfx950_staggered_early_v() + check_gfx950_kq_pad_staged_q()
-                         + check_gfx950_fp8_qk_without_fp8_kv() + check_gfx942_3d_i64_kv_addr();
+                         + check_gfx950_fp8_qk_without_fp8_kv() + check_gfx942_3d_i64_kv_addr()
+                         + check_gfx942_2d_i64_pages();
     if(failures != 0)
     {
         fprintf(stderr, "%d TILED ATTENTION ENTRY GUARD CHECK(S) FAILED\n", failures);

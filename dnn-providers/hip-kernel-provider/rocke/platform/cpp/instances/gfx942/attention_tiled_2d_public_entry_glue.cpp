@@ -432,6 +432,9 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
 
         /* 3. Pre-loop: build K/V buffer descriptors (lines 2163-2351). */
         rocke_gfx942_attn2d_emit_preloop(&ctx);
+        /* A refused spec leaves the loaders unset; stop before they are used. */
+        if(!rocke_ir_builder_ok(b))
+            return NULL;
 
         /* 4. Gather the per-lane Q MFMA A-operand to VGPRs (lines 3426-3592). */
         rocke_gfx942_attn2d_emit_q_gather(&ctx);
@@ -451,6 +454,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
          *    drive_kv_loop returns the loop handle whose results are the rewritten
          *    carry the epilogue consumes; mirror them into ctx.out_carry. */
         rocke_for_t kvloop = rocke_gfx942_attn2d_drive_kv_loop(&ctx);
+        if(!rocke_ir_builder_ok(b))
+            return NULL;
         if(kvloop.op != NULL)
         {
             for(int i = 0; i < kvloop.op->num_results; ++i)
