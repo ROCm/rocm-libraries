@@ -534,10 +534,6 @@ class PersistentLoop(Component):
             finally:
                 writer.states.rapInPapNextTilePrefetch = rapOuter
             module.add(writer.papRestoreCurrentTileIdentity(kernel, previous, subtile=subtile))
-        if (not subtile and kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"] and not kernel["HalfPLR"]):
-            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preservePapBank=False))
-            if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preservePapBank=False))
         module.add(skip)
         return module
 

@@ -1883,8 +1883,9 @@ class _PapSetRefreshWriter:
     def papTdmRecomputeWaveIdx(self, kernel, wave_idx_sgpr):
         return Module("recompute WaveIdx")
 
-    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
-        return self._record("init", tpa, tpb)
+    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx",
+                                       *, updateOnly=False, preparedGlobalAddr=None):
+        return self._record("update" if updateOnly else "init", tpa, tpb)
 
     def tdmGlobalOffsetWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
         return self._record("offset", tpa, tpb)
@@ -1906,10 +1907,10 @@ class _PapSetRefreshWriter:
         return Module("tail bank")
 
 
-def _pap_set_kernel(fuse, num_waves, mx):
+def _pap_set_kernel(fuse, num_waves, mx, **ov):
     blocks = {"MXBlockA": 32, "MXBlockB": 32} if mx else {"MXBlockA": 0, "MXBlockB": 0}
     return _ks(fuse=fuse, NumWaves=num_waves, ProblemType=blocks, LdsOffsetA_Blk=0x8000,
-               TileProcessingStrategy="StreamK", WorkAssignment="StaticGrid")
+               TileProcessingStrategy="StreamK", WorkAssignment="StaticGrid", **ov)
 
 
 def _pap_set_calls(kernel, entry, monkeypatch):
@@ -1945,17 +1946,21 @@ def _expected_pap_calls(fuse, mx, steps, tail):
     return [[(step,) + pair for step in steps for pair in pairs] + tail(None)] + ([[]] if mx else [])
 
 
+@pytest.mark.parametrize("stagger_u", [0, 32])
 @pytest.mark.parametrize("fuse, num_waves, mx, owners", _PAP_SET_CELLS)
-def test_pap_refresh_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse, num_waves, mx, owners):
+def test_pap_refresh_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse, num_waves, mx, owners, stagger_u):
     """The scale pair of a separate-set row is refreshed on the A/B call, each bank restored once."""
-    kernel = _pap_set_kernel(fuse, num_waves, mx)
+    kernel = _pap_set_kernel(fuse, num_waves, mx, StaggerU=stagger_u)
     assert _PapSetRefreshWriter().papTdmDescriptorSetOwners(kernel) == owners
     out = _pap_set_calls(kernel, kwa_module.KernelWriterAssembly.papTdmUpdateDescriptor, monkeypatch)
-    expected = _expected_pap_calls(fuse, mx, ("init", "offset", "k offset"), lambda pair: [])
+    incremental = kwa_module.KernelWriterAssembly.papTdmSupportsIncrementalUpdate(kernel)
+    expected = _expected_pap_calls(fuse, mx, ("update" if incremental else "init", "offset", "k offset"), lambda pair: [])
     assert [calls for calls, _ in out] == expected
     restored = [re.findall(r"s_add_u32 s\[sgprtdm(\w+)Group0\+1\][^\n]*restore PAP LDS bank", text)
                 for _, text in out]
-    if fuse == 0:
+    if incremental:
+        assert restored == [[]] + ([[]] if mx else [])
+    elif fuse == 0:
         assert restored == [["A"]] + ([["MXSA"]] if mx else [])
     else:
         assert restored == [owners] + ([[]] if mx else [])
@@ -2057,11 +2062,37 @@ def test_pap_moves_each_descriptor_set_once(_gp_gfx1250, gfx1250_iim, assembler,
             # LdsOffsetA_Blk == 0 folds the bank helpers out: no set has a bank to move to.
             assert not [line for line in asm.splitlines() if any(c in line for c in comments)], comments
             continue
+        if (comments == _NON_IDEMPOTENT_BANK_SITES["papTdmUpdateDescriptor"]
+                and kwa_module.KernelWriterAssembly.papTdmSupportsIncrementalUpdate(sol)):
+            # Incremental refresh preserves each bank in place.
+            assert not hits
+            assert "PAP: re-enable TDM for the next tile" in asm
+            continue
         counts = {reg: hits.count(reg) for reg in hits}
         assert set(counts) == allocated, (comments, sorted(counts), sorted(allocated))
         assert len(set(counts.values())) == 1 and (not once or set(counts.values()) == {1}), (comments, counts)
     undefined = sorted(s for s in set(re.findall(r"\bsgprtdm\w*Incs\b", asm)) if resolved.get(s) is None)
     assert not undefined, "referenced with no .set: %s" % undefined
+
+
+@pytest.mark.parametrize("cell", [dict(TDMFuse=0), dict(_NO_MX_EMIT, TDMFuse=0)], ids=["mx", "bf16"])
+def test_pap_rebuilds_current_descriptors_only_at_tail_entry(_gp_gfx1250, gfx1250_iim, assembler, capsys, cell):
+    """The NLL handoff leaves the next tile's descriptors in place; tail entry rebuilds the current tile's."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, **cell)
+    assert asm, "rejected or not emitted: %r" % capsys.readouterr().out
+    assert not sol.get("NoTailLoop") and not sol.get("HalfPLR")
+    refresh = "recompute WaveIdx for PAP TDM descriptor refresh"
+    handoff = asm.rindex("first PGR group for next persistent iter prefetched")
+    rebuild = asm.index("did PAP actually prefetch a persistent tile?", handoff)
+    assert refresh not in asm[handoff:rebuild]
+    done = re.search(r"^label_PapTailDescriptorDone\w*:", asm[rebuild:], re.M)
+    assert done, "tail descriptor reset has no join label"
+    tail = asm[rebuild:rebuild + done.start()]
+    assert tail.count(refresh) == 1
+    assert "Apply StreamK tail K-offset to TDM global addr" in tail
+    if sol.get("LdsOffsetA_Blk"):
+        assert "tail uses opposite physical LDS bank" in tail
+        assert "set TDM tail write bank opposite PAP" in tail
 
 
 _RAP_NO_MX = dict(_NO_MX_EMIT, ReuseAcrossPersistent=1, AssertSummationElementMultiple=128)

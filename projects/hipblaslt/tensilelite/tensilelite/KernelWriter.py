@@ -3805,7 +3805,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #   Borrowed state: current tile identity, descriptors/shadow limits,
     #   StaggerU registers, and LDS bank/descriptor state needed when current
     #   NLL or tail code resumes. Each borrowed group must be restored before
-    #   leaving this handoff or by the caller immediately after it.
+    #   leaving this handoff or by the caller immediately after it. TDM
+    #   descriptors are the exception: nothing reads them before tail entry
+    #   rebuilds them (papResetTDMDescriptorForTailWaveSeparated).
     tensorParameters1st, tensorParameters2nd = self._dcpThickThinIssueOrder(
       kernel, tensorParametersA, tensorParametersB)
     if not self._dcpDivergent(kernel) and self.isSwapGlobalReadOrderForDtvOrDtl(kernel, prefetch1=True):
@@ -13044,7 +13046,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def papTdmUpdateDescriptor(self, kernel, tPA, tPB, preservePapBank=True) -> Module:
+  def papTdmUpdateDescriptor(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papTdmSaveLdsBank(self, kernel) -> Module:
