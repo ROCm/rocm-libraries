@@ -89,6 +89,11 @@
 # blas2/my_arch/plots_roofline/*.png and a roofline_*.csv with the percentage of the ceiling for every result
 ./benchmark_plot.sh --benchmark false --plot true  --level1 false --level2 true --level3 false --tag1 my_arch --roofline true
 
+     The roofline mode also writes bandwidth_*.png: the best achieved bandwidth of each function and precision
+     (GFLOP/s / arithmetic intensity, also in the achieved_gbps column of roofline_*.csv) against the bandwidth
+     ceiling. Only bandwidth-bound results count: compute-bound ones (all of BLAS3, and FP64 BLAS2 on parts with a
+     low FP64 peak) and cache-resident ones are left out, so BLAS3 gets no bandwidth chart.
+
 # --achievable-bw-frac <f> also draws the bandwidth line at a fraction of the ceiling, for example a measured
 # achievable fraction for the part
 

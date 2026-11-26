@@ -333,7 +333,8 @@ def test_plot_roofline_writes_csv_and_figures(data_root):
               '-f', 'gemv', '-f', 'ger', '-f', 'hemv', '-f', 'tbmv', '--achievable-bw-frac', '0.65')
     assert r.returncode == 0, r.stderr
     out = data_root / 'blas2' / 'gfx90a' / 'plots_roofline'
-    assert len(list(out.glob('*.png'))) == 4
+    assert len(list(out.glob('roofline_*.png'))) == 4
+    assert (out / 'bandwidth_gemv_ger_hemv_tbmv.png').is_file()
     lines = (out / 'roofline_gemv_ger_hemv_tbmv.csv').read_text().splitlines()
     header = lines[0].split(',')
     rows = [dict(zip(header, line.split(','))) for line in lines[1:]]
@@ -343,6 +344,8 @@ def test_plot_roofline_writes_csv_and_figures(data_root):
     assert any(row['cache_resident'] == 'True' for row in rows)
     # results benchmarked without HIPBLAS_BENCH_FREQ have no clocks
     assert all(row['sclk_mhz'] == '' and row['mclk_mhz'] == '' for row in rows)
+    for row in rows:
+        assert float(row['achieved_gbps']) == pytest.approx(float(row['gflops']) / float(row['ai']), abs=0.1)
 
 
 def test_plot_draws_every_precision_any_function_has(tmp_path):
@@ -542,3 +545,18 @@ def test_gemm_transposes_share_one_chart_per_datatype(tmp_path, monkeypatch):
     sgemm = [l for l in charts['gemm_f32_r']['legend'] if l.startswith('sgemm')]
     assert len(sgemm) == 2
     assert any('transA=N, transB=N' in l for l in sgemm) and any('transA=N, transB=T' in l for l in sgemm)
+
+
+def test_bandwidth_chart_keeps_the_best_bandwidth_bound_result_per_series():
+    import plot
+    def point(series, gbps, bound=True, resident=False):
+        return {'series': series, 'achieved_gbps': gbps, 'bandwidth_bound': bound, 'cache_resident': resident}
+    points = {
+        'f32_r': [point('gemv', 900), point('gemv', 1200), point('gemv', 5000, resident=True),
+                  point('axpy', 1100)],
+        # compute bound under the FP64 peak: bandwidth does not limit it
+        'f64_r': [point('gemv', 2000, bound=False)],
+        'f32_c': [point('gemm NT', 300, bound=False)],
+    }
+    assert plot.best_bandwidth(points) == [('sgemv', 1200), ('saxpy', 1100)]
+

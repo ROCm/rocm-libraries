@@ -342,7 +342,8 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
     """
     One log-log roofline per compute_type for the functions in dir1: arithmetic intensity from
     perf_model on x, measured GFLOP/s on y, under the bandwidth and compute ceilings in
-    machine_spec_dict. Also writes roofline.csv with every plotted point.
+    machine_spec_dict. Also writes roofline.csv with every plotted point, and the best achieved
+    bandwidth of each function against the bandwidth ceiling (bandwidth_*.png).
     """
     gbps, peaks = machine_ceilings(machine_spec_dict)
     gbps_published = machine_spec_dict.get('GBps')
@@ -368,6 +369,8 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
                 continue
             gflops = float(row['hipblas-Gflops'])
             sclk, mclk = perf_model.result_clocks(row)
+            gbps_row, peaks_row = machine_ceilings(machine_spec_dict, row)
+            peak_row = (peaks_row or {}).get(perf_model.PRECISIONS[prec][3])
             points.setdefault(prec, []).append({
                 'function': funcname,
                 'transA': row.get('transA', ''), 'transB': row.get('transB', ''),
@@ -375,7 +378,10 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
                 'M': row.get('M', ''), 'N': row.get('N', ''), 'K': row.get('K', ''),
                 'ai': ai,
                 'gflops': gflops,
-                'ceiling': perf_model.ceiling_gflops(funcname, prec, row, *machine_ceilings(machine_spec_dict, row)),
+                'ceiling': perf_model.ceiling_gflops(funcname, prec, row, gbps_row, peaks_row),
+                'achieved_gbps': round(gflops / ai, 1) if ai else 0.0,
+                # the bandwidth term is the ceiling, so memory bandwidth limits this result
+                'bandwidth_bound': bool(gbps_row) and not (peak_row and ai * gbps_row > peak_row),
                 'footprint_bytes': perf_model.footprint_bytes(funcname, prec, row),
                 'cache_resident': is_cache_resident(funcname, prec, row, machine_spec_dict),
                 'sclk_mhz': sclk or '', 'mclk_mhz': mclk or '',
@@ -399,7 +405,7 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
     stem = "_".join(function_names)
     with open(os.path.join(savedir, f"roofline_{stem}.csv"), 'w') as csv_out:
         columns = ['function', 'compute_type', 'transA', 'transB', 'M', 'N', 'K', 'ai', 'gflops', 'ceiling',
-                   'pct_of_ceiling', 'footprint_bytes', 'cache_resident', 'sclk_mhz', 'mclk_mhz']
+                   'pct_of_ceiling', 'achieved_gbps', 'footprint_bytes', 'cache_resident', 'sclk_mhz', 'mclk_mhz']
         csv_out.write(",".join(columns) + "\n")
         for prec in sorted(points):
             for pt in points[prec]:
@@ -464,6 +470,55 @@ def plot_roofline(dir1, function_names, machine_spec_dict, savedir, title, achie
         finish_chart(axes)
         axes.set_title(f"{title}  {prec}")
         save_chart(figure, os.path.join(savedir, f"roofline_{stem}_{prec}"))
+
+    plot_bandwidth(best_bandwidth(points), gbps, gbps_published, savedir, stem, title,
+                   per_result=machine_spec_dict.get('per_result_mclk'))
+
+
+def best_bandwidth(points):
+    """
+    [(label, GB/s)], highest first: the best achieved bandwidth of each series (function and
+    precision, e.g. sgemv) over its bandwidth-bound results. Compute-bound results are left out, since
+    bandwidth does not limit them, and so are cache-resident ones, which measure cache bandwidth.
+    """
+    best = {}
+    for prec, pts in points.items():
+        for pt in pts:
+            if not pt['bandwidth_bound'] or pt['cache_resident']:
+                continue
+            label = perf_model.PRECISIONS[prec][0] + pt['series']
+            best[label] = max(best.get(label, 0.0), pt['achieved_gbps'])
+    return sorted(best.items(), key=lambda item: item[1], reverse=True)
+
+
+def plot_bandwidth(entries, gbps, gbps_published, savedir, stem, title, per_result=False):
+    """Horizontal bars of the best achieved bandwidth per series against the bandwidth ceiling."""
+    if not entries or not gbps:
+        print("plot.py --roofline: no bandwidth-bound results, no bandwidth chart")
+        return
+    labels = [label for label, _ in reversed(entries)]
+    values = [value for _, value in reversed(entries)]
+    figure, axes = new_chart(len(entries))
+    color = series_styles(1)[0][0]
+    bars = axes.barh(labels, values, color=color, height=0.7)
+    for bar, value in zip(bars, values):
+        axes.text(value, bar.get_y() + bar.get_height() / 2, f"  {value:,.0f}", va='center', fontsize=10)
+    axes.axvline(gbps, color='black', linewidth=2,
+                 label=f"bandwidth ceiling{' at median clock' if per_result else ''} ({gbps:,.0f} GB/s)")
+    if gbps_published and gbps_published != gbps:
+        axes.axvline(gbps_published, color='gray', linestyle='--', linewidth=1,
+                     label=f"published bandwidth ({gbps_published:,.0f} GB/s)")
+    axes.set_xlim(0, 1.12 * max([gbps, gbps_published or 0] + values))
+    axes.set_xlabel('best achieved bandwidth, GB/s (GFLOP/s / arithmetic intensity)')
+    axes.minorticks_on()
+    axes.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    axes.grid(True, axis='x', which='major', linewidth=0.7, alpha=0.7)
+    axes.grid(True, axis='x', which='minor', linestyle=':', linewidth=0.5, alpha=0.5)
+    axes.set_axisbelow(True)
+    axes.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), borderaxespad=0.)
+    axes.set_title(f"Best achieved bandwidth {title.replace('Roofline ', '', 1)}  (bandwidth-bound results, "
+                   "cache-resident ones left out)")
+    save_chart(figure, os.path.join(savedir, f"bandwidth_{stem}"))
 
 
 def get_function_name(filename):
