@@ -161,7 +161,7 @@ def test_grad_route_mask_requires_grad_override_wins_over_mask_attribute():
     # mask carries it. The caller-supplied override must still force native,
     # not the (stale) attribute on the tensor actually passed in -- otherwise
     # a reentrant checkpoint's no-grad first pass would route differently
-    # from its grad-enabled recompute (M9/D1).
+    # from its grad-enabled recompute.
     q, k, v = _qkv(requires_grad=False)
     mask = _FakeTensor((128, 128), requires_grad=False, floating=True)
     route, reason = _grad_route(
@@ -214,6 +214,39 @@ def test_grad_route_deterministic_warn_only_still_routes():
         **_route_kwargs(grad_enabled=True, deterministic=True, warn_only=True),
     )
     assert route == "grad"
+    assert reason == ""
+
+
+def test_grad_route_deterministic_at_dropout_whatever_grad_mode():
+    # Mirrors the mask-requires-grad precedent: at p > 0 a reentrant
+    # checkpoint's no-grad first pass and its grad-enabled recompute must
+    # decide identically, so deterministic mode forces native regardless of
+    # grad_enabled whenever dropout_p > 0.
+    q, k, v = _qkv()
+    route, reason = _grad_route(
+        q,
+        k,
+        v,
+        None,
+        0.1,
+        **_route_kwargs(grad_enabled=False, deterministic=True, warn_only=False),
+    )
+    assert (route, reason) == ("native", "grad: deterministic algorithms")
+
+
+def test_grad_route_deterministic_plain_call_unaffected():
+    # p == 0, grad mode off, nothing requires grad: never grad-eligible in
+    # the first place, so the deterministic check is never reached.
+    q, k, v = _qkv()
+    route, reason = _grad_route(
+        q,
+        k,
+        v,
+        None,
+        0.0,
+        **_route_kwargs(grad_enabled=False, deterministic=True, warn_only=False),
+    )
+    assert route == "plain"
     assert reason == ""
 
 

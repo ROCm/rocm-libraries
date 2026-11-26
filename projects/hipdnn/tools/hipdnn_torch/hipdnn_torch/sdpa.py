@@ -248,7 +248,7 @@ def _grad_route(
         return "native", "compile: tracing"
     if mask_requires_grad:
         return "native", "grad: attn_mask requires grad"
-    if grad_enabled and deterministic and not warn_only:
+    if (grad_enabled or dropout_p > 0) and deterministic and not warn_only:
         return "native", "grad: deterministic algorithms"
 
     for t in (q, k, v):
