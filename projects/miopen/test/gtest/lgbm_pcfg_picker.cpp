@@ -70,8 +70,10 @@ protected:
 
     void SetUp() override
     {
-        if(!meta.IsReady())
-            GTEST_SKIP() << "lgbm_pcfg metadata unavailable; picker disabled in this build";
+        // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing
+        // model asset is a packaging fault and must fail, not skip.
+        ASSERT_TRUE(meta.IsReady())
+            << "lgbm_pcfg.bin not found in " << miopen::GetSystemDbPath().string();
     }
 };
 
@@ -334,7 +336,7 @@ protected:
 
 TEST_P(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
 {
-    std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict, gfx950;
+    std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict, gfx950, gfx950_strict;
     try
     {
         base          = MakeHandle("gfx1250");
@@ -342,6 +344,7 @@ TEST_P(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
         unseen        = MakeHandle("gfx9999");
         unseen_strict = MakeHandle("gfx9999-strict");
         gfx950        = MakeHandle("gfx950");
+        gfx950_strict = MakeHandle("gfx950-strict");
     }
     catch(const std::exception& e)
     {
@@ -352,12 +355,20 @@ TEST_P(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
 
     const auto default_desc = [] { return std::string{}; };
 
-    // ConvHipImplicitGemmGroupFwdXdlops has a gfx_code feature and a gfx1250|1|fp16 bucket, and
-    // the two-tower model does not cover gfx1250, so PickConfig ranks the bucket on both names.
+    // ConvHipImplicitGemmGroupFwdXdlops has a gfx_code feature and a gfx1250|1|fp16 bucket, but
+    // the two-tower model covers it on gfx1250 (TwoTowerCoversSolver), so PickConfig defers to it
+    // and returns nothing, on the base name and on the strict name alike. The bucket exists, so
+    // an empty result comes from the deferral and not from a missing bucket. Every other solver
+    // with a gfx_code feature and a gfx1250 bucket is covered too, so the ranking path is checked
+    // on gfx950 with ConvHipConv below.
     const std::string solver = "ConvHipImplicitGemmGroupFwdXdlops";
     const auto* model        = meta.Find(solver);
     ASSERT_NE(model, nullptr);
     ASSERT_TRUE(model->has_gfx_code);
+    ASSERT_NE(model->buckets.find("gfx1250|1|fp16"), model->buckets.end());
+    const auto strict_key =
+        BucketKey("gfx1250-strict", miopen::conv::Direction::Forward, miopenHalf);
+    ASSERT_NE(model->buckets.find(strict_key), model->buckets.end());
 
     // n, c, k, hw, fil, groups
     const std::vector<std::array<int, 6>> shapes = {{16, 64, 64, 56, 3, 2},
@@ -367,17 +378,20 @@ TEST_P(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
     for(const auto& s : shapes)
     {
         const auto problem = MakeProblem(miopenHalf, s[0], s[1], s[2], s[3], s[4], s[5]);
-        const auto ranked  = PickConfig(solver, problem, *base, default_desc);
-        ASSERT_FALSE(ranked.empty()) << "gfx1250 bucket must be ranked";
-        EXPECT_EQ(ranked.size(), model->buckets.at("gfx1250|1|fp16").size());
-        EXPECT_EQ(PickConfig(solver, problem, *strict, default_desc), ranked);
+        EXPECT_TRUE(PickConfig(solver, problem, *base, default_desc).empty())
+            << "two-tower must take precedence on gfx1250";
+        EXPECT_TRUE(PickConfig(solver, problem, *strict, default_desc).empty())
+            << "gfx1250-strict must defer like gfx1250";
 
         // No bucket for an unknown arch, with or without the suffix: abstain.
         EXPECT_TRUE(PickConfig(solver, problem, *unseen, default_desc).empty());
         EXPECT_TRUE(PickConfig(solver, problem, *unseen_strict, default_desc).empty());
 
-        // ConvHipConv is held out on gfx1250 for every name, and picks on gfx950.
-        EXPECT_FALSE(PickConfig("ConvHipConv", problem, *gfx950, default_desc).empty());
+        // ConvHipConv has a gfx_code feature, is not covered by the two-tower and is held out
+        // on gfx1250 for every name. On gfx950 it ranks its bucket, on both names.
+        const auto picked = PickConfig("ConvHipConv", problem, *gfx950, default_desc);
+        ASSERT_FALSE(picked.empty()) << "gfx950 bucket must be ranked";
+        EXPECT_EQ(PickConfig("ConvHipConv", problem, *gfx950_strict, default_desc), picked);
         EXPECT_TRUE(PickConfig("ConvHipConv", problem, *base, default_desc).empty());
         EXPECT_TRUE(PickConfig("ConvHipConv", problem, *strict, default_desc).empty());
     }
@@ -393,13 +407,14 @@ using CPU_LgbmPcfgForest_NONE = ::testing::TestWithParam<int>;
 TEST_P(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
 {
     const auto& meta = LgbmPcfgMetadata::Get();
-    if(!meta.IsReady())
-        GTEST_SKIP() << "lgbm_pcfg metadata unavailable; picker disabled in this build";
+    // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing model or
+    // fixture is a packaging fault and must fail, not skip.
+    ASSERT_TRUE(meta.IsReady()) << "lgbm_pcfg.bin not found in "
+                                << miopen::GetSystemDbPath().string();
 
     const auto gpath = miopen::GetSystemDbPath() / "lgbm_pcfg_golden.json";
-    if(!miopen::fs::exists(gpath))
-        GTEST_SKIP() << "pcfg golden fixture not installed in "
-                     << miopen::GetSystemDbPath().string();
+    ASSERT_TRUE(miopen::fs::exists(gpath)) << "golden fixture lgbm_pcfg_golden.json not found in "
+                                           << miopen::GetSystemDbPath().string();
     nlohmann::json golden;
     std::ifstream(gpath.string()) >> golden;
 
@@ -707,7 +722,7 @@ TEST_P(CPU_LgbmPcfgDefaultMargin_NONE, KeepAboveDefaultMargin)
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgPicker_NONE, ::testing::Values(0));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LgbmPcfgPickerStrictArch_FP16, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_LgbmPcfgPickerStrictArch_FP16, ::testing::Values(0));
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgForest_NONE, ::testing::Values(0));
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgMetadata_NONE, ::testing::Values(0));
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgHoldOut_NONE, ::testing::Values(0));

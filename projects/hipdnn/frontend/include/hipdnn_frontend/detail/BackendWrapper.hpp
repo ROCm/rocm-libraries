@@ -59,6 +59,17 @@ inline std::optional<hipdnn_data_sdk::utilities::Version> checkBackendVersion(co
     return backendVersion;
 }
 
+// Reason an IncompatibleBackendWrapper reports when the backend's version string is missing,
+// malformed, or of a different major version than the frontend.
+inline std::string incompatibleBackendVersionReason(const char* version)
+{
+    return "hipDNN backend version '" + std::string(version != nullptr ? version : "(missing)")
+           + "' is not compatible with hipDNN frontend version "
+           + std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR) + "."
+           + std::to_string(HIPDNN_FRONTEND_VERSION_MINOR) + "."
+           + std::to_string(HIPDNN_FRONTEND_VERSION_PATCH);
+}
+
 #ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
 
 // Attempts to create a direct-link backend interface, falling back to
@@ -69,7 +80,8 @@ inline std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(const char* vers
     auto backendVersion = checkBackendVersion(version);
     if(!backendVersion)
     {
-        return std::make_shared<IncompatibleBackendWrapper>();
+        return std::make_shared<IncompatibleBackendWrapper>(
+            incompatibleBackendVersionReason(version));
     }
 
     return std::make_shared<HipdnnDirectBackendWrapper>(*backendVersion);
@@ -85,7 +97,9 @@ inline std::shared_ptr<IHipdnnBackend> tryToUseDynamicBackendInterface()
     if(backendLibraryHandle() == nullptr)
     {
         HIPDNN_FE_LOG_ERROR("Failed to load hipDNN backend library for runtime backend loading");
-        return std::make_shared<IncompatibleBackendWrapper>();
+        return std::make_shared<IncompatibleBackendWrapper>(
+            "failed to load the hipDNN backend library; tried:"
+            + backendLibraryResolution().diagnostics);
     }
 
     // Resolve the version string without an instance so the version can be
@@ -99,7 +113,8 @@ inline std::shared_ptr<IHipdnnBackend> tryToUseDynamicBackendInterface()
     auto backendVersion = checkBackendVersion(version);
     if(!backendVersion)
     {
-        return std::make_shared<IncompatibleBackendWrapper>();
+        return std::make_shared<IncompatibleBackendWrapper>(
+            incompatibleBackendVersionReason(version));
     }
 
     return std::make_shared<HipdnnDynamicBackendWrapper>(*backendVersion);
