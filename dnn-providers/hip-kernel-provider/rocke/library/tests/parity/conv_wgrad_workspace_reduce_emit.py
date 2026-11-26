@@ -25,6 +25,11 @@
 #   18-21 -- both engines must reject: ws_bf16 on the scalar fold, slab_par
 #         without fold_loop, vec=32 and fold_loop=128 (past the widest vector
 #         and the deepest loop the folds hold)
+#   22-28 -- bias (the forward split_det 3 fold of a conv + bias forward:
+#         wg_M = 144 GEMM rows, wg_N = 96 output channels): the scalar, vector
+#         and looped folds (22-26: bf16 scalar R=3, bf16 vec 4 R=3, fp16
+#         fold_loop + slab_par, fp32 vec 2, bf16 fold_loop with a remainder);
+#         27-28 (grouped, rezero) both engines must reject
 from kernels.common.conv_wgrad_workspace_reduce import (
     WgradReduceSpec,
     build_conv_wgrad_workspace_reduce,
@@ -148,6 +153,30 @@ def _spec(idx: int):
         kw = dict(dtype_d="bf16")
         kw.update(_v[idx])
         return WgradReduceSpec(problem=_make_problem(64, 576), **kw), "gfx942"
+    # bias: the forward split_det 3 fold. Keep in lockstep with the C emitter.
+    _b = {
+        22: (dict(ws_replicas=3), "gfx942"),
+        23: (dict(vec=4, ws_replicas=3), "gfx942"),
+        24: (
+            dict(
+                dtype_d="fp16",
+                vec=4,
+                ws_replicas=10,
+                fold_loop=4,
+                slab_par=2,
+                tile_m=1,
+            ),
+            "gfx950",
+        ),
+        25: (dict(dtype_d="fp32", vec=2, ws_replicas=2), "gfx950"),
+        26: (dict(vec=4, ws_replicas=9, fold_loop=4), "gfx942"),
+        27: (dict(vec=4, ws_replicas=3, groups=2), "gfx942"),
+        28: (dict(vec=4, ws_replicas=3, rezero=1), "gfx942"),
+    }
+    if idx in _b:
+        kw = dict(dtype_d="bf16", bias=True)
+        kw.update(_b[idx][0])
+        return WgradReduceSpec(problem=_make_problem(144, 96), **kw), _b[idx][1]
     raise SystemExit(f"unknown config index {idx}")
 
 

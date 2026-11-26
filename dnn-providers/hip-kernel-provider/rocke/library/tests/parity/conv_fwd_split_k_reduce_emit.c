@@ -22,6 +22,10 @@
  *   8  bf16, vec 4, runtime slab loop, gfx950
  *   9  vec 3 (rejected by both engines)
  *   10 dtype_d NULL (rejected by both engines, not defaulted)
+ *   11 bias, bf16, vec 4, runtime slab loop, gfx1250
+ *   12 bias, fp16, vec 1 (scalar store), runtime slab loop, gfx950
+ *   13 bias, bf16, vec 4, unrolled fold, degree 4, gfx950
+ *   14 bias, fp16, vec 2, unrolled fold, degree 3, gfx942
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +47,7 @@ static int make_cfg(int idx, rocke_fwd_split_k_reduce_spec_t* spec, const char**
         int block_size;
         int degree;
         const char* arch;
+        bool bias;
     } kCfgs[] = {
         {"bf16", 4, 256, 0, "gfx1250"},
         {"fp16", 4, 256, 0, "gfx1250"},
@@ -55,6 +60,10 @@ static int make_cfg(int idx, rocke_fwd_split_k_reduce_spec_t* spec, const char**
         {"bf16", 4, 256, 0, "gfx950"},
         {"bf16", 3, 256, 0, "gfx1250"},
         {NULL, 4, 256, 0, "gfx1250"},
+        {"bf16", 4, 256, 0, "gfx1250", true},
+        {"fp16", 1, 256, 0, "gfx950", true},
+        {"bf16", 4, 256, 4, "gfx950", true},
+        {"fp16", 2, 256, 3, "gfx942", true},
     };
     if(idx < 0 || idx >= (int)(sizeof(kCfgs) / sizeof(kCfgs[0])))
         return -1;
@@ -63,6 +72,7 @@ static int make_cfg(int idx, rocke_fwd_split_k_reduce_spec_t* spec, const char**
     spec->vec = kCfgs[idx].vec;
     spec->block_size = kCfgs[idx].block_size;
     spec->degree = kCfgs[idx].degree;
+    spec->bias = kCfgs[idx].bias;
     *arch = kCfgs[idx].arch;
     return 0;
 }

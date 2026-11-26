@@ -628,9 +628,22 @@ def _spec_raw(idx: int):
 #   202-207: gfx942 3-D: fp16 cshuffle, bf16 grouped cshuffle, bf16 32x32
 #            default, epi_quad_xpose 1, the x-halo loop (epi_quad_xpose 4),
 #            epi_store_fast
-#   208-210: split-K (gfx950 workspace split, gfx942 3-D atomic split,
-#            gfx1250 wavelet workspace split): rejected by both engines
+#   208-210: split-K: gfx950 workspace split (the Stage 2 fold adds the
+#            bias), gfx942 3-D atomic split (rejected by both engines),
+#            gfx1250 wavelet workspace split (Stage 2 adds the bias)
 #   211:     192 with an acc_epilogue (scalar bias + relu) after the bias
+#   212-219: the two-stage and cluster split-K forward: gfx1250 WMMA
+#            mem/cshuffle, mem/default, grouped wavelet (Stage 2 adds the
+#            bias); cluster S=4, grouped cluster, cluster mem/default (the
+#            cluster fold adds it); gfx950 MFMA grouped 4-wide, compv3/default
+#            (Stage 2 adds it)
+#   220-224: gfx942 3-D split_det: mode 1, mode 2 + split_tail (the owner's
+#            fold and the whole-K tiles add the bias), mode 2 + split_tail +
+#            m_band, mode 3 (the workspace fold adds it), mode 3 +
+#            split_xcd_remap
+#   225-229: rejected by both engines: the gfx942 3-D atomic split, stream-K,
+#            split_hybrid + split_det 1, split_hybrid + split_det 3, the 2-D
+#            split_atomic
 _BIAS_FIRST = 192
 _BIAS_BASE = {
     192: 0,
@@ -653,6 +666,24 @@ _BIAS_BASE = {
     209: 189,
     210: 40,
     211: 0,
+    212: 41,
+    213: 42,
+    214: 43,
+    215: 44,
+    216: 47,
+    217: 48,
+    218: 68,
+    219: 70,
+    220: 126,  # gfx942 3-D config 94
+    221: 124,  # gfx942 3-D config 92
+    222: 128,  # gfx942 3-D config 96
+    223: 137,  # gfx942 3-D config 105
+    224: 136,  # gfx942 3-D config 104
+    225: 95,  # gfx942 3-D config 63
+    226: 142,  # gfx942 3-D config 110
+    227: 143,  # gfx942 3-D config 111
+    228: 140,  # gfx942 3-D config 108
+    229: 183,  # gfx942 3-D config 151
 }
 
 

@@ -90,7 +90,9 @@ from kernels.conv.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_fwd_problem_block
 from kernels.common.conv_bias import (
     apply_implicit_gemm_conv_bias,
+    conv_bias_rsrc,
     declare_conv_bias_params,
+    load_conv_bias_f32,
 )
 from kernels.common.conv_fwd_split_k_reduce import FwdSplitKReduceSpec
 
@@ -845,7 +847,11 @@ class ImplicitGemmConvSpec:
     # fp32 accumulators before ``acc_epilogue`` and before the single rounding
     # to dtype_d. The vector has K entries in the dtype_d type. Default False
     # leaves the kernel, its name and its ABI unchanged; tags ``cbias`` right
-    # after the acc_epilogue tag.
+    # after the acc_epilogue tag. On a split-K forward the bias is added once,
+    # where the whole sum of an output exists (fwd_bias_stage: the split_det
+    # 1/2 owner, the cluster fold, or the fold kernel of the two-stage split
+    # and split_det 3); the atomic and stream-K forms refuse it
+    # (fwd_bias_conflict).
     bias: bool = False
 
     @property
@@ -2007,15 +2013,49 @@ def fwd_split_det_slots(
     return groups * split_tiles * max(0, split_k - 1)
 
 
+def fwd_bias_stage(spec: "ImplicitGemmConvSpec") -> str:
+    """Where a forward kernel built with ``spec.bias`` adds the bias, or ``""``
+    when it has none. The bias reaches every output exactly once, in fp32,
+    before the single rounding to dtype_d:
+
+    * ``"epilogue"`` -- the unsplit kernel: on the accumulator fragments,
+      before every store path;
+    * ``"owner"`` -- ``split_det`` 1 / 2: the owner of a tile after it folds
+      the other slices' partials (and a ``split_tail`` whole-K tile before its
+      plain store);
+    * ``"cluster"`` -- ``split_k_cluster``: the cluster fold, per 4-channel
+      quad, before the cast;
+    * ``"reduce"`` -- the two-stage workspace split and ``split_det`` 3: the
+      kernel stores raw fp32 partials and its fold kernel adds the bias
+      (``FwdSplitKReduceSpec.bias`` / ``WgradReduceSpec.bias``). The kernel
+      still takes the ``Bias`` / ``Bias_bytes`` tail without reading it, so
+      both launches of the form can share one kernarg block (as the gfx950 AOT
+      split-C form's conv pass and fold do).
+
+    Only meaningful for a spec :func:`fwd_bias_conflict` accepts.
+    """
+    if not spec.bias:
+        return ""
+    if spec.split_k == 1 and not spec.split_k_cluster:
+        return "epilogue"
+    if spec.split_k_cluster:
+        return "cluster"
+    if spec.split_det in (1, 2):
+        return "owner"
+    return "reduce"
+
+
 def fwd_bias_conflict(spec: "ImplicitGemmConvSpec") -> str:
     """Why ``spec.bias`` cannot be honoured, or ``""`` if it can.
 
-    The bias has to reach every output exactly once. The atomic split-K
-    forward (and its stream-K / hybrid forms) adds each slice's partial tile
-    into D with no single owner of the tile, and the workspace split-K forms
-    store raw partial sums that a later fold reduces, so a split forward is
-    refused for now; split_k == -1 (auto) is refused too because it may
-    resolve to one.
+    The bias has to reach every output exactly once (:func:`fwd_bias_stage`).
+    The forms with one owner of each output value take it: the unsplit
+    kernel, ``split_det`` 1 / 2 (the owner's fold), ``split_det`` 3 and the
+    two-stage workspace split (their fold kernel), ``split_k_cluster`` (the
+    cluster fold). Refused: the atomic split-K forward (every slice adds its
+    partial into D, no single owner) and the stream-K / hybrid segment loops
+    (a tile's owner changes with the segment); split_k == -1 (auto) only
+    where it can resolve to the atomic form.
     """
     if not spec.bias:
         return ""
@@ -2025,15 +2065,13 @@ def fwd_bias_conflict(spec: "ImplicitGemmConvSpec") -> str:
                 "bias: the stream-K split-K forward has no single owner of an "
                 "output tile, so the bias cannot be added exactly once"
             )
-        if spec.split_k > 1 and fwd_split_k_atomic(spec) and not spec.split_det:
+        # The form any split degree of this spec builds (fwd_split_k_atomic).
+        atomic = spec.wave_size == 64 and (spec.problem.is_3d or spec.split_atomic)
+        if atomic and not spec.split_det:
             return (
                 "bias: the atomic split-K forward adds every slice into D, so "
-                "the bias cannot be added exactly once; use split_k=1"
+                "the bias cannot be added exactly once; use split_det or split_k=1"
             )
-        return (
-            "bias: the split-K forward reduces raw partial sums after the "
-            "kernel; the bias is not added on that path yet (use split_k=1)"
-        )
     return ""
 
 
@@ -2891,6 +2929,9 @@ def _build_implicit_gemm_conv_impl(
             b.set_cluster_dims(1, 1, spec.split_k_cluster)
     # Per-output-channel bias: the Bias / Bias_bytes tail, after every other
     # kernarg (conv_abi conv_bias_arg_names).
+    # Where the bias is added (fwd_bias_stage): "reduce" forms declare the
+    # tail and leave the add to their fold kernel.
+    _bias_stage = fwd_bias_stage(spec)
     if spec.bias:
         if epilogue_override is not None:
             raise ValueError("bias is not supported with an epilogue_override")
@@ -4910,9 +4951,13 @@ def _build_implicit_gemm_conv_impl(
                                 j += n // 4
                                 new.append(b.fadd(acc, b.vec_pack(parts, F32)))
                             b.scf_yield(*new)
+                        folded = list(fold.results)
+                        if _bias_stage == "owner":
+                            # The whole sum is here: add the bias once.
+                            folded = _apply_bias(folded)
                         epi.store(
                             b,
-                            accs=list(fold.results),
+                            accs=folded,
                             addr_fn=d_addr,
                             d_rsrc=d_rsrc,
                             bounds=(p_M, c_N_bound),
@@ -5005,7 +5050,11 @@ def _build_implicit_gemm_conv_impl(
                     with then_ctx:
                         epi.store(
                             b,
-                            accs=final_accs_in,
+                            accs=(
+                                _apply_bias(final_accs_in)
+                                if _bias_stage == "owner"
+                                else final_accs_in
+                            ),
                             addr_fn=d_addr,
                             d_rsrc=d_rsrc,
                             bounds=(p_M, c_N_bound),
@@ -5135,7 +5184,7 @@ def _build_implicit_gemm_conv_impl(
         )
 
         def _fwd_epilogue_with_acc_transform(accs_in):
-            if spec.bias:
+            if _bias_stage == "epilogue":
                 accs_in = _apply_bias(accs_in)
             _emit_fwd_epilogue(
                 _apply_accumulator_epilogue(b, spec.acc_epilogue, accs_in)
@@ -8223,7 +8272,7 @@ def _build_implicit_gemm_conv_impl(
         )
 
     # ---- epilogue ----
-    if spec.bias:
+    if _bias_stage == "epilogue":
         final_accs = _apply_bias(final_accs)
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
     if epilogue_override is not None:
@@ -8246,6 +8295,11 @@ def _build_implicit_gemm_conv_impl(
                 k_base=k_out_group_base,
                 ws=p_ws,
                 D=D,
+                bias=(
+                    (p_bias, p_bias_bytes, ir_dtype_d)
+                    if _bias_stage == "cluster"
+                    else None
+                ),
             )
     if (spec.split_streamk or spec.split_hybrid) and spec.split_k > 1:
         # The next segment's prologue rewrites the LDS the epilogue staged C in.
@@ -8270,6 +8324,7 @@ def _emit_cluster_fold(
     k_base,
     ws,
     D,
+    bias=None,
 ) -> None:
     """Fold the cluster's S slabs of this tile into D (``split_k_cluster``).
 
@@ -8278,9 +8333,16 @@ def _emit_cluster_fold(
     packed ``[M][K]``; :func:`fwd_split_k_cluster_problem_reason` requires
     K % 4 == 0 and kpg % 4 == 0 at build and launch admission, so a quad
     whose first channel is in bounds lies wholly in its group).
+
+    ``bias`` (``(Bias, Bias_bytes, elem)`` of a bias kernel, else None): the
+    quad's ``bias[k_out .. k_out + 3]`` is added to the folded sum in fp32,
+    before the cast -- the one place the whole sum of an output exists.
     """
     from rocke.helpers.io import pack_f32_to
 
+    if bias is not None:
+        bias_rsrc = conv_bias_rsrc(b, bias[0], bias[1])
+        bias_c0 = b.const_i32(0)
     S = spec.split_k_cluster
     rows = -(-block_m // S)
     quads_per_row = block_n // 4
@@ -8310,6 +8372,20 @@ def _emit_cluster_fold(
             tot = parts[0]
             for pp in parts[1:]:
                 tot = [b.fadd(x, y) for x, y in zip(tot, pp)]
+            if bias is not None:
+                tot = [
+                    b.fadd(
+                        x,
+                        load_conv_bias_f32(
+                            b,
+                            bias_rsrc,
+                            k_out if i == 0 else b.add(k_out, b.const_i32(i)),
+                            bias[2],
+                            bias_c0,
+                        ),
+                    )
+                    for i, x in enumerate(tot)
+                ]
             b.global_store_vN(D, off, pack_f32_to(b, tot, dtype=spec.data.dtype_d), 4)
 
 

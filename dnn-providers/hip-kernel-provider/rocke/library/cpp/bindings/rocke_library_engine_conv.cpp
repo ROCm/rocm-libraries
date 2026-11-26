@@ -2612,6 +2612,9 @@ rocke_fwd_split_k_reduce_spec_t conv_fwd_split_k_reduce_build_spec(const py::dic
     /* The unrolled fold bakes the slab count: it must match the launch's
      * ks_count, so it is parsed rather than left at the runtime-loop default. */
     s.degree = dict_int(d, "degree", s.degree);
+    /* The bias variant adds a K / Bias / Bias_bytes tail: dropping it would
+     * build a kernel with a shorter ABI than the launch packs. */
+    s.bias = dict_bool(d, "bias", s.bias);
     {
         std::string v;
         if(dict_str(d, "dtype_d", v))

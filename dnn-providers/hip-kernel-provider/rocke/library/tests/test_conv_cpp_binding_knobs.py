@@ -57,14 +57,17 @@ _FWD = (
     178,
     180,
     192,
+    208,
     211,
+    220,
 )
 _DGRAD = (1, 8, 34, 50, 52, 87, 101, 116, 127, 128, 129, 130, 147, 151, 152)
 _WGRAD = (10, 17, 18, 20, 22, 33, 114, 117, 133, 139, 140, 141, 142, 143, 144)
 # Stage 2 fold configs that build: the scalar folds and the vector / looped
-# ones (vec, rezero, ws_bf16, fold_loop, slab_par); 16-21 both engines refuse.
-_REDUCE = tuple(range(16))
-_REDUCE_REFUSED = (16, 17, 18, 19, 20, 21)
+# ones (vec, rezero, ws_bf16, fold_loop, slab_par), and their bias forms
+# (the forward split_det 3 fold, 22-26); 16-21 and 27-28 both engines refuse.
+_REDUCE = tuple(range(16)) + (22, 23, 24, 25, 26)
+_REDUCE_REFUSED = (16, 17, 18, 19, 20, 21, 27, 28)
 
 # Non-default spec fields some emitter config sets but no config of the cover
 # above does: they are set only by configs left out of the cover (configs

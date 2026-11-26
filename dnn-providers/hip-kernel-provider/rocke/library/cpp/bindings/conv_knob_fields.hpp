@@ -148,6 +148,7 @@
     X_INT(rezero)                                          \
     X_BOOL(ws_bf16)                                        \
     X_INT(fold_loop)                                       \
-    X_INT(slab_par)
+    X_INT(slab_par)                                        \
+    X_BOOL(bias)
 
 #endif /* ROCKE_BINDINGS_CONV_KNOB_FIELDS_HPP */

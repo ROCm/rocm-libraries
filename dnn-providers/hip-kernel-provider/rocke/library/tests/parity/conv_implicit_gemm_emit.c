@@ -1411,12 +1411,13 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
 
 /* Per-output-channel bias (spec.bias): an existing config, by index, built
  * with bias = true. Mirrors _bias_spec() / _BIAS_BASE in
- * conv_implicit_gemm_emit.py (192-211; see the map there). */
+ * conv_implicit_gemm_emit.py (192-229; see the map there). */
 #define BIAS_FIRST 192
 static int make_cfg_bias(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     static const int base[]
-        = {0, 1, 22, 37, 33, 35, 34, 39, 32, 54, 86, 87, 88, 186, 146, 168, 49, 189, 40, 0};
+        = {0, 1,  22, 37, 33, 35, 34, 39, 32, 54,  86,  87,  88,  186, 146, 168, 49,  189, 40,
+           0, 41, 42, 43, 44, 47, 48, 68, 70, 126, 124, 128, 137, 136, 95,  142, 143, 140, 183};
     const int n = (int)(sizeof(base) / sizeof(base[0]));
     if(idx < BIAS_FIRST || idx >= BIAS_FIRST + n)
         return -1;

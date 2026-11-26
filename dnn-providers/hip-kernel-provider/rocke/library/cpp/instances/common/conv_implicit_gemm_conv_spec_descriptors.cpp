@@ -1189,9 +1189,28 @@ bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
     return true;
 }
 
-/* fwd_bias_conflict(spec): the bias reaches every output exactly once, so a
- * split-K forward is refused for now (split_k == -1 too: it may resolve to
- * one). */
+/* fwd_bias_stage(spec): where a bias kernel adds its bias. The "reduce"
+ * forms store raw fp32 partials and leave the add to their fold kernel
+ * (conv_fwd_split_k_reduce / conv_wgrad_workspace_reduce with bias), yet
+ * still take the Bias / Bias_bytes tail, so both launches can share one
+ * kernarg block. */
+rocke_conv_bias_stage_t rocke_conv_fwd_bias_stage(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    if(!s->bias)
+        return ROCKE_CONV_BIAS_NONE;
+    if(s->split_k == 1 && !s->split_k_cluster)
+        return ROCKE_CONV_BIAS_EPILOGUE;
+    if(s->split_k_cluster)
+        return ROCKE_CONV_BIAS_CLUSTER;
+    if(s->split_det == 1 || s->split_det == 2)
+        return ROCKE_CONV_BIAS_OWNER;
+    return ROCKE_CONV_BIAS_REDUCE;
+}
+
+/* fwd_bias_conflict(spec): the bias reaches every output exactly once, so
+ * the forms without one owner of an output value are refused: the atomic
+ * split-K (whatever degree split_k == -1 resolves to) and the stream-K /
+ * hybrid segment loops. */
 bool rocke_conv_fwd_bias_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             char* reason,
                             size_t reason_cap)
@@ -1205,15 +1224,13 @@ bool rocke_conv_fwd_bias_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "bias: the stream-K split-K forward has no single owner of an "
                             "output tile, so the bias cannot be added exactly once");
-        if(s->split_k > 1 && rocke_conv_fwd_split_k_atomic(s) && !s->split_det)
+        /* The form any split degree of this spec builds (fwd_split_k_atomic). */
+        const bool atomic = s->wave_size == 64 && (s->problem.is_3d || s->split_atomic);
+        if(atomic && !s->split_det)
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "bias: the atomic split-K forward adds every slice into D, so "
-                            "the bias cannot be added exactly once; use split_k=1");
-        ROCKE_SPEC_FAIL(reason,
-                        reason_cap,
-                        "bias: the split-K forward reduces raw partial sums after the "
-                        "kernel; the bias is not added on that path yet (use split_k=1)");
+                            "the bias cannot be added exactly once; use split_det or split_k=1");
     }
     return true;
 }

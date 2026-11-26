@@ -24,6 +24,10 @@
  *        engines must reject)
  *   18-21 both engines must reject: ws_bf16 on the scalar fold, slab_par
  *        without fold_loop, vec=32, fold_loop=128
+ *   22-28 bias (the forward split_det 3 fold, wg_M=144, wg_N=96): bf16
+ *        scalar R=3, bf16 vec 4 R=3, fp16 fold_loop + slab_par, fp32 vec 2,
+ *        bf16 fold_loop with a remainder; 27-28 (grouped, rezero) both
+ *        engines must reject
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,6 +157,31 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
             spec->fold_loop = 128;
             spec->tile_m = 1;
         }
+        return 0;
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+        /* bias: mirrors _b in the Python emitter. */
+        spec->wg_M = 144;
+        spec->wg_N = 96;
+        spec->problem_short = "N1H4W4C96_K144Y1X1";
+        spec->bias = true;
+        spec->dtype_d = idx == 24 ? "fp16" : idx == 25 ? "fp32" : "bf16";
+        *arch = (idx == 24 || idx == 25) ? "gfx950" : "gfx942";
+        spec->vec = idx == 22 ? 1 : idx == 25 ? 2 : 4;
+        spec->ws_replicas = idx == 24 ? 10 : idx == 25 ? 2 : idx == 26 ? 9 : 3;
+        spec->fold_loop = (idx == 24 || idx == 26) ? 4 : 0;
+        spec->slab_par = idx == 24 ? 2 : 1;
+        if(idx == 24)
+            spec->tile_m = 1;
+        if(idx == 27)
+            spec->groups = 2;
+        if(idx == 28)
+            spec->rezero = 1;
         return 0;
     default:
         return -1;

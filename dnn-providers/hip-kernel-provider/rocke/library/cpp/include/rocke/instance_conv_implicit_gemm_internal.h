@@ -779,10 +779,21 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                                        char* reason,
                                        size_t reason_cap);
 /* fwd_bias_conflict(spec): false with Python's reason when spec.bias is set on
- * a split-K forward (not wired yet). */
+ * a forward with no single owner of an output value (the atomic split-K and
+ * the stream-K / hybrid segment loops). */
 bool rocke_conv_fwd_bias_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             char* reason,
                             size_t reason_cap);
+/* fwd_bias_stage(spec): where a bias kernel adds its bias. */
+typedef enum
+{
+    ROCKE_CONV_BIAS_NONE = 0, /* ""         -- no bias */
+    ROCKE_CONV_BIAS_EPILOGUE, /* "epilogue" -- unsplit: the accumulator fragments */
+    ROCKE_CONV_BIAS_OWNER, /* "owner"    -- split_det 1/2: the owner's fold */
+    ROCKE_CONV_BIAS_CLUSTER, /* "cluster"  -- split_k_cluster: the cluster fold */
+    ROCKE_CONV_BIAS_REDUCE /* "reduce"   -- two-stage / split_det 3: the fold kernel */
+} rocke_conv_bias_stage_t;
+rocke_conv_bias_stage_t rocke_conv_fwd_bias_stage(const rocke_implicit_gemm_conv_spec_t* s);
 /* _fwd_kloop_conflict(spec) for the knobs the C port carries (xcd_remap,
  * m_band): false with the reason when Python's returns a non-empty string. */
 bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,

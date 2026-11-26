@@ -83,6 +83,11 @@ typedef struct rocke_wgrad_reduce_spec
      * Default 0 / 1. */
     int fold_loop;
     int slab_par;
+    /* bias: the forward split_det 3 fold of a conv + bias forward (one group,
+     * wg_N = the output channels, no rezero): bias[n] is added to the folded
+     * fp32 sum before the cast; appends the Bias / Bias_bytes kernargs after
+     * groups. Name tag "cbias". Default false. */
+    bool bias;
 } rocke_wgrad_reduce_spec_t;
 
 /* Default-constructed spec.  Caller must set wg_M, wg_N, problem_short. */
