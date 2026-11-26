@@ -170,9 +170,13 @@ RppStatus hip_exec_tensor_mean(T* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* tensor
     // the multi-channel ones multiply it (3x here), so check the largest form once
     // rather than at each write. The limit is reachable: 683 images at 4K with
     // three channels, 171 at 8K.
-    constexpr Rpp32u kScratchBufferFloats = 8294400;
-    const Rpp64u partialUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
-    if (partialUpperBound > kScratchBufferFloats) return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
+    // This file writes sizeof(U) elements rather than a fixed 4-byte type, so the
+    // bound is compared in bytes: it then holds whatever U is instantiated with.
+    constexpr Rpp64u kScratchBufferBytes = sizeof(Rpp32f) * 8294400;
+    const Rpp64u partialUpperBoundBytes =
+        static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z * sizeof(U);
+    if (partialUpperBoundBytes > kScratchBufferBytes)
+        return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u tensorPartialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
