@@ -1089,6 +1089,8 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
             CK_EX55_SC512(32, 32, 4, 2)
             CK_EX55_SC512(32, 64, 2, 4)
             CK_EX55_SC512(64, 64, 2, 2)
+            CK_EX55_SC512(64, 32, 2, 2)
+            CK_EX55_SC512(64, 32, 2, 4)
 #define CK_EX55_SC1024(TM, TN, CM, CN)                \
     if(t == #TM "x" #TN "x1024" && cl == #CM "x" #CN) \
         return run<Instance<TM, TN, 1024, 2, 2, TdmEpi, CDataType, 16, CM, CN>>(arg, name);

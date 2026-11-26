@@ -1,5 +1,5 @@
 {
-  "_comment": "MX 256x2048x2048, round 5: around the 32x32x512 2x4-cluster best (current loop): K 512 at more clusters (32x32 2x8 / 4x2, 32x64 2x4, 64x64 2x2) and a 1024-deep K tile (32x32 at 2x4 / 2x2, 32x64 at 2x2).",
+  "_comment": "MX 256x2048x2048, round 5 (the 512-deep K tile, current loop): 32x32x512 at 2x4 / 2x8 / 4x2, 32x64x512 and 64x32x512 at 2x2 / 2x4; anchors 64x64x256 at 2x4 (f19-17 best) and 32x32x256 at 2x4. 64x64x512 and the 1024-deep tiles spill and are skipped.",
   "default_defines": [
     "-DCK_EX55_BF16_TDM_ONLY",
     "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
@@ -16,6 +16,32 @@
     }
   ],
   "arms": [
+    {
+      "tile": "64x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x4",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
     {
       "tile": "32x32x512",
       "warps": "2x2",
@@ -82,7 +108,7 @@
       ]
     },
     {
-      "tile": "64x64x512",
+      "tile": "64x32x512",
       "warps": "2x2",
       "wt": 16,
       "cluster": "2x2",
@@ -95,36 +121,10 @@
       ]
     },
     {
-      "tile": "32x32x1024",
+      "tile": "64x32x512",
       "warps": "2x2",
       "wt": 16,
       "cluster": "2x4",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "32x32x1024",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "2x2",
-      "shapes": [
-        [
-          256,
-          2048,
-          2048
-        ]
-      ]
-    },
-    {
-      "tile": "32x64x1024",
-      "warps": "2x2",
-      "wt": 16,
-      "cluster": "2x2",
       "shapes": [
         [
           256,
