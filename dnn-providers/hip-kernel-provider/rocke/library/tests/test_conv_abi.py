@@ -187,8 +187,8 @@ def test_fwd_addr64_abi_rejects_split_k_and_3d():
         conv_arg_names(direction="fwd", addr64=True, two_stage=True)
     with pytest.raises(ValueError, match="is_3d"):
         conv_arg_names(direction="fwd", addr64=True, is_3d=True)
-    with pytest.raises(ValueError, match="fwd-only"):
-        conv_arg_names(direction="wgrad", addr64=True)
+    with pytest.raises(ValueError, match="fwd/wgrad-only"):
+        conv_arg_names(direction="dgrad", addr64=True)
 
 
 def test_fwd_addr64_signature_matches_arg_names():
@@ -201,6 +201,46 @@ def test_fwd_addr64_signature_matches_arg_names():
     assert by_name["A_bytes"]["size_bytes"] == 8
     assert by_name["p_A_stride_hi"]["type"] == "i32"
     assert by_name["p_A_stride_hi"]["size_bytes"] == 4
+
+
+def test_wgrad_addr64_abi_rejects_3d_and_dgrad():
+    with pytest.raises(ValueError, match="is_3d"):
+        conv_arg_names(direction="wgrad", addr64=True, is_3d=True)
+    with pytest.raises(ValueError, match="fwd/wgrad-only"):
+        conv_arg_names(direction="dgrad", addr64=True)
+
+
+def test_wgrad_addr64_signature_matches_arg_names():
+    sig = conv_args_signature("fp16", direction="wgrad", addr64=True)
+    assert [a["name"] for a in sig] == [
+        n for n, _ in conv_arg_names(direction="wgrad", addr64=True)
+    ]
+    by_name = {a["name"]: a for a in sig}
+    assert by_name["dY_bytes"]["type"] == "i64"
+    assert by_name["dY_bytes"]["size_bytes"] == 8
+    assert by_name["X_bytes"]["type"] == "i64"
+    assert by_name["p_dY_stride_n"]["type"] == "i64"
+    assert by_name["p_dY_stride_ho"]["type"] == "i32"
+    # dW stays i32: bounded by the filter, never by K_wg.
+    assert by_name["dW_bytes"]["type"] == "i32"
+    assert by_name["p_dW_stride_k"]["type"] == "i32"
+    # k_ magic pair dropped under addr64 (exact i64 division instead);
+    # n_ is unaffected (bounded by the filter, same as fwd's k_).
+    names = [n for n, _ in conv_arg_names(direction="wgrad", addr64=True)]
+    assert not any(n.startswith("p_magic_k_") for n in names)
+    assert any(n.startswith("p_magic_n_") for n in names)
+
+
+def test_wgrad_addr64_grouped_and_split_k_allowed_at_abi_level():
+    # The ABI accepts grouped/split-K/two-stage wgrad addr64 -- group/split-K
+    # args (p_groups/p_cpg/p_kpg, ks/ks_count) are direction-shared and
+    # unaffected by addr64. Whether a *kernel* can be built for them is a
+    # separate (currently unimplemented) question; see WgradConvSpec.addr64.
+    plain = conv_arg_names(direction="wgrad", addr64=True)
+    two_stage = conv_arg_names(direction="wgrad", addr64=True, two_stage=True)
+    assert "ws_ptr" in [n for n, _ in two_stage]
+    assert "ws_ptr" not in [n for n, _ in plain]
+    assert {n for n, _ in plain} <= {n for n, _ in two_stage}
 
 
 def test_i64_kernarg_kind_is_8_byte_aligned():

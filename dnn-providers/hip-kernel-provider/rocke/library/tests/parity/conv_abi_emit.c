@@ -17,6 +17,8 @@
  *  15  direct wgrad                16  direct "bwd" (rejected)
  *  17  fwd 3-D two_stage (split-K) 18  dgrad two_stage (rejected)
  *  19  fwd addr64
+ *  20  wgrad addr64                21  wgrad addr64 two_stage (split-K)
+ *  22  wgrad addr64 3-D (rejected)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,6 +134,15 @@ int main(int argc, char** argv)
         break;
     case 19:
         ok = rocke_conv_arg_names_ex("fwd", false, false, NULL, /*addr64=*/true, &list);
+        break;
+    case 20:
+        ok = rocke_conv_arg_names_ex("wgrad", false, false, NULL, /*addr64=*/true, &list);
+        break;
+    case 21:
+        ok = rocke_conv_arg_names_ex("wgrad", false, true, NULL, /*addr64=*/true, &list);
+        break;
+    case 22:
+        ok = rocke_conv_arg_names_ex("wgrad", true, false, NULL, /*addr64=*/true, &list);
         break;
     default:
         fprintf(stderr, "unknown config index %d\n", idx);
