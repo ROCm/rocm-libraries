@@ -49,6 +49,15 @@ EXPECTED_SCRIPTS = {
         "pin.py",
         "reviewlib.py",
     ),
+    "hipdnn-gauntlet-fuzz": (
+        "analyze.py",
+        "calibration_report.py",
+        "calibration_rows.py",
+        "class_check.py",
+        "ledger.py",
+        "make_variant_space.py",
+        "triage_wrong.py",
+    ),
     "hipdnn-ingestor-impact": ("impact.py", "impact_emit.py"),
     "hipdnn-review-comments": ("review_comments.py",),
     "hipdnn-trigger-ci": ("trigger_ci.py",),
@@ -68,6 +77,7 @@ CLAUDE_COMMAND_SKILLS = frozenset(
     {
         "hipdnn-aiter-asm-sdpa-fwd-sync",
         "hipdnn-deep-review",
+        "hipdnn-gauntlet-fuzz",
         "hipdnn-ingestor-engine",
         "hipdnn-ingestor-impact",
         "hipdnn-integration-testing",

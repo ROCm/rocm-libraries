@@ -55,6 +55,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/hipdnn-ingestor-impact/SKILL.md`
   - Reports kernel ingestor changes that break at run time while the build stays green: kernel argument lists out of step with their C++ and test copies (also against the target branch's tip, which catches two PRs that each pass alone), dispatch predicates, descriptors and generic targets, removed Python symbols still read, and which shipped variants' emitted code changed. Reads git objects; its optional emitter runs rocKE on the CPU. Advisory: it never builds, tests or posts.
   - Suggest this skill for a quick answer on a hip-kernel-provider, rocKE or ingestor change without a full review, and before turning the ingestor flags ON by default. Use `hipdnn-deep-review` for a full review; its `IMPACT` lane runs the same scripts.
+- `tools/ai/skills/hipdnn-gauntlet-fuzz/SKILL.md`
+  - Fuzzes a hipDNN engine, or a PR that changes one, with the integration gauntlet (RFC 0023): search lanes find what to fuzz, the oracle is calibrated, base and PR builds are fuzzed on a GPU, every failure group is triaged, and a per-engine ledger carries results across rounds.
+  - Suggest this skill when the user asks to fuzz an engine or a PR, widen the fuzz net, or tell a regression from a failure already on base. It never posts on the PR or edits its code.
 - `tools/ai/skills/rfc-review/SKILL.md`, with the focused follow-ups `rfc-review-compatibility`, `rfc-review-ops`, and `rfc-review-security`
   - Review a technical RFC or design document and produce a written review report. They are not for implementation PRs.
   - Suggest these skills when the user asks to review an RFC, design doc, ADR, or proposal.

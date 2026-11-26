@@ -78,6 +78,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `hipdnn-tidy` | Running clang-tidy on hipDNN, scoped to the files you changed. |
 | `hipdnn-ingestor-engine` | Creating or extending a generic-kernel-ingestor integration. |
 | `hipdnn-ingestor-impact` | Checking whether a kernel ingestor change breaks kernel ABI or dispatch at run time while the build stays green, without a full review. |
+| `hipdnn-gauntlet-fuzz` | Fuzzing a hipDNN engine, or a PR that changes one, with the integration gauntlet: search lanes, calibrated oracle, base vs PR runs, triage and a per-engine ledger. |
 | `hipdnn-uhd` | Taking a hipDNN engine through the UHD heuristic lifecycle on the local GPU: generating, training, judging, validating, installing, and triaging heuristics and their training data. |
 | `hipdnn-deep-review` | Reviewing a hipDNN or provider change in depth with parallel agents until its findings close. Its `IMPACT` lane runs the `hipdnn-ingestor-impact` scripts. |
 | `hipdnn-aiter-asm-sdpa-fwd-sync` | Updating the ASM SDPA engine's forward and backward kernels from an AITER release for the GPU archs and directions you choose: tiered plan, apply with generated provenance, engine follow-up and validation. ASM kernels only, never CK. |

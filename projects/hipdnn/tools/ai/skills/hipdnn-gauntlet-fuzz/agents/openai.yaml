@@ -1,0 +1,9 @@
+interface:
+  display_name: "hipDNN Gauntlet Fuzz"
+  short_description: "Fuzz a hipDNN engine or PR with the integration gauntlet and triage every failure"
+  default_prompt: >-
+    Use $hipdnn-gauntlet-fuzz to fuzz a hipDNN engine or a PR that changes one. Read
+    SKILL.md for the entry contract, then execute RUNBOOK.md as the only ordered
+    workflow, checking each gate. Report WRONG results with their measurements and
+    proof, never as verdicts, and keep hosts, users and internal ticket ids out of
+    anything that leaves the workspace.
