@@ -625,8 +625,10 @@ def emitTDMStoreFlush(gwb) -> Module:
       module.add(tdm.issueStore(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
       module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store"))
       module.add(skipStore)
-  if isPersistent(gwb.kernel) and not _handoffBarriersLds(gwb.kernel):
-    sync = kw._syncThreads(gwb.kernel, "every TDM store is done with the staged tile before the next tile writes LDS")
+  k = gwb.kernel
+  # syncThreads emits no barrier for one wave without a cluster barrier; the Hybrid branch would then skip nothing.
+  if isPersistent(k) and not _handoffBarriersLds(k) and (k["NumThreads"] > k["WavefrontSize"] or k.get("ClusterBarrier")):
+    sync = kw._syncThreads(k, "every TDM store is done with the staged tile before the next tile writes LDS")
     if _hybridStaticArmOnly(gwb.kernel):
       dynamicArm = Label(kw.labels.getNameInc("TDMStoreFlushDynamicArm"), "the queue handoff barrier fences this arm")
       module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=0, comment="Hybrid: static assignment selected?"))
