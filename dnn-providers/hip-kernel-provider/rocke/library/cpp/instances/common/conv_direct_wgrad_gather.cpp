@@ -41,7 +41,17 @@ int block_k(const rocke_direct_wgrad_gather_spec_t* s)
 
 int n_atoms(const rocke_direct_wgrad_gather_spec_t* s)
 {
+    if(s->grouped)
+    {
+        return s->problem.KW;
+    }
     return cdiv(s->problem.KW * s->problem.cpg, kAtom);
+}
+
+/* c_staged: input channels per staged X pixel (block_k when grouped). */
+int c_staged(const rocke_direct_wgrad_gather_spec_t* s)
+{
+    return s->grouped ? block_k(s) : s->problem.cpg;
 }
 
 int unroll(const rocke_direct_wgrad_gather_spec_t* s)
@@ -56,6 +66,10 @@ int rps(const rocke_direct_wgrad_gather_spec_t* s)
 
 int x_phase(const rocke_direct_wgrad_gather_spec_t* s)
 {
+    if(s->grouped)
+    {
+        return 0;
+    }
     return pymod(-s->problem.PAD * s->problem.cpg, kVec);
 }
 
@@ -63,12 +77,12 @@ int x_phase(const rocke_direct_wgrad_gather_spec_t* s)
 int x_elems(const rocke_direct_wgrad_gather_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return x_phase(s) + ((kWo - 1) * p->stride + p->KW) * p->cpg;
+    return x_phase(s) + ((kWo - 1) * p->stride + p->KW) * c_staged(s);
 }
 
 int n_k_tiles(const rocke_direct_wgrad_gather_spec_t* s)
 {
-    return cdiv(s->problem.kpg, block_k(s));
+    return cdiv(s->problem.groups * s->problem.kpg, block_k(s));
 }
 
 /* WgradGatherSpec.dma_instrs(): 16-byte DMA instructions per wave and row. */
@@ -107,6 +121,7 @@ extern "C" rocke_direct_wgrad_gather_spec_t rocke_direct_wgrad_gather_spec_defau
     s.prefetch = 2;
     s.rows_per_seg = 16;
     s.target_blocks = 1024;
+    s.grouped = false;
     return s;
 }
 
@@ -138,7 +153,7 @@ extern "C" int rocke_direct_wgrad_gather_fold_taps(const rocke_direct_wgrad_gath
 extern "C" long rocke_direct_wgrad_gather_workspace_bytes(const rocke_direct_wgrad_gather_spec_t* s)
 {
     return (long)rocke_direct_wgrad_gather_n_partitions(s) * rocke_direct_wgrad_gather_fold_taps(s)
-           * s->problem.kpg * 4;
+           * s->problem.groups * s->problem.kpg * 4;
 }
 
 extern "C" void rocke_direct_wgrad_gather_launch_geometry(const rocke_direct_wgrad_gather_spec_t* s,
@@ -168,9 +183,9 @@ extern "C" rocke_status_t rocke_direct_wgrad_gather_kernel_name(
     snprintf(rps_buf, sizeof rps_buf, "rps%d", s->rows_per_seg);
     snprintf(tb_buf, sizeof tb_buf, "tb%d", s->target_blocks);
     const char* parts[5] = {f_buf, wk_buf, pf_buf, rps_buf, tb_buf};
-    const char* flag_names[1] = {"bf16"};
-    int on[1] = {problem_is_bf16(p) ? 1 : 0};
-    return rocke_kernel_name_join(s->name, parts, 5, flag_names, on, 1, out, out_cap, NULL);
+    const char* flag_names[2] = {"bf16", "grp"};
+    int on[2] = {problem_is_bf16(p) ? 1 : 0, s->grouped ? 1 : 0};
+    return rocke_kernel_name_join(s->name, parts, 5, flag_names, on, 2, out, out_cap, NULL);
 }
 
 extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad_gather_spec_t* s,
@@ -202,9 +217,14 @@ extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad
     }
     const char* why = NULL;
     int acc = p->KH * s->wave_k16 * n_atoms(s) * 4;
-    if(p->groups != 1)
+    if(s->grouped
+       && (p->groups < 2 || p->cpg != p->kpg || (p->kpg != 4 && p->kpg != 8 && p->kpg != 16)))
     {
-        why = "dense layers only";
+        why = "grouped needs groups > 1 and cpg == kpg in (4, 8, 16)";
+    }
+    else if(!s->grouped && p->groups != 1)
+    {
+        why = "dense layers only (grouped=False)";
     }
     else if(!problem_dtype_ok(p))
     {
@@ -230,7 +250,7 @@ extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad
         why = "KW * C must be at most 96";
     }
     /* Whole 16-byte chunks from an aligned start at a build-time phase. */
-    else if((p->W * p->cpg) % kVec || (kWo * p->stride * p->cpg) % kVec)
+    else if(!s->grouped && ((p->W * p->cpg) % kVec || (kWo * p->stride * p->cpg) % kVec))
     {
         why = "W * C and 32 * stride * C must be multiples of 8";
     }
@@ -296,6 +316,8 @@ rocke_kernel_def_t*
     Em e{b};
     const rocke_direct_conv_problem_t& p = spec->problem;
     const int KH = p.KH, KW = p.KW, PAD = p.PAD, S = p.stride, C = p.cpg;
+    const bool G = spec->grouped;
+    const int CS = c_staged(spec); /* channels per staged X pixel (C, or block_k grouped) */
     const bool bf16 = problem_is_bf16(&p);
     const rocke_type_t* io_type = bf16 ? rocke_bf16() : rocke_f16();
     const int WK16 = spec->wave_k16;
@@ -318,7 +340,7 @@ rocke_kernel_def_t*
     const int X_ELEMS = x_slot_elems(spec);
     /* When a pixel row of the strip (S * C elements) and the phase keep every
      * lane's 8-byte read aligned, the X operand is a transpose read too. */
-    const bool X_TR = (S * C) % 4 == 0 && PH % 4 == 0;
+    const bool X_TR = (S * CS) % 4 == 0 && PH % 4 == 0;
     const int Y_ELEMS = dy_slot_elems(spec);
     const int PER_STEP = S * IX + IY;
 
@@ -402,14 +424,23 @@ rocke_kernel_def_t*
         return e.add(slot, lane);
     };
 
-    /* X: chunk L of a row is elements [8 L, 8 L + 8) from the aligned start. */
+    /* X: chunk L of a row is elements [8 L, 8 L + 8) from the aligned start.
+     * Grouped: chunk L is pixel L / (CS / 8), channels 8 * (L % (CS / 8)) on. */
     std::vector<Chunk> x_chunks;
     for(int i = 0; i < IX; ++i)
     {
         V slot = dma_slot(IX, i);
         Chunk ch;
-        ch.a = e.muli(slot, kVec);
-        ch.b = NULL;
+        if(G)
+        {
+            ch.a = e.divi(slot, CS / kVec);
+            ch.b = e.muli(e.modi(slot, CS / kVec), kVec);
+        }
+        else
+        {
+            ch.a = e.muli(slot, kVec);
+            ch.b = NULL;
+        }
         ch.ok = e.lti(slot, XCH);
         x_chunks.push_back(ch);
     }
@@ -484,6 +515,29 @@ rocke_kernel_def_t*
         }
     }
 
+    /* Grouped: atom nj is filter column s = nj over the 16 input channels of k
+     * atom mi: elements s * CS + (wave_k0 + 16 mi) + 0..15 of each pixel. */
+    std::vector<std::vector<std::vector<V>>> xg_tr_idx; /* [nj][mi][rd] */
+    if(G)
+    {
+        xg_tr_idx.assign(NA, std::vector<std::vector<V>>(WK16));
+        for(int nj = 0; nj < NA; ++nj)
+        {
+            for(int mi = 0; mi < WK16; ++mi)
+            {
+                for(int rd = 0; rd < 2; ++rd)
+                {
+                    V k0 = e.add(e.ci(nj * CS + mi * kAtom), wave_k0);
+                    V t = e.add(e.muli(lane_hi, 8), lane_q);
+                    t = e.addi(t, rd * 4);
+                    t = e.muli(t, S * CS);
+                    t = e.add(t, e.muli(lane_c4, 4));
+                    xg_tr_idx[nj][mi].push_back(e.add(k0, t));
+                }
+            }
+        }
+    }
+
     auto read_dy = [&](int buf) {
         std::vector<V> out;
         for(int mi = 0; mi < WK16; ++mi)
@@ -494,7 +548,14 @@ rocke_kernel_def_t*
         }
         return out;
     };
-    auto read_x = [&](int buf, int nj) {
+    auto read_x = [&](int buf, int nj, int mi) {
+        if(G)
+        {
+            const std::vector<V>& idx = xg_tr_idx[nj][mi];
+            V lo = e.ds_read_tr(x_bufs[buf], c0, idx[0], io_type);
+            V hi = e.ds_read_tr(x_bufs[buf], c0, idx[1], io_type);
+            return rocke_b_vec_concat(b, lo, hi);
+        }
         if(X_TR)
         {
             V lo = e.ds_read_tr(x_bufs[buf], c0, x_tr_idx[nj][0], io_type);
@@ -557,6 +618,23 @@ rocke_kernel_def_t*
             V pad_hi0 = e.add(kph, e.muli(cols_in, C));
             V edge = e.lt(col0, c0);
             edge = e.lor(edge, e.lti(pad_hi0, XE));
+            /* Grouped, per chunk: its pixel's column bounds and offset within
+             * the row. */
+            std::vector<Off> xg_offs;
+            if(G)
+            {
+                for(const Chunk& ch : x_chunks)
+                {
+                    V col = e.add(col0, ch.a);
+                    V a = e.ge(col, c0);
+                    a = e.land(a, e.lt(col, P.p_Wi));
+                    V ok = e.land(ch.ok, a);
+                    V off = e.mul(n_img, P.p_B_stride_n);
+                    off = e.add(off, e.mul(col, P.p_B_stride_wi));
+                    off = e.add(off, e.add(k_blk0, ch.b));
+                    xg_offs.push_back({off, ok});
+                }
+            }
 
             auto issue_x = [&](V xr, int slot) {
                 V hi = e.add(x_row0, xr);
@@ -564,6 +642,17 @@ rocke_kernel_def_t*
                 a = e.land(a, e.lt(hi, P.p_Hi));
                 V lim = e.addi(e.muli(n_steps, S), PRE);
                 V ok_r = e.land(a, e.lt(xr, lim));
+                if(G)
+                {
+                    for(int i = 0; i < (int)xg_offs.size(); ++i)
+                    {
+                        V okk = e.land(xg_offs[i].ok, ok_r);
+                        V voff = e.add(xg_offs[i].off, e.mul(hi, P.p_B_stride_hi));
+                        voff = e.select(okk, e.mul(voff, c2), oob);
+                        dma(b_rsrc, x_addr[slot], IX, i, voff);
+                    }
+                    return;
+                }
                 V row_off = e.add(x_start, e.mul(hi, P.p_B_stride_hi));
                 for(int i = 0; i < (int)x_chunks.size(); ++i)
                 {
@@ -595,6 +684,10 @@ rocke_kernel_def_t*
             };
             /* Zero the padding columns of freshly landed X rows (edge strips). */
             auto fix_padding = [&](const std::vector<int>& slots) {
+                if(G)
+                {
+                    return; /* out-of-image pixels were read as zeros */
+                }
                 e.if_(edge, [&]() {
                     for(int slot : slots)
                     {
@@ -660,9 +753,13 @@ rocke_kernel_def_t*
                                          int slot = (S * tm + r) % NX;
                                          for(int nj = 0; nj < NA; ++nj)
                                          {
-                                             V xf = read_x(slot, nj);
+                                             V xf = G ? NULL : read_x(slot, nj, 0);
                                              for(int mi = 0; mi < WK16; ++mi)
                                              {
+                                                 if(G)
+                                                 {
+                                                     xf = read_x(slot, nj, mi);
+                                                 }
                                                  int i = acc_index(r, mi, nj);
                                                  la[i] = e.mfma16x16x32(bf16, dyf[mi], xf, la[i]);
                                              }
@@ -696,10 +793,33 @@ rocke_kernel_def_t*
             row_base = e.mul(row_base, p_K);
             for(int mi = 0; mi < WK16; ++mi)
             {
+                V ch = NULL;
+                if(G)
+                {
+                    /* Column n is input channel ch of filter column s = nj;
+                     * only the products inside one group are kept. */
+                    ch = e.add(k_blk0, wave_k0);
+                    ch = e.add(ch, e.addi(lane_n, mi * kAtom));
+                    V kt_g = e.ci((r * KW + nj) * C);
+                    tap = e.add(kt_g, e.modi(ch, C));
+                    row_base = e.add(e.muli(part, TAPS), tap);
+                    row_base = e.mul(row_base, p_K);
+                }
                 for(int slot = 0; slot < 4; ++slot)
                 {
                     V kk = e.addi(k_lane0, mi * kAtom + slot);
-                    V ok = e.land(n_ok, e.lt(kk, p_K));
+                    V ok;
+                    if(G)
+                    {
+                        V in_k = e.lt(kk, p_K);
+                        V gk = e.divi(kk, C);
+                        V gc = e.divi(ch, C);
+                        ok = e.land(in_k, e.eq(gk, gc));
+                    }
+                    else
+                    {
+                        ok = e.land(n_ok, e.lt(kk, p_K));
+                    }
                     V val = rocke_b_vec_extract(b, accs[acc_index(r, mi, nj)], slot);
                     e.if_(ok, [&]() { rocke_b_global_store(b, P.D, e.add(row_base, kk), val, 4); });
                 }

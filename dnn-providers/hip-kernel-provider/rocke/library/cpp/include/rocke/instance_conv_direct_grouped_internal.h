@@ -108,6 +108,16 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
                              const char* direction,
                              const rocke_type_t* io_type);
 
+/* emit_direct_params(..., d16=, d16_atomic=): under wgrad, d16 makes D the
+ * io_type dW a kernel stores whole (writeonly, align 2), d16_atomic the io_type
+ * dW it adds packed pairs into (align 4); d16_atomic wins when both are set. */
+void rocke_dconv_emit_params_ex(rocke_ir_builder_t* b,
+                                rocke_dconv_params_t* params,
+                                const char* direction,
+                                const rocke_type_t* io_type,
+                                bool d16,
+                                bool d16_atomic);
+
 /* A[N,H,W,total_c] with runtime extents + the two conv-spatial embeds.
  * w_upper_0 / w_upper_1 name the column pair ("q_pos"/"W_lds_pos" for the
  * LDS-staged variants, "wo"/"s" for the DRAM-direct 4c one). */

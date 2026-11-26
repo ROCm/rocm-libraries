@@ -39,7 +39,7 @@ from __future__ import annotations
 import itertools
 import math
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import List, Optional, Tuple
 
 from rocke.core.ir import I64, IRBuilder, KernelDef, Value
@@ -750,26 +750,35 @@ def build_direct_wgrad_tiled(
         )
         dy_row = b.mul(ho, sdy_h)
         x_row = b.mul(hi, sx_h)
+        # pp_sched forms every DMA address of the row before the first DMA;
+        # otherwise each DMA issues as soon as its address is formed.
         loads = []
+
+        def dma(rsrc, lds, voff):
+            if PPS:
+                loads.append((rsrc, lds, voff))
+            else:
+                b.async_buffer_load_lds(rsrc, lds, voff, c0, 4)
+
         for i, (off, ok) in enumerate(dy_offs):
             voff = b.select(b.land(ok, dy_ok), b.mul(b.add(off, dy_row), c_two), oob)
             lds = b.smem_ptr_add(
                 dy_addr[buf] if QG == 1 else b.smem_ptr_add(dy_addr[buf], qg_dy_bytes),
                 b.zext(b.mul(b.add(b.mul(wave, ci(IK)), ci(i)), ci(_WAVE * 16)), I64),
             )
-            loads.append((a_rsrc, lds, voff))
+            dma(a_rsrc, lds, voff)
         for i, (off, ok) in enumerate(x_offs):
             voff = b.select(b.land(ok, x_ok), b.mul(b.add(off, x_row), c_two), oob)
             lds = b.smem_ptr_add(
                 x_addr[buf] if QG == 1 else b.smem_ptr_add(x_addr[buf], qg_x_bytes),
                 b.zext(b.mul(b.add(b.mul(wave, ci(IC)), ci(i)), ci(_WAVE * 16)), I64),
             )
-            loads.append((b_rsrc, lds, voff))
+            dma(b_rsrc, lds, voff)
         if PPS:
             # Every address in its own register before the first DMA.
             b.sched_barrier(0)
-        for rsrc, lds, voff in loads:
-            b.async_buffer_load_lds(rsrc, lds, voff, c0, 4)
+            for rsrc, lds, voff in loads:
+                b.async_buffer_load_lds(rsrc, lds, voff, c0, 4)
 
     # ---- fragment read addresses (element index into a buffer) -------------
     # See _frag_row: a lane's 8 reduction elements are 8 columns of one image.
@@ -1102,11 +1111,15 @@ def build_direct_wgrad_tiled(
 
     def _emit(ptr, off, val, ok):
         """``_put`` under ``ok``; pk16: even lanes add (own, odd neighbour's)
-        as one packed pair (c even, cpg % 8 == 0: the pair shares ``ok``)."""
+        as one packed pair (c even, cpg % 8 == 0: the pair shares ``ok``).
+        ``val`` may be a thunk, built inside the guard where no lane needs it
+        outside (the pk16 swap needs it before)."""
         if not spec.pk16:
             with b.scf_if(ok):
-                _put(ptr, off, val)
+                _put(ptr, off, val() if callable(val) else val)
             return
+        if callable(val):
+            val = val()
         from rocke.helpers.io import pack_f32_to
 
         nb = b.warp_shuffle_xor_dpp(val, 1)
@@ -1255,7 +1268,7 @@ def build_direct_wgrad_tiled(
                                     b.add(b.mul(k_glb, k_stride), c_in),
                                     b.mul(ci(tap), rs_stride),
                                 )
-                                _emit(D_ptr, off, b.vec_extract(tot, slot), ok)
+                                _emit(D_ptr, off, partial(b.vec_extract, tot, slot), ok)
         return b.kernel
     for ni in range(WC16):
         c_in = b.add(c_lane0, ci(ni * _ATOM))
@@ -1347,6 +1360,9 @@ def build_wgrad_slab_fold(spec: WgradSlabFoldSpec, arch: str = "gfx950") -> Kern
     from rocke.core.ir import F32, I32, PtrType
     from rocke.helpers.io import io_ir_type
 
+    ok, why = is_valid_slab_fold_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid WgradSlabFoldSpec for {arch}: {why}")
     S, Q, E, U = spec.slices, spec.quads, spec.elems_per_block, _FOLD_UNROLL
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = _FOLD_THREADS

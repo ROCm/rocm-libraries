@@ -373,6 +373,13 @@ bool rocke_conv_direct_arg_names(const char* direction, rocke_conv_arg_list_t* o
     return true;
 }
 
+const char* rocke_conv_direct_output_dtype(const char* dtype, const char* direction, bool dw16)
+{
+    if(direction != NULL && strcmp(direction, "wgrad") == 0 && !dw16)
+        return "fp32";
+    return dtype;
+}
+
 void rocke_conv_fwd_problem_block(bool is_3d, rocke_conv_arg_list_t* out)
 {
     rocke_conv_arg_list_t full;

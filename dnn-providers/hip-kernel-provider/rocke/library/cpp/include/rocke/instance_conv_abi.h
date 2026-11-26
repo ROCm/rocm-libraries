@@ -12,6 +12,7 @@
  *
  *   rocke_conv_arg_names()        <->  conv_arg_names()
  *   rocke_conv_direct_arg_names() <->  conv_direct_arg_names()
+ *   rocke_conv_direct_output_dtype() <-> conv_direct_output_dtype()
  *   rocke_conv_fwd_problem_block()<->  conv_fwd_problem_block()
  *   rocke_conv_emit_param_block() <->  emit_param_block()
  *
@@ -85,6 +86,13 @@ bool rocke_conv_arg_names_ex(const char* direction,
 /* Direct grouped conv ABI ("fwd", "dgrad" or "wgrad"); false for any other
  * direction. */
 bool rocke_conv_direct_arg_names(const char* direction, rocke_conv_arg_list_t* out);
+
+/* conv_direct_output_dtype(dtype, direction, dw16=): the element type of a
+ * direct kernel's output D for activation / filter element type `dtype`. The
+ * wgrad kernels accumulate dW through fp32 atomics, so their D is "fp32"
+ * unless dw16 (a kernel that stores the 16-bit dW whole); every other
+ * direction writes `dtype`. Returns `dtype` itself or a static string. */
+const char* rocke_conv_direct_output_dtype(const char* dtype, const char* direction, bool dw16);
 
 /* The forward problem block without the leading pointer/byte-size six, for a
  * fused kernel that keeps its own pointer convention (deep_fused_conv_pool). */
