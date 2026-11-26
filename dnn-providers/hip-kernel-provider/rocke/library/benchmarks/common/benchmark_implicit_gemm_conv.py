@@ -131,7 +131,8 @@ _WARP_MN_GFX1250 = _WARP_MN + (16,)
 # _PIPELINES there. "mem" is the neutral one: no scheduling hints.
 _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
-_SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
+# 384: the packed-atomic fp16 wgrad of the patch-embed 1x1 s2 rows (n128 112^2/128^2 C32 K224) is fastest there.
+_SPLIT_K_AUTO = (384, 128, 64, 32, 16, 8, 4, 2, 1)
 # The spec split_k that builds the wgrad split-K kernel. Any value > 1 builds
 # the same kernel (the degree is a kernarg); this one is only its label.
 _SPLIT_K_BUILD = 2
@@ -6489,6 +6490,14 @@ def _cached_bind(
             rt.memset_async(dw_ptr, 0, dw_bytes, stream)
             _launch()
 
+    elif direction == "dgrad" and extras.get("zero_dx"):
+        # Honest timing: the product path memsets dX inside the call.
+        _launch = run
+
+        def run(_launch=_launch, dx_ptr=ptrs[2], dx_bytes=sizes[2], stream=stream):
+            rt.memset_async(dx_ptr, 0, dx_bytes, stream)
+            _launch()
+
     elif direction == "wgrad" and ident.needs_stage2:
         # Two-stage is three steps and all of them are the algorithm's cost:
         # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
@@ -6645,6 +6654,21 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         # budget (see _extras_bytes). The table is small, but the accounting
         # should name everything it holds.
         extras["sub_gemm_bytes"] = int(flat.nbytes)
+        # The product plan (ConvDgradAotPlan.zero_dx) zeroes dX first when the
+        # kernel leaves residues unwritten (1x1 at stride 2): part of the cost.
+        from builders.common.convolution_backward_data import _dx_fully_written
+
+        from kernels.common.conv_implicit_gemm_dgrad import dgrad_fuses_dx_zero_fill
+
+        # The kernel zeroes the residues of its own tile when it can (no memset).
+        extras["zero_dx"] = not _dx_fully_written(
+            problem, sub_gemms, bool(ident.patch)
+        ) and not dgrad_fuses_dx_zero_fill(
+            problem,
+            dtype_d=ident.dtype_d,
+            split_k=ident.split_k,
+            pipeline=ident.pipeline,
+        )
         blocks = sum(
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms
