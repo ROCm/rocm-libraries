@@ -1,0 +1,59 @@
+{
+  "_comment": "mx_env_sweep.py config, MX at 49152x16x32768: skinny-N tiles (16 columns, four waves along M; ROCKE_EXP_SWEEP_TILE) on the plain MX K loop (the read-ahead loop needs an even N repeat, the scale swizzle 4 | repeats, so both are off). (The wave-uniform L2 prefetch spills SGPRs on these tiles at any distance.)",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "0",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mx",
+      "env": {}
+    }
+  ],
+  "arms": [
+    {
+      "name": "t64x16x256",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,16,256,4,1"
+      }
+    },
+    {
+      "name": "t128x16x256",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "128,16,256,4,1"
+      }
+    },
+    {
+      "name": "t256x16x256",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "256,16,256,4,1"
+      }
+    },
+    {
+      "name": "t64x16x512",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "64,16,512,4,1"
+      }
+    },
+    {
+      "name": "t128x16x512",
+      "env": {
+        "ROCKE_EXP_SWEEP_TILE": "128,16,512,4,1"
+      }
+    }
+  ],
+  "shapes": [
+    [
+      49152,
+      16,
+      32768
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

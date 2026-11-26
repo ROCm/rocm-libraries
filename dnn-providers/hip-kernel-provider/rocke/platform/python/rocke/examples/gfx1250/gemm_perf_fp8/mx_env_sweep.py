@@ -3,8 +3,10 @@
 The MX path and its options are switched on by ``ROCKE_EXP_*`` environment
 flags read at build time, so every point of the sweep is one compiled kernel:
 ``variants`` (flag sets: scale swizzle, K-atom fence, ...) times ``arms``
-(cluster shape and multicast flags), all on the 256x256x256, 2x2-wave,
-16x16x128 TDM spec of the B0 fat-wave champion. Kernels compile in parallel
+(cluster shape and multicast flags), on the 256x256x256, 2x2-wave, 16x16x128
+TDM spec of the B0 fat-wave champion unless a variant or arm env sets
+``ROCKE_EXP_SWEEP_TILE=tile_m,tile_n,tile_k,warp_m,warp_n`` (for example
+``64,16,256,4,1``: a skinny-N tile, four waves along M). Kernels compile in parallel
 worker processes; one that spills (VGPR or SGPR) is never run.
 
 Timing goes first: ``rounds`` interleaved rounds (order reversed every other
@@ -54,9 +56,18 @@ def _log(msg: str) -> None:
 # ----------------------------------------------------------------- the spec
 
 
-def _spec():
+def _tile(env=None):
+    """(tile_m, tile_n, tile_k, warp_m, warp_n) from ROCKE_EXP_SWEEP_TILE in ``env``
+    (default: the process environment); 256x256x256 at 2x2 waves when unset."""
+    raw = (os.environ if env is None else env).get("ROCKE_EXP_SWEEP_TILE") or "256,256,256,2,2"
+    tm, tn, tk, wm, wn = (int(x) for x in raw.split(","))
+    return tm, tn, tk, wm, wn
+
+
+def _spec(tile=None):
     """The swept spec; variant envs ROCKE_EXP_SWEEP_LDS_PAD (default 48) and
-    ROCKE_EXP_SWEEP_EPILOGUE (default cshuffle) set lds_k_pad and the epilogue."""
+    ROCKE_EXP_SWEEP_EPILOGUE (default cshuffle) set lds_k_pad and the epilogue,
+    ROCKE_EXP_SWEEP_TILE the tile (see ``_tile``)."""
     from rocke.instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
@@ -64,9 +75,11 @@ def _spec():
         UniversalGemmSpec,
     )
 
+    tm, tn, tk, wm, wn = tile or _tile()
     return UniversalGemmSpec(
-        name="mxsweep_k256_w2x2",
-        tile=TileSpec(tile_m=256, tile_n=256, tile_k=256, warp_m=2, warp_n=2, warp_k=1,
+        name="mxsweep_k256_w2x2" if (tm, tn, tk, wm, wn) == (256, 256, 256, 2, 2)
+        else f"mxsweep_{tm}x{tn}x{tk}_w{wm}x{wn}",
+        tile=TileSpec(tile_m=tm, tile_n=tn, tile_k=tk, warp_m=wm, warp_n=wn, warp_k=1,
                       warp_tile_m=16, warp_tile_n=16, warp_tile_k=128),
         trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue=os.environ.get("ROCKE_EXP_SWEEP_EPILOGUE", "cshuffle"), tdm=True,
                         tdm_depth=2, lds_k_pad=int(os.environ.get("ROCKE_EXP_SWEEP_LDS_PAD", "48")), pad_m=False, pad_n=False, pad_k=False,
@@ -368,11 +381,12 @@ def main():
     out = o.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     base = cfg.get("base_env", {})
-    jobs, launch_cluster = [], {}
+    jobs, launch_cluster, tile_of = [], {}, {}
     for v in cfg["variants"]:
         for a in cfg["arms"]:
             tag = f"{v['name']}|{a['name']}"
             env = dict(base, **v.get("env", {}), **a.get("env", {}))
+            tile_of[tag] = _tile(env)
             if a.get("cluster"):
                 env["ROCKE_EXP_CLUSTER"] = a["cluster"]
                 cx, cy = (int(x) for x in a["cluster"].split(","))
@@ -433,7 +447,7 @@ def main():
     rt = Runtime()
     mods = {t: rt.load_module(Path(p).read_bytes()) for t, (p, _, _) in built.items()}
     fns = {t: mods[t].get_function(built[t][1]) for t in built}
-    spec = _spec()
+    spec_of = {t: _spec(tile_of[t]) for t in built}
     rounds, warm, rep = cfg.get("rounds", 5), cfg.get("warmup", 50), cfg.get("repeat", 100)
     tags = list(built)
     res = {}
@@ -443,7 +457,7 @@ def main():
         for shape in cfg["shapes"]:
             shape = tuple(shape)
             prob = _Problem(rt, shape, o.data)
-            grid, block = _launch_geometry(spec, shape)
+            geom = {t: _launch_geometry(spec_of[t], shape) for t in tags}
             fl = 2.0 * shape[0] * shape[1] * shape[2]
             for r in range(rounds):
                 for t in (tags if r % 2 == 0 else tags[::-1]):
@@ -462,12 +476,12 @@ def main():
                             _log("  pair busy: " + "; ".join(w for w in why if any(f"HIP {i} " in w for i in pair) or w == "amd-smi failed"))
                     args = prob.args(plain_of[t])
                     for _ in range(warm):
-                        rt.launch(fns[t], grid, block, args, cluster=launch_cluster[t])
+                        rt.launch(fns[t], *geom[t], args, cluster=launch_cluster[t])
                     rt.wait_stream(0)
                     e0, e1 = rt.event(), rt.event()
                     e0.record()
                     for _ in range(rep):
-                        rt.launch(fns[t], grid, block, args, cluster=launch_cluster[t])
+                        rt.launch(fns[t], *geom[t], args, cluster=launch_cluster[t])
                     e1.record()
                     e1.synchronize()
                     tf = fl / (e0.elapsed_to(e1) / rep * 1e9)
@@ -505,7 +519,7 @@ def main():
     if o.verify_top:
         _log("\n== verify (K = 8192) of the best kernels")
         for shape, t in best:
-            grid, block = _launch_geometry(spec, (shape[0], shape[1], 8192))
+            grid, block = _launch_geometry(spec_of[t], (shape[0], shape[1], 8192))
             exact, rel, ok = _verify(rt, fns[t], grid, block, launch_cluster[t], swz_of[t], shape[:2], plain_of[t])
             _log(f"  {t} {shape[0]}x{shape[1]}: int_exact={exact} rand_rel={rel:.1e} "
                  + ("PASS" if exact and ok else "FAIL"))
