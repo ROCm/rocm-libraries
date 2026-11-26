@@ -272,10 +272,13 @@ struct EngineOrderRule
 /// arch that accept some of the same graphs; the preferred engine comes first. On gfx942 both
 /// accept a dense BSHD SDPA graph of head size 64 or 128 whenever seqlen_q equals seqlen_kv (a
 /// top-left and a bottom-right causal mask coincide there), and the dense engine was measured
-/// faster on every shared shape of the ground truth. A pair is listed only once its order is
-/// measured.
-inline constexpr std::array<EngineOrderRule, 1> ENGINE_ORDER_RULES{{
+/// faster on every shared shape of the ground truth. On gfx950 both accept a dense BSHD SDPA
+/// prefill graph of head size 64 or 128 with no mask or a causal one, with or without an fp32
+/// attn_mask, and the dense engine was measured faster on every one of 96 such graphs (48 with
+/// the bias, 48 without). A pair is listed only once its order is measured.
+inline constexpr std::array<EngineOrderRule, 2> ENGINE_ORDER_RULES{{
     {GFX942_ATTENTION_DENSE_ENGINE_NAME, GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME},
+    {GFX950_ATTENTION_DENSE_ENGINE_NAME, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME},
 }};
 
 /// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines

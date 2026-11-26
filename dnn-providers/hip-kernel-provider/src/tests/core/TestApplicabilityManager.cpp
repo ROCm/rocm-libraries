@@ -1879,6 +1879,19 @@ TEST(TestDenseAttentionOrder, Gfx942DenseComesBeforeUnified2D)
     EXPECT_LT(position(ids, dense), position(ids, unified));
 }
 
+// The same on gfx950, where the two engines also share graphs with an attn_mask.
+TEST(TestDenseAttentionOrder, Gfx950DenseComesBeforeUnified2D)
+{
+    namespace engines = hip_kernel_provider::kernel_ingestor_engine;
+    const auto dense
+        = hipdnn_data_sdk::utilities::engineNameToId(engines::GFX950_ATTENTION_DENSE_ENGINE_NAME);
+    const auto unified = hipdnn_data_sdk::utilities::engineNameToId(
+        engines::GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+    std::vector<int64_t> ids{0x41, unified, 0x42, dense};
+    applyEngineOrderRules(ids);
+    EXPECT_LT(position(ids, dense), position(ids, unified));
+}
+
 TEST(TestDenseAttentionOrder, AppliesEveryRuleToOneList)
 {
     // Every pair listed the wrong way round, a bystander between the pairs.
