@@ -1766,8 +1766,17 @@ _SGPR_SPLIT_SPILL = (
     "it never copied (a compiler defect: rocKE's IR is the same for every "
     "LLVM 24 build, and LLVM 20 builds these kernels correctly)"
 )
+# Where _SGPR_SPLIT_SPILL stands, which each of its quarantines records.
+_SGPR_SPLIT_SPILL_STATUS = (
+    "dispatch does not refuse these kernels (a known issue: "
+    "platform/dsl_docs/architecture/gfx_support_audit.md); the expiry follows "
+    "the compiler fix, which has no target date yet"
+)
 # The compiler issue that tracks _SGPR_SPLIT_SPILL.
 _SGPR_SPLIT_SPILL_ISSUE = "LCOMPILER-3317"
+# The quarantines of _SGPR_SPLIT_SPILL expire together, as late as the window
+# allows while the compiler fix has no target date.
+_SGPR_SPLIT_SPILL_EXPIRES = "2026-12-26"
 
 
 QUARANTINED: tuple[QuarantinedTest, ...] = (
@@ -1794,9 +1803,9 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         "built by the LLVM 24 compiler a ROCm install ships, the gfx950 dgrad kouter "
         "and ukd kernels (16x16x32 and 32x32x16 atoms) fault with an illegal "
         "memory access or miscompare (rel_err 1.17, depthwise 11x3): "
-        f"{_SGPR_SPLIT_SPILL}",
+        f"{_SGPR_SPLIT_SPILL}; {_SGPR_SPLIT_SPILL_STATUS}",
         _LIBRARY,
-        "2026-12-15",
+        _SGPR_SPLIT_SPILL_EXPIRES,
         f"{_DGRAD_CORRECTNESS}::test_bf16_depthwise_large_filter",
         f"{_DGRAD_CORRECTNESS}::test_bf16_stride1",
         f"{_DGRAD_CORRECTNESS}::test_fp16_resnet_shape",
@@ -1808,9 +1817,10 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         _SGPR_SPLIT_SPILL_ISSUE,
         "built by the LLVM 24 compiler CI pins, the gfx950 dgrad kernel at tile "
         "256x64x32, warp tile 32x32x16, compv4 miscompares on the fp16 depthwise "
-        f"stride-2 shape (rel_err 0.89): {_SGPR_SPLIT_SPILL}",
+        f"stride-2 shape (rel_err 0.89): {_SGPR_SPLIT_SPILL}; "
+        f"{_SGPR_SPLIT_SPILL_STATUS}",
         _LIBRARY,
-        "2026-12-15",
+        _SGPR_SPLIT_SPILL_EXPIRES,
         f"{_DGRAD_CORRECTNESS}::test_fp16_depthwise_stride2",
         arches=("gfx950",),
         compilers=_LLVM_24_CI,

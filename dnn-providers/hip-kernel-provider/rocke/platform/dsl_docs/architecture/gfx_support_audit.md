@@ -124,6 +124,14 @@ Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_represent
 
 7. **A matrix capability flag is not sufficient to emit a primitive** — a registered target can report a matrix capability TRUE while the catalog offers zero usable rows for it. Authority for "can I emit this" is the backend coverage record (`helpers/tiling/traits/data/backend_coverage.json`): an instruction is emitted on a target only where the record classes the pair `issuable` (`TileMmaPlan.emit_op`), not where a flag is set or a catalog row exists.
 
+8. **gfx950 conv dgrad: an LLVM 24 register-allocator defect (LCOMPILER-3317)**. Built by some
+   LLVM 24 compiler builds, some gfx950 dgrad kernels fault with an illegal memory access or return
+   wrong results; rocKE's IR is the same for every LLVM 24 build, and LLVM 20 builds these kernels
+   correctly. Dispatch does not refuse them, so a caller on an affected compiler can get them;
+   build with LLVM 20 until the compiler fix lands. Their tests are quarantined on gfx950 with the
+   affected compilers until then: the `QUARANTINED` records in
+   `python/rocke/tests/pending_lanes.py` name the compiler builds, the kernels and the defect.
+
 ## Proposed gap-closure priority
 Ordering for follow-up stories (to be confirmed with the team):
 
