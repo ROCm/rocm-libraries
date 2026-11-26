@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,10 +16,12 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "HipblasltUtils.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
+#include "engines/plans/MxTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
@@ -26,6 +29,9 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipblaslt_plugin_test::createMxGraphWithLayout;
+using hipblaslt_plugin_test::createMxGraphWithStrides;
+using hipblaslt_plugin_test::MxOperandLayout;
 
 namespace
 {
@@ -152,9 +158,11 @@ flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target,
 // Fixtures
 // ===========================================================================
 
-// CPU fixture: negative cases that reject the graph before any GPU handle use.
-// No device required — the handle is default-constructed and never touched
-// because every rejection happens during topology/constraint checks.
+// CPU fixture: graph-level negative cases, no device required. The handle has no
+// hipBLASLt handle, so isApplicable() also returns false for a valid graph that
+// reaches the heuristic: these tests show that a graph is declined, not why. A decline
+// that needs a packed control is in the GPU fixture, and the graph-only rules are also
+// tested without a device in TestMxGraphConstraints.
 class TestHipblasltMxMatmulPlanBuilder : public ::testing::Test
 {
 protected:
@@ -208,24 +216,24 @@ class TestGpuHipblasltMxMatmulPlanBuilder : public MxGpuPlanBuilderTestBase
 static flatbuffers::FlatBufferBuilder
     createMxGraphWithTypes(DT xTypeA, DT cType, DT xTypeB = DT::UNSET)
 {
-    return createValidMxMatmulGraph({32, 128},
-                                    {1, 32},
-                                    {128, 32},
-                                    {32, 1},
-                                    {32, 32},
-                                    {32, 1},
-                                    {32, 4},
-                                    {4, 32},
-                                    xTypeA,
-                                    cType,
-                                    DT::FP8_E8M0,
-                                    DT::FP8_E8M0,
-                                    DT::FLOAT,
-                                    32,
-                                    false,
-                                    false,
-                                    xTypeB);
+    return createMxGraphWithStrides({1, 32}, {32, 1}, {4, 1}, {32, 1}, cType, xTypeA, xTypeB);
 }
+
+namespace
+{
+
+bool onArch(const char* arch)
+{
+    return archMatches(
+        hipdnn_test_sdk::utilities::currentDeviceArch(), arch, ArchMatchMode::PREFIX);
+}
+
+bool onGfx1250()
+{
+    return hipblaslt_plugin_test::isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch());
+}
+
+} // namespace
 
 // ===========================================================================
 // isApplicable — positive cases (GPU-gated via SKIP_IF_NO_DEVICES in SetUp)
@@ -331,7 +339,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrd
 }
 
 // ===========================================================================
-// isApplicable — negative cases (all CPU-safe, no GPU call needed)
+// isApplicable — negative cases (CPU fixture unless the fixture name says Gpu)
 // ===========================================================================
 
 // Plain matmul (1 node) must NOT match the MX builder
@@ -471,22 +479,308 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongBlockSize)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-// opA != T (A must be col-major for MX) — pass row-major A strides
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOpANotT)
+// Operands and scales must be packed row- or column-major matrices: rocRoller
+// ignores leading dimensions, so a padded one would be read as packed (#14290).
+// Each case changes the strides of one tensor of a K-contiguous graph that is
+// accepted when packed (on every MX arch), so the decline comes from those strides.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensors)
 {
-    auto fb = createValidMxMatmulGraph(
-        {32, 128}, {128, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+    const std::vector<int64_t> aPacked = {128, 1};
+    const std::vector<int64_t> bPacked = {1, 128};
+    const std::vector<int64_t> scaleAPacked = {4, 1};
+    const std::vector<int64_t> scaleBPacked = {1, 4};
+
+    auto packed
+        = createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16);
+    GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
+    ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
+
+    struct Case
+    {
+        const char* name;
+        flatbuffers::FlatBufferBuilder graph;
+    };
+    std::vector<Case> cases;
+    // A row-major [32, 128] with a row stride of 136.
+    cases.push_back(
+        {"padded A",
+         createMxGraphWithStrides({136, 1}, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16)});
+    // B column-major [128, 32] with a column stride of 136.
+    cases.push_back(
+        {"padded B",
+         createMxGraphWithStrides(aPacked, {1, 136}, scaleAPacked, scaleBPacked, DT::BFLOAT16)});
+    // Neither axis of A has unit stride.
+    cases.push_back(
+        {"non-matrix A",
+         createMxGraphWithStrides({256, 2}, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16)});
+    // scale_a row-major [32, 4] with a row stride of 8.
+    cases.push_back(
+        {"padded scale_a",
+         createMxGraphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked, DT::BFLOAT16)});
+    // scale_b column-major [4, 32] with a column stride of 8.
+    cases.push_back(
+        {"padded scale_b",
+         createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, {1, 8}, DT::BFLOAT16)});
+
+    for(auto& c : cases)
+    {
+        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << c.name;
+    }
 }
 
-// opB != N (B must be row-major for MX) — pass col-major B strides
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOpBNotN)
+// The same rule for the NT layout (M-contiguous A, N-contiguous B, row-major
+// scales), which the provider accepted before it checked packing: a padded operand
+// or scale was then read as packed. gfx950 only; gfx1250 declines NT for layout.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsNt)
 {
-    auto fb = createValidMxMatmulGraph(
-        {32, 128}, {1, 32}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check";
+    }
+    const std::vector<int64_t> aPacked = {1, 32};
+    const std::vector<int64_t> bPacked = {32, 1};
+    const std::vector<int64_t> scaleAPacked = {4, 1};
+    const std::vector<int64_t> scaleBPacked = {32, 1};
+
+    auto packed = createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
+    GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
+    ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
+
+    struct Case
+    {
+        const char* name;
+        flatbuffers::FlatBufferBuilder graph;
+    };
+    std::vector<Case> cases;
+    // A column-major [32, 128] with a column stride of 40.
+    cases.push_back(
+        {"padded A", createMxGraphWithStrides({1, 40}, bPacked, scaleAPacked, scaleBPacked)});
+    // B row-major [128, 32] with a row stride of 40.
+    cases.push_back(
+        {"padded B", createMxGraphWithStrides(aPacked, {40, 1}, scaleAPacked, scaleBPacked)});
+    // scale_a row-major [32, 4] with a row stride of 8.
+    cases.push_back(
+        {"padded scale_a", createMxGraphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked)});
+    // scale_b row-major [4, 32] with a row stride of 40.
+    cases.push_back(
+        {"padded scale_b", createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, {40, 1})});
+
+    for(auto& c : cases)
+    {
+        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, graph)) << c.name;
+    }
+}
+
+// The graph-only checks need no device. Every packed operand order passes them, with
+// packed scales in either order: the plan prepares a scale stored in the other order.
+TEST(TestMxGraphConstraints, AcceptsPackedOperandsWithScalesInEitherOrder)
+{
+    for(const auto layout : {MxOperandLayout::MN_MN,
+                             MxOperandLayout::K_K,
+                             MxOperandLayout::K_MN,
+                             MxOperandLayout::MN_K})
+    {
+        for(const bool mnContiguousScales : {false, true})
+        {
+            auto fb = createMxGraphWithLayout(
+                layout, DT::FP8_E4M3, DT::HALF, DT::UNSET, mnContiguousScales);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_NO_THROW(checkMxGraphConstraints(graph))
+                << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
+        }
+    }
+}
+
+// The plan hands C to hipBLASLt as a row-major matrix, so a column-major C is declined,
+// and hipBLASLt ignores an MX GEMM's leading dimensions (#14290), so is a padded one.
+TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
+{
+    const std::vector<std::pair<std::vector<int64_t>, std::string>> cases{
+        {{48, 1}, "[#14290] MX matmul: output C has a padded leading dimension"},
+        {{1, 32}, "output C must be a row-major"}};
+    for(const auto& [cStrides, reason] : cases)
+    {
+        auto fb = createValidMxMatmulGraph({32, 128},
+                                           {128, 1},
+                                           {128, 32},
+                                           {1, 128},
+                                           {32, 32},
+                                           cStrides,
+                                           {32, 4},
+                                           {4, 32},
+                                           DT::FP8_E4M3,
+                                           DT::HALF,
+                                           DT::FP8_E8M0,
+                                           DT::FP8_E8M0,
+                                           DT::FLOAT,
+                                           32,
+                                           false,
+                                           false,
+                                           DT::UNSET,
+                                           {4, 1},
+                                           {1, 4});
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        try
+        {
+            checkMxGraphConstraints(graph);
+            ADD_FAILURE() << "C strides {" << cStrides[0] << ", " << cStrides[1] << "} accepted";
+        }
+        catch(const HipdnnPluginException& e)
+        {
+            EXPECT_NE(std::string(e.what()).find(reason), std::string::npos) << e.what();
+        }
+    }
+}
+
+// hipBLASLt reads A and B and writes C as packed matrices (#14290), so the graph-only
+// checks decline a padded A or B in either order, and a C whose row stride is not N.
+TEST(TestMxGraphConstraints, DeclinesMatricesThatAreNotPacked)
+{
+    struct Case
+    {
+        std::string name;
+        flatbuffers::FlatBufferBuilder graph;
+    };
+    std::vector<Case> cases;
+    cases.push_back(
+        {"K-contiguous A, row stride 136",
+         createValidMxMatmulGraph(
+             {32, 128}, {136, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    cases.push_back(
+        {"M-contiguous A, column stride 40",
+         createValidMxMatmulGraph(
+             {32, 128}, {1, 40}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    cases.push_back(
+        {"K-contiguous B, column stride 136",
+         createValidMxMatmulGraph(
+             {32, 128}, {1, 32}, {128, 32}, {1, 136}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    cases.push_back(
+        {"N-contiguous B, row stride 40",
+         createValidMxMatmulGraph(
+             {32, 128}, {1, 32}, {128, 32}, {40, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    for(const int64_t cRowStride : {16, 0, -32})
+    {
+        cases.push_back({"C row stride " + std::to_string(cRowStride),
+                         createValidMxMatmulGraph({32, 128},
+                                                  {1, 32},
+                                                  {128, 32},
+                                                  {32, 1},
+                                                  {32, 32},
+                                                  {cRowStride, 1},
+                                                  {32, 4},
+                                                  {4, 32})});
+    }
+
+    for(auto& c : cases)
+    {
+        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        EXPECT_THROW(checkMxGraphConstraints(graph), HipdnnPluginException) << c.name;
+    }
+}
+
+// The swizzled scale formats run on hipBLASLt's Tensile kernels, which exist only for
+// K-contiguous A and B (#13715). Natural scales take every packed operand order.
+TEST(TestMxGraphConstraints, SwizzledScaleFormatsNeedKContiguousOperands)
+{
+    for(const auto layout : {MxOperandLayout::MN_MN,
+                             MxOperandLayout::K_K,
+                             MxOperandLayout::K_MN,
+                             MxOperandLayout::MN_K})
+    {
+        auto fb = createMxGraphWithLayout(layout);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        EXPECT_NO_THROW(checkMxLayoutForScaleFormat(graph, MxScaleFormat::NATURAL))
+            << toString(layout);
+        for(const auto format : {MxScaleFormat::SWIZZLED_GFX950, MxScaleFormat::SWIZZLED_GFX1250})
+        {
+            if(layout == MxOperandLayout::K_K)
+            {
+                EXPECT_NO_THROW(checkMxLayoutForScaleFormat(graph, format)) << toString(format);
+                continue;
+            }
+            try
+            {
+                checkMxLayoutForScaleFormat(graph, format);
+                ADD_FAILURE() << toString(layout) << " accepted for " << toString(format);
+            }
+            catch(const HipdnnPluginException& e)
+            {
+                EXPECT_NE(std::string(e.what()).find("(#13715)"), std::string::npos) << e.what();
+            }
+        }
+    }
+}
+
+// Alignment: M and N multiples of 16, K a multiple of 128. The reason is checked
+// because hipBLASLt itself finds no kernel for some misaligned shapes.
+TEST(TestMxGraphConstraints, DeclinesMisalignedShapes)
+{
+    const auto expectDeclined
+        = [](const flatbuffers::FlatBufferBuilder& fb, const std::string& reason) {
+              GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+              try
+              {
+                  checkMxGraphConstraints(graph);
+                  ADD_FAILURE() << "accepted; expected: " << reason;
+              }
+              catch(const HipdnnPluginException& e)
+              {
+                  EXPECT_NE(std::string(e.what()).find(reason), std::string::npos) << e.what();
+              }
+          };
+    expectDeclined(createValidMxMatmulGraph(
+                       {24, 128}, {1, 24}, {128, 32}, {32, 1}, {24, 32}, {32, 1}, {24, 4}, {4, 32}),
+                   "M must be divisible by 16");
+    expectDeclined(createValidMxMatmulGraph(
+                       {32, 128}, {1, 32}, {128, 24}, {24, 1}, {32, 24}, {24, 1}, {32, 4}, {4, 24}),
+                   "N must be divisible by 16");
+    expectDeclined(createValidMxMatmulGraph(
+                       {32, 96}, {1, 32}, {96, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 3}, {3, 32}),
+                   "K must be divisible by 128");
+}
+
+// rocRoller (gfx950) reads every operand-order combination; the plan transposes a
+// scale whose order differs from its operand's.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx950)
+{
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check";
+    }
+    for(const auto layout : {MxOperandLayout::MN_MN,
+                             MxOperandLayout::K_K,
+                             MxOperandLayout::K_MN,
+                             MxOperandLayout::MN_K})
+    {
+        for(const bool mnContiguousScales : {false, true})
+        {
+            auto fb = createMxGraphWithLayout(
+                layout, DT::FP8_E4M3, DT::HALF, DT::UNSET, mnContiguousScales);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+                << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
+        }
+    }
+}
+
+// gfx1250 runs only the gfx1250 swizzled format, so K-contiguous A and B are
+// accepted with either scale order (other layouts: SwizzledScaleFormatsNeedKContiguousOperands).
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousOnGfx1250)
+{
+    if(!onGfx1250())
+    {
+        GTEST_SKIP() << "gfx1250-only check";
+    }
+    for(const bool mnContiguousScales : {false, true})
+    {
+        auto fb = createMxGraphWithLayout(
+            MxOperandLayout::K_K, DT::FP8_E4M3, DT::BFLOAT16, DT::UNSET, mnContiguousScales);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+            << "mnContiguousScales=" << mnContiguousScales;
+    }
 }
 
 // Non-MX graph (batchnorm) must return false
@@ -566,26 +860,26 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8AWithFp6B)
     }
 }
 
-// See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt does have gfx1250 MX
-// kernels for these element types, but only for transA=T, transB=N, while this
-// provider always sends transA=N, transB=T, so every MX graph must be declined.
-// A failure here means hipBLASLt now offers a kernel for the provider's problem;
-// see the issue before enabling MX on gfx1250.
-TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOnGfx1250)
+// #10811 only hits hipBLASLt transB = T, i.e. a column-major graph A. A K-contiguous
+// (row-major) FP8 A with an FP6 B is correct on gfx950 and is accepted.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousFp8AWithFp6B)
 {
-    const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
-    if(!archMatches(archName, "gfx1250", ArchMatchMode::PREFIX))
+    if(!onArch("gfx950"))
     {
-        GTEST_SKIP() << "gfx1250-only check, running on " << archName;
+        GTEST_SKIP() << "gfx950-only check (no FP6 MX kernels on gfx1250)";
     }
-    for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
+    for(const auto layout : {MxOperandLayout::K_K, MxOperandLayout::K_MN})
     {
-        for(const auto cType : {DT::BFLOAT16, DT::FLOAT})
+        for(const auto aType : {DT::FP8_E4M3, DT::FP8_E5M2})
         {
-            auto fb = createMxGraphWithTypes(xType, cType);
-            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-            EXPECT_FALSE(_builder.isApplicable(_handle, graph))
-                << "x=" << EnumNameDataType(xType) << " out=" << EnumNameDataType(cType);
+            for(const auto bType : {DT::FP6_E2M3, DT::FP6_E3M2})
+            {
+                auto fb = createMxGraphWithLayout(layout, aType, DT::HALF, bType);
+                GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+                EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+                    << toString(layout) << " A=" << EnumNameDataType(aType)
+                    << " B=" << EnumNameDataType(bType);
+            }
         }
     }
 }
@@ -723,13 +1017,14 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableDoesNotDeclineDefaultScaleS
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsDefaultScaleSign)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithWrongVirtual(MxTensor::NONE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
-// The plan reads each scale tensor as dense row-major data: the canonical A scale
-// is [32, 4] with strides [4, 1] and the B scale is [4, 32] with strides [32, 1].
+// Each scale must be a packed row- or column-major matrix; the plan prepares a scale
+// stored in the other order. The canonical A scale is [32, 4] and the B scale [4, 32].
 // The decline cause is asserted from the log because, without a GPU handle, every
 // graph that passes the constraint checks is also rejected later by plan construction.
 struct ScaleStridesCase
@@ -737,7 +1032,7 @@ struct ScaleStridesCase
     const char* tensorName;
     const char* role;
     std::vector<int64_t> strides;
-    bool denseRowMajor;
+    bool packed;
 };
 
 class TestHipblasltMxMatmulPlanBuilderScaleStrides
@@ -746,7 +1041,7 @@ class TestHipblasltMxMatmulPlanBuilderScaleStrides
 {
 };
 
-TEST_P(TestHipblasltMxMatmulPlanBuilderScaleStrides, IsApplicableDeclinesNonDenseScaleStrides)
+TEST_P(TestHipblasltMxMatmulPlanBuilderScaleStrides, IsApplicableDeclinesScalesThatAreNotPacked)
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
@@ -767,19 +1062,19 @@ TEST_P(TestHipblasltMxMatmulPlanBuilderScaleStrides, IsApplicableDeclinesNonDens
     (void)_builder.isApplicable(_handle, graph);
     EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_INFO,
                                         std::string("MX matmul: ") + param.role
-                                            + " scale strides must be dense"),
-              !param.denseRowMajor)
+                                            + " scale must be a packed"),
+              !param.packed)
         << recorder.getRecordedLogsAsString();
 }
 
 INSTANTIATE_TEST_SUITE_P(Strides,
                          TestHipblasltMxMatmulPlanBuilderScaleStrides,
                          ::testing::Values(ScaleStridesCase{"scale_a", "A", {4, 1}, true},
-                                           ScaleStridesCase{"scale_a", "A", {1, 32}, false},
+                                           ScaleStridesCase{"scale_a", "A", {1, 32}, true},
                                            ScaleStridesCase{"scale_a", "A", {8, 2}, false},
                                            ScaleStridesCase{"scale_a", "A", {4, 0}, false},
                                            ScaleStridesCase{"scale_b", "B", {32, 1}, true},
-                                           ScaleStridesCase{"scale_b", "B", {1, 4}, false},
+                                           ScaleStridesCase{"scale_b", "B", {1, 4}, true},
                                            ScaleStridesCase{"scale_b", "B", {64, 2}, false},
                                            ScaleStridesCase{"scale_b", "B", {0, 1}, false}));
 

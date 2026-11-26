@@ -27,17 +27,15 @@ OperationMetadata shippedSdpa()
 
 ProblemPoint sdpaPoint()
 {
-    return ProblemPoint{{"batch", int64_t{1}},
-                        {"heads", int64_t{32}},
-                        {"heads_kv", int64_t{32}},
-                        {"seqlen_q", int64_t{2048}},
-                        {"seqlen_k", int64_t{2048}},
-                        {"head_dim", int64_t{128}},
-                        {"is_causal", true},
-                        {"alignment", std::string("top_left")},
-                        {"generate_stats", false},
-                        {"form", std::string("plain")},
-                        {"dtype", std::string("bf16")}};
+    return test::withDefaultCategoricals(shippedSdpa(),
+                                         ProblemPoint{{"batch", int64_t{1}},
+                                                      {"heads", int64_t{32}},
+                                                      {"heads_kv", int64_t{32}},
+                                                      {"seqlen_q", int64_t{2048}},
+                                                      {"seqlen_k", int64_t{2048}},
+                                                      {"head_dim", int64_t{128}},
+                                                      {"is_causal", true},
+                                                      {"dtype", std::string("bf16")}});
 }
 
 } // namespace
