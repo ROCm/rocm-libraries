@@ -495,9 +495,10 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             useStreamK = true;
         }
 
-        // rocRoller's StreamK implementation is not USO compliant.
-        if(useStreamK && prob.uniform_summation_order != 0)
-            continue;
+        // rocRoller's StreamK implementation is not USO compliant, so the tile runs
+        // data-parallel instead: one workgroup sums all of K.
+        if(prob.uniform_summation_order != 0)
+            useStreamK = false;
 
         // Heuristics:
         // 64x256 performs poorly for StreamK
