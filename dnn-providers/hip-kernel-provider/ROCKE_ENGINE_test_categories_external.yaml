@@ -31,12 +31,10 @@
 #
 # What each tier is for, what belongs in it and its budget are defined once,
 # in rocke/TESTING.md section 5.0.3; rocke/tools/check_entry_times.py and the
-# registration checks fail a quick entry that breaks those rules. Quick holds
-# only unit tests and the most basic enablement checks: here the native C++
-# unit tests, the Python import smoke, the engine-modules packaging check and
-# the small host contract checks. New tests start at standard. The golden
-# checks, the GPU numeric checks and the pinned GPU reference lanes with their
-# reference contracts start there too (the python-standard, gpu-standard and
+# registration checks fail a quick entry that is over its budgets or
+# registered as GPU work. The quick category below is the one list of quick
+# entries. The golden, parity, GPU numeric and pinned GPU reference entries
+# start at standard (the python-standard, gpu-standard and
 # pinned-reference-standard categories), where CI splits their tests across
 # its shards. The tier rule gives a category whose name is not a tier only its
 # own name as a label, so those categories list the standard, comprehensive

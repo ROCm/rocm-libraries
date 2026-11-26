@@ -229,7 +229,7 @@ the strategy's biggest holes live (see
   distinguishes production-selected instances from explicit kernel configurations.
 
 - The [oracle-free attention lane](library/tests/oracle_free/README.md)
-  (`rocke_oracle_free_pytest`, quick tier) launches the shipped gfx942 dense
+  (`rocke_oracle_free_pytest`, standard tier) launches the shipped gfx942 dense
   kernel, at whatever configuration dispatch resolves, on zero-Q inputs whose
   outputs are uniform probabilities over the legal keys. It requires every
   stored bit to equal the correctly rounded closed form (a proven zero-ULP
@@ -956,9 +956,10 @@ runs on each pull request to develop that changes rocKE:
 
 - `rocke-library-reach`: platform's imports of the library packages only shrink;
 - `rocke-pending-lanes`: every test file is assigned to a CI entry or has a
-  recorded reason, and no CTest entry without the GPU lock selects a test
+  recorded reason, no CTest entry without the GPU lock selects a test
   module that marks a test `gpu` (or that imports a GPU launch entry point
-  and marks none);
+  and marks none), and the quick tier keeps to its budgets and runs no GPU
+  entry ([Budgets](#budgets));
 - `rocke-pending-lanes-on-deletion`: `rocke-pending-lanes` for a change that
   only deletes files it reads;
 - `rocke-compliance`: the files a change adds or edits pass the compliance
@@ -1051,6 +1052,34 @@ discovered, gated and split; this section says where a new or moved test goes.
 The owners of the hip-kernel-provider test tiers set this policy; change this
 section with it.
 
+**The tiers.** This table is the one definition of each tier; every other
+description of the tiers points here. The budgets themselves are in
+[Budgets](#budgets).
+
+| Tier | What passing proves | What belongs there | What does not | Budget (rocKE's share) |
+|---|---|---|---|---|
+| quick | rocKE compiled, packaged and imports, and one trivial thing runs end to end. It does not prove that rocKE works. | Unit tests and the most basic enablement checks. | Coverage of any kind: goldens, parity, GPU numeric and reference suites, sweeps. | Q1 for the tier, Q2 per item; no GPU entry outside its allowlist |
+| standard | The change keeps rocKE correct on the regular cases. It is the pre-merge tier, for every pull request that touches the provider. | Regular cases: unit suites at full breadth, goldens and byte stability, parity, GPU numeric checks and pinned references. New tests go here by default. | Exhaustive matrices and heavy resource gates. | S4 per CI shard |
+| comprehensive, full | The exhaustive and heavy cases still pass. Scheduled runs only; no CI job runs them today ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)). | Exhaustive sweeps and explicit resource gates; say in the pull request which job runs the entry. | Anything a pull request must pass; a test moved there only to make room. | None set |
+| benchmarks | Nothing in CI: never in any tier above. | Timing, throughput and performance-baseline checks, run separately on a dedicated benchmarking system. | Correctness checks, which take a CI tier. | Not a CI budget |
+
+**Why quick stays tiny.** Quick is the fast check that a build works: that
+rocKE compiled, packaged, imports and runs one trivial thing end to end. Being
+that small, it can also be used to bring up simulators, new hardware or new CI
+environments.
+
+**The quick rule.** Quick is for unit tests and the most basic enablement
+checks only: did it build, package, import and run one trivial thing. It is not
+where coverage goes. rocKE's whole quick share is capped (Q1), and it holds no
+GPU numeric or reference test. New tests go to standard by default. Adding to
+quick needs a reason stated in the pull request and must stay within budget;
+the checks fail a quick entry that is over its budgets or uses the GPU
+([Budgets](#budgets)).
+
+No CI job builds rocKE yet, so no tier runs in CI today
+([What CI checks today](#what-ci-checks-today)); which job runs which tier once
+one does is in [§5.0.2](#502-ci-shards-and-rocke-item-sharding).
+
 **Test at the cheapest level that proves the claim.** Go up a level only for
 what the level below cannot see.
 
@@ -1058,9 +1087,9 @@ what the level below cannot see.
 |---|---|---|
 | 1. Host unit and contract | A spec rule, a pure function, a typed refusal | standard |
 | 2. IR structure | The emitted IR has the claimed shape | standard |
-| 3. Golden | The Python engine's output bytes are stable | quick, as a case in the existing golden corpus |
-| 4. Installed artifact | The installed tree imports and packages | quick for the import smoke; otherwise standard |
-| 5. GPU numeric | A kernel computes the right result | quick for a published operation's pinned reference lane; otherwise standard |
+| 3. Golden | The Python engine's output bytes are stable | standard, as a case in the existing golden corpus |
+| 4. Installed artifact | The installed tree imports and packages | quick for the import smoke and the engine-modules check; otherwise standard |
+| 5. GPU numeric | A kernel computes the right result | standard, including each published operation's pinned reference lane |
 | 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
 
 **Make the test prove the claim.** Each new refusal has a test that asserts the
@@ -1069,65 +1098,41 @@ claim is false: assert the property claimed (the `align N` of a load, not only
 its vector type). Use real inputs, not stubs. A one-time claim (a measurement,
 "IR unchanged") needs evidence in the PR instead. Drop a claim you can't back.
 
-The quick golden entries lower with the Python engine only. The byte-identity
+The golden entries lower with the Python engine only. The byte-identity
 gate over the kernel families runs in `tests/run_all.py`, through
 `tools/check_byte_identity.py`
 ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)), and in no CTest
 entry (⚠ [G10](#72-platform-quality-gaps-question-b)).
 
-**quick is a smoke tier.** It runs unsplit on one CI shard, and a failure there
-must mean that rocKE cannot be used or that a shipped kernel is wrong. It admits
-only:
+**The quick entries.** The `quick` category of
+`ROCKE_ENGINE_test_categories_external.yaml` lists them; quick runs unsplit on one
+CI shard. The import smoke, `rocke_python_import_smoke`, which builds one GEMM
+kernel and lowers it to LLVM IR, is its one end-to-end check, and
+`rocke_engine_modules_check` checks that the engine pieces the build made are
+packaged. Both run on the host: launching a kernel would take several seconds of
+Q1, and the standard tier's GPU checks launch kernels. A quick entry registered
+as GPU work (the `gpu` label or the `rocke_gpu` lock) needs
+`GPU_ENTRY_ALLOWLIST` in
+[`tools/check_entry_times.py`](tools/check_entry_times.py) to name it with its
+reason; only the one end-to-end check may be there.
 
-- the import smoke, `rocke_python_import_smoke`;
-- golden byte stability (`rocke_golden_static`, `rocke_differential_golden_*`):
-  add cases to their corpus, not new golden entries;
-- the core refusal and parity contracts of shipped kernel families, including
-  their small non-pytest contract binaries within S3;
-- the native C++ unit test binaries, each within S3;
-- the oracle-free GPU checks of shipped kernels, `rocke_oracle_free_pytest`;
-- the pinned GPU reference lane of each published operation, with its
-  reference contracts (`rocke_reference_common_pytest`,
-  `rocke_<operation>_reference_unit_pytest`);
-- the builder-surface contract, `rocke_contracts_pytest`;
-- the check of the test registration itself, `rocke_pending_lanes_check`
-  (build tree only).
-
-Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests other
-than that check, and tests of an unshipped family belong in standard. The
-entry-time check, `rocke_entry_time_check`, takes seconds to list and collect
-every split entry, so it runs in standard too.
-Which contracts count as core for each family is part of the domain test
-strategy, which refines this list.
-State the reason for a quick addition in the pull request.
-
-**standard is the default home of every new test.** Only entries whose command
-starts with `_ROCKE_INSTALLED_PYTEST` are split over the CI shards item by item;
-every other entry runs whole on every CI shard
+**Which standard entries split across the CI shards.** Only entries whose
+command starts with `_ROCKE_INSTALLED_PYTEST`, and the runners that take their
+share under `--rocke-shard-from-gtest-env`, are split over the CI shards item by
+item; every other entry runs whole on every CI shard
 ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
 
-**comprehensive and full** are for explicit resource gates and other
-scheduled-only entries. [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says
-which CI jobs run these tiers today; say in the pull request where an installed
-entry placed there runs.
-Do not move a test there to make room.
-
-**Benchmarks are not a CI tier.** The CI tiers (quick, standard, comprehensive,
-full) run correctness and validation only. A benchmark, whose verdict is a time,
-a throughput or a comparison with a performance baseline, is never a CTest
-entry: benchmarking is its own tier and runs on a dedicated benchmarking system
-outside this CI. A host test of the benchmark tooling checks correctness and
-takes a CI tier like any other test.
+**Benchmarks.** A benchmark's verdict is a time, a throughput or a comparison
+with a performance baseline, so it is never a CTest entry. A host test of the
+benchmark tooling checks correctness and takes a CI tier like any other test.
 
 | Test | Placement |
 |---|---|
 | A host test of the benchmark tooling, such as `platform/tests/benchmark/test_occupancy_targets.py` (the occupancy model of `rocke.benchmark.perf`); it times nothing | A CI tier, as any host test. |
 | Anti-example: a CTest entry that runs a kernel sweep and fails when a kernel is slower than its baseline | Its verdict is a time: it belongs in the benchmarking tier, not in CI. |
 
-**Where a new file lands.** The one list of quick entries is the `quick`
-category of `ROCKE_ENGINE_test_categories_external.yaml`, whose header states
-the quick-tier rule. The platform pytest parts (`rocke_pytest_<part>`), the
-tiling entries and the library unit, IR and GPU numeric suites start at
+**Where a new file lands.** The platform pytest parts (`rocke_pytest_<part>`),
+the tiling entries and the library unit, IR and GPU numeric suites start at
 standard. A new file under `platform/tests`, under the tiling tests, or under
 `library/tests/dispatch/attention/` or `library/tests/sdpa/` joins one of them
 with no edit if it is installed and its entry's filters select it, so it runs in
@@ -1146,10 +1151,10 @@ CTest processes, gets a standard entry modeled on `rocke_ctest_shard_pytest` in
 
 - start its command as [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
 - list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
-  which gives it the labels of standard and every later tier; choose a name
-  that no quick pattern matches (`*_reference_unit_pytest`,
-  `*_gpu_gfx<target>_pytest`), or quick runs it too, and leave the
-  `rocke_pytest_` prefix to the platform parts;
+  which gives it the labels of standard and every later tier; leave the
+  name patterns of the pinned reference lanes (`*_reference_unit_pytest`,
+  `*_gpu_gfx<target>_pytest`) to those lanes and the `rocke_pytest_` prefix to
+  the platform parts;
 - keep its files out of the shared entries: for `platform/tests`, `list(APPEND)`
   the file to `_ROCKE_PLATFORM_PYTEST_IGNORE_<part>`; for the two library
   directories, add an `--ignore` for the file to its entry in
@@ -1157,9 +1162,10 @@ CTest processes, gets a standard entry modeled on `rocke_ctest_shard_pytest` in
   and the `gpu` marker, so moving a tiling file to its own entry needs a CMake
   change.
 
-A quick addition, one that the list above admits, goes in its own entry under
-the `quick` category; each of its items stays within Q2, and the change adds at
-most Q3 to quick.
+A quick addition is a unit test or a basic enablement check that the tier table
+admits, with its reason stated in the pull request. It goes in its own entry
+under the `quick` category; each of its items stays within Q2, and the change
+adds at most Q3 to quick.
 
 **Place a test so that sharding can split it.**
 
@@ -1230,45 +1236,53 @@ log.
 #### Budgets
 
 Times are wall time on a CI runner, as the CI log shows it; the Test step of a
-CI shard has a 30-minute limit. Q1 and S4 are checked (below the table). The
-other budgets are proposed, pending agreement with the owners of the
+CI shard has a 30-minute limit. Q1, Q2 and S4 are checked (below the table).
+The other budgets are proposed, pending agreement with the owners of the
 hip-kernel-provider test tiers, and no check holds them; change them here only.
 
 | Id | Budget | Value | Why |
 |---|---|---|---|
-| Q1 | rocKE's share of the quick shard | 300 s | TheRock targets under 5 min for a whole quick shard. Checked. |
-| Q2 | One item in a quick entry | 2 s | Almost every quick item is far below it; the few above it take a large share of quick time. |
-| Q3 | A new quick entry, or what one change adds to quick | 15 s | A small fraction of Q1; every entry also pays start-up and collection. |
-| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | `rocke_golden_static`, `rocke_differential_golden_ll` and `rocke_differential_golden_canonical` split across CI shards under `--rocke-shard-from-gtest-env` (by case and by family), but quick runs as one shard, so each case still runs there whole. `rocke_arch_domain_reproducibility` (standard) splits its declaration keys the same way; its toolchain, method and processor checks run on every shard. `rocke_optimization_barrier_hip_pair` splits its HIP emitter configurations and its range-boundary check the same way. |
+| Q1 | rocKE's share of the quick shard | 30 s | The whole quick shard, of every project in it, targets 5 min; rocKE is one of many, so its share stays a small fraction. Checked. |
+| Q2 | One item in a quick entry | 2 s | One slow item takes a large share of Q1. Checked: a pytest test, or the whole run of a non-pytest entry. |
+| Q3 | A new quick entry, or what one change adds to quick | 5 s | A sixth of Q1; every entry also pays start-up and collection. |
+| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | `rocke_golden_static`, `rocke_differential_golden_ll` and `rocke_differential_golden_canonical` split across CI shards under `--rocke-shard-from-gtest-env` (by case and by family). `rocke_arch_domain_reproducibility` (standard) splits its declaration keys the same way; its toolchain, method and processor checks run on every shard. `rocke_optimization_barrier_hip_pair` splits its HIP emitter configurations and its range-boundary check the same way. |
 | S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. In an entry with a lower `--timeout` (several library entries use 30 s), S2 holds each item to half of it. |
 | S2 | Limit headroom | The slowest item under half its pytest `--timeout`; the entry's longest run, which is its unsplit run if the entry is in quick, under half its CTest `TIMEOUT` | The worst case stays under half of each limit. The CTest `TIMEOUT` is its resource class's limit, so an entry near half of it gets cheaper or splits; the limit does not move. |
-| S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard unless it takes its share under `--rocke-shard-from-gtest-env`. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions: each splits across the CI shards that way, and runs whole in quick. |
+| S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard unless it takes its share under `--rocke-shard-from-gtest-env`. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions: each splits across the CI shards that way. |
 | S4 | rocKE's share of each standard shard | 540 s | Under a third of the 30-minute step; the rest of the step is left to the provider's other tests. Checked for the slowest shard, not the average. |
 
-[`tools/check_entry_times.py`](tools/check_entry_times.py) enforces Q1 and S4
-(its `CI_TIERS` holds the same values), and the standard-tier CTest entry
-`rocke_entry_time_check` runs its `check`. It projects every shard from the
-times in `tools/entry_times.json` (recorded from CI logs, per operating system)
-and the live CTest registration. It places the cases of each split entry as CI
-does: it collects a pytest entry's tests, and every other split runner (the
-non-pytest entries of G1 and S3) lists its cases under
+[`tools/check_entry_times.py`](tools/check_entry_times.py) enforces Q1, Q2, S4
+and quick's GPU rule (its `CI_TIERS` holds the same values), and the
+standard-tier CTest entry `rocke_entry_time_check` runs its `check`. The time
+rules judge the installed entries, which CI runs. It projects every shard from
+the times in `tools/entry_times.json` (recorded from CI logs, per operating
+system) and the live CTest registration. It places the cases of each split entry
+as CI does: it collects a pytest entry's tests, and every other split runner
+(the non-pytest entries of G1 and S3) lists its cases under
 `--rocke-list-shard-keys` (`rocke.tests.ci_shard.LIST_KEYS_FLAG`, which
 `add_shard_argument` gives a runner with its shard flag). It places their shard
 keys by their `rocke_shard_cost` marks and the hash, and spreads each shard's
 keys over the entry's workers. So heavy keys that the hash puts on one shard
-show on that shard. It fails when one entry alone is over its tier's budget on
-a shard, when any shard is over its limit (the budget, or the ceiling
+show on that shard. It fails when one entry alone is over its tier's budget on a
+shard, when any shard is over its limit (the budget, or the ceiling
 `entry_times.json` records for a tier already over budget; a ceiling only goes
-down), or when an entry that a tier runs has no recorded time (a new entry, or
-one whose time was removed); record its time from a CI log with
-`check_entry_times.py record`, and drop the times of entries no longer
-registered with `check_entry_times.py prune`. The tool's docstring gives the
-`check`, `record`, `prune` and `lower-ceiling` commands. The check needs a
-provider install on the operating system it judges, because the tier labels
-and the tests it collects exist only there. So the `windows` column of
-`entry_times.json` is judged only when the check runs on Windows; the entries
-it has no time for stay untimed until a Windows run records them. Run `ctest -R '^rocke_entry_time_check$'` in
-`<install>/bin/hip_kernel_provider`. No pre-commit hook runs it.
+down), when an entry that a tier runs has no recorded time (a new entry, or one
+whose time was removed), when a quick entry may have an item over Q2 (a quick
+pytest entry over Q2 as a whole needs its test times, recorded from a log of a
+run with pytest's `--durations` report), or when a quick entry uses the GPU
+outside its allowlist; record times from a CI log with `check_entry_times.py
+record`, and drop the times of entries no longer registered with
+`check_entry_times.py prune`. The tool's docstring gives the `check`, `record`,
+`prune` and `lower-ceiling` commands. The check needs a provider install on the
+operating system it judges, because the tier labels and the tests it collects
+exist only there. So the `windows` column of `entry_times.json` is judged only
+when the check runs on Windows; the entries it has no time for stay untimed
+until a Windows run records them. Run `ctest -R '^rocke_entry_time_check$'` in
+`<install>/bin/hip_kernel_provider`. The `rocke-pending-lanes` pre-commit hook
+runs `platform/tests/tools/test_quick_tier.py`, which holds the quick tier to
+the same rules on a configure of the entries, against the recorded times of the
+operating system it runs on, for every change to rocKE or its categories; it
+also refuses a GPU entry among the build-tree quick entries.
 
 **GPU tests.** A test that launches GPU work (device memory, a code object or a
 kernel launch) carries the `gpu` mark. The host CTest entries deselect it, and

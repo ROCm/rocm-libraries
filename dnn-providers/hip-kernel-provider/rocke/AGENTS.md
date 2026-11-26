@@ -113,6 +113,10 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
   reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Tests** — PR test-evidence [rule](platform/AGENTS.md#pull-requests); placement:
   [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
+- **Never add coverage to quick** — it holds unit tests and the most basic
+  enablement checks only, under a hard time cap; new tests go to standard; the
+  `rocke-pending-lanes` hook fails a quick entry over budget or on the GPU.
+  Rule: [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
 - **Develop breaks** — [rule](TESTING.md#53-after-merging-develop-breaks).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
