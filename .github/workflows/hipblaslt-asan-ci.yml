@@ -51,9 +51,6 @@ jobs:
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       test_type: ${{ env.TEST_TYPE }}
-      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
-      test_matrix: ${{ steps.matrix.outputs.test_matrix }}
-      timeouts: ${{ steps.matrix.outputs.timeouts }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -61,61 +58,11 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Load CI environment
         id: ci-env
         uses: ./.github/actions/ci-env
-
-      - name: Compute matrices and select timeouts
-        id: matrix
-        run: |
-          architectures='{
-            "gfx942": {
-              "runs_on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
-              "components": ["hipBLASLt", "hipSPARSELt"]
-            },
-            "gfx950": {
-              "runs_on": "linux-gfx950-1gpu-ccs-ossci-rocm",
-              "components": ["hipBLASLt", "hipSPARSELt"]
-            }
-          }'
-          # Timeouts are set to at least 1.5x observed runtimes.
-          timeouts='{
-            "gfx942": {
-              "hipblaslt": {
-                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
-                "standard": {"command_timeout": "140m", "step_timeout_minutes": 150, "job_timeout_minutes": 160}
-              },
-              "hipsparselt": {
-                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
-              }
-            },
-            "gfx950": {
-              "hipblaslt": {
-                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
-              },
-              "hipsparselt": {
-                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
-              }
-            }
-          }'
-          build=$(echo "$architectures" | jq -c \
-            '{include: [to_entries[] | {family: .key, components: .value.components}]}')
-          test=$(echo "$architectures" | jq -c \
-            '{include: [to_entries[]
-                       | .key as $family
-                       | .value as $arch
-                       | $arch.components[]
-                       | {family: $family, component: ascii_downcase, runs_on: $arch.runs_on}]}')
-          # Other test types use the longest limits allowed.
-          timeouts=$(echo "$timeouts" | jq -c --arg test_type "$TEST_TYPE" \
-            'map_values(map_values(.[$test_type] // {command_timeout: "0", step_timeout_minutes: 360, job_timeout_minutes: 7200}))')
-          echo "build_matrix=${build}" >> "$GITHUB_OUTPUT"
-          echo "test_matrix=${test}" >> "$GITHUB_OUTPUT"
-          echo "timeouts=${timeouts}" >> "$GITHUB_OUTPUT"
 
   build:
     name: "Build (hipBLASLt / hipSPARSELt | ${{ matrix.family }} | HOST_ASAN)"
@@ -123,12 +70,15 @@ jobs:
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     timeout-minutes: 600
     permissions:
+      contents: read
       id-token: write
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
+      matrix:
+        family: [gfx942, gfx950]
     container:
-      image: ${{ needs.setup.outputs.docker_image }}
+      # ci-env pins this image by digest; zizmor cannot inspect the output.
+      image: ${{ needs.setup.outputs.docker_image }} # zizmor: ignore[unpinned-images]
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
@@ -145,11 +95,13 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: ${{ needs.setup.outputs.therock_ref }}
+          persist-credentials: false
 
       - name: "Check out rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: rocm-libraries
+          persist-credentials: false
 
       - name: Install python deps
         run: |
@@ -173,13 +125,7 @@ jobs:
 
       - name: Pull DVC files for rocm-libraries
         working-directory: rocm-libraries
-        run: |
-          if command -v dvc &> /dev/null; then
-            echo "dvc detected"
-          else
-            echo "Warning, dvc not detected!"
-          fi
-          LOGNAME=github-runner dvc pull -v
+        run: LOGNAME=github-runner dvc pull -v
 
       - name: Fetch sources
         timeout-minutes: 30
@@ -208,16 +154,10 @@ jobs:
       - name: Report
         if: ${{ !cancelled() }}
         run: |
-          echo "## hipBLASLt"
-          echo "------------------------------------"
-          for kind in stage dist; do
-            find build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipBLASLt/${kind}" 2>/dev/null || true
-            find build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipSPARSELt/${kind}" 2>/dev/null || true
-          done
-          find build -maxdepth 8 -type f -name "hipblaslt-test" 2>/dev/null || true
           echo "CCache Stats:"
-          echo "-------------"
-          ccache -s -v || true
+          ccache -s -v
+          echo "Artifacts:"
+          ls build/artifacts
 
       - name: Configure ASAN artifact upload credentials
         uses: ./.github/actions/configure_aws_artifacts_credentials
@@ -231,7 +171,7 @@ jobs:
     name: "Test ${{ matrix.component }} HOST_ASAN | ${{ matrix.family }} (${{ needs.setup.outputs.test_type }})"
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].job_timeout_minutes }}
+    timeout-minutes: ${{ matrix.timeouts[needs.setup.outputs.test_type].job || 7200 }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
@@ -244,7 +184,36 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.test_matrix) }}
+      matrix:
+        family: [gfx942, gfx950]
+        component: [hipblaslt, hipsparselt]
+        include:
+          - family: gfx942
+            runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+          - family: gfx950
+            runs_on: linux-gfx950-1gpu-ccs-ossci-rocm
+          # Step timeouts are at least 1.5x observed runtimes. Unlisted test
+          # types (comprehensive, full) use the fallbacks where these are read.
+          - family: gfx942
+            component: hipblaslt
+            timeouts:
+              quick: {step: 25, job: 45}
+              standard: {step: 140, job: 160}
+          - family: gfx942
+            component: hipsparselt
+            timeouts:
+              quick: {step: 25, job: 45}
+              standard: {step: 195, job: 215}
+          - family: gfx950
+            component: hipblaslt
+            timeouts:
+              quick: {step: 25, job: 45}
+              standard: {step: 195, job: 215}
+          - family: gfx950
+            component: hipsparselt
+            timeouts:
+              quick: {step: 25, job: 45}
+              standard: {step: 195, job: 215}
     defaults:
       run:
         shell: bash
@@ -268,6 +237,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: ${{ needs.setup.outputs.therock_ref }}
+          persist-credentials: false
 
       - name: Checkout rocm-libraries repository for scripts
         timeout-minutes: 30
@@ -278,6 +248,7 @@ jobs:
             .github/scripts
             test/therock
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -308,21 +279,14 @@ jobs:
           echo "Runner: ${RUNNER_NAME}"
           export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
           export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
-          timeout -k 10 120 python3 ./build_tools/print_driver_gpu_info.py || true
+          python3 ./build_tools/print_driver_gpu_info.py || true
 
-      - name: ASAN runtime environment
+      - name: Configure ASAN environment
         run: |
-          set -euo pipefail
-          OUT="${GITHUB_WORKSPACE}/build"
-          ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan*.so' | head -1)")"
-          LSAN_SUPP="${GITHUB_WORKSPACE}/rocm-libraries/test/therock/lsan.supp"
-          {
-            echo "ASAN_OPTIONS=quarantine_size_mb=600"
-            echo "LSAN_OPTIONS=suppressions=${LSAN_SUPP}"
-            echo "HSA_XNACK=0"
-            echo "ASAN_SYMBOLIZER_PATH=${OUT}/lib/llvm/bin/llvm-symbolizer"
-            echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
-          } >> "$GITHUB_ENV"
+          python build_tools/github_actions/configure_asan_env.py \
+            --artifacts-dir "${OUTPUT_ARTIFACTS_DIR}" \
+            --hsa-xnack 0 \
+            --lsan-suppressions rocm-libraries/test/therock/lsan.supp
 
       - name: Set up Python YAML converter
         run: |
@@ -331,35 +295,12 @@ jobs:
           echo "${VENV_DIR}/bin" >> "$GITHUB_PATH"
 
       - name: Test ${{ matrix.component }} (${{ needs.setup.outputs.test_type }})
-        # Hangs used to run to the 180-minute step limit and clustered on
-        # specific hosts. Cap tests using the resolved command timeout and
-        # name the runner.
-        # The step timeout leaves time to record logs after killing the test.
-        timeout-minutes: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].step_timeout_minutes }}
+        timeout-minutes: ${{ matrix.timeouts[needs.setup.outputs.test_type].step || 360 }}
         env:
           SHARD_INDEX: 1
           TOTAL_SHARDS: 1
           TEST_TYPE: ${{ needs.setup.outputs.test_type }}
-          TEST_COMMAND_TIMEOUT: ${{ fromJSON(needs.setup.outputs.timeouts)[matrix.family][matrix.component].command_timeout }}
-          RUNNER_NAME: ${{ runner.name }}
-        run: |
-          mkdir -p ./test_logs
-          status=0
-          timeout -k 60 "${TEST_COMMAND_TIMEOUT}" python3 "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py" 2>&1 \
-            | tee "./test_logs/${TEST_COMPONENT}-test_output.log" || status=$?
-          if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
-            echo "::error::${TEST_COMPONENT} HOST_ASAN test timed out after ${TEST_COMMAND_TIMEOUT} on runner ${RUNNER_NAME}"
-          fi
-          exit "${status}"
-
-      - name: Upload failed test logs
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: asan-logs-${{ matrix.component }}-${{ matrix.family }}
-          path: test_logs
-          if-no-files-found: ignore
-          retention-days: 7
+        run: python3 "rocm-libraries/test/therock/test_${TEST_COMPONENT}.py"
 
   summary:
     name: "hipBLASLt ASAN CI Summary"
@@ -367,19 +308,26 @@ jobs:
     # group above. Do not convert that cancellation into a second red summary;
     # genuine build or test failures still reach the gate below.
     if: ${{ always() && !cancelled() }}
+    # The summary accepts skipped jobs, so list setup to fail on setup errors.
     needs:
+      - setup
       - build
       - test
     runs-on: ubuntu-24.04
     steps:
-      - name: Report and gate
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ needs.setup.outputs.therock_ref }}
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Evaluate workflow results
         env:
-          BUILD: ${{ needs.build.result }}
-          TEST: ${{ needs.test.result }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          echo "Build (hipBLASLt / hipSPARSELt HOST_ASAN): ${BUILD}"
-          echo "Test  (hipBLASLt / hipSPARSELt HOST_ASAN): ${TEST}"
-          if [[ "$BUILD" != "success" || "$TEST" != "success" ]]; then
-            echo "::error::hipBLASLt ASAN failed (build=${BUILD} test=${TEST})"
-            exit 1
-          fi
+          python build_tools/github_actions/workflow_summary.py \
+            --needs-json "${NEEDS_JSON}"
