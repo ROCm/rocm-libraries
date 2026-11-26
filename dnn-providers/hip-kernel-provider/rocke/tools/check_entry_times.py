@@ -71,7 +71,8 @@ entry runs::
     python check_entry_times.py check --ctest-dir .
 
 Refresh one operating system's times from ``ctest -V`` logs of CI test jobs
-(any tier, any shard; entries the logs do not show keep their previous time).
+(any tier, any shard; entries the logs do not show passing keep their previous
+time).
 A split entry's whole time is the sum over its shards of each shard's median;
 when the logs lack a shard, it is the shard count times the median shard. Test
 seconds come from the logs that carry pytest's ``--durations`` report, for the
@@ -713,8 +714,16 @@ def _collect_all(
 
 
 # `ctest -V` lines, as ctest prints them or after the timestamp a CI log
-# prefixes to each line.
-_RESULT = re.compile(r"\d+/\d+ Test +#(\d+): (\S+) \.+.*?\s([\d.]+) sec")
+# prefixes to each line. A result line carries the entry's status: `Passed`, or
+# after `***` one such as `Failed`, `Skipped`, `Not Run` or `Timeout`.
+_RESULT = re.compile(
+    r"\d+/\d+ Test +#(\d+): (\S+) \.+\s*\**(\w+(?: Run)?)\b.*?\s([\d.]+) sec"
+)
+# The one status whose seconds measure what an entry costs: a skipped entry
+# (its SKIP_RETURN_CODE, such as a GPU entry of another target), one CTest did
+# not start, and one that failed or timed out (at collection, say, or at its
+# limit) did not run its tests through.
+_MEASURED_STATUS = "Passed"
 _COMMAND = re.compile(r"(?:^|\s)(\d+): Test command: (.*)$")
 _SHARD = re.compile(r"(?:^|\s)(\d+): rocke-ctest-shard: (\d+)/(\d+)\b")
 # One line of pytest's `--durations` report, as an entry prints it (a worker's
@@ -735,7 +744,8 @@ class _ShardRun:
 
 
 def _shard_runs_in_log(text: str) -> dict[str, _ShardRun]:
-    """Each ``rocke_*`` entry's run as one shard's log shows it."""
+    """Each ``rocke_*`` entry's passed run as one shard's log shows it: a run
+    with any other status (:data:`_MEASURED_STATUS`) is left out."""
     split, shard_of_number, runs = set(), {}, {}
     for line in text.splitlines():
         if match := _COMMAND.search(line):
@@ -745,8 +755,8 @@ def _shard_runs_in_log(text: str) -> dict[str, _ShardRun]:
             number, index, count = match.groups()
             shard_of_number[number] = (int(index), int(count))
         elif match := _RESULT.search(line):
-            number, name, elapsed = match.groups()
-            if name.startswith(ROCKE_ENTRY_PREFIX):
+            number, name, status, elapsed = match.groups()
+            if name.startswith(ROCKE_ENTRY_PREFIX) and status == _MEASURED_STATUS:
                 # The plugin reports no shard line when the run is unsharded.
                 index, count = (
                     shard_of_number.get(number, (0, 1)) if number in split else (0, 1)

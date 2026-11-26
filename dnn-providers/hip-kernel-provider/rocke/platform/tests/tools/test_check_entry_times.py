@@ -421,7 +421,7 @@ _SHARD_LOG = """\
 GTEST_TOTAL_SHARDS=4)
 2026-11-17T11:50:35.2Z  10/40 Test   #7: rocke_pytest_core ............   Passed   30.50 sec
 2026-11-17T11:50:35.3Z 8: Test command: /venv/bin/python "./tests/run_golden.py"
-2026-11-17T11:51:10.0Z  11/40 Test   #8: rocke_golden_static ..........***Failed   34.00 sec
+2026-11-17T11:51:10.0Z  11/40 Test   #8: rocke_golden_static ..........   Passed   34.00 sec
 2026-11-17T11:51:20.0Z  12/40 Test   #9: hip_kernel_provider_tests ....   Passed   10.00 sec
 """
 
@@ -457,6 +457,25 @@ def test_entry_seconds_scale_an_entry_run_in_workers_by_its_shard_count(
     log = tmp_path / "workers.log"
     log.write_text(_WORKERS_LOG, encoding="utf-8")
     assert check.entry_seconds_from_ctest_logs([log]) == {"rocke_pytest_core": 42.0}
+
+
+def test_entry_seconds_leave_out_an_entry_that_did_not_pass(tmp_path) -> None:
+    """A skipped entry (a GPU entry of another target), one CTest did not start
+    and one that failed or timed out did not run its tests through: their
+    seconds are no measure of what the entry costs."""
+    log = tmp_path / "skips.log"
+    log.write_text(
+        _SHARD_LOG
+        + " 13/40 Test  #10: rocke_sdpa_gpu_gfx950_pytest ...***Skipped   0.55 sec\n"
+        + " 14/40 Test  #11: rocke_not_started ..............***Not Run   0.00 sec\n"
+        + " 15/40 Test  #12: rocke_collection_error .........***Failed    1.20 sec\n"
+        + " 16/40 Test  #13: rocke_hung .....................***Timeout 900.02 sec\n",
+        encoding="utf-8",
+    )
+    assert check.entry_seconds_from_ctest_logs([log]) == {
+        "rocke_golden_static": 34.0,
+        "rocke_pytest_core": 122.0,
+    }
 
 
 def test_entry_seconds_read_a_log_without_timestamps(tmp_path) -> None:
