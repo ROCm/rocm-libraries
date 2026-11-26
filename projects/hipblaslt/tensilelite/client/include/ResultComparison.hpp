@@ -328,7 +328,6 @@ namespace TensileLite
                         if(m_printedBefore == 0)
                         {
                             std::cout << "Value written before output buffer:" << std::endl;
-                            m_printedBefore++;
                         }
 
                         std::cout << "Index " << elemIndex << " / " << elemCount << ": found "
@@ -336,6 +335,7 @@ namespace TensileLite
                                   << DataInitialization::getValue<T, InitMode::BadOutput>()
                                   << std::endl;
 
+                        m_printedBefore++;
                         if(m_printedBefore >= m_printMax)
                             m_doPrintBefore = false;
                     }
@@ -356,7 +356,6 @@ namespace TensileLite
                         {
                             std::cout << "Value written inside output buffer, ouside tensor:"
                                       << std::endl;
-                            m_printedInside++;
                         }
 
                         std::cout << "Index " << elemIndex << " / " << elemCount << ": found "
@@ -364,6 +363,7 @@ namespace TensileLite
                                   << DataInitialization::getValue<T, InitMode::BadOutput>()
                                   << std::endl;
 
+                        m_printedInside++;
                         if(m_printedInside >= m_printMax)
                             m_doPrintInside = false;
                     }
@@ -383,7 +383,6 @@ namespace TensileLite
                         if(m_printedAfter == 0)
                         {
                             std::cout << "Value written after output buffer:" << std::endl;
-                            m_printedAfter++;
                         }
 
                         std::cout << "Index " << elemIndex << " / " << elemCount << ": found "
@@ -391,6 +390,7 @@ namespace TensileLite
                                   << DataInitialization::getValue<T, InitMode::BadOutput>()
                                   << std::endl;
 
+                        m_printedAfter++;
                         if(m_printedAfter >= m_printMax)
                             m_doPrintAfter = false;
                     }

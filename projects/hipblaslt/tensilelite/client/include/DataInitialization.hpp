@@ -38,6 +38,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <cstring>
 #include <map>
 #include <random>
 
@@ -2995,7 +2996,10 @@ namespace TensileLite
         template <>
         inline bool DataInitialization::isBadOutput<Float8>(Float8 value)
         {
-            return std::isinf(static_cast<float>(value));
+            // OCP fp8 has no Inf, so the BadOutput guard is a NaN, which std::isinf does not match and which
+            // compares unequal to itself: an untouched guard is recognised by its bits.
+            Float8 guard = DataInitialization::getValue<Float8, InitMode::BadOutput>();
+            return std::memcmp(&value, &guard, sizeof(value)) == 0;
         }
 
         template <>
@@ -3007,13 +3011,17 @@ namespace TensileLite
         template <>
         inline bool DataInitialization::isBadOutput<Float8_fnuz>(Float8_fnuz value)
         {
-            return std::isinf(static_cast<float>(value));
+            // fnuz fp8 has no Inf either: its BadOutput guard is the NaN 0x80, recognised by its bits.
+            Float8_fnuz guard = DataInitialization::getValue<Float8_fnuz, InitMode::BadOutput>();
+            return std::memcmp(&value, &guard, sizeof(value)) == 0;
         }
 
         template <>
         inline bool DataInitialization::isBadOutput<BFloat8_fnuz>(BFloat8_fnuz value)
         {
-            return std::isinf(static_cast<float>(value));
+            // fnuz bf8 has no Inf either: its BadOutput guard is the NaN 0x80, recognised by its bits.
+            BFloat8_fnuz guard = DataInitialization::getValue<BFloat8_fnuz, InitMode::BadOutput>();
+            return std::memcmp(&value, &guard, sizeof(value)) == 0;
         }
 
         template <>
