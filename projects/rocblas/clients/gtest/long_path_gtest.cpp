@@ -238,10 +238,20 @@ namespace
         return s.size() <= n ? s : "..." + s.substr(s.size() - n);
     }
 
+    // Whether a library file at the top level of a flat library is used by `arch`: it names
+    // that architecture, or it names none and every architecture shares it (the arch-less
+    // TensileLibrary.dat of a single-library build, or the *_fallback files of libraries built
+    // before Tensile gave them an _<arch> suffix).
+    bool used_by_arch(const std::string& name, const std::string& arch)
+    {
+        return name.find(arch) != std::string::npos || name.find("gfx") == std::string::npos;
+    }
+
     // Copies the Tensile library at `source` to a new directory whose own path is
     // `root_length` characters long, using hard links where the volume allows. The
     // directory goes next to the executable, which shares its volume with an installed
-    // library, or into the temporary directory if that is read-only.
+    // library, or into the temporary directory if that is read-only. A run killed while a case
+    // is in progress leaves its rocblas_long_path_<pid>_<n> directory behind.
     class deep_library
     {
         stdfs::path m_unique; // the directory this object created and removes
@@ -294,11 +304,14 @@ namespace
                 }
                 stdfs::create_directories(verbatim(m_root));
 
-                // Mirror the top-level files and the directories for this architecture.
+                // Mirror this architecture's files and directories, plus the top-level files
+                // every architecture shares. A flat multi-architecture library holds every
+                // architecture's files at the top level, and copying them all is costly when
+                // hard links are refused (e.g. root-owned files under protected_hardlinks).
                 for(const auto& entry : stdfs::directory_iterator(source))
                 {
                     const std::string name = entry.path().filename().string();
-                    if(entry.is_regular_file())
+                    if(entry.is_regular_file() && used_by_arch(name, arch))
                         link_or_copy(entry.path(), m_root / name);
                     else if(entry.is_directory() && name.rfind(arch, 0) == 0)
                     {
@@ -378,7 +391,7 @@ namespace
         {
             const std::string name = file.path().filename().string();
             if(name.find("_Type_SS_Contraction_l_Ailk_Bljk_Cijk_Dijk") != std::string::npos
-               && name.find(arch) != std::string::npos && file.path().extension() == ".dat")
+               && used_by_arch(name, arch) && file.path().extension() == ".dat")
                 shortest = shortest ? std::min<size_t>(shortest, name.size()) : name.size();
         }
         return shortest;

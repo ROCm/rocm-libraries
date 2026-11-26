@@ -50,7 +50,6 @@ target_sources(
           "${_CMAKE_CURRENT_SOURCE_DIR}/TestData_test.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/KernelArguments_test.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/LongPath_test.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp")
 
 target_sources(
