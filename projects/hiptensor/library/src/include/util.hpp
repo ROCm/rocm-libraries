@@ -192,6 +192,51 @@ namespace hiptensor
         logger.logError("hiptensorPermute", msg);
     };
 
+    // The operator applied to a single operand must be a unary operator. Anything else, including
+    // a binary operator or a value outside hiptensorOperator_t, is rejected with
+    // HIPTENSOR_STATUS_INVALID_VALUE.
+    inline hiptensorStatus_t
+        checkUnaryOperator(char const* apiFuncName, hiptensorOperator_t op, char const* opName)
+    {
+        if(isUnaryOperator(op))
+        {
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        char msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "%s (%s, %d) is not a unary operator",
+                 opName,
+                 opTypeToString(op).c_str(),
+                 static_cast<int>(op));
+        Logger::instance()->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    // The operator that combines two operands must be HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL,
+    // HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Anything else is rejected with
+    // HIPTENSOR_STATUS_INVALID_VALUE.
+    inline hiptensorStatus_t
+        checkBinaryOperator(char const* apiFuncName, hiptensorOperator_t op, char const* opName)
+    {
+        if(isBinaryOperator(op))
+        {
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        char msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "%s (%s, %d) is not a binary operator; expected HIPTENSOR_OP_ADD, "
+                 "HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN",
+                 opName,
+                 opTypeToString(op).c_str(),
+                 static_cast<int>(op));
+        Logger::instance()->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
     // Read and environment variable and check if it's value evaluates to true or false.
     // "ON", "on" and "1" evaluates to true, any other value or the absense of the value
     // evaluates to false.

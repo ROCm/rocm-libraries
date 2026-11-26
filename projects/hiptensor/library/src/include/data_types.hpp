@@ -256,6 +256,15 @@ namespace hiptensor
     std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
     std::string hipTypeToString(hiptensorDataType_t hipType);
     std::string opTypeToString(hiptensorOperator_t opType);
+
+    // True for the operators that apply to a single element (HIPTENSOR_OP_IDENTITY to
+    // HIPTENSOR_OP_FLOOR), false for the binary operators and any other value.
+    bool isUnaryOperator(hiptensorOperator_t op);
+
+    // True for the operators that combine two elements (HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL,
+    // HIPTENSOR_OP_MAX and HIPTENSOR_OP_MIN), false for any other value.
+    bool isBinaryOperator(hiptensorOperator_t op);
+
     std::string algoTypeToString(hiptensorAlgo_t algoType);
     std::string logLevelToString(hiptensorLogLevel_t);
     std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);

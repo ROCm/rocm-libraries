@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <set>
+#include <tuple>
 #include <unordered_map>
 
 #include <hiptensor/hiptensor.h>
@@ -281,6 +282,22 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                  sharedMode);
         logger->logError("hiptensorCreateContraction", msg);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    // opC only applies when C is given, so it is not checked otherwise.
+    for(auto const& [op, opName, used] : {std::tuple{opA, "opA", true},
+                                          std::tuple{opB, "opB", true},
+                                          std::tuple{opC, "opC", descC != nullptr}})
+    {
+        if(!used)
+        {
+            continue;
+        }
+        if(auto status = hiptensor::checkUnaryOperator("hiptensorCreateContraction", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
     }
 
     *desc = new hiptensorOperationDescriptor();
@@ -1050,6 +1067,24 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(const hiptensorHandle_t     
                  sharedStep);
         logger->logError("hiptensorCreateContractionTrinary", msg);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    // opD only applies when D is given, so it is not checked otherwise.
+    for(auto const& [op, opName, used] : {std::tuple{opA, "opA", true},
+                                          std::tuple{opB, "opB", true},
+                                          std::tuple{opC, "opC", true},
+                                          std::tuple{opD, "opD", descD != nullptr}})
+    {
+        if(!used)
+        {
+            continue;
+        }
+        if(auto status
+           = hiptensor::checkUnaryOperator("hiptensorCreateContractionTrinary", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
     }
 
     *desc = new hiptensorOperationDescriptor();

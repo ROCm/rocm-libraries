@@ -467,7 +467,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t hand
 //! @param[in] opC Unary operator applied to each element of C before processing. C's original data remains unchanged.
 //! @param[in] descD Descriptor containing D's data type, modes, and strides. Currently must be identical to descC.
 //! @param[in] modeD Host memory array of size descD->numModes with D's mode names.
-//! @param[in] opAC Element-wise binary operator.
+//! @param[in] opAC Element-wise binary operator: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN.
 //! @param[in] descCompute Determines the precision for this operation.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
 //! @retval HIPTENSOR_STATUS_INVALID_VALUE When tensor dimensions or modes contain illegal values
@@ -543,8 +543,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hipte
 //! @param[in] opC Unary operator applied to each element of C before processing. C's original data remains unchanged.
 //! @param[in] descD Descriptor containing D's data type, modes, and strides. Currently must be identical to descC.
 //! @param[in] modeD Host memory array of size descD->numModes with D's mode names.
-//! @param[in] opAB Element-wise binary operator.
-//! @param[in] opABC Element-wise binary operator.
+//! @param[in] opAB Element-wise binary operator: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN.
+//! @param[in] opABC Element-wise binary operator: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN.
 //! @param[in] descCompute Determines the precision for this operation.
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully.
 //! @retval HIPTENSOR_STATUS_NOT_INITIALIZED When the handle isn't initialized.
@@ -617,7 +617,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] opC Unary operator that will be applied to each element of C before it is further processed. The original data of this tensor remains unchanged.
 //! @param[in] descD Must be identical to descC for now.
 //! @param[in] modeD Must be identical to modeC for now.
-//! @param[in] opReduce binary operator used to reduce elements of A.
+//! @param[in] opReduce Binary operator used to reduce elements of A: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN.
 //! @param[in] descCompute All arithmetic is performed using this data type.
 //!
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED if operation is not supported.
