@@ -41,9 +41,10 @@ rocke_status_t rocke_lower_serialized_ir_to_llvm(const char* ir_text,
     {
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = '\0';
-        /* An empty arch names no target, as NULL does: there is no default. */
-        status = rocke_lower_kernel_to_llvm_ex(
-            kernel, flavor, (arch && *arch) ? arch : nullptr, out_text, err, sizeof err);
+        /* An empty arch names no target, as NULL does: the lowering refuses
+         * it, as there is no default. */
+        const char* target = ckc::serialized_ir_names_target(arch) ? arch : nullptr;
+        status = rocke_lower_kernel_to_llvm_ex(kernel, flavor, target, out_text, err, sizeof err);
         rocke_ir_builder_free(&b);
         if(status != ROCKE_OK)
         {

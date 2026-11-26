@@ -44,6 +44,13 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/verify.h"
 
+/* How every binding refuses a missing target: the engine's reason with a hint
+ * for a Python caller. The same words as
+ * rocke.core.native_engine.NO_TARGET_MESSAGE, which tests/core/
+ * test_native_engine.py holds equal. */
+#define ROCKE_BINDING_NO_TARGET_MESSAGE \
+    "lowering requires an explicit gfx target; pass arch=... (there is no default)"
+
 /* The gfx target every binding lowers or builds for. Required: there is no
  * default target on either engine. An empty string used to stand for each
  * family's "usual" arch (gfx950, gfx942, gfx1151 or gfx1201), so a caller that
@@ -54,8 +61,7 @@ inline const char* require_arch(const std::string& arch)
 {
     if(arch.empty())
     {
-        throw std::invalid_argument("lowering requires an explicit gfx target; "
-                                    "pass arch=... (there is no default)");
+        throw std::invalid_argument(ROCKE_BINDING_NO_TARGET_MESSAGE);
     }
     return arch.c_str();
 }
