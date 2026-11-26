@@ -9,6 +9,7 @@ for ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
 
 import ast
 import inspect
+import itertools
 import os
 import shutil
 import textwrap
@@ -22,6 +23,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.OccupancyMeasure import compute_occupancy_from_resources
 from tensilelite.SolutionStructs import Solution
 from rocisa import rocIsa
 
@@ -852,6 +854,138 @@ def test_max_waves_per_simd_prevents_overclaim_on_gfx950(isa, should_be_capped):
 
 
 # ---------------------------------------------------------------------------
+# getCUOccupancy – workgroups per CU, the value CUOccupancy reports
+# ---------------------------------------------------------------------------
+
+def _cu_occ(kw, *, numThreads, vgprs, accvgprs, sgprs, ldsBytes, doubleVgpr=True):
+    """Convenience wrapper for getCUOccupancy."""
+    return kw.getCUOccupancy(numThreads, vgprs, sgprs, ldsBytes, accvgprs, doubleVgpr)
+
+
+class TestGetCUOccupancyGfx950:
+    """A workgroup of fewer than 4 waves leaves SIMDs free for more workgroups."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.kw = _make_writer(_init_rocisa((9, 5, 0)), (9, 5, 0))
+
+    @pytest.mark.parametrize(
+        "numThreads,vgprs,accvgprs,sgprs,ldsBytes,perSimd,perCU",
+        [
+            # MT32x256x16 f32, 2 waves: 120 + 64 = 184 unified VGPRs hold 2 waves
+            # per SIMD, so 4 SIMDs x 2 waves / 2 waves per workgroup = 4.
+            (128, 116, 64, 86, 18688, 2, 4),
+            # 1 wave: 256 unified VGPRs hold 2 waves per SIMD → 8 workgroups.
+            (64, 16, 240, 64, 16384, 2, 8),
+            # 1 wave, nothing binding: the CU's 32 wave slots.
+            (64, 16, 0, 64, 0, 8, 32),
+            # 2 waves, LDS-limited: 163840 // 40960 = 4, below the 16 the waves allow.
+            (128, 16, 0, 64, 40960, 4, 4),
+            # 3 waves, nothing binding: 4 SIMDs x 8 waves / 3 waves per workgroup = 10.
+            (192, 16, 0, 64, 0, 8, 10),
+        ],
+    )
+    def test_small_workgroups_share_the_simds(self, numThreads, vgprs, accvgprs, sgprs,
+                                              ldsBytes, perSimd, perCU):
+        args = dict(numThreads=numThreads, vgprs=vgprs, accvgprs=accvgprs, sgprs=sgprs,
+                    ldsBytes=ldsBytes)
+        assert _occ(self.kw, **args) == perSimd
+        assert _cu_occ(self.kw, **args) == perCU
+
+    @pytest.mark.parametrize("numThreads", [256, 512, 1024])
+    @pytest.mark.parametrize(
+        "vgprs,accvgprs,sgprs,ldsBytes",
+        [
+            (16, 240, 64, 68864),    # VGPR- and LDS-limited to 2
+            (64, 240, 64, 65536),    # VGPR-limited
+            (16, 0, 64, 0),          # wave cap
+            (16, 0, 64, 133120),     # LDS-limited
+            (300, 300, 64, 0),       # does not fit: 0
+        ],
+    )
+    def test_matches_getoccupancy_for_multiples_of_four_waves(self, numThreads, vgprs,
+                                                              accvgprs, sgprs, ldsBytes):
+        args = dict(numThreads=numThreads, vgprs=vgprs, accvgprs=accvgprs, sgprs=sgprs,
+                    ldsBytes=ldsBytes)
+        assert _cu_occ(self.kw, **args) == _occ(self.kw, **args)
+
+    @pytest.mark.parametrize("numThreads,perCU", [(512, 3), (320, 5)])
+    def test_sgpr_limit_counts_every_wave_of_the_workgroup(self, numThreads, perCU):
+        """102 SGPRs hold 7 waves per SIMD: the CU's 28 fit three 8-wave or five
+        5-wave workgroups.
+
+        getOccupancy compares the per-SIMD SGPR limit against workgroups and
+        reports the wave cap of 4 for both.
+        """
+        args = dict(numThreads=numThreads, vgprs=16, accvgprs=0, sgprs=102, ldsBytes=0)
+        assert _occ(self.kw, **args) == 4
+        assert _cu_occ(self.kw, **args) == perCU
+
+    def test_matches_the_custom_kernel_formula(self):
+        """compute_occupancy_from_resources (custom kernels) gives what getCUOccupancy
+        gives for the same resources; it reads the unified VGPR count."""
+        caps = dict(
+            physical_vgpr=self.kw.states.regCaps["MaxVgpr"] * 2,
+            physical_sgpr=self.kw.states.regCaps["PhysicalMaxSgpr"],
+            device_lds=self.kw.states.archCaps["DeviceLDS"],
+            max_waves_per_simd=self.kw.states.archCaps["MaxWavesPerSimd"],
+        )
+        for numThreads, vgprs, accvgprs, sgprs, ldsBytes in itertools.product(
+                (64, 128, 192, 256, 320, 512, 1024), (16, 96, 116, 250), (0, 4, 64, 132),
+                (64, 102, 120), (0, 18688, 40960)):
+            args = dict(numThreads=numThreads, vgprs=vgprs, accvgprs=accvgprs, sgprs=sgprs,
+                        ldsBytes=ldsBytes)
+            custom = compute_occupancy_from_resources(
+                vgpr_count=ceil(vgprs / 8) * 8 + accvgprs, lds_bytes=ldsBytes,
+                sgpr_count=sgprs, num_threads=numThreads, **caps)
+            # The custom formula reports at least 1 where the kernel does not fit.
+            assert custom == max(1, _cu_occ(self.kw, **args)), args
+
+
+class TestGetCUOccupancyBarrierCap:
+    """A CU has 16 barriers: workgroups of more than one wave are capped at 16."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.kw = _make_writer(_init_rocisa((9, 0, 8)), (9, 0, 8))
+
+    @pytest.mark.parametrize("numThreads,perCU", [(64, 40), (128, 16), (192, 13)])
+    def test_multi_wave_workgroups_are_capped(self, numThreads, perCU):
+        # gfx908: 10 waves per SIMD, 40 per CU; 2 waves would fit 20 times.
+        args = dict(numThreads=numThreads, vgprs=16, accvgprs=0, sgprs=64, ldsBytes=0,
+                    doubleVgpr=False)
+        assert _cu_occ(self.kw, **args) == perCU
+
+
+def test_getcuoccupancy_is_getoccupancy_off_gfx9():
+    """RDNA keeps its own WGP model."""
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
+    assert kw.getCUOccupancy(64, 64, 64, 0, 0, True) == kw.getOccupancy(64, 64, 64, 0, 0, True)
+
+
+def test_judge_register_budget_reports_per_cu_occupancy():
+    """CUOccupancy is per CU; the SIA2 rule still asks for 2 waves per SIMD."""
+    kw = _make_writer(_init_rocisa((9, 5, 0)), (9, 5, 0))
+    kw.states.doubleVgpr = True
+    kw.states.overflowedResources = 0
+    kw.states.postLoopStoreInNll = False
+    kw.states.asmCaps = {"HasWMMA": False}
+    kw.getLdsSize = lambda k: k["LdsNumBytes"]
+
+    # 2 waves of 304 unified VGPRs: 1 wave per SIMD, 2 workgroups per CU.
+    kernel = {"NumThreads": 128, "LdsNumBytes": 16384, "_ScheduleIterAlg": 2}
+    kw.judgeRegisterBudget(kernel, _MockMkb(""), 64, 240, 64)
+    assert kernel["CUOccupancy"] == 2
+    assert kw.states.overflowedResources == 6
+
+    kw.states.overflowedResources = 0
+    kernel["_ScheduleIterAlg"] = 3
+    kw.judgeRegisterBudget(kernel, _MockMkb(""), 64, 240, 64)
+    assert kernel["CUOccupancy"] == 2
+    assert kw.states.overflowedResources == 0
+
+
+# ---------------------------------------------------------------------------
 # updateOccupancyFromMaxVgpr – corrects CUOccupancy after rocIsaPass optimization
 # ---------------------------------------------------------------------------
 
@@ -972,6 +1106,12 @@ class TestUpdateOccupancyFromMaxVgpr:
         assert kernel["CUOccupancy"] == 2, (
             f"MT320x192x64/gfx950: expected CUOccupancy=2, got {kernel['CUOccupancy']}"
         )
+
+    def test_two_wave_workgroup_reports_per_cu(self):
+        """128 threads, max_vgpr=16 → 256 unified: 2 waves per SIMD, 4 workgroups per CU."""
+        kernel = {"NumThreads": 128, "LdsNumBytes": 16384, "CUOccupancy": 1}
+        kernel, _ = self._run_with_max_vgpr(kernel=kernel, max_vgpr=16)
+        assert kernel["CUOccupancy"] == 4
 
     def test_missing_max_vgpr_skips_update(self):
         """When rocIsaPass does not supply maxVgpr (<=0), skip the update."""

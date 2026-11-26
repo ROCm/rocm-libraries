@@ -394,6 +394,43 @@ class KernelWriterAssembly(KernelWriter):
 
     return min(ldsLimitedOccupancy, vgprLimitedOccupancy, accvgprLimitedOccupancy, sgprLimitedOccupancy)
 
+  def getWavesPerSimd(self, vgprs, sgprs, accvgprs=0, doubleVgpr=False):
+    """Waves of this kernel one SIMD holds, as its VGPRs, AGPRs and SGPRs allow."""
+    wavefrontSize = self.states.kernel["WavefrontSize"]
+    if not doubleVgpr:
+      vgprWaves = min(self.getVgprOccupancy(wavefrontSize, vgprs, doubleVgpr),
+                      self.getVgprOccupancy(wavefrontSize, accvgprs, doubleVgpr))
+    else:
+      vgprWaves = self.getVgprOccupancy(wavefrontSize, ceil(vgprs/8)*8+accvgprs, doubleVgpr)
+    return min(vgprWaves, self.getSgprOccupancy(sgprs))
+
+  def getCUOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+    """Max. number of workgroups resident on one CU: the kernel's CUOccupancy.
+
+    getOccupancy charges every workgroup a wave slot on each SIMD and compares
+    the per-SIMD SGPR limit against workgroups. On gfx9 the waves of a 1- or
+    2-wave workgroup fill only 1 or 2 of the CU's 4 SIMDs and the others hold
+    further workgroups, so it undercounts those; and where SGPRs bind it
+    overcounts workgroups of more than 4 waves. This shares the waves the 4
+    SIMDs can hold, SGPR limit included, among whole workgroups instead, as the
+    hardware (and HIP's occupancy API) does, and caps multi-wave workgroups at
+    the 16 barriers a gfx9 CU has (LLVM's getMaxWorkGroupsPerCU). The register
+    budgeting heuristics keep getOccupancy.
+    """
+    if self.states.version[0] != 9:
+      return self.getOccupancy(numThreads, vgprs, sgprs, ldsSize, accvgprs, doubleVgpr)
+
+    simdsPerCU = 4
+    maxBarriersPerCU = 16
+    wavesPerSimd = self.getWavesPerSimd(vgprs, sgprs, accvgprs, doubleVgpr)
+    wavesPerWorkgroup = int(ceil(numThreads / self.states.kernel["WavefrontSize"]))
+    occupancy = simdsPerCU * wavesPerSimd // wavesPerWorkgroup
+    if wavesPerWorkgroup > 1:
+      occupancy = min(occupancy, maxBarriersPerCU)
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(
+        self.states.archCaps["DeviceLDS"], ldsSize, self.states.archCaps["LdsGranularity"])
+    return min(ldsLimitedOccupancy, occupancy)
+
   # TODO: also consider sgpr
   def getMaxRegsForOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
     lastVgprs = vgprs
@@ -2811,10 +2848,12 @@ class KernelWriterAssembly(KernelWriter):
                      self.states.regCaps["MaxSgpr"]))
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
-    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], totalVgprs, totalSgprs, \
-      self.getLdsSize(kernel), totalAgprs, self.states.doubleVgpr)
-    if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
+    # The SIA2 rule keeps its per-SIMD measure; CUOccupancy reports workgroups per CU.
+    resources = (kernel["NumThreads"], totalVgprs, totalSgprs, self.getLdsSize(kernel),
+                 totalAgprs, self.states.doubleVgpr)
+    if kernel["_ScheduleIterAlg"] == 2 and self.getOccupancy(*resources) < 2:
       verdict = 6
+    kernel["CUOccupancy"] = self.getCUOccupancy(*resources)
 
     if self.states.asmCaps["HasWMMA"]:
       # RDNA: workgroup executes on a WGP (2 CUs, 4 SIMDs)
@@ -2971,7 +3010,7 @@ class KernelWriterAssembly(KernelWriter):
     mkb.setGprs(totalVgprs=max_vgpr, totalAgprs=pool_agprs,
                 totalSgprs=self.sgprPool.size())
 
-    kernel["CUOccupancy"] = self.getOccupancy(
+    kernel["CUOccupancy"] = self.getCUOccupancy(
       kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
       self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
 
