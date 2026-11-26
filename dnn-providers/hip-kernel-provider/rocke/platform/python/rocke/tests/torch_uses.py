@@ -15,6 +15,8 @@ strings, comments and docstrings is not code::
 
     import torch                         # IMPORT, TORCH_OBJECT where torch.x is used
     importlib.util.find_spec("torch")    # IMPORT
+    sys.modules.get("torch")             # IMPORT: takes torch another module imported
+    "torch" in sys.modules               # nothing: asks, does not take the module
     pytest.importorskip("torch")         # IMPORTORSKIP
     from rocke.runtime import torch_interop  # TORCH_INTEROP
     torch.cuda.synchronize()             # TORCH_API
@@ -66,8 +68,10 @@ class TorchUseKind(enum.Enum):
     """What a torch use does; the gate allowlists kinds per file."""
 
     IMPORT = "import"
-    """An ``import`` of torch or a torch submodule, or a call of ``__import__``,
-    ``import_module`` or ``find_spec`` with a torch module name."""
+    """An ``import`` of torch or a torch submodule, a call of ``__import__``,
+    ``import_module`` or ``find_spec`` with a torch module name, or a read of
+    one from ``sys.modules`` (``sys.modules.get("torch")``,
+    ``sys.modules["torch"]``)."""
     IMPORTORSKIP = "importorskip"
     """``importorskip`` or ``import_or_skip_until`` with a torch module name."""
     TORCH_INTEROP = "torch_interop"
@@ -96,6 +100,7 @@ _INTEROP = "torch_interop"
 _API_SUBMODULES = frozenset({"ops", "fx", "compile", "cuda"})
 _DYNAMIC_IMPORTS = frozenset({"__import__", "import_module", "find_spec"})
 _SKIP_IMPORTS = frozenset({"importorskip", "import_or_skip_until"})
+_MODULE_TABLE = "sys.modules"
 _CONFIG_MENTION = re.compile(rf"\b{_TORCH}\b", re.IGNORECASE)
 _IDENTIFIER_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 
@@ -203,9 +208,23 @@ def _call_uses(node: ast.Call) -> list[TorchUse]:
     detail = f"{_dotted(node.func)}({module!r})"
     if function in _SKIP_IMPORTS and _is_torch_module(module):
         return [TorchUse(node.lineno, TorchUseKind.IMPORTORSKIP, detail)]
-    if function in _DYNAMIC_IMPORTS:
+    if function in _DYNAMIC_IMPORTS or _dotted(node.func) == f"{_MODULE_TABLE}.get":
         return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(module)]
     return []
+
+
+def _module_table_uses(node: ast.Subscript) -> list[TorchUse]:
+    """``sys.modules["torch"]`` read (not assigned or deleted): the module itself."""
+    key = node.slice
+    if not (
+        isinstance(node.ctx, ast.Load)
+        and _dotted(node.value) == _MODULE_TABLE
+        and isinstance(key, ast.Constant)
+        and isinstance(key.value, str)
+    ):
+        return []
+    detail = f"{_MODULE_TABLE}[{key.value!r}]"
+    return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(key.value)]
 
 
 def torch_uses_in_python(source: str, filename: str) -> list[TorchUse]:
@@ -225,6 +244,8 @@ def torch_uses_in_python(source: str, filename: str) -> list[TorchUse]:
             uses.extend(_import_uses(node))
         elif isinstance(node, ast.Call):
             uses.extend(_call_uses(node))
+        elif isinstance(node, ast.Subscript):
+            uses.extend(_module_table_uses(node))
         elif isinstance(node, ast.Attribute):
             if node.attr == _INTEROP:
                 uses.append(

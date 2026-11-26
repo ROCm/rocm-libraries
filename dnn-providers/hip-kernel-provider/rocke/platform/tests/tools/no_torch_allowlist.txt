@@ -56,7 +56,7 @@ library/tests/sdpa/test_unified_sdpa_numeric.py: importorskip
 library/tests/test_attention_builds.py: importorskip
 library/tests/test_attention_bwd_bench.py: importorskip torch_object
 library/tests/test_attention_unified_lse_numeric.py: importorskip torch_api torch_object
-library/tests/test_attention_workspace.py: torch_api torch_object
+library/tests/test_attention_workspace.py: import torch_api torch_object
 library/tests/test_strided_kv_decode.py: importorskip torch_object
 library/tests/test_strided_kv_decode_numeric.py: importorskip torch_api torch_object
 platform/dsl_docs/development/verify_dsl_docs.py: import torch_api torch_object
@@ -111,6 +111,7 @@ platform/python/rocke/runtime/__init__.py: torch_interop
 platform/python/rocke/runtime/comgr.py: import
 platform/python/rocke/runtime/device_array.py: torch_interop
 platform/python/rocke/runtime/launcher.py: import torch_interop torch_object
+platform/python/rocke/runtime/runtime_coexistence.py: import
 platform/python/rocke/runtime/stall_gate.py: torch_interop
 platform/python/rocke/runtime/torch_interop.py: import torch_api torch_object
 platform/python/rocke/torch_backend.py: import torch_api

@@ -48,6 +48,8 @@ CONFIG = TorchUseKind.CONFIG
             {IMPORT, TORCH_API},
         ),
         ("import importlib.util\nimportlib.util.find_spec('torch')\n", {IMPORT}),
+        ("import sys\nloaded = sys.modules.get('torch')\n", {IMPORT}),
+        ("import sys\nloaded = sys.modules['torch']\n", {IMPORT}),
         ("import pytest\ntorch = pytest.importorskip('torch')\n", {IMPORTORSKIP}),
         (
             (
@@ -86,6 +88,9 @@ def test_each_kind_of_use_is_found(source, kinds):
         "from .torch import helper\n",
         "out = run_unified_attention_torch(q, k, v)\n",
         "import pytest\nyaml = pytest.importorskip('yaml')\n",
+        "import sys\nassert 'torch' not in sys.modules\n",
+        "import sys\nsys.modules['torch'] = None\n",
+        "import sys\nloaded = sys.modules.get('numpy')\n",
     ],
 )
 def test_text_that_only_mentions_torch_is_not_a_use(source):
