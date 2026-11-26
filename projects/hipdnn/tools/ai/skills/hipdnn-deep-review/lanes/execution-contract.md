@@ -85,7 +85,9 @@ Classify every hit by the stage that reaches it. A call counts only when it is r
    `workspaceBytes()` regions with the zero fills.
 9. Advertised capture. For every engine whose `getDetails()` or `.ued.json` `behavior_notes` gains or keeps
    `supports_graph_capture` (including `GRAPH_CAPTURE_OPS` in `flydsl/gen_descriptors.py`), walk its execute path through steps 4
-   to 8. Check that the integration-test capture category covers it (`GRAPH_CAPTURE_test_categories_integration.yaml`).
+   to 8. Check that the provider's integration-test capture category covers it (hip-kernel-provider:
+   `GRAPH_CAPTURE_test_categories_integration.yaml`; hipblaslt-provider: `test_categories_graph_capture.yaml`). A provider with
+   no capture category leaves the note untested: hand that to `TESTB`.
 10. Missing note. For every changed engine (definition below), read its descriptor or `getDetails()` at the head, even when the
    diff does not touch the note. When it lacks `SUPPORTS_GRAPH_CAPTURE` and the provider's documentation section states no
    delegated-library exception for it, file one `capture-support` finding (tier in *Severity*), separate from and in addition
@@ -171,10 +173,12 @@ applicability, build or destroy, is reported. Check the provider docs for accura
 ## Device checks
 
 Capture semantics the source cannot settle are `[INFERENCE]` in **Proof**: a module load inside a capture, implicit syncs in the
-runtime. A pageable copy is settled from source (step 5), not an inference. Put a reproducer under **Approval requests**: the
-integration-test `--graph-capture` run of the affected suites in `hipStreamCaptureModeGlobal` on the engine's architecture, or a
-short capture of `execute()` that shows `hipErrorStreamCaptureInvalidated`. A reproducer strengthens a finding; it never holds
-closure.
+runtime. A pageable copy is settled from source (step 5), not an inference. Put a reproducer under **Approval requests**. The
+integration-test `--graph-capture` run fits only an `execute()` finding on an engine that reports the note: the harness skips
+engines without the note, and it captures one execute in `hipStreamCaptureModeGlobal` after the plan is built and has run
+eagerly. For any other finding, propose a short program that shows `hipErrorStreamCaptureInvalidated`: capture the first
+`execute()` of a fresh plan, or build or destroy a plan on a second thread during a Global capture on the first. A reproducer
+strengthens a finding; it never holds closure.
 
 ## Contract knowledge
 
