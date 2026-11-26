@@ -77,150 +77,18 @@ _BX = 256  # pixels per block tile
 _XT = 4  # 16-pixel MFMA tiles per wave
 PERSIST = 256  # blocks of the persistent grid (one per gfx950 CU)
 ROT = 97  # per-round rotation of the item walk
-EPI_CONC = True  # group 1 takes its post-MFMA barrier at its next step's start
-EPI_COAL = True  # the epilogue regroups lanes so 4 neighbours store a pixel's 64 B
-# cs 4: the filter taps of a chunk unrolled (compile-time tap offsets, no
-# scalar cursor; every tap runs, padding taps load zeros)
-CS4_UNROLL = 1
-# cs 4 (with CS4_UNROLL): DMA look-ahead of two steps; a group's DMAs of
-# step j + 2 go into the stage step j just read and are spread over step j's
-# MFMA phase (inline asm, counted vmcnt waits)
-CS4_PF2 = 1
-CS4_PRO = 1  # cs 4: an item's first weight DMAs before its table build
-# cs 4 (with CS4_PF2): a step's DMA offsets formed before the phase barrier (not after it)
-CS4_PREOPS = 1
-# cs 4: the fragment-read bases formed in the group's branch from an opaque lane (hoisted above it they go to scratch)
-CS4_HLOC = 0
-# cs 4: the fragment-read bases re-formed from an opaque lane at each item's head (no kernel-long copy to spill)
-CS4_HITEM = 1
-# cs 4: the DMAs' LDS addresses as one SGPR per stage plus an immediate
-# (16 held addresses cost SGPR spills and VGPR scratch)
-CS4_SBASE = 1
-# cs 4: fewer live SGPRs across the unrolled sweep (the pair's first chunk
-# on the plain resources, the weight offsets' products formed per step)
-CS4_SLIM = 1
-CS4_PROBE = 0  # timing probes (wrong results): 1 no epilogue, 2 no table build, 4 no item prologue wait
-# cs 4 wt: the transposing reads' lane part from shifts and masks of the
-# lane (per step) instead of signed divisions of an opaque copy
-CS4_WT_BITS = 1
-# cs 2 wt: the transposing reads' lane part formed once per kernel (one
-# VGPR) instead of per step
-CS2_WT_HOIST = 1
-# cs 4 wt: the same, formed once per kernel (needs CS4_WT_BITS)
-CS4_WT_HOIST = 1
-# the epilogue's store offsets as one select per 16-pixel tile plus the
-# channel step as the store's immediate offset (K range: a compare of the
-# lane's channel with a scalar limit per store)
-EPI_IMM = 1
-# group 0 issues one DMA after every K2_DMIX fragment reads (0: all first)
-K2_DMIX = 3
-K3_PROBE = 0  # timing probes (wrong results): 1 epilogue stores off, 2 no table build at a tile change
-# the division magic numbers without a 64-bit division (see _Div)
-P1_DIV = 1
-# the kernel's division magic numbers formed in one VALU sequence, lane
-# i for divisor i (with P1_DIV's method), read back by v_readlane
-P1_VEC = 1
-# the item walk without a signed division by the grid size: the grid
-# is PERSIST (a power of two) or every item, so the rounds come from a shift
-# and a mask (1), and (b + i ROT) % G is a mask, or b in the only round (2)
-# (either moves the bk 256 kernels into VGPR spills); 4: the rounds from the
-# grid size's _Div magic
-P1_WALK = 4
-# an item's valid tap rows / columns in closed form (a clamp and, with
-# dilation, a constant division per bound) instead of a compare per tap
-P3_TAPS = 1
-# the kernel's first weight DMAs before the offset table build (off:
-# VGPR spills on bk 256)
-P2_WFIRST = 0
-# group 1 issues step 1's DMAs before the first barrier (vmcnt leaves
-# them in flight)
-P2_G1PRE = 1
-# an item's first step peeled, its MFMAs on C = 0 (no accumulator
-# zeroing at the item's start); off: VGPR spills on bk 256
-P2_ZF = 0
-# the round loop carries the item's step count (the next item's formed
-# after this item's epilogue, not at the round's start): 1 (and 3) not wt,
-# 4 all; 2 (3: wt) from the cursor when it is still in the round's item.
-# wt bk 256 spills 3 VGPRs with any of them, c_tail bk 256 fp16 with 1
-P2_STEPS = 1
-# the lane-derived LDS bases formed per group from an opaque lane (else
-# formed once above the group branch, held across it: SGPR / VGPR spills)
-P2_LB = 1
-# two offset-table buffers by item parity, group 1 builds the rows of
-# all eight waves: at its cursor's crossing into item k only when not built
-# ahead (k == 1, or the cursor runs two items ahead), else after its epilogue
-# of item k - 2 (its waves idle there); group 0's crossing builds nothing.
-# Main builder, not ds, when the second buffer fits in LDS.
-T1_DB = 1
-# the next item's step count formed before the epilogue
-T5_EARLY = 1
-# zero-first (P2_ZF's peeled first step, MFMA C = 0) for bk <= 128 only
-T3_ZF = 1
-# (T1_DB) item 1's rows by each group itself (group 0 in its prologue,
-# group 1 at its crossing) instead of all by group 1 at its crossing
-T1_K1 = 1
-# group 1's DMAs out of its MFMA phase (where they share the memory pipe
-# with group 0's and stall its MFMAs). 5: group 1's input rows (read by its
-# own waves only) of step + 1 into the other stage at the start of its memory
-# phase (two phases of latency), its weight rows over the second half of its
-# MFMA phase; 6: bk 256 plain: group 0 issues all eight waves' weight rows,
-# group 1 only its input rows as 5 (nothing in its MFMA phase); the other
-# kernels except wt as 5
-S1_G1DMA = 6
 
 
 class _Div:
     """Division by a runtime divisor 1 <= d < 2^24 of numerators in
     [0, 2^31): q = (mulhi(n, m) + n) >> l with l = bit length of d - 1 and
     m = floor(2^32 (2^l - d) / d) + 1, formed once per kernel (the generic
-    signed division expands to ~30 instructions per use). With ``P1_DIV``
-    the magic's quotient comes in two 16-bit halves, each an f32 estimate
-    (|error| < 1 / 64) rounded to an integer and corrected once by its
-    remainder, instead of a 64-bit division (~120 instructions)."""
+    signed division expands to ~30 instructions per use). The magic numbers
+    come from :func:`_divs`."""
 
-    def __init__(self, b: IRBuilder, d: Value, ml=None):
+    def __init__(self, b: IRBuilder, d: Value, ml):
         self.b, self.d = b, d
-        if ml is not None:  # (magic, shift) formed elsewhere (_divs)
-            self.m, self.l = ml
-            return
-        c0, c1 = b.const_i32(0), b.const_i32(1)
-        # bit length of d - 1 from the exponent of its (exact) float
-        e = b.lshr(b.bitcast(b.sitofp_f32(b.sub(d, c1)), I32), b.const_i32(23))
-        self.l = b.smax(b.sub(e, b.const_i32(126)), c0)
-        a = b.sub(b.shl(c1, self.l), d)
-        if not P1_DIV:
-            q = b.div(b.shl(b.zext(a, I64), b.const_i64(32)), b.zext(d, I64))
-            self.m = b.add(b.trunc(q, I32), c1)
-            return
-        rd = b.fmul(b.rcp_fast(b.sitofp_f32(d)), b.const_f32(65536.0))
-
-        def half(n: Value):
-            """(floor(n 2^16 / d), remainder) for 0 <= n < d."""
-            est = b.fmul(b.sitofp_f32(n), rd)
-            # round to nearest: the float of 2^23 + est has an ulp of 1
-            q = b.sub(
-                b.bitcast(b.fadd(est, b.const_f32(8388608.0)), I32),
-                b.const_i32(0x4B000000),
-            )
-            # the remainder is small (|r| < d): its low 32 bits, from i64
-            # products (an i32 product of these would overflow)
-            r = b.trunc(
-                b.sub(
-                    b.shl(b.zext(n, I64), b.const_i64(16)),
-                    b.mul(b.zext(q, I64), b.zext(d, I64)),
-                ),
-                I32,
-            )
-            # the estimate is never low: only a round-up to correct
-            neg = b.cmp_lt(r, c0)
-            return b.sub(q, b.select(neg, c1, c0)), b.add(r, b.select(neg, d, c0))
-
-        qh, r = half(a)
-        ql, _ = half(r)
-        # the float steps run in VALU: the results made scalar again (else
-        # every use of the magic moves to VALU, and its registers with it)
-        self.l = b.readfirstlane(self.l)
-        self.m = b.readfirstlane(b.add(b.shl(qh, b.const_i32(16)), b.add(ql, c1)))
+        self.m, self.l = ml
 
     def div(self, n: Value) -> Value:
         b = self.b
@@ -234,23 +102,29 @@ class _Div:
 def _divs(b: IRBuilder, lane: Value, ds: List[Value]) -> List[_Div]:
     """:class:`_Div` of each divisor in ``ds`` with the magic numbers formed
     together, lane i for divisor i (one VALU sequence instead of one per
-    divisor), then read back from the lanes."""
-    if not P1_VEC:
-        return [_Div(b, d) for d in ds]
+    divisor), then read back by v_readlane. The magic's quotient comes in two
+    16-bit halves, each an f32 estimate (|error| < 1 / 64) rounded to an
+    integer and corrected once by its remainder, instead of a 64-bit division
+    (~120 instructions)."""
     c0, c1 = b.const_i32(0), b.const_i32(1)
     d = c1
     for i in reversed(range(len(ds))):
         d = b.select(b.cmp_eq(lane, b.const_i32(i)), ds[i], d)
+    # bit length of d - 1 from the exponent of its (exact) float
     e = b.lshr(b.bitcast(b.sitofp_f32(b.sub(d, c1)), I32), b.const_i32(23))
     l = b.smax(b.sub(e, b.const_i32(126)), c0)
     a = b.sub(b.shl(c1, l), d)
     rd = b.fmul(b.rcp_fast(b.sitofp_f32(d)), b.const_f32(65536.0))
 
     def half(n: Value):
+        """(floor(n 2^16 / d), remainder) for 0 <= n < d."""
         est = b.fmul(b.sitofp_f32(n), rd)
+        # round to nearest: the float of 2^23 + est has an ulp of 1
         q = b.sub(
             b.bitcast(b.fadd(est, b.const_f32(8388608.0)), I32), b.const_i32(0x4B000000)
         )
+        # the remainder is small (|r| < d): its low 32 bits, from i64
+        # products (an i32 product of these would overflow)
         r = b.trunc(
             b.sub(
                 b.shl(b.zext(n, I64), b.const_i64(16)),
@@ -258,6 +132,7 @@ def _divs(b: IRBuilder, lane: Value, ds: List[Value]) -> List[_Div]:
             ),
             I32,
         )
+        # the estimate is never low: only a round-up to correct
         neg = b.cmp_lt(r, c0)
         return b.sub(q, b.select(neg, c1, c0)), b.add(r, b.select(neg, d, c0))
 
@@ -546,8 +421,12 @@ def _tab_bytes(spec: FwdFlexMfmaSpec) -> int:
 
 
 def _tab_db(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> bool:
-    """T1_DB: two offset-table buffers (see T1_DB)."""
-    if not T1_DB or spec.cs != 1 or spec.ds or (spec.wt and spec.c_tail):
+    """Two offset-table buffers by item parity (main builder, not ds, when the
+    second buffer fits in LDS): group 1 builds the rows of all eight waves, at
+    its cursor's crossing into item k only when not built ahead, else after
+    its epilogue of item k - 2 (its waves idle there); group 0 builds its
+    rows of item 1 in its prologue."""
+    if spec.cs != 1 or spec.ds or (spec.wt and spec.c_tail):
         # (wt with c_tail: VGPR spills on bk 256)
         return False
     stage = (spec.bx * _CK + _w_elems(spec)) * 2
@@ -580,7 +459,7 @@ def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | 
         if spec.h1 and (p.H != 1 or p.KH != 1 or p.PAD != 0):
             return "h1: one dX row, a 1 x S filter and no row padding"
         if spec.zf:
-            if spec.split_c != 1 or spec.h1 or not spec.wt or not EPI_IMM:
+            if spec.split_c != 1 or spec.h1 or not spec.wt:
                 return "zf: split_c 1 and wt only, no h1"
             if len(ds_order(spec)) != 1 or len(ds_zero_deltas(spec)) + ZF_BITS > 31:
                 return "zf: one output phase with taps, the others none"
@@ -652,8 +531,6 @@ def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | 
             return f"cs 4: C must be a multiple of {_CK} and >= {2 * _CK * spec.split_c} (two chunks per piece)"
     if spec.wt and (spec.bk not in (128, 192, 256) or (spec.c_tail and spec.cs == 4)):
         return "wt: bk 128 / 192 / 256 only, no c_tail with cs 4"
-    if spec.wt and spec.cs == 4 and not (CS4_UNROLL and CS4_PF2):
-        return "wt with cs 4 needs the unrolled look-ahead kernel"
     stage = (spec.bx * _CK + _w_elems(spec)) * 2 * (2 if spec.cs == 4 else 1)
     lds = (3 if spec.cs == 2 else 2) * stage + _tab_bytes(spec)
     if not target.fits_lds(lds):
@@ -771,7 +648,6 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     WT = spec.wt
     SW = spec.sw  # positions-inner sweep (see FwdFlexMfmaSpec.sw)
     NT = R * S  # sw: the taps of a chunk
-    assert not (SW and P2_WFIRST)
     if WT:
         # wt: NH halves of HK outputs, each [64 reduction rows][128]; a wave
         # DMAs pieces q = wave * NWI + i of 4 rows (1 KiB), half q // 16
@@ -889,7 +765,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     TI = b.mul(b.mul(nxt, nkt), ci(SP))
     G = b.smin(TI, ci(PERSIST))
     # ds forms its pixel indices in ds_pix (no hw)
-    dl = ([] if DS else [hw]) + [p_Wo, nkt] + ([] if P1_WALK & 2 else [G])
+    dl = ([] if DS else [hw]) + [p_Wo, nkt, G]
     if spec.flat:
         dl.append(b.div(C, ci(8)))
     if GRP:
@@ -897,7 +773,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     fd = _divs(b, lane, dl)
     f_hw = None if DS else fd.pop(0)
     f_wo, f_nkt = fd.pop(0), fd.pop(0)
-    f_g = None if P1_WALK & 2 else fd.pop(0)
+    f_g = fd.pop(0)
     f_cg0 = fd.pop(0) if spec.flat else None
     f_nktg = fd.pop(0) if GRP else None
 
@@ -942,18 +818,9 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         g8 = b.div(G, ci(8))
         xr = b.add(b.mul(b.mod(blk, ci(8)), g8), b.div(blk, ci(8)))
         blk = b.select(b.cmp_eq(b.mod(G, ci(8)), c0), xr, blk)
-    if P1_WALK & 1:
-        # G = PERSIST (a power of two) when TI >= PERSIST, else TI (one round)
-        assert PERSIST & (PERSIST - 1) == 0
-        big = b.cmp_ge(TI, ci(PERSIST))
-        full = b.select(big, b.lshr(TI, ci(PERSIST.bit_length() - 1)), c1)
-        part = b.select(big, b.land(TI, ci(PERSIST - 1)), c0)
-    elif P1_WALK & 4:
-        # the rounds from the grid size's magic (no signed division)
-        full = f_g.div(TI)
-        part = b.sub(TI, b.mul(full, G))
-    else:
-        full, part = b.div(TI, G), b.mod(TI, G)
+    # the rounds from the grid size's magic (no signed division)
+    full = f_g.div(TI)
+    part = b.sub(TI, b.mul(full, G))
     if DS:
         # the items run in falling tap count (phase order PORD); a block takes
         # slot b in even rounds and G - 1 - b in odd ones, so the long tiles of
@@ -962,17 +829,8 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             return b.select(b.cmp_eq(b.mod(i, c2), c1), b.sub(b.sub(G, c1), blk), blk)
 
         last_ok = b.cmp_lt(slot(full), part)
-    elif XR:
-        pass
-    elif P1_WALK & 1:
-        # part = 0 when G < PERSIST: the mask is then moot
-        last_ok = b.cmp_lt(
-            b.land(b.add(blk, b.mul(full, ci(rot))), ci(PERSIST - 1)), part
-        )
-    elif P1_WALK & 4:
+    elif not XR:
         last_ok = b.cmp_lt(f_g.mod(b.add(blk, b.mul(full, ci(rot)))), part)
-    else:
-        last_ok = b.cmp_lt(b.mod(b.add(blk, b.mul(full, ci(rot))), G), part)
     if not XR:
         rounds = b.add(full, b.select(last_ok, c1, c0))
 
@@ -981,12 +839,6 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             return b.add(b.mul(i, G), slot(i))
         if XR:
             return b.add(run0, b.mul(i, wpx))
-        if P1_WALK & 2:
-            # G = PERSIST: (b + i ROT) % G; G < PERSIST: one round, so i = 0
-            # gives b and i >= 1 an item past the last (any slot)
-            return b.add(
-                b.mul(i, G), b.land(b.add(blk, b.mul(i, ci(rot))), ci(PERSIST - 1))
-            )
         return b.add(b.mul(i, G), f_g.mod(b.add(blk, b.mul(i, ci(rot)))))
 
     # ---- item -> (tile, piece, valid tap ranges) -----------------------------
@@ -1053,30 +905,18 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         hi_h = b.sub(b.mul(ho0, ci(SH)), ci(PH))
         lo_w = b.sub(b.mul(wo1, ci(SH)), ci(PW))
         hi_w = b.sub(b.mul(wo0, ci(SH)), ci(PW))
-        if P3_TAPS:
-            # the counts in closed form: #{r < n: lo + r d < 0} =
-            # min(ceil(max(-lo, 0) / d), n), #{r < n: hi + r d < E} =
-            # min(ceil(max(E - hi, 0) / d), n)
-            def cnt(v: Value, d: int, n: int) -> Value:
-                v = b.smax(v, c0)
-                if d > 1:
-                    v = b.div(b.add(v, ci(d - 1)), ci(d))
-                return b.smin(v, ci(n))
 
-            r0, r1 = cnt(b.sub(c0, lo_h), DH, R), cnt(b.sub(p_Hi, hi_h), DH, R)
-            s0, s1 = cnt(b.sub(c0, lo_w), DW, S), cnt(b.sub(p_Wi, hi_w), DW, S)
-        else:
-            r0, r1, s0, s1 = c0, ci(R), c0, ci(S)
-            for r in range(R):
-                r0 = b.add(r0, b.select(b.cmp_lt(b.add(lo_h, ci(r * DH)), c0), c1, c0))
-                r1 = b.sub(
-                    r1, b.select(b.cmp_ge(b.add(hi_h, ci(r * DH)), p_Hi), c1, c0)
-                )
-            for s in range(S):
-                s0 = b.add(s0, b.select(b.cmp_lt(b.add(lo_w, ci(s * DW)), c0), c1, c0))
-                s1 = b.sub(
-                    s1, b.select(b.cmp_ge(b.add(hi_w, ci(s * DW)), p_Wi), c1, c0)
-                )
+        # the counts in closed form: #{r < n: lo + r d < 0} =
+        # min(ceil(max(-lo, 0) / d), n), #{r < n: hi + r d < E} =
+        # min(ceil(max(E - hi, 0) / d), n)
+        def cnt(v: Value, d: int, n: int) -> Value:
+            v = b.smax(v, c0)
+            if d > 1:
+                v = b.div(b.add(v, ci(d - 1)), ci(d))
+            return b.smin(v, ci(n))
+
+        r0, r1 = cnt(b.sub(c0, lo_h), DH, R), cnt(b.sub(p_Hi, hi_h), DH, R)
+        s0, s1 = cnt(b.sub(c0, lo_w), DW, S), cnt(b.sub(p_Wi, hi_w), DW, S)
         if FLAT:  # one cursor tap; the chunks walk the whole reduction
             r0, r1, s0, s1 = c0, c1, c0, c1
         # a tile reading only padding still runs one (zero) step
@@ -1121,7 +961,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     TB2 = _tab_db(spec, arch)
     TABN = RSP * 64 * NXI  # elements of one table buffer
     tab_s = b.smem_alloc(I32, [1, (2 if TB2 else 1) * TABN], name_hint="flex_tab")
-    # T1_DB: the group of the code being built and its round (set by run)
+    # TB2: the group of the code being built and its round (set by run)
     tctx = {"g1": False, "rnd": None}
     if DS:
         # ds: the dX pixel (or -1) of each tile pixel, formed with the offset
@@ -1135,7 +975,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
 
     def build_tab(info, ln: Value, l8: Value, wv=None, buf=None) -> None:
         """Wave wv's (default: this wave's) table rows for the tile, into
-        buffer buf (T1_DB): lane (l8, c) writes taps c, c + 8, ... of its NXI
+        buffer buf (TB2): lane (l8, c) writes taps c, c + 8, ... of its NXI
         pixels (byte offset of the tap's input fibre, or the zero-fill
         offset)."""
         wv = wave if wv is None else wv
@@ -1203,7 +1043,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             b.smem_store_vN(tab_s, [c0, tab_index(t, l8, wv, buf)], val, NXI)
 
     def build_tab_all(info, k: Value) -> None:
-        """T1_DB, group 1: the rows of this wave and of its group-0 partner
+        """TB2, group 1: the rows of this wave and of its group-0 partner
         (wave - 4) for item k, into buffer k & 1."""
         ln = opaque_lane()
         l8 = dv(ln, 8)
@@ -1212,34 +1052,26 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         ln = opaque_lane()
         build_tab(info, ln, dv(ln, 8), b.sub(wave, ci(4)), buf)
 
-    def lanes_of(info, first: bool = False, pre_tab=None) -> Dict[str, Value]:
-        """The cursor's lane parts; with ``pre_tab`` (the kernel's first
-        item) the table is built last, after ``pre_tab(out)``."""
+    def lanes_of(info, first: bool = False) -> Dict[str, Value]:
+        """The cursor's lane parts (and the item's offset-table rows)."""
         ln = opaque_lane()
         l8 = dv(ln, 8)
         c8 = b.xor(md(ln, 8), l8)
         out = {}
-        if pre_tab is not None:
-            pass
-        elif first or DS:
+        if first or DS:
             build_tab(info, ln, l8, None, c0 if TB2 else None)
         elif TB2:
             if tctx["g1"]:
                 # built here unless built after the epilogue of item k - 2
                 k, rnd_ = info["rnd"], tctx["rnd"]
-                if T1_K1:
-                    # item 1: group 0 built its rows in its prologue
-                    with b.scf_if(b.land(b.cmp_eq(k, c1), b.cmp_lt(k, rounds))):
-                        build_tab(info, ln, l8, None, c1)
-                    need = b.land(b.cmp_lt(k, rounds), b.cmp_ge(k, b.add(rnd_, c2)))
-                else:
-                    need = b.land(
-                        b.cmp_lt(k, rounds),
-                        b.lor(b.cmp_eq(k, c1), b.cmp_ge(k, b.add(rnd_, c2))),
-                    )
+                # item 1: group 1's own rows (group 0 built its rows in its
+                # prologue)
+                with b.scf_if(b.land(b.cmp_eq(k, c1), b.cmp_lt(k, rounds))):
+                    build_tab(info, ln, l8, None, c1)
+                need = b.land(b.cmp_lt(k, rounds), b.cmp_ge(k, b.add(rnd_, c2)))
                 with b.scf_if(need):
                     build_tab_all(info, k)
-        elif not K3_PROBE & 2:
+        else:
             # no table for the item past the block's last (the cursor enters
             # it when the last item's steps run out)
             with b.scf_if(b.cmp_lt(info["rnd"], rounds)):
@@ -1303,12 +1135,9 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             out["wk0"] = b.readfirstlane(b.mul(wk, c2))
         else:
             out["wo"] = b.mul(b.add(b.mul(k, RSC), b.mul(c8, ci(8))), c2)
-        if pre_tab is not None:
-            pre_tab(out)
-            build_tab(info, ln, l8, None, c0 if TB2 else None)
         return out
 
-    def cursor_at(i: Value, first: bool = False, pre_tab=None) -> Dict[str, Value]:
+    def cursor_at(i: Value, first: bool = False) -> Dict[str, Value]:
         t = tile_of(i)
         info = item_info(t)
         info["rnd"] = i
@@ -1318,8 +1147,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         cur.update({k: info[k] for k in ("r0", "r1", "s0", "s1")})
         if DS:
             cur["fb"] = info["fb"]
-        hook = None if pre_tab is None else (lambda lan: pre_tab(dict(cur, **lan)))
-        cur.update(lanes_of(info, first, hook))
+        cur.update(lanes_of(info, first))
         return cur
 
     def cur_adv(cur) -> Dict[str, Value]:
@@ -1367,7 +1195,9 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     def s_other(st):
         return 1 - st if isinstance(st, int) else b.xor(st, c1)
 
-    h_gran, h_xin, h_kw, h_tab = (None,) * 4 if P2_LB else lane_bases()
+    # the lane-derived LDS bases, formed per group in run (from an opaque
+    # lane, not formed above the group branch and held across it)
+    h_gran, h_xin, h_kw, h_tab = (None,) * 4
 
     def dma(cur, st: int):
         """This wave's NXI input + NWI weight DMAs of the cursor's step into stage st."""
@@ -1641,18 +1471,16 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             gi, tk = grp_tk(tk)
             gk = b.mul(gi, K)  # the group's first output channel
         ln = opaque_lane()
-        l16, q = md(ln, 16), dv(ln, 16)
-        coal = EPI_COAL
-        if coal:
-            # lane 4 p + j stores pixel p's j-th 16 bytes of the store's 64
-            # (bf16: channels 8 j.., held by lane 16 j + p; fp32 slab:
-            # channels 4 j.., held by lane 16 q + p, q = 2 (j & 1) + j / 2):
-            # one ds_bpermute per dword pair, and a store's lanes then cover
-            # 16 64-byte rows, 4 lanes per row (16 lanes per row touched 4x
-            # as many cache lines)
-            l16, q = dv(ln, 4), md(ln, 4)
-            sq = q if SP == 1 else b.add(b.mul(md(q, 2), c2), dv(q, 2))
-            src = b.mul(b.add(b.mul(sq, ci(16)), l16), ci(4))
+        md(ln, 16), dv(ln, 16)  # (unused, kept: part of the kernel's IR)
+        # lane 4 p + j stores pixel p's j-th 16 bytes of the store's 64
+        # (bf16: channels 8 j.., held by lane 16 j + p; fp32 slab:
+        # channels 4 j.., held by lane 16 q + p, q = 2 (j & 1) + j / 2):
+        # one ds_bpermute per dword pair, and a store's lanes then cover
+        # 16 64-byte rows, 4 lanes per row (16 lanes per row touched 4x
+        # as many cache lines)
+        l16, q = dv(ln, 4), md(ln, 4)
+        sq = q if SP == 1 else b.add(b.mul(md(q, 2), c2), dv(q, 2))
+        src = b.mul(b.add(b.mul(sq, ci(16)), l16), ci(4))
 
         def permute(words):
             out = []
@@ -1706,14 +1534,16 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                         b.vec_extract(da, 1), b.vec_extract(db, 1)
                     )
                     packed[xt, cc] = [lo0, lo1, hi0, hi1]
-            if coal:
-                # every accumulator narrowed first: the permutes then take
-                # registers from the freed half (interleaved, K256 spills)
-                b.sched_barrier(0)
+            # every accumulator narrowed first: the permutes then take
+            # registers from the freed half (interleaved, K256 spills)
+            b.sched_barrier(0)
             klim = b.sub(K, kbase)  # channels left from the wave's first
             for xt in range(XT):
                 xok, xp = opix(b.add(xbase, ci(xt * 16)))
-                if EPI_IMM and not spec.k_tail:
+                if not spec.k_tail:
+                    # the store offsets as one select per 16-pixel tile, the
+                    # channel step as the store's immediate offset (K range:
+                    # a compare of the lane's channel with a scalar limit)
                     po = b.mul(xp, YS)
                     if GRP:
                         po = b.add(po, gk)
@@ -1730,9 +1560,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                             b.select(zok, b.add(b0, b.mul(b.mul(dp, K), c2)), oob)
                         )
                 for cc in range(KT // 2):
-                    words = packed[xt, cc]
-                    if coal:
-                        words = permute(words)
+                    words = permute(packed[xt, cc])
                     val = b.vec_bitcast(b.vec_pack(words, I32), half8)
                     k = b.add(b.add(kbase, ci(cc * 32)), kq)
                     if zb:
@@ -1754,20 +1582,8 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                             off = b.select(ok, b.add(e0, ci(2 * j)), oob)
                             st1(d_rsrc, off, c0, b.vec_extract(val, j))
                         continue
-                    if EPI_IMM:
-                        kok = b.cmp_lt(kq, b.sub(klim, ci(cc * 32)))
-                        if K3_PROBE & 1:
-                            kok = b.cmp_lt(kq, c0)
-                        off = b.add(b.select(kok, b0, oob), ci(cc * 64))
-                        _buf_store_vN(b, dtype, d_rsrc, off, c0, val, 4)
-                        continue
-                    ok = b.land(xok, b.cmp_lt(k, K))
-                    if K3_PROBE & 1:
-                        ok = b.cmp_lt(k, c0)
-                    po = b.mul(xp, YS)
-                    if GRP:
-                        po = b.add(po, gk)
-                    off = b.select(ok, b.mul(b.add(po, k), c2), oob)
+                    kok = b.cmp_lt(kq, b.sub(klim, ci(cc * 32)))
+                    off = b.add(b.select(kok, b0, oob), ci(cc * 64))
                     _buf_store_vN(b, dtype, d_rsrc, off, c0, val, 4)
         else:
             pc = b.mod(t, ci(SP))
@@ -1776,10 +1592,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                 params["D"], b.mul(b.zext(pc, I64), b.zext(slab, I64))
             )
             s_rsrc = b.buffer_rsrc(base, slab)
-            if coal:
-                kq = b.mul(q, ci(4))
-            else:
-                kq = b.add(b.mul(md(q, 2), ci(8)), b.mul(dv(q, 2), ci(4)))
+            kq = b.mul(q, ci(4))
             for xt in range(XT):
                 xok, xp = opix(b.add(xbase, ci(xt * 16)))
                 for kt in range(KT):
@@ -1787,14 +1600,13 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                     ok = b.land(xok, b.cmp_lt(k, K))
                     off = b.select(ok, b.mul(b.add(b.mul(xp, K), k), ci(4)), oob)
                     v = accs[xt * KT + kt]
-                    if coal:
-                        w = b.vec_bitcast(v, VectorType(I32, 4))
-                        v = b.vec_bitcast(
-                            b.vec_pack(
-                                permute([b.vec_extract(w, j) for j in range(4)]), I32
-                            ),
-                            v.type,
-                        )
+                    w = b.vec_bitcast(v, VectorType(I32, 4))
+                    v = b.vec_bitcast(
+                        b.vec_pack(
+                            permute([b.vec_extract(w, j) for j in range(4)]), I32
+                        ),
+                        v.type,
+                    )
                     if spec.k_tail:
                         # fp32 element stores, each masked by K
                         e0 = b.mul(b.add(b.mul(xp, K), k), ci(4))
@@ -1808,8 +1620,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                             )
                     else:
                         b.buffer_store_vN_f32(s_rsrc, off, c0, v, 4)
-                    if coal:
-                        b.sched_barrier(0)
+                    b.sched_barrier(0)
 
     # ---- the two groups ------------------------------------------------------
     zero = b.zero_vec_f32(4)
@@ -1818,10 +1629,16 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     nacc = XT * KT
     vec4 = zero.type
 
-    # S1_G1DMA 6: bk 256 plain (wave + 4's weight rows = one scalar offset)
-    S6 = S1_G1DMA == 6 and BK == 256 and BX == 256 and not WT and not DS and not FLAT
-    # S1_G1DMA 5 (6: the other kernels): group 1's inputs in its memory phase
-    S5 = (S1_G1DMA == 5 or S1_G1DMA == 6 and not S6) and not WT
+    # group 1's DMAs out of its MFMA phase (where they share the memory pipe
+    # with group 0's and stall its MFMAs). S6, bk 256 plain: group 0 issues
+    # all eight waves' weight rows (wave + 4's are one scalar offset away),
+    # group 1 only its input rows (nothing in its MFMA phase); S5, the other
+    # kernels except wt: group 1's input rows (read by its own waves only) of
+    # step + 1 into the other stage at the start of its memory phase (two
+    # phases of latency), its weight rows over the second half of its MFMA
+    # phase
+    S6 = BK == 256 and BX == 256 and not WT and not DS and not FLAT
+    S5 = not S6 and not WT
 
     def adv_sw(cur, tau: int, last: bool):
         """sw: the cursor's advance in the step of tap tau: it moves to the
@@ -1851,12 +1668,12 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             return adv_sw(c, *sw)
 
         ost = s_other(st)
-        if not g1 and K2_DMIX:
+        if not g1:
             # the DMAs of step j + 1 between the fragment reads (one every
-            # K2_DMIX reads), the cursor advance after them
+            # 3 reads, S6: 2), the cursor advance after them
             ops = prep(cur, "xw", 1)
             if S6:
-                # S1_G1DMA 6: group 1's weight rows too (wave + 4: channel
+                # S6: group 1's weight rows too (wave + 4: channel
                 # + 128, one scalar offset)
                 ops += [
                     ("w4", i, r_, v_, b.add(s_, b.mul(RSC, ci(256))))
@@ -1869,7 +1686,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             cur = adv(cur)
 
             nxt = [1]
-            every = 2 if S6 else K2_DMIX
+            every = 2 if S6 else 3
 
             def hook(i: int):
                 if i % every == 0 and nxt[0] < len(ops):
@@ -1886,17 +1703,6 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             b.sched_barrier(0)
             b.s_waitcnt(vmcnt=0)
             bar(0)
-        elif not g1:
-            dma_issue(prep(cur, "xw", 1), ost)
-            cur = adv(cur)
-            a, bb = frags(st)
-            b.s_waitcnt(lgkmcnt=0)
-            b.sched_barrier(0)
-            bar(1)
-            accs = mfmas(accs, a, bb)
-            b.sched_barrier(0)
-            b.s_waitcnt(vmcnt=0)
-            bar(0)
         else:
             # Group 1 advances its cursor at the start of its memory phase,
             # before the fragment reads (only the accumulators are live across
@@ -1904,13 +1710,12 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             # vmcnt), forms its DMA offsets there and spreads its DMAs (step +
             # 2 into this stage, read by both groups) over its MFMA phase;
             # group 0 issues all of its own at the barrier this phase starts on.
-            if EPI_CONC:
-                # the barrier that ends group 1's MFMA phase opens its next
-                # memory phase instead: an item's epilogue runs before it,
-                # beside group 0's epilogue, not one phase after it
-                bar(0)
+            # The barrier that ends group 1's MFMA phase opens its next
+            # memory phase instead: an item's epilogue runs before it,
+            # beside group 0's epilogue, not one phase after it.
+            bar(0)
             if S6:
-                # S1_G1DMA 6: only this group's input rows (step + 1, the
+                # only this group's input rows (step + 1, the
                 # other stage) at the start of the memory phase; group 0
                 # issues all weight rows; no DMAs in the MFMA phase
                 dma_issue(prep(cur, "x", 1), ost)
@@ -1932,8 +1737,6 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                     start=n_ - n_ // 4,
                 )
                 b.sched_barrier(0)
-                if not EPI_CONC:
-                    bar(0)
                 return accs, cur
             if S5:
                 # the input DMAs of step + 1 (the cursor before its advance)
@@ -1958,8 +1761,6 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                 ]
                 accs = mfmas(accs, a, bb, inter=inter, start=(2 * XT * KT) // 2)
                 b.sched_barrier(0)
-                if not EPI_CONC:
-                    bar(0)
                 return accs, cur
             cur = adv(cur)
             b.sched_barrier(0)
@@ -1971,20 +1772,17 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             inter = [(lambda op=op: dma_issue([op], st)) for op in ops]
             accs = mfmas(accs, a, bb, inter=inter)
             b.sched_barrier(0)
-            if not EPI_CONC:
-                bar(0)
         return accs, cur
 
-    # wt and c_tail bk 256 kernels spill VGPRs with the carried step count
-    STEPS = (
-        P2_STEPS in (1, 3) and not WT and not spec.c_tail or P2_STEPS == 4
-    ) and not SW
-    # P2_STEPS 2 (3: wt only): the step count from the cursor's fields when
-    # the cursor is still in the round's item (no carried state)
-    STEPS_CUR = (P2_STEPS == 2 or P2_STEPS == 3 and WT) and not SW
+    # the round loop carries the item's step count (the next item's formed
+    # before this item's epilogue, its scalar work filling the epilogue's
+    # VALU / LDS waits); wt and c_tail bk 256 kernels spill VGPRs with it
+    STEPS = not WT and not spec.c_tail and not SW
 
-    # zero-first (P2_ZF all; T3_ZF bk <= 128: the wider tiles spill)
-    ZF = (P2_ZF or T3_ZF and BK <= 128) and not SW
+    # zero-first: an item's first step peeled, its MFMAs on C = 0 (no
+    # accumulator zeroing at the item's start); bk <= 128 only (the wider
+    # tiles spill)
+    ZF = BK <= 128 and not SW
 
     def chunk_sw(accs, cur, p0, g1: bool, last: bool):
         """sw: the NT steps of one chunk, stage parity p0 at its first."""
@@ -2027,7 +1825,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
 
     def item_steps(accs, cur, steps: Value, p: int, g1: bool, tag: str):
         """All steps of an item that starts on stage p: pairs, then an odd tail
-        (P2_ZF: the first step peeled, its MFMAs on C = 0)."""
+        (ZF: the first step peeled, its MFMAs on C = 0)."""
         if ZF:
             accs, cur = step([None] * nacc, cur, p, g1)
             steps, p = b.sub(steps, c1), 1 - p
@@ -2063,25 +1861,18 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     def run(g1: bool):
         nonlocal h_gran, h_xin, h_kw, h_tab, lane
         tctx["g1"], tctx["rnd"] = g1, c0
-        if P2_LB:
-            # per group, from an opaque lane (not formed above the group
-            # branch and held across it)
-            lane_ = lane
-            lane = opaque_lane()
-            h_gran, h_xin, h_kw, h_tab = lane_bases()
-            lane = lane_
-        if P2_WFIRST:
-            # the first step's weight DMAs before the table build (they need
-            # no table), its input DMAs after it
-            cur = cursor_at(c0, True, lambda c: dma_issue(dma_prep(c, "w"), 0))
-            dma_issue(dma_prep(cur, "x"), 0)
+        # per group, from an opaque lane (not formed above the group branch
+        # and held across it)
+        lane_ = lane
+        lane = opaque_lane()
+        h_gran, h_xin, h_kw, h_tab = lane_bases()
+        lane = lane_
+        cur = cursor_at(c0, True)
+        if SW:
+            dma_issue(dma_prep(cur, stap=0), 0)
         else:
-            cur = cursor_at(c0, True)
-            if SW:
-                dma_issue(dma_prep(cur, stap=0), 0)
-            else:
-                dma(cur, 0)
-        if TB2 and T1_K1 and not g1:
+            dma(cur, 0)
+        if TB2 and not g1:
             # group 0's rows of item 1 while it waits for group 1 at the
             # first barrier (group 1 builds its own at its crossing)
             with b.scf_if(b.cmp_lt(c1, rounds)):
@@ -2090,7 +1881,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         if not SW:  # (sw: the cursor's static tap moves to 1)
             cur = dict(zip(names, cur_adv(cur)))
         st1 = dict(stap=1) if SW else {}
-        if g1 and P2_G1PRE and EPI_CONC and not S6:
+        if g1 and not S6:
             # group 1's DMAs of step 1 before the first barrier: the wait
             # leaves them in flight (they are waited at the end of its first
             # memory phase)
@@ -2099,7 +1890,8 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                 dma_issue(dma_prep(cur, "w", **st1), 1)
             else:
                 dma_issue(dma_prep(cur, **st1), 1)
-            # (ds, T1_DB: LDS writes other waves read after the barrier)
+            # (ds, TB2: LDS writes other waves read after the barrier)
+
             n1 = NWI if S5 else NXI + NWI
             if DS or TB2:
                 b.s_waitcnt(vmcnt=n1, lgkmcnt=0)
@@ -2109,12 +1901,6 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
         else:
             b.s_waitcnt(vmcnt=0, lgkmcnt=0) if DS or TB2 else b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
-            if g1:
-                if not EPI_CONC:
-                    b.s_barrier_bare()  # group 1 runs one barrier behind
-                if not S6:
-                    # group 1 advances at its next memory phase
-                    dma_issue(dma_prep(cur, **st1), 1)
         b.sched_barrier(0)
 
         def steps_of(i: Value) -> Value:
@@ -2138,29 +1924,11 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
             cur = dict(zip(names, oc[: len(names)]))
             st = oc[len(names)]
             t = tile_of(rnd)
-            # P2_STEPS: the item's step count comes with the round (the next
-            # one is formed after this item's epilogue)
+            # STEPS: the item's step count comes with the round
             if SW:
                 steps = None
             elif STEPS:
                 steps = oc[len(names) + 1]
-            elif STEPS_CUR:
-                here = b.scf_if_else(b.cmp_eq(cur["i"], rnd), [I32])
-                with here as (then_ctx, else_ctx):
-                    with then_ctx:
-                        ch0 = b.div(b.mul(b.mod(cur["t"], ci(SP)), nch), ci(SP))
-                        b.scf_yield(
-                            b.mul(
-                                b.mul(
-                                    b.sub(cur["r1"], cur["r0"]),
-                                    b.sub(cur["s1"], cur["s0"]),
-                                ),
-                                b.sub(cur["ch1"], ch0),
-                            )
-                        )
-                    with else_ctx:
-                        b.scf_yield(steps_of(rnd))
-                steps = here.results[0]
             else:
                 steps = steps_of(rnd)
             accs = [zero] * nacc
@@ -2178,9 +1946,9 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                             b.scf_yield(*pa, *[pcur[k] for k in names], pst)
                 res = list(par.results)
                 accs, cur, st = res[:nacc], dict(zip(names, res[nacc:-1])), res[-1]
-            # T5_EARLY: the next item's step count before the epilogue (its
-            # scalar work fills the epilogue's VALU / LDS waits)
-            nxt_steps = [steps_of(b.add(rnd, c1))] if STEPS and T5_EARLY else []
+            # the next item's step count before the epilogue (its scalar work
+            # fills the epilogue's VALU / LDS waits)
+            nxt_steps = [steps_of(b.add(rnd, c1))] if STEPS else []
             epilogue(accs, t, rnd)
             b.sched_barrier(0)
             if TB2 and g1:
@@ -2193,12 +1961,9 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
                     build_tab_all(item_info(tile_of(k2)), k2)
                     b.s_waitcnt(lgkmcnt=0)
                 b.sched_barrier(0)
-            if STEPS and not T5_EARLY:
-                nxt_steps = [steps_of(b.add(rnd, c1))]
             b.scf_yield(*[cur[k] for k in names], st, *nxt_steps)
         b.s_setprio(0)
-        if not g1 or EPI_CONC:
-            b.s_barrier_bare()  # balance the barrier count
+        b.s_barrier_bare()  # balance the barrier count
 
     def groups():
         with b.scf_if_else(b.cmp_eq(g, c0)) as (then_ctx, else_ctx):
@@ -2375,30 +2140,18 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
         hi_h = b.sub(b.mul(ho0, ci(SH)), ci(PH))
         lo_w = b.sub(b.mul(wo1, ci(SH)), ci(PW))
         hi_w = b.sub(b.mul(wo0, ci(SH)), ci(PW))
-        if P3_TAPS:
-            # the counts in closed form: #{r < n: lo + r d < 0} =
-            # min(ceil(max(-lo, 0) / d), n), #{r < n: hi + r d < E} =
-            # min(ceil(max(E - hi, 0) / d), n)
-            def cnt(v: Value, d: int, n: int) -> Value:
-                v = b.smax(v, c0)
-                if d > 1:
-                    v = b.div(b.add(v, ci(d - 1)), ci(d))
-                return b.smin(v, ci(n))
 
-            r0, r1 = cnt(b.sub(c0, lo_h), DH, R), cnt(b.sub(p_Hi, hi_h), DH, R)
-            s0, s1 = cnt(b.sub(c0, lo_w), DW, S), cnt(b.sub(p_Wi, hi_w), DW, S)
-        else:
-            r0, r1, s0, s1 = c0, ci(R), c0, ci(S)
-            for r in range(R):
-                r0 = b.add(r0, b.select(b.cmp_lt(b.add(lo_h, ci(r * DH)), c0), c1, c0))
-                r1 = b.sub(
-                    r1, b.select(b.cmp_ge(b.add(hi_h, ci(r * DH)), p_Hi), c1, c0)
-                )
-            for s in range(S):
-                s0 = b.add(s0, b.select(b.cmp_lt(b.add(lo_w, ci(s * DW)), c0), c1, c0))
-                s1 = b.sub(
-                    s1, b.select(b.cmp_ge(b.add(hi_w, ci(s * DW)), p_Wi), c1, c0)
-                )
+        # the counts in closed form: #{r < n: lo + r d < 0} =
+        # min(ceil(max(-lo, 0) / d), n), #{r < n: hi + r d < E} =
+        # min(ceil(max(E - hi, 0) / d), n)
+        def cnt(v: Value, d: int, n: int) -> Value:
+            v = b.smax(v, c0)
+            if d > 1:
+                v = b.div(b.add(v, ci(d - 1)), ci(d))
+            return b.smin(v, ci(n))
+
+        r0, r1 = cnt(b.sub(c0, lo_h), DH, R), cnt(b.sub(p_Hi, hi_h), DH, R)
+        s0, s1 = cnt(b.sub(c0, lo_w), DW, S), cnt(b.sub(p_Wi, hi_w), DW, S)
         empty = b.lor(b.cmp_ge(r0, r1), b.cmp_ge(s0, s1))
         r0, r1 = b.select(empty, c0, r0), b.select(empty, c1, r1)
         s0, s1 = b.select(empty, c0, s0), b.select(empty, c1, s1)
@@ -2458,27 +2211,29 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
     h_l8 = dv(lane, 8)
     h_gran = b.mul(b.xor(md(lane, 8), h_l8), ci(16))
     h_sl = b.mul(b.xor(b.add(b.mul(sl, ci(4)), h_q), md(h_r16, 8)), ci(8))
-    h_tab = b.mul(b.add(b.mul(wave, ci(8)), h_l8), ci(NXI))
+    # (the per-wave table row base; run_pf2 forms its own in the group's
+    # branch, this one is unused but kept: it is part of the kernel's IR)
+    b.mul(b.add(b.mul(wave, ci(8)), h_l8), ci(NXI))
 
     RS = R * S
+
     C2 = b.mul(C, c2)
     RSK = b.mul(ci(RS), K)  # wt: a reduction row of the KRSC filter
 
-    def run_pf2(
-        g, gb, h_xin, h_kw, wlane, frags, bar, reduce_store, zero, vec4, nacc, head=None
-    ):
-        """Group g's items, taps of a chunk unrolled, DMA look-ahead of two
-        steps. Lookahead slot m of a chunk pair (step m from the pair's start,
-        m < 2 RS + 2) is chunk cA + 2 (m // RS), tap m % RS; it is live while
-        that chunk is one of the group's (index < NQ) and < ch1, else its DMAs
-        are dead (zero fill, kept so every step waits the same vmcnt)."""
+    def run_pf2(g, gb, wlane, frags, bar, reduce_store, zero, vec4, nacc, head):
+        """Group g's items, the filter taps of a chunk unrolled (compile-time
+        tap offsets, no scalar cursor; every tap runs, padding taps load
+        zeros), DMA look-ahead of two steps: a group's DMAs of step j + 2 go
+        into the stage step j just read and are spread over step j's MFMA
+        phase, their offsets formed before the phase barrier. Lookahead slot
+        m of a chunk pair (step m from the pair's start, m < 2 RS + 2) is
+        chunk cA + 2 (m // RS), tap m % RS; it is live while that chunk is
+        one of the group's (index < NQ) and < ch1, else its DMAs are dead
+        (zero fill, kept so every step waits the same vmcnt). ``head`` runs
+        at each item's start."""
         NDMA = NXI + NWI
         # formed in the group's branch (held across it, it went to scratch)
-        g_tab = (
-            b.mul(b.add(b.mul(wave, ci(8)), dv(opaque_lane(), 8)), ci(NXI))
-            if CS4_SLIM
-            else h_tab
-        )
+        g_tab = b.mul(b.add(b.mul(wave, ci(8)), dv(opaque_lane(), 8)), ci(NXI))
 
         def ent_of(tap: int) -> Value:
             return b.smem_load_vN(
@@ -2499,27 +2254,15 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
         def opaque_s(v: Value) -> Value:
             # a per-step copy: products of it are formed where used, not
             # hoisted and held across the unrolled sweep
-            return (
-                b.inline_asm("", "=s,0", [v], I32, sideeffect=True) if CS4_SLIM else v
-            )
+            return b.inline_asm("", "=s,0", [v], I32, sideeffect=True)
 
         def dma_ops(rs, ent, chb: Value, tap: int, wo, st: int, parts: str = "xw"):
+            """The DMAs as (rsrc, (LDS SGPR base, immediate), voffset,
+            soffset)."""
             xr, wr = rs
             ops = []
             for i in range(NXI if "x" in parts else 0):
-                if CS4_SBASE:
-                    dst = (sbase[st], i * 1024)
-                else:
-                    dst = b.smem_ptr_add(
-                        st_a[st],
-                        b.zext(
-                            b.add(
-                                ci(gb * 2),
-                                b.mul(b.add(b.mul(wq, ci(NXI)), ci(i)), ci(1024)),
-                            ),
-                            I64,
-                        ),
-                    )
+                dst = (sbase[st], i * 1024)
                 ops.append((xr, dst, b.add(b.vec_extract(ent, i), h_gran), chb))
             if "w" not in parts:
                 return ops
@@ -2536,14 +2279,7 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
                     b.add(k0b, b.mul(b.mul(wq, ci(4 * NWI * 2)), RSK)),
                 )
                 for i in range(NWI):
-                    if CS4_SBASE:
-                        dst = (sbase[st], IN_E * 2 + i * 1024)
-                    else:
-                        q = b.add(b.mul(wq, ci(NWI)), ci(i))
-                        dst = b.smem_ptr_add(
-                            st_a[st],
-                            b.zext(b.add(ci((gb + IN_E) * 2), b.mul(q, ci(1024))), I64),
-                        )
+                    dst = (sbase[st], IN_E * 2 + i * 1024)
                     soff = b.add(sb, b.mul(rsk, ci(8 * i))) if i else sb
                     ops.append((wr, dst, wv1 if (i >> 1) & 1 else wv0, soff))
                 return ops
@@ -2551,50 +2287,32 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             rsc = opaque_s(RSC)
             for i in range(NWI):
                 wsh = ((i & 1) * 4 + (i >> 1) * 16) * 2
-                if CS4_SBASE:
-                    dst = (sbase[st], IN_E * 2 + i * 1024)
-                else:
-                    dst = b.smem_ptr_add(
-                        st_a[st],
-                        b.zext(
-                            b.add(
-                                ci((gb + IN_E) * 2),
-                                b.mul(b.add(b.mul(wq, ci(NWI)), ci(i)), ci(1024)),
-                            ),
-                            I64,
-                        ),
-                    )
+                dst = (sbase[st], IN_E * 2 + i * 1024)
                 ops.append(
                     (wr, dst, wo, b.add(woff, b.mul(rsc, ci(wsh))) if wsh else woff)
                 )
             return ops
 
-        # this wave's first DMA slot of each stage (input and weight slots
-        # are i KiB past it, the weights' IN_E elements further)
+        # this wave's first DMA slot of each stage as one SGPR (input and
+        # weight slots are i KiB past it, the weights' IN_E elements further;
+        # 16 held addresses cost SGPR spills and VGPR scratch)
         assert NXI == NWI
-        sbase = (
-            [
-                b.readfirstlane(
-                    b.trunc(
-                        b.smem_ptr_add(
-                            st_a[st],
-                            b.zext(b.add(ci(gb * 2), b.mul(wq, ci(NXI * 1024))), I64),
-                        ),
-                        I32,
-                    )
+        sbase = [
+            b.readfirstlane(
+                b.trunc(
+                    b.smem_ptr_add(
+                        st_a[st],
+                        b.zext(b.add(ci(gb * 2), b.mul(wq, ci(NXI * 1024))), I64),
+                    ),
+                    I32,
                 )
-                for st in range(2)
-            ]
-            if CS4_SBASE
-            else None
-        )
+            )
+            for st in range(2)
+        ]
 
         def issue(op):
             rs, dst, voff, soff = op
-            if CS4_SBASE:
-                _dma_lds_at(b, rs, dst[0], dst[1], voff, soff)
-            else:
-                _dma_lds(b, rs, dst, voff, soff)
+            _dma_lds_at(b, rs, dst[0], dst[1], voff, soff)
 
         if spec.wt:
             # transposing A reads of the [64 reduction rows][128 outputs] stage
@@ -2602,59 +2320,40 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             # group kt one XOR
             def t_lane():
                 ln0 = opaque_lane()
-                if CS4_WT_BITS:
-                    # the lane fields are disjoint bit ranges (BK 128): row
-                    # 8 tb + ti at 1024 / 128, swz = ti | 4 (tb & 1) at 16,
-                    # P(tj) at 4 -- shifts and masks of the (opaque, so
-                    # signedness-unknown) lane instead of divisions
-                    assert BK == 128
+                # the lane fields are disjoint bit ranges (BK 128): row
+                # 8 tb + ti at 1024 / 128, swz = ti | 4 (tb & 1) at 16,
+                # P(tj) at 4 -- shifts and masks of the (opaque, so
+                # signedness-unknown) lane instead of divisions
+                assert BK == 128
 
-                    def bits(sh: int, mask: int, to: int) -> Value:
-                        v = b.land(b.lshr(ln0, ci(sh)) if sh else ln0, ci(mask))
-                        return b.shl(v, ci(to)) if to else v
+                def bits(sh: int, mask: int, to: int) -> Value:
+                    v = b.land(b.lshr(ln0, ci(sh)) if sh else ln0, ci(mask))
+                    return b.shl(v, ci(to)) if to else v
 
-                    # in bytes (each field one bit higher): the fragment's
-                    # XOR stays in the byte domain and the exact halving to
-                    # the element index folds into the read's address
-                    lp = b.lor(
-                        b.lor(
-                            b.lor(bits(4, 3, 11), bits(2, 3, 8)),
-                            b.lor(bits(2, 3, 5), bits(4, 1, 7)),
-                        ),
-                        b.lor(bits(0, 1, 4), bits(1, 1, 3)),
-                    )
-                    return b.lor(
-                        lp, b.shl(b.add(ci(gb + IN_E), b.mul(sl, ci(32 * BK))), c1)
-                    )
-                t_tb, t_ti, t_tj = dv(ln0, 16), md(dv(ln0, 4), 4), md(ln0, 4)
-                t_swz = b.add(t_ti, b.mul(md(t_tb, 2), ci(4)))
-                return b.add(
-                    b.add(ci(gb + IN_E), b.mul(sl, ci(32 * BK))),
-                    b.add(
-                        b.mul(b.add(b.mul(t_tb, ci(8)), t_ti), ci(BK)),
-                        b.add(
-                            b.mul(t_swz, ci(16)),
-                            b.mul(b.add(b.mul(md(t_tj, 2), c2), dv(t_tj, 2)), ci(4)),
-                        ),
+                # in bytes (each field one bit higher): the fragment's
+                # XOR stays in the byte domain and the exact halving to
+                # the element index folds into the read's address
+                lp = b.lor(
+                    b.lor(
+                        b.lor(bits(4, 3, 11), bits(2, 3, 8)),
+                        b.lor(bits(2, 3, 5), bits(4, 1, 7)),
                     ),
+                    b.lor(bits(0, 1, 4), bits(1, 1, 3)),
+                )
+                return b.lor(
+                    lp, b.shl(b.add(ci(gb + IN_E), b.mul(sl, ci(32 * BK))), c1)
                 )
 
-            t_l0 = [t_lane()] if CS4_WT_HOIST else None
+            t_l0 = t_lane()
             frags_in = frags
 
             def frags(st: int):
                 _, bb = frags_in(st, a_frags=False)
                 a = []
-                if CS4_WT_HOIST:
-                    # the kernel's lane part (one VGPR), laundered per step
-                    t_l = b.inline_asm("", "=v,0", [t_l0[0]], I32, sideeffect=True)
-                else:
-                    t_l = t_lane()  # per step: a kept register costs spills
+                # the kernel's lane part (one VGPR), laundered per step
+                t_l = b.inline_asm("", "=v,0", [t_l0], I32, sideeffect=True)
                 for kt in range(KT):
-                    if CS4_WT_BITS:
-                        base = b.lshr(b.xor(t_l, ci(kt * 32)) if kt else t_l, c1)
-                    else:
-                        base = b.xor(t_l, ci(kt * 16)) if kt else t_l
+                    base = b.lshr(b.xor(t_l, ci(kt * 32)) if kt else t_l, c1)
                     lo = b.ds_read_tr16_b64(st_s[st], c0, base, dtype=io_type)
                     hi = b.ds_read_tr16_b64(
                         st_s[st], c0, b.add(base, ci(4 * BK)), dtype=io_type
@@ -2669,12 +2368,10 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             ent = ent_of(tap)
             a, bb = frags(st)
             b.s_waitcnt(lgkmcnt=0)
-            if CS4_PREOPS:
-                ops = dma_ops(rs, ent, chb, tap, wo, st)
+            # the DMA offsets formed before the phase barrier
+            ops = dma_ops(rs, ent, chb, tap, wo, st)
             b.sched_barrier(0)
             bar(1)
-            if not CS4_PREOPS:
-                ops = dma_ops(rs, ent, chb, tap, wo, st)
             every = (_XT * KT) // len(ops)
             accs = list(accs)
             j = 0
@@ -2698,8 +2395,7 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
         with outer as (rnd, oc):
             t = tile_of(rnd)
             info = item_info(t)
-            if head is not None:
-                head()
+            head()
             if spec.wt:
                 # slot l % 16 of row 4 q + l // 16 takes group (l % 16) // 2 ^
                 # (l // 16) ^ 4 ((q >> 1) & 1) (q = 4 wq + i: bit 1 of i); the
@@ -2732,23 +2428,16 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             # free. The weight DMAs of steps 0 and 1 need no table: they go
             # first and land while this wave builds its table rows.
             pro = [slot(c0, chA, m) for m in range(2)]
-            if CS4_PRO:
-                for m, (ok, chb, tap) in enumerate(pro):
-                    for op in dma_ops(rsrcs(ok), None, chb, tap, wo, m % 2, parts="w"):
-                        issue(op)
-            if not CS4_PROBE & 2:
-                build_tab(info["tx"])
-            if not CS4_PRO:
-                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-                b.s_barrier_bare()
+            for m, (ok, chb, tap) in enumerate(pro):
+                for op in dma_ops(rsrcs(ok), None, chb, tap, wo, m % 2, parts="w"):
+                    issue(op)
+            build_tab(info["tx"])
             for m, (ok, chb, tap) in enumerate(pro):
                 ent = ent_of(tap)
                 b.s_waitcnt(lgkmcnt=0)
-                for op in dma_ops(
-                    rsrcs(ok), ent, chb, tap, wo, m % 2, parts="x" if CS4_PRO else "xw"
-                ):
+                for op in dma_ops(rsrcs(ok), ent, chb, tap, wo, m % 2, parts="x"):
                     issue(op)
-            b.s_waitcnt(vmcnt=NXI if CS4_PRO else NDMA)
+            b.s_waitcnt(vmcnt=NXI)
             b.s_barrier_bare()
             if g == 1:
                 b.s_barrier_bare()  # group 1 runs one barrier behind
@@ -2773,7 +2462,7 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
                     if q not in slots:
                         ok, chb, _ = slot(q0, cA, m)
                         # the pair's first chunk is always live
-                        slots[q] = (rsrcs(ok) if q or not CS4_SLIM else live_rs, chb)
+                        slots[q] = (rsrcs(ok) if q else live_rs, chb)
                 for k in range(2 * RS):
                     m = k + 2
                     rs, chb = slots[m // RS]
@@ -2806,187 +2495,19 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             b.s_setprio(0)
             if g == 0:
                 b.s_barrier_bare()  # wait out group 1's last MFMA phase
-            if not CS4_PROBE & 1:
-                reduce_store(accs, info)
-            else:
-                acc = accs[0]
-                for v in accs[1:]:
-                    acc = b.fadd(acc, v)
-                bits = b.bitcast(b.vec_extract(acc, 0), I32)
-                off = b.select(b.cmp_eq(bits, ci(0x7FC01234)), c0, oob)
-                b.buffer_store_vN_f32(
-                    b.buffer_rsrc(params["D"], params["D_bytes"]), off, c0, acc, 4
-                )
-            b.sched_barrier(0)
-            b.scf_yield(c0)
-
-    def run_unrolled(
-        g, gb, h_xin, h_kw, wlane, frags, bar, reduce_store, zero, vec4, nacc
-    ):
-        """Group g's items with the taps of a chunk unrolled: step k of a
-        chunk pair is chunk k // RS, tap k % RS, stage k % 2 (pairs are an
-        even step count, so a pair and the odd tail chunk start on stage 0)."""
-
-        def ent_of(tap: int) -> Value:
-            return b.smem_load_vN(
-                tab_s, c0, b.add(h_tab, ci(tap * 64 * NXI)), dtype=I32, n=NXI
-            )
-
-        def rsrcs(ok: Value):
-            return (
-                b.buffer_rsrc(params["A"], b.select(ok, params["A_bytes"], c0)),
-                b.buffer_rsrc(params["B"], b.select(ok, params["B_bytes"], c0)),
-            )
-
-        def dma_u(rs, ent: Value, chb: Value, tap: int, wo: Value, st: int):
-            xr, wr = rs
-            for i in range(NXI):
-                dst = b.smem_ptr_add(
-                    st_a[st],
-                    b.zext(
-                        b.add(
-                            ci(gb * 2),
-                            b.mul(b.add(b.mul(wq, ci(NXI)), ci(i)), ci(1024)),
-                        ),
-                        I64,
-                    ),
-                )
-                b.async_buffer_load_lds(
-                    xr, dst, b.add(b.vec_extract(ent, i), h_gran), chb, 4
-                )
-            woff = b.add(b.mul(ci(tap), C2), chb)
-            for i in range(NWI):
-                wsh = ((i & 1) * 4 + (i >> 1) * 16) * 2
-                dst = b.smem_ptr_add(
-                    st_a[st],
-                    b.zext(
-                        b.add(
-                            ci((gb + IN_E) * 2),
-                            b.mul(b.add(b.mul(wq, ci(NWI)), ci(i)), ci(1024)),
-                        ),
-                        I64,
-                    ),
-                )
-                b.async_buffer_load_lds(
-                    wr, dst, wo, b.add(woff, b.mul(RSC, ci(wsh))), 4
-                )
-
-        def step_u(accs, st: int, nxt):
-            """One step on stage st; nxt = (rsrcs, ent, chunk bytes, tap, wo) of
-            the next step's DMA (into 1 - st) and the tap whose entries to read
-            for the step after (or None)."""
-            rs, ent, chb, tap, wo, tap2 = nxt
-            dma_u(rs, ent, chb, tap, wo, 1 - st)
-            e2 = ent_of(tap2) if tap2 is not None else ent
-            a, bb = frags(st)
-            b.s_waitcnt(lgkmcnt=0)
-            b.sched_barrier(0)
-            bar(1)
-            accs = list(accs)
-            for xt in range(_XT):
-                for kt in range(KT):
-                    i = xt * KT + kt
-                    accs[i] = _mfma(b, dtype, "16x16x32", a[kt], bb[xt], accs[i])
-            b.sched_barrier(0)
-            b.s_waitcnt(vmcnt=0)
-            bar(0)
-            return accs, e2
-
-        outer = b.scf_for_iter(
-            c0, rounds, c1, [("o_d", c0)], iv_name="rnd", elide_trailing_barrier=False
-        )
-        with outer as (rnd, oc):
-            t = tile_of(rnd)
-            info = item_info(t)
-            build_tab(info["tx"])
-            wo = wlane(info["tk"])
-            ch0, ch1 = info["ch0"], info["ch1"]
-            NQ = dv(b.add(b.sub(ch1, ch0), c1), 2)  # chunks per group
-            chA = b.add(ch0, ci(g))
-            b.s_waitcnt(lgkmcnt=0)
-            b.s_barrier_bare()
-            ent0 = ent_of(0)
-            b.s_waitcnt(lgkmcnt=0)
-            dma_u(rsrcs(b.cmp_lt(chA, ch1)), ent0, b.mul(chA, ci(_CK * 2)), 0, wo, 0)
-            ent1 = ent_of(1 % RS)
-            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-            b.s_barrier_bare()
-            if g == 1:
-                b.s_barrier_bare()  # group 1 runs one barrier behind
-            b.sched_barrier(0)
-            accs = [zero] * nacc
-            NP = dv(NQ, 2)
-            ivt = ent1.type
-            loop = b.scf_for_iter(
-                c0,
-                NP,
-                c1,
-                [(f"a{i}", v) for i, v in enumerate(accs)] + [("ent", ent1)],
-                iv_name="cpair",
-                elide_trailing_barrier=False,
-            )
-            with loop as (qp, lc):
-                la, ent = list(lc[:nacc]), lc[nacc]
-                cA = b.add(chA, b.mul(qp, ci(4)))
-                cB = b.add(cA, c2)
-                cN = b.add(cA, ci(4))
-                okA, okB = b.cmp_lt(cA, ch1), b.cmp_lt(cB, ch1)
-                okN = b.land(b.cmp_lt(b.add(b.mul(qp, c2), c2), NQ), b.cmp_lt(cN, ch1))
-                rA, rB, rN = rsrcs(okA), rsrcs(okB), rsrcs(okN)
-                bA, bB, bN = (b.mul(x, ci(_CK * 2)) for x in (cA, cB, cN))
-                for k in range(2 * RS):
-                    k1, k2 = k + 1, k + 2
-                    if k1 < RS:
-                        nx = (rA, bA, k1)
-                    elif k1 < 2 * RS:
-                        nx = (rB, bB, k1 - RS)
-                    else:
-                        nx = (rN, bN, 0)
-                    tap2 = k2 % RS
-                    la, ent = step_u(la, k % 2, (nx[0], ent, nx[1], nx[2], wo, tap2))
-                b.scf_yield(*la, ent)
-            res = list(loop.results)
-            accs, ent = res[:nacc], res[nacc]
-            tail = b.scf_if_else(b.cmp_eq(md(NQ, 2), c1), [vec4] * nacc)
-            with tail as (then_ctx, else_ctx):
-                with then_ctx:
-                    ta = accs
-                    cT = b.add(chA, b.mul(NP, ci(4)))
-                    rT = rsrcs(b.cmp_lt(cT, ch1))
-                    bT = b.mul(cT, ci(_CK * 2))
-                    rD = rsrcs(b.cmp_lt(ch1, ch0))  # dead (never true)
-                    e = ent
-                    for k in range(RS):
-                        if k + 1 < RS:
-                            nx = (rT, bT, k + 1)
-                        else:
-                            nx = (rD, bT, 0)
-                        ta, e = step_u(
-                            ta, k % 2, (nx[0], e, nx[1], nx[2], wo, (k + 2) % RS)
-                        )
-                    b.scf_yield(*ta)
-                with else_ctx:
-                    b.scf_yield(*accs)
-            accs = list(tail.results)
-            b.s_setprio(0)
-            if g == 0:
-                b.s_barrier_bare()  # wait out group 1's last MFMA phase
             reduce_store(accs, info)
             b.sched_barrier(0)
+
             b.scf_yield(c0)
 
     def run(g: int):
         gb = g * GE  # this group's half of a stage, elements
-        if CS4_HLOC:
-            ln_ = opaque_lane()
-            r16_, q_ = md(ln_, 16), dv(ln_, 16)
-            sl_ = b.mul(b.xor(b.add(b.mul(sl, ci(4)), q_), md(r16_, 8)), ci(8))
-        else:
-            r16_, sl_ = h_r16, h_sl
+        # the fragment-read bases (re-formed at each item's head by
+        # item_head, from an opaque lane: no kernel-long copy to spill)
         h_xin = b.add(
-            b.add(ci(gb), b.mul(b.add(b.mul(xi, ci(64)), r16_), ci(_CK))), sl_
+            b.add(ci(gb), b.mul(b.add(b.mul(xi, ci(64)), h_r16), ci(_CK))), h_sl
         )
-        h_kw = b.add(ci(gb + IN_E), b.add(b.mul(r16_, ci(_CK)), sl_))
+        h_kw = b.add(ci(gb + IN_E), b.add(b.mul(h_r16, ci(_CK)), h_sl))
         hh = {"xin": h_xin, "kw": h_kw}
 
         def item_head() -> None:
@@ -3005,59 +2526,6 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             chan = b.add(b.mul(dv(l8, 4), ci(8)), md(l8, 4))
             k = b.add(b.add(b.mul(tk, ci(BK)), b.mul(wq, ci(NWI * 8))), chan)
             return b.mul(b.add(b.mul(k, RSC), b.mul(c8, ci(8))), c2)
-
-        def entries(cur) -> Value:
-            """The cursor's input table entries (read a step ahead of its DMAs)."""
-            tap = b.add(b.mul(cur["r"], ci(S)), cur["s"])
-            return b.smem_load_vN(
-                tab_s, c0, b.add(b.mul(tap, ci(64 * NXI)), h_tab), dtype=I32, n=NXI
-            )
-
-        def dma(cur, ent: Value, wo: Value, live: Value, st: int):
-            xr = b.buffer_rsrc(params["A"], b.select(live, params["A_bytes"], c0))
-            wr = b.buffer_rsrc(params["B"], b.select(live, params["B_bytes"], c0))
-            tap = b.add(b.mul(cur["r"], ci(S)), cur["s"])
-            soff = b.mul(cur["ch"], ci(_CK * 2))
-            for i in range(NXI):
-                dst = b.smem_ptr_add(
-                    st_a[st],
-                    b.zext(
-                        b.add(
-                            ci(gb * 2),
-                            b.mul(b.add(b.mul(wq, ci(NXI)), ci(i)), ci(1024)),
-                        ),
-                        I64,
-                    ),
-                )
-                b.async_buffer_load_lds(
-                    xr, dst, b.add(b.vec_extract(ent, i), h_gran), soff, 4
-                )
-            woff = b.mul(b.add(b.mul(tap, C), b.mul(cur["ch"], ci(_CK))), c2)
-            for i in range(NWI):
-                wsh = ((i & 1) * 4 + (i >> 1) * 16) * 2
-                dst = b.smem_ptr_add(
-                    st_a[st],
-                    b.zext(
-                        b.add(
-                            ci((gb + IN_E) * 2),
-                            b.mul(b.add(b.mul(wq, ci(NWI)), ci(i)), ci(1024)),
-                        ),
-                        I64,
-                    ),
-                )
-                b.async_buffer_load_lds(
-                    wr, dst, wo, b.add(woff, b.mul(RSC, ci(wsh))), 4
-                )
-
-        def adv(cur) -> Dict[str, Value]:
-            s = b.add(cur["s"], c1)
-            ws = b.cmp_ge(s, cur["s1"])
-            s = b.select(ws, cur["s0"], s)
-            r = b.add(cur["r"], b.select(ws, c1, c0))
-            wr = b.cmp_ge(r, cur["r1"])
-            r = b.select(wr, cur["r0"], r)
-            ch = b.add(cur["ch"], b.select(wr, c2, c0))
-            return dict(cur, s=s, r=r, ch=ch)
 
         def frags(st: int, a_frags: bool = True):
             a = (
@@ -3091,35 +2559,9 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             b.s_barrier_bare()
             b.sched_barrier(0)
 
-        CN = ["r", "s", "ch", "r0", "r1", "s0", "s1", "ch1", "ent"]
         nacc = _XT * KT
         zero = b.zero_vec_f32(4)
         vec4 = zero.type
-
-        def step(accs, cur, wo, j: Value, NS: Value, st: int):
-            live = b.cmp_lt(b.add(j, c1), NS)
-            dma(
-                cur,
-                cur["ent"],
-                wo,
-                b.land(live, b.cmp_lt(cur["ch"], cur["ch1"])),
-                1 - st,
-            )
-            cur = adv(cur)
-            cur["ent"] = entries(cur)
-            a, bb = frags(st)
-            b.s_waitcnt(lgkmcnt=0)
-            b.sched_barrier(0)
-            bar(1)
-            accs = list(accs)
-            for xt in range(_XT):
-                for kt in range(KT):
-                    i = xt * KT + kt
-                    accs[i] = _mfma(b, dtype, "16x16x32", a[kt], bb[xt], accs[i])
-            b.sched_barrier(0)
-            b.s_waitcnt(vmcnt=0)
-            bar(0)
-            return accs, cur
 
         i32x2 = VectorType(I32, 2)
         i32x4 = VectorType(I32, 4)
@@ -3212,95 +2654,7 @@ def _build_cs4(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
                 b.s_waitcnt(lgkmcnt=0)
                 b.s_barrier_bare()
 
-        if CS4_UNROLL and CS4_PF2:
-            run_pf2(
-                g,
-                gb,
-                h_xin,
-                h_kw,
-                wlane,
-                frags,
-                bar,
-                reduce_store,
-                zero,
-                vec4,
-                nacc,
-                item_head if CS4_HITEM else None,
-            )
-            return
-        if CS4_UNROLL:
-            run_unrolled(
-                g, gb, h_xin, h_kw, wlane, frags, bar, reduce_store, zero, vec4, nacc
-            )
-            return
-        outer = b.scf_for_iter(
-            c0, rounds, c1, [("o_d", c0)], iv_name="rnd", elide_trailing_barrier=False
-        )
-        with outer as (rnd, oc):
-            t = tile_of(rnd)
-            info = item_info(t)
-            build_tab(info["tx"])
-            wo = wlane(info["tk"])
-            # an odd chunk count leaves group 1 a last chunk past ch1: its
-            # DMAs are dead (zero fill) and both groups keep one step count
-            NS = b.mul(
-                b.mul(b.sub(info["r1"], info["r0"]), b.sub(info["s1"], info["s0"])),
-                dv(b.add(b.sub(info["ch1"], info["ch0"]), c1), 2),
-            )
-            cur = dict(
-                r=info["r0"],
-                s=info["s0"],
-                ch=b.add(info["ch0"], ci(g)),
-                r0=info["r0"],
-                r1=info["r1"],
-                s0=info["s0"],
-                s1=info["s1"],
-                ch1=info["ch1"],
-            )
-            # the previous tile's partial reads are done in every wave
-            b.s_waitcnt(lgkmcnt=0)
-            b.s_barrier_bare()
-            dma(cur, entries(cur), wo, b.cmp_lt(cur["ch"], cur["ch1"]), 0)
-            cur = adv(cur)
-            cur["ent"] = entries(cur)
-            b.s_waitcnt(vmcnt=0)
-            b.s_barrier_bare()
-            if g == 1:
-                b.s_barrier_bare()  # group 1 runs one barrier behind
-            b.sched_barrier(0)
-            accs = [zero] * nacc
-            loop = b.scf_for_iter(
-                c0,
-                dv(NS, 2),
-                c1,
-                [(f"a{i}", v) for i, v in enumerate(accs)]
-                + [(f"c_{k}", cur[k]) for k in CN],
-                iv_name="pair",
-                elide_trailing_barrier=False,
-            )
-            with loop as (pv, lc):
-                la = list(lc[:nacc])
-                lcur = dict(zip(CN, lc[nacc:]))
-                j0 = b.mul(pv, c2)
-                la, lcur = step(la, lcur, wo, j0, NS, 0)
-                la, lcur = step(la, lcur, wo, b.add(j0, c1), NS, 1)
-                b.scf_yield(*la, *[lcur[k] for k in CN])
-            res = list(loop.results)
-            accs, cur = res[:nacc], dict(zip(CN, res[nacc:]))
-            tail = b.scf_if_else(b.cmp_eq(md(NS, 2), c1), [vec4] * nacc)
-            with tail as (then_ctx, else_ctx):
-                with then_ctx:
-                    ta, _ = step(accs, cur, wo, b.sub(NS, c1), NS, 0)
-                    b.scf_yield(*ta)
-                with else_ctx:
-                    b.scf_yield(*accs)
-            accs = list(tail.results)
-            b.s_setprio(0)
-            if g == 0:
-                b.s_barrier_bare()  # wait out group 1's last MFMA phase
-            reduce_store(accs, info)
-            b.sched_barrier(0)
-            b.scf_yield(c0)
+        run_pf2(g, gb, wlane, frags, bar, reduce_store, zero, vec4, nacc, item_head)
 
     with b.scf_if_else(b.cmp_eq(dv(wave, 4), c0)) as (then_ctx, else_ctx):
         with then_ctx:
@@ -3522,7 +2876,8 @@ def _build_cs2(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
             b.shl(b.add(ci(IN_E), b.add(b.mul(ki, ci(8192)), b.mul(GQ, ci(4096)))), c1),
         )
 
-    t_l0 = t_lane() if spec.wt and CS2_WT_HOIST else None
+    # wt: the transposing reads' lane part formed once per kernel (one VGPR)
+    t_l0 = t_lane() if spec.wt else None
 
     def wlane(tk: Value) -> Value:
         if spec.wt:
@@ -3615,11 +2970,7 @@ def _build_cs2(spec: FwdFlexMfmaSpec, arch: str) -> KernelDef:
         if spec.wt:
             # the kernel's lane part, laundered per step (else the compiler
             # keeps the 8 XORed addresses live across the sweep)
-            tl = (
-                b.inline_asm("", "=v,0", [t_l0], I32, sideeffect=True)
-                if CS2_WT_HOIST
-                else t_lane()
-            )
+            tl = b.inline_asm("", "=v,0", [t_l0], I32, sideeffect=True)
         for j, (kind, i) in enumerate(reads):
             if j % per == 0 and j // per < len(ops):
                 _dma_lds_at(b, *ops[j // per])
