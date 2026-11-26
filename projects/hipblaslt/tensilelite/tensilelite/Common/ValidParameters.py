@@ -1320,12 +1320,15 @@ validParameters = { # we need to make sure this matches develop
     "TDMStoreInst": [False, True],
     # Elements added to the pitch of the D tile TDMStoreInst stages in LDS, MacroTile0 + TDMStoreLdsPad, so that the
     # staging stores of neighbouring columns fall in different LDS banks. The pad rows lie outside the tensor: the TDM
-    # store drops them and the C load fills them with zeros. 0, the default, keeps the pitch at MacroTile0. Requires
-    # TDMStoreInst and a pad of whole DWORDs, or 1 with a 16-bit D, a probe of the LDS alignment mode. A pad that is
-    # not a multiple of a staged vector's widest DS access, min(its bytes, 16), is correct only when the driver sets
-    # SH_MEM_CONFIG.alignment_mode to UNALIGNED, as the KFD does for the queues it creates: with bf16 at
-    # StoreVectorWidth 8 that is every pad below 8, 1 included, and 1 measured 85-130% slower than 0 there on even M.
-    "TDMStoreLdsPad": [0, 1, 2, 4, 8, 16],
+    # store drops them and the C load fills them with zeros. -1, the default as for LdsPadA and LdsPadB, lets Solution
+    # derive the pad from the kernel (tdmStoreLdsPads in Components/TDMStoreInst.py): 8 bytes per column without
+    # SourceSwap, 0 with it or without TDMStoreInst, and less while the padded tile would not fit the LDS. 0 keeps the
+    # pitch at MacroTile0. Any other pad requires TDMStoreInst and whole DWORDs, or 1 with a 16-bit D, a probe of the
+    # LDS alignment mode. A pad that is not a multiple of a staged vector's widest DS access, min(its bytes, 16), is
+    # correct only when the driver sets SH_MEM_CONFIG.alignment_mode to UNALIGNED, as the KFD does for the queues it
+    # creates: with bf16 at StoreVectorWidth 8 that is every pad below 8, the derived 4 and 1 included, and 1 measured
+    # 85-130% slower than 0 there on even M.
+    "TDMStoreLdsPad": [-1, 0, 1, 2, 4, 8, 16],
     # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.

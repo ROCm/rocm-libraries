@@ -546,6 +546,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsPadB": [-1]},
     {"LdsPadMXSB": [ -1 ] },
     {"LdsPadMetadata": [-1]},
+    {"TDMStoreLdsPad": [-1]},
     {"LdsBlockSizePerPadA": [-1]},
     {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
@@ -711,7 +712,6 @@ defaultBenchmarkCommonParameters = [
     {"TDMSplit": [False]},
     {"TDMLoadWaveSync": [False]},
     {"TDMStoreInst": [False]},
-    {"TDMStoreLdsPad": [0]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
     # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):

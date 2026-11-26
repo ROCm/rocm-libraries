@@ -17,8 +17,8 @@ from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, hasEpilogueSideEffects, \
-  TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreSinglePath, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, \
-  tdmStorePitch, tdmStoreRejectReason, tdmStoreVectorRejectReason
+  TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreSinglePath, tdmStoreLdsBytes, tdmStoreLdsPads, tdmStoreLdsSplit, \
+  tdmStoreModifiers, tdmStorePitch, tdmStoreRejectReason, tdmStoreVectorRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
 
 from emit_test_helpers import assert_every_vector_preload_barriers, emit_asm
@@ -179,8 +179,8 @@ _PAP_REASON = "TDMStoreInst does not support PrefetchAcrossPersistent, whichever
   "TDM loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
   "completes before them, and leave the prefetch nothing to hide"
 _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"), "HighPrecisionAccumulate": False}
-_PAD = "TDMStoreLdsPad requires a non-negative pad of whole DWORDs (TDMStoreLdsPad times the bytes of D a multiple of 4) " \
-       "or 1 with 16-bit D"
+_PAD = "TDMStoreLdsPad requires -1 (derived) or a non-negative pad of whole DWORDs (TDMStoreLdsPad times the bytes " \
+       "of D a multiple of 4) or 1 with 16-bit D"
 
 
 @pytest.mark.parametrize("overrides, reason", [
@@ -210,6 +210,7 @@ _PAD = "TDMStoreLdsPad requires a non-negative pad of whole DWORDs (TDMStoreLdsP
   ({"TDMStoreLdsPad": -2}, _PAD),
   ({"TDMStoreLdsPad": 2, "MacroTile0": TDM_TILE_DIM_MAX - 1}, _TILE),
   (dict(_ZGEMM_STATE, TDMStoreLdsPad=1, MacroTile0=TDM_TILE_DIM_MAX // 2), _TILE),
+  ({"TDMStoreLdsPad": -1, "MacroTile0": TDM_TILE_DIM_MAX + 1}, _TILE),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
@@ -268,16 +269,48 @@ def test_accepts_the_largest_tile_the_descriptor_holds(overrides):
   {"TDMStoreLdsPad": 4, "DestDataType": DataType("f8")},
   {"TDMStoreLdsPad": 16, "MacroTile0": TDM_TILE_DIM_MAX - 16},
   dict(_ZGEMM_STATE, TDMStoreLdsPad=1, MacroTile0=TDM_TILE_DIM_MAX // 2 - 1),
-], ids=["bf16_1", "fp16_1", "bf16_2", "fp32_1", "fp8_4", "largest_tile", "largest_tile_complex_double"])
+  {"TDMStoreLdsPad": -1, "MacroTile0": TDM_TILE_DIM_MAX, "DestDataType": DataType("f8")},
+], ids=["bf16_1", "fp16_1", "bf16_2", "fp32_1", "fp8_4", "largest_tile", "largest_tile_complex_double",
+        "derived_largest_tile"])
 def test_accepts_pads_of_whole_dwords_and_pad_1_of_16_bit_d(overrides):
   """A pad of whole DWORDs keeps every column of the staged tile at its DWORD alignment, a pad of 1 with a 16-bit D
-  starts the odd columns at 2 mod 4 bytes, and the padded tile_dim0, in data_size units, still fits 16 bits."""
+  starts the odd columns at 2 mod 4 bytes, and the padded tile_dim0, in data_size units, still fits 16 bits. -1 is
+  checked as the unpadded tile, the least it resolves to."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
-def test_pad_requires_the_switch():
+@pytest.mark.parametrize("dest, pads", [
+  ("b", [4, 2, 0]), ("h", [4, 2, 0]), ("s", [2, 1, 0]), ("i", [2, 1, 0]), ("f8", [8, 4, 0]), ("i8", [8, 4, 0]),
+  ("d", [1, 0]), ("c", [1, 0]), ("z", [1, 0]),
+])
+def test_pad_is_8_bytes_per_column_without_source_swap(dest, pads):
+  """Without SourceSwap the staged tile's columns get 8 bytes, or one element of 8 bytes or more, then 4 bytes and 0
+  while the padded tile does not fit the LDS; every pad is a whole number of DWORDs."""
+  bpe = int(DataType(dest).numBytes())
+  assert tdmStoreLdsPads(_state(DestDataType=DataType(dest), SourceSwap=False)) == pads
+  assert pads[0] * bpe == max(8, bpe) and all(pad * bpe % 4 == 0 for pad in pads)
+
+
+def test_pad_is_0_with_source_swap_or_without_the_switch():
+  """With SourceSwap a half-wave stages 32 contiguous bytes of one column, which no pitch moves to other banks, and
+  without TDMStoreInst there is no staged tile: neither gets a pad, and an explicit pad needs TDMStoreInst."""
+  assert tdmStoreLdsPads(_state(SourceSwap=True)) == [0]
+  assert tdmStoreLdsPads(_state(TDMStoreInst=False, SourceSwap=False)) == [0]
+  for pad in (-1, 0):
+    assert tdmStoreRejectReason(_state(TDMStoreInst=False, TDMStoreLdsPad=pad)) is None
   assert tdmStoreRejectReason(_state(TDMStoreInst=False, TDMStoreLdsPad=2)) == "TDMStoreLdsPad requires TDMStoreInst"
-  assert tdmStoreRejectReason(_state(TDMStoreInst=False, TDMStoreLdsPad=0)) is None
+
+
+def test_derived_pads_keep_tile_dim0_within_16_bits():
+  """A pad that would take tile_dim0 past 0xFFFF data_size units is left out, so the derived pad never makes
+  tdmStoreRejectReason reject a tile it accepts unpadded."""
+  assert tdmStoreLdsPads(_state(SourceSwap=False, MacroTile0=TDM_TILE_DIM_MAX - 3)) == [2, 0]
+  assert tdmStoreLdsPads(_state(SourceSwap=False, MacroTile0=TDM_TILE_DIM_MAX)) == [0]
+  assert tdmStoreLdsPads(_state(SourceSwap=False, MacroTile0=TDM_TILE_DIM_MAX // 2, **_ZGEMM_STATE)) == [0]
+  for mt0 in (TDM_TILE_DIM_MAX - 4, TDM_TILE_DIM_MAX - 3, TDM_TILE_DIM_MAX):
+    state = _state(SourceSwap=False, MacroTile0=mt0)
+    state["TDMStoreLdsPad"] = tdmStoreLdsPads(state)[0]
+    assert tdmStoreRejectReason(state) is None, mt0
 
 
 def test_tdm_descriptor_refuses_a_tile_the_16_bit_field_cannot_hold():
@@ -457,14 +490,14 @@ def test_lds_bytes_cover_the_columns_of_every_wave():
   assert tdmStoreLdsBytes(state) == 256 * 129 * 2
 
 
-@pytest.mark.parametrize("pad", [0, 2, 8])
-def test_pad_widens_the_pitch_and_the_lds_bytes_of_the_staged_tile(pad):
-  """TDMStoreLdsPad adds its elements to the pitch of the staged tile, so the tile takes pad more elements in each
-  column of every wave, the columns past MacroTile1 of the last wave included."""
+@pytest.mark.parametrize("pad, pitch", [(-1, 256), (0, 256), (2, 258), (8, 264)])
+def test_pad_widens_the_pitch_and_the_lds_bytes_of_the_staged_tile(pad, pitch):
+  """The pad adds its elements to the pitch of the staged tile, so the tile takes pad more elements in each column of
+  every wave, the columns past MacroTile1 of the last wave included. -1, not resolved yet, counts as 0."""
   state = {"TDMStoreInst": True, "TDMStoreLdsPad": pad, "MacroTile0": 256, "MacroTile1": 128, "NumThreads": 96,
            "WavefrontSize": 32, "ProblemType": {"DestDataType": DataType("b")}}
-  assert tdmStorePitch(state) == 256 + pad
-  assert tdmStoreLdsBytes(state) == (256 + pad) * 129 * 2
+  assert tdmStorePitch(state) == pitch
+  assert tdmStoreLdsBytes(state) == pitch * 129 * 2
 
 
 def test_store_modifiers_follow_the_hints_of_d():
@@ -524,12 +557,13 @@ def test_kernel_name_token_only_when_enabled():
 
 
 def test_kernel_name_pad_token_only_with_a_pad():
-  """TDMStoreLdsPad=0 keeps every kernel name; a pad adds the TDMSLP token with its value."""
+  """A pad of 0, or -1 before Solution resolves it, keeps every kernel name; a pad adds the TDMSLP token with its
+  value."""
   pad = 2
-  plain, padded = _kernel(1), _kernel(1)
-  padded["TDMStoreLdsPad"] = pad
-  plain, padded = getKernelNameMin(plain, False), getKernelNameMin(padded, False)
-  assert "TDMSLP" not in plain
+  plain, unresolved, padded = _kernel(1), _kernel(1), _kernel(1)
+  plain["TDMStoreLdsPad"], unresolved["TDMStoreLdsPad"], padded["TDMStoreLdsPad"] = 0, -1, pad
+  plain, unresolved, padded = (getKernelNameMin(k, False) for k in (plain, unresolved, padded))
+  assert "TDMSLP" not in plain and unresolved == plain
   assert padded.replace("_TDMSLP%u" % pad, "", 1) == plain
 
 
@@ -793,7 +827,7 @@ def test_wide_vectors_split_into_16_byte_ds_ops(gp_gfx1250, gfx1250_iim, assembl
   tdm = 1
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, StoreVectorWidth=8, ProblemType={"DestDataType": "S"})
   assert sol.get("Valid"), capsys.readouterr().out
-  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 4
+  assert tdmStoreLdsBytes(sol) == tdmStorePitch(sol) * sol["MacroTile1"] * 4
   for beta, tag, op in (("0", "stage D element", "ds_store_b128"), ("1", "load C element", "ds_load_b128")):
     lines = [line for line in _tdmBlock(asm, beta, 8).splitlines() if tag in line]
     assert lines and {line.split()[0] for line in lines} == {op}, (beta, lines[:2])
@@ -813,7 +847,7 @@ def test_int32_d_stages_4_byte_elements(gp_gfx1250, gfx1250_iim, assembler, caps
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 64, 1, 1, 2, 2, 2, 2], TDMStoreInst=tdm,
                        StoreVectorWidth=1, ProblemType=_INT32)
   assert sol.get("Valid"), capsys.readouterr().out
-  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 4
+  assert tdmStoreLdsBytes(sol) == tdmStorePitch(sol) * sol["MacroTile1"] * 4
   assert "tensor_store_from_lds" in asm
   for tag, op in (("stage D element", "ds_store_b32"), ("load C element", "ds_load_b32")):
     assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
@@ -828,7 +862,7 @@ def test_one_byte_d_stages_with_ds_store_b8_at_vw1(gp_gfx1250, gfx1250_iim, asse
                        StoreVectorWidth=1, ProblemType={"DataType": "F8", "MacDataTypeA": "F8", "MacDataTypeB": "F8",
                                                        "DestDataType": "F8", "ComputeDataType": "S"})
   assert sol.get("Valid"), capsys.readouterr().out
-  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"]
+  assert tdmStoreLdsBytes(sol) == tdmStorePitch(sol) * sol["MacroTile1"]
   assert "tensor_store_from_lds" in asm
   for tag, op in (("stage D element", "ds_store_b8"), ("load C element", "ds_load_u8")):
     assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
@@ -859,7 +893,7 @@ def test_eight_byte_d_stages_two_registers_per_element(gp_gfx1250, gfx1250_iim, 
   tdm = 1
   sol, asm = emit_asm(gfx1250_iim, assembler, _fp64_params(TDMStoreInst=tdm, StoreVectorWidth=1))
   assert sol.get("Valid"), capsys.readouterr().out
-  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 8
+  assert tdmStoreLdsBytes(sol) == tdmStorePitch(sol) * sol["MacroTile1"] * 8
   assert "tensor_store_from_lds" in asm
   for tag, op in (("stage D element", "ds_store_b64"), ("load C element", "ds_load_b64")):
     assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
@@ -879,11 +913,11 @@ def test_complex_double_descriptor_uses_8_byte_units(gp_gfx1250, gfx1250_iim, as
   8-byte units, two per element, with data_size 3 and tensor_dim0, tile0 and the stride doubled. At store vector
   width 1 every D element is one ds_store_b128 of its four registers, ValuC + 4*sumIdx as addStore stores it, into a
   staged tile of 16 bytes per element, and with beta != 0 every C element is read back with one ds_load_b128. With
-  TDMStoreLdsPad 1 tile0 is twice the padded pitch, and tensor_dim0 is clamped to MacroTile0 elements before it is
+  a pad of 1 tile0 is twice the padded pitch, and tensor_dim0 is clamped to MacroTile0 elements before it is
   doubled."""
   tdm = 1
   sol, asm = emit_asm(gfx1250_iim, assembler, _fp64_params(TDMStoreInst=tdm, TDMStoreLdsPad=pad, StoreVectorWidth=1,
-                                                             ProblemType=_ZGEMM))
+                                                           ProblemType=_ZGEMM))
   assert sol.get("Valid"), capsys.readouterr().out
   assert tdmStoreLdsBytes(sol) == (sol["MacroTile0"] + pad) * sol["MacroTile1"] * 16
   descriptors = asm.count("tensor_dim0 = SizeI - wg0*MT0")
@@ -1151,7 +1185,7 @@ def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, cap
   assert sol.get("Valid"), capsys.readouterr().out
   waves = sol["NumThreads"] // sol["WavefrontSize"]
   assert sol["MacroTile1"] % waves
-  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * -(-sol["MacroTile1"] // waves) * waves * 2
+  assert tdmStoreLdsBytes(sol) == tdmStorePitch(sol) * -(-sol["MacroTile1"] // waves) * waves * 2
   assert sol["LdsNumBytes"] >= sol["_TDMStoreLdsOffset"] + tdmStoreLdsBytes(sol)
   blocks = len(re.findall(r"^label_TDMStore(?:LoadC)?Skip\w*:", asm, re.M))
   bounds = [line for line in asm.splitlines() if _code(line).startswith("s_min_u32") and "column bound" in line]
@@ -1407,7 +1441,7 @@ def test_staged_tile_goes_after_the_epilogue_vectors(gp_gfx1250, gfx1250_iim, as
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, StreamK=streamk,
                        ProblemType={"UseBias": useBias, "UseScaleAlphaVec": useBias})
   assert sol.get("Valid"), capsys.readouterr().out
-  staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
+  staged = tdmStorePitch(sol) * sol["MacroTile1"] * 2
   assert tdmStoreLdsBytes(sol) == staged
   assert sol["LdsOffsetBias"] == sol["LdsOffsetBiasNonGSU"] == sol["LdsOffsetBiasGSU"] == 0
   offset = sol["_TDMStoreLdsOffset"]
@@ -1507,7 +1541,8 @@ def _descriptorTile0(lines):
 @pytest.mark.parametrize("policy", [{}, dict(_DATA_PARALLEL, mi=_MT128)], ids=["gsu1", "sk3"])
 @pytest.mark.parametrize("pad", [1, 2])
 def test_pad_lays_out_the_staged_tile_at_the_padded_pitch(gp_gfx1250, gfx1250_iim, assembler, capsys, pad, policy):
-  """With TDMStoreLdsPad 1 or 2 a bf16 kernel stages D and reads C back at a pitch of MacroTile0 + pad elements: the
+  """With a TDMStoreLdsPad of 1 or 2 a bf16 kernel stages D and reads C back at a pitch of MacroTile0 + pad elements:
+  the
   thread's base and every wave's LDS address at that pitch, every element below 64 KiB at DS offset
   (column * pitch + row) * 2, every descriptor of D and C with tile0 the pitch and tensor_dim0 at most MT0, so that the
   pad rows lie outside the tensor, and the staged tile pitch x MacroTile1 x 2 bytes in LDS, for MT256x256 at
@@ -1561,15 +1596,51 @@ def test_pad_steps_the_compact_loop_store_by_the_padded_pitch(gp_gfx1250, gfx125
   assert all(s % ((mt0 + pad) * 2) == 0 for s in steps[pad]), steps
 
 
-def test_pad_zero_keeps_the_unpadded_tile(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """TDMStoreLdsPad=0, the default, keeps the pitch at MacroTile0: tile0 MT0, no clamp of tensor_dim0, the unpadded LDS
-  bytes and no TDMSLP token in the kernel name."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, TDMStoreLdsPad=0)
+@pytest.mark.parametrize("swap, pad", [(True, -1), (False, 0)], ids=["source_swap", "explicit_0"])
+def test_no_pad_keeps_the_unpadded_tile(gp_gfx1250, gfx1250_iim, assembler, capsys, swap, pad):
+  """SourceSwap, whose derived pad is 0, and an explicit pad of 0 keep the pitch at MacroTile0: tile0 MT0, no clamp of
+  tensor_dim0, the unpadded LDS bytes and no TDMSLP token in the kernel name."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, SourceSwap=swap, TDMStoreLdsPad=pad)
   assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["TDMStoreLdsPad"] == 0
   tile0 = _descriptorTile0(asm.splitlines())
   assert tile0 and set(tile0) == {sol["MacroTile0"]}
   assert "pad rows lie outside the tensor" not in asm and "* MT0 + pad" not in asm and "TDMSLP" not in asm
   assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 2
+
+
+def test_source_swap_0_derives_8_bytes_per_column(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """The bf16 kernel without SourceSwap derives, from the default TDMStoreLdsPad of -1, a pad of 4 elements, 8 bytes
+  per column, which the solution keeps: every descriptor of D and C has tile0 MacroTile0 + 4 and clamps tensor_dim0
+  to MacroTile0, and the kernel name carries TDMSLP4."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["TDMStoreLdsPad"] == 4 and tdmStorePitch(sol) == sol["MacroTile0"] + 4
+  tile0 = _descriptorTile0(asm.splitlines())
+  assert tile0 and set(tile0) == {sol["MacroTile0"] + 4}
+  assert asm.count("pad rows lie outside the tensor") == len(tile0)
+  assert "_TDMSLP4" in asm
+
+
+@pytest.mark.parametrize("maxLds, pad", [(264192, 2), (263168, 1), (262144, 0)])
+def test_pad_steps_down_while_the_padded_tile_does_not_fit_the_lds(gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                                                   maxLds, pad):
+  """fp32 D at MT256x256 stages (256 + pad) x 256 x 4 bytes over the main-loop buffers, more than they take, and
+  derives the pads 2, 1 and 0. With MaxLDS below the tile of a pad the kernel takes the next pad instead of being
+  rejected, down to the unpadded tile."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, StoreVectorWidth=8, MaxLDS=maxLds,
+                       ProblemType={"DestDataType": "S"})
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["TDMStoreLdsPad"] == pad
+  assert tdmStoreLdsBytes(sol) == (sol["MacroTile0"] + pad) * sol["MacroTile1"] * 4 <= sol["LdsNumBytes"] <= maxLds
+
+
+def test_an_explicit_pad_does_not_step_down(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """An explicit TDMStoreLdsPad is kept as given: the fp32 kernel whose derived pad steps down to 0 under this MaxLDS
+  is rejected with an explicit pad of 2."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, TDMStoreLdsPad=2, StoreVectorWidth=8, MaxLDS=262144,
+                       ProblemType={"DestDataType": "S"})
+  assert not sol.get("Valid")
 
 
 def test_solution_checks_the_d_vectors_once_their_widths_are_final(gp_gfx1250, gfx1250_iim, assembler, capsys,

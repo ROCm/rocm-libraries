@@ -91,7 +91,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
-from ..Components.TDMStoreInst import tdmStoreLdsBytes, tdmStoreRejectReason, tdmStoreVectorRejectReason
+from ..Components.TDMStoreInst import tdmStoreLdsBytes, tdmStoreLdsPads, tdmStoreRejectReason, tdmStoreVectorRejectReason
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
@@ -2617,6 +2617,9 @@ class Solution(collections.abc.Mapping):
         # store is enabled for eligible fp4 subtile kernels even though the rest
         # of the derivation is (correctly) skipped for already-derived solutions.
         Solution.assignPostLoopStoreInNll(state)
+        # A logic entry without TDMStoreLdsPad predates it, so its staged D tile, if any, is unpadded.
+        if state.get("TDMStoreLdsPad", 0) == -1:
+          state["TDMStoreLdsPad"] = 0
         return
     state["AssignedDerivedParameters"] = False
 
@@ -7706,14 +7709,7 @@ class Solution(collections.abc.Mapping):
     # written, the vectors, which every store batch reads. The tile lies over the main-loop buffers: every
     # wave is done with them before the tile is staged, and tdmStoreRejectReason rejects
     # PrefetchAcrossPersistent, whose next tile's loads would write them during the epilogue.
-    tdmStoreBytes = tdmStoreLdsBytes(state)
-    assert not (tdmStoreBytes and state["PrefetchAcrossPersistent"])
-    liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
-    state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
-    assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd
-    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)
-
-    state["LdsBytesNoAmax"] = ldsNumBytes
+    ldsAmaxDBytes = 0
     if state["ProblemType"]["OutputAmaxD"]:
       # used in reduce inter wave
       # 4 data * half_wave_num * amax bytePerE
@@ -7721,7 +7717,25 @@ class Solution(collections.abc.Mapping):
       half_wave_size = state["WavefrontSize"] // 2
       amaxBPE = int(state["ProblemType"]["DataTypeAmaxD"].numBytes())
       ldsAmaxDBytes = 4 * (num_workItems // half_wave_size) * amaxBPE
-      ldsNumBytes += ldsAmaxDBytes
+    # TDMStoreLdsPad -1 resolves here, as LdsPadA -1 does: to the first pad of tdmStoreLdsPads, stepping down that list
+    # while the padded tile alone takes the kernel past MaxLDS, so a derived pad never rejects a kernel that fits
+    # without one. An explicit pad is kept as given.
+    tdmStorePads = tdmStoreLdsPads(state) if state.get("TDMStoreLdsPad", -1) == -1 else [state["TDMStoreLdsPad"]]
+    state["TDMStoreLdsPad"] = tdmStorePads[0]
+    tdmStoreBytes = tdmStoreLdsBytes(state)
+    assert not (tdmStoreBytes and state["PrefetchAcrossPersistent"])
+    liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
+    state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
+    assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd
+    for pad in tdmStorePads[1:]:
+      if state["_TDMStoreLdsOffset"] + tdmStoreBytes + ldsAmaxDBytes <= state["MaxLDS"]:
+        break
+      state["TDMStoreLdsPad"] = pad
+      tdmStoreBytes = tdmStoreLdsBytes(state)
+    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)
+
+    state["LdsBytesNoAmax"] = ldsNumBytes
+    ldsNumBytes += ldsAmaxDBytes
 
     if state.get("WaveTileContiguousA"):
       pt = state["ProblemType"]

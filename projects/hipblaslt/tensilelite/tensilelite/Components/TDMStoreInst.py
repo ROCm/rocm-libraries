@@ -46,7 +46,8 @@ holds, and generateBetaModules picks the TDM blocks of a cascade with tdmStoreBl
 with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
 tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers. Its columns are
 tdmStorePitch elements apart: MacroTile0 and the TDMStoreLdsPad pad rows, which lie outside the tensor, so the TDM
-store drops them and the C load fills them with zeros.
+store drops them and the C load fills them with zeros. TDMStoreLdsPad -1 asks Solution for the pad tdmStoreLdsPads
+derives from the kernel.
 """
 
 from math import log2
@@ -143,14 +144,15 @@ def tdmStoreRejectReason(state):
   before the loop, steps the staged tile's base by each iteration's rows and stores the tile after the loop.
   The descriptors hold the pitch of the staged tile in data_size units (tile_dim0) and the columns of a wave
   (tile_dim1) in 16 bits. A TDMStoreLdsPad needs TDMStoreInst and a pad of whole DWORDs, or 1 with a 16-bit D, which
-  starts the odd columns at 2 mod 4 bytes. The pad moves column c of the staged tile by c * TDMStoreLdsPad elements, so
+  starts the odd columns at 2 mod 4 bytes; -1, which Solution resolves to a pad of tdmStoreLdsPads, and 0 always pass.
+  The pad moves column c of the staged tile by c * TDMStoreLdsPad elements, so
   a pad whose bytes are not a multiple of the widest DS access of a staged vector, min(its bytes, 16), leaves that
   access below its native alignment. It is then correct only in the UNALIGNED SH_MEM_CONFIG.alignment_mode, which the
   KFD sets for the queues it creates, since the other modes clear the low address bits.
   The store vectors the block stages are checked by tdmStoreVectorRejectReason, once their widths are final.
   """
   if not state["TDMStoreInst"]:
-    return "TDMStoreLdsPad requires TDMStoreInst" if state.get("TDMStoreLdsPad", 0) else None
+    return "TDMStoreLdsPad requires TDMStoreInst" if state.get("TDMStoreLdsPad", 0) > 0 else None
 
   pt = state["ProblemType"]
   sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
@@ -193,8 +195,8 @@ def tdmStoreRejectReason(state):
   if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
     return "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
   pad = state.get("TDMStoreLdsPad", 0)
-  if pad < 0 or pad * int(pt["DestDataType"].numBytes()) % 4 and not (sixteenBit and pad == 1):
-    return "TDMStoreLdsPad requires a non-negative pad of whole DWORDs (TDMStoreLdsPad times the bytes of D a multiple of 4) or 1 with 16-bit D"
+  if pad != -1 and (pad < 0 or pad * int(pt["DestDataType"].numBytes()) % 4 and not (sixteenBit and pad == 1)):
+    return "TDMStoreLdsPad requires -1 (derived) or a non-negative pad of whole DWORDs (TDMStoreLdsPad times the bytes of D a multiple of 4) or 1 with 16-bit D"
   return None
 
 
@@ -255,9 +257,33 @@ def _dataUnits(bpe):
   return bpe // min(bpe, 8)
 
 
+def tdmStoreLdsPads(state):
+  """The pads, in elements of D, that TDMStoreLdsPad -1 may resolve to, best first. Solution gives the kernel the first
+  one and steps down the list while the padded tile alone takes the kernel past MaxLDS, so a derived pad never rejects
+  a kernel that fits without it; an explicit TDMStoreLdsPad is kept as given and checked by tdmStoreRejectReason.
+
+  Without SourceSwap the 16 lanes of a half-wave stage 16 columns of the tile, VectorWidthB columns apart. Their
+  addresses then differ by a multiple of the pitch, MacroTile0 * bpe bytes, which is a multiple of the 256 bytes of the
+  64 four-byte LDS banks for the usual tiles, so all 16 lanes start in the same bank and their DS stores serialize. A
+  pad of 8 bytes per column moves neighbouring lanes VectorWidthB * 2 banks apart, so that for a VectorWidthB of up to
+  8 at most four of them share a bank; as a single value it measured fastest over the tile shapes swept, and 4 bytes is
+  the fallback. An element of 8 bytes or more pads by one element. With SourceSwap the lanes of a half-wave stage
+  consecutive rows of one column, 32 contiguous bytes, so no pitch changes their banks and a pad would only cost LDS
+  and TDM traffic: the pad is 0, as it is without TDMStoreInst. Every pad is a whole number of DWORDs, and a pad that
+  would take tile_dim0 past 16 bits is left out. A pad of 8 bytes leaves the 16-byte staging stores of odd columns
+  8-byte aligned, which is correct in the UNALIGNED alignment mode only (tdmStoreRejectReason)."""
+  if not state["TDMStoreInst"] or state["SourceSwap"]:
+    return [0]
+  bpe = int(state["ProblemType"]["DestDataType"].numBytes())
+  units = _dataUnits(bpe)
+  pads = [max(1, 8 // bpe)] + ([4 // bpe] if bpe <= 4 else [])
+  return [pad for pad in pads if (state["MacroTile0"] + pad) * units <= TDM_TILE_DIM_MAX] + [0]
+
+
 def tdmStorePitch(kernel):
-  """The elements from one column of the staged tile to the next: MacroTile0 and the TDMStoreLdsPad pad rows."""
-  return kernel["MacroTile0"] + kernel.get("TDMStoreLdsPad", 0)
+  """The elements from one column of the staged tile to the next: MacroTile0 and the TDMStoreLdsPad pad rows. -1, a
+  pad Solution has yet to resolve, counts as 0, the least it resolves to."""
+  return kernel["MacroTile0"] + max(kernel.get("TDMStoreLdsPad", 0), 0)
 
 
 def _tileDim0(kernel):
