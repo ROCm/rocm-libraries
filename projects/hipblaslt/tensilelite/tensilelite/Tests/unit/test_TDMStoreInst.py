@@ -1228,6 +1228,31 @@ def test_solution_rejects_tdm_store_with_suppress_no_load_loop_on_tdm_loads(gp_g
   assert not sol.get("Valid") and _SNLL_REASON in out, out
 
 
+@pytest.mark.parametrize("stinkytofu", [True, False])
+def test_tdm_staging_fold_waited_under_expert_scheduling(gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch,
+                                                         stinkytofu):
+  """ExpertSchedulingMode 2 turns off the hardware VA_VDST check, so the VALU that folds a staged-tile offset above
+  64 KiB into tmpVgpr must be waited for before the DS access that reads it. StinkyTofu re-derives the wait, and
+  without the StinkyTofu backend the TDM block emits it. MT256x256 bf16 stages 128 KiB, and with vector widths of 1 a
+  thread's elements span more than 128 of its columns, so the block folds."""
+  import rocisa
+  if not stinkytofu:
+    monkeypatch.setattr(rocisa, "isSupportedByStinkyTofu", lambda version: False)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ScheduleIterAlg=3, VectorWidthA=1, VectorWidthB=1,
+                       StoreVectorWidth=1)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["ExpertSchedulingMode"] == 2
+  assert ("STINKY_TOTAL_INST_BYTES" in asm) == stinkytofu
+  lines = asm.splitlines()
+  folds = [i for i, line in enumerate(lines) if "LDS offset above 64 KiB" in line]
+  assert folds
+  for i in folds:
+    dst = _code(lines[i]).split()[1].rstrip(",")
+    reads = re.compile(r"(?<![\w\[])" + re.escape(dst) + r"(?!\w)")
+    j = next(k for k in range(i + 1, len(lines)) if _code(lines[k]).startswith("ds_") and reads.search(_code(lines[k])))
+    assert any(re.match(r"s_wait_alu\b.*va_vdst\(0\)", _code(lines[k])) for k in range(i + 1, j)), lines[i:j + 1]
+
+
 @pytest.mark.parametrize("streamk", [0, 3])
 @pytest.mark.parametrize("tdm", [1])
 def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm, streamk):
@@ -1691,12 +1716,12 @@ def _instructions(module):
 
 def _stagedAddresses(module, base, tmp):
   """(the LDS byte each DS store of an emitted module addresses, from its address VGPR, the fold last added to that
-  VGPR and its DS offset; the number of folds)."""
+  VGPR and its DS offset; the number of folds). The fold carries its literal in src0, the VOP2 form."""
   value, addresses, folds = {base: 0}, [], 0
   for line in str(module).splitlines():
     code = _code(line)
     if _FOLD in line:
-      dst, src, high = [operand.strip() for operand in code.split(None, 1)[1].split(",")]
+      dst, high, src = [operand.strip() for operand in code.split(None, 1)[1].split(",")]
       assert (re.sub(r"\D", "", dst), re.sub(r"\D", "", src)) == (str(tmp), str(base)), line
       value[tmp], folds = int(high, 16), folds + 1
     elif code.startswith("ds_store"):

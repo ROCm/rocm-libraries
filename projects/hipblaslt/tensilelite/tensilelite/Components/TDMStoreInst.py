@@ -53,8 +53,8 @@ from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.enum import NonVolatile, TemporalHint
 from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, \
-  SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SOrB32, SSubU32, SWaitCnt, SWaitTensorcnt, \
-  VAddU32, VLShiftLeftB32, VMulLOU32, VReadfirstlaneB32, VSubU32
+  SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SOrB32, SSubU32, SWaitAlu, SWaitCnt, \
+  SWaitTensorcnt, VAddU32, VLShiftLeftB32, VMulLOU32, VReadfirstlaneB32, VSubU32
 
 from ..AsmMemoryHelpers import DS_STORE_WIDTHS, dsLoad, dsStore
 from ..Common import persistentSpatialCluster
@@ -373,7 +373,10 @@ def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0,
   if not high:
     return gwb.tdmStoreLdsBase, low, folded
   if high != folded:
-    module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=vgpr(gwb.tdmStoreLdsBase), src1=hex(high), comment="LDS offset above 64 KiB"))
+    module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=hex(high), src1=vgpr(gwb.tdmStoreLdsBase), comment="LDS offset above 64 KiB"))
+    if gwb.kernel.get("ExpertSchedulingMode", 0) > 0:
+      # Expert scheduling turns off the hardware VA_VDST check, and the next DS access reads the fold.
+      module.add(SWaitAlu(va_vdst=0, comment="fold written before a DS access reads it"))
   return gwb.tmpVgpr, low, high
 
 
