@@ -405,6 +405,24 @@ void add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances
 
 #endif
 
+// Tuned instances (f16, tuned_v1)
+#ifdef CK_ENABLE_FP16
+void add_device_grouped_conv2d_bwd_data_wmma_v3_tuned_v1_nhwgk_gkyxc_nhwgc_f16_instances_part1(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
+                                                                  NHWGK,
+                                                                  GKYXC,
+                                                                  Empty_Tuple,
+                                                                  NHWGC,
+                                                                  F16,
+                                                                  F16,
+                                                                  Empty_Tuple,
+                                                                  F16,
+                                                                  PassThrough,
+                                                                  PassThrough,
+                                                                  PassThrough>>>& instances);
+
+#endif
+
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation

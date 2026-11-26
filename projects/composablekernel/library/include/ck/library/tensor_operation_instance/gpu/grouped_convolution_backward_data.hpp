@@ -112,6 +112,10 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wavelet_direct_load_xdl_v3_nhwgk_gkyxc_nhwgc_f16_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wavelet_xdl_v3_tuned_v1_nhwgk_gkyxc_nhwgc_f16_instances_part1(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wavelet_xdl_v3_tuned_v1_nhwgk_gkyxc_nhwgc_f16_instances_part2(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wavelet_xdl_v3_nhwgk_gkyxc_nhwgc_f16_instances_part1(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f16_large_tensors_instances(
@@ -475,6 +479,8 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_16_16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_tuned_v1_nhwgk_gkyxc_nhwgc_f16_instances_part1(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f16_instances_part1(
                         op_ptrs);

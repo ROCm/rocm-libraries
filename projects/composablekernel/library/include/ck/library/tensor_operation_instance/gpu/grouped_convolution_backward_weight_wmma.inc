@@ -168,6 +168,34 @@ void add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_
 
 #endif
 
+// Tuned instances (f16, tuned_v1)
+#ifdef CK_ENABLE_FP16
+void add_device_grouped_conv2d_bwd_weight_wmma_tuned_v1_nhwgc_gkyxc_nhwgk_f16_instances_part1(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           F16,
+                                                           F16,
+                                                           F16,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
+
+void add_device_grouped_conv2d_bwd_weight_two_stage_wmma_tuned_v1_nhwgc_gkyxc_nhwgk_f16_instances_part1(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           F16,
+                                                           F16,
+                                                           F16,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
+
+#endif
+
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation
