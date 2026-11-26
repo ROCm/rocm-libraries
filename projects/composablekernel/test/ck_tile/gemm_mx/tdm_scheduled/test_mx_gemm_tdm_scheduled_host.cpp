@@ -259,7 +259,10 @@ TEST(MxGemmTdmScheduledHost, MixedWideInputsNarrowOutputIsSupported)
                                                          N});
     const char* why = K::GetUnsupportedReason(args);
     EXPECT_EQ(why, nullptr) << (why ? why : "");
-    EXPECT_TRUE(K::IsSupportedArgument(args)) << (why ? why : "");
+    if(ck_tile::is_gfx125_supported())
+    {
+        EXPECT_TRUE(K::IsSupportedArgument(args));
+    }
 }
 
 // The host picks the kernel of a whole-tile count's parity: TailNumber::One for odd counts, Two
