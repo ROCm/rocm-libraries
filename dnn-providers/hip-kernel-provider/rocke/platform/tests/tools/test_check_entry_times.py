@@ -557,6 +557,87 @@ def test_test_seconds_sum_each_slow_test_of_a_rocke_entry(tmp_path) -> None:
     }
 
 
+_FAST_CONTRACTS_LOG = (
+    "4: 0.30s call     test_surface.py::test_imports\n"
+    " 1/1 Test   #4: rocke_contracts_pytest ....   Passed    1.50 sec\n"
+)
+
+
+def test_an_unsplit_entry_with_a_durations_report_is_measured(tmp_path) -> None:
+    log = tmp_path / "durations.log"
+    log.write_text(_FAST_CONTRACTS_LOG, encoding="utf-8")
+    assert check.slow_test_seconds_from_ctest_logs([log]) == {}
+    assert check.measured_entries_from_ctest_logs([log]) == ["rocke_contracts_pytest"]
+
+
+def _split_durations_log(tmp_path: Path, shard: int, seconds: float = 0.3) -> Path:
+    """A log of shard ``shard`` of 4 of a split entry with one test there."""
+    log = tmp_path / f"durations{shard}.log"
+    log.write_text(
+        f'5: Test command: /venv/bin/python "-m" "pytest" "{ACTIVATION_FLAG}"\n'
+        f"5: rocke-ctest-shard: {shard}/4 (GTEST_SHARD_INDEX={shard}, "
+        "GTEST_TOTAL_SHARDS=4)\n"
+        f"5: {seconds:.2f}s call     t.py::test_{shard}\n"
+        " 1/1 Test   #5: rocke_split_entry ....   Passed    1.00 sec\n",
+        encoding="utf-8",
+    )
+    return log
+
+
+def test_a_split_entry_is_measured_only_when_every_shard_reported(tmp_path) -> None:
+    """A slow test on a shard whose report the logs lack would go unseen, so
+    an entry reported on some shards only is not measured, even with a slow
+    test on the shards the logs hold."""
+    logs = [_split_durations_log(tmp_path, 0, seconds=1.5)]
+    logs += [_split_durations_log(tmp_path, shard) for shard in range(1, 4)]
+    assert check.measured_entries_from_ctest_logs(logs[:2]) == []
+    assert check.slow_test_seconds_from_ctest_logs(logs[:2]) == {
+        "rocke_split_entry": {"t.py::test_0": 1.5}
+    }
+    assert check.measured_entries_from_ctest_logs(logs) == ["rocke_split_entry"]
+
+
+def test_recorded_test_seconds_replace_a_measured_entry_and_unmark_a_partial_one() -> (
+    None
+):
+    column = {
+        "test_seconds": {
+            "rocke_remeasured": {"t.py::test": 3.0},
+            "rocke_partial": {"t.py::test": 1.2},
+            "rocke_untouched": {"t.py::test": 4.0},
+        },
+        "tests_measured": ["rocke_partial", "rocke_untouched"],
+    }
+    tests, measured = check.recorded_test_seconds(
+        column,
+        test_seconds={"rocke_partial": {"t.py::other": 1.4}},
+        measured=["rocke_remeasured"],
+    )
+    assert tests == {
+        "rocke_partial": {"t.py::other": 1.4},
+        "rocke_untouched": {"t.py::test": 4.0},
+    }
+    assert measured == ["rocke_remeasured", "rocke_untouched"]
+
+
+def test_record_marks_an_entry_measured_and_drops_its_stale_slow_tests(
+    tmp_path,
+) -> None:
+    times = tmp_path / "entry_times.json"
+    column = _column(
+        test_seconds={"rocke_contracts_pytest": {"t.py::test": 3.0}},
+        rocke_contracts_pytest=4.0,
+    )
+    times.write_text(json.dumps(column), encoding="utf-8")
+    log = tmp_path / "durations.log"
+    log.write_text(_FAST_CONTRACTS_LOG, encoding="utf-8")
+    argv = ["--entry-times", str(times), "record", "--column", "linux"]
+    assert check.main([*argv, "--source", "test log", str(log)]) == 0
+    recorded = json.loads(times.read_text(encoding="utf-8"))["linux"]
+    assert "test_seconds" not in recorded
+    assert recorded["tests_measured"] == ["rocke_contracts_pytest"]
+
+
 def _data_options(times: Path) -> list[str]:
     """Project from ``times``."""
     return ["--entry-times", str(times)]
@@ -996,14 +1077,16 @@ def test_pruned_column_keeps_only_registered_entries() -> None:
             "rocke_gone": {"t.py::test": 4.0},
             "rocke_timed_by_test_only": {"t.py::test": 2.0},
         },
+        "tests_measured": ["rocke_golden_static", "rocke_measured_only"],
         "ceilings": {"standard": 540.0},
     }
     kept, dropped = check.pruned_column(column, entries)
-    assert dropped == ["rocke_gone", "rocke_timed_by_test_only"]
+    assert dropped == ["rocke_gone", "rocke_measured_only", "rocke_timed_by_test_only"]
     assert kept == {
         "source": "test data",
         "seconds": {"rocke_golden_static": 30.0},
         "test_seconds": {},
+        "tests_measured": ["rocke_golden_static"],
         "ceilings": {"standard": 540.0},
     }
 
