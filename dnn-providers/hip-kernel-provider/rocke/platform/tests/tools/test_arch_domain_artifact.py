@@ -1726,31 +1726,39 @@ class ProbeTimeoutTest(unittest.TestCase):
     its timeout: only the driver was killed, and the orphaned child spun at
     full CPU until the host was rebooted, one per hanging probe per sweep.
 
-    The stub stands in for that driver: it starts a child that never exits,
-    records both pids, and never exits itself.
+    The stub stands in for that driver: it starts a child that never exits and
+    records both pids. By default it then never exits itself; the
+    `_EXITS_LEAVING_A_CHILD` variant exits first, leaving the child holding its
+    output streams open.
     """
 
     ARCH = "gfx942"
 
-    _HANGS_WITH_A_CHILD = """
+    _EXITS_LEAVING_A_CHILD = """
 import os, subprocess, sys, time
 {prelude}
 child = subprocess.Popen([sys.executable, "-c", "import time\\nwhile True: time.sleep(1)"])
 with open({pids!r}, "a") as f:
     f.write(f"{{os.getpid()}} {{child.pid}}\\n")
-while True:
+"""
+    _HANGS_WITH_A_CHILD = (
+        _EXITS_LEAVING_A_CHILD
+        + """while True:
     time.sleep(1)
 """
+    )
 
-    def _stub(self, name: str, prelude: str = "") -> tuple[str, Path]:
-        """A stub tool `name` that runs `prelude`, then hangs with a child."""
+    def _stub(
+        self, name: str, prelude: str = "", script: str = _HANGS_WITH_A_CHILD
+    ) -> tuple[str, Path]:
+        """A stub tool `name` that runs `prelude`, then `script` (by default it
+        hangs with a child)."""
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
         pids = root / "pids"
         path = root / name
         path.write_text(
-            "#!/usr/bin/env python3\n"
-            + self._HANGS_WITH_A_CHILD.format(pids=str(pids), prelude=prelude)
+            "#!/usr/bin/env python3\n" + script.format(pids=str(pids), prelude=prelude)
         )
         path.chmod(0o755)
         self.addCleanup(self._kill_survivors, pids)
@@ -1982,6 +1990,92 @@ with G._probe_pool(1) as ex:
         sweep.kill()
         sweep.wait()
         self.assertEqual(self._survivors(pids), [], "outlived the killed sweep")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "a probe dies with its sweep only on Linux (PR_SET_PDEATHSIG)",
+    )
+    def test_killing_the_sweep_ends_a_child_its_exited_driver_left(self):
+        """A driver can exit while a child it started still runs and holds its
+        output open, so the sweep keeps waiting. Killing the sweep then must
+        still end that child: the session leader has to outlive the driver for
+        as long as anything it started is running."""
+        tool, pids = self._stub("clang", script=self._EXITS_LEAVING_A_CHILD)
+        script = self._PROBES_UNTIL_KILLED.format(
+            tools=str(_ROCKE / "tools"), tool=tool
+        )
+        sweep = subprocess.Popen([sys.executable, "-c", script])
+        self.addCleanup(sweep.wait)
+        self.addCleanup(sweep.kill)
+        deadline = time.monotonic() + 30
+        while (
+            not pids.exists()
+            or len(self._started(pids)) < 2
+            or self._alive(self._started(pids)[0])
+        ):
+            self.assertIsNone(sweep.poll(), "the sweep exited before the child did")
+            self.assertLess(time.monotonic(), deadline, "the driver did not exit")
+            time.sleep(0.05)
+        sweep.kill()
+        sweep.wait()
+        self.assertEqual(self._survivors(pids), [], "outlived the killed sweep")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "only Linux runs commands under a session leader",
+    )
+    def test_the_command_status_passes_through_a_descendant_that_outlives_it(self):
+        """The leader waits for every descendant left in its group before it
+        exits, and must then exit with the command's status, not a
+        descendant's."""
+        completed = B.run_bounded(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import subprocess, sys\n"
+                    "subprocess.Popen([sys.executable, '-c', "
+                    "'import time; time.sleep(0.5); raise SystemExit(5)'])\n"
+                    "print('out')\n"
+                    "sys.exit(3)"
+                ),
+            ],
+            timeout=60,
+        )
+        self.assertEqual((completed.returncode, completed.stdout), (3, "out\n"))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "only Linux runs commands under a session leader",
+    )
+    def test_a_detached_daemon_does_not_hold_up_the_command(self):
+        """A descendant that leaves the process group with its output closed (a
+        detached daemon) is not the leader's to wait for: `run_bounded` returns
+        the command's status as soon as the command exits."""
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        pids = scratch / "pids"
+        self.addCleanup(self._kill_survivors, pids)
+        started = time.monotonic()
+        completed = B.run_bounded(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import subprocess, sys\n"
+                    "daemon = subprocess.Popen([sys.executable, '-c', "
+                    "'import time\\nwhile True: time.sleep(1)'], "
+                    "start_new_session=True, stdin=subprocess.DEVNULL, "
+                    "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                    f"open({str(pids)!r}, 'w').write(str(daemon.pid))\n"
+                    "sys.exit(4)"
+                ),
+            ],
+            timeout=60,
+        )
+        self.assertEqual(completed.returncode, 4)
+        self.assertLess(time.monotonic() - started, 30, "waited for the daemon")
+        self.assertTrue(self._alive(self._started(pids)[0]), "the daemon was ended")
 
     @unittest.skipUnless(
         sys.platform.startswith("linux"),
