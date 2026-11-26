@@ -7,11 +7,13 @@ remapMXScaleInterleave and the interleaved RegSets in macroAndSet.
 
 v_wmma_scale costs one cycle when its two scale VGPRs share a VGPR bank
 (index % 8). The interleave is on by default (KernelWriter.do["MXScaleVgprInterleave"]).
-Where it applies, every v_wmma_scale must read its two scales from disjoint banks, every MXS
-reference must resolve inside v0-v255, and no VGPR may be reached through two different scale
-blocks. It never raises the VGPR count: a kernel whose layout needs a larger scale region than the
-default keeps the default layout (kernels already at the 1024 VGPR limit would not assemble).
-With the switch off every kernel keeps the default layout, whose scale banks collide.
+Where it applies, every MXS reference must resolve inside v0-v255 and no VGPR may be reached
+through two different scale blocks. By default it never raises the VGPR count: when the
+bank-conflict-free layout needs a larger scale region than the default, the kernel gets the layout
+with the fewest bank conflicts that fits the default region (kernels already at the 1024 VGPR
+limit would not assemble otherwise). With the parameter MXScaleVgprInterleaveExtraVgpr the region grows
+instead and every v_wmma_scale reads its two scales from disjoint banks. With the switch off every
+kernel keeps the default layout, whose scale banks collide.
 
 pytestmark = pytest.mark.unit. CPU-only; no GPU.
 """
@@ -30,7 +32,8 @@ _ARCH = "gfx1250"
 
 _DESIGNED = os.path.join(os.path.dirname(__file__), "data", "test_data", "_designed", "gfx1250")
 
-# (config, kernels keep the default layout because the interleave would need more VGPRs than it)
+# (config, the bank-conflict-free layout needs more VGPRs than the default, so the kernels get the
+# fewest-conflict layout that fits the default region)
 _CONFIGS = [
     ("cluster_padding_npot_mt1.yaml", True),
     ("streamk_cluster_multicast.yaml", False),
@@ -142,7 +145,7 @@ def test_mx_scale_vgpr_interleave_emits(kernels):
 def test_mx_scale_vgpr_interleave_banks(kernels):
     fallsBack, out = kernels
     if fallsBack:
-        pytest.skip("kernels keep the default layout; see test_mx_scale_vgpr_interleave_falls_back")
+        pytest.skip("not conflict free in the default VGPR budget; see test_mx_scale_vgpr_interleave_tight_budget")
     for base, src, _err in out:
         wmma, conflicts, high, shared, _pieces = _scan(src)
         assert wmma > 0, f"{base}: no v_wmma_scale"
@@ -163,17 +166,78 @@ def test_mx_scale_vgpr_interleave_never_adds_vgprs(kernels_on_off):
         assert _vgprs(src) <= _vgprs(srcOff), f"{base}: the interleave raised the VGPR count"
 
 
-def test_mx_scale_vgpr_interleave_falls_back(kernels_on_off):
-    # The layout needs a larger scale region than the default: the kernel keeps the default
-    # layout, with its scale-bank conflicts and the same VGPR count.
+def test_mx_scale_vgpr_interleave_tight_budget(kernels_on_off):
+    # The conflict-free layout needs a larger scale region than the default: the kernel keeps
+    # the default VGPR count and gets fewer scale-bank conflicts than the default layout.
     fallsBack, on, off = kernels_on_off
     if not fallsBack:
-        pytest.skip("the interleave applies to these kernels")
+        pytest.skip("the conflict-free layout fits these kernels")
+    fewer = 0
     for (base, src, _e), (_b, srcOff, _eOff) in zip(on, off):
-        wmma, conflicts, _high, _shared, pieces = _scan(src)
-        assert not pieces, f"{base}: interleave pieces in a kernel that must keep the default layout"
-        assert conflicts == _scan(srcOff)[1] > 0, f"{base}: layout differs from the default"
-        assert _vgprs(src) == _vgprs(srcOff)
+        wmma, conflicts, high, shared, pieces = _scan(src)
+        assert pieces, f"{base}: the interleave was not applied"
+        assert high == 0 and shared == 0
+        assert _vgprs(src) <= _vgprs(srcOff)
+        offConflicts = _scan(srcOff)[1]
+        assert conflicts <= offConflicts, f"{base}: more bank conflicts than the default layout"
+        fewer += conflicts < offConflicts
+    assert fewer >= 1, "no kernel has fewer scale-bank conflicts than the default layout"
+
+
+def _emit_with_extra_vgpr(name, tmp_path_factory, values="true", limit=8):
+    """The same designed config with MXScaleVgprInterleaveExtraVgpr: [values] forked in."""
+    with open(os.path.join(_DESIGNED, name)) as f:
+        text = f.read()
+    text, n = re.subn(r"(ForkParameters:\n)(\s*)- ",
+                      lambda m: f"{m.group(1)}{m.group(2)}- MXScaleVgprInterleaveExtraVgpr: [{values}]\n{m.group(2)}- ",
+                      text, count=1)
+    assert n == 1
+    path = tmp_path_factory.mktemp("extra_vgprs") / name
+    path.write_text(text)
+    return emit_kernels_from_config(str(path), limit=limit, arch=_ARCH)
+
+
+@pytest.fixture(scope="module", params=_CONFIGS, ids=_IDS)
+def kernels_extra_requested(request, tmp_path_factory):
+    name, tight = request.param
+    return tight, _emit(name), _emit_with_extra_vgpr(name, tmp_path_factory)
+
+
+@pytest.fixture(scope="module", params=[c for c in _CONFIGS if c[1]], ids=[c[0] for c in _CONFIGS if c[1]])
+def kernels_extra_vgprs(request, tmp_path_factory):
+    name, _ = request.param
+    return _emit_with_extra_vgpr(name, tmp_path_factory)
+
+
+def _without_random_labels(src):
+    # The cluster barrier labels carry a random suffix that differs between two emissions.
+    return re.sub(r"(skipCBPreSignal_)[A-Za-z0-9]{16}", r"\1X", src)
+
+
+def test_extra_vgpr_is_folded_unless_the_layout_needs_it(kernels_extra_requested):
+    # Solution folds True into False when the conflict-free layout fits the default span: the kernel is
+    # then identical to the one without the parameter. Where it does not fit, True changes the layout.
+    # (The harness canonicalizes kernel names, so the sources are compared.)
+    tight, default, extra = kernels_extra_requested
+    assert default and len(default) == len(extra)
+    for (_, defaultSrc, _), (_, extraSrc, extraErr) in zip(default, extra):
+        assert extraErr == 0
+        assert (_without_random_labels(defaultSrc) != _without_random_labels(extraSrc)) == tight
+
+
+def test_extra_vgpr_on_a_non_mx_kernel_is_rejected(tmp_path_factory):
+    # rich_gemm_sb has no MX scales: with the parameter set to True no solution survives.
+    assert _emit_with_extra_vgpr("rich_gemm_sb.yaml", tmp_path_factory) == []
+
+
+def test_mx_scale_vgpr_interleave_extra_vgprs_is_conflict_free(kernels_extra_vgprs):
+    # With extra VGPRs allowed the region grows to hold the conflict-free layout.
+    for base, src, err in kernels_extra_vgprs:
+        assert err == 0, f"kernel {base!r} emitted with err={err}"
+        wmma, conflicts, high, shared, pieces = _scan(src)
+        assert wmma > 0 and pieces
+        assert conflicts == 0, f"{base}: {conflicts}/{wmma} v_wmma_scale read both scales from one bank"
+        assert high == 0 and shared == 0
 
 
 def test_mx_scale_vgpr_interleave_switch_off(kernels_on_off):

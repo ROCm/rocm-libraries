@@ -38,7 +38,11 @@ namespace hipdnn_frontend::graph
  * - Y: Dequantized output tensor
  *
  * **Required parameters:**
- * - block_size: Vector of block sizes for each dimension
+ * - block_size: Block sizes of the trailing dimensions of X. A vector of K entries
+ *   applies entry i to dimension (rank - K + i); the leading dimensions are not
+ *   blocked. Scale has the rank of X, and each Scale dimension is at least
+ *   ceil(X dim / block size); a larger Scale dimension is a padded layout.
+ *   set_block_size(value, idx) writes vector position idx, not dimension idx.
  *
  * **Optional parameters:**
  * - is_negative_scale: Whether the scale is negative (default: false)

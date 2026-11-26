@@ -30,6 +30,8 @@
 
 #include <Tensile/DataTypes.hpp>
 
+#include <string>
+
 namespace TensileLite
 {
     namespace Client
@@ -187,8 +189,10 @@ namespace TensileLite
 
         // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
         // This inspects problem geometry, data types, and feature flags but does not
-        // look at runtime input buffers.
-        bool isFastPathEligible(ContractionProblemGemm const& problem);
+        // look at runtime input buffers. When supplied, rejectionReason is cleared for
+        // an eligible problem or set to the first unsupported feature.
+        bool isFastPathEligible(ContractionProblemGemm const& problem,
+                                std::string*                  rejectionReason = nullptr);
 
     } // namespace Client
 } // namespace TensileLite

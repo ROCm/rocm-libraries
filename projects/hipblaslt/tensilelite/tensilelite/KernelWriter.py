@@ -67,6 +67,7 @@ from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Problem import isFusedA2A
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .SolutionStructs.segment_interleave import wave_tile_span
+from .SolutionStructs.mxs_interleave_extra import LOCAL_READ_SELECTION_TABLE
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -84,6 +85,7 @@ from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .SgprHazards import insertSgprHazardWaits
 from .Toolchain.Component import Assembler
 
+import contextlib
 import rocisa
 import math
 import abc
@@ -517,6 +519,8 @@ class StateValues:
   subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
+  subtileKeepHoistedWriteIndices: bool   = False   # planning emit of the fused store: leave the hoisted indices for the real emit
+  subtileHoistedCleanupDeferred: bool    = False   # that emit skipped cleanupGlobalWrite; whoever keeps its module must run it
   subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
   subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
   subtileStoreStagesM: int               = 1       # of those, how many split M (1 = N-only split)
@@ -4737,8 +4741,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["PrefetchGL2"]:
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       self.codes.gl2PrefetchIncrement = Module()
-      self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
-        comment="counterL<=PGR+GL2"))
+      # TailFolding: the last k-tile is partial; stop one k-tile earlier so no prefetch passes K.
+      if kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel):
+        # TailFolding: PGR+GL2, +1 when K has a tail, recomputed here (no SGPR kept across the loop)
+        with self.allocTmpSgpr(1, tag="gl2FoldThreshold") as tmp:
+          self.codes.gl2PrefetchIncrement.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), \
+            src1=kernel["DepthU"] - 1, comment="TailFolding: SCC = (K %% %u != 0)" % kernel["DepthU"]))
+          self.codes.gl2PrefetchIncrement.add(SAddCU32(dst=sgpr(tmp.idx), src0=kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], src1=0, \
+            comment="TailFolding: GL2 threshold = PGR+GL2 (+1 if K tail)"))
+          self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, sgpr(tmp.idx), \
+            comment="TailFolding: counterL <= PGR+GL2 (+1 if K tail)"))
+      else:
+        self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
+          comment="counterL<=PGR+GL2"))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchClearIncrement(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
@@ -6343,17 +6358,33 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["PrefetchGL2"]:
       skipGL2Label = Label(self.rapLabel("Skip_GL2"), "")
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-      module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
-        comment="counterL<=PGR"))
-      module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
-      module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
-      module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      if kernel["PrefetchGL2"] == 2:
-        module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
+      pgr = kernel["PrefetchGlobalRead"]
+      gl2 = kernel["PrefetchGL2"]
+      gl2Fold = kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel)
+      # TF0: no tmp sgpr, so its allocation and code stay unchanged
+      with (self.allocTmpSgpr(1, tag="gl2FoldPreLoop") if gl2Fold else contextlib.nullcontext()) as tmp:
+        if gl2Fold:
+          # TailFolding: when K has a tail the last k-tile is partial, so every GL2 prefetch threshold
+          # is one higher: PGR (+1) here, PGR+1 (+1) below, PGR+GL2 (+1) recomputed in the loop.
+          module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), \
+            src1=kernel["DepthU"] - 1, comment="TailFolding: SCC = (K %% %u != 0)" % kernel["DepthU"]))
+          module.add(SAddCU32(dst=sgpr(tmp.idx), src0=pgr, src1=0, comment="TailFolding: pre-loop GL2 threshold = PGR (+1 if K tail)"))
+          module.add(SCmpLeU32(src0=loopCounter, src1=sgpr(tmp.idx), comment="TailFolding: counterL <= PGR (+1 if K tail)"))
+        else:
+          module.add(SCmpLeU32(src0=loopCounter, src1=hex(pgr), comment="counterL<=PGR"))
         module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
-        module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+        module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
         module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      module.add(skipGL2Label)
+        if gl2 == 2:
+          if gl2Fold:
+            module.add(SAddU32(dst=sgpr(tmp.idx), src0=sgpr(tmp.idx), src1=1, comment="TailFolding: pre-loop GL2 threshold = PGR+1 (+1 if K tail)"))
+            module.add(SCmpLeU32(src0=loopCounter, src1=sgpr(tmp.idx), comment="TailFolding: counterL <= PGR+1 (+1 if K tail)"))
+          else:
+            module.add(SCmpLeU32(src0=loopCounter, src1=hex(pgr+1), comment="counterL<=PGR+1"))
+          module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+          module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+          module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
+        module.add(skipGL2Label)
 
     loopCopies = 3 if kernel["HalfPLR"] else 2 if expand else 1
     isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -6722,22 +6753,42 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     """(plan, regionLen, reason): the interleave plan and the length of the region it takes from
     vgprIdx, or (None, 0, reason) when the kernel keeps the default layout.
 
-    The region is never longer than the default MXSA + MXSB valu span, so the kernel's VGPR
-    count does not grow (kernels already at the 1024 limit would not assemble)."""
+    By default the region is exactly the default MXSA + MXSB valu span, so the kernel's VGPR
+    count does not grow: the bank-conflict-free layout is used when it fits, otherwise the layout
+    with the fewest bank conflicts that fits (_mxsBudgetPlan). With the solution parameter
+    MXScaleVgprInterleaveExtraVgpr the region instead grows to hold the conflict-free layout."""
     plan, reason = self._mxsInterleavePlan(kernel, tPMXSA, tPMXSB)
     if plan is None:
       return None, 0, reason
-    defaultLen = self._alignMXSB(kernel, vgprIdx + self.states.mxsa.numVgprValu) + self.states.mxsb.numVgprValu - vgprIdx
+    mxsa, mxsb = self.states.mxsa, self.states.mxsb
+    mxsbStart = self._alignMXSB(kernel, vgprIdx + mxsa.numVgprValu)
+    defaultLen = mxsbStart + mxsb.numVgprValu - vgprIdx
     needed = sum(g["span"] for g in plan["groups"])
+    stacked = plan
     if needed > defaultLen:
-      return None, 0, "the layout needs %u VGPRs, more than the default's %u" % (needed, defaultLen)
+      # Stacked groups do not fit the default span: let the groups share their padding holes
+      # (same bank-conflict freedom). Layouts that already fit are left as they are.
+      shared, _ = self._mxsInterleavePlan(kernel, tPMXSA, tPMXSB, shareGroups=True)
+      if shared is not None and sum(g["span"] for g in shared["groups"]) < needed:
+        plan, needed = shared, sum(g["span"] for g in shared["groups"])
+    allowExtraVgpr = bool(kernel["MXScaleVgprInterleaveExtraVgpr"])
+    if needed > defaultLen and not allowExtraVgpr:
+      plan = self._mxsBudgetPlan(kernel, stacked, defaultLen, mxsbStart - vgprIdx)
+      needed = sum(g["span"] for g in plan["groups"])
+    regionLen = max(needed, defaultLen)
     if (not kernel["PrefetchGlobalRead"]) and not papEnabled:
       # The default layout overlaps the MXSA G2L with its valu block; the shared region cannot
       # (it also holds the MXSB scales), which would grow the VGPR count.
       return None, 0, "the MXSA G2L cannot overlap the shared region"
-    if vgprIdx + defaultLen > 256:
-      return None, 0, "the region would pass v255 (%u VGPRs)" % defaultLen
-    return plan, defaultLen, None
+    if vgprIdx + regionLen > 256:
+      return None, 0, "the region would pass v255 (%u VGPRs)" % regionLen
+    before, pairs = self._mxsLayoutConflicts(stacked, mxsbStart - vgprIdx)
+    after = plan.get("conflicts", 0)
+    print2("MXScaleVgprInterleave applied: scale bank conflicts %u -> %u of %u MXSA x MXSB scale pairs "
+           "(%.1f%% -> %.1f%%), region %u VGPRs (default layout %u): %s"
+           % (before, after, pairs, 100.0 * before / max(pairs, 1), 100.0 * after / max(pairs, 1),
+              regionLen, defaultLen, self.states.kernelName))
+    return plan, regionLen, None
 
   def _mxsDefaultBlocks(self, kernel, tc):
     """(bi, iui) -> offset of vgprValuMXS<tc>_X<bi>_I<iui> in the default layout, mirroring
@@ -6754,12 +6805,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         ri = 0
     return blocks
 
-  def _mxsInterleavePlan(self, kernel, tPMXSA, tPMXSB):
+  def _mxsInterleavePlan(self, kernel, tPMXSA, tPMXSB, shareGroups=False):
     """Group-local MXScaleVgprInterleave layout, or (None, reason) when it does not apply.
 
     The scales a WMMA reads come from the same (bi, iui) block pair, so blocks are grouped by
     pairing and each group is packed first-fit with its MXSA and MXSB pieces on disjoint banks.
-    The groups are placed in the region later (placeMXScaleInterleave)."""
+    The groups are placed in the region later (placeMXScaleInterleave).
+
+    shareGroups: only the MXSA and MXSB scales of one group are read by the same WMMA, so
+    different groups need no bank separation from each other. Instead of stacking the groups,
+    pack them into one shared set of VGPRs, trying for each group the free first-fit and the two
+    bank splits (MXSA on banks 0-3 / MXSB on 4-7 and the reverse), and keeping the one that ends
+    lowest. A group can then fill the bank-padding holes the others leave. The result is a single
+    merged group; it is never longer than the stacked layout."""
     pt = kernel["ProblemType"]
     mxsa, mxsb = self.states.mxsa, self.states.mxsb
     if not (pt["MXBlockA"] and pt["MXBlockB"]):
@@ -6811,28 +6869,211 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # The B-slot scale of the WMMA (MXSA when SourceSwap swaps the sources) is also kept out
     # of the low 8 VGPRs of the WMMA's own C/D where the region allows it (placement step).
     slotTc = "A" if kernel["SourceSwap"] else "B"
-    for grp in groups:
+
+    def pack(grp, used, allowed):
+      """First-fit the pieces of grp into `used` (updated); each side keeps to the banks in
+      `allowed` (None = any). Returns cells, or None when no slot exists."""
       lists = {tc: [(tc, off, k) for off in grp[tc] for k in range(numPieces[tc])] for tc in ("A", "B")}
       order = []
       for i in range(max(len(lists["A"]), len(lists["B"]))):
         order += [lst[i] for lst in (lists["A"], lists["B"]) if i < len(lst)]
-      used, banks, cells = set(), {"A": set(), "B": set()}, {}
+      banks, cells = {"A": set(), "B": set()}, {}
       for pc in order:
         tc = pc[0]
         size = piece[tc]
         other = banks["B" if tc == "A" else "A"]
         step = 2 if size >= 2 else 1
         p = 0
-        while any(c in used for c in range(p, p + size)) or {c % 8 for c in range(p, p + size)} & other:
+        while any(c in used for c in range(p, p + size)) or {c % 8 for c in range(p, p + size)} & other \
+              or (allowed is not None and not {c % 8 for c in range(p, p + size)} <= allowed[tc]):
           p += step
-          assert p < 4096, "MXScaleVgprInterleave: no bank-disjoint slot"
+          if p >= 4096:
+            assert allowed is not None, "MXScaleVgprInterleave: no bank-disjoint slot"
+            return None
         used.update(range(p, p + size))
         banks[tc].update(c % 8 for c in range(p, p + size))
         cells[pc] = p
+      return cells
+
+    def finish(grp, cells, used):
       grp["cells"] = cells
       grp["span"] = (max(used) + 2) // 2 * 2  # groups start on even VGPRs
       grp["slot"] = sorted(c for pc, p in cells.items() if pc[0] == slotTc for c in range(p, p + piece[slotTc]))
+
+    if shareGroups and len(groups) > 1:
+      low, high = set(range(4)), set(range(4, 8))
+      splits = (None, {"A": low, "B": high}, {"A": high, "B": low})
+      shared, used = {"A": [], "B": [], "cells": {}}, set()
+      for grp in groups:
+        best = None
+        for allowed in splits:
+          trial = set(used)
+          cells = pack(grp, trial, allowed)
+          if cells is not None and (best is None or max(trial) < max(best[1])):
+            best = (cells, trial)
+        used = best[1]
+        shared["cells"].update(best[0])
+        for tc in ("A", "B"):
+          shared[tc] += grp[tc]
+      finish(shared, shared.pop("cells"), used)
+      groups = [shared]
+    else:
+      for grp in groups:
+        used = set()
+        finish(grp, pack(grp, used, None), used)
     return {"piece": piece, "blocks": blocks, "groups": groups}, None
+
+  def _mxsLayoutConflicts(self, stacked, bBase, pos=None):
+    """(conflicts, pairs) of a layout of the planned MXS pieces: the default layout (MXSA from 0,
+    MXSB from bBase) when pos is None, else pos {(tc, blockOff, k): offset}. `pairs` counts every
+    (MXSA VGPR, MXSB VGPR) combination a pairing group's WMMAs read, `conflicts` those that share
+    a bank (index % 8), so conflicts / pairs is the share of v_wmma_scale that pay the extra cycle."""
+    piece = stacked["piece"]
+    numPieces = {"A": self.states.mxsa.numVgprValuPerBlock // piece["A"],
+                 "B": self.states.mxsb.numVgprValuPerBlock // piece["B"]}
+    conflicts = pairs = 0
+    for grp in stacked["groups"]:
+      count = {"A": [0] * 8, "B": [0] * 8}
+      for tc in ("A", "B"):
+        for off in grp[tc]:
+          for k in range(numPieces[tc]):
+            p = (0 if tc == "A" else bBase) + off + k * piece[tc] if pos is None else pos[(tc, off, k)]
+            for c in range(p, p + piece[tc]):
+              count[tc][c % 8] += 1
+      conflicts += sum(a * b for a, b in zip(count["A"], count["B"]))
+      pairs += sum(count["A"]) * sum(count["B"])
+    return conflicts, pairs
+
+  def _mxsBudgetPlan(self, kernel, stacked, budget, bBase, trace=None):
+    """Fewest-bank-conflict layout of the planned MXS pieces inside [0, budget), as one group.
+
+    A v_wmma_scale pays a cycle when its MXSA and MXSB scale VGPRs share a bank (index % 8), and
+    every MXSA scale of a pairing group meets every MXSB scale of that group, so the cost is, per
+    group, the sum over banks of (#MXSA VGPRs on the bank) * (#MXSB VGPRs on the bank). It starts
+    from the default layout (MXSB from bBase, so never worse than keeping the default layout) and
+    from a greedy placement, then relocates and swaps pieces while that lowers the cost.
+    `stacked` supplies the pieces and the pairing groups; the result has a "conflicts" total.
+    `trace`, when a list, receives ("start"|"move"|"swap"|"end", ...) events for documentation/debugging."""
+    piece, blocks, pairing = stacked["piece"], stacked["blocks"], stacked["groups"]
+    numPieces = {"A": self.states.mxsa.numVgprValuPerBlock // piece["A"],
+                 "B": self.states.mxsb.numVgprValuPerBlock // piece["B"]}
+    groupOf, keys = {}, []
+    for gi, grp in enumerate(pairing):
+      for tc in ("A", "B"):
+        for off in grp[tc]:
+          for k in range(numPieces[tc]):
+            groupOf[(tc, off, k)] = gi
+            keys.append((tc, off, k))
+    keys.sort()
+
+    def groupCost(count):
+      return sum(a * b for a, b in zip(count["A"], count["B"]))
+
+    def evaluate(pos):
+      count = [{"A": [0] * 8, "B": [0] * 8} for _ in pairing]
+      for key, p in pos.items():
+        for c in range(p, p + piece[key[0]]):
+          count[groupOf[key]][key[0]][c % 8] += 1
+      return count
+
+    def climb(pos):
+      count = evaluate(pos)
+      cost = [groupCost(c) for c in count]
+      occupied = {c for key, p in pos.items() for c in range(p, p + piece[key[0]])}
+      def bump(key, p, sign):
+        for c in range(p, p + piece[key[0]]):
+          count[groupOf[key]][key[0]][c % 8] += sign
+      for _ in range(32):
+        improved = False
+        for key in keys:
+          if key not in pos:
+            continue
+          size, gi, cur = piece[key[0]], groupOf[key], pos[key]
+          own = set(range(cur, cur + size))
+          bump(key, cur, -1)
+          bestP, bestCost = cur, None
+          for p in range(0, budget - size + 1, 2 if size >= 2 else 1):
+            cells = set(range(p, p + size))
+            if p != cur and (cells & (occupied - own)):
+              continue
+            bump(key, p, 1)
+            cst = groupCost(count[gi])
+            bump(key, p, -1)
+            if bestCost is None or cst < bestCost:
+              bestP, bestCost = p, cst
+          if bestCost is not None and bestCost < cost[gi]:
+            occupied -= own
+            occupied |= set(range(bestP, bestP + size))
+            pos[key] = bestP
+            cost[gi] = bestCost
+            improved = True
+            if trace is not None:
+              trace.append(("move", key, cur, bestP, sum(cost)))
+          bump(key, pos[key], 1)
+        # swap two pieces of the same size (a fully packed region has no free cell to move into)
+        for i, k1 in enumerate(keys):
+          for k2 in keys[i + 1:]:
+            if k1 not in pos or k2 not in pos or piece[k1[0]] != piece[k2[0]] or pos[k1] == pos[k2]:
+              continue
+            if groupOf[k1] == groupOf[k2] and k1[0] == k2[0]:
+              continue  # exchanging two scales of one side of one group changes nothing
+            g1, g2 = groupOf[k1], groupOf[k2]
+            before = cost[g1] + (cost[g2] if g2 != g1 else 0)
+            bump(k1, pos[k1], -1); bump(k2, pos[k2], -1)
+            bump(k1, pos[k2], 1); bump(k2, pos[k1], 1)
+            after = groupCost(count[g1]) + (groupCost(count[g2]) if g2 != g1 else 0)
+            if after < before:
+              pos[k1], pos[k2] = pos[k2], pos[k1]
+              cost[g1] = groupCost(count[g1]); cost[g2] = groupCost(count[g2])
+              improved = True
+              if trace is not None:
+                trace.append(("swap", k1, k2, sum(cost)))
+            else:
+              bump(k1, pos[k2], -1); bump(k2, pos[k1], -1)
+              bump(k1, pos[k1], 1); bump(k2, pos[k2], 1)
+        if not improved:
+          break
+      return sum(cost), pos
+
+    # Start 1: the default layout.
+    starts = [{key: (0 if key[0] == "A" else bBase) + key[1] + key[2] * piece[key[0]] for key in keys}]
+    # Start 2: greedy, biggest pieces first, each at the lowest slot adding the fewest conflicts.
+    greedy, occupied = {}, set()
+    count = [{"A": [0] * 8, "B": [0] * 8} for _ in pairing]
+    for key in sorted(keys, key=lambda kk: (-piece[kk[0]], kk)):
+      size, gi = piece[key[0]], groupOf[key]
+      best = None
+      for p in range(0, budget - size + 1, 2 if size >= 2 else 1):
+        if any(c in occupied for c in range(p, p + size)):
+          continue
+        other = count[gi]["B" if key[0] == "A" else "A"]
+        add = sum(other[c % 8] for c in range(p, p + size))
+        if best is None or add < best[0]:
+          best = (add, p)
+      if best is None:
+        greedy = None
+        break
+      p = best[1]
+      greedy[key] = p
+      occupied.update(range(p, p + size))
+      for c in range(p, p + size):
+        count[gi][key[0]][c % 8] += 1
+    if greedy is not None:
+      starts.append(greedy)
+
+    results = []
+    for name, st in zip(("default", "greedy"), starts):
+      if trace is not None:
+        trace.append(("start", name, dict(st), self._mxsLayoutConflicts(stacked, bBase, st)[0]))
+      results.append(climb(dict(st)))
+      if trace is not None:
+        trace.append(("end", name, dict(results[-1][1]), results[-1][0]))
+    conflicts, pos = min(results, key=lambda r: r[0])
+    slotTc = "A" if kernel["SourceSwap"] else "B"
+    merged = {"A": [off for grp in pairing for off in grp["A"]], "B": [off for grp in pairing for off in grp["B"]],
+              "cells": pos, "span": max(p + piece[key[0]] for key, p in pos.items()),
+              "slot": sorted(c for key, p in pos.items() if key[0] == slotTc for c in range(p, p + piece[slotTc]))}
+    return {"piece": piece, "blocks": blocks, "groups": [merged], "conflicts": conflicts}
 
   def placeMXScaleInterleave(self, kernel, plan, regionStart, regionEnd, cStart):
     """Place the planned groups in [regionStart, regionEnd): each at the first even offset that
@@ -6977,6 +7218,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           (self.states.lastValuAB, self.states.lastVgprForReads))
 
     self.removeSgprVarFromPool("SrdWS")
+
+    # The L2 prefetch increments are set again for every tile and nothing after the main loop
+    # reads them. Give them back when the 4 temporaries of the tail loop no longer fit.
+    if kernel["PrefetchGL2"] and not self.tmpSgprFits(4):
+      for tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
+        if "GL2PrefetchInc%s" % tc in self.sgprs:
+          module.add(self.undefineSgpr("GL2PrefetchInc%s" % tc))
 
     if not kernel["NoTailLoop"]:
       ########################################
@@ -8819,6 +9067,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                            _ds_store_b32, _ds_store_b16, _ds_store_b8 ]
         }
 
+    # Solution folds MXScaleVgprInterleaveExtraVgpr using this table (mxs_interleave_extra).
+    assert tuple((i.blockWidth, i.numOffsets, i.numAddresses) for i in self.memoryInstructions["LocalRead"]) \
+        == LOCAL_READ_SELECTION_TABLE, "LocalRead memory instructions changed: update mxs_interleave_extra.LOCAL_READ_SELECTION_TABLE"
+
     ####################################
     # choose memory instructions
     ####################################
@@ -10326,13 +10578,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
   
+      # The prefetch addresses start on an even register. From an odd index, Serial takes
+      # the slot that alignment would leave empty.
+      serialFirst = bool(kernel["PrefetchGL2"]) and vgprIdx % 2 == 1
+      if serialFirst:
+        self.states.startVgprSerial = vgprIdx
+        vgprIdx += 1
       if kernel["PrefetchGL2"]:
         vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
-      self.states.startVgprSerial = vgprIdx
-      vgprIdx += 1 # for vgpr serial id
+      if not serialFirst:
+        self.states.startVgprSerial = vgprIdx
+        vgprIdx += 1 # for vgpr serial id
 
       self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
       if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
@@ -12091,6 +12350,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if self.do["Sync"]:
       return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
     return Module("SyncThreads (Empty)")
+
+  def tailFoldGsu(self, kernel):
+    return False
+
+  def tailFoldingGL2Clamp(self, kernel):
+    """TailFolding (not RAP): the last k-tile is partial, so the GL2 prefetch stops one k-tile
+    earlier; a prefetch of it would reach up to DepthU - 1 elements past K."""
+    return kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
 
   def _tailLoopBarrierTokens(self, kernel):
     # Explicit tail barriers must list every token; the auto-barrier pass doesn't cover them.
