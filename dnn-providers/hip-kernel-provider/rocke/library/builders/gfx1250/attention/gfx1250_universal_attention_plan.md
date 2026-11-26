@@ -81,7 +81,7 @@ Key early decisions:
     limitations mostly affect the deferred FP8-KV / Phase 3 work, not Phase 1–2
     bf16/fp16 correctness and parity.
 - **Compile path** — Phase 1 uses the **HIP path**
-  (`compile_kernel_via_hipcc(kernel, arch="gfx1250")`) so the on-device clang
+  (`compile_kernel_via_hip(kernel, arch="gfx1250")`) so the on-device clang
   handles gfx1250-specific lowering (split waits, 57-bit SRD, shader padding) that
   ROCKE core does not yet emit. Hot kernels migrate to the **LLVM-direct path**
   (`compile_kernel(..., arch="gfx1250")`) in Phase 2/3 as core gains those
@@ -113,14 +113,14 @@ These let the four legs run in parallel without colliding:
 1. **Arch token** `"gfx1250"`, resolvable via `ArchTarget.from_gfx("gfx1250")`.
 2. **Builder signatures** mirror existing: `build_*(spec, arch="gfx1250") -> KernelDef`;
    specs are frozen dataclasses exposing `kernel_name()`.
-3. **Compile entry**: Phase 1 → `compile_kernel_via_hipcc`; Phase 2+ → `compile_kernel`.
+3. **Compile entry**: Phase 1 → `compile_kernel_via_hip`; Phase 2+ → `compile_kernel`.
 4. **Verify contract**: Phase 1 functional kernels compare to a numpy/torch fp32
    reference (tolerance gates fp16 `2e-2`, bf16 `4e-2`, matching gfx942 / gfx1151
    examples). Phase 2 perf parity reuses the gfx950 harnesses' contract: compare
    to AITER `ref_paged_attn` and require bit-accuracy vs Triton (`max_abs` within
    fp16/bf16 ULP) on the `aiter_ua_2_shapes.json` cohort.
 5. **Run contract**: use the `remote-gpu-build-run` skill — preflight an idle
-   GPU, build with host `hipcc`, run with `HIP_VISIBLE_DEVICES`, wrap in `timeout`.
+   GPU, build with host `amdclang++`, run with `HIP_VISIBLE_DEVICES`, wrap in `timeout`.
 
 ---
 
