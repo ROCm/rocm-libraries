@@ -8,7 +8,10 @@
   },
   "metadata": "b05bee81-c56a-479a-b3a4-e227c53b1c0c",
   "sort_kernel_catalog": {
-    "default": "669ae67e-248b-445f-8838-c54fcaed2fbc"
+    "default": "669ae67e-248b-445f-8838-c54fcaed2fbc",
+    "gfx942": [
+      "ae3dc037-19cf-4e86-ba82-cf5ed06edbb0"
+    ]
   },
   "knobs": [
     "kernel_family",

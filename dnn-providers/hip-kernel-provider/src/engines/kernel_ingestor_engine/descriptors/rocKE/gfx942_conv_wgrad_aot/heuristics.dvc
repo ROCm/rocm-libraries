@@ -4,3 +4,4 @@ outs:
   nfiles: 2
   hash: md5
   path: heuristics
+  remote: ingestor
