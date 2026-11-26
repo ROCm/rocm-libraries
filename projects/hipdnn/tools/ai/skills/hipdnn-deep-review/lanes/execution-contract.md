@@ -8,7 +8,7 @@ The lane applies it as follows:
 1. **No allocation, no sync.** hipDNN and providers allocate no device or pinned host memory outside the caller's variant pack
    and workspace, and do not synchronize, at any stage: applicability or support query, options or workspace query, plan build,
    execute, serialization or deserialization, plan destroy. *Synchronize* means device, stream or event sync, a blocking copy or
-   memset, `hipFree`, a host-consumed device-to-host readback, and `hipMemcpyAsync` from pageable host memory.
+   memset, `hipFree` or `hipHostFree`, a host-consumed device-to-host readback, and `hipMemcpyAsync` from pageable host memory.
 2. **Code objects.** Kernel code objects load at plan build or deserialization and may unload at plan destroy. Loading inside
    `execute()` is a violation.
 3. **Host heap.** Host heap is allocated at build. `execute()` uses only small bounded temporaries freed before it returns: no
@@ -85,10 +85,12 @@ Classify every hit by the stage that reaches it. A call counts only when it is r
    `workspaceBytes()` regions with the zero fills.
 9. Advertised capture. For every engine whose `getDetails()` or `.ued.json` `behavior_notes` gains or keeps
    `supports_graph_capture` (including `GRAPH_CAPTURE_OPS` in `flydsl/gen_descriptors.py`), walk its execute path through steps 4
-   to 8. Check that the integration-test capture category covers it (`GRAPH_CAPTURE_test_categories_integration.yaml`). For a
-   new or changed engine that lacks the note, find whether the provider's documentation section states a delegated-library
-   exception for it.
-10. Delegated libraries: see *Delegated libraries*.
+   to 8. Check that the integration-test capture category covers it (`GRAPH_CAPTURE_test_categories_integration.yaml`).
+10. Missing note. For every changed engine (definition below), read its descriptor or `getDetails()` at the head, even when the
+   diff does not touch the note. When it lacks `SUPPORTS_GRAPH_CAPTURE` and the provider's documentation section states no
+   delegated-library exception for it, file one `capture-support` finding (tier in *Severity*), separate from and in addition
+   to any other class the change draws. File it once per review, not per file.
+11. Delegated libraries: see *Delegated libraries*.
 
 An engine's descriptor is its own `.ued.json`; ranker and kernel-pack JSON do not count. A *changed engine* is a new engine, or a
 change to that engine's own pack, plan, registration or descriptor; shared ingestor or SDK infrastructure does not count.
@@ -101,13 +103,13 @@ Closed set; name each finding's class in `Actual`.
 |---|---|
 | `alloc` | `hipMalloc*`, `hipExtMallocWithFlags`, `hipHostMalloc`, `hipHostRegister`, `hipMallocManaged`, `hipMemPool*`, virtual memory management, delegated-library allocation, outside the variant pack and workspace |
 | `host-heap` | Execute-time host heap beyond small bounded temporaries freed before return; a growing cache or pool |
-| `sync` | Contract 1's definition: `hip{Device,Stream,Event}Synchronize`, `hipEventQuery`, `hipStreamQuery`, `hipEventElapsedTime`, blocking `hipMemcpy` or `hipMemset`, `hipFree`, `hipLaunchHostFunc`, device-to-host readback the host consumes, `hipMemcpyAsync` from pageable host memory |
-| `lazy-load` | A code-object load, compile, Find or search inside `execute()`, including by a library call that does it on first use |
+| `sync` | Contract 1's definition: `hip{Device,Stream,Event}Synchronize`, `hipEventQuery`, `hipStreamQuery`, `hipEventElapsedTime`, blocking `hipMemcpy` or `hipMemset`, `hipFree` and `hipHostFree` (both documented to synchronize the device), `hipLaunchHostFunc`, device-to-host readback the host consumes, `hipMemcpyAsync` from pageable host memory |
+| `lazy-load` | A code-object load, compile, Find or search inside `execute()`, including by a library call that does it on first use; a `hipModuleUnload` inside `execute()` belongs to the same finding |
 | `off-stream` | Work on a stream other than the handle's |
 | `capture-bake` | A by-value-only RNG seed or offset with no device-tensor form |
 | `uninit-workspace` | A read before write of a workspace region with no on-stream zero fill |
 | `cross-thread` | `hipModuleUnload` at plan destroy, and nothing else (an unload is permitted but is capture-checked like `hipFree`) |
-| `capture-support` | The engine's `SUPPORTS_GRAPH_CAPTURE` note is missing where required, or reported while `execute()` breaks the contract. Judged on `execute()` only: a build or destroy finding never makes it false |
+| `capture-support` | The engine's `SUPPORTS_GRAPH_CAPTURE` note is missing where required (step 10), or a document claims capture support or misstates a library's behavior. Judged on `execute()` only: a build or destroy finding never makes it missing. An engine that reports the note while `execute()` breaks the contract draws the breaking class at `BLOCKING` (name the reported note in `Actual`), not a separate `capture-support` finding |
 
 `alloc` and `sync` at build or destroy stay in their own classes; only the unload is `cross-thread`.
 
