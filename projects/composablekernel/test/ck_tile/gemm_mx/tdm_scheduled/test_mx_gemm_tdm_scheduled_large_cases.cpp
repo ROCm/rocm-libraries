@@ -10,9 +10,11 @@
 namespace {
 
 using namespace mx_tdm_scheduled_test;
+using ck_tile::bf16_t;
 using ck_tile::fp8_t;
 using ck_tile::half_t;
 using ck_tile::pk_fp4_t;
+using ck_tile::pk_fp6x16_t;
 
 std::vector<index_t> sample_rows(index_t M, index_t tile_m)
 {
@@ -72,6 +74,26 @@ TEST(MxGemmTdmScheduledLargeCases, WideA)
                      Tu<1, 4, 0, false, false>,
                      ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0>>;
     check_sampled<K>(65536, 16, 81920);
+}
+
+// A past 2^31 bytes with FP6: the MAB tuning (256x16x512 4x1, no PrefetchLdsRead, no GL2
+// prefetch) with WideA at 65536 x 16 x 65536, 3 GiB of FP6 A. Its rows load in TDM iterate mode
+// from component views rebased at each component's first row: from row 32768 on, a row's offset
+// in K values passes 2^31.
+TEST(MxGemmTdmScheduledLargeCases, Fp6WideA)
+{
+    using K = Kernel<pk_fp6x16_t,
+                     pk_fp6x16_t,
+                     bf16_t,
+                     256,
+                     16,
+                     512,
+                     4,
+                     1,
+                     16,
+                     Tu<1, 2, 0, false, false>,
+                     ck_tile::MxTdmScheduledGemmTraits<false, false, true, false, false, 0>>;
+    check_sampled<K>(65536, 16, 65536);
 }
 
 // E past 2^31 bytes: 33024 x 33024 FP16 (2.03 GiB).

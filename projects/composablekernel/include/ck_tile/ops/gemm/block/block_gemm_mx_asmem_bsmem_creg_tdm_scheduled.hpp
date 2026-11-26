@@ -21,9 +21,10 @@ namespace ck_tile {
 /// reads.
 ///
 /// With PackMNIter, V1's M (N) index is (warp, repeat, atom row): the fragment order of the
-/// policy's MakeLdsBlockDescriptor. The reads go through word windows whose distribution is
-/// the word form of V1's warp encoding (one access per 16-byte chunk). The A and B tiles and the
-/// accumulators keep each repeat's fragment as one vector of its warp tensor's words; element-wise
+/// policy's MakeLdsBlockDescriptor. The reads go through word windows whose distribution keeps
+/// the register order of V1's warp encoding (one 16-byte read per K chunk; FP6 three 8-byte reads
+/// per 24-byte chunk). The A and B tiles and the accumulators keep each repeat's fragment as its
+/// warp tensor's words, one vector (FP6: three vectors of 4 words, see FragOf); element-wise
 /// copies into byte thread buffers change the register allocation of the loop.
 ///
 /// Policy is MxGemmPipelineAgBgCrCompTDMScheduledPolicy: the LDS layout, the read distributions
@@ -94,9 +95,20 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
     using AScaleTile = decltype(std::declval<const AScaleWindow&>().load_with_offset(0));
     using BScaleTile = decltype(std::declval<const BScaleWindow&>().load_with_offset(0));
 
-    /// One repeat's A or B fragment of a K step, as the words of V1's warp tensor.
-    using AFrag = ext_vector_t<int32_t, sizeof(typename WarpGemm::AWarpTensor) / 4>;
-    using BFrag = ext_vector_t<int32_t, sizeof(typename WarpGemm::BWarpTensor) / 4>;
+    /// One repeat's A or B fragment of a K step, as the words of V1's warp tensor: one vector
+    /// when the word count is a power of two, else vectors of 4 words (FP6's 12: an ext_vector of
+    /// 12 words is 16 words long, so a 12-word thread buffer cannot be read or written as one).
+    template <index_t Words>
+    using FragOf = std::conditional_t<(Words & (Words - 1)) == 0,
+                                      ext_vector_t<int32_t, Words>,
+                                      array<ext_vector_t<int32_t, 4>, Words / 4>>;
+    using AFrag  = FragOf<sizeof(typename WarpGemm::AWarpTensor) / 4>;
+    using BFrag  = FragOf<sizeof(typename WarpGemm::BWarpTensor) / 4>;
+    // Protects the whole-fragment copies (set_as and get_as of AFrag / BFrag in Run and
+    // LdsFragment): a fragment is exactly its warp tensor's words, so one copy moves all of them.
+    static_assert(sizeof(AFrag) == sizeof(typename WarpGemm::AWarpTensor) &&
+                      sizeof(BFrag) == sizeof(typename WarpGemm::BWarpTensor),
+                  "comp_tdm_scheduled: a fragment holds exactly its warp tensor's words");
     /// One WMMA's accumulators: slot mIter * kRn + nIter of the accumulators' thread buffer.
     using CVec = ext_vector_t<float, WarpGemm::CWarpTensor::get_thread_buffer_size()>;
     static_assert(AccTile::get_thread_buffer_size() == kRm * kRn * sizeof(CVec) / sizeof(float),
@@ -276,8 +288,8 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
                                               bool_constant<false>{});
             }
         }();
-        using Vec = ext_vector_t<int32_t, decltype(tile)::get_thread_buffer_size()>;
-        return tile.get_thread_buffer().template get_as<Vec>()[number<0>{}];
+        using Frag = FragOf<decltype(tile)::get_thread_buffer_size()>;
+        return tile.get_thread_buffer().template get_as<Frag>()[number<0>{}];
     }
 
     /// A's or B's per-lane E8M0 words of K step `step`. With linear reads the step is a word

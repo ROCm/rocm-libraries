@@ -10,6 +10,7 @@ tile_engine CMake builder rejects the pipeline (it runs through the dispatcher).
 is required.
 """
 
+import itertools
 import json
 import re
 import subprocess
@@ -173,6 +174,59 @@ class TestParity(unittest.TestCase):
         self.assertEqual(rows | unreachable, set(sched.REASONS))
         self.assertFalse(parity_cases.PYTHON_ONLY & set(sched.REASONS))
 
+    def test_unreachable_reasons_are_unreachable(self):
+        # Every instance the tile grid offers (each MX type, tile_m and tile_n 16..256, tile_k
+        # 128..1024, the wave groups, both atoms, schedule_tunings()): no reason of
+        # HOST_UNREACHABLE comes back, and every reason that does has a parity row. Every type
+        # has instances past the pad and accumulator rules, so the scan reaches them.
+        rows = {row["reason"] for row in parity_cases.PARITY_CASES}
+        sizes = (16, 32, 64, 128, 256)
+        first = {}
+        ok_dtypes = set()
+        for a_dtype, tile_m, tile_n, tile_k, group, atom in itertools.product(
+            sched.MX_DTYPES,
+            sizes,
+            sizes,
+            (128, 256, 512, 1024),
+            ((2, 2), (4, 1), (1, 4)),
+            (16, 32),
+        ):
+            tile = {
+                **TILE,
+                "tile_m": tile_m,
+                "tile_n": tile_n,
+                "tile_k": tile_k,
+                "warp_m": group[0],
+                "warp_n": group[1],
+                "warp_tile_m": atom,
+            }
+            for tuning in sched.schedule_tunings():
+                spec = sched.spec_from_tile(tile, tuning, a_dtype=a_dtype)
+                reason = sched.validate_instance(spec, tuning)
+                first.setdefault(reason, (a_dtype, tile, tuning))
+                if reason == "ok":
+                    ok_dtypes.add(a_dtype)
+        reached = {r: first[r] for r in parity_cases.HOST_UNREACHABLE if r in first}
+        self.assertFalse(reached, "HOST_UNREACHABLE reasons, with their first instance")
+        no_row = {r: i for r, i in first.items() if r != "ok" and r not in rows}
+        self.assertFalse(no_row, "reasons without a parity row")
+        self.assertEqual(ok_dtypes, set(sched.MX_DTYPES))
+
+    def test_ok_problem_rows_fit_their_instance(self):
+        # GetUnsupportedReason also checks that the instance's traits cover the problem (edge,
+        # wide, tail_steps); MxTdmScheduledSpec.validate does not, so the rows must. An ok row is
+        # wide exactly when its problem passes 2^31, as MxTdmScheduledSelectTraits picks, so a
+        # wide row runs the wide path.
+        for row in parity_cases.PARITY_CASES:
+            if row["mnk"] == (0, 0, 0) or row["reason"] != "ok":
+                continue
+            with self.subTest(row=row["name"]):
+                spec = parity_cases.row_spec(row)
+                t = sched.normalize_tuning(row["tuning"])
+                self.assertTrue(t["edge"] or not (spec.edge_m or spec.edge_n))
+                self.assertEqual(t["wide"], spec.wide_a or spec.wide_b or spec.wide_d)
+                self.assertEqual(t["tail_steps"], spec.tail_steps)
+
     def test_enum_matches_reasons(self):
         text = _POLICY_HPP.read_text()
         enum = re.search(
@@ -189,15 +243,17 @@ class TestParity(unittest.TestCase):
 
 
 class TestLdsLayout(unittest.TestCase):
-    """The Python half of the host test's LdsLayoutOfTheTunedInstances, LaneChunksTileTheKStep and
-    RowBytesOfKValues (test_mx_gemm_tdm_scheduled_host.cpp), and the policy's pad rule."""
+    """The Python half of the host test's LdsLayoutOfTheTunedInstances, LaneChunksTileTheKStep,
+    RowBytesOfKValues, Fp6BankSpreadPads and the GetReadsPerStep values of
+    PolicyDerivesTheScheduleFromProblemAndParameters (test_mx_gemm_tdm_scheduled_host.cpp), and
+    the policy's pad rule."""
 
     def test_tuned_instances(self):
         # The C++ test's instances and problems, each valid for its problem. Its layout fields:
         # B and A bases and component strides, B and A scale bases, buffer stride, LDS size,
         # then A's and B's iterate-mode rows and stride (0 for a load the TDM pads itself). Then
-        # the K step's bytes, chunk bytes, chunks per lane and LDS reads per K step, and whether A
-        # needs WideA (no row needs WideB).
+        # the K step's bytes, chunk bytes, chunks per lane, LDS reads per fragment and per K step,
+        # and whether A needs WideA (no row needs WideB).
         no_split = {"split_b_lds_read": False}
         no_split_no_interleave = {**no_split, "interleave_lds_regions": False}
         c1x4 = {**no_split_no_interleave, "cluster_dim": (1, 4)}
@@ -219,7 +275,7 @@ class TestLdsLayout(unittest.TestCase):
                 "fp4",
                 (4096, 4096, 65536),
                 (0, 99584, 33024, 33280, 132608, 137216, 141312, 282624, 0, 0, 8, 2064),
-                (64, 16, 2, 35),
+                (64, 16, 2, 2, 35),
                 False,
             ),
             (
@@ -229,7 +285,7 @@ class TestLdsLayout(unittest.TestCase):
                 "fp4",
                 mab,
                 (0, 2176, 9216, 33280, 4608, 5120, 131072, 206848, 0, 0, 0, 0),
-                (64, 16, 2, 12),
+                (64, 16, 2, 2, 12),
                 False,
             ),
             (
@@ -239,7 +295,7 @@ class TestLdsLayout(unittest.TestCase):
                 "fp8",
                 mab,
                 fp8_256x16,
-                (128, 16, 4, 22),
+                (128, 16, 4, 4, 22),
                 True,
             ),
             (
@@ -249,7 +305,7 @@ class TestLdsLayout(unittest.TestCase):
                 "bf8",
                 mab,
                 fp8_256x16,
-                (128, 16, 4, 22),
+                (128, 16, 4, 4, 22),
                 True,
             ),
             (
@@ -259,14 +315,53 @@ class TestLdsLayout(unittest.TestCase):
                 "fp8",
                 (2048, 2048, 65536),
                 (0, 65536, 16640, 65536, 98816, 99840, 131072, 231936, 0, 0, 0, 0),
-                (128, 16, 4, 34),
+                (128, 16, 4, 4, 34),
+                False,
+            ),
+            (
+                "fp6 64x128x512",
+                parity_cases.T64X128X512,
+                parity_cases.FP6_SM,
+                "fp6",
+                (256, 2048, 2048),
+                (0, 24832, 52736, 12544, 49664, 51712, 131072, 208896, 2, 784, 4, 1552),
+                (96, 24, 2, 3, 20),
+                False,
+            ),
+            (
+                "fp6 256x16x512",
+                parity_cases.T256X16X512,
+                parity_cases.FP6_MAB,
+                "fp6",
+                (49152, 16, 32768),
+                (
+                    49664,
+                    3136,
+                    0,
+                    65536,
+                    115200,
+                    115712,
+                    131072,
+                    250880,
+                    4,
+                    1552,
+                    2,
+                    784,
+                ),
+                (96, 24, 2, 3, 17),
                 False,
             ),
         ):
             with self.subTest(name=name):
                 M, N, K = mnk
                 spec = sched.spec_from_tile(
-                    tile, tuning, a_dtype=a_dtype, M=M, N=N, K=K
+                    tile,
+                    tuning,
+                    a_dtype=a_dtype,
+                    out_dtype="bf16" if a_dtype == "fp6" else "fp8e4m3",
+                    M=M,
+                    N=N,
+                    K=K,
                 )
                 self.assertEqual(spec.validate(check_shape=True), "ok")
                 lay = spec.lds_layout()
@@ -290,23 +385,26 @@ class TestLdsLayout(unittest.TestCase):
                         spec.step_bytes,
                         spec.chunk_bytes,
                         spec.chunks_per_lane,
+                        spec.reads_per_fragment,
                         spec.reads_per_step,
                     ),
                     step,
                 )
-                self.assertEqual(spec.reads_per_fragment, spec.chunks_per_lane)
                 self.assertEqual((spec.wide_a, spec.wide_b), (wide_a, False))
 
     def test_wide_operands(self):
-        # At M = N = 1024, A and B pass 2^31 bytes above K = 2^22 for FP4 (K / 2 bytes per row)
-        # and above K = 2^21 for the 8-bit types, as in MxTdmScheduledSelectTraits.
+        # At M = N = 1024, A and B pass 2^31 bytes above K = 2^22 for FP4 (K / 2 bytes per row),
+        # above K = 2796192 for FP6 (3 K / 4 bytes; the last multiple of 32 at most 2^23 / 3) and
+        # above K = 2^21 for the 8-bit types, as in MxTdmScheduledSelectTraits.
         fp8 = {**TILE, "tile_m": 128, "tile_n": 128, "tile_k": 256, "warp_tile_m": 16}
+        fp6 = {**TILE, "tile_m": 64, "tile_n": 128, "warp_tile_m": 16}
         for tile, a_dtype, k_max in (
             (TILE, "fp4", 1 << 22),
+            (fp6, "fp6", 2796192),
             (fp8, "fp8", 1 << 21),
             (fp8, "bf8", 1 << 21),
         ):
-            for K, wide in ((k_max, False), (k_max + tile["tile_k"], True)):
+            for K, wide in ((k_max, False), (k_max + sched.BLOCK_K, True)):
                 with self.subTest(a_dtype=a_dtype, K=K):
                     spec = sched.spec_from_tile(
                         tile, {}, a_dtype=a_dtype, M=1024, N=1024, K=K
@@ -345,6 +443,89 @@ class TestLdsLayout(unittest.TestCase):
         ):
             with self.subTest(block=block, row_bytes=row_bytes, rows=rows):
                 self.assertEqual(reason(pad(16, block), row_bytes, rows, 16), want)
+
+    def test_power_of_two_rows_pad_per_bank_cycle(self):
+        # FP4 and 8-bit rows are powers of two, so GetDataPadBlock's lcm(lane step, bank cycle)
+        # is the lane step rounded up to a bank cycle: max(256, repeat x row bytes), for A and B
+        # of every tile of the grid with each type's tile_k values and atoms.
+        sizes = (16, 32, 64, 128, 256)
+        wrong = []
+        for a_dtype, tile_ks, atoms in (
+            ("fp4", (128, 256, 512, 1024), (16, 32)),
+            ("fp8", (128, 256), (16,)),
+            ("bf8", (128, 256), (16,)),
+        ):
+            for tile_m, tile_n, tile_k, group, atom in itertools.product(
+                sizes, sizes, tile_ks, ((2, 2), (4, 1), (1, 4)), atoms
+            ):
+                tile = {
+                    **TILE,
+                    "tile_m": tile_m,
+                    "tile_n": tile_n,
+                    "tile_k": tile_k,
+                    "warp_m": group[0],
+                    "warp_n": group[1],
+                    "warp_tile_m": atom,
+                }
+                spec = sched.spec_from_tile(tile, {}, a_dtype=a_dtype)
+                pads = spec.derived_pads()
+                for side, repeat in (
+                    ("a", spec.wave_repeat_m),
+                    ("b", spec.wave_repeat_n),
+                ):
+                    want = max(256, repeat * spec.k_bytes(tile_k))
+                    if repeat and pads[side].block_bytes != want:
+                        wrong.append(
+                            (a_dtype, tile_m, tile_n, tile_k, group, atom, side)
+                        )
+        self.assertEqual(wrong, [])
+
+    def test_fp6_bank_spread(self):
+        # FP6 data pads 16 B after lcm(lane step, 256 B), where a lane's first bank (64 banks of
+        # 4 B) comes round again, a lane step being wave repeat x row bytes (adjacent lanes of a
+        # lane group read rows a wave repeat apart): at 384 B rows (tile_k 512) every 2, 1, 1, 1
+        # and 1 lane steps for repeats 1, 2, 4, 8 and 16; at 192 B rows (tile_k 256) every 4 lane
+        # steps for repeat 1 and every one for repeat 16; at 96 B rows (tile_k 128) every 8 lane
+        # steps for repeat 1 and every one for repeat 16. None is a pad period: iterate mode.
+        for tile_m, tile_k, block in (
+            (16, 512, 768),
+            (32, 512, 768),
+            (64, 512, 1536),
+            (128, 512, 3072),
+            (256, 512, 6144),
+            (16, 256, 768),
+            (256, 256, 3072),
+            (16, 128, 768),
+            (256, 128, 1536),
+        ):
+            with self.subTest(tile_m=tile_m, tile_k=tile_k):
+                tile = {
+                    **TILE,
+                    "tile_m": tile_m,
+                    "tile_n": 64,
+                    "tile_k": tile_k,
+                    "warp_m": 1,
+                    "warp_n": 4,
+                    "warp_tile_m": 16,
+                }
+                spec = sched.spec_from_tile(
+                    tile, {"split_b_lds_read": False}, a_dtype="fp6"
+                )
+                self.assertEqual(spec.validate(check_shape=False), "ok")
+                pad = spec.derived_pads()["a"]
+                self.assertEqual((pad.pad_bytes, pad.block_bytes), (16, block))
+                self.assertFalse(sched._is_pad_period(pad.block_bytes))
+
+    def test_reads_per_step_clamp(self):
+        # A K step's reads clamp to the s_wait_dscnt immediate, 63, as in GetReadsPerStep:
+        # 256x256x128 on 4x1 waves (4 x 16 repeats) issues 1 + 4 scale reads and 3 (FP6) or 4
+        # (FP8) reads for each of 4 A and 16 B fragments: 65 and 85.
+        tile = {**TILE, "tile_k": 128, "warp_m": 4, "warp_n": 1, "warp_tile_m": 16}
+        for a_dtype in ("fp6", "fp8"):
+            with self.subTest(a_dtype=a_dtype):
+                spec = sched.spec_from_tile(tile, {}, a_dtype=a_dtype)
+                self.assertEqual(spec.validate(check_shape=False), "ok")
+                self.assertEqual(spec.reads_per_step, 63)
 
 
 class TestValidationUtils(unittest.TestCase):

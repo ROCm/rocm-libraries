@@ -94,13 +94,15 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
         return "K must be a multiple of 32: each E8M0 scale covers 32 K values";
     case MxTdmScheduledReason::OutDtype: return "out_dtype must be one of fp8e4m3, fp16, bf16";
     case MxTdmScheduledReason::TileMN: return "tile_m and tile_n must be in 16, 32, 64, 128, 256";
-    case MxTdmScheduledReason::Dtype: return "a_dtype and b_dtype must be in fp4, fp8, bf8";
+    case MxTdmScheduledReason::Dtype: return "a_dtype and b_dtype must be in fp4, fp6, fp8, bf8";
     case MxTdmScheduledReason::DtypeWidth:
-        return "a_dtype and b_dtype must have the same width (no FP4 x 8-bit)";
+        return "a_dtype and b_dtype must have the same width (no FP4, FP6 and 8-bit mixes)";
     case MxTdmScheduledReason::TileK:
-        return "tile_k must be in 128, 256, 512, 1024 for fp4 and 128, 256 for 8-bit types";
+        return "tile_k must be 128, 256, 512 or 1024 for fp4; 128, 256 or 512 for fp6; 128 or 256 "
+               "for 8-bit types";
     case MxTdmScheduledReason::WaveGroup: return "wave_group must be 2x2, 4x1 or 1x4 (4 waves)";
-    case MxTdmScheduledReason::Mma: return "mma must be 32x16 or 16x16 for fp4 and 16x16 for 8-bit";
+    case MxTdmScheduledReason::Mma:
+        return "mma must be 32x16 or 16x16 for fp4 and 16x16 for fp6 and 8-bit types";
     case MxTdmScheduledReason::TileAtoms: return "the tile must hold whole WMMA atoms per wave";
     case MxTdmScheduledReason::ScaleSpan:
         return "A and B scale bytes must each be at most 2^31 (i32 offsets)";
@@ -236,9 +238,9 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
  * @brief Problem of MxGemmPipelineAgBgCrCompTDMScheduled: E = A @ B^T.
  *
  * A is M x K and B is N x K, both K-contiguous (RCR); E is M x N row-major. A and B are
- * pk_fp4_t, fp8_t or bf8_t of the same width, with one E8M0 scale per 32 K values in the K-major
- * layout [ceil(K / 128)][M or N][4] (see mx_scale_to_kmajor in host/mx_processing.hpp). ODataType
- * (E) is fp8_t (saturating), half_t or bf16_t.
+ * pk_fp4_t, pk_fp6x16_t, fp8_t or bf8_t of the same width, with one E8M0 scale per 32 K values in
+ * the K-major layout [ceil(K / 128)][M or N][4] (see mx_scale_to_kmajor in
+ * host/mx_processing.hpp). ODataType (E) is fp8_t (saturating), half_t or bf16_t.
  *
  * BlockGemmShape is a TileGemmShape: block tile (tile_m, tile_n, tile_k), block warps 2x2x1,
  * 4x1x1 or 1x4x1 and warp tile 32x16x128 (FP4) or 16x16x128: the scaled WMMA atom. A
@@ -342,14 +344,17 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     static constexpr index_t kLdsCapacityBytes = 327680;
     /// The largest s_wait_dscnt immediate.
     static constexpr index_t kDscntMax = 63;
+    /// The widest LDS read of a lane: 16 B (ds_load_b128, ds_load_2addr_b64).
+    static constexpr index_t kLdsReadMaxBytes = 16;
     /// VGPRs per lane, which bound the accumulators.
     static constexpr index_t kVgprs = 1024;
 
-    /// Whether T is an A or B type: pk_fp4_t, fp8_t or bf8_t.
+    /// Whether T is an A or B type: pk_fp4_t, pk_fp6x16_t, fp8_t or bf8_t.
     template <typename T>
     CK_TILE_HOST_DEVICE static constexpr bool IsMxDataType()
     {
-        return std::is_same_v<T, pk_fp4_t> || std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>;
+        return std::is_same_v<T, pk_fp4_t> || std::is_same_v<T, pk_fp6x16_t> ||
+               std::is_same_v<T, fp8_t> || std::is_same_v<T, bf8_t>;
     }
     /// Bits per K value of an A or B type.
     template <typename T>
@@ -478,13 +483,17 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return i * kLaneGroups * GetChunkBytes<Problem>();
     }
 
-    /// LDS reads (ds_loads) per lane of an A or B row fragment of one K step: one per chunk (a
-    /// 16 B read for FP4 and the 8-bit types). The waits that count reads (GetReadsPerStep, the
-    /// refill's s_wait_dscnt) hold only while this is at most the ds_loads a fragment issues.
+    /// LDS reads (ds_loads) per lane of an A or B row fragment of one K step: the fewest that
+    /// carry its chunks' bytes, no LDS read taking more than kLdsReadMaxBytes per lane. FP4 and
+    /// the 8-bit types read each 16 B chunk in one ds_load (2 and 4); FP6 reads its two 24 B
+    /// chunks (48 B: 3) in 8 B pieces (MakeLdsReadDistribution), which LLVM pairs into
+    /// ds_load_2addr_b64. The waits that count reads (GetReadsPerStep, the refill's s_wait_dscnt)
+    /// hold only while this is at most the ds_loads a fragment issues, which the fewest possible
+    /// always is.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerFragment()
     {
-        return GetChunksPerLane<Problem>();
+        return GetChunksPerLane<Problem>() * GetChunkBytes<Problem>() / kLdsReadMaxBytes;
     }
 
     /// Whether the next K step's fragments are read while this one's WMMAs run.
@@ -502,9 +511,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     }
 
     /// LDS reads of a K step, clamped to the 6-bit s_wait_dscnt immediate. Above the clamp (FP8
-    /// and BF8 tiles with 16 repeats, or 8 x 8) each wait also drains the oldest reads of the
-    /// next K step before the WMMAs: still correct, but less read latency is hidden. The waits
-    /// are only correct while GetLdsReads is at most the ds_loads a K step issues.
+    /// and BF8 tiles with 16 repeats or 8 x 8, FP6 tiles with 16 x 4) each wait also drains the
+    /// oldest reads of the next K step before the WMMAs: still correct, but less read latency is
+    /// hidden. The waits are only correct while GetLdsReads is at most the ds_loads a K step
+    /// issues.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetReadsPerStep()
     {
@@ -516,6 +526,48 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
     {
         return kPrefetchLdsRead ? GetReadsPerStep<Problem>() : 0;
+    }
+
+    /// Whether an A or B row of a K tile neither holds whole GL2 lines nor divides one (FP6 rows:
+    /// 96, 192 or 384 B).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool IsGl2LineStraddle()
+    {
+        constexpr index_t row = GetKBytes<Problem>(Problem::BlockGemmShape::kK);
+        return row % kGl2LineBytes != 0 && kGl2LineBytes % row != 0;
+    }
+
+    /// GL2 lines the prefetch takes per A or B row of a K tile whose index has parity
+    /// AheadParity: a straddling row's ceil(row / line); else the row's whole lines, and for rows
+    /// that divide a line one line for an even tile only (that line holds the next tile too).
+    template <typename Problem, index_t AheadParity>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetGl2DataLines()
+    {
+        constexpr index_t row = GetKBytes<Problem>(Problem::BlockGemmShape::kK);
+        if constexpr(IsGl2LineStraddle<Problem>())
+            return integer_divide_ceil(row, kGl2LineBytes);
+        else
+            return row / kGl2LineBytes == 0 && AheadParity == 0 ? 1 : row / kGl2LineBytes;
+    }
+
+    /// The byte offset in an A or B row of packed_k bytes of GL2 line `line` of the K tile at row
+    /// byte k_byte: line by line from the tile's first byte or, for a straddling tile row, back
+    /// from the tile's last byte, so the tiles of a row that starts on a line together reach
+    /// every line of it. A partial tile's lines are clamped to the row's last byte; a straddling
+    /// row's are counted back from it. A straddling row's offsets stay at or after byte 0 only
+    /// while K >= tile_k (the pipeline's GetUnsupportedReason):
+    /// (GetGl2DataLines - 1) * kGl2LineBytes < row.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t
+    GetGl2DataOffset(index_t k_byte, index_t packed_k, index_t line)
+    {
+        if constexpr(IsGl2LineStraddle<Problem>())
+        {
+            constexpr index_t row = GetKBytes<Problem>(Problem::BlockGemmShape::kK);
+            return min(k_byte + row - 1, packed_k - 1) - line * kGl2LineBytes;
+        }
+        else
+            return min(k_byte + line * kGl2LineBytes, packed_k - 1);
     }
 
     /// The first compile-time rule the Problem and this policy break, or Ok. The rules that need
@@ -540,7 +592,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         if(GetElemBits<BDataType>() != GetElemBits<ADataType>())
             return R::DtypeWidth;
         constexpr bool fp4 = std::is_same_v<ADataType, pk_fp4_t>;
-        if(!(tile_k == 128 || tile_k == 256 || (fp4 && (tile_k == 512 || tile_k == 1024))))
+        constexpr bool fp6 = std::is_same_v<ADataType, pk_fp6x16_t>;
+        if(!(tile_k == 128 || tile_k == 256 || ((fp4 || fp6) && tile_k == 512) ||
+             (fp4 && tile_k == 1024)))
             return R::TileK;
         constexpr index_t warp_m = GetWarps<Problem, true>();
         constexpr index_t warp_n = GetWarps<Problem, false>();
@@ -667,22 +721,39 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     /// A's or B's data in LDS as the TDM loads write it, over [tile row, K] in elements of the
     /// operand: component c's op.rows rows start op.stride bytes after component c - 1's. The
     /// offset is from the operand's base.
+    ///
+    /// Widths without whole K values per byte (FP6: 3 bytes per 4 values) have no such
+    /// descriptor: their 16 B pads are no whole number of K values. They take the unpadded box of
+    /// MakeDramTdmTileDistribution (an iterate-mode block's rows by tile_k) instead:
+    /// make_tdm_groups uses only the LDS address of the window's origin, the component's first
+    /// byte, and the load's TDMConfig places the blocks iterate_stride apart (FP6 data always
+    /// loads in iterate mode, see GetDataPadBlock).
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsTdmBlockDescriptor()
     {
-        constexpr auto runs       = MakeLdsRunsDescriptor<Problem, IsA, true>();
-        constexpr auto lengths    = runs.get_lengths();
-        constexpr index_t comps   = lengths[number<0>{}];
-        constexpr index_t outer   = lengths[number<1>{}];
-        constexpr index_t inner   = lengths[number<2>{}];
-        constexpr index_t k_elems = lengths[number<3>{}];
-        return transform_tensor_descriptor(
-            runs,
-            make_tuple(
-                make_merge_transform(make_tuple(number<comps>{}, number<outer>{}, number<inner>{})),
-                make_pass_through_transform(number<k_elems>{})),
-            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
+        if constexpr(8 % GetElemBits<typename Problem::ADataType>() != 0)
+        {
+            constexpr LdsOperand op    = GetLdsOperand<Problem, IsA>();
+            constexpr index_t box_rows = op.iterate_rows > 0 ? op.iterate_rows : op.rows;
+            return make_naive_tensor_descriptor_packed(
+                make_tuple(number<box_rows>{}, number<Problem::BlockGemmShape::kK>{}));
+        }
+        else
+        {
+            constexpr auto runs       = MakeLdsRunsDescriptor<Problem, IsA, true>();
+            constexpr auto lengths    = runs.get_lengths();
+            constexpr index_t comps   = lengths[number<0>{}];
+            constexpr index_t outer   = lengths[number<1>{}];
+            constexpr index_t inner   = lengths[number<2>{}];
+            constexpr index_t k_elems = lengths[number<3>{}];
+            return transform_tensor_descriptor(
+                runs,
+                make_tuple(make_merge_transform(
+                               make_tuple(number<comps>{}, number<outer>{}, number<inner>{})),
+                           make_pass_through_transform(number<k_elems>{})),
+                make_tuple(sequence<0, 1, 2>{}, sequence<3>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
     }
 
     /// The DRAM distribution of one TDM component load of A or B: one box of the component's
@@ -813,32 +884,55 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     }
 
     /// One wave's read of an A or B fragment of one K step, in words: lane l reads row l % 16 of
-    /// each half and, for each chunk index, the 16-byte chunk of its lane group l / 16.
+    /// each half and, for each chunk index, the chunk (GetChunkBytes) of its lane group l / 16.
+    /// A chunk of whole 16-byte reads (FP4 and the 8-bit types) is read at once:
     ///   rows: (half, l % 16)   K words: (chunk index, l / 16, 4)
+    /// Any other chunk (FP6's 24 bytes, 8-byte aligned; one half: the 16x16 atom) is read in
+    /// chunk bytes / 8 reads of 8 bytes:
+    ///   rows: l % 16   K words: (chunk index, l / 16, chunk bytes / 8, 2)
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsReadDistribution()
     {
         constexpr index_t chunks = GetChunksPerLane<Problem>();
-        // Protects the K words below (4 per lane group and chunk): the distribution reads
-        // 16-byte chunks, so GetChunkBytes must be 16.
-        static_assert(GetChunkBytes<Problem>() == 16,
-                      "comp_tdm_scheduled: the LDS read distribution reads 16-byte chunks");
-        if constexpr(GetFragmentHalves<Problem, IsA>() == 2)
+        if constexpr(GetChunkBytes<Problem>() % 16 != 0)
+        {
+            constexpr index_t pieces = GetChunkBytes<Problem>() / 8;
+            // Protects the rows and pieces below: one 16-row half (FP6 runs the 16x16 atom only)
+            // and chunks of whole 8-byte pieces, so that `pieces` reads cover the chunk.
+            static_assert(GetFragmentHalves<Problem, IsA>() == 1 &&
+                              GetChunkBytes<Problem>() % 8 == 0,
+                          "comp_tdm_scheduled: FP6 reads 16-row fragments in 8-byte pieces");
             return make_static_tile_distribution(
                 tile_distribution_encoding<sequence<>,
-                                           tuple<sequence<2, 16>, sequence<chunks, 2, 4>>,
-                                           tuple<sequence<2, 1>>,
-                                           tuple<sequence<1, 1>>,
-                                           sequence<1, 2, 2>,
-                                           sequence<0, 0, 2>>{});
-        else
-            return make_static_tile_distribution(
-                tile_distribution_encoding<sequence<>,
-                                           tuple<sequence<16>, sequence<chunks, 2, 4>>,
+                                           tuple<sequence<16>, sequence<chunks, 2, pieces, 2>>,
                                            tuple<sequence<2, 1>>,
                                            tuple<sequence<1, 0>>,
-                                           sequence<2, 2>,
-                                           sequence<0, 2>>{});
+                                           sequence<2, 2, 2>,
+                                           sequence<0, 2, 3>>{});
+        }
+        else
+        {
+            // Protects the K words below (4 per lane group and chunk): the distribution reads
+            // 16-byte chunks, so GetChunkBytes must be 16.
+            static_assert(GetChunkBytes<Problem>() == 16,
+                          "comp_tdm_scheduled: the LDS read distribution reads 16-byte chunks");
+            if constexpr(GetFragmentHalves<Problem, IsA>() == 2)
+                return make_static_tile_distribution(
+                    tile_distribution_encoding<sequence<>,
+                                               tuple<sequence<2, 16>, sequence<chunks, 2, 4>>,
+                                               tuple<sequence<2, 1>>,
+                                               tuple<sequence<1, 1>>,
+                                               sequence<1, 2, 2>,
+                                               sequence<0, 0, 2>>{});
+            else
+                return make_static_tile_distribution(
+                    tile_distribution_encoding<sequence<>,
+                                               tuple<sequence<16>, sequence<chunks, 2, 4>>,
+                                               tuple<sequence<2, 1>>,
+                                               tuple<sequence<1, 0>>,
+                                               sequence<2, 2>,
+                                               sequence<0, 2>>{});
+        }
     }
 
     /// Word offset of fragment-order row t of A's or B's data from the operand's base, as
@@ -846,14 +940,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowOffset(index_t t)
     {
-        constexpr LdsOperand op   = GetLdsOperand<Problem, IsA>();
-        constexpr index_t atom    = GetAtom<Problem, IsA>();
-        constexpr index_t repeats = GetRepeats<Problem, IsA>();
-        const index_t wave        = t / (repeats * atom);
-        const index_t r           = t / atom % repeats;
-        const index_t l           = t % atom;
-        const index_t row         = wave * atom * repeats + l * repeats + r;
-        return (GetLdsRowByteOffset<index_t>(op, GetLdsRowBytes<Problem>(), row) - op.base) / 4;
+        constexpr LdsOperand op = GetLdsOperand<Problem, IsA>();
+        return GetLdsRowWordOffset<Problem, IsA>(op, t);
     }
 
     /// Whether a fragment read can take its repeat and half offsets as constants: for every
@@ -869,7 +957,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         constexpr index_t halves  = GetFragmentHalves<Problem, IsA>();
         constexpr index_t rows    = warps * repeats * atom;
         constexpr auto desc       = MakeLdsBlockDescriptor<Problem, IsA>();
-        const auto offset         = [](index_t t) { return GetLdsRowOffset<Problem, IsA>(t); };
+        // The placement once for the whole check, not once per offset.
+        constexpr LdsOperand op = GetLdsOperand<Problem, IsA>();
+        const auto offset = [op](index_t t) { return GetLdsRowWordOffset<Problem, IsA>(op, t); };
         for(const index_t t : {index_t{1}, atom - 1, atom, rows / 2 + 1, rows - 1})
             if(desc.calculate_offset(make_multi_index(t, 0)) != offset(t))
                 return false;
@@ -995,8 +1085,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         constexpr index_t repeats = GetRepeats<Problem, IsA>();
         constexpr index_t steps   = GetKSteps<Problem>();
         constexpr auto desc       = MakeLdsScaleDescriptor<Problem, IsA>();
-        const auto offset         = [](index_t step, index_t row) {
-            constexpr LdsOperand op = GetLdsOperand<Problem, IsA, true>();
+        // The placement once for the whole check, not once per offset (the loops below take
+        // an offset of every row, K step and repeat).
+        constexpr LdsOperand op = GetLdsOperand<Problem, IsA, true>();
+        const auto offset       = [op](index_t step, index_t row) {
             return (GetLdsScaleByteOffset<index_t>(op, step, row) - op.base) / 4;
         };
         const index_t step_words = offset(1, 0);
@@ -1060,10 +1152,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 
     /// The block GEMM: BlockGemmARegBRegCRegV1 with PackMNIter (M and N in the fragment order of
     /// MakeLdsBlockDescriptor) and one K step per sub-tile, reading this policy's LDS layout. The
-    /// warp GEMM's operands take one access per 16-byte chunk, as MakeLdsReadDistribution reads
-    /// them. The warp GEMM is the gfx1250 WMMA WarpGemmDispatcher picks on the device, built from
-    /// its traits because the dispatcher has no gfx1250 16x16x128 WMMA in the host pass (which also
-    /// instantiates the pipeline) nor named WMMAs with USE_NEW_UNIFIED_FRAMEWORK.
+    /// warp GEMM's operands take one access per chunk (GetChunksPerLane), in the register order
+    /// of MakeLdsReadDistribution. The warp GEMM is the gfx1250 WMMA WarpGemmDispatcher picks on
+    /// the device, built from its traits because the dispatcher has no gfx1250 16x16x128 WMMA in
+    /// the host pass (which also instantiates the pipeline) nor named WMMAs with
+    /// USE_NEW_UNIFIED_FRAMEWORK.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
@@ -1105,7 +1198,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
      * @brief The tuning part of a kernel name: the cluster, then every value that is not its
      *        default, each with a leading "_": the out dtype, the wave group, pf<N> (a GL2
      *        prefetch distance other than 4), lp0 (PrefetchLdsRead off), hplrnone (SplitBLdsRead
-     *        off), lsi0 (InterleaveLdsRegions off) and mma16 (the 16x16 atom for FP4).
+     *        off), lsi0 (InterleaveLdsRegions off) and mma16 (the 16x16 atom, any type).
      *
      * @param with_shape_parts  Include the out dtype, wave group and mma16, which a CK kernel name
      *                          already carries in its tile and type fields.
@@ -1139,10 +1232,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     }
 
     private:
-    // The LDS layout. A and B rows are padded by 16 B per bank cycle-aligned block, so the rows a
-    // K step reads start in different banks; the scales take 16 B per 256 B when their reads
-    // would otherwise conflict; regions start at GetRegionAlign boundaries; with
-    // InterleaveLdsRegions the components are placed by 64 KiB segment (GetInterleavePlacement).
+    // The LDS layout. A and B rows are padded by 16 B per GetDataPadBlock, so the rows a K step
+    // reads start in different banks; the scales take 16 B per 256 B when their reads would
+    // otherwise conflict; regions start at GetRegionAlign boundaries; with InterleaveLdsRegions the
+    // components are placed by 64 KiB segment (GetInterleavePlacement).
     static constexpr index_t kDataPadBytes    = 16;
     static constexpr index_t kBankCycleBytes  = 256;
     static constexpr index_t kMxsBlockBytes   = 256;
@@ -1247,15 +1340,16 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         index_t lds_bytes     = 0;
     };
 
-    /// The bytes after which an A or B component takes kDataPadBytes: the K row of `repeat`
-    /// interleaved rows (the operand's wave repeat, see MakeLdsBlockDescriptor), rounded up to a
-    /// bank cycle, so the rows a K step reads start in different banks.
+    /// The bytes after which an A or B component takes kDataPadBytes: the 16 lanes of a lane
+    /// group read rows `repeat` apart (the operand's wave repeat, see MakeLdsBlockDescriptor), a
+    /// lane step of repeat * k_bytes. A lane's first bank (64 banks of 4 B) comes round again
+    /// after lcm(lane step, kBankCycleBytes) bytes, so 16 B there move the next lanes' first
+    /// banks on by 4: the 16 lanes start in different banks. The block is a power of two for
+    /// FP4 and the 8-bit types; FP6 rows are 96 B per K step, so their block never is and the
+    /// TDM writes it in iterate mode.
     CK_TILE_HOST_DEVICE static constexpr index_t GetDataPadBlock(index_t k_bytes, index_t repeat)
     {
-        index_t block = static_cast<index_t>(round_up(k_bytes, kBankCycleBytes));
-        if(k_bytes * repeat > kBankCycleBytes)
-            block = static_cast<index_t>(round_up(k_bytes * repeat, kBankCycleBytes));
-        return block;
+        return lcm(repeat * k_bytes, kBankCycleBytes);
     }
 
     /// The scale padding of an operand with wave repeat `repeat`: a K step of its scales is
@@ -1574,6 +1668,23 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                 linear += linear / op.block_bytes * op.pad_bytes;
         }
         return op.base + component * op.stride + linear;
+    }
+
+    /// GetLdsRowOffset of row t for the operand's placement op (GetLdsOperand<Problem, IsA>()),
+    /// which a caller that takes many offsets evaluates once. The row bytes are GetLdsRowBytes's,
+    /// without evaluating the layout.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowWordOffset(const LdsOperand& op,
+                                                                     index_t t)
+    {
+        constexpr index_t atom      = GetAtom<Problem, IsA>();
+        constexpr index_t repeats   = GetRepeats<Problem, IsA>();
+        constexpr index_t row_bytes = GetKBytes<Problem>(Problem::BlockGemmShape::kK);
+        const index_t wave          = t / (repeats * atom);
+        const index_t r             = t / atom % repeats;
+        const index_t l             = t % atom;
+        const index_t row           = wave * atom * repeats + l * repeats + r;
+        return (GetLdsRowByteOffset<index_t>(op, row_bytes, row) - op.base) / 4;
     }
 
     /// LDS byte offset of the four E8M0 scales of row `row` at K step `step`.

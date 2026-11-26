@@ -92,7 +92,7 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
  *
  * PipelineImpl has five roles: TdmLoader (descriptors built once, each tile patches only its LDS
  * address, global address and remaining sizes; even waves load one B component, odd waves one A
- * component), Gl2Prefetcher, LdsReader (16 B reads), TileCompute (PrefetchLdsRead and
+ * component), Gl2Prefetcher, LdsReader (16 B reads; FP6 8 B), TileCompute (PrefetchLdsRead and
  * SplitBLdsRead) and Pipeline (PrefetchStages 2: tile k refills its own buffer with
  * tile k+2 once the cluster has read it; tile k+1 is waited for at tile k's last K step).
  *
@@ -230,7 +230,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static_assert(kClusterZ == 1, "comp_tdm_scheduled: the cluster spans no K");
     static constexpr index_t kGl2Distance     = Policy::kGl2PrefetchDistance;
     static constexpr index_t kReadsPerStep    = Policy::template GetReadsPerStep<Problem>();
-    static constexpr index_t kLdsRowBytes     = Policy::template GetLdsRowBytes<Problem>();
     static constexpr index_t kLdsBufferStride = Policy::template GetLdsBufferStride<Problem>();
     static constexpr index_t kLatePending     = Policy::template GetLatePendingReads<Problem>();
     /// The sched_fence mask of the pipeline's fences: LDS reads and WMMAs stay put, ALU work may
@@ -245,8 +244,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     /// The refill's cluster barrier in two halves: the arrival once every wave has drained its
     /// reads of the buffer, the wait after the last K step's WMMAs (fill_arrive, fill_wait).
     static constexpr bool kSplitCluster = kHasCluster && !kSourceOrder;
-    /// A K step's ds_loads (unclamped): kReadsA with LocalPrefetchA (scales and A), kReadsBFrag
-    /// per B fragment.
+    /// A K step's ds_loads as the policy counts them (GetReadsPerFragment, a lower bound;
+    /// unclamped): kReadsA with LocalPrefetchA (scales and A), kReadsBFrag per B fragment.
     static constexpr index_t kReadsBFrag = Policy::template GetReadsPerFragment<Problem>();
     static constexpr index_t kReadsA =
         (kRm < 8 ? 1 : kRm / 4) + (kRn < 8 ? 1 : kRn / 4) + kReadsBFrag * (kAtomM / 16) * kRm;
@@ -276,7 +275,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     template <typename T>
     CK_TILE_HOST static const char* GetDtypeName()
     {
-        return std::is_same_v<T, pk_fp4_t> ? "fp4" : std::is_same_v<T, fp8_t> ? "fp8" : "bf8";
+        return std::is_same_v<T, pk_fp4_t>      ? "fp4"
+               : std::is_same_v<T, pk_fp6x16_t> ? "fp6"
+               : std::is_same_v<T, fp8_t>       ? "fp8"
+                                                : "bf8";
     }
     /// The kernel-name type tag: mx, A's type, then B's if it differs.
     CK_TILE_HOST static std::string GetDtypeTag()
@@ -734,7 +736,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         /// every category: any branch in the loop body makes LLVM drain the LDS read pipeline.
         /// AheadParity is the parity of the prefetched tile's index: with 128 B rows one line
         /// holds an even tile and the next one, so the data lines are only prefetched for even
-        /// tiles. Past the end of K the last tile is prefetched again.
+        /// tiles. Rows that neither hold whole lines nor divide one (FP6 rows: 96, 192 or 384 B)
+        /// take ceil(row / line) lines per row, counted back from the tile's last byte
+        /// (the policy's GetGl2DataLines and GetGl2DataOffset). Past the end of K the last tile is
+        /// prefetched again.
         template <index_t AheadParity>
         CK_TILE_DEVICE void prefetch_for_tdm_cluster(index_t k_ahead) const
         {
@@ -744,7 +749,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 k_ahead                = k_ahead < K ? k_ahead : K - kTileK;
                 const index_t k_byte   = Policy::template GetKBytes<Problem>(k_ahead);
                 constexpr index_t data_lines =
-                    kLdsRowBytes / line == 0 && AheadParity == 0 ? 1 : kLdsRowBytes / line;
+                    Policy::template GetGl2DataLines<Problem, AheadParity>();
                 const index_t cluster_m0 = kHasCluster ? block_m - cluster_wy * kTileM : block_m;
                 const index_t cluster_n0 = kHasCluster ? block_n - cluster_wx * kTileN : block_n;
                 constexpr index_t b_scale_row     = kClusterX * kTileN * 4;
@@ -784,8 +789,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                         // A partial tile's lines past the end of the row are clamped to its last
                         // byte: past the last row's they are past the end of the buffer. Any
                         // instance may prefetch one: the K tail, or a partial last loop tile.
-                        const index_t offset = min(
-                            k_byte + integer_modulo_nonnegative<lines>(index) * line, packed_k - 1);
+                        const index_t offset = Policy::template GetGl2DataOffset<Problem>(
+                            k_byte, packed_k, integer_modulo_nonnegative<lines>(index));
                         const index_t row_bytes = DramRowBytes<is_a>();
                         const uint8_t* base     = Bytes(DramWindow<is_a>());
                         if constexpr(wide)

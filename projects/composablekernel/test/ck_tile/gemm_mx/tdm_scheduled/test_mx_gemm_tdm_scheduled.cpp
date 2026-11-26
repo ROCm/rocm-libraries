@@ -16,6 +16,7 @@ using ck_tile::bf8_t;
 using ck_tile::fp8_t;
 using ck_tile::half_t;
 using ck_tile::pk_fp4_t;
+using ck_tile::pk_fp6x16_t;
 
 template <typename O, typename Tuning, typename Traits>
 using Fp4Big = Kernel<pk_fp4_t, pk_fp4_t, O, 256, 256, 512, 2, 2, 32, Tuning, Traits>;
@@ -178,6 +179,73 @@ TEST(MxGemmTdmScheduled, EightBitTypes)
         1000, 1000, 2048 + 96);
     check<Kernel<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, Shape<true, true, 1>>>(
         1000, 1001, 2048 + 96);
+}
+
+// FP6, bf16 out, with and without PrefetchLdsRead: the SM tuning (64x128x512, PrefetchLdsRead,
+// GL2 distance 2, no SplitBLdsRead, regions not interleaved; its 384 B rows straddle GL2 lines)
+// and the MAB tuning (256x16x512 4x1, no PrefetchLdsRead, no GL2 prefetch).
+template <typename Tuning, typename Traits>
+using Fp6Sm = Kernel<pk_fp6x16_t, pk_fp6x16_t, bf16_t, 64, 128, 512, 2, 2, 16, Tuning, Traits>;
+template <typename Tuning, typename Traits>
+using Fp6Mab   = Kernel<pk_fp6x16_t, pk_fp6x16_t, bf16_t, 256, 16, 512, 4, 1, 16, Tuning, Traits>;
+using Fp6SmTu  = Tu<4, 4, 2, true, false, false>;
+using Fp6MabTu = Tu<1, 2, 0, false, false>;
+
+// Tile counts 1 to 4 (TailNumber::One and Two) with both tunings; 4 tiles of the SM tuning is
+// 256 x 2048 x 2048, the problem it is tuned for.
+TEST(MxGemmTdmScheduled, Fp6TileCounts)
+{
+    for(index_t tiles = 1; tiles <= 4; ++tiles)
+    {
+        check<Fp6Sm<Fp6SmTu, Shape<false, false, 0>>>(256, 2048, tiles * 512);
+        check<Fp6Mab<Fp6MabTu, Shape<false, false, 0>>>(1024, 16, tiles * 512);
+    }
+}
+
+// K tails of one K step (SM) and three (MAB), each after an even and an odd whole-tile count, the
+// second with a partial last K step (K a multiple of 32 only); and a partial tile of every K
+// step, which runs in the loop.
+TEST(MxGemmTdmScheduled, Fp6KTail)
+{
+    using SmTail1  = Fp6Sm<Fp6SmTu, Shape<false, false, 1>>;
+    using MabTail3 = Fp6Mab<Fp6MabTu, Shape<false, false, 3>>;
+    check<SmTail1>(256, 2048, 2048 + 128);
+    check<SmTail1>(256, 2048, 1536 + 32);
+    check<MabTail3>(1024, 16, 1536 + 384);
+    check<MabTail3>(1024, 16, 2048 + 352);
+    check<Fp6Sm<Fp6SmTu, Shape<false, false, 0>>>(256, 2048, 1536 + 416);
+    check<Fp6Mab<Fp6MabTu, Shape<false, false, 0>>>(1024, 16, 1536 + 480);
+}
+
+// Partial M and N tiles with both tunings, the SM one with a K tail. A and B load in iterate mode
+// (SM: A 2 and B 4 rows per block; MAB: A 4 and B 2), two components of half the tile each: the
+// last tile's rows end inside a block, fewer rows than one block included, and leave the second
+// component of A or B empty.
+TEST(MxGemmTdmScheduled, Fp6Edges)
+{
+    using SmEdge  = Fp6Sm<Tu<1, 1, 2, true, false, false>, Shape<true, true, 1>>;
+    using MabEdge = Fp6Mab<Tu<1, 1, 0, false, false>, Shape<true, true, 0>>;
+    // Last tile: A 32 + 9 rows, B 64 + 3; then A 17 + 0, B 3 + 0.
+    check<SmEdge>(64 + 41, 128 + 67, 1024 + 128);
+    check<SmEdge>(64 + 17, 128 + 3, 1024 + 128);
+    // Last tile: A 128 + 105 rows, B 8 + 1; then A 17 + 0, B 8 + 0.
+    check<MabEdge>(256 + 233, 16 + 9, 2048);
+    check<MabEdge>(256 + 17, 8, 2048);
+}
+
+// tile_k 128 and 256 (96 B and 192 B rows: one GL2 line each, the one holding the tile's last
+// byte), each with a partial last tile in the loop, whose line is clamped at the row's end;
+// SplitBLdsRead with interleaved regions, with a cluster and without one (the refill's wait then
+// counts the reads in flight, 3 per FP6 fragment); the 1x4 wave group; FP8 and FP16 out.
+TEST(MxGemmTdmScheduled, Fp6TilesAndOutputs)
+{
+    using S = Shape<false, false, 0>;
+    check<Kernel<pk_fp6x16_t, pk_fp6x16_t, fp8_t, 128, 128, 128, 2, 2, 16, Tu<2, 2>, S>>(
+        512, 512, 1024 + 32);
+    check<Kernel<pk_fp6x16_t, pk_fp6x16_t, half_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, S>>(
+        512, 512, 2048 + 160);
+    check<Kernel<pk_fp6x16_t, pk_fp6x16_t, bf16_t, 64, 256, 512, 1, 4, 16, Tu<2, 2>, S>>(
+        512, 512, 2048);
 }
 
 // The tile after the K loop reads no next tile and refills no buffer. Each schedule variant with

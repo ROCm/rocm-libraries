@@ -50,7 +50,23 @@ def _tile(tile_m, tile_n, tile_k, warp_m, warp_n, atom_m):
 T256X256X512 = _tile(256, 256, 512, 2, 2, 32)
 T128X16X512 = _tile(128, 16, 512, 4, 1, 16)
 T128X128X256 = _tile(128, 128, 256, 2, 2, 16)
+T64X128X512 = _tile(64, 128, 512, 2, 2, 16)
+T256X16X512 = _tile(256, 16, 512, 4, 1, 16)
 NO_CLUSTER = {"cluster_dim": (1, 1)}
+#: The FP6 tunings of 64x128x512 (SM: GL2 distance 2, PrefetchLdsRead, no SplitBLdsRead, regions
+#: not interleaved) and 256x16x512 4x1 (MAB: 1x2 cluster, no GL2 prefetch, no PrefetchLdsRead, no
+#: SplitBLdsRead).
+FP6_SM = {
+    "gl2_prefetch_distance": 2,
+    "split_b_lds_read": False,
+    "interleave_lds_regions": False,
+}
+FP6_MAB = {
+    "cluster_dim": (1, 2),
+    "gl2_prefetch_distance": 0,
+    "prefetch_lds_read": False,
+    "split_b_lds_read": False,
+}
 
 
 def _row(
@@ -88,9 +104,12 @@ PARITY_CASES = [
     _row("tile_m_48", _tile(48, 256, 512, 2, 2, 32), "tile_mn"),
     _row("in_f16", T256X256X512, "dtype", a="fp16"),
     _row("fp4_x_fp8", T256X256X512, "dtype_width", b="fp8"),
+    _row("fp6_x_fp8", T128X128X256, "dtype_width", a="fp6", b="fp8"),
     _row("fp8_tile_k_512", T256X256X512, "tile_k", a="fp8"),
+    _row("fp6_tile_k_1024", _tile(64, 128, 1024, 2, 2, 16), "tile_k", a="fp6"),
     _row("waves_2x1", _tile(256, 256, 512, 2, 1, 32), "wave_group"),
     _row("fp8_atom_32", _tile(128, 128, 256, 2, 2, 32), "mma", a="fp8"),
+    _row("fp6_atom_32", _tile(128, 128, 256, 2, 2, 32), "mma", a="fp6"),
     _row("tile_16x16", _tile(16, 16, 128, 2, 2, 32), "tile_atoms"),
     _row(
         "split_b_no_prefetch",
@@ -113,7 +132,51 @@ PARITY_CASES = [
         "interleave_baseline_split",
     ),
     _row("lds_64x256x1024", _tile(64, 256, 1024, 2, 2, 32), "lds_capacity"),
+    _row(
+        "fp6_interleave_64x256x512",
+        _tile(64, 256, 512, 2, 2, 16),
+        "interleave_capacity",
+        a="fp6",
+    ),
     _row("t256x256x512_1024", T256X256X512, "ok", mnk=(1024, 1024, 1024)),
+    _row("fp6_sm", T64X128X512, "ok", a="fp6", out="bf16", tuning=FP6_SM),
+    _row("fp6_mab", T256X16X512, "ok", a="fp6", out="bf16", tuning=FP6_MAB),
+    _row(
+        "fp6_sm_256x2048x2048",
+        T64X128X512,
+        "ok",
+        a="fp6",
+        out="bf16",
+        tuning=FP6_SM,
+        mnk=(256, 2048, 2048),
+    ),
+    _row(
+        "fp6_mab_wide_65536x16x65536",
+        T256X16X512,
+        "ok",
+        a="fp6",
+        out="bf16",
+        tuning={**FP6_MAB, "wide": True},
+        mnk=(65536, 16, 65536),
+    ),
+    _row(
+        "fp6_k_2064",
+        T64X128X512,
+        "k_scale_block",
+        a="fp6",
+        out="bf16",
+        tuning=FP6_SM,
+        mnk=(256, 2048, 2048 + 16),
+    ),
+    _row(
+        "fp6_k_256",
+        T64X128X512,
+        "k_short",
+        a="fp6",
+        out="bf16",
+        tuning=FP6_SM,
+        mnk=(256, 2048, 256),
+    ),
     _row("m_0", T256X256X512, "shape_positive", tuning=NO_CLUSTER, mnk=(0, 256, 512)),
     _row(
         "k_1040", T256X256X512, "k_scale_block", tuning=NO_CLUSTER, mnk=(256, 256, 1040)
@@ -151,8 +214,6 @@ HOST_UNREACHABLE = {
     "lds_pad": "derived pads always encode",
     # At most 512 accumulators: 256x256 with a 2x2 wave group, 32x16 atoms (4 x 8 x 16).
     "accumulators": "valid tiles hold at most 512 accumulators per lane",
-    # The aligned interleaved layouts of every valid tile fit in half the LDS.
-    "interleave_capacity": "no valid tile's aligned layout exceeds the LDS",
 }
 
 #: validate_instance reasons outside REASONS and the C++ enum: TailSteps is a GemmTraits value.
@@ -160,6 +221,7 @@ PYTHON_ONLY = {"tail_steps"}
 
 _CPP_DTYPES = {
     "fp4": "ck_tile::pk_fp4_t",
+    "fp6": "ck_tile::pk_fp6x16_t",
     "fp8": "ck_tile::fp8_t",
     "bf8": "ck_tile::bf8_t",
     "fp16": "ck_tile::half_t",

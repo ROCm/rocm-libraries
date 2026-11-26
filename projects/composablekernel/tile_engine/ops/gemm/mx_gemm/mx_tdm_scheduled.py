@@ -16,6 +16,7 @@ tile config and the data types.
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -36,8 +37,12 @@ I32_SPAN = 1 << 31
 LDS_CAPACITY_BYTES = 327680
 VGPRS = 1024
 LANE_GROUPS = 2
+#: The largest s_wait_dscnt immediate (the policy's kDscntMax).
+DSCNT_MAX = 63
+#: The widest LDS read of a lane, in bytes (the policy's kLdsReadMaxBytes).
+LDS_READ_MAX_BYTES = 16
 
-MX_DTYPES = ("fp4", "fp8", "bf8")
+MX_DTYPES = ("fp4", "fp6", "fp8", "bf8")
 #: Bits per K value of an A or B type (the policy's GetElemBits); "fp6" is pk_fp6x16_t.
 DTYPE_BITS = {"fp4": 4, "fp6": 6, "fp8": 8, "bf8": 8}
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
@@ -264,8 +269,9 @@ class MxTdmScheduledSpec:
 
     @property
     def reads_per_fragment(self) -> int:
-        """ds_loads per lane of a row fragment of a K step (the policy's GetReadsPerFragment)."""
-        return self.chunks_per_lane
+        """ds_loads per lane of a row fragment of a K step (the policy's GetReadsPerFragment):
+        the fewest that carry its chunks' bytes, at most LDS_READ_MAX_BYTES each (FP6: three)."""
+        return self.chunks_per_lane * self.chunk_bytes // LDS_READ_MAX_BYTES
 
     @property
     def region_align(self) -> int:
@@ -342,12 +348,15 @@ class MxTdmScheduledSpec:
 
     @property
     def reads_per_step(self) -> int:
-        return (
+        """LDS reads of a K step, clamped to the s_wait_dscnt immediate (the policy's
+        GetReadsPerStep)."""
+        reads = (
             self.a_scale_reads
             + self.b_scale_reads
             + self.reads_per_fragment
             * (self.a_rows * self.wave_repeat_m + self.wave_repeat_n)
         )
+        return min(reads, DSCNT_MAX)
 
     @property
     def late_pending_reads(self) -> int:
@@ -363,10 +372,10 @@ class MxTdmScheduledSpec:
         k_bytes = self.k_bytes(self.tile_k)
 
         def data_block(repeat: int) -> int:
-            block = _round_up(k_bytes, BANK_CYCLE_BYTES)
-            if k_bytes * repeat > BANK_CYCLE_BYTES:
-                block = _round_up(k_bytes * repeat, BANK_CYCLE_BYTES)
-            return block
+            """The policy's GetDataPadBlock: lcm(lane step, bank cycle), the lanes of a lane group
+            reading rows `repeat` apart."""
+            step = repeat * k_bytes
+            return step * BANK_CYCLE_BYTES // math.gcd(step, BANK_CYCLE_BYTES)
 
         def scale_pad(repeat: int) -> Pad:
             per_block = (ATOM_K // 32) * repeat
@@ -576,7 +585,12 @@ class MxTdmScheduledSpec:
         if self.dtype_bits(self.b_dtype) != self.elem_bits:
             return "dtype_width"
         fp4 = self.a_dtype == "fp4"
-        if not (self.tile_k in (128, 256) or (fp4 and self.tile_k in (512, 1024))):
+        fp6 = self.a_dtype == "fp6"
+        if not (
+            self.tile_k in (128, 256)
+            or ((fp4 or fp6) and self.tile_k == 512)
+            or (fp4 and self.tile_k == 1024)
+        ):
             return "tile_k"
         if tuple(self.wave_group) not in ((2, 2), (4, 1), (1, 4)):
             return "wave_group"
