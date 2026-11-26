@@ -42,6 +42,8 @@ extern "C" {
 #include "rocke/instance_conv_direct_fwd_flex_mfma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_fwd_pp_mfma.h"
+#include "rocke/instance_conv_direct_fwd_rr_mfma.h"
+#include "rocke/instance_conv_direct_fwd_tap1d_mfma.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
@@ -975,6 +977,213 @@ py::tuple conv_direct_fwd_flex_mfma_describe(const py::dict& d, const std::strin
     }
     return py::make_tuple(
         ok, std::string(reason), std::string(name), py::make_tuple(grid[0], grid[1], grid[2]), ws);
+}
+
+/* ======================== conv_direct_fwd_rr_mfma ======================= */
+
+/* Rows-in-registers MFMA direct forward (gfx950). The dict mirrors
+ * FwdRrMfmaSpec with the problem nested. */
+rocke_fwd_rr_mfma_spec_t frr_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_fwd_rr_mfma_spec_t s = rocke_fwd_rr_mfma_spec_default();
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "FwdRrMfmaSpec");
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.kw16 = dict_int(d, "kw16", s.kw16);
+    s.odd_c = dict_bool(d, "odd_c", s.odd_c);
+    s.c64 = dict_bool(d, "c64", s.c64);
+    s.unfold = dict_bool(d, "unfold", s.unfold);
+    s.k4w = dict_bool(d, "k4w", s.k4w);
+    s.c_tail = dict_bool(d, "c_tail", s.c_tail);
+    s.one_c = dict_bool(d, "one_c", s.one_c);
+    s.grp = dict_bool(d, "grp", s.grp);
+    s.xcd = dict_bool(d, "xcd", s.xcd);
+    s.chunk = dict_bool(d, "chunk", s.chunk);
+    return s;
+}
+
+std::string conv_direct_fwd_rr_mfma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_rr_mfma_spec_t s = frr_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fwd_rr_mfma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_direct_fwd_rr_mfma_lower_llvm");
+}
+
+std::string conv_direct_fwd_rr_mfma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_fwd_rr_mfma_serialize_ir",
+                                rocke_fwd_rr_mfma_spec_t,
+                                frr_build_spec,
+                                rocke_build_fwd_rr_mfma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_fwd_rr_mfma_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_fwd_rr_mfma_verify",
+                             rocke_fwd_rr_mfma_spec_t,
+                             frr_build_spec,
+                             rocke_build_fwd_rr_mfma_new(&b, &s, arch.c_str()));
+}
+
+/* fwd_rr_mfma_reason + kernel_name / grid / workspace_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), workspace_bytes). */
+py::tuple conv_direct_fwd_rr_mfma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_rr_mfma_spec_t s = frr_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    long long ws = 0;
+    bool ok = rocke_fwd_rr_mfma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_fwd_rr_mfma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok)
+    {
+        rocke_fwd_rr_mfma_grid(&s, grid);
+        ws = rocke_fwd_rr_mfma_workspace_bytes(&s);
+    }
+    return py::make_tuple(
+        ok, std::string(reason), std::string(name), py::make_tuple(grid[0], grid[1], grid[2]), ws);
+}
+
+/* The weight-format helper of the rr forward. The dict mirrors FwdRrWfmtSpec
+ * with the problem nested. */
+rocke_fwd_rr_wfmt_spec_t frw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_fwd_rr_wfmt_spec_t s = rocke_fwd_rr_wfmt_spec_default();
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "FwdRrWfmtSpec");
+    s.threads = dict_int(d, "threads", s.threads);
+    s.kw16 = dict_int(d, "kw16", s.kw16);
+    s.fw = dict_int(d, "fw", s.fw);
+    s.nwk = dict_int(d, "nwk", s.nwk);
+    s.dg = dict_bool(d, "dg", s.dg);
+    return s;
+}
+
+std::string conv_direct_fwd_rr_wfmt_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_rr_wfmt_spec_t s = frw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fwd_rr_wfmt_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_direct_fwd_rr_wfmt_lower_llvm");
+}
+
+std::string conv_direct_fwd_rr_wfmt_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_fwd_rr_wfmt_serialize_ir",
+                                rocke_fwd_rr_wfmt_spec_t,
+                                frw_build_spec,
+                                rocke_build_fwd_rr_wfmt_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_fwd_rr_wfmt_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_fwd_rr_wfmt_verify",
+                             rocke_fwd_rr_wfmt_spec_t,
+                             frw_build_spec,
+                             rocke_build_fwd_rr_wfmt_new(&b, &s, arch.c_str()));
+}
+
+/* -> (kernel_name, (gx, gy, gz)). */
+py::tuple conv_direct_fwd_rr_wfmt_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_rr_wfmt_spec_t s = frw_build_spec(d, store);
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    if(rocke_fwd_rr_wfmt_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    rocke_fwd_rr_wfmt_grid(&s, grid);
+    return py::make_tuple(std::string(name), py::make_tuple(grid[0], grid[1], grid[2]));
+}
+
+/* ====================== conv_direct_fwd_tap1d_mfma ====================== */
+
+/* 1-D tap-reuse MFMA direct forward (gfx950). The dict mirrors
+ * FwdTap1dMfmaSpec with the problem nested. */
+rocke_fwd_tap1d_mfma_spec_t ftp_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_fwd_tap1d_mfma_spec_t s = rocke_fwd_tap1d_mfma_spec_default();
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "FwdTap1dMfmaSpec");
+    s.bk = dict_int(d, "bk", s.bk);
+    s.nwv = dict_int(d, "nwv", s.nwv);
+    s.seg = dict_int(d, "seg", s.seg);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.one = dict_bool(d, "one", s.one);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    return s;
+}
+
+std::string conv_direct_fwd_tap1d_mfma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_tap1d_mfma_spec_t s = ftp_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fwd_tap1d_mfma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_direct_fwd_tap1d_mfma_lower_llvm");
+}
+
+std::string conv_direct_fwd_tap1d_mfma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_fwd_tap1d_mfma_serialize_ir",
+                                rocke_fwd_tap1d_mfma_spec_t,
+                                ftp_build_spec,
+                                rocke_build_fwd_tap1d_mfma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_fwd_tap1d_mfma_verify(const py::dict& d,
+                                                           const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_fwd_tap1d_mfma_verify",
+                             rocke_fwd_tap1d_mfma_spec_t,
+                             ftp_build_spec,
+                             rocke_build_fwd_tap1d_mfma_new(&b, &s, arch.c_str()));
+}
+
+/* fwd_tap1d_mfma_reason + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_direct_fwd_tap1d_mfma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_tap1d_mfma_spec_t s = ftp_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    long long lds = 0;
+    bool ok = rocke_fwd_tap1d_mfma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_fwd_tap1d_mfma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok)
+    {
+        rocke_fwd_tap1d_mfma_grid(&s, grid);
+        lds = rocke_fwd_tap1d_mfma_lds_bytes(&s);
+    }
+    return py::make_tuple(
+        ok, std::string(reason), std::string(name), py::make_tuple(grid[0], grid[1], grid[2]), lds);
 }
 
 /* ======================== conv_direct_dw_fwd_wmma ======================== */
@@ -2258,6 +2467,30 @@ void register_conv(py::module_& m)
          &conv_direct_fwd_flex_mfma_verify);
     m.def("conv_direct_fwd_flex_mfma_describe",
           &conv_direct_fwd_flex_mfma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_fwd_rr_mfma",
+         &conv_direct_fwd_rr_mfma_lower_llvm,
+         &conv_direct_fwd_rr_mfma_serialize_ir,
+         &conv_direct_fwd_rr_mfma_verify);
+    m.def("conv_direct_fwd_rr_mfma_describe",
+          &conv_direct_fwd_rr_mfma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_fwd_rr_wfmt",
+         &conv_direct_fwd_rr_wfmt_lower_llvm,
+         &conv_direct_fwd_rr_wfmt_serialize_ir,
+         &conv_direct_fwd_rr_wfmt_verify);
+    m.def("conv_direct_fwd_rr_wfmt_describe",
+          &conv_direct_fwd_rr_wfmt_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_fwd_tap1d_mfma",
+         &conv_direct_fwd_tap1d_mfma_lower_llvm,
+         &conv_direct_fwd_tap1d_mfma_serialize_ir,
+         &conv_direct_fwd_tap1d_mfma_verify);
+    m.def("conv_direct_fwd_tap1d_mfma_describe",
+          &conv_direct_fwd_tap1d_mfma_describe,
           py::arg("spec"),
           py::arg("arch"));
     reg3("conv_direct_dw_fwd_wmma",

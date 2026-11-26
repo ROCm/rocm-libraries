@@ -1211,6 +1211,7 @@ rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx);
  *    _dw_win_tile(b, p_Hi, rows)            rocke_dw_win_tile
  *    _buf_load_vN(b, dtype, ...)            rocke_dconv_buf_load_vN
  *    _buf_store_vN(b, dtype, ...)           rocke_dconv_buf_store_vN
+ *    _buf_store_vN(..., cachepolicy=c)      rocke_dconv_buf_store_vN_ex
  *    _trunc_f32(b, dtype, val)              rocke_dconv_trunc_f32
  *    _trunc_f32_elem(b, dtype, val)         rocke_dconv_trunc_f32_elem
  *    _buf_load_half(b, dtype, ...)          rocke_dconv_buf_load_half
@@ -1272,6 +1273,16 @@ void rocke_dconv_buf_store_vN(rocke_ir_builder_t* b,
                               rocke_value_t* soff,
                               rocke_value_t* val,
                               int dwords);
+/* The same store with the intrinsic's aux immediate `cachepolicy` (0 records
+ * no attribute: rocke_dconv_buf_store_vN is this with 0). */
+void rocke_dconv_buf_store_vN_ex(rocke_ir_builder_t* b,
+                                 bool bf16,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voff,
+                                 rocke_value_t* soff,
+                                 rocke_value_t* val,
+                                 int dwords,
+                                 int cachepolicy);
 /* Truncate a vector of f32 accumulators to the output dtype. */
 rocke_value_t* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, rocke_value_t* val);
 /* Truncate one f32 value to the output dtype. */
