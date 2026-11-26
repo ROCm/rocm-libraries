@@ -95,6 +95,11 @@ std::array<uint8_t, 16> generateUuidV4()
     return bytes;
 }
 
+bool isProcessTerminating()
+{
+    return false;
+}
+
 }
 
 #endif // defined(__linux__)

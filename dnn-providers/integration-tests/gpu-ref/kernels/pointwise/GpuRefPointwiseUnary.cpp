@@ -14,7 +14,7 @@ struct UnaryOp
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_IDENTITY, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     template <typename X>
     static __forceinline__ __device__ OutputType impl(const X& x)
@@ -27,7 +27,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_IDENTITY, ComputeType, OutputType>
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_ABS, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     template <typename X>
     static __forceinline__ __device__ OutputType impl(const X& x)
@@ -41,7 +41,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_ABS, ComputeType, OutputType>
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_NEG, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     template <typename X>
     static __forceinline__ __device__ OutputType impl(const X& x)
@@ -59,7 +59,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_RELU_FWD, ComputeType, OutputType>
     const ComputeType _upperClip;
     const ComputeType _lowerSlope;
 
-    __device__ UnaryOp(float lowerClip, float upperClip, float lowerSlope, float)
+    __device__ UnaryOp(float lowerClip, float upperClip, float lowerSlope, float, float, float)
         : _lowerClip(lowerClip)
         , _upperClip(upperClip)
         , _lowerSlope(lowerSlope)
@@ -91,7 +91,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_RELU_FWD, ComputeType, OutputType>
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_SIGMOID_FWD, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     template <typename X>
     static __forceinline__ __device__ OutputType impl(const X& x)
@@ -105,7 +105,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_SIGMOID_FWD, ComputeType, OutputType>
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_TANH_FWD, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     template <typename X>
     static __forceinline__ __device__ OutputType impl(const X& x)
@@ -119,7 +119,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_TANH_FWD, ComputeType, OutputType>
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_GELU_FWD, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     static constexpr ComputeType s_kSqrt2 = ComputeType{1.4142135623731};
 
@@ -138,7 +138,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_GELU_FWD, ComputeType, OutputType>
 template <typename ComputeType, typename OutputType>
 struct UnaryOp<POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD, ComputeType, OutputType>
 {
-    __device__ UnaryOp(float, float, float, float) {}
+    __device__ UnaryOp(float, float, float, float, float, float) {}
 
     static constexpr ComputeType s_kCoeff = ComputeType{0.044715};
     static constexpr ComputeType s_kSqrt2OverPi = ComputeType{0.797884561258723};
@@ -158,7 +158,7 @@ struct UnaryOp<POINTWISE_UNARY_OP_SWISH_FWD, ComputeType, OutputType>
 {
     const ComputeType _beta;
 
-    __device__ UnaryOp(float, float, float, float beta)
+    __device__ UnaryOp(float, float, float, float beta, float, float)
         : _beta(beta)
     {
     }
@@ -169,6 +169,191 @@ struct UnaryOp<POINTWISE_UNARY_OP_SWISH_FWD, ComputeType, OutputType>
         ComputeType xCompute = static_cast<ComputeType>(x);
         ComputeType result = xCompute / (ComputeType{1} + exp(-_beta * xCompute));
         return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_EXP, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = exp(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_LOG, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = log(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_SQRT, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = sqrt(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_RSQRT, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = ComputeType{1} / sqrt(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_RECIPROCAL, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = ComputeType{1} / xCompute;
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_SIN, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = sin(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_TAN, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = tan(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_ERF, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = erf(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_CEIL, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = ceil(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_FLOOR, ComputeType, OutputType>
+{
+    __device__ UnaryOp(float, float, float, float, float, float) {}
+
+    template <typename X>
+    static __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result = floor(xCompute);
+        return static_cast<OutputType>(result);
+    }
+};
+
+// ELU(x) = x for x > 0, alpha * expm1(x) otherwise. expm1 is evaluated in double, as on the CPU.
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_ELU_FWD, ComputeType, OutputType>
+{
+    const ComputeType _alpha;
+
+    __device__ UnaryOp(float, float, float, float, float alpha, float)
+        : _alpha(alpha)
+    {
+    }
+
+    template <typename X>
+    __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        ComputeType xCompute = static_cast<ComputeType>(x);
+        ComputeType result
+            = xCompute > ComputeType{0}
+                  ? xCompute
+                  : _alpha * static_cast<ComputeType>(expm1(static_cast<double>(xCompute)));
+        return static_cast<OutputType>(result);
+    }
+};
+
+// Softplus(x) = log1p(exp(beta * x)) / beta, evaluated in double until the final result, with a
+// fall back to x above a threshold of 20. Matches the CPU reference.
+template <typename ComputeType, typename OutputType>
+struct UnaryOp<POINTWISE_UNARY_OP_SOFTPLUS_FWD, ComputeType, OutputType>
+{
+    const double _beta;
+
+    __device__ UnaryOp(float, float, float, float, float, float beta)
+        : _beta(static_cast<double>(static_cast<ComputeType>(beta)))
+    {
+    }
+
+    template <typename X>
+    __forceinline__ __device__ OutputType impl(const X& x)
+    {
+        const double xDouble = static_cast<double>(static_cast<ComputeType>(x));
+        const double scaled = _beta * xDouble;
+        const double result = scaled > 20.0 ? xDouble : log1p(exp(scaled)) / _beta;
+        return static_cast<OutputType>(static_cast<ComputeType>(result));
     }
 };
 
@@ -205,7 +390,11 @@ extern "C" __global__ void PointwiseUnaryRef(PointwiseUnaryArgs args)
         outIdx += coord * args.outputStrides[d];
     }
 
-    output[outIdx] = UnaryOp<OP, COMPUTE_TYPE, OUTPUT_TYPE>(
-                         args.lowerClip, args.upperClip, args.lowerSlope, args.swishBeta)
+    output[outIdx] = UnaryOp<OP, COMPUTE_TYPE, OUTPUT_TYPE>(args.lowerClip,
+                                                            args.upperClip,
+                                                            args.lowerSlope,
+                                                            args.swishBeta,
+                                                            args.eluAlpha,
+                                                            args.softplusBeta)
                          .impl(input[inIdx]);
 }

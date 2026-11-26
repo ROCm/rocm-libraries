@@ -113,7 +113,7 @@ from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Common.LdsReadPlan import fp32_lds_read_bytes, validate_gfx1250_fp32_lds_read_width
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
-from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
+from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList, tmpGprStart
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
   FusedA2AWgRemap
 
@@ -1180,6 +1180,10 @@ class KernelWriterAssembly(KernelWriter):
 
     tmpSgpr = allocTmpGpr(self.sgprPool, num, self.states.regCaps["MaxSgpr"], alignment, tag, overflowListener)
     return tmpSgpr
+
+  def tmpSgprFits(self, num: int, alignment=None) -> bool:
+    """True when allocTmpSgpr(num, alignment) would stay under MaxSgpr."""
+    return tmpGprStart(self.sgprPool, num, alignment) + num <= self.states.regCaps["MaxSgpr"]
 
   def allocTmpSgprList(self, nums: List[int], alignments: Optional[List[int]]=None, tag=None):
     def overflowListener(e):
@@ -17338,10 +17342,20 @@ class KernelWriterAssembly(KernelWriter):
 
     # Keep tmp SGPR usage lean for the common path.
     requiredNumSgpr = 4 if self.states.archCaps["EnableXnackReplay"] else 3
-    with self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
-      tmpS0 = tmpSgprInfo.idx
+    # [tmpS0, tmpS1] and [wgMT1, wgMT1+1] are two separate groups. When one block misses the
+    # SGPR limit while free slots remain lower in the pool, each group takes its own slot.
+    if self.tmpSgprFits(requiredNumSgpr):
+      tmpSgprCtx = self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo")
+    else:
+      tmpSgprCtx = self.allocTmpSgprList(nums=[2, requiredNumSgpr - 2], tag="computeStoreSrdStart_tmpSgprInfo")
+    with tmpSgprCtx as tmpSgprInfo:
+      if isinstance(tmpSgprInfo, list):
+        tmpS0 = tmpSgprInfo[0].idx
+        wgMT1 = tmpSgprInfo[1].idx
+      else:
+        tmpS0 = tmpSgprInfo.idx
+        wgMT1 = tmpS0+2
       tmpS1 = tmpS0+1
-      wgMT1 = tmpS0+2
 
       assert kernel["BufferStore"]
       module.addSpaceLine()

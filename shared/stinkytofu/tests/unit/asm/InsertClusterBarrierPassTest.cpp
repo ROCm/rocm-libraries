@@ -3238,33 +3238,69 @@ TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesSkipClusterHandshake) 
         << "a second pass must not hand the handshake to a later copy";
 }
 
-TEST_F(InsertClusterBarrierPassTest, ReducedLoopAddsHandshakeAfterTwoThousandCycles) {
+// A loop shorter than the 2000-cycle interval takes one handshake, and it goes to the trigger
+// whose signal can lead its wait the furthest: a trigger sitting right under the loop head has
+// no room for the configured lead, so a later trigger with room wins over it.
+TEST_F(InsertClusterBarrierPassTest, ReducedLoopTakesTheTriggerWithTheLongestLead) {
     appendGsu1Preheader();
     openLoop();
-    StinkyInstruction* first = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
-    // gfx1250 WMMAs contribute enough estimated latency that this clears the
-    // 2000-cycle interval with room to spare.
-    for (int i = 0; i < 300; ++i) createWMMA(80, 8, 16);
-    StinkyInstruction* second = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    StinkyInstruction* atHead = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    for (int i = 0; i < 100; ++i) createWMMA(80, 8, 16);
+    StinkyInstruction* later = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
     for (int i = 0; i < 10; ++i) createWMMA(88, 16, 24);
-    StinkyInstruction* third = appendHandshake(/*loadS0=*/32, /*loadS1=*/36);
     closeLoop();
 
     PassContext ctx;
     ctx.setGemmTileConfig(config);
     const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
-    ASSERT_GE(cycleMap.at(second) - cycleMap.at(first), 2000u);
-    ASSERT_LT(cycleMap.at(third) - cycleMap.at(second), 2000u);
+    ASSERT_LT(cycleMap.at(later) - cycleMap.at(atHead), 2000u) << "one handshake is enough";
 
     runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
             /*streamKMulticast=*/false, /*pgrValue=*/1,
             /*reduceClusterBarrierPerLoop=*/true);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(atHead))
+        << "the signal cannot get its lead above the loop head:" << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(later)) << blockListing(*bb);
+
+    const std::string once = blockListing(*bb);
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/true);
+    EXPECT_EQ(blockListing(*bb), once) << "the lead-ranked reduction must be idempotent";
+}
+
+// A loop of about 3000 cycles takes ceil(3000 / 2000) = 2 handshakes. The first goes to the
+// earliest trigger with the longest lead; among the triggers that tie for the longest lead, the
+// second goes to the one whose distance from the first (measured around the loop) is nearest
+// 2000 cycles, not simply the next one along.
+TEST_F(InsertClusterBarrierPassTest, ReducedLoopSpacesItsSecondHandshakeAwayFromTheFirst) {
+    appendGsu1Preheader();
+    openLoop();
+    StinkyInstruction* atHead = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    for (int i = 0; i < 100; ++i) createWMMA(80, 8, 16);
+    StinkyInstruction* first = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    for (int i = 0; i < 250; ++i) createWMMA(88, 16, 24);
+    StinkyInstruction* spaced = appendHandshake(/*loadS0=*/32, /*loadS1=*/36);
+    for (int i = 0; i < 20; ++i) createWMMA(96, 24, 32);
+    StinkyInstruction* adjacent = appendHandshake(/*loadS0=*/16, /*loadS1=*/20);
+    for (int i = 0; i < 10; ++i) createWMMA(104, 32, 40);
+    closeLoop();
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    const auto cycleMap = computeEstimatedCyclesPerInstruction(*func, ctx);
+    ASSERT_GE(cycleMap.at(adjacent) - cycleMap.at(atHead), 2000u)
+        << "the body needs two handshakes";
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,
+            /*streamKMulticast=*/false, /*pgrValue=*/1,
+            /*reduceClusterBarrierPerLoop=*/true);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(atHead)) << blockListing(*bb);
     EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(first)) << blockListing(*bb);
-    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(second))
-        << "a same-loop trigger at least 2000 cycles later needs another handshake:"
-        << blockListing(*bb);
-    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(third))
-        << "spacing restarts at the second accepted trigger:" << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(spaced))
+        << "the trigger spaced furthest from the first, nearest 2000 cycles:" << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(adjacent))
+        << "a trigger only a few cycles after another is not spacing:" << blockListing(*bb);
 
     const std::string once = blockListing(*bb);
     runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false,

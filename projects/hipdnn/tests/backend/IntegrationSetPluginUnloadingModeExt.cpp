@@ -1,53 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include "hipdnn_backend.h"
+#include <array>
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/ProcessUtils.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#include <fstream>
-#endif
-
-namespace
-{
-// Check if a shared library is currently loaded in the process
-// Uses /proc/self/maps on Linux to check for loaded libraries by filename,
-// GetModuleHandle on Windows
-bool isSharedLibraryLoaded(const char* libraryPath)
-{
-#ifdef _WIN32
-    // On Windows, GetModuleHandle returns NULL if the module is not loaded
-    HMODULE handle = GetModuleHandleA(libraryPath);
-    return handle != nullptr;
-#else
-    // Extract the filename from the path for matching
-    const std::filesystem::path path(libraryPath);
-    const std::string filename = path.filename().string();
-
-    // Read /proc/self/maps to find all loaded shared objects
-    std::ifstream maps("/proc/self/maps");
-    if(!maps.is_open())
-    {
-        return false;
-    }
-
-    std::string line;
-    while(std::getline(maps, line))
-    {
-        // Each line in /proc/self/maps contains the mapped file path at the end
-        // Check if the line contains our library filename
-        if(line.find(filename) != std::string::npos)
-        {
-            return true;
-        }
-    }
-    return false;
-#endif
-}
-} // namespace
+using hipdnn_test_sdk::utilities::isLibraryLoaded;
 
 class IntegrationSetPluginUnloadingModeExt : public ::testing::Test
 {
@@ -94,13 +53,13 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, LazyModeKeepsPluginLoaded)
     ASSERT_NE(handle1, nullptr);
 
     // Plugin should now be loaded
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     // Destroy first handle
     EXPECT_EQ(hipdnnDestroy(handle1), HIPDNN_STATUS_SUCCESS);
 
     // In lazy mode, plugin should still be loaded after handle destruction
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     // Create second handle - should still be using the same loaded plugin
     hipdnnHandle_t handle2 = nullptr;
@@ -108,7 +67,7 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, LazyModeKeepsPluginLoaded)
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle2, nullptr);
 
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     EXPECT_EQ(hipdnnDestroy(handle2), HIPDNN_STATUS_SUCCESS);
 }
@@ -120,7 +79,7 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, EagerModeUnloadsPlugin)
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Plugin should not be loaded yet (no handle created)
-    EXPECT_FALSE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_FALSE(isLibraryLoaded(getPluginPath()));
 
     // Create first handle - this loads plugins
     hipdnnHandle_t handle1 = nullptr;
@@ -129,13 +88,13 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, EagerModeUnloadsPlugin)
     ASSERT_NE(handle1, nullptr);
 
     // Plugin should now be loaded
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     // Destroy first handle - plugins unload in eager mode
     EXPECT_EQ(hipdnnDestroy(handle1), HIPDNN_STATUS_SUCCESS);
 
     // In eager mode, plugin should be unloaded after handle destruction
-    EXPECT_FALSE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_FALSE(isLibraryLoaded(getPluginPath()));
 
     // Create second handle - should reload plugins
     hipdnnHandle_t handle2 = nullptr;
@@ -143,7 +102,7 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, EagerModeUnloadsPlugin)
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle2, nullptr);
 
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     EXPECT_EQ(hipdnnDestroy(handle2), HIPDNN_STATUS_SUCCESS);
 }
@@ -161,14 +120,14 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, SwitchingToEagerModeUnloadsPlugins)
     EXPECT_EQ(hipdnnDestroy(handle1), HIPDNN_STATUS_SUCCESS);
 
     // Plugin should still be loaded (lazy mode)
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     // Switch to eager mode - should unload plugins
     status = hipdnnSetPluginUnloadMode_ext(HIPDNN_PLUGIN_UNLOAD_EAGER);
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Plugin should now be unloaded (no handles exist, eager mode clears persistentPmPtr)
-    EXPECT_FALSE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_FALSE(isLibraryLoaded(getPluginPath()));
 }
 
 TEST_F(IntegrationSetPluginUnloadingModeExt, SetPluginPathsUnloadsPluginsInLazyMode)
@@ -184,7 +143,7 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, SetPluginPathsUnloadsPluginsInLazyM
     EXPECT_EQ(hipdnnDestroy(handle1), HIPDNN_STATUS_SUCCESS);
 
     // Plugin should still be loaded (lazy mode)
-    EXPECT_TRUE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_TRUE(isLibraryLoaded(getPluginPath()));
 
     // Set plugin paths again - should clear persistentPmPtr and unload plugins
     const std::array<const char*, 1> paths
@@ -194,5 +153,5 @@ TEST_F(IntegrationSetPluginUnloadingModeExt, SetPluginPathsUnloadsPluginsInLazyM
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
     // Plugin should now be unloaded (setPluginPaths clears persistentPmPtr)
-    EXPECT_FALSE(isSharedLibraryLoaded(getPluginPath().c_str()));
+    EXPECT_FALSE(isLibraryLoaded(getPluginPath()));
 }
