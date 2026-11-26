@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "55bb4a27-1d49-4050-9680-c194863fe285",
-  "name": "hipkernel:flydsl_sdpa_cdna (gfx942, 359 contribution(s))",
+  "id": "23ed57a9-eaa6-4b12-b0af-db740c1733fd",
+  "name": "hipkernel:flydsl_sdpa_cdna (gfx942, 100 contribution(s))",
   "adapter": "mlp_data",
   "features_signature": [
     "$flydsl_sdpa_cdna.bias.vectorized",
@@ -680,7 +680,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/119381509fa05359429ce115cdd39f1c19c89fea2832e56f851bc22b503a89f2",
+    "selector_revision": "generic-untuned-v1/e168ce6698b75c74ea318b74b6e33a29e1d938bde3cf732254d7ea23eeb44cb2",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -691,6 +691,6 @@
   },
   "mlp_data": {
     "artifact": "model.bin",
-    "hash": "7b6026d2bcc8682b0052f903ba195aa1aff7204db447b430d66aacc4d8f781d2"
+    "hash": "9a1c0a2c78b865c9a0587f0cbd85cfe7cd76b2a02637d584e5a94817e826fbc1"
   }
 }

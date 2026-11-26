@@ -726,9 +726,14 @@ def test_orient_gate_checks_context_orient_links_against_the_round(
     assert (
         capsys.readouterr().out == "not at base: orient/io.md (cited at CONTEXT.md:2)\n"
     )
+    (rd / "CONTEXT.md").write_text(
+        "The `core` lane uses `orient/core.md` directly, not via a table.\n"
+    )
+    run(part, "orient-gate", rd)
+    assert capsys.readouterr().out == ""
 
 
-def test_orient_gate_reports_extra_count_for_a_citation_in_two_places(
+def test_orient_gate_lists_every_citation_site_for_a_path_cited_twice(
     part, tmp_path, capsys
 ):
     clone = tmp_path / "clone"
@@ -755,7 +760,7 @@ def test_orient_gate_reports_extra_count_for_a_citation_in_two_places(
     assert exc.value.code == 1
     assert (
         capsys.readouterr().out
-        == "not at base: src/gone.hpp (cited at CONTEXT.md:1, +1 more)\n"
+        == "not at base: src/gone.hpp (cited at CONTEXT.md:1, orient/a.md:1)\n"
     )
 
 

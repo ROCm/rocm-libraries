@@ -310,3 +310,105 @@ TYPED_TEST(ReferenceInt8IntegerWrapping, BothOverflowDirectionsBeforeIntegerEpil
         }
     }
 }
+
+namespace
+{
+    // Int32 alpha/beta epilogue cases whose dot product fits Int32 but whose
+    // epilogue does not. GPU Int32-compute kernels apply alpha, ScaleAlphaVec
+    // and beta*C with v_mul_lo_u32/v_add_u32, i.e. modulo 2^32.
+    struct IntegerEpilogueCase
+    {
+        const char* name;
+        size_t      k;
+        int8_t      a;
+        int8_t      b;
+        int32_t     c;
+        int32_t     alpha;
+        int32_t     beta;
+        bool        scaleAlphaVec; // alpha is 1 and this value is the vector entry
+        int32_t     scaleAlpha;
+        int32_t     expected;
+    };
+
+    void PrintTo(const IntegerEpilogueCase& test, std::ostream* out)
+    {
+        *out << test.name;
+    }
+
+    constexpr int32_t int32Max = std::numeric_limits<int32_t>::max();
+    constexpr int32_t int32Min = std::numeric_limits<int32_t>::min();
+
+    constexpr IntegerEpilogueCase integerEpilogueCases[] = {
+        // 1 + INT32_MAX
+        {"AddWrapsToMin", 1, 1, 1, int32Max, 1, 1, false, 0, int32Min},
+        // 2 * INT32_MAX
+        {"AlphaWrapsToMinusTwo", 2, 1, 1, 0, int32Max, 0, false, 0, -2},
+        // -1 + INT32_MIN
+        {"AddWrapsToMax", 1, 1, -1, int32Min, 1, 1, false, 0, int32Max},
+        // 2 * -INT32_MAX
+        {"AlphaWrapsToTwo", 2, 1, 1, 0, -int32Max, 0, false, 0, 2},
+        // 0 + 2 * INT32_MAX
+        {"BetaTimesCWrapsToMinusTwo", 1, 0, 0, int32Max, 1, 2, false, 0, -2},
+        // 2 * 1 * INT32_MAX
+        {"ScaleAlphaVecWrapsToMinusTwo", 2, 1, 1, 0, 1, 0, true, int32Max, -2},
+    };
+
+    ContractionProblemGemm makeIntegerEpilogueProblem(IntegerEpilogueCase const& test,
+                                                      rocisa::DataType           outputType)
+    {
+        auto problem = makeInt8DotProductProblem(test.k, false, outputType);
+        if(test.scaleAlphaVec)
+        {
+            problem.setUseScaleAlphaVec(1);
+            problem.setScaleAlphaVec(rocisa::DataType::Int32, 1);
+        }
+        return problem;
+    }
+
+    template <typename OutputT>
+    OutputT solveIntegerEpilogue(IntegerEpilogueCase const& test, OutputT c, bool tryFastPath)
+    {
+        std::vector<int8_t> a(test.k, test.a);
+        std::vector<int8_t> b(test.k, test.b);
+        auto                problem    = makeIntegerEpilogueProblem(test, TypeInfo<OutputT>::Enum);
+        int32_t             scaleAlpha = test.scaleAlpha;
+        OutputT             d          = 0;
+        ContractionInputs   inputs(a.data(), b.data(), &c, &d, test.alpha, test.beta);
+        if(test.scaleAlphaVec)
+            inputs.scaleAlphaVec = &scaleAlpha;
+        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+        return d;
+    }
+} // namespace
+
+class ReferenceInt32EpilogueWrapping
+    : public ::testing::TestWithParam<std::tuple<IntegerEpilogueCase, bool>>
+{
+};
+
+TEST_P(ReferenceInt32EpilogueWrapping, Int32OutputWrapsModulo2To32)
+{
+    const auto& [test, tryFastPath] = GetParam();
+    EXPECT_EQ(solveIntegerEpilogue<int32_t>(test, test.c, tryFastPath), test.expected);
+}
+
+TEST_P(ReferenceInt32EpilogueWrapping, Int8OutputSaturatesTheWrappedValue)
+{
+    const auto& [test, tryFastPath] = GetParam();
+    if(test.c != 0)
+        GTEST_SKIP() << "C does not fit Int8";
+    // The wrapped Int32 values fit Int8, so saturating before wrapping would
+    // give 127 or -128 instead.
+    const int8_t d = solveIntegerEpilogue<int8_t>(test, int8_t(0), tryFastPath);
+    EXPECT_EQ(int32_t(d), test.expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    CPUReference,
+    ReferenceInt32EpilogueWrapping,
+    ::testing::Combine(::testing::ValuesIn(integerEpilogueCases), ::testing::Bool()),
+    [](const ::testing::TestParamInfo<ReferenceInt32EpilogueWrapping::ParamType>& info) {
+        const auto& test        = std::get<0>(info.param);
+        const bool  tryFastPath = std::get<1>(info.param);
+        return std::string(test.name) + (tryFastPath ? "TryFastPath" : "SlowPath");
+    });

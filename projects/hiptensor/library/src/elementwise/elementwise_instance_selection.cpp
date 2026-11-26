@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "elementwise_instance_selection.hpp"
+#include <algorithm>
 #include <unordered_map>
 
 namespace hiptensor
@@ -4110,7 +4111,9 @@ namespace hiptensor
         point.reserve(lengths.size());
         for(auto len : lengths)
         {
-            auto lower_edge = len <= 32 ? 32 : *std::lower_bound(edges.cbegin(), edges.cend(), len);
+            // Extents beyond the last edge fall into the last bucket.
+            auto edge       = std::lower_bound(edges.cbegin(), edges.cend(), len);
+            auto lower_edge = len <= 32 ? 32 : (edge == edges.cend() ? edges.back() : *edge);
             point.push_back(lower_edge);
         }
         return point;
