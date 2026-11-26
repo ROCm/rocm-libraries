@@ -27,6 +27,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include <stdio.h>
 
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -86,7 +87,10 @@ bool rocke_dconv8c_prologue(rocke_dconv_8c_ctx_t* ctx)
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
     /* ---- params (AOT kernarg block, conv_abi order) ---- */
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
+    if(ctx->spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, ctx->io_type);
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -551,6 +555,18 @@ rocke_kernel_def_t* rocke_dconv8c_stream_h_loop(rocke_dconv_8c_ctx_t* ctx)
             return NULL;
         ctx->d_desc = &d_dyn->base;
     }
+    /* Conv + bias: bias[g*kpg + c4*4 .. +4) of the lane's accumulator
+     * quad (rows past kpg are never stored), as fp32. */
+    if(ctx->spec->bias)
+    {
+        rocke_value_t* bias_rsrc
+            = rocke_conv_bias_rsrc(b, ctx->params.Bias, ctx->params.Bias_bytes);
+        rocke_value_t* m_g = rocke_b_mul(b, ctx->g, ctx->c_kpg);
+        rocke_value_t* m_c4 = rocke_b_mul(b, ctx->c4, rocke_b_const_i32(b, 4));
+        rocke_value_t* k_bias = rocke_b_add(b, m_g, m_c4);
+        ctx->bias_acc
+            = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k_bias, 4, ctx->io_type, ctx->c0);
+    }
 
     if(num_accs > (int)(sizeof(iter_args) / sizeof(iter_args[0])))
     {
@@ -698,6 +714,8 @@ rocke_kernel_def_t* rocke_dconv8c_stream_h_loop(rocke_dconv_8c_ctx_t* ctx)
         {
             int flat = qt * KH + P_FLUSH;
             rocke_value_t* acc_to_flush = accs_flat[flat];
+            if(ctx->bias_acc != NULL)
+                acc_to_flush = rocke_b_fadd(b, acc_to_flush, ctx->bias_acc);
             rocke_value_t* out_q;
             rocke_value_t* out_q_valid;
             rocke_value_t* k_val;

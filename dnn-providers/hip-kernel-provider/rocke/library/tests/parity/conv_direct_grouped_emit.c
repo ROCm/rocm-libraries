@@ -199,6 +199,62 @@ static const int BIAS_CFGS[] = {
     /* 14..15: fp32 storage. */
     201,
     204,
+    /* 16..26: the generic DirectConvSpec. */
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    86,
+    242,
+    250,
+    /* 27..33: depthwise. */
+    8,
+    22,
+    166,
+    170,
+    171,
+    172,
+    176,
+    /* 34..36: spatial. */
+    10,
+    23,
+    167,
+    /* 37..39: column-streamed. */
+    32,
+    33,
+    169,
+    /* 40..45: tiled. */
+    57,
+    58,
+    59,
+    168,
+    173,
+    174,
+    /* 46: tiled dgrad + bias (rejected). */
+    190,
+    /* 47..50: fp32 storage. */
+    293,
+    300,
+    305,
+    312,
+    /* 51..63: 16c, 4c, 8c, 32c. */
+    0,
+    4,
+    17,
+    218,
+    2,
+    163,
+    164,
+    6,
+    18,
+    228,
+    7,
+    21,
+    232,
 };
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
@@ -3686,6 +3742,24 @@ int main(int argc, char** argv)
             snongrouped.bias = true;
         else if(kind == KIND_SPLIT_REDUCE)
             sred.bias = true;
+        else if(kind == KIND_GENERIC)
+            sgen.bias = true;
+        else if(kind == KIND_DW)
+            sdw.bias = true;
+        else if(kind == KIND_SPATIAL)
+            ssp.bias = true;
+        else if(kind == KIND_DWCOL)
+            sdwc.bias = true;
+        else if(kind == KIND_DW_TILED)
+            stiled.bias = true;
+        else if(kind == KIND_16C)
+            s16.bias = true;
+        else if(kind == KIND_4C)
+            s4.bias = true;
+        else if(kind == KIND_8C)
+            s8.bias = true;
+        else if(kind == KIND_32C)
+            s32.bias = true;
         else
         {
             fprintf(stderr, "config %d: kind %d has no bias form\n", idx, kind);

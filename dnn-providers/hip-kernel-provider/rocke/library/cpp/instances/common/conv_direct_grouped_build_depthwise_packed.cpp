@@ -27,6 +27,7 @@
 
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -222,7 +223,12 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_params_t params;
-    rocke_dconv_emit_params(b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(
+            b, &params, rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+    else
+        rocke_dconv_emit_params(
+            b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
     rocke_value_t* p_Hi = params.p_Hi;
     dwp_helpers h(b, p, CPL);
 
@@ -274,6 +280,22 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
             for(int k = 0; k < NP; ++k)
                 weights[r_const][s_const].push_back(
                     rocke_b_vec_pack(b, &vals[2 * k], 2, rocke_f32()));
+        }
+    }
+    /* Conv + bias: bias[ch .. ch+CPL) as <2 x f32> channel pairs, added to
+     * every flushed output. */
+    vals_t bias_pairs;
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params.Bias, params.Bias_bytes);
+        rocke_value_t* bias_v = rocke_conv_bias_load_vec_f32(
+            b, bias_rsrc, ch, CPL, rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"), c0);
+        for(int k = 0; k < NP; ++k)
+        {
+            rocke_value_t* pr[2];
+            pr[0] = rocke_b_vec_extract(b, bias_v, 2 * k);
+            pr[1] = rocke_b_vec_extract(b, bias_v, 2 * k + 1);
+            bias_pairs.push_back(rocke_b_vec_pack(b, pr, 2, rocke_f32()));
         }
     }
 
@@ -356,7 +378,15 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
             rocke_value_t* safe
                 = rocke_b_select(b, ok, rocke_b_mul(b, d_off, c_half), oob_sentinel);
             const size_t f = (size_t)(P_FLUSH_j * BLOCK_W + w_out);
-            h.store(d_rsrc, safe, &slots[f * NP]);
+            if(!bias_pairs.empty())
+            {
+                vals_t out_pairs;
+                for(int k = 0; k < NP; ++k)
+                    out_pairs.push_back(rocke_b_fadd(b, slots[f * NP + k], bias_pairs[k]));
+                h.store(d_rsrc, safe, out_pairs.data());
+            }
+            else
+                h.store(d_rsrc, safe, &slots[f * NP]);
             for(int k = 0; k < NP; ++k)
                 slots[f * NP + k] = zero2;
         }
@@ -506,7 +536,12 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_params_t params;
-    rocke_dconv_emit_params(b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(
+            b, &params, rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
+    else
+        rocke_dconv_emit_params(
+            b, &params, "fwd", rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"));
     rocke_value_t* p_Hi = params.p_Hi;
     rocke_value_t* p_Ho = params.p_Ho;
     dwp_helpers h(b, p, CPL);
@@ -717,6 +752,22 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
             accs[(size_t)i] = loop.op->results[i];
     }
 
+    /* Conv + bias: bias[ch .. ch+CPL) as <2 x f32> channel pairs, added to
+     * every output before its store. */
+    vals_t bias_pairs;
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params.Bias, params.Bias_bytes);
+        rocke_value_t* bias_v = rocke_conv_bias_load_vec_f32(
+            b, bias_rsrc, ch, CPL, rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16"), c0);
+        for(int k = 0; k < NP; ++k)
+        {
+            rocke_value_t* pr[2];
+            pr[0] = rocke_b_vec_extract(b, bias_v, 2 * k);
+            pr[1] = rocke_b_vec_extract(b, bias_v, 2 * k + 1);
+            bias_pairs.push_back(rocke_b_vec_pack(b, pr, 2, rocke_f32()));
+        }
+    }
     rocke_dynamic_tensor_descriptor_t* d_dyn = rocke_dconv_d_descriptor_dynamic(b, &params);
     if(!d_dyn)
         return NULL;
@@ -732,7 +783,16 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_tiled_packed(
             rocke_value_t* d_off = dwp_d_offset(b, d_desc, n, ho, wo, ch);
             rocke_value_t* safe
                 = rocke_b_select(b, ok, rocke_b_mul(b, d_off, c_half), oob_sentinel);
-            h.store(d_rsrc, safe, &accs[(size_t)((t * BW + w_out) * NP)]);
+            const size_t base = (size_t)((t * BW + w_out) * NP);
+            if(!bias_pairs.empty())
+            {
+                vals_t out_pairs;
+                for(int k = 0; k < NP; ++k)
+                    out_pairs.push_back(rocke_b_fadd(b, accs[base + k], bias_pairs[k]));
+                h.store(d_rsrc, safe, out_pairs.data());
+            }
+            else
+                h.store(d_rsrc, safe, &accs[base]);
         }
     }
 

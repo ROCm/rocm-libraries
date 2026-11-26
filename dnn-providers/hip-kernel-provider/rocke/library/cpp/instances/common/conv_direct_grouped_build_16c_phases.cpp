@@ -96,7 +96,10 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
     /* ---- params (AOT kernarg block, conv_abi order) ---- */
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
+    if(ctx->spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, ctx->io_type);
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;

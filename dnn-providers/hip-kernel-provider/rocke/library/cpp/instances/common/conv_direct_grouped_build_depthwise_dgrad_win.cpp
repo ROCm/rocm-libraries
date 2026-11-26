@@ -36,6 +36,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx */
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_ceil_div */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
@@ -63,6 +64,7 @@ rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_de
     s.wave_size = 64;
     s.fwd = false;
     s.out_stride = 1;
+    s.bias = false;
     return s;
 }
 
@@ -213,7 +215,7 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
     if(spec->mfma)
         n = snprintf(out,
                      out_cap,
-                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s%s%s",
+                     "%s_r%ds%dp%d_wv%d_bh%d_f%d_pf%d_mfma%s%s%s%s%s",
                      name,
                      p->KH,
                      p->KW,
@@ -225,7 +227,8 @@ rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
                      rocke_direct_conv_problem_is_bf16(p) ? "_bf16" : "",
                      spec->fwd ? "_fwd" : "",
                      gtag,
-                     spec->out_stride == 2 ? "_s2" : "");
+                     spec->out_stride == 2 ? "_s2" : "",
+                     spec->bias ? "_cbias" : "");
     else
         n = snprintf(out,
                      out_cap,
@@ -256,6 +259,9 @@ static bool
     const char* dtype = rocke_direct_conv_problem_dtype(p);
     if(strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0)
         ROCKE_SPEC_FAIL(reason, cap, "unsupported dtype '%s'; expected fp16 or bf16", dtype);
+    if(spec->bias && !spec->fwd)
+        ROCKE_SPEC_FAIL(
+            reason, cap, "bias is a forward epilogue: it needs fwd (the dgrad has none)");
     const bool grouped8 = spec->mfma && spec->fwd && p->cpg == p->kpg
                           && p->cpg % ROCKE_DW_DGRAD_MFMA_CH == 0
                           && p->cpg <= ROCKE_DW_WIN_MAX_GROUP_CH;
@@ -896,7 +902,10 @@ static rocke_kernel_def_t* dw_win_build_toeplitz(
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, rocke_direct_conv_problem_dtype(p));
     rocke_dconv_params_t prm;
-    rocke_dconv_emit_params(b, &prm, FWD ? "fwd" : "dgrad", io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &prm, io_type);
+    else
+        rocke_dconv_emit_params(b, &prm, FWD ? "fwd" : "dgrad", io_type);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     V* p_N = prm.p_N;
@@ -1088,6 +1097,15 @@ static rocke_kernel_def_t* dw_win_build_toeplitz(
         V* c4 = rocke_b_const_i32(b, 4);
         V* tm4 = rocke_b_mul(b, tm, c4);
         o_ch = rocke_b_add(b, wave_ch, tm4);
+    }
+    /* Conv + bias (fwd): the bias of the ACC output channels the lane's
+     * fragment holds (block channel o_ch), as fp32, added before the rounding. */
+    V* bias_v = NULL;
+    if(spec->bias)
+    {
+        V* bias_rsrc = rocke_conv_bias_rsrc(b, prm.Bias, prm.Bias_bytes);
+        bias_v = rocke_conv_bias_load_vec_f32(
+            b, bias_rsrc, rocke_b_add(b, ch_blk, o_ch), ACC, io_type, c0);
     }
     const int n_out = F * (TW / S) * PER_PX;
     V* c_TW = rocke_b_const_i32(b, TW);
@@ -1368,7 +1386,8 @@ static rocke_kernel_def_t* dw_win_build_toeplitz(
         if(hi_local < 0 || hi_local >= ROWS || hi_local % S != 0)
             continue;
         const int slot = hi_local % KH;
-        pend_val = rocke_dconv_trunc_f32(b, bf16, acc[slot]);
+        pend_val = rocke_dconv_trunc_f32(
+            b, bf16, bias_v == NULL ? acc[slot] : rocke_b_fadd(b, acc[slot], bias_v));
         pend_row = dx_row_part(hi_local);
         have_out = true;
         acc[slot] = zero_acc;

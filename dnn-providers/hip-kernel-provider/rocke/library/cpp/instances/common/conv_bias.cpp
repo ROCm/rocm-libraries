@@ -91,6 +91,32 @@ rocke_value_t* rocke_conv_bias_load_vec_f32(rocke_ir_builder_t* b,
     return rocke_b_vec_pack(b, comps, count, rocke_f32());
 }
 
+rocke_value_t* rocke_conv_bias_load_run_f32(rocke_ir_builder_t* b,
+                                            rocke_value_t* rsrc,
+                                            rocke_value_t* k,
+                                            int n,
+                                            const rocke_type_t* elem,
+                                            rocke_value_t* c0)
+{
+    rocke_value_t* comps[ROCKE_CONV_BIAS_MAX_SLOTS];
+    if(n <= 0 || n > ROCKE_CONV_BIAS_MAX_SLOTS)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "load_conv_bias_run_f32: %d elements", n);
+        return NULL;
+    }
+    for(int j = 0; j < n; ++j)
+    {
+        rocke_value_t* k_j = k;
+        if(j != 0)
+        {
+            rocke_value_t* c_j = rocke_b_const_i32(b, j);
+            k_j = rocke_b_add(b, k, c_j);
+        }
+        comps[j] = rocke_conv_bias_load_f32(b, rsrc, k_j, elem, c0);
+    }
+    return rocke_b_vec_pack(b, comps, n, rocke_f32());
+}
+
 void rocke_conv_bias_add_to_accs(rocke_ir_builder_t* b,
                                  rocke_value_t* const* accs,
                                  rocke_value_t* const* bias_per_ni,

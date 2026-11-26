@@ -38,6 +38,7 @@
 
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -207,8 +208,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     }
     else
     {
-        rocke_dconv_emit_params(
-            b, &params, "fwd", rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p)));
+        const rocke_type_t* io = rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p));
+        if(spec->bias)
+            rocke_dconv_emit_params_bias(b, &params, io);
+        else
+            rocke_dconv_emit_params(b, &params, "fwd", io);
         PAD_W = PAD;
     }
 
@@ -418,9 +422,17 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
             accs[i] = loop.op->results[i];
     }
 
-    /* Epilogue: one store per output of the tile. */
+    /* Epilogue: one store per output of the tile. Conv + bias (forward only):
+     * bias[ch] as fp32, added to every output before its store. */
     {
         int t, w_out;
+        rocke_value_t* bias_f32 = NULL;
+        if(spec->bias)
+        {
+            rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params.Bias, params.Bias_bytes);
+            bias_f32 = rocke_conv_bias_load_f32(
+                b, bias_rsrc, ch, rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p)), c.c0);
+        }
         d_desc = NULL;
         if(!spec->dgrad)
         {
@@ -464,6 +476,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
                         b, d_desc, off_names, off_vals, 4, &d_off, &d_valid);
                 }
                 safe_d = rocke_b_select(b, ok, rocke_b_mul(b, d_off, c.c_half), c.oob_sentinel);
+                if(bias_f32 != NULL)
+                    acc = rocke_b_fadd(b, acc, bias_f32);
                 rocke_dconv_scalar_store(b, c.dtype, d_rsrc, safe_d, c.c0, acc);
             }
         }

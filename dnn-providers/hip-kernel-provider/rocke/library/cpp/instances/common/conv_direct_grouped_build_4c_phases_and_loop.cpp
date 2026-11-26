@@ -26,6 +26,7 @@
  * Builder-call sequence is byte-identical to the Python so the emitted IR op
  * stream matches exactly.
  */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 
 #include <stdio.h> /* snprintf (error messages) */
@@ -101,7 +102,10 @@ bool rocke_dconv4c_prologue(rocke_dconv_4c_ctx_t* ctx)
         b, &b->kernel->attrs, "max_workgroup_size", rocke_direct_conv_4c_threads_per_block(spec));
 
     /* Lines 841-846: kernel params (AOT kernarg block, conv_abi order). */
-    rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
+    if(ctx->spec->bias)
+        rocke_dconv_emit_params_bias(b, &ctx->params, ctx->io_type);
+    else
+        rocke_dconv_emit_params(b, &ctx->params, "fwd", ctx->io_type);
     ctx->A = ctx->params.A;
     ctx->Bp = ctx->params.Bp;
     ctx->D = ctx->params.D;
@@ -454,6 +458,15 @@ void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx)
             return;
         ctx->d_desc = &d_dyn->base;
     }
+    /* Conv + bias: bias[g*kpg .. +4) (the lane's output channels), as fp32,
+     * added to every flushed accumulator. */
+    if(ctx->spec->bias)
+    {
+        rocke_value_t* bias_rsrc
+            = rocke_conv_bias_rsrc(b, ctx->params.Bias, ctx->params.Bias_bytes);
+        ctx->bias_acc = rocke_conv_bias_load_vec_f32(
+            b, bias_rsrc, rocke_b_mul(b, ctx->g, ctx->c_kpg), 4, ctx->io_type, ctx->c0);
+    }
 
     /* Line 959: c_val_groupc = b.mul(g, c_cpg). */
     ctx->c_val_groupc = rocke_b_mul(b, ctx->g, ctx->c_cpg);
@@ -640,6 +653,8 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
         {
             int flat = qt * KH + P_FLUSH;
             rocke_value_t* acc = accs_flat[flat];
+            if(ctx->bias_acc != NULL)
+                acc = rocke_b_fadd(b, acc, ctx->bias_acc);
             rocke_value_t* q_base = rocke_b_add(b, ctx->q_tile_start, rocke_b_const_i32(b, qt * 4));
             rocke_value_t* out_q = rocke_b_add(b, q_base, ctx->lane_q);
             rocke_value_t* store_ok = rocke_b_land(b, row_ok, rocke_b_cmp_lt(b, out_q, ctx->c_W));

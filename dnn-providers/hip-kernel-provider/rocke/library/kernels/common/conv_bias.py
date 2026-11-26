@@ -23,6 +23,8 @@ The pieces are generic, so every conv family uses the same ones:
 * :func:`load_conv_bias_f32` -- ``bias[k]`` as an fp32 value;
 * :func:`load_conv_bias_vec_f32` -- ``bias[k .. k+n)`` as an ``<n x f32>``
   vector (the direct kernels, which store runs of channels);
+* :func:`load_conv_bias_run_f32` -- the same run read one element at a time,
+  for a run whose start is not aligned to the vector load;
 * :func:`add_conv_bias_to_accs` -- add one value per fragment column to MMA
   accumulator fragments;
 * :func:`apply_implicit_gemm_conv_bias` -- the implicit-GEMM forward's use of
@@ -44,6 +46,7 @@ __all__ = [
     "conv_bias_rsrc",
     "declare_conv_bias_params",
     "load_conv_bias_f32",
+    "load_conv_bias_run_f32",
     "load_conv_bias_vec_f32",
 ]
 
@@ -159,4 +162,18 @@ def load_conv_bias_vec_f32(
         voff = off if j == 0 else b.add(off, b.const_i32(j * eb))
         v = b.buffer_load_vN(rsrc, voff, c0, elem, per)
         comps += [b.cast_to_f32(b.vec_extract(v, i)) for i in range(per)]
+    return b.vec_pack(comps, F32)
+
+
+def load_conv_bias_run_f32(
+    b: IRBuilder, rsrc: Value, k: Value, n: int, elem: Type, c0: Value
+) -> Value:
+    """``bias[k .. k+n)`` as an ``<n x f32>`` vector, one scalar load per
+    element (:func:`load_conv_bias_f32`): for a run that may start off the
+    alignment of a vector load (a per-group channel count that is not a
+    multiple of the run)."""
+    comps = [
+        load_conv_bias_f32(b, rsrc, k if j == 0 else b.add(k, b.const_i32(j)), elem, c0)
+        for j in range(n)
+    ]
     return b.vec_pack(comps, F32)

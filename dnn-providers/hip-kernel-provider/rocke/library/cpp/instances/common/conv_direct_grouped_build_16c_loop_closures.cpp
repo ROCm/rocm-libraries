@@ -23,6 +23,7 @@
  */
 #include <stdio.h>
 
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 
 #include <string.h>
@@ -337,6 +338,18 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
             return NULL;
         ctx->d_desc = &d_dyn->base;
     }
+    /* Conv + bias: bias[g*kpg + c4*4 .. +4) of the lane's accumulator
+     * quad, as fp32, added to every flushed quad. */
+    if(ctx->spec->bias)
+    {
+        rocke_value_t* bias_rsrc
+            = rocke_conv_bias_rsrc(b, ctx->params.Bias, ctx->params.Bias_bytes);
+        rocke_value_t* m_g = rocke_b_mul(b, ctx->g, ctx->c_kpg);
+        rocke_value_t* m_c4 = rocke_b_mul(b, ctx->c4, rocke_b_const_i32(b, 4));
+        rocke_value_t* k_bias = rocke_b_add(b, m_g, m_c4);
+        ctx->bias_acc
+            = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k_bias, 4, ctx->io_type, ctx->c0);
+    }
 
     rocke_iter_arg_t iter_args[ROCKE_DCONV_MAX_QTILES * ROCKE_DCONV_MAX_ACC_SLOTS];
     char acc_names[ROCKE_DCONV_MAX_QTILES * ROCKE_DCONV_MAX_ACC_SLOTS][32];
@@ -559,6 +572,8 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
         {
             int flat = qt * KH + P_FLUSH;
             rocke_value_t* acc_to_flush = accs_flat[flat];
+            if(ctx->bias_acc != NULL)
+                acc_to_flush = rocke_b_fadd(b, acc_to_flush, ctx->bias_acc);
             rocke_value_t* out_q;
             rocke_value_t* store_ok;
             rocke_value_t* k_val;

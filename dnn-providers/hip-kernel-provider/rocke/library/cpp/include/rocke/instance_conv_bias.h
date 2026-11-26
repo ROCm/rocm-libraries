@@ -16,6 +16,7 @@
  *   rocke_conv_bias_rsrc()                <->  conv_bias_rsrc()
  *   rocke_conv_bias_load_f32()            <->  load_conv_bias_f32()
  *   rocke_conv_bias_load_vec_f32()        <->  load_conv_bias_vec_f32()
+ *   rocke_conv_bias_load_run_f32()        <->  load_conv_bias_run_f32()
  *   rocke_conv_bias_add_to_accs()         <->  add_conv_bias_to_accs()
  *   rocke_conv_bias_apply_implicit_gemm() <->  apply_implicit_gemm_conv_bias()
  *
@@ -54,6 +55,15 @@ rocke_value_t* rocke_conv_bias_load_f32(rocke_ir_builder_t* b,
  * bytes (the direct kernels, which store runs of channels). n must be a whole
  * number of such loads. */
 rocke_value_t* rocke_conv_bias_load_vec_f32(rocke_ir_builder_t* b,
+                                            rocke_value_t* rsrc,
+                                            rocke_value_t* k,
+                                            int n,
+                                            const rocke_type_t* elem,
+                                            rocke_value_t* c0);
+
+/* bias[k .. k+n) as an <n x f32> vector, one scalar load per element
+ * (rocke_conv_bias_load_f32): a run that may start off the vector alignment. */
+rocke_value_t* rocke_conv_bias_load_run_f32(rocke_ir_builder_t* b,
                                             rocke_value_t* rsrc,
                                             rocke_value_t* k,
                                             int n,

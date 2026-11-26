@@ -2553,6 +2553,69 @@ _BIAS_CFGS = (
     # 14..15: fp32 storage (gfx950 TF32, gfx942 fp32).
     201,
     204,
+    # 16..26: DirectConvSpec (build_direct_conv) -- baked fp16, single-buffered
+    # bf16, the waves_k LDS reduction (plain and fold_k32), the runtime K loop
+    # over two q waves, the persistent grid, 5x5, runtime channels (plain and
+    # persistent), fp32 on gfx942 and a partial M-tile (kpg 4, tf32 gfx950).
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    86,
+    242,
+    250,
+    # 27..33: DirectDepthwiseSpec -- fp16, bf16, wave32 gfx1250, a logical
+    # wave64 on gfx1250, channel-packed cpl 2 / 4 (gfx1250) and cpl 2 (gfx950).
+    8,
+    22,
+    166,
+    170,
+    171,
+    172,
+    176,
+    # 34..36: DirectDepthwiseSpatialSpec -- fp16, bf16, wave32.
+    10,
+    23,
+    167,
+    # 37..39: DirectDepthwiseColSpec -- fp16, bf16, wave32.
+    32,
+    33,
+    169,
+    # 40..45: DirectDepthwiseTiledSpec -- bf16, fp16, gfx942, wave32, cpl 2 / 4.
+    57,
+    58,
+    59,
+    168,
+    173,
+    174,
+    # 46: DirectDepthwiseTiledSpec(dgrad=True) with bias -- both reject.
+    190,
+    # 47..50: fp32 storage -- depthwise, tiled, column-streamed, spatial.
+    293,
+    300,
+    305,
+    312,
+    # 51..63: the specialised grouped kernels -- DirectConv16cSpec (fold_k32
+    # gfx950, gfx942, bf16, fp32 gfx942), DirectConv4cSpec (fp16, bf16,
+    # gfx942 bf16), DirectConv8cSpec (fp16, bf16, fp32 gfx942),
+    # DirectConv32cSpec (fp16, bf16, fp32 gfx942).
+    0,
+    4,
+    17,
+    218,
+    2,
+    163,
+    164,
+    6,
+    18,
+    228,
+    7,
+    21,
+    232,
 )
 
 
