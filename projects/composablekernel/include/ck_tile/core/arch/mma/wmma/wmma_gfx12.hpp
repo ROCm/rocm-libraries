@@ -779,7 +779,9 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<fp8_t, fp8_t, fp16_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -809,7 +811,9 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<fp8_t, bf8_t, fp16_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -839,7 +843,9 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<bf8_t, fp8_t, fp16_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -869,7 +875,9 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -1003,7 +1011,9 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -1033,7 +1043,9 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -1063,7 +1075,9 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
@@ -1093,7 +1107,9 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 : amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8";
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8 (gfx1250-strict: "
+        "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)";
 
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)

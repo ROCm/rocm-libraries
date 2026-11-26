@@ -30,15 +30,32 @@ namespace ck {
 
 // FP8/BF8 16x16x128 dense WMMA on gfx125x. ABf8/BBf8 select bf8 (e5m2) instead of fp8 (e4m3).
 // gfx1250-strict has no V_WMMA_F{16,32}_16X16X128_{FP8,BF8}_{FP8,BF8} (llvm/llvm-project#228564),
-// so there the product goes through V_WMMA_F32_16X16X128_F8F6F4, which reads A and B in the same
-// register layout (LLVM lowers it to the scaled form with a scale of 1.0). The f16-accumulator
-// forms have no F8F6F4 equivalent: they accumulate in f32 and round once.
+// so there the product goes through V_WMMA_SCALE_F32_16X16X128_F8F6F4 with an explicit E8M0 scale
+// of 1.0 (0x7F in every byte); it reads A and B in the same register layout. Do not use the
+// unscaled F8F6F4 builtin here: on gfx1250-strict LLVM rewrites it to the scaled form with a scale
+// of 0, which means 1.0 only as an inline constant; at -O0 the 0 is placed in a VGPR, where E8M0 0
+// is 2^-127 and the result is C. The f16-accumulator forms have no F8F6F4 equivalent: they
+// accumulate in f32 and round once.
 template <bool ABf8, bool BBf8>
 __device__ inline float8_t
 wmma_f32_16x16x128_f8_gfx125(const int32x16_t& a, const int32x16_t& b, const float8_t& c)
 {
 #if defined(__gfx1250_strict__)
-    return __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(ABf8 ? 1 : 0, a, BBf8 ? 1 : 0, b, 0, c);
+    constexpr int32_t scale_one = 0x7F7F7F7F; // E8M0 1.0 in every byte
+    return __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(ABf8 ? 1 : 0,
+                                                            a,
+                                                            BBf8 ? 1 : 0,
+                                                            b,
+                                                            0, // C_mod
+                                                            c,
+                                                            0, // matrix_a_scale (byte select)
+                                                            0, // matrix_a_scale_fmt: E8M0
+                                                            scale_one,
+                                                            0, // matrix_b_scale (byte select)
+                                                            0, // matrix_b_scale_fmt: E8M0
+                                                            scale_one,
+                                                            false,
+                                                            false);
 #elif defined(__gfx125__)
     if constexpr(!ABf8 && !BBf8)
         return __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(a, b, 0, c, false, false);
