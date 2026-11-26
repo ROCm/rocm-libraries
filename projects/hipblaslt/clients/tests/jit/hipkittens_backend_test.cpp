@@ -567,7 +567,7 @@ TEST_CASE("HipKittens predicates reject zero alpha and a truncating stride", "[j
 {
     using Problem       = TensileLite::ContractionProblemGemm;
     const auto solution = hk::detail::kernels().front().solution();
-    auto       alpha = findPredicate<TensileLite::Predicates::Contraction::AlphaNotZero>(*solution);
+    auto       alpha = findPredicate<TensileLite::Predicates::Contraction::AlphaValue>(*solution);
     auto       stride
         = findPredicate<TensileLite::Predicates::Contraction::StrideFitsInUint32>(*solution);
     JIT_REQUIRE("the solution does not reject zero alpha", alpha != nullptr);
@@ -594,9 +594,11 @@ TEST_CASE("HipKittens predicates reject zero alpha and a truncating stride", "[j
                                          256,
                                          256 * 256,
                                          0.0);
-    problem.setRuntimeAlpha(1.0);
+    problem.setAlphaRestriction(TensileLite::ScalarValue::One);
     JIT_REQUIRE("alpha 1 was rejected", (*alpha)(problem));
-    problem.setRuntimeAlpha(0.0);
+    problem.setAlphaRestriction(TensileLite::ScalarValue::Any);
+    JIT_REQUIRE("a non-zero alpha was rejected", (*alpha)(problem));
+    problem.setAlphaRestriction(TensileLite::ScalarValue::Zero);
     JIT_REQUIRE("alpha 0 was accepted", !(*alpha)(problem));
 
     // stridedBatched stays true for a pointer-array batch. Batch mode is separate.
@@ -806,8 +808,8 @@ TEST_CASE("a published HipKittens solution rejects half-precision alpha zero", "
                 kernel == "HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5");
 
     // Do not launch. The kernel faults on alpha 0. The decoded problem has to
-    // carry runtime alpha 0, and the published solution has to reject that
-    // value while K stays 128.
+    // classify that alpha as Zero, and the published solution has to reject it
+    // while K stays 128.
     std::shared_ptr<const jit::GemmRequest> zeroRequest;
     hipblaslt_jit_test::checkBlas(jit::makeGemmRequest(handle,
                                                        desc,
@@ -826,10 +828,11 @@ TEST_CASE("a published HipKittens solution rejects half-precision alpha zero", "
                                   "makeGemmRequest",
                                   diagnostics.message);
     const auto decoded = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(*zeroRequest);
-    JIT_REQUIRE("half alpha 0 was stored as " + std::to_string(decoded.runtimeAlpha()),
-                decoded.runtimeAlpha() == 0.0);
+    JIT_REQUIRE("half alpha 0 was classified as "
+                    + TensileLite::ToString(decoded.alphaRestriction()),
+                decoded.alphaRestriction() == TensileLite::ScalarValue::Zero);
     auto kept = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(*request);
-    kept.setRuntimeAlpha(decoded.runtimeAlpha());
+    kept.setAlphaRestriction(decoded.alphaRestriction());
     std::shared_ptr<TensileLite::ContractionSolution> publishedSolution;
     for(const auto& entry : hk::detail::kernels())
         if(entry.kernelName == "HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5")

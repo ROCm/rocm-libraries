@@ -41,6 +41,8 @@ namespace TensileLite
             return "1";
         case ScalarValue::NegativeOne:
             return "-1";
+        case ScalarValue::Zero:
+            return "0";
 
         case ScalarValue::Count:
         default:;
@@ -78,6 +80,7 @@ namespace TensileLite
         registerTypeInfo<ScalarValue::Any>();
         registerTypeInfo<ScalarValue::One>();
         registerTypeInfo<ScalarValue::NegativeOne>();
+        registerTypeInfo<ScalarValue::Zero>();
     }
 
     void ScalarValueTypeInfo::registerAllTypeInfoOnce()

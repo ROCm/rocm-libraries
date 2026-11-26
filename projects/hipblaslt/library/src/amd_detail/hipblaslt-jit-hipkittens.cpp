@@ -205,7 +205,9 @@ namespace hipblaslt_jit::hipkittens
                     predicate<BufferLoadOffsetLimitCheck>({0, 0, allColumns, allColumns}),
                     predicate<BufferLoadOffsetLimitCheck_Beta>(allColumns),
                     predicate<BufferStoreOffsetLimitCheck>(allColumns),
-                    std::make_shared<AlphaNotZero>(),
+                    // Any matches every alphaRestriction except Zero. 1 and -1
+                    // stay on that restriction; the number stays on the request.
+                    predicate<AlphaValue>(ScalarValue::Any),
                     std::make_shared<StrideFitsInUint32>(),
                     predicate<GlobalSplitUCheckMinK>({32, 1}),
                     predicate<WorkgroupMappingXCCCheck>({1, -1}),
@@ -267,15 +269,11 @@ namespace hipblaslt_jit::hipkittens
             const auto problem = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(request);
             // The kernel always loads A and B; the multiply by alpha is only in
             // store_scaled. It has no zero-alpha path, so alpha 0 is not solved.
-            if(request.problem.compute_type == rocblaslt_compute_f32 && request.problem.alpha)
-            {
-                float alpha = 1.f;
-                std::memcpy(&alpha, request.problem.alpha, sizeof(alpha));
-                if(alpha == 0.f)
-                    return {Status::Code::NotSupported,
-                            Stage::Generate,
-                            "HipKittens kernels have no zero-alpha path"};
-            }
+            // The classification is alphaRestriction; the number stays on the request.
+            if(problem.alphaRestriction() == TensileLite::ScalarValue::Zero)
+                return {Status::Code::NotSupported,
+                        Stage::Generate,
+                        "HipKittens kernels have no zero-alpha path"};
             try
             {
                 hipblaslt_jit::canonicalGemm(problem);

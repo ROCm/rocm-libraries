@@ -1174,35 +1174,6 @@ namespace TensileLite
                 }
             };
 
-            // Rejects alpha 0. The numeric value is runtimeAlpha, not the Any/One
-            // restriction, which does not distinguish zero from any other value.
-            struct AlphaNotZero : public Predicate_CRTP<AlphaNotZero, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = false,
-                    HasValue = false
-                };
-                AlphaNotZero() = default;
-
-                static std::string Type()
-                {
-                    return "AlphaNotZero";
-                }
-
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    return problem.runtimeAlpha() != 0.0;
-                }
-
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    return debugEvalCmp(
-                        problem, stream, "prob", problem.runtimeAlpha(), "!=", "sol", 0.0);
-                }
-            };
-
             // The custom kernel packs these strides as uint32. A value that does not
             // fit is truncated, so the published solution must reject it.
             struct StrideFitsInUint32
@@ -1473,26 +1444,23 @@ namespace TensileLite
                     return "AlphaValue";
                 }
 
+                // Any matches every restriction except Zero. One and NegativeOne
+                // require that restriction. The number stays on ContractionInputs.
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.alphaRestriction() == value || value == ScalarValue::Any;
+                    if(value == ScalarValue::Any)
+                        return problem.alphaRestriction() != ScalarValue::Zero;
+                    return problem.alphaRestriction() == value;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "prob",
-                                        problem.alphaRestriction(),
-                                        "==",
-                                        "sol",
-                                        value,
-                                        "sol",
-                                        value,
-                                        "==",
-                                        "sol_any",
-                                        ScalarValue::Any);
+                    const bool         rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.alphaRestriction() << " sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
