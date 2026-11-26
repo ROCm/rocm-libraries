@@ -30,7 +30,10 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/util_allocator.hpp"
+#include <condition_variable>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
 #include <hipcub/util_allocator.hpp>
 
 #if __has_include(<valgrind/valgrind.h>)
@@ -52,46 +55,73 @@
 #endif
 
 // Host-side control of stream progress, used to keep blocks "in use" on a stream.
-// block() enqueues a stream wait on a flag in signal memory, so all later work on the
-// stream is held back until unblock() sets the flag from the host. Unlike a spinning
-// kernel, the wait occupies no GPU resources and is known to the runtime.
-// Construct instances before blocking any stream: the constructor allocates memory,
-// which may synchronize with the device.
+// block() enqueues a host function on the stream that waits until unblock() is called from
+// the host, so all later work on the stream is held back. Unlike a spinning kernel, this
+// occupies no GPU resources (and needs no scratch memory). It only uses APIs that exist in
+// both the HIP and CUDA backends.
 struct stream_blocker
 {
-	stream_blocker(const hipStream_t& stream)
-	  : m_stream(stream)
-	{
-		// Note: hipStreamWaitValue64 requires signal memory, which must be at least 8 bytes in size.
-		HIP_CHECK(hipExtMallocWithFlags((void**)&m_flag, sizeof(*m_flag), hipMallocSignalMemory));
-		__atomic_store_n(m_flag, 0u, __ATOMIC_RELEASE);
-	}
-	~stream_blocker()
-	{
-		// Release the stream in case a failed assertion skipped unblock()
-		__atomic_store_n(m_flag, 1u, __ATOMIC_RELEASE);
-		HIP_CHECK(hipFree(m_flag));
-	}
+    stream_blocker(const hipStream_t& stream)
+        : m_stream(stream), m_state(std::make_shared<state>())
+    {}
 
-	stream_blocker(const stream_blocker&) = delete;
-	stream_blocker& operator=(const stream_blocker&) = delete;
+    // The host function holds its own reference to the state, so it is safe to destroy the
+    // blocker while the callback is still pending. Release the stream in case a failed
+    // assertion skipped unblock().
+    ~stream_blocker()
+    {
+        unblock();
+    }
 
-	void block()
-	{
-		printf("Blocking Stream %lld\n", (long long) m_stream);
-		__atomic_store_n(m_flag, 0u, __ATOMIC_RELEASE);
-		HIP_CHECK(hipStreamWaitValue64(m_stream, m_flag, 1, hipStreamWaitValueEq));
-	}
+    stream_blocker(const stream_blocker&) = delete;
+    stream_blocker& operator=(const stream_blocker&) = delete;
 
-	void unblock()
-	{
-		__atomic_store_n(m_flag, 1u, __ATOMIC_RELEASE);
-		printf("Unblocking Stream %lld\n", (long long) m_stream);
-	}
+    void block()
+    {
+        printf("Blocking Stream %lld\n", (long long) m_stream);
+        {
+            std::lock_guard<std::mutex> lock(m_state->mutex);
+            m_state->released = false;
+        }
+        // Ownership of this reference passes to wait_callback
+        auto* ref = new std::shared_ptr<state>(m_state);
+        const hipError_t err = hipLaunchHostFunc(m_stream, wait_callback, ref);
+        if(err != hipSuccess)
+        {
+            delete ref;
+        }
+        HIP_CHECK(err);
+    }
+
+    void unblock()
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_state->mutex);
+            m_state->released = true;
+        }
+        m_state->cv.notify_all();
+        printf("Unblocking Stream %lld\n", (long long) m_stream);
+    }
 
 private:
-	uint64_t* m_flag{};
-	hipStream_t m_stream{0};
+    struct state
+    {
+        std::mutex              mutex;
+        std::condition_variable cv;
+        bool                    released{true};
+    };
+
+    // Runs on a runtime thread: must not call any HIP/CUDA API.
+    static void wait_callback(void* user_data)
+    {
+        std::unique_ptr<std::shared_ptr<state>> ref(static_cast<std::shared_ptr<state>*>(user_data));
+        state& s = **ref;
+        std::unique_lock<std::mutex> lock(s.mutex);
+        s.cv.wait(lock, [&s] { return s.released; });
+    }
+
+    hipStream_t             m_stream{0};
+    std::shared_ptr<state>  m_state;
 };
 
 __global__
@@ -122,15 +152,6 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
 
     HIP_CHECK(hipGetDeviceCount(&num_gpus));
     HIP_CHECK(hipGetDevice(&initial_gpu));
-
-    // stream_blocker relies on hipStreamWaitValue64
-    int can_use_stream_wait_value = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&can_use_stream_wait_value,
-                                    hipDeviceAttributeCanUseStreamWaitValue,
-                                    initial_gpu));
-    if (!can_use_stream_wait_value) {
-        GTEST_SKIP() << "Skipping test: device does not support hipStreamWaitValue64";
-    }
 
     // Create default allocator (caches up to 6MB in device allocations per GPU)
     hipcub::CachingDeviceAllocator allocator;
