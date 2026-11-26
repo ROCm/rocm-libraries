@@ -16,7 +16,7 @@ tree, and the installed guard holds the tree to it::
 
     {"modules": ["rocke_engine", "rocke_library_engine"],
      "shared_engine": "librocke.so"}
-    {"modules": [], "absent_reason": "the build's Python had no pybind11",
+    {"modules": [], "absent_reason": "the build had ROCKE_BUILD_PYBIND off",
      "shared_engine": "", "shared_engine_absent_reason": "..."}
 
 Run as ``python -m rocke.tests.engine_modules <marker>``, the guard:

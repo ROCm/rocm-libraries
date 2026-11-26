@@ -688,8 +688,8 @@ endif()
 # The C++/Python engine parity checks of library kernels: the gfx950 tiled-2D
 # selector, and the LLVM IR of the attention, MLA prefill and GDN/KDA decode
 # kernels. They run the C++ engine through its Python modules (rocke_engine),
-# which a provider build installs beside the rocke package when the build's
-# Python has pybind11; without them every case skips, and
+# which a provider build installs beside the rocke package when its configure
+# sets ROCKE_BUILD_PYBIND=ON; without them every case skips, and
 # rocke_engine_modules_check says why. The selector's full grid (its exhaustive
 # items) runs in the comprehensive entry below. The GDN/KDA decode case takes
 # about 20 s on one host core (it lowers 341 kernels at four LLVM flavors with

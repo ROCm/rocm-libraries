@@ -549,10 +549,10 @@ if(ROCKE_INSTALL_TESTS)
     # installed guard rocke_engine_modules_check (rocke.tests.engine_modules),
     # which fails when a module or the shared engine the build made does not
     # load. Under tests/, which TheRock's test artifact captures. A build that
-    # decides against the modules (the provider build, on Windows or without
-    # pybind11) says why in ROCKE_ENGINE_MODULES_ABSENT_REASON, and one that
-    # does not install the shared engine beside the package says why in
-    # ROCKE_SHARED_ENGINE_ABSENT_REASON.
+    # decides against the modules (the provider build on Windows) says why in
+    # ROCKE_ENGINE_MODULES_ABSENT_REASON, one with ROCKE_BUILD_PYBIND off gets
+    # the default reason below, and one that does not install the shared engine
+    # beside the package says why in ROCKE_SHARED_ENGINE_ABSENT_REASON.
 
     # `value` as a JSON string literal: its backslashes, then its quotes, escaped.
     function(_rocke_json_string out_var value)
