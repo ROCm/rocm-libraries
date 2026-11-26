@@ -65,11 +65,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
     defined(__gfx117__))
-#if defined(__gfx11__) || defined(__gfx117__)
-    // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
-    if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<CGlobalMemoryDataOperation>())
     {
-#endif
         using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
 
         constexpr index_t LDS_size =
@@ -104,10 +101,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             num_k_per_block,
             karg,
             epilogue_args);
-
-#if defined(__gfx11__) || defined(__gfx117__)
     }
-#endif
 #else
     ignore = karg;
     ignore = a_grid_desc_ak0_m_ak1;

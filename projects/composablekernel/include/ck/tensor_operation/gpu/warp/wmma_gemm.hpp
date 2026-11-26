@@ -644,25 +644,18 @@ struct wmma_type<WmmaInstr::wmma_f32_16x16x4_f32_gfx12,
                  WaveSize,
                  typename std::enable_if_t<WaveSize == 32 || WaveSize == 64>>
 {
-    // Absolute fixing property
-    // * Data Pixel
     static constexpr index_t m_per_wmma = 16;
     static constexpr index_t n_per_wmma = 16;
     static constexpr index_t k_per_wmma = 4;
     static constexpr index_t k_per_blk  = 2;
-    // static constexpr index_t src_a_data_size = 2;
-    // static constexpr index_t src_b_data_size = 2;
-    // static constexpr index_t acc_data_size   = 4;
-    // * Thread mapping inside wave, num_thread_per_subgroups always alone N direction
+
     static constexpr index_t acc_data_size            = 4;
     static constexpr index_t acc_pack_number          = 1;
     static constexpr index_t num_thread_per_subgroups = n_per_wmma;
 
     // Wave mode dependent propety
     static constexpr index_t wave_size = Number<WaveSize>{};
-    // * Fixed in Navi3x, Will be wave mode dependent on Navi4x
-    // static constexpr index_t num_src_a_vgprs_per_wave = k_per_wmma / 2 * src_a_data_size / 4;
-    // static constexpr index_t num_src_b_vgprs_per_wave = k_per_wmma / 2 * src_b_data_size / 4;
+
     // * num_acc_vgprs_per_wave alone M direction
     // * num_subgroups alone M direction
     static constexpr index_t num_acc_vgprs_per_wave = m_per_wmma * n_per_wmma / wave_size;
@@ -1077,13 +1070,7 @@ struct WmmaSelector
         static_assert(selected_wmma.m_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
 
         static_assert(selected_wmma.m_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
-        // #if defined(__gfx125__)
-        //         // on gfx125x k_per_wmma could be 32 or 64
-        //         // static_assert(selected_wmma.k_per_wmma == 32, "WRONG! WMMA_M must equal to
-        //         32");
-        // #else
-        //         static_assert(selected_wmma.k_per_wmma == 16, "WRONG! WMMA_M must equal to 16");
-        // #endif
+
         static_assert(selected_wmma.wave_size * selected_wmma.num_acc_vgprs_per_wave *
                               selected_wmma.acc_data_size * selected_wmma.acc_pack_number ==
                           selected_wmma.m_per_wmma * selected_wmma.n_per_wmma * 4,

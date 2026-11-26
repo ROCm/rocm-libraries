@@ -322,6 +322,30 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     // return block_id to C matrix tile idx (m0, n0) mapping
     using Block2CTileMap = BlockToCTileMap_Grouped_M00_N0_M01Adapt<8, MPerBlock, NPerBlock>;
 
+    template <InMemoryDataOperationEnum CGlobalMemoryDataOperation_>
+    __device__ static bool constexpr IsValidInstanceDevice()
+    {
+#if defined(__gfx11__) || defined(__gfx117__)
+        constexpr bool SupportMemOp = CGlobalMemoryDataOperation_ == InMemoryDataOperationEnum::Set;
+#else
+        constexpr bool SupportMemOp = sizeof(EDataType) >= 2 || (CGlobalMemoryDataOperation_ ==
+                                                                 InMemoryDataOperationEnum::Set);
+#endif
+        if constexpr(SupportMemOp == false)
+        {
+            return false;
+        }
+
+#if defined(__gfx11__) || defined(__gfx117__) || defined(__gfx120__)
+        if constexpr(std::is_same_v<ComputeTypeA, float> || std::is_same_v<ComputeTypeB, float>)
+        {
+            return false;
+        }
+#endif
+
+        return true;
+    }
+
     // Calculate grid size taking into account splitk (KBatch)
     // 2D grid (x,z)
     __host__ __device__ static auto CalculateGridSize(index_t M, index_t N, index_t KBatch)
@@ -966,6 +990,34 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                     }
                     return false;
                 }
+            }
+        }
+        else if constexpr(sizeof(ComputeTypeA) == 4 && sizeof(ComputeTypeB) == 4)
+        {
+            if(is_gfx125_supported())
+            {
+                if constexpr(KPerBlock % 4 != 0)
+                {
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "KPerBlock must be a multiple of 4 for 32bit types "
+                                     "GEMM on gfx125x. KPerBlock: "
+                                  << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                                  << ", in function: " << __func__ << std::endl;
+                    }
+                    return false;
+                }
+            }
+            else
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "KPerBlock must be a multiple of 16 for 8bit types "
+                                 "GEMM on gfx12x. KPerBlock: "
+                              << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
+                return false;
             }
         }
 

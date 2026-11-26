@@ -85,12 +85,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     if(karg.M == 0 || karg.N == 0 || karg.K == 0)
         return;
 
-#if defined(__gfx11__) || defined(__gfx117__)
-    // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
-    if constexpr(!(EGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
-                   (std::is_same_v<typename GridwiseGemm::EDataType_, ck::half_t> ||
-                    std::is_same_v<typename GridwiseGemm::EDataType_, ck::bhalf_t>)))
-#endif
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<EGlobalMemoryDataOperation>())
     {
 
         typename GridwiseGemm::Problem problem(karg.M,
@@ -576,6 +571,36 @@ struct DeviceGroupedGemm_Wmma_Multi_ABD_Fixed_NK
         if(ck::type_convert<ck::index_t>(arg.gemm_desc_kernel_arg_.size()) != arg.group_count_)
         {
             return false;
+        }
+
+        // GridwiseGemm CheckValidity is not called here so FP32 support needs to be checked
+        // explicitly
+        // FP32 not supported on RDNA
+        if constexpr(sizeof(ComputeTypeA) == 4 && sizeof(ComputeTypeB) == 4)
+        {
+            if(ck::is_gfx125_supported())
+            {
+                if constexpr(KPerBlock % 4 != 0)
+                {
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        std::cout << "KPerBlock must be a multiple of 4 for 32bit types "
+                                     "GEMM on gfx125x. KPerBlock: "
+                                  << KPerBlock << " " << __FILE__ << ":" << __LINE__
+                                  << ", in function: " << __func__ << std::endl;
+                    }
+                    return false;
+                }
+            }
+            else
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "FP32 not supported on RDNA!" << " In " << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
         }
 
         bool supported = true;

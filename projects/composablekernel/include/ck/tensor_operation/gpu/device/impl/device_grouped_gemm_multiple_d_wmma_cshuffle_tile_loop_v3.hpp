@@ -67,142 +67,145 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                         const CDEElementwiseOperation cde_element_op)
 {
 #if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__))
-    constexpr auto epilogue_type =
-        GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
-            ? EpilogueType::DirectStore
-            : EpilogueType::CShuffle;
-    using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
-
-    constexpr index_t LDS_size =
-        GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>(get_device_arch());
-    __shared__ uint8_t p_shared[LDS_size];
-
-    const auto gemm_desc_ptr =
-        reinterpret_cast<const GemmDesc*>(cast_pointer_to_generic_address_space(gemm_descs_const));
-
-    constexpr auto NumDTensor = DsDataType::Size();
-    index_t tile_id           = get_block_1d_id();
-    index_t tile_offset       = 0;
-    index_t group_id          = -1;
-    index_t group_offset      = 0;
-    index_t grid_size_grp     = 0;
-
-    index_t gemm_tile_id_start = 0;
-    index_t gemm_tile_id_end   = 0;
-
-    index_t M = 0, N = 0, K = 0;
-
-    auto b2c_tile_map = OffsettedBlockToCTileMap(LocalBlock2ETileMap(1, 1), 1, 1);
-
-    do
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<InMemoryDataOperationEnum::Set>())
     {
-        // Find corresponding GEMM group for our tile
-        while(!(tile_id >= gemm_tile_id_start && tile_id < gemm_tile_id_end) &&
-              group_id < group_count)
+        constexpr auto epilogue_type =
+            GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
+                ? EpilogueType::DirectStore
+                : EpilogueType::CShuffle;
+        using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
+
+        constexpr index_t LDS_size =
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>(get_device_arch());
+        __shared__ uint8_t p_shared[LDS_size];
+
+        const auto gemm_desc_ptr = reinterpret_cast<const GemmDesc*>(
+            cast_pointer_to_generic_address_space(gemm_descs_const));
+
+        constexpr auto NumDTensor = DsDataType::Size();
+        index_t tile_id           = get_block_1d_id();
+        index_t tile_offset       = 0;
+        index_t group_id          = -1;
+        index_t group_offset      = 0;
+        index_t grid_size_grp     = 0;
+
+        index_t gemm_tile_id_start = 0;
+        index_t gemm_tile_id_end   = 0;
+
+        index_t M = 0, N = 0, K = 0;
+
+        auto b2c_tile_map = OffsettedBlockToCTileMap(LocalBlock2ETileMap(1, 1), 1, 1);
+
+        do
         {
-            group_offset += grid_size_grp;
-            group_id++;
-
-            if(group_id >= group_count)
-                return;
-
-            M = gemm_desc_ptr[group_id].M;
-            N = gemm_desc_ptr[group_id].N;
-            K = gemm_desc_ptr[group_id].K;
-
-            if(M == 0 || N == 0 || K == 0)
+            // Find corresponding GEMM group for our tile
+            while(!(tile_id >= gemm_tile_id_start && tile_id < gemm_tile_id_end) &&
+                  group_id < group_count)
             {
-                grid_size_grp = 0;
-                continue;
+                group_offset += grid_size_grp;
+                group_id++;
+
+                if(group_id >= group_count)
+                    return;
+
+                M = gemm_desc_ptr[group_id].M;
+                N = gemm_desc_ptr[group_id].N;
+                K = gemm_desc_ptr[group_id].K;
+
+                if(M == 0 || N == 0 || K == 0)
+                {
+                    grid_size_grp = 0;
+                    continue;
+                }
+
+                b2c_tile_map = OffsettedBlockToCTileMap(
+                    LocalBlock2ETileMap(M, N, 4), group_offset, tile_offset);
+                grid_size_grp = b2c_tile_map.CalculateGridSize(M, N);
+
+                gemm_tile_id_start = group_offset;
+                gemm_tile_id_end   = group_offset + grid_size_grp;
             }
 
-            b2c_tile_map =
-                OffsettedBlockToCTileMap(LocalBlock2ETileMap(M, N, 4), group_offset, tile_offset);
-            grid_size_grp = b2c_tile_map.CalculateGridSize(M, N);
+            // Create A&B grid pointer containing their single tensors
+            typename GridwiseGemm::AsGridPointer p_as_grid = Tuple<const ADataType*>(
+                static_cast<const ADataType*>(gemm_desc_ptr[group_id].p_a_grid));
+            typename GridwiseGemm::BsGridPointer p_bs_grid = Tuple<const BDataType*>(
+                static_cast<const BDataType*>(gemm_desc_ptr[group_id].p_b_grid));
 
-            gemm_tile_id_start = group_offset;
-            gemm_tile_id_end   = group_offset + grid_size_grp;
-        }
+            // Make a DsGridPointer instance containing all D tensors
+            using DsGridPointer = decltype(GridwiseGemm::MakeDsGridPointer());
+            DsGridPointer p_ds_grid;
+            std::array<index_t, NumDTensor> stride_Ds;
 
-        // Create A&B grid pointer containing their single tensors
-        typename GridwiseGemm::AsGridPointer p_as_grid = Tuple<const ADataType*>(
-            static_cast<const ADataType*>(gemm_desc_ptr[group_id].p_a_grid));
-        typename GridwiseGemm::BsGridPointer p_bs_grid = Tuple<const BDataType*>(
-            static_cast<const BDataType*>(gemm_desc_ptr[group_id].p_b_grid));
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+                p_ds_grid(i) = static_cast<const DDataType*>(gemm_desc_ptr[group_id].p_ds_grid[i]);
+                stride_Ds[i] = gemm_desc_ptr[group_id].StrideDs[i];
+            });
 
-        // Make a DsGridPointer instance containing all D tensors
-        using DsGridPointer = decltype(GridwiseGemm::MakeDsGridPointer());
-        DsGridPointer p_ds_grid;
-        std::array<index_t, NumDTensor> stride_Ds;
+            index_t K_split = ck::math::integer_divide_ceil(K, KPerBlock) * KPerBlock;
+            const bool has_main_k_block_loop = GridwiseGemm::CalculateHasMainKBlockLoop(K_split);
 
-        static_for<0, NumDTensor, 1>{}([&](auto i) {
-            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
-            p_ds_grid(i)    = static_cast<const DDataType*>(gemm_desc_ptr[group_id].p_ds_grid[i]);
-            stride_Ds[i]    = gemm_desc_ptr[group_id].StrideDs[i];
-        });
+            // Update tile offset if we have moved within group
+            b2c_tile_map.UpdateTileOffset(tile_offset);
 
-        index_t K_split                  = ck::math::integer_divide_ceil(K, KPerBlock) * KPerBlock;
-        const bool has_main_k_block_loop = GridwiseGemm::CalculateHasMainKBlockLoop(K_split);
+            using Problem = typename GridwiseGemm::Problem;
+            auto problem  = Problem(gemm_desc_ptr[group_id].M,
+                                   gemm_desc_ptr[group_id].N,
+                                   gemm_desc_ptr[group_id].K,
+                                   std::array<index_t, 1>{gemm_desc_ptr[group_id].StrideA},
+                                   std::array<index_t, 1>{gemm_desc_ptr[group_id].StrideB},
+                                   stride_Ds,
+                                   gemm_desc_ptr[group_id].StrideE,
+                                   1);
 
-        // Update tile offset if we have moved within group
-        b2c_tile_map.UpdateTileOffset(tile_offset);
+            auto epilogue_args           = SelectedEpilogue{};
+            constexpr TailNumber TailNum = TailNumber::Full;
 
-        using Problem = typename GridwiseGemm::Problem;
-        auto problem  = Problem(gemm_desc_ptr[group_id].M,
-                               gemm_desc_ptr[group_id].N,
-                               gemm_desc_ptr[group_id].K,
-                               std::array<index_t, 1>{gemm_desc_ptr[group_id].StrideA},
-                               std::array<index_t, 1>{gemm_desc_ptr[group_id].StrideB},
-                               stride_Ds,
-                               gemm_desc_ptr[group_id].StrideE,
-                               1);
-
-        auto epilogue_args           = SelectedEpilogue{};
-        constexpr TailNumber TailNum = TailNumber::Full;
-
-        if(has_main_k_block_loop)
-        {
-            if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ||
-                         BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
+            if(has_main_k_block_loop)
             {
-                GridwiseGemm::template Run<true, InMemoryDataOperationEnum::Set, TailNum>(
-                    p_as_grid,
-                    p_bs_grid,
-                    p_ds_grid,
-                    static_cast<EDataType*>(gemm_desc_ptr[group_id].p_e_grid),
-                    static_cast<void*>(p_shared),
-                    problem,
-                    b2c_tile_map,
-                    a_element_op,
-                    b_element_op,
-                    cde_element_op,
-                    epilogue_args);
+                if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ||
+                             BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
+                {
+                    GridwiseGemm::template Run<true, InMemoryDataOperationEnum::Set, TailNum>(
+                        p_as_grid,
+                        p_bs_grid,
+                        p_ds_grid,
+                        static_cast<EDataType*>(gemm_desc_ptr[group_id].p_e_grid),
+                        static_cast<void*>(p_shared),
+                        problem,
+                        b2c_tile_map,
+                        a_element_op,
+                        b_element_op,
+                        cde_element_op,
+                        epilogue_args);
+                }
             }
-        }
-        else
-        {
-            if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+            else
             {
-                GridwiseGemm::template Run<false, InMemoryDataOperationEnum::Set, TailNum>(
-                    p_as_grid,
-                    p_bs_grid,
-                    p_ds_grid,
-                    static_cast<EDataType*>(gemm_desc_ptr[group_id].p_e_grid),
-                    static_cast<void*>(p_shared),
-                    problem,
-                    b2c_tile_map,
-                    a_element_op,
-                    b_element_op,
-                    cde_element_op,
-                    epilogue_args);
+                if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+                {
+                    GridwiseGemm::template Run<false, InMemoryDataOperationEnum::Set, TailNum>(
+                        p_as_grid,
+                        p_bs_grid,
+                        p_ds_grid,
+                        static_cast<EDataType*>(gemm_desc_ptr[group_id].p_e_grid),
+                        static_cast<void*>(p_shared),
+                        problem,
+                        b2c_tile_map,
+                        a_element_op,
+                        b_element_op,
+                        cde_element_op,
+                        epilogue_args);
+                }
             }
-        }
 
-        tile_id += get_grid_size();
-        tile_offset += get_grid_size();
-        block_sync_lds();
+            tile_id += get_grid_size();
+            tile_offset += get_grid_size();
+            block_sync_lds();
 
-    } while(group_id < group_count);
+        } while(group_id < group_count);
+    }
 #else
     ignore = gemm_descs_const;
     ignore = group_count;
