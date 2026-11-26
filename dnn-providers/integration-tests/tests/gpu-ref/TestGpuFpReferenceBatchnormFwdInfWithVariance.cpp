@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuBatchnormFwdInfRefTestFixture.hpp"
-#include "SmokeCases.hpp"
+#include "QuickCases.hpp"
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -1079,10 +1079,6 @@ TEST_P(TestGpuBatchnormFwdInfVarRef5DBfp16, MatchesCpuRef)
 // 3D (NCL/NLC) tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(StandardBasic,
-                         TestGpuBatchnormFwdInfVarRef3DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfVarRef3DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
@@ -1093,10 +1089,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                           ::testing::ValuesIn(getBatchnormSmall3DTestCases())));
 // Medium shapes (3D/4D/5D) are fp32-only: dtype only affects per-element load/store
 // conversion, already covered by the standard tier's small-shape fp16/bfp16 runs (cull principle P1).
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfVarRef3DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
-                                          ::testing::ValuesIn(getBatchnormMedium3DTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuBatchnormFwdInfVarRef3DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     ::testing::ValuesIn(concatCases(getBatchnormSmall3DTestCases(),
+                                                     getBatchnormMedium3DTestCases()))));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdInfVarRef3DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
@@ -1111,10 +1109,6 @@ INSTANTIATE_TEST_SUITE_P(
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(StandardBasic,
-                         TestGpuBatchnormFwdInfVarRef4DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfVarRef4DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
@@ -1123,10 +1117,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfVarRef4DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           ::testing::ValuesIn(getBatchnormSmall4DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfVarRef4DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                                          ::testing::ValuesIn(getBatchnormMedium4DTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuBatchnormFwdInfVarRef4DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     ::testing::ValuesIn(concatCases(getBatchnormSmall4DTestCases(),
+                                                     getBatchnormMedium4DTestCases()))));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdInfVarRef4DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
@@ -1142,14 +1138,10 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     TestGpuBatchnormFwdInfVarRef5DFp32,
     testing::Combine(testing::Values(TensorLayout::NCDHW),
-                     ::testing::ValuesIn(smokeCase(getBatchnormSmall5DTestCases()))));
-INSTANTIATE_TEST_SUITE_P(StandardBasic,
-                         TestGpuBatchnormFwdInfVarRef5DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
+                     ::testing::ValuesIn(quickCase(getBatchnormSmall5DTestCases()))));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfVarRef5DFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
@@ -1158,10 +1150,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuBatchnormFwdInfVarRef5DBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           ::testing::ValuesIn(getBatchnormSmall5DTestCases())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuBatchnormFwdInfVarRef5DFp32,
-                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                                          ::testing::ValuesIn(getBatchnormMedium5DTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuBatchnormFwdInfVarRef5DFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     ::testing::ValuesIn(concatCases(getBatchnormSmall5DTestCases(),
+                                                     getBatchnormMedium5DTestCases()))));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuBatchnormFwdInfVarRef5DFp32,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),

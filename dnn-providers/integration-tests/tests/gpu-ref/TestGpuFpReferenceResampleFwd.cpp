@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuResampleFwdRefTestFixture.hpp"
+#include "QuickCases.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
@@ -1045,15 +1046,8 @@ TEST_P(TestGpuResampleFwdRef5DBfp16, MatchesCpuRef)
 // 4D tests
 // ============================================================================
 
-// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
+// --- Standard: fp32 small + medium shapes, reduced precision on small shapes ---
 
-INSTANTIATE_TEST_SUITE_P(StandardBasic,
-                         TestGpuResampleFwdRef4DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleSmall4DShapes(),
-                                                                   getResample4DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef4DFp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall4DShapes(),
@@ -1070,16 +1064,22 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                                                    ResampleDirection::FORWARD)));
 
 // --- Standard tests ---
-// Fp32 only: reduced-precision types are covered by the standard tier's small-shape run
-// (dtype orthogonality, P1).
+// fp32 runs the small catalog followed by the medium catalog; reduced-precision types are
+// covered by the small-shape run above (dtype orthogonality, P1).
 
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuResampleFwdRef4DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleMedium4DShapes(),
-                                                                   getResample4DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuResampleFwdRef4DFp32,
+    ::testing::ValuesIn(concatCases(makeResampleTestCases(getResampleSmall4DShapes(),
+                                                          getResample4DLayouts(),
+                                                          getResampleModes(),
+                                                          getPaddingModes(),
+                                                          ResampleDirection::FORWARD),
+                                    makeResampleTestCases(getResampleMedium4DShapes(),
+                                                          getResample4DLayouts(),
+                                                          getResampleModes(),
+                                                          getPaddingModes(),
+                                                          ResampleDirection::FORWARD))));
 
 // --- Comprehensive tests ---
 
@@ -1095,15 +1095,8 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D tests
 // ============================================================================
 
-// --- fp32 small shapes (StandardBasic) + Standard small-shape reduced precision ---
+// --- Standard: fp32 small + medium shapes, reduced precision on small shapes ---
 
-INSTANTIATE_TEST_SUITE_P(StandardBasic,
-                         TestGpuResampleFwdRef5DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleSmall5DShapes(),
-                                                                   getResample5DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuResampleFwdRef5DFp16,
                          ::testing::ValuesIn(makeResampleTestCases(getResampleSmall5DShapes(),
@@ -1120,14 +1113,21 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                                                    ResampleDirection::FORWARD)));
 
 // --- Standard tests ---
+// fp32 runs the small catalog followed by the medium catalog.
 
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuResampleFwdRef5DFp32,
-                         ::testing::ValuesIn(makeResampleTestCases(getResampleMedium5DShapes(),
-                                                                   getResample5DLayouts(),
-                                                                   getResampleModes(),
-                                                                   getPaddingModes(),
-                                                                   ResampleDirection::FORWARD)));
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuResampleFwdRef5DFp32,
+    ::testing::ValuesIn(concatCases(makeResampleTestCases(getResampleSmall5DShapes(),
+                                                          getResample5DLayouts(),
+                                                          getResampleModes(),
+                                                          getPaddingModes(),
+                                                          ResampleDirection::FORWARD),
+                                    makeResampleTestCases(getResampleMedium5DShapes(),
+                                                          getResample5DLayouts(),
+                                                          getResampleModes(),
+                                                          getPaddingModes(),
+                                                          ResampleDirection::FORWARD))));
 
 // --- Comprehensive tests ---
 

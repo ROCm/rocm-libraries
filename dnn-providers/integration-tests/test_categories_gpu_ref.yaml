@@ -11,14 +11,13 @@
 #   the time is HipRTC compilation (~0.4 s per kernel variant, docs/gpu-ref-test-coverage.md),
 #   so the quick tier is sized by the number of kernel variants it compiles, not by its
 #   case count. The list is:
-#     - Smoke/*: the one-case Smoke instantiations (tests/gpu-ref/SmokeCases.hpp);
-#     - the plain TESTs named below, one per family the Smoke instantiations leave out.
+#     - Quick/*: the one-case Quick instantiations (tests/gpu-ref/QuickCases.hpp);
+#     - the plain TESTs named below, one per family the Quick instantiations leave out.
 # standard: everything else except Comprehensive* and Full*, so a new test lands in
-#   standard unless it is named here. This includes the fp32 small catalogs
-#   (StandardBasic*), every reduced-precision, fp8, int8, TF32 and mixed-type case, the
-#   fp32 medium shapes (Standard*) and the host-only validation tests. Datatype only
-#   enters through per-element load/store conversion (P1), and every extra datatype is
-#   a separate HipRTC compile.
+#   standard unless it is named here. This includes the fp32 small and medium catalogs
+#   (Standard*), every reduced-precision, fp8, int8, TF32 and mixed-type case and the
+#   host-only validation tests. Datatype only enters through per-element load/store
+#   conversion (P1), and every extra datatype is a separate HipRTC compile.
 # comprehensive / full: Comprehensive* / Full* (large shapes, fp32 only).
 #
 # The quick list appears twice below (quick test_patterns, standard exclude): change both.
@@ -26,9 +25,9 @@
 # tier and that every quick pattern selects a test. GTest filters are case-sensitive.
 test_categories:
   quick:
-    description: "One fp32 case per GPU reference kernel family (Smoke/* plus the named plain tests)"
+    description: "One fp32 case per GPU reference kernel family (Quick/* plus the named plain tests)"
     test_patterns: &gpu_ref_quick_patterns
-      - "Smoke/*"
+      - "Quick/*"
       - "TestGpuFpReferenceRmsValidation/0.AgreesWithCpuOnBothSidesOfTheThreshold"
       - "TestGpuIntValidation/2.SingleElementExactMatchPasses"
       - "TestGpuFpReferenceBlockScale.QuantizeMatchesCpu"
@@ -59,7 +58,7 @@ test_categories:
       - "Comprehensive*"
       - "Full*"
       # The quick list (quick test_patterns above)
-      - "Smoke/*"
+      - "Quick/*"
       - "TestGpuFpReferenceRmsValidation/0.AgreesWithCpuOnBothSidesOfTheThreshold"
       - "TestGpuIntValidation/2.SingleElementExactMatchPasses"
       - "TestGpuFpReferenceBlockScale.QuantizeMatchesCpu"

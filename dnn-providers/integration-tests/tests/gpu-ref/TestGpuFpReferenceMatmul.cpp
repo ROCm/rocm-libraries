@@ -3,7 +3,7 @@
 
 #include "GpuMatmulRefTestFixture.hpp"
 #include "MatmulShapeCatalog.hpp"
-#include "SmokeCases.hpp"
+#include "QuickCases.hpp"
 #include "hipdnn-gpu-ref/GpuFpReferenceMatmul.hpp"
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
@@ -424,12 +424,9 @@ TEST_P(TestGpuMatmulRefUpcastBfp16, MatchesCpuRef)
 // 2D tests
 // ========
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuMatmulRefPureFp32,
-                         ::testing::ValuesIn(smokeCase(getMatmulSmallTestCases())));
-INSTANTIATE_TEST_SUITE_P(StandardBasic,
-                         TestGpuMatmulRefPureFp32,
-                         ::testing::ValuesIn(getMatmulSmallTestCases()));
+                         ::testing::ValuesIn(quickCase(getMatmulSmallTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefPureFp16,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
@@ -450,10 +447,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          ::testing::ValuesIn(getMatmulSmallTestCases()));
 
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
-// reduced-precision and mixed types are covered by the standard tier's small-shape run.
+// reduced-precision and mixed types are covered by the standard tier's small-shape run. The fp32
+// fixture runs the small cases followed by the medium cases in one instantiation.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuMatmulRefPureFp32,
-                         ::testing::ValuesIn(getMatmulMediumTestCases()));
+                         ::testing::ValuesIn(concatCases(getMatmulSmallTestCases(),
+                                                         getMatmulMediumTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuMatmulRefPureFp32,

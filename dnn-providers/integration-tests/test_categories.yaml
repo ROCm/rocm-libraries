@@ -62,7 +62,7 @@ test_categories:
       - "standard_*"
       # Tests that execute a GPU reference plan or graph executor. Each compiles HipRTC
       # kernels (~0.4 s per kernel variant), which was most of the unit-test quick tier; the
-      # kernels themselves are covered in quick by hipdnn_gpu_ref_tests (Smoke/*).
+      # kernels themselves are covered in quick by hipdnn_gpu_ref_tests (Quick/*).
       # The same list appears twice (quick exclude, standard test_patterns): change both.
       - "*TestGpu*Plan*"
       - "*TestGpu*Executor*"

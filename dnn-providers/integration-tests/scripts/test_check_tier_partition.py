@@ -11,22 +11,22 @@ import check_tier_partition as ctp
 YAML = textwrap.dedent("""\
     test_categories:
       quick:
-        test_patterns: ["Smoke/*", "TestHost.Named"]
+        test_patterns: ["Quick/*", "TestHost.Named"]
         exclude: ["*DISABLED*"]
       standard:
         test_patterns: ["*"]
-        exclude: ["*DISABLED*", "Comprehensive*", "Full*", "Smoke/*", "TestHost.Named"]
+        exclude: ["*DISABLED*", "Comprehensive*", "Full*", "Quick/*", "TestHost.Named"]
       comprehensive:
         test_patterns: ["Comprehensive*"]
       full:
         test_patterns: ["Full*"]
       ffm-quick:
-        test_patterns: ["Smoke/*"]
+        test_patterns: ["Quick/*"]
     """)
 
 TESTS = [
-    "Smoke/TestGpuA.Compare/0",
-    "StandardBasic/TestGpuA.Compare/0",
+    "Quick/TestGpuA.Compare/0",
+    "Standard/TestGpuA.Compare/0",
     "TestHost.Named",
     "TestHost.Other",
     "Comprehensive/TestGpuA.Compare/0",
@@ -62,12 +62,12 @@ def test_test_selected_by_no_tier_fails(run):
 
 def test_test_selected_by_two_tiers_fails(run):
     yaml_text = YAML.replace(
-        'test_patterns: ["Smoke/*", "TestHost.Named"]',
-        'test_patterns: ["Smoke/*", "TestHost.Named", "StandardBasic/*"]',
+        'test_patterns: ["Quick/*", "TestHost.Named"]',
+        'test_patterns: ["Quick/*", "TestHost.Named", "Standard/*"]',
     )
     with pytest.raises(
         SystemExit,
-        match=r"StandardBasic/TestGpuA.Compare/0: selected by \['quick', 'standard'\]",
+        match=r"Standard/TestGpuA.Compare/0: selected by \['quick', 'standard'\]",
     ):
         run(TESTS, yaml_text)
 

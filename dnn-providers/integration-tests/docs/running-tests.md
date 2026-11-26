@@ -556,7 +556,7 @@ goes into quick. If the quick tier starts to time out, look for a large shape th
 has no prefix.
 
 `test_categories_gpu_ref.yaml` (for `hipdnn_gpu_ref_tests`) does the opposite: quick is
-an opt-in list (`Smoke/*` plus a short list of named tests, one fp32 case per kernel
+an opt-in list (`Quick/*` plus a short list of named tests, one fp32 case per kernel
 family) and standard is the catch-all, so a new test runs in standard. The
 `hipdnn_gpu_ref_tests_tier_partition` and `hipdnn_integration_tests_unit_tests_tier_partition`
 CTest checks fail when a test of the binary runs in no tier or in two. They run in the
