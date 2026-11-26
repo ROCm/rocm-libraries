@@ -364,11 +364,9 @@ jobs:
       # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
       # than a TheRock family name. A lane that needs a family name will need its own variable.
       GPU_TARGET: gfx942
-      # clang-tidy comes from the PyPI wheel of this exact version (installed into the venv in
-      # "Install Python dependencies"). To upgrade clang-tidy, change this one line; the major
-      # version is handed to CMake as EXPECTED_CLANG_TIDY_VERSION. Ubuntu 24.04's apt carries
-      # clang-tidy up to 20 only, and apt.llvm.org has had outages.
-      CLANG_TIDY_VERSION: "23.1.4"
+      # clang-tidy comes from the PyPI wheel pinned in .github/requirements-hipdnn-superbuild-ci.txt
+      # (installed into the venv in "Install Python dependencies"), which is the one place to
+      # change to upgrade it; the major version is handed to CMake as EXPECTED_CLANG_TIDY_VERSION.
     steps:
       - name: Runner health status
         run: |
@@ -558,7 +556,21 @@ jobs:
       - name: Install Python dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
-          "$VENV_PYTHON" -m pip install "clang-tidy==${CLANG_TIDY_VERSION}"
+          CLANG_TIDY_VERSION=$(sed -n 's/^clang-tidy==//p' .github/requirements-hipdnn-superbuild-ci.txt)
+          test -n "$CLANG_TIDY_VERSION" || { echo "no clang-tidy pin in the requirements file" >&2; exit 1; }
+          # The other places that name the version must agree with the pin.
+          major="${CLANG_TIDY_VERSION%%.*}"
+          for f in projects/hipdnn/cmake/CheckToolVersion.cmake dnn-providers/cmake/CheckToolVersion.cmake; do
+            grep -qF "set(EXPECTED_CLANG_TIDY_VERSION \"$major\")" "$f" \
+              || { echo "::error file=$f::EXPECTED_CLANG_TIDY_VERSION default is not $major" >&2; exit 1; }
+          done
+          grep -qF "ARG CLANG_TIDY_VERSION=$CLANG_TIDY_VERSION" projects/hipdnn/dockerfiles/Dockerfile.ubuntu24 \
+            || { echo "::error file=projects/hipdnn/dockerfiles/Dockerfile.ubuntu24::CLANG_TIDY_VERSION is not $CLANG_TIDY_VERSION" >&2; exit 1; }
+          grep -qF "clang-tidy==$CLANG_TIDY_VERSION" projects/hipdnn/docs/Building.md \
+            || { echo "::error file=projects/hipdnn/docs/Building.md::does not name clang-tidy==$CLANG_TIDY_VERSION" >&2; exit 1; }
+          grep -qF "clang-tidy-$major" projects/hipdnn/tools/ai/skills/hipdnn-tidy/scripts/tidy_changed.py \
+            || { echo "::error file=projects/hipdnn/tools/ai/skills/hipdnn-tidy/scripts/tidy_changed.py::does not search clang-tidy-$major" >&2; exit 1; }
+          echo "CLANG_TIDY_VERSION=$CLANG_TIDY_VERSION" >> "$GITHUB_ENV"
           echo "CLANG_TIDY_EXE=$VENV_PATH/bin/clang-tidy" >> "$GITHUB_ENV"
           "$VENV_PATH/bin/clang-tidy" --version
 

@@ -62,7 +62,9 @@ function(add_clang_tidy_custom_target)
     else()
         set(_not_found_log_level STATUS)
     endif()
-    if(RUN_CLANG_TIDY_EXE)
+    # run-clang-tidy resolves clang-tidy from PATH unless told otherwise, so the targets pin the
+    # version-checked CLANG_TIDY_EXE with -clang-tidy-binary and need both tools.
+    if(RUN_CLANG_TIDY_EXE AND CLANG_TIDY_EXE)
         processorcount(N)
         if(NOT N EQUAL 0)
             set(CLANG_TIDY_JOBS ${N})
@@ -86,7 +88,7 @@ function(add_clang_tidy_custom_target)
         add_custom_target(
             ${_TIDY_TARGET}
             COMMAND
-                ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+                ${RUN_CLANG_TIDY_EXE} -clang-tidy-binary ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
                 -config-file=${HIPDNN_SOURCE_DIR}/.clang-tidy -source-filter "^(?!.*_deps/).*" -quiet
                 -j ${CLANG_TIDY_JOBS} ${CLANG_TIDY_HIP_ARGS} ${_TIDY_SCOPE_ARG}
             WORKING_DIRECTORY ${HIPDNN_SOURCE_DIR}
@@ -99,7 +101,7 @@ function(add_clang_tidy_custom_target)
         add_custom_target(
             ${_TIDY_CXX_TARGET}
             COMMAND
-                ${RUN_CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+                ${RUN_CLANG_TIDY_EXE} -clang-tidy-binary ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
                 -config-file=${HIPDNN_SOURCE_DIR}/.clang-tidy -source-filter
                 "^(?!.*(_deps/)).*" -quiet -j ${CLANG_TIDY_JOBS} ${_TIDY_SCOPE_ARG}
             WORKING_DIRECTORY ${HIPDNN_SOURCE_DIR}
@@ -120,7 +122,7 @@ function(add_clang_tidy_custom_target)
         )
     else()
         message(${_not_found_log_level}
-                "run-clang-tidy-${EXPECTED_CLANG_TIDY_VERSION} not found. The 'tidy' targets will not be available."
+                "run-clang-tidy and clang-tidy version ${EXPECTED_CLANG_TIDY_VERSION} not both found. The 'tidy' targets will not be available."
         )
     endif()
 endfunction()

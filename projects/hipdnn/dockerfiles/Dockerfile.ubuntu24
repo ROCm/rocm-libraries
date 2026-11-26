@@ -430,12 +430,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # clang-tidy from the PyPI wheel: Ubuntu 24.04's apt carries clang-tidy up to 20 only.
-# To upgrade, change CLANG_TIDY_VERSION here and in hipdnn-superbuild-ci.yml, and the default
-# EXPECTED_CLANG_TIDY_VERSION in projects/hipdnn/cmake/CheckToolVersion.cmake and
-# dnn-providers/cmake/CheckToolVersion.cmake. The wheel installs clang-tidy, run-clang-tidy.py and
+# To upgrade, change CLANG_TIDY_VERSION here and the pin in
+# .github/requirements-hipdnn-superbuild-ci.txt (the CI lane reads it, and a step there fails if
+# this file, the default EXPECTED_CLANG_TIDY_VERSION in projects/hipdnn/cmake/CheckToolVersion.cmake
+# and dnn-providers/cmake/CheckToolVersion.cmake, Building.md or tidy_changed.py disagree). The wheel
+# installs clang-tidy, run-clang-tidy.py and
 # clang-apply-replacements into /usr/local/bin, where the hipDNN tool discovery finds them.
 ARG CLANG_TIDY_VERSION=23.1.4
-RUN python3 -m pip install --break-system-packages "clang-tidy==${CLANG_TIDY_VERSION}"
+RUN python3 -m pip install --no-cache-dir --break-system-packages "clang-tidy==${CLANG_TIDY_VERSION}"
 
 # Install flatc version 25.9.23
 RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip -O /tmp/flatc.zip \
