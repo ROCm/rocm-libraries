@@ -19,6 +19,7 @@ from tensilelite.SolutionStructs.Naming import _getName, getKernelFileBase
 from tensilelite.SolutionStructs.Solution import (
     Solution,
     _supportStreamKArrivalFixup,
+    _supportStreamKDynamicUnevenParts,
     _supportStreamKPerTileExtraIters,
 )
 from tensilelite.Toolchain.Component import Assembler
@@ -356,6 +357,24 @@ def test_uso_capability_assignment_survives_missing_custom_kernel_name():
 )
 def test_arrival_fixup_capability(state, hasSAtomic, expected):
     assert _supportStreamKArrivalFixup(state, hasSAtomic) is expected
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        ({"StreamK": 5}, True),
+        ({"StreamK": 5, "DebugStreamK": 1}, True),
+        ({"StreamK": 5, "CustomKernel": {"name": "handwritten"}}, False),
+        ({"StreamK": 5, "CustomKernel": {"name": "gen", "generated": True}}, True),
+        ({"StreamK": 4}, True),
+        ({"StreamK": 4, "_PrefetchAcrossPersistentEnabled": True}, True),
+        ({"StreamK": 4, "CustomKernel": {"name": "handwritten"}}, False),
+        ({"StreamK": 3}, False),
+        ({"StreamK": 0}, False),
+    ],
+)
+def test_dynamic_uneven_parts_capability(state, expected):
+    assert _supportStreamKDynamicUnevenParts(state) is expected
 
 
 # --------------------------------------------------------------------------- #

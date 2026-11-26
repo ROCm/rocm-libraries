@@ -238,6 +238,8 @@ namespace
         // Likewise the arrival fixup.
         if(args.arrivalFixup)
             add("internalArgsSupport.arrivalFixup", jsonBool(args.arrivalFixup));
+        if(args.dynamicUnevenParts)
+            add("internalArgsSupport.dynamicUnevenParts", jsonBool(args.dynamicUnevenParts));
         add("internalArgsSupport.useUniversalArgs", jsonBool(args.useUniversalArgs));
         add("internalArgsSupport.useSFC", jsonBool(args.useSFC));
 

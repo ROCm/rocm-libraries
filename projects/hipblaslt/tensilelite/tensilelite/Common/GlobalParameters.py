@@ -535,6 +535,11 @@ defaultInternalSupportParams = {
     # split few-tile problems; per-part ready flags could wait on parts no
     # resident workgroup runs. Derived in Solution.py; False keeps tiles whole.
     "SupportStreamKArrivalFixup": False,
+    # Pure CAPABILITY: the dynamic StreamK path decodes split parts of unequal
+    # length (StreamK.dynamicPartRange), so the host may split a tile into
+    # exactly the parts it asks for. Derived in Solution.py; False keeps the
+    # equal parts older/custom kernels decode.
+    "SupportStreamKDynamicUnevenParts": False,
     # Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args and, when
     # ProbeAddr is non-null, stores ProbeEpoch into the slot of the CU each WG
     # runs on; WGs launched past ProbeGrid then end.

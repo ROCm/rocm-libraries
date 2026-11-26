@@ -134,8 +134,10 @@ namespace TensileLite
             /**
              * Kernel arguments of a dynamic StreamK launch (DynamicWorkQueue, and
              * Hybrid's dynamic sub-mode): totalItems work items, the whole tiles
-             * plus `tiles` tiles cut into `split` parts of itersPerWI iterations;
-             * grid is the workgroups the dynamic grid policy launches.
+             * plus `tiles` tiles cut into `split` parts; grid is the workgroups the
+             * dynamic grid policy launches. A part is itersPerWI iterations, and on
+             * kernels with uneven parts the first parts take one K unit more (see
+             * partIterRange()).
              */
             struct KernelArguments
             {
@@ -177,6 +179,11 @@ namespace TensileLite
                 // that split only some tiles (see isRowUniform).
                 bool allowSplit            = true;
                 bool uniformSummationOrder = false;
+                // InternalArgsSupport::dynamicUnevenParts: the kernel decodes parts
+                // of unequal length, so a tile splits into exactly the parts asked
+                // for. Otherwise every part but the last is itersPerWI long, which
+                // can leave fewer parts.
+                bool unevenParts = false;
 
                 // Debug overrides: TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
                 int overrideTiles = -1;
@@ -207,6 +214,19 @@ namespace TensileLite
              */
             TENSILELITEHOST_EXPORT static bool isRowUniform(KernelArguments const& d,
                                                             size_t                 totalTiles);
+
+            /**
+             * Iterations [start, end) of part `part` of a split tile, as the kernel
+             * decodes them. The tile is padded to whole K units of kGranularity
+             * iterations; the units left over after split * itersPerWI go one each
+             * to the first parts. The last part is clipped to itersPerTile. An
+             * equal-parts split leaves no units over, so each part starts at
+             * part * itersPerWI.
+             */
+            TENSILELITEHOST_EXPORT static Static::IterRange partIterRange(KernelArguments const& d,
+                                                                          size_t itersPerTile,
+                                                                          size_t kGranularity,
+                                                                          size_t part);
 
             // Workgroups per CU the dynamic grid launches at most.
             // TODO Verify this limit is best

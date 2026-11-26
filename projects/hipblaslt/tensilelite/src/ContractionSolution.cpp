@@ -7734,6 +7734,7 @@ namespace TensileLite
             = !in.uniformSummationOrder || StreamK::Dynamic::keepsSummationOrder(*this);
         in.allowSplit = internalArgsSupport.arrivalFixup && !handwritten && dynamicPath
                         && summationOrderKept && !problem.groupedGemm();
+        in.unevenParts = internalArgsSupport.dynamicUnevenParts;
         // Arrival counters (and per-part flags) start after the queue counters.
         const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);
         in.flagSlots

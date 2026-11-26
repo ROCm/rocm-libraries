@@ -2275,7 +2275,29 @@ namespace
         in.flagSlots        = 1792;
         in.workspaceBytes   = size_t{1} << 30;
         in.partialTileBytes = 192 * 224 * 4;
+        in.unevenParts      = true;
         return in;
+    }
+
+    // The parts of one split tile, as the kernel decodes them, tile K exactly:
+    // d.split non-empty parts, in order, each starting on a K unit.
+    std::vector<size_t> partLengths(StreamK::Dynamic::KernelArguments const& d,
+                                    size_t                                   itersPerTile,
+                                    size_t                                   kGranularity = 1)
+    {
+        std::vector<size_t> lengths;
+        size_t              end = 0;
+        for(size_t p = 0; p < d.split; ++p)
+        {
+            const auto r = StreamK::Dynamic::partIterRange(d, itersPerTile, kGranularity, p);
+            EXPECT_EQ(r.start, end) << "part " << p;
+            EXPECT_EQ(r.start % kGranularity, 0u) << "part " << p;
+            EXPECT_GT(r.end, r.start) << "part " << p;
+            lengths.push_back(r.end - r.start);
+            end = r.end;
+        }
+        EXPECT_EQ(end, itersPerTile);
+        return lengths;
     }
 } // namespace
 
@@ -2309,11 +2331,11 @@ TEST(StreamKDynamicSplitTest, SplitFollowsTheStaticFactors)
     const auto e = StreamK::Dynamic::computeSplit(dynamicSplitInputs(20, 128));
     EXPECT_EQ(e.tiles, 20u);
     EXPECT_EQ(e.split, 12u);
-    EXPECT_EQ(e.itersPerWI, 11u);
+    EXPECT_EQ(e.itersPerWI, 10u);
     EXPECT_EQ(e.totalItems, 240u);
     EXPECT_EQ(e.grid, 240u);
-    EXPECT_GE(size_t{e.itersPerWI} * e.split, 128u) << "parts cover the tile";
-    EXPECT_LT(size_t{e.itersPerWI} * (e.split - 1), 128u) << "no empty part";
+    const std::vector<size_t> lengths{11, 11, 11, 11, 11, 11, 11, 11, 10, 10, 10, 10};
+    EXPECT_EQ(partLengths(e, 128), lengths) << "128 = 8 x 11 + 4 x 10";
 
     // The split is sized for the CUs, not for the grid.
     auto in      = dynamicSplitInputs(50, 128);
@@ -2412,7 +2434,9 @@ TEST(StreamKDynamicSplitTest, DebugOverridesReplaceThePolicy)
     EXPECT_EQ(d.partialSlots(), 0u);
 }
 
-TEST(StreamKDynamicSplitTest, PartsStartOnAKUnit)
+// Kernels without uneven parts decode SKSplit parts of SKItersPerWI, so the
+// split is rounded through SKItersPerWI.
+TEST(StreamKDynamicSplitTest, EqualPartsWithoutTheCapability)
 {
     struct Case
     {
@@ -2444,6 +2468,7 @@ TEST(StreamKDynamicSplitTest, PartsStartOnAKUnit)
         in.kGranularity  = c.kGranularity;
         in.overrideTiles = c.overrideTiles;
         in.overrideSplit = c.overrideSplit;
+        in.unevenParts   = false;
         const auto d     = StreamK::Dynamic::computeSplit(in);
         EXPECT_EQ(d.tiles, c.skTiles);
         EXPECT_EQ(d.itersPerWI, c.skItersPerWI);
@@ -2451,6 +2476,73 @@ TEST(StreamKDynamicSplitTest, PartsStartOnAKUnit)
         EXPECT_EQ(d.split, c.skSplit);
         EXPECT_EQ(d.totalItems, c.totalItems);
         EXPECT_EQ(d.partialSlots(), size_t{c.skTiles} * c.skSplit);
+        for(size_t length : partLengths(d, c.itersPerTile, c.kGranularity))
+            EXPECT_LE(length, size_t{d.itersPerWI});
+    }
+
+    // 369 iterations asked into 32 parts: parts of 12 leave only 31.
+    auto in          = dynamicSplitInputs(1, 369);
+    in.overrideTiles = 1;
+    in.overrideSplit = 32;
+    in.unevenParts   = false;
+    const auto d     = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.split, 31u);
+    EXPECT_EQ(d.itersPerWI, 12u);
+    EXPECT_EQ(d.totalItems, 31u);
+}
+
+// Kernels with uneven parts get exactly the parts asked for (as the static
+// grid does), at most one per K unit; the first take one unit more.
+TEST(StreamKDynamicSplitTest, ExactPartsWithUnevenParts)
+{
+    auto in          = dynamicSplitInputs(1, 369);
+    in.overrideTiles = 1;
+    in.overrideSplit = 32;
+    const auto d     = StreamK::Dynamic::computeSplit(in);
+    EXPECT_EQ(d.tiles, 1u);
+    EXPECT_EQ(d.split, 32u);
+    EXPECT_EQ(d.itersPerWI, 11u);
+    EXPECT_EQ(d.totalItems, 32u);
+    EXPECT_EQ(d.grid, 32u);
+    EXPECT_EQ(d.partialSlots(), 32u);
+    std::vector<size_t> expected(17, 12);
+    expected.resize(32, 11);
+    EXPECT_EQ(partLengths(d, 369), expected) << "369 = 17 x 12 + 15 x 11";
+
+    struct Case
+    {
+        size_t              tiles, itersPerTile, kGranularity;
+        int                 overrideTiles, overrideSplit;
+        uint32_t            skTiles, skItersPerWI, skSplit, totalItems;
+        std::vector<size_t> lengths;
+    };
+    const Case cases[] = {
+        // 129 iterations pad to 65 units of 2: 4 parts of 16 units and one left
+        // over for part 0; the last part is clipped to the real 129.
+        {10, 129, 2, 3, 4, 3, 32, 4, 7 + 3 * 4, {34, 32, 32, 31}},
+        // At most one part per unit: 20 iterations pad to 3 units of 8.
+        {10, 20, 8, 10, 6, 10, 8, 3, 30, {8, 8, 4}},
+        // The policy's 12 parts of 104 padded iterations: 13 units of 8, so
+        // part 0 takes two units (12 parts where equal parts leave 7).
+        {4, 100, 8, -1, -1, 4, 8, 12, 48, {16, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4}},
+        // A unit of one.
+        {10, 20, 1, 10, 6, 10, 3, 6, 60, {4, 4, 3, 3, 3, 3}},
+    };
+    for(auto const& c : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "tiles=" << c.tiles << " iters=" << c.itersPerTile
+                                          << " unit=" << c.kGranularity);
+        auto u          = dynamicSplitInputs(c.tiles, c.itersPerTile);
+        u.kGranularity  = c.kGranularity;
+        u.overrideTiles = c.overrideTiles;
+        u.overrideSplit = c.overrideSplit;
+        const auto e    = StreamK::Dynamic::computeSplit(u);
+        EXPECT_EQ(e.tiles, c.skTiles);
+        EXPECT_EQ(e.itersPerWI, c.skItersPerWI);
+        EXPECT_EQ(e.split, c.skSplit);
+        EXPECT_EQ(e.totalItems, c.totalItems);
+        EXPECT_EQ(e.partialSlots(), size_t{c.skTiles} * c.skSplit);
+        EXPECT_EQ(partLengths(e, c.itersPerTile, c.kGranularity), c.lengths);
     }
 }
 
@@ -2480,18 +2572,19 @@ namespace
     {
         auto solution = std::make_shared<ContractionSolution>();
         initStreamKSolution(*solution, streamK);
-        solution->kernelName                            = "streamk_dynamic_split_probe";
-        solution->sizeMapping.LocalSplitU               = 1;
-        solution->sizeMapping.packBatchDims             = 0;
-        solution->sizeMapping.workGroupMapping          = 1;
-        solution->sizeMapping.workGroupMappingXCC       = 0;
-        solution->sizeMapping.staggerU                  = 0;
-        solution->sizeMapping.globalSplitU              = 1;
-        solution->sizeMapping.globalAccumulation        = 4;
-        solution->internalArgsSupport.staggerU          = true;
-        solution->internalArgsSupport.perTileExtraIters = false;
-        solution->internalArgsSupport.arrivalFixup      = true;
-        solution->problemType.mxScaleFormat             = 1;
+        solution->kernelName                             = "streamk_dynamic_split_probe";
+        solution->sizeMapping.LocalSplitU                = 1;
+        solution->sizeMapping.packBatchDims              = 0;
+        solution->sizeMapping.workGroupMapping           = 1;
+        solution->sizeMapping.workGroupMappingXCC        = 0;
+        solution->sizeMapping.staggerU                   = 0;
+        solution->sizeMapping.globalSplitU               = 1;
+        solution->sizeMapping.globalAccumulation         = 4;
+        solution->internalArgsSupport.staggerU           = true;
+        solution->internalArgsSupport.perTileExtraIters  = false;
+        solution->internalArgsSupport.arrivalFixup       = true;
+        solution->internalArgsSupport.dynamicUnevenParts = true;
+        solution->problemType.mxScaleFormat              = 1;
         return solution;
     }
 
@@ -2585,6 +2678,32 @@ TEST_F(StreamKDynamicSplitSolveTest, SplitNeedsTheArrivalFixup)
     auto spinFlag                              = dynamicSplitSolution();
     spinFlag->internalArgsSupport.arrivalFixup = false;
     EXPECT_EQ(spinFlag->streamKDynamicDecomposition(problem, device, tiles).tiles, 0u);
+}
+
+// The capability reaches the decomposition: 369 iterations asked into 32
+// parts give 32 uneven parts, or 31 equal ones on a kernel without it, and
+// the workspace query and the launch carry either.
+TEST_F(StreamKDynamicSplitSolveTest, UnevenPartsNeedTheCapability)
+{
+    device.skTiles = 1;
+    device.skSplit = 32;
+    for(bool uneven : {true, false})
+    {
+        SCOPED_TRACE(uneven ? "uneven parts" : "equal parts");
+        auto s                                    = dynamicSplitSolution();
+        s->internalArgsSupport.dynamicUnevenParts = uneven;
+        auto         problem                      = dynamicSplitGemm({128, 128, 369 * 64, 1});
+        const size_t tiles                        = problem.getNumTiles(s->sizeMapping, 1);
+        ASSERT_EQ(problem.getItersPerTile(s->sizeMapping), 369u);
+        const auto d = s->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_EQ(d.tiles, 1u);
+        EXPECT_EQ(d.split, uneven ? 32u : 31u);
+        // K units of 4 (skKGranularity()): 369 pads to 93 units, 32 parts of 2
+        // units and 29 left over; equal parts of 3 units leave 31.
+        ASSERT_EQ(s->skKGranularity(), 4u);
+        EXPECT_EQ(d.itersPerWI, uneven ? 8u : 12u);
+        ASSERT_NO_FATAL_FAILURE(expectWorkspaceAndLaunchCarry(*s, problem, d));
+    }
 }
 
 // Grouped GEMM and the static StreamK path keep every tile whole even with
