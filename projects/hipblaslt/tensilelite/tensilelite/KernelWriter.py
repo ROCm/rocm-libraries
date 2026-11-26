@@ -603,6 +603,8 @@ class StateValues:
     # runtime gate + both push/local versions (default, unchanged behavior);
     # "PUSH"/"LOCAL" emit only that single version (gate hoisted to caller).
     self.fusedA2ADispatchMode = "BOTH"
+    # gfx1250 GemmA2A direct stores of the PUSH replay being emitted (Components.GlobalWriteBatch.FusedA2ADirect).
+    self.fusedA2ADirect = None
 
     self.preloadGuard = []
     self.tmpvgpr = {}

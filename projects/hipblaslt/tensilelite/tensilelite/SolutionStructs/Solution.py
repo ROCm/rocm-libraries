@@ -2789,6 +2789,14 @@ class Solution(collections.abc.Mapping):
       if not state["ProblemType"]["DestDataType"].isBFloat16():
         reject(state, printRejectionReason, "FusedA2A=GemmA2A requires a bf16 D")
         return
+      if isa[:2] == (12, 5):
+        unsupported = [name for name in ("UseSubtileImpl", "CompactLoopStore") if state[name]]
+        if state["StoreRemapVectorWidth"] > 0:
+          unsupported.append("StoreRemapVectorWidth")
+        if unsupported:
+          reject(state, printRejectionReason,
+                 "FusedA2A=GemmA2A on gfx1250 does not support %s" % ", ".join(unsupported))
+          return
 
     if state["A2ASubRounds"] != 1 and fusedA2A != "A2AGemm":
       reject(state, printRejectionReason, "A2ASubRounds > 1 requires FusedA2A=A2AGemm")

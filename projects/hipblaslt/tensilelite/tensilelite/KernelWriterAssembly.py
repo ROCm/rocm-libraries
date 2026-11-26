@@ -80,7 +80,8 @@ from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsK
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
-from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
+from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate, FusedA2ADirect, \
+    emitFusedA2ADirectPrologue
 from .Components.Signature import FUSED_A2A_A2AGEMM_DONE_OFFSET, FUSED_A2A_A2AGEMM_FLAG_OFFSET, \
     FUSED_A2A_CURSOR_BYTES, FUSED_A2A_DRAIN_SEND, FUSED_A2A_LINE_BYTES, FUSED_A2A_MAX_RANKS, \
     PEER_GROUP_BYTES, fusedA2AKernArgLayout
@@ -21981,6 +21982,24 @@ class KernelWriterAssembly(KernelWriter):
     return numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs
 
 
+  def _fusedA2ADirectEligible(self, kernel, edge, vectorWidth):
+    """True for the gfx1250 GemmA2A PUSH replays that carry the direct stores: GSU=1, buffer
+    stores, NonEdge or the full-width edge (Then) replay."""
+    if self.states.version[:2] != (12, 5) or kernel["ProblemType"]["FusedA2A"] != "GemmA2A" \
+       or kernel["_GlobalAccumulation"] in ("MultipleBuffer", "MultipleBufferSingleKernel") \
+       or not kernel["BufferStore"]:
+      return False
+    if edge and vectorWidth != self.notLocalFullTileElements(kernel)[2][0]:
+      return False
+    unsupported = [name for name in ("UseSubtileImpl", "CompactLoopStore", "StoreRemapVectorWidth")
+                   if kernel[name]]
+    unsupported += [name for name in ("OutputPeerD", "UseE") if kernel["ProblemType"][name]]
+    if len(kernel["PackedC1IndicesX"]) > 1:
+      unsupported.append("PackedC1IndicesX")
+    if unsupported:
+      raise NotImplementedError("fused-A2A direct stores with %s" % ", ".join(unsupported))
+    return True
+
   ##############################################################################
   # globalWriteElementBatch :
   ##############################################################################
@@ -22235,14 +22254,23 @@ class KernelWriterAssembly(KernelWriter):
                              "fused-A2A hoisted: WG>=AM_tiles -> local")
           afterLabel = Label(self.labels.getNameInc("fusedA2A_hoist_after"),
                              "fused-A2A hoisted: after PUSH/local")
+          direct = self._fusedA2ADirectEligible(kernel, edge, vectorWidth)
           emitFusedA2AGate(actLoopModule, self, localLabel.getLabelName())
           # self.states outlives this call, so a mid-pass raise would otherwise leak
           # "PUSH"/"LOCAL" into a subsequent kernel.
           try:
             # PUSH pass
             self.states.fusedA2ADispatchMode = "PUSH"
+            if direct:
+              assert ss.firstBatch and ss.lastCoordOffset1 == 0
+              self.states.fusedA2ADirect = FusedA2ADirect(self)
+              emitFusedA2ADirectPrologue(actLoopModule, self, self.states.fusedA2ADirect)
             actLoopModule.add(_emit_batch_loop())
             actLoopModule.add(SBranch(labelName=afterLabel.getLabelName(), comment="skip local store"))
+            if direct:
+              for coldBlock in self.states.fusedA2ADirect.coldBlocks:
+                actLoopModule.add(coldBlock)
+              self.states.fusedA2ADirect = None
             # Roll back codegen-time state so the LOCAL pass regenerates from the
             # batch-loop start. firstBatch and biasLocalBarrierInit are outside
             # resetState()'s remit, so restore them here.
@@ -22256,6 +22284,9 @@ class KernelWriterAssembly(KernelWriter):
             actLoopModule.add(afterLabel)
           finally:
             self.states.fusedA2ADispatchMode = "BOTH"
+            if self.states.fusedA2ADirect is not None:
+              self.states.fusedA2ADirect.checkIn(self)
+              self.states.fusedA2ADirect = None
         else:
           actLoopModule.add(_emit_batch_loop())
 
@@ -22704,7 +22735,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
                wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False,
-               peerD: bool = False):
+               peerD: bool = False, recv=None):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
@@ -22716,7 +22747,10 @@ class KernelWriterAssembly(KernelWriter):
     peerD (OutputPeerD): the same D store into the peer D buffer. SrdPeerD is SrdD plus the
     distance between the two buffers, taken from the SrdD that the regular store just used,
     with a system-scope store so that another device sees the data.
+    recv (fused-A2A direct stores, tc == 'D' only): (address VGPR, immediate offset) of the
+    same data into states.fusedA2ADirect.srdRecv, scope:SCOPE_SYS th:TH_STORE_RT.
     """
+    assert recv is None or tc == 'D'
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
       # perform vector stores here, so no VI indexing.
@@ -22731,9 +22765,13 @@ class KernelWriterAssembly(KernelWriter):
       isDlc = False
 
       if tc == 'D':
-        isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
-            self.states.asmCaps, kernel["NonTemporalD"] | (0x2 if forceSlc else 0),
-            _temporalHint(kernel, "D"), _nonVolatile(kernel, "D"))
+        if recv is None:
+          isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
+              self.states.asmCaps, kernel["NonTemporalD"] | (0x2 if forceSlc else 0),
+              _temporalHint(kernel, "D"), _nonVolatile(kernel, "D"))
+        else:
+          assert kernel["BufferStore"] and not peerD
+          scope, th = CacheScope.SCOPE_SYS, TemporalHint.TH_RT
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
@@ -22742,19 +22780,22 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddCU32(dst=sgpr("SrdPeerD+1"), src0=sgpr("SrdD+1"), src1=sgpr("DeltaPeerD+1")))
           module.add(SMovB64(dst=sgpr("SrdPeerD+2", 2), src=sgpr("SrdD+2", 2), comment="same limit and flags"))
           scope = CacheScope.SCOPE_SYS
-        if kernel["BufferStore"]:
+        if recv is not None:
+          addr0 = vgpr(recv[0])
+          addr1 = sgpr(self.states.fusedA2ADirect.srdRecv, 4)
+        elif kernel["BufferStore"]:
           addr0 = vgpr(addrCalc.addrDVgpr)
           addr1 = sgpr("SrdPeerD" if peerD else "SrdD", 4)
         else:
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
         # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
-        if (not peerD and ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+        if (not peerD and recv is None and ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
 
         dataType     = kernel["ProblemType"]["DestDataType"]
-        globalOffset = addrCalc.globalOffset
+        globalOffset = addrCalc.globalOffset if recv is None else recv[1]
       elif tc == 'TD':
         isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
             self.states.asmCaps, kernel["NonTemporalD"], _temporalHint(kernel, "TD"), _nonVolatile(kernel, "TD"))
@@ -22864,7 +22905,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
               glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, comment=comment, scope=scope, th=th, nv=nv))
-    if tc == 'D' and not peerD and kernel["ProblemType"]["OutputPeerD"]:
+    if tc == 'D' and not peerD and recv is None and kernel["ProblemType"]["OutputPeerD"]:
       module.add(self.addStore(kernel, ss, tc, addrCalc, sumIdx, tmpS01, edge, elementIdx, batchIdx,
                                wsOffset, overrideAfterPrimerRows, comment + " (peer D)", forceSlc, peerD=True))
     return module

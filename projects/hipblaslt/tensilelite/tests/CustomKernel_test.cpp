@@ -532,16 +532,29 @@ namespace
         return result;
     }
 
-    KernelInvocation fusedCustomCall(FusedA2A mode     = FusedA2A::GemmA2A,
-                                     int      fixedWGM = std::numeric_limits<int>::max(),
-                                     void*    myBuf    = nullptr)
+    KernelInvocation fusedCustomCall(FusedA2A mode        = FusedA2A::GemmA2A,
+                                     int      fixedWGM    = std::numeric_limits<int>::max(),
+                                     void*    myBuf       = nullptr,
+                                     int16_t  compiledGsu = 1,
+                                     int16_t  runtimeGsu  = 0,
+                                     bool     singleCall  = false)
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
-        solution.problemType.fusedA2A = mode;
+        solution.problemType.fusedA2A     = mode;
+        solution.sizeMapping.globalSplitU = compiledGsu;
+        solution.customKernel.generated   = singleCall;
+        if(singleCall)
+        {
+            solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
+            solution.sizeMapping.waveNum           = 4;
+            solution.sizeMapping.matrixInstruction = {16, 16, 4, 1};
+            solution.sizeMapping.CUOccupancy       = 1;
+        }
 
         auto problem = dummyProblem();
         problem.setFusedA2A(mode);
+        problem.setParams().setGSU(runtimeGsu);
         problem.setWorld(2);
         problem.setFusedA2AExtent(256);
 
@@ -559,6 +572,9 @@ namespace
 
         auto device     = probeDevice();
         device.fixedWGM = fixedWGM;
+        if(singleCall)
+            return solution.generateSingleCall<false>(
+                problem, inputs, device, StreamKSettings{}, GSUSettings{});
         return solution.generateCustomCall<false>(problem, inputs, device, StreamKSettings{});
     }
 }
@@ -593,6 +609,23 @@ TEST(CustomKernelTest, A2AGemmRejectsAMisalignedA2ABuf)
     EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf));
     EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf + 64), std::runtime_error);
     EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, defaultWGM, buf + 64));
+}
+
+TEST(CustomKernelTest, GemmA2ARejectsAnEffectiveGsuOtherThanOne)
+{
+    constexpr int defaultWGM = std::numeric_limits<int>::max();
+    for(bool singleCall : {false, true})
+    {
+        auto call = [&](FusedA2A mode, int16_t compiledGsu, int16_t runtimeGsu) {
+            return fusedCustomCall(mode, defaultWGM, nullptr, compiledGsu, runtimeGsu, singleCall);
+        };
+        SCOPED_TRACE(singleCall ? "generateSingleCall" : "generateCustomCall");
+        EXPECT_NO_THROW(call(FusedA2A::GemmA2A, 1, 0));
+        EXPECT_NO_THROW(call(FusedA2A::GemmA2A, 4, 1));
+        EXPECT_THROW(call(FusedA2A::GemmA2A, 1, 2), std::runtime_error);
+        EXPECT_THROW(call(FusedA2A::GemmA2A, 2, 0), std::runtime_error);
+        EXPECT_THROW(call(FusedA2A::GemmA2A, 0, 0), std::runtime_error);
+    }
 }
 
 // The random seed takes exactly one 32-bit slot. Follow it with another argument

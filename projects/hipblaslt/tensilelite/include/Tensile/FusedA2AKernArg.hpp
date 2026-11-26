@@ -147,4 +147,11 @@ namespace TensileLite
            && reinterpret_cast<uintptr_t>(peers[myRank][FUSED_A2A_SLOT_BUF_PTR]) % 128 != 0)
             throw std::runtime_error("[fused-a2a] A2AGemm requires a 128-byte aligned a2aBuf.");
     }
+
+    inline void checkGemmA2AGsu(uint32_t gsu)
+    {
+        if(gsu != 1)
+            throw std::runtime_error("[fused-a2a] GemmA2A requires GSU 1; got " + std::to_string(gsu)
+                                     + ".");
+    }
 } // namespace TensileLite

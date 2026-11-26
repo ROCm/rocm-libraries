@@ -5,8 +5,8 @@
 Covers the gfx1250 arms of tensilelite/Components/SdmaRingEmitter.py,
 SdmaPacketEmitter.py and the FusedA2A: GemmA2A store path in
 GlobalWriteBatch.py: the ring goes through VMEM stores and atomics, ring polls
-carry a scope, the PUSH D stores are device scope, and the handshake keeps its
-barrier.
+carry a scope, the PUSH D stores are device scope, the handshake keeps its
+barrier, and the direct-write path is emitted.
 """
 
 import os
@@ -36,6 +36,13 @@ _A2A_MARKERS = (
     "global_atomic_cmpswap_b64",
     "global_store_b128",
     "s_bfm_b32",
+)
+
+_DIRECT_MARKERS = (
+    "label_fusedA2A_direct_nocopy",
+    "label_fusedA2A_direct_flag",
+    "SrdRecv",
+    "DwStep",
 )
 
 # ATOMIC DW0 and COPY_LINEAR_SUBWIN DW12 with their scope fields at SCOPE_SYS.
@@ -112,7 +119,7 @@ def test_fused_a2a_gfx1250_emits_assembly(results):
     for base, src, _err in results:
         assert_assembles(src, base)
         assert "gfx1250" in src, f"Kernel {base!r} missing gfx1250 arch marker"
-        missing = [m for m in _A2A_MARKERS + _GFX12_PACKET_CONSTANTS if m not in src]
+        missing = [m for m in _A2A_MARKERS + _GFX12_PACKET_CONSTANTS + _DIRECT_MARKERS if m not in src]
         assert not missing, f"Kernel {base!r}: missing {missing}"
 
 

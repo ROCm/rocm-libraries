@@ -195,6 +195,15 @@ def test_fused_a2a_gfx1250_is_accepted(_gp_gfx942, gfx1250_iim, assembler, capsy
     assert (sol["MacroTile0"], sol["MacroTile1"]) == (128, 128)
 
 
+@pytest.mark.parametrize("name, value", [("UseSubtileImpl", True), ("CompactLoopStore", True),
+                                         ("StoreRemapVectorWidth", 8)])
+def test_fused_a2a_gfx1250_rejects_unsupported_stores(_gp_gfx942, gfx1250_iim, assembler, capsys,
+                                                      name, value):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **{**_GFX1250, name: value})
+    assert sol.get("Valid") is False
+    assert "FusedA2A=GemmA2A on gfx1250 does not support %s" % name in out
+
+
 def test_a2a_gemm_rejects_gfx1250(_gp_gfx942, gfx1250_iim, assembler, capsys):
     sol, out = _derive(gfx1250_iim, assembler, capsys, mode="A2AGemm", **_GFX1250)
     assert sol.get("Valid") is False
