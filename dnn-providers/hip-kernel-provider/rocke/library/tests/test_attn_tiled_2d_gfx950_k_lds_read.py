@@ -383,20 +383,16 @@ def test_cpp_engine_emits_the_same_llvm_ir(path):
     )
 
 
-@pytest.mark.parametrize("knob", ["use_kq_lds_pad", "use_kq_xor_swizzle"])
-def test_cpp_engine_refuses_the_python_only_k_knobs(knob):
-    # The C++ builder has neither the KQ slab pad nor the KQ XOR swizzle (a
-    # probe knob the Python builder reads off a spec subclass); it refuses each
-    # rather than lower an unpadded, unswizzled K read. Developer builds only
-    # (see the module note).
+def test_cpp_engine_refuses_the_python_only_k_knob():
+    # The C++ builder has no KQ XOR swizzle (a probe knob the Python builder
+    # reads off a spec subclass); it refuses it rather than lower an unswizzled
+    # K read. Developer builds only (see the module note).
+    knob = "use_kq_xor_swizzle"
     engine = pytest.importorskip("rocke_engine")
     spec = UnifiedAttention2DTiledSpec(
         **_BASE, **_TRANSPOSED, **_LAID_OUT_K_PAD, use_q_reread=True
     )
-    knobs = asdict(spec) | {
-        "use_kq_lds_pad": knob == "use_kq_lds_pad",
-        "use_kq_xor_swizzle": knob == "use_kq_xor_swizzle",
-    }
+    knobs = asdict(spec) | {"use_kq_xor_swizzle": True}
     message = (
         f"rocke_engine tiled-2d: {knob}=True is not implemented in the C++ "
         "engine; build this spec with the Python engine or set it to False"

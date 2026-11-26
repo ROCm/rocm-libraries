@@ -1585,3 +1585,25 @@ def test_source_runner_preserves_library_ir_gates(monkeypatch):
         ]
         for tool in ("check_ir_validity.py", "check_arch_domain.py")
     ]
+
+
+def test_gpu_gate_skips_on_cuda_torch(monkeypatch):
+    """A CUDA build of torch skips the on-GPU numeric tests instead of failing their collection."""
+    from . import _gpu_gate
+
+    def no_device_query(index):
+        raise AssertionError("the gate queried a CUDA device")
+
+    cuda = SimpleNamespace(
+        is_available=lambda: True, get_device_properties=no_device_query
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(version=SimpleNamespace(hip=None), cuda=cuda),
+    )
+    _gpu_gate.gpu_arch.cache_clear()
+    try:
+        assert _gpu_gate.gpu_arch() is None
+    finally:
+        _gpu_gate.gpu_arch.cache_clear()

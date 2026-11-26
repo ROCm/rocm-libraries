@@ -141,8 +141,18 @@ extern "C" {
  *     rocke_unified_attention_3d_tiled_spec_t (gfx942, gfx950),
  *     rocke_unified_attention_problem_t and rocke_unified_attn_problem_t gained
  *     use_additive_bias at their end. Their sizes do not change (the field
- *     fits in their tail padding), but a caller built against 20 never sets it. */
-#define ROCKE_ABI_VERSION 21
+ *     fits in their tail padding), but a caller built against 20 never sets it.
+ * 22: rocke_unified_attention_problem_t (renamed from rocke_unified_attn_problem_t)
+ *     gained fp8_fnuz, target_ctas, causal_top_left, right_bound and emit_lse,
+ *     which changes its size and field offsets;
+ *     rocke_attention_tiled_2d_spec_t gained the kq_lds_pad, mask phase split,
+ *     HBM-direct K/V and mask-band fields, and the gfx942 / gfx950
+ *     rocke_unified_attention_3d_tiled_spec_t gained kv_layout and the
+ *     mask-band fields, which changes their sizes;
+ *     rocke_gfx942_attention_tiled_2d_supports_args_t gained use_d256_fast; the
+ *     unified-attention selectors take an explicit arch argument, and
+ *     rocke_unified_attn_set_resolved_arch is gone. */
+#define ROCKE_ABI_VERSION 22
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

@@ -676,6 +676,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+        "hipkernel.attention_general_bwd.main_dispatch",
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
@@ -692,16 +693,24 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     std::map<const IKernelDispatchHandler<Handle>*, std::string> handlers;
     for(const auto& set : discoverDescriptorSets())
     {
-        for(const auto& pack : set.packs)
+        const auto collect = [&](const auto& packs) {
+            for(const auto& pack : packs)
+            {
+                const auto dispatch = std::find_if(
+                    set.dispatches.begin(), set.dispatches.end(), [&pack](const auto& entry) {
+                        return entry.id == pack.dispatchId;
+                    });
+                ASSERT_NE(dispatch, set.dispatches.end()) << set.engine.name << ": " << pack.name;
+                const auto* handler = DispatchRegistry<Handle>::resolve(dispatch->dispatchSymbol);
+                ASSERT_NE(handler, nullptr) << dispatch->dispatchSymbol;
+                handlers.emplace(handler, dispatch->dispatchSymbol);
+            }
+        };
+        collect(set.packs);
+        // A slotted engine holds its packs per slot (RFC 0021), not at the set level.
+        for(const auto& slot : set.slots)
         {
-            const auto dispatch
-                = std::find_if(set.dispatches.begin(),
-                               set.dispatches.end(),
-                               [&pack](const auto& entry) { return entry.id == pack.dispatchId; });
-            ASSERT_NE(dispatch, set.dispatches.end()) << set.engine.name << ": " << pack.name;
-            const auto* handler = DispatchRegistry<Handle>::resolve(dispatch->dispatchSymbol);
-            ASSERT_NE(handler, nullptr) << dispatch->dispatchSymbol;
-            handlers.emplace(handler, dispatch->dispatchSymbol);
+            collect(slot.packs);
         }
     }
     registerNativeIngestorSymbols();

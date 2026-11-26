@@ -39,6 +39,8 @@ import pytest
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
 
+from _gpu_gate import requires_gpu
+
 
 @pytest.fixture
 def gfx942(monkeypatch):
@@ -144,6 +146,36 @@ def test_d64_ring_depth_unchanged(gfx942):
         assert s.num_warps == 4
 
 
+@pytest.mark.parametrize("ring_env", [None, "1"])
+@pytest.mark.parametrize(
+    "dtype,d,bs,sq,hq,hk",
+    [
+        ("fp16", 64, 16, 512, 8, 8),
+        ("fp16", 128, 64, 4096, 32, 8),
+        ("bf16", 64, 16, 2048, 8, 8),
+    ],
+)
+def test_flash_wide_off_disables_ring(
+    gfx942, monkeypatch, ring_env, dtype, d, bs, sq, hq, hk
+):
+    # The ring requires the wide cfvst geometry. With HIPDNN_GFX942_FLASH_WIDE=0
+    # the gate used to keep the ring on, so the spec build raised (fp16: ring
+    # without cfvst) or got num_warps=0 (bf16). Even a forced-on ring must yield.
+    monkeypatch.setenv("HIPDNN_GFX942_FLASH_WIDE", "0")
+    if ring_env is not None:
+        monkeypatch.setenv("HIPDNN_GFX942_K_SLICED_RING", ring_env)
+    au._2D_LAUNCH_META.clear()
+    p = _problem(dtype, sq=sq, hq=hq, hk=hk, d=d, bs=bs)
+    assert not au._enable_gfx942_flash_k_sliced_ring(p, "gfx942")
+    spec = au._tiled_spec_from_problem(p, "gfx942")
+    assert not spec.use_k_sliced_ring
+    if dtype == "fp16":
+        assert spec.num_warps == 1 and spec.use_k_single_buffer
+        assert not spec.use_conflict_free_v_store
+    meta = au._get_2d_launch_meta(p, au._tiled_cache_key(p, "gfx942"), arch="gfx942")
+    assert meta.block[0] == 64 * spec.num_warps
+
+
 # ---------------------------------------------------------------------------
 # On-GPU numeric guardrail -- the check #9198 lacked
 # ---------------------------------------------------------------------------
@@ -169,20 +201,7 @@ def _load_parity_harness():
     return mod
 
 
-def _gpu_ready():
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    if not torch.cuda.is_available():
-        return False
-    name = torch.cuda.get_device_name(0).lower()
-    return "mi300" in name or "gfx942" in name
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 (MI300X) GPU with ROCm torch"
-)
+requires_gfx942_gpu = requires_gpu("gfx942")
 
 
 @requires_gfx942_gpu

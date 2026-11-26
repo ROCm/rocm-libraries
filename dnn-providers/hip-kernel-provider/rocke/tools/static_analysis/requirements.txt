@@ -1,0 +1,7 @@
+# Analyzers that static_analysis_checks.py wraps, at the versions its tests and the
+# docs/static-analysis.md reports were checked with. Contributors install them by
+# choice (a missing tool is skipped, never an error); CI installs them to run the
+# wrapper's own tests. This file is the one place the versions are written down.
+pyright==1.1.414
+radon==6.0.1
+vulture==2.16

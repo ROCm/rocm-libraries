@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from _gpu_gate import requires_gpu
+
 _ROCKE = Path(__file__).resolve().parents[1]
 _BUILDER = _ROCKE / "builders" / "gfx942" / "kda"
 sys.path.insert(0, str(_BUILDER))
@@ -18,22 +20,9 @@ sys.path.insert(0, str(_BUILDER))
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 
-def _gpu_ready() -> bool:
-    try:
-        if not torch.cuda.is_available():
-            return False
-        props = torch.cuda.get_device_properties(0)
-        arch = getattr(props, "gcnArchName", "")
-        if not arch:
-            arch = torch.cuda.get_arch_list()[0]
-        return "gfx942" in arch
-    except Exception:  # noqa: BLE001
-        return False
-
-
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif(not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"),
+    requires_gpu("gfx942"),
 ]
 
 GATES = (-0.1, -0.5, -2.0, -5.0)

@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the SDPA backward bundle generator and its plan module.
 
-They check that the checked-in SdpaBackward sweeps and the generated block
-of ASM_SDPA_ENGINE.toml are what the generator writes, that the generator is
+They check that the checked-in SdpaBackward sweeps and the generated blocks
+of the engine TOMLs are what the generator writes, that the generator is
 deterministic, that every written case is legal and traceable to the plan,
 that the cases up to nightly cover every required pair of axis values, and
 that every case id resolves to exactly one tolerance row. The same generated
@@ -38,6 +38,14 @@ FLYDSL_TOML = (
     / "config"
     / "hipkernel_flydsl_sdpa_bwd.toml"
 )
+GENERAL_BWD_TOML = (
+    SCRIPTS.parents[1]
+    / "hip-kernel-provider"
+    / "config"
+    / "hipkernel_AttentionGeneralBwd.toml"
+)
+# Every engine TOML that carries the generated block.
+GENERATED_TOMLS = (ENGINE_TOML, FLYDSL_TOML, GENERAL_BWD_TOML)
 ENGINE_TIER_YAML = (
     SCRIPTS.parents[1]
     / "hip-kernel-provider"
@@ -101,7 +109,7 @@ def test_checked_in_sweeps_are_generated(files):
     ), f"stale generator files: {sorted(on_disk - set(files))}"
 
 
-@pytest.mark.parametrize("toml", [ENGINE_TOML, FLYDSL_TOML], ids=lambda p: p.name)
+@pytest.mark.parametrize("toml", GENERATED_TOMLS, ids=lambda p: p.name)
 def test_engine_toml_block_is_generated(toml):
     text = toml.read_text(encoding="utf-8")
     assert text.count(G.TOML_BEGIN) == 1

@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+#include "rocke/instance_attention_kv_seq_tail_internal.h"
 #include "rocke/ir.h"
 
 typedef struct rocke_strided_kv_params
@@ -63,6 +64,6 @@ static inline rocke_value_t* rocke_strided_kv_offset(rocke_ir_builder_t* b,
     rocke_value_t* row_offset = rocke_b_mul(b, safe_token, p->token);
     rocke_value_t* dim_offset = rocke_b_mul(b, dim, rocke_b_const_i32(b, 2));
     rocke_value_t* offset = rocke_b_add(b, row_offset, dim_offset);
-    return rocke_b_select(b, valid, offset, rocke_b_const_i32(b, 0x7fffffff));
+    return rocke_b_select(b, valid, offset, rocke_b_const_i32(b, ROCKE_KV_SEQ_TAIL_OUT_OF_RANGE));
 }
 #endif
