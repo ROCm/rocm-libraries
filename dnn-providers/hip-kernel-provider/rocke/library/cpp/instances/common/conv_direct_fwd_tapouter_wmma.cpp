@@ -28,6 +28,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
@@ -169,8 +170,20 @@ rocke_status_t rocke_fwd_tapouter_wmma_kernel_name(const rocke_fwd_tapouter_wmma
         snprintf(ts, sizeof ts, "ts%d", spec->tdm_split);
     else
         ts[0] = '\0';
-    const char* parts[]
-        = {f, pad, dil, wk, wp, tk, tp, tw, ck, st, spec->prefetch ? "pf" : "", sched.c_str(), ts};
+    const char* parts[] = {f,
+                           pad,
+                           dil,
+                           wk,
+                           wp,
+                           tk,
+                           tp,
+                           tw,
+                           ck,
+                           st,
+                           spec->prefetch ? "pf" : "",
+                           sched.c_str(),
+                           ts,
+                           spec->bias ? "cbias" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_tapouter_wmma",
@@ -339,7 +352,10 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
     if(spec->sched != NULL && spec->sched[0] != '\0')
         rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->sched);
     rocke_dconv_params_t prm;
-    rocke_dconv_emit_params(b, &prm, "fwd", io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &prm, io_type);
+    else
+        rocke_dconv_emit_params(b, &prm, "fwd", io_type);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     V Xp = prm.A, Wp = prm.Bp, Yp = prm.D;
@@ -733,6 +749,9 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
 
     auto epilogue = [&](const std::vector<V>& accs) {
         rocke_b_sync_lds_only(b);
+        V bias_rsrc = NULL;
+        if(spec->bias)
+            bias_rsrc = rocke_conv_bias_rsrc(b, prm.Bias, prm.Bias_bytes);
         for(int m = 0; m < TM; ++m)
         {
             V col;
@@ -743,10 +762,20 @@ rocke_kernel_def_t* rocke_build_fwd_tapouter_wmma(rocke_ir_builder_t* b,
                 V u = rocke_b_mul(b, lhalf, c8);
                 col = rocke_b_add(b, z, u);
             }
+            V bv = NULL;
+            if(spec->bias)
+            {
+                /* The lane's 8 accumulator slots are channels col .. col+7. */
+                V k = rocke_b_add(b, k_out, col);
+                bv = rocke_conv_bias_load_vec_f32(b, bias_rsrc, k, 8, io_type, c0);
+            }
             for(int tn = 0; tn < TN; ++tn)
             {
                 V px = tile_row(wave_p, TN, tn, l16);
-                V val = rocke_b_vec_cast_f32_to(b, accs[m * TN + tn], io_type);
+                V acc = accs[m * TN + tn];
+                if(spec->bias)
+                    acc = rocke_b_fadd(b, acc, bv);
+                V val = rocke_b_vec_cast_f32_to(b, acc, io_type);
                 V x = rocke_b_mul(b, px, ci(b, EPITCH));
                 V y = rocke_b_add(b, x, col);
                 V idx[2] = {c0, y};

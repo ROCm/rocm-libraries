@@ -82,6 +82,7 @@ typedef struct rocke_fwd_smallc_wmma_spec
     bool tdm_store; /* default false */
     const char* sched; /* default NULL */
     int wave_size; /* default 32 */
+    bool bias; /* default false; conv + bias (Bias / Bias_bytes tail) */
 } rocke_fwd_smallc_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */
@@ -162,6 +163,7 @@ typedef struct rocke_fwd_smallk_wmma_spec
     bool prefetch; /* default false */
     const char* sched; /* default NULL */
     int wave_size; /* default 32 */
+    bool bias; /* default false; conv + bias (Bias / Bias_bytes tail) */
 } rocke_fwd_smallk_wmma_spec_t;
 
 rocke_fwd_smallk_wmma_spec_t rocke_fwd_smallk_wmma_spec_default(void);

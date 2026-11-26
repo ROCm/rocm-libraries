@@ -67,6 +67,8 @@ extern "C" {
  *      pf_depth: int = 1
  *      sched: str | None = None
  *      wave_size: int = 32
+ *      bias: bool = False   # conv + bias: Bias / Bias_bytes tail, bias[k] loaded
+ *                           # once per block and added before every store
  * ===================================================================== */
 typedef struct rocke_fwd_gstream_wmma_spec
 {
@@ -84,6 +86,7 @@ typedef struct rocke_fwd_gstream_wmma_spec
     int pf_depth; /* default 1 */
     const char* sched; /* default NULL */
     int wave_size; /* default 32 */
+    bool bias; /* default false */
 } rocke_fwd_gstream_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */

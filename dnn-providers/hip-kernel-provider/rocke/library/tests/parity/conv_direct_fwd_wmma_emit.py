@@ -71,6 +71,7 @@
 #  49  fp16, 3x3 s2, phase_split + row_ring, 2x5 waves, tile_w 40, 3 stages,
 #      prefetch + iterative-ilp
 #  50  bf16, 3x3 s2, row_ring, four images of 8-wide tiles, 3 stages
+from dataclasses import replace
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -163,7 +164,7 @@ SV = dict(strided_view=True)
 PV = dict(poly_view=True)
 
 
-def _spec(idx: int):
+def _base_spec(idx: int):
     S = DirectFwdWmmaSpec
     cfgs = {
         0: (S(problem=_p()), "gfx1250"),
@@ -470,6 +471,33 @@ def _spec(idx: int):
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")
     return cfgs[idx]
+
+
+# Conv + bias forward, configs 51..: the config _BIAS_CFGS[idx - 51]
+# above rebuilt with bias=True (the Bias / Bias_bytes kernarg tail and the
+# fp32 bias add before the store).
+_BIAS_CFG_BASE = 51
+_BIAS_CFGS = (
+    0,
+    1,
+    2,
+    8,
+    12,
+    22,
+    37,
+    44,
+)
+
+
+def _spec(idx: int):
+    if idx < _BIAS_CFG_BASE:
+        return _base_spec(idx)
+    if idx - _BIAS_CFG_BASE >= len(_BIAS_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    sel = _base_spec(_BIAS_CFGS[idx - _BIAS_CFG_BASE])
+    if isinstance(sel, tuple):
+        return replace(sel[0], bias=True), sel[1]
+    return replace(sel, bias=True)
 
 
 def main() -> int:
