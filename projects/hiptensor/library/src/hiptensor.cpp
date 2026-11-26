@@ -864,21 +864,30 @@ hiptensorStatus_t contractionCreatePlanPreference(const hiptensorHandle_t   hand
                                                   hiptensorAlgo_t           algo,
                                                   hiptensorJitMode_t        jitMode);
 
+namespace
+{
+    void initPlanPreference(hiptensorPlanPreference& pref,
+                            hiptensorAlgo_t          algo,
+                            hiptensorJitMode_t       jitMode)
+    {
+        pref.mAutotuneMode     = HIPTENSOR_AUTOTUNE_MODE_NONE;
+        pref.mCacheMode        = HIPTENSOR_CACHE_MODE_PEDANTIC;
+        pref.mIncrementalCount = 0;
+        pref.mKernelRank       = 0;
+        pref.mJit              = jitMode;
+
+        pref.mSelectionAlgorithm = algo;
+        pref.mSolution.store(nullptr);
+    }
+} // namespace
+
 hiptensorStatus_t hiptensorCreatePlanPreference(const hiptensorHandle_t    handle,
                                                 hiptensorPlanPreference_t* pref,
                                                 hiptensorAlgo_t            algo,
                                                 hiptensorJitMode_t         jitMode)
 {
     *pref = new hiptensorPlanPreference();
-
-    (*pref)->mAutotuneMode     = HIPTENSOR_AUTOTUNE_MODE_NONE;
-    (*pref)->mCacheMode        = HIPTENSOR_CACHE_MODE_PEDANTIC;
-    (*pref)->mIncrementalCount = 0;
-    (*pref)->mKernelRank       = 0;
-    (*pref)->mJit              = jitMode;
-
-    (*pref)->mSelectionAlgorithm = algo;
-    (*pref)->mSolution.store(nullptr);
+    initPlanPreference(**pref, algo, jitMode);
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -961,6 +970,18 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
                                                  const hiptensorWorksizePreference_t  workspacePref,
                                                  uint64_t* workspaceSizeEstimate)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, workspaceSizeEstimate);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
         return contractionGetWorkspaceSize(
@@ -991,8 +1012,21 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       const hiptensorPlanPreference_t      pref,
                                       uint64_t                             workspaceSizeLimit)
 {
-    (*plan)                     = new hiptensorPlan();
-    hiptensorPlan_t newPlan     = *plan;
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, plan);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    // Owned here until it is returned, so a failed initialization frees it and leaves *plan as is.
+    auto            ownedPlan   = std::make_unique<hiptensorPlan>();
+    hiptensorPlan_t newPlan     = ownedPlan.get();
     newPlan->mRequiredWorkspace = workspaceSizeLimit;
 
     // Deep-copy the tensor descriptors referenced by the operation descriptor
@@ -1024,7 +1058,16 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
     newPlan->mOwnedOpDesc->mDescD = newPlan->mOwnedDescD.get();
     newPlan->mOwnedOpDesc->mDescE = newPlan->mOwnedDescE.get();
 
-    newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
+    // A null preference selects the defaults of hiptensorCreatePlanPreference.
+    if(pref != nullptr)
+    {
+        newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
+    }
+    else
+    {
+        newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>();
+        initPlanPreference(*newPlan->mOwnedPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE);
+    }
 
     newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
     newPlan->mPref   = newPlan->mOwnedPref.get();
@@ -1038,17 +1081,23 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
         newPlan->mOwnedOpDesc->mOpAC = HIPTENSOR_OP_ADD;
     }
 
+    auto status = HIPTENSOR_STATUS_SUCCESS;
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
-        return contractionInitPlan(
+        status = contractionInitPlan(
             handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
-    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
+    else if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
     {
-        return contractionTrinaryInitPlan(
+        status = contractionTrinaryInitPlan(
             handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
-    return HIPTENSOR_STATUS_SUCCESS;
+
+    if(status == HIPTENSOR_STATUS_SUCCESS)
+    {
+        *plan = ownedPlan.release();
+    }
+    return status;
 }
 
 hiptensorStatus_t hiptensorDestroyPlan(hiptensorPlan_t plan)
