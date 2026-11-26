@@ -75,6 +75,13 @@ TEST_F(TestCudnnShimHandle, DestroyForwards)
     EXPECT_EQ(cudnnDestroy(fakeHandle), CUDNN_STATUS_SUCCESS);
 }
 
+TEST_F(TestCudnnShimHandle, DestroyRejectsNullWithoutReachingBackend)
+{
+    EXPECT_CALL(*_mockBackend, destroy(_)).Times(0);
+
+    EXPECT_EQ(cudnnDestroy(nullptr), CUDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestCudnnShimHandle, SetStreamForwards)
 {
     auto fakeHandle = reinterpret_cast<cudnnHandle_t>(0x3456);

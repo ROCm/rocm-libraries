@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <vector>
 
 // TODO - Once PluginManager is implemented, we will need to add a testing plugin for this API.
@@ -189,6 +190,30 @@ TEST_F(IntegrationEngineHeuristicApi, Finalize)
     EXPECT_EQ(hipdnnBackendFinalize(_engineHeuristic), HIPDNN_STATUS_SUCCESS);
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineHeuristic), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(IntegrationEngineHeuristicApi, RankingSurvivesDuplicateFallbackEntries)
+{
+    using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
+    _policyOrderEnv.reset();
+    const ScopedEnvironmentVariableSetter policyOrder("HIPDNN_HEUR_POLICY_ORDER", "");
+    const ScopedEnvironmentVariableSetter configPath("HIPDNN_HEUR_CONFIG_PATH", "");
+    const ScopedEnvironmentVariableSetter disableExactCache("HIPDNN_DISABLE_EXACT_ENGINE_CACHE",
+                                                            "1");
+    const auto engineId = std::to_string(hipdnn_tests::plugin_constants::engineId<GoodPlugin>());
+    const ScopedEnvironmentVariableSetter fallbackOrder("HIPDNN_HEUR_FALLBACK_ENGINE_ORDER",
+                                                        engineId + "," + engineId);
+    ASSERT_NO_FATAL_FAILURE(populateEngineHeuristic());
+
+    int64_t count = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
+                                        HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        0,
+                                        &count,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(count, 1);
 }
 
 TEST_F(IntegrationEngineHeuristicApi, SetAttributeOnFinalizedDescriptor)
@@ -543,5 +568,37 @@ TEST_F(IntegrationEngineHeuristicApi, EachModeRunsItsBuiltInPolicyList)
         EXPECT_EQ(hipdnnBackendDestroyDescriptor(engine), HIPDNN_STATUS_SUCCESS);
         EXPECT_EQ(hipdnnBackendDestroyDescriptor(engineConfig), HIPDNN_STATUS_SUCCESS);
         EXPECT_EQ(hipdnnBackendDestroyDescriptor(heuristic), HIPDNN_STATUS_SUCCESS);
+    }
+}
+
+TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigsRejectsNegativeRequestedCount)
+{
+    populateEngineHeuristic(true);
+
+    std::vector<hipdnnBackendDescriptor_t> configs(2);
+    for(auto& config : configs)
+    {
+        ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &config),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+    const std::vector<hipdnnBackendDescriptor_t> sentinel = configs;
+
+    int64_t count = 42;
+    EXPECT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
+                                        HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        -1,
+                                        &count,
+                                        static_cast<void*>(configs.data())),
+              HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(count, 42);
+    EXPECT_EQ(configs, sentinel);
+
+    // No engine config was written into the caller's descriptors, so none of
+    // them can be finalized.
+    for(auto config : configs)
+    {
+        EXPECT_NE(hipdnnBackendFinalize(config), HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(config), HIPDNN_STATUS_SUCCESS);
     }
 }

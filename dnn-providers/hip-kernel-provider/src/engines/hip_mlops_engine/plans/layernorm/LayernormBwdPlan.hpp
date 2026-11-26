@@ -12,8 +12,10 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
+#include <vector>
 
 namespace hip_kernel_provider
 {
@@ -82,6 +84,14 @@ public:
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
+
+    // Launches in execution order: the main kernel, then the scale/bias kernels of the chosen mode.
+    static std::vector<KernelLaunchShape> launchShapes(int64_t outerSize,
+                                                       int64_t innerSize,
+                                                       int64_t stride,
+                                                       int64_t localSize,
+                                                       bool isParallel,
+                                                       int64_t parallelSize);
 
     static size_t getReqdWorkItemCount(const hipDeviceProp_t& deviceProperties, size_t localSize);
 

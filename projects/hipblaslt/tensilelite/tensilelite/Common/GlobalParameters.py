@@ -100,6 +100,9 @@ globalParameters["BoundsCheck"] = 0  # Bounds check
 globalParameters["ValidationMaxToPrint"] = 4  # maximum number of mismatches to print
 globalParameters["ValidationPrintValids"] = False  # print matches too
 # steps
+globalParameters["ForceResultsFile"] = (
+    False  # write benchmark results CSVs even without LibraryLogic or Ductile, for external readers
+)
 globalParameters["ForceRedoBenchmarkProblems"] = (
     True  # if False and benchmarking already complete, then benchmarking will be skipped when TensileLite is re-run
 )
@@ -595,6 +598,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToLds": [0]},
     {"DirectToLdsMetadata": [1]},
     {"UseSubtileImpl": [False]},
+    {"StoreCachelineAlign": [True]},
     {"A2ASubRounds": [1]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
