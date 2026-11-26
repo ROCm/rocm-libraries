@@ -76,6 +76,7 @@ from rocke.tests.entry_selection import normalized_path as _normalized
 from rocke.tests.lane_mentions import LaneMention, LaneMentionKind, lane_mentions
 from rocke.tests.lanes import (
     BUILD_VARIANT,
+    PR_RUNNER_ARCHES,
     RUNNER_HARDWARE,
     SOURCE_TREE,
     TICKET,
@@ -103,6 +104,10 @@ from rocke.tests.pending_lanes import (
 )
 from rocke.tests.provider_categories import provider_category_labels
 from rocke.tests.quarantine import register_quarantine, skip_quarantined_items
+from rocke.tests.reference_artifacts import (
+    ARTIFACT_CLI,
+    published_reference_variants,
+)
 
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
@@ -116,12 +121,28 @@ PORTABLE_IR_RUNNER = "platform/tests/portable_ir/test_portable_ir.py"
 PORTABLE_IR_UNIT_TESTS = "platform/python/rocke/portable_ir/tests"
 # platform/CMakeLists.txt (the ROCKE_INSTALL_TEST_GPU_REFERENCES block, through
 # cmake/InstallGpuReferences.cmake) registers rocke_<operation>_gpu_<arch>_pytest
-# over this file of each reference operation only when the reference bundles
+# over library/tests/test_<operation>_pinned_reference.py for each architecture
+# that publishes a variant of the operation, only when the reference bundles
 # are installed, which the provider build does and this check's configure
-# (without the bundles) cannot.
+# (without the bundles) cannot. The library's artifact CLI lists those pairs
+# from the committed locks (rocke.tests.reference_artifacts).
 # The registry module, relative to the rocke directory.
 PENDING_LANES_MODULE = "platform/python/rocke/tests/pending_lanes.py"
-PINNED_REFERENCE_TEST = re.compile(r"library/tests/test_(\w+)_pinned_reference\.py")
+
+
+def pinned_reference_entries(library: Path) -> dict[str, set[str]]:
+    """Each pinned-reference test file, relative to the rocke directory -> the
+    GPU CTest entries the provider build registers over it on a pull-request
+    runner arch: one per architecture in ``PR_RUNNER_ARCHES`` that publishes a
+    variant of the file's operation, as the artifact CLI under ``library``
+    lists them. A file's name credits it with nothing."""
+    entries: dict[str, set[str]] = {}
+    for variant in published_reference_variants(library):
+        operation, arch = variant["operation"], variant["architecture"]
+        if arch in PR_RUNNER_ARCHES:
+            path = f"library/tests/test_{operation}_pinned_reference.py"
+            entries.setdefault(path, set()).add(f"rocke_{operation}_gpu_{arch}_pytest")
+    return entries
 
 
 def run_by_another_test() -> dict[str, str]:
@@ -160,13 +181,10 @@ def ci_selected_files(scratch: Path) -> set[str]:
             install,
         ),
     ]
-    references = {
-        path: f"rocke_{match.group(1)}_gpu_gfx942_pytest"
-        for path in tree_test_files(ROCKE)
-        if (match := PINNED_REFERENCE_TEST.fullmatch(path))
-    }
+    references = pinned_reference_entries(ROCKE / "library")
+    reference_names = set().union(*references.values())
     entry_names = [entry["name"] for entries, _, _ in trees for entry in entries]
-    labels = provider_category_labels([*entry_names, *references.values()], scratch)
+    labels = provider_category_labels([*entry_names, *reference_names], scratch)
 
     def ci_run(name: str) -> bool:
         return bool(labels.get(name, set()) & CI_TIERS)
@@ -187,7 +205,7 @@ def ci_selected_files(scratch: Path) -> set[str]:
         file.relative_to(rocke).as_posix() for file in selected if rocke in file.parents
     }
     in_ci |= {file for file, runner in run_by_another_test().items() if runner in in_ci}
-    in_ci |= {path for path, name in references.items() if ci_run(name)}
+    in_ci |= {path for path, names in references.items() if any(map(ci_run, names))}
     return in_ci
 
 
@@ -1391,3 +1409,52 @@ def test_every_test_file_is_assigned_to_a_ci_entry_or_has_a_recorded_reason(tmp_
         "assigned to a CI entry, or a case record's file is assigned to none): "
         f"{stale}"
     )
+
+
+# The template platform/CMakeLists.txt registers each published operation and
+# architecture's GPU reference entry with, and the test file the entry runs.
+_REFERENCE_ENTRY_TEMPLATE = re.compile(
+    r"add_test\((rocke_\$\{_operation\}_gpu_\$\{_arch\}_pytest) \S+ "
+    r'\\"\$\{ROCKE_TEST_CTEST_REL\}tests/'
+    r'(library/tests/test_\$\{_operation\}_pinned_reference\.py)\\"'
+)
+
+
+def _render(template: str, operation: str, arch: str) -> str:
+    return template.replace("${_operation}", operation).replace("${_arch}", arch)
+
+
+def test_pinned_reference_entries_are_the_published_operations_registrations(
+    tmp_path,
+):
+    """The audit credits each pinned-reference file with the entries the CMake
+    template registers for the operations and pull-request runner arches the
+    committed locks publish; a pinned-reference file planted beside them
+    without a reference operation is credited with none."""
+    name_template, file_template = _REFERENCE_ENTRY_TEMPLATE.search(
+        (ROCKE / "platform/CMakeLists.txt").read_text(encoding="utf-8")
+    ).groups()
+    published = {
+        (variant["operation"], variant["architecture"])
+        for variant in published_reference_variants(ROCKE / "library")
+    }
+    expected: dict[str, set[str]] = {}
+    for operation, arch in published:
+        if arch in PR_RUNNER_ARCHES:
+            expected.setdefault(_render(file_template, operation, arch), set()).add(
+                _render(name_template, operation, arch)
+            )
+    assert expected, "no published pinned reference on a pull-request runner arch"
+    assert pinned_reference_entries(ROCKE / "library") == expected
+
+    # The same locks in a copy of the library tree, with a planted file.
+    library = tmp_path / "library"
+    shutil.copytree(
+        ROCKE / "library/tests/reference_common", library / ARTIFACT_CLI.parent
+    )
+    for operation in {operation for operation, _ in published}:
+        package = f"tests/{operation}_reference/architectures"
+        shutil.copytree(ROCKE / "library" / package, library / package)
+    planted = library / "tests/test_bogus_pinned_reference.py"
+    planted.write_text("def test_x():\n    pass\n", encoding="utf-8")
+    assert pinned_reference_entries(library) == expected
