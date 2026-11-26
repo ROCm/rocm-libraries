@@ -3157,7 +3157,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     if(arg.uniform_check != hipblaslt_uniform_check::none)
     {
         const int tiA = static_cast<int>(TiA);
-        if(arg.partitions > 1)
+        if(std::all_of(M.begin(), M.end(), [](int64_t m) { return m <= 1; }))
+            skipUniformCheck("M is 1: D has a single row, so no row is compared");
+        else if(arg.partitions > 1)
             skipUniformCheck("--partitions: each partition runs its own GEMM on its slice of D");
         else if(arg.c_equal_d && (arg.beta != 0 || arg.betai != 0))
             skipUniformCheck("c_equal_d with a nonzero beta: each launch reads the D the previous "

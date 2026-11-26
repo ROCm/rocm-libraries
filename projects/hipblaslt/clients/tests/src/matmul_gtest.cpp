@@ -690,6 +690,53 @@ namespace
         EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
     }
 
+    // Runs an f32 m x n x 64 uniform_check case whose D has a single line in direction, so nothing
+    // is compared, and expects the case to skip with reason rather than pass.
+    void expectSingleLineSkips(hipblaslt_uniform_check direction,
+                               int64_t                 m,
+                               int64_t                 n,
+                               const char*             reason)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = HIP_R_32F;
+        arg.compute_type                                  = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.lda[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = m;
+        arg.N[0]                                                     = n;
+        arg.K[0] = arg.ldb[0] = 64;
+        arg.stride_a[0]       = m * 64;
+        arg.stride_b[0]       = 64 * n;
+        arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0] = m * n;
+        arg.alpha                                           = 1;
+        arg.beta                                            = 0;
+        arg.initialization                                  = hipblaslt_initialization::hpl;
+        arg.uniform_summation_order                         = 0;
+        arg.uniform_check                                   = direction;
+        arg.unit_check                                      = 0;
+
+        const int64_t                  before = hipblaslt_bench_options::verification_failures();
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            testing_matmul(arg);
+        }
+        ASSERT_EQ(results.size(), 1);
+        const auto&       r        = results.GetTestPartResult(0);
+        const std::string expected = std::string("uniform_check checked no solution: ") + reason;
+        EXPECT_TRUE(r.skipped()) << r.message();
+        EXPECT_NE(std::string(r.message()).find(expected), std::string::npos) << r.message();
+        EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_OneRowSkipsRowCheck)
+    {
+        expectSingleLineSkips(hipblaslt_uniform_check::row, 1, 64, "M is 1");
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
