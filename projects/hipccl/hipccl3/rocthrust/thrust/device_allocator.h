@@ -23,12 +23,18 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/device_ptr.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/device_memory_resource.h>
 
-#include <limits>
-#include <stdexcept>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -68,7 +74,7 @@ public:
    *  \param alignment alignment size, in bytes
    *  \return a pointer to the newly allocated storage.
    */
-  THRUST_NODISCARD THRUST_HOST virtual pointer
+  [[nodiscard]] THRUST_HOST virtual pointer
   do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
     return pointer(m_upstream->do_allocate(bytes, alignment).get());
@@ -108,7 +114,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p device_allocator.
+    /*! The alias \p other gives the type of the rebound \p device_allocator.
      */
     using other = device_allocator<U>;
   };

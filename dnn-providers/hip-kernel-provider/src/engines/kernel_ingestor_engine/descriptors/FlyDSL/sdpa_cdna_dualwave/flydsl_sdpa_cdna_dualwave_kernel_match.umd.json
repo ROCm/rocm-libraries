@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "13c21633-2a68-5dbb-951f-7fc9e7c730a2",
+  "name": "flydsl sdpa_cdna_dualwave: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_sdpa_cdna_dualwave.kernel_match"
+}

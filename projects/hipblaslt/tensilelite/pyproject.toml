@@ -3,7 +3,7 @@
 
 [tool.coverage.run]
 branch = true
-concurrency = ["multiprocessing"]
+concurrency = ["multiprocessing", "thread"]
 omit = [
     "*/Tests/*",
     "*/tests/*",
@@ -61,48 +61,36 @@ show_contexts = true
 
 [tool.pytest.ini_options]
 # You can also move pytest config here if desired
-testpaths = ["Tensile/Tests", "rocisa/test"]
+testpaths = ["tensilelite/Tests", "rocisa/test"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [project]
-name = "tensile"
-version = "5.0.0"
+name = "tensilelite"
+dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
 description = "A code generation library for high-performance GEMM and tensor contraction kernels on AMD GPUs."
 license = {text = "MIT"}
-dependencies = [
-    "packaging",
-    "pyyaml",
-    "msgpack",
-    "joblib>=1.4.0",
-    "simplejson",
-    "ujson",
-    "orjson",
-    "yappi",
-    "setuptools",
-    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
-    "cmake",
-    "invoke",
-    "filelock",
-    "numpy",
-    "hip-python",
-]
 
 [project.scripts]
-Tensile = "Tensile.Tensile:main"
-TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
-TensileVerifyStinkyElfText = "Tensile.verify_stinky_comment_vs_elf_text:main"
-TensileGetPath = "Tensile:PrintTensileRoot"
-TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"
-TensileRetuneLibrary = "Tensile.TensileRetuneLibrary:main"
+tensilelite = "tensilelite.cli:main"
+tensilelite-configure-client = "tensilelite_configure_client:main"
+Tensile = "tensilelite.run:main"
+TensileCreateLibrary = "tensilelite.create_library:main"
+TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
+TensileGetPath = "tensilelite:PrintTensileRoot"
+TensileBenchmarkCluster = "tensilelite.benchmark_cluster:main"
+TensileRetuneLibrary = "tensilelite.retune_library:main"
 
+[project.optional-dependencies]
+profile = ["yappi"]
+hip-query = ["hip-python"]
 [dependency-groups]
 dev = [
     "rocisa",
     "pytest>=5.4.1",
-    "pytest-xdist>=1.32.0",
+    "pytest-xdist>=3.2",
     "pytest-cov",
     "syrupy",
     "filelock",
@@ -111,11 +99,35 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["setuptools>=68"]
+build-backend = "_tensilelite_build_backend"
+backend-path = ["packaging_backend"]
+
+[tool.setuptools]
+# package-data below is the only list of non-Python files in the wheel.
+# MANIFEST.in only adds sdist-only build inputs; it must not add wheel files.
+include-package-data = false
+py-modules = ["_tensilelite_client_binding", "tensilelite_configure_client"]
 
 [tool.setuptools.packages.find]
-include = ["Tensile*"]
+include = ["tensilelite*"]
+exclude = ["tensilelite.Tests*", "tensilelite.Utilities.archive*"]
+
+[tool.setuptools.package-data]
+tensilelite = [
+    "Source/TensileTypes.h",
+    "Source/tensile_bfloat16.h",
+    "Source/tensile_float8_bfloat8.h",
+    "Source/KernelHeader.h",
+    "Source/ReductionTemplate.h",
+    "Source/memory_gfx.h",
+    "CustomKernels/**/*.s",
+    "logic/known_bugs.yaml",
+    "ductile/config/defaults.yaml",
+]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["Tests/unit/source_only/*", "source_only/*"]
 
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
@@ -135,41 +147,41 @@ members = ["rocisa"]
 # See projects/hipblaslt/skills/tensilelite-mutation-rerun/SKILL.md for the
 # optional workflow.
 # mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
-# tests there, so the WHOLE Tensile package is copied (for imports to resolve)
+# tests there, so the WHOLE TensileLite package is copied (for imports to resolve)
 # while `only_mutate` restricts which files are actually mutated to the slice.
 # `also_copy` must include pytest.ini (markers + config) and characterization
 # fixtures. mutmut caches the initial non-Python source copy, so snapshots must
 # be refreshed explicitly for the copied test tree to match the source suite.
 [tool.mutmut]
-source_paths = ["Tensile"]
+source_paths = ["tensilelite"]
 only_mutate = [
-    "Tensile/Common/DataType.py",
-    "Tensile/Common/Utilities.py",
-    "Tensile/Common/Types.py",
-    "Tensile/Common/ValidParameters.py",
-    "Tensile/SolutionStructs/Naming.py",
-    "Tensile/SolutionStructs/Utilities.py",
-    "Tensile/TensileLogic/ValidChipId.py",
-    "Tensile/TensileLogic/ValidMatrixInstruction.py",
-    "Tensile/TensileLogic/ValidWorkGroup.py",
-    "Tensile/TensileLogic/ValidWorkGroupMappingXCC.py",
+    "tensilelite/Common/DataType.py",
+    "tensilelite/Common/Utilities.py",
+    "tensilelite/Common/Types.py",
+    "tensilelite/Common/ValidParameters.py",
+    "tensilelite/SolutionStructs/Naming.py",
+    "tensilelite/SolutionStructs/Utilities.py",
+    "tensilelite/logic/valid_chip_id.py",
+    "tensilelite/logic/valid_matrix_instruction.py",
+    "tensilelite/logic/valid_work_group.py",
+    "tensilelite/logic/valid_work_group_mapping_xcc.py",
 ]
 do_not_mutate = [
-    "Tensile/Tests/*",
+    "tensilelite/Tests/*",
     "*/Tests/*",
     "*/test_*.py",
     "*/conftest.py",
 ]
 pytest_add_cli_args_test_selection = [
-    "Tensile/Tests/unit/characterization/CommonTypes",
-    "Tensile/Tests/unit/characterization/CommonUtilities",
-    "Tensile/Tests/unit/characterization/DataType",
-    "Tensile/Tests/unit/characterization/Naming",
-    "Tensile/Tests/unit/characterization/SolutionStructsUtils",
-    "Tensile/Tests/unit/characterization/TensileLogic",
-    "Tensile/Tests/unit/characterization/ValidParameters"
+    "tensilelite/Tests/unit/characterization/CommonTypes",
+    "tensilelite/Tests/unit/characterization/CommonUtilities",
+    "tensilelite/Tests/unit/characterization/DataType",
+    "tensilelite/Tests/unit/characterization/Naming",
+    "tensilelite/Tests/unit/characterization/SolutionStructsUtils",
+    "tensilelite/Tests/unit/characterization/TensileLogic",
+    "tensilelite/Tests/unit/characterization/ValidParameters"
 ]
-also_copy = ["pytest.ini", "Tensile/Tests/unit/characterization"]
+also_copy = ["pytest.ini", "tensilelite/Tests/unit/characterization"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
 # in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
 # sys.modules; the later "Running stats" phase re-imports rocisa in the SAME

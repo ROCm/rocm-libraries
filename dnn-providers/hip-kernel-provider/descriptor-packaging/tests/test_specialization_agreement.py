@@ -29,11 +29,16 @@ from hkp_pack import agreement, pipeline
 from hkp_pack.errors import HkpPackError
 from hkp_pack.desk_check import compiled_agreement, load_kernels
 from hkp_pack.kpack_resolver import load_kpack
-from pack_helpers import write_shipped
+from pack_helpers import GENERIC_TARGETS, GENERIC_TARGETS_JSON, write_shipped
+
+# quick: no HIP compiler/comgr (the marker's definition); TestRealArchiveReaders needs only
+# rocm_kpack, as other quick files do.
+pytestmark = pytest.mark.quick
 
 ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"
 PAYLOAD_SHA = hashlib.sha256(PAYLOAD).hexdigest()
+PAYLOAD_IDENTITY = hashlib.sha256(b"what PAYLOAD was compiled from").hexdigest()
 SYMBOL = "attention_dense_bf16_d128"
 # One argument in the shape kernel_signature emits -- `name` is present only when the
 # code object carries one, so a bare kind/size/offset triple is a valid produced entry.
@@ -139,6 +144,7 @@ def observe_for(spec, *consumers, schema=FULL_KMD):
     observations["arch"] = ARCH
     observations["symbol"] = SYMBOL
     observations["code_object_sha256"] = PAYLOAD_SHA
+    observations["code_object_identity"] = PAYLOAD_IDENTITY
     return observations
 
 
@@ -495,7 +501,8 @@ def shipped_ukd(**overrides):
         build=None,
         symbol=SYMBOL,
         variant_key="vk-demo",
-        extra=overrides.pop("extra", {}),
+        # Every authored UKD carries a version.
+        extra={"version": "1.0", **overrides.pop("extra", {})},
         origin_kind="rocke",
         builder="demo_builder",
         spec={"head_size": 64},
@@ -538,6 +545,21 @@ def restamp_authored_spec(doc):
     doc["provenance"]["spec"] = {"head_size": 128}
     evidence = doc["provenance"]["effective_spec"]
     evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
+
+
+def restamp_identity(identity):
+    """A mutation that sets the packed `identity` (dropping it for None) and re-stamps the
+    descriptor digest over it, so the identity's own binding to the evidence speaks."""
+
+    def mutate(doc):
+        if identity is None:
+            del doc["kernel_source"]["identity"]
+        else:
+            doc["kernel_source"]["identity"] = identity
+        evidence = doc["provenance"]["effective_spec"]
+        evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
+
+    return mutate
 
 
 class TestProducerEvidenceReservation:
@@ -607,6 +629,23 @@ class TestPackedVerification:
                 ),
                 "code-object binding mismatch",
                 id="observed-code-object",
+            ),
+            pytest.param(
+                lambda d: observations_of(d).__setitem__(
+                    "code_object_identity", "0" * 64
+                ),
+                "code-object identity binding mismatch",
+                id="observed-identity",
+            ),
+            pytest.param(
+                restamp_identity("1" * 64),
+                "code-object identity binding mismatch",
+                id="restamped-identity",
+            ),
+            pytest.param(
+                restamp_identity(None),
+                "code-object identity binding mismatch",
+                id="dropped-identity",
             ),
             pytest.param(
                 lambda d: observations_of(d).__setitem__("symbol", "other"),
@@ -900,18 +939,19 @@ class _ReaderArtifact:
         self.kdps = [{"id": "kdp-selected", "engine": ENGINE["id"], "arch": [ARCH]}]
         declarations = [consumer()]
         if shared:
+            schema = self.schemas[0]
             if distinct_kmd:
                 schema = copy.deepcopy(FULL_KMD)
                 schema["id"] = "kmd-second"
                 schema["fields"][0]["default_value"] = 256
                 self.schemas.append(schema)
-                engine = dict(ENGINE, id="ued-second", metadata=schema["id"])
-                self.engines.append(engine)
-                declarations.append(
-                    consumer(engine_id=engine["id"], kmd_id=schema["id"])
-                )
+            engine = dict(
+                ENGINE, id="ued-second", name="demo:Sibling", metadata=schema["id"]
+            )
+            self.engines.append(engine)
+            declarations.append(consumer(engine_id=engine["id"], kmd_id=schema["id"]))
             self.kdps.append(
-                {"id": "kdp-sibling", "engine": self.engines[-1]["id"], "arch": [ARCH]}
+                {"id": "kdp-sibling", "engine": engine["id"], "arch": [ARCH]}
             )
         contract = contract_of(*declarations)
         if inherited and self.inline:
@@ -942,10 +982,13 @@ class _ReaderArtifact:
         agreement.publish(self.ukd, observations, agreement.canonical_records(records))
         # No shared Python references between mutable descriptors and old evidence.
         self.ukd = json.loads(json.dumps(self.ukd))
-        self.profile = root / "profile.json"
-        self.profile.write_text(
+        self.manifest = root / "manifest.json"
+        self.manifest.write_text(
             json.dumps(
-                {"bundle": "selected", "vocabulary": {"dtype": ["BF16", "FP16"]}}
+                {
+                    "engine": {"name": ENGINE["name"]},
+                    "specialization": {"vocabulary": {"dtype": ["BF16", "FP16"]}},
+                }
             )
         )
         self.save()
@@ -1015,7 +1058,7 @@ class _ReaderArtifact:
     def assert_qualified_waiver(self):
         """Both readers pass, and both say out loud that they bound nothing."""
         failures, unclaimed, verified = compiled_agreement(
-            self.kdp_path, self.python_dir
+            self.kdp_path, GENERIC_TARGETS, self.python_dir
         )
         assert failures == [] and len(unclaimed) == 1 and verified == 0
         for result in self.run_clis():
@@ -1033,6 +1076,8 @@ class _ReaderArtifact:
             "full",
             "--field",
             "head_size",
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
         ]
         variant = [
             sys.executable,
@@ -1044,8 +1089,8 @@ class _ReaderArtifact:
             str(self.root),
             "--mode",
             "full",
-            "--profile",
-            str(self.profile),
+            "--manifest",
+            str(self.manifest),
         ]
         extra = ["--kpack-python-dir", str(self.python_dir)] if self.python_dir else []
         return [
@@ -1054,14 +1099,18 @@ class _ReaderArtifact:
         ]
 
     def assert_agreement(self):
-        assert compiled_agreement(self.kdp_path, self.python_dir) == ([], [], 1)
+        assert compiled_agreement(self.kdp_path, GENERIC_TARGETS, self.python_dir) == (
+            [],
+            [],
+            1,
+        )
         for result in self.run_clis():
             assert result.returncode == 0, result.stdout + result.stderr
             assert "NOT VERIFIED HERE" not in result.stdout
 
     def assert_failure(self, reason):
         failures, unclaimed, verified = compiled_agreement(
-            self.kdp_path, self.python_dir
+            self.kdp_path, GENERIC_TARGETS, self.python_dir
         )
         assert failures and not unclaimed and verified == 0
         assert any(reason in failure for failure in failures), failures
@@ -1125,7 +1174,9 @@ class TestRealArchiveReaders:
         artifact = reader_artifact(shared=True, distinct_kmd=distinct_kmd)
         artifact.assert_agreement()
         sibling_path = artifact.root / "sibling.kdp.json"
-        assert compiled_agreement(sibling_path, artifact.python_dir) == ([], [], 1)
+        assert compiled_agreement(
+            sibling_path, GENERIC_TARGETS, artifact.python_dir
+        ) == ([], [], 1)
         if mutation == "missing-record":
             artifact.ukd["provenance"]["effective_spec"]["consumers"].pop()
         else:
@@ -1148,7 +1199,7 @@ class TestRealArchiveReaders:
             wrong_origin.parent.mkdir(parents=True, exist_ok=True)
             artifact.archive_path.rename(wrong_origin)
             failures, unclaimed, verified = compiled_agreement(
-                artifact.kdp_path, artifact.python_dir
+                artifact.kdp_path, GENERIC_TARGETS, artifact.python_dir
             )
             assert failures and not unclaimed and verified == 0
             for result in artifact.run_clis():
@@ -1215,7 +1266,7 @@ class TestRealArchiveReaders:
             kdp["provenance"] = {"specialization_contract": contract}
         artifact.save()
         failures, unclaimed, verified = compiled_agreement(
-            artifact.kdp_path, artifact.python_dir
+            artifact.kdp_path, GENERIC_TARGETS, artifact.python_dir
         )
         assert failures and not unclaimed and verified == 0
         assert any("missing/invalid specialization_contract" in f for f in failures)
@@ -1237,7 +1288,7 @@ class TestRealArchiveReaders:
         )
         artifact.save()
         with pytest.raises(HkpPackError, match="0 specialization consumers"):
-            compiled_agreement(artifact.kdp_path, artifact.python_dir)
+            compiled_agreement(artifact.kdp_path, GENERIC_TARGETS, artifact.python_dir)
         for result in artifact.run_clis():
             assert result.returncode == 1, result.stdout + result.stderr
             assert "0 specialization consumers" in result.stdout + result.stderr

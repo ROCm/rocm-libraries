@@ -91,23 +91,6 @@ namespace TensileLite
                             // than deferred.
                             lib.solution_list.emplace_back(index, solution);
 
-                            origami::dim3_t origami_mi;
-                            if(solution->sizeMapping.matrixInstruction[0] == 0
-                               && solution->sizeMapping.matrixInstruction[1] == 0
-                               && solution->sizeMapping.matrixInstruction[2] == 0)
-                            {
-                                // Override dot2 instruction with vector lane widths
-                                origami_mi = {1, 1, 64};
-                            }
-                            else
-                            {
-                                origami_mi = {
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[0]),
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[1]),
-                                    static_cast<size_t>(
-                                        solution->sizeMapping.matrixInstruction[2])};
-                            }
-
                             if(Debug::Instance().printPropertyEvaluation()
                                && solution->sizeMapping.CUOccupancy <= 0)
                             {
@@ -116,48 +99,14 @@ namespace TensileLite
                                           << " (<=0) for solution '" << solution->kernelName
                                           << "'; clamping to 1 in origami config.\n";
                             }
-                            origami::config_t origami_config = {
-                                .mt = {solution->sizeMapping.macroTile.x,
-                                       solution->sizeMapping.macroTile.y,
-                                       solution->sizeMapping.depthU},
-                                .mi = origami_mi,
-                                .hand_optimized_main_loop
-                                = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
-                                                                                       : false,
-                                .subtile                   = solution->sizeMapping.useSubtileImpl,
-                                .occupancy
-                                = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a             = solution->sizeMapping.cacheHintA(),
-                                .cache_hints_b             = solution->sizeMapping.cacheHintB(),
-                                .cache_hints_d             = solution->sizeMapping.NonTemporalD,
-                                .workspace_size            = std::numeric_limits<size_t>::max(),
-                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                                .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
-                                .index                     = local_index,
-                                .grvw_a                    = static_cast<std::size_t>(
-                                    solution->sizeMapping.grvwA),
-                                .grvw_b                    = static_cast<std::size_t>(
-                                    solution->sizeMapping.grvwB),
-                                .gwvw_d                    = static_cast<std::size_t>(
-                                    solution->sizeMapping.gwvwD),
-                                .cluster_dim               = {solution->sizeMapping.clusterDim.x,
-                                                              solution->sizeMapping.clusterDim.y,
-                                                              solution->sizeMapping.clusterDim.z},
-                                .backend                   = origami::tensile_params_t{
-                                    .local_split_u        = solution->sizeMapping.LocalSplitU,
-                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
-                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
-                                    .wave_group_m         = solution->sizeMapping.waveGroup[0],
-                                    .wave_group_n         = solution->sizeMapping.waveGroup[1],
-                                    .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
-                                    .source_swap          = solution->sizeMapping.SourceSwap,
-                                },
-                            };
+                            origami::config_t origami_config
+                                = makeOrigamiConfig(*solution, local_index);
 
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
+                    // Once per library load. rank_configs reads the flags.
+                    origami::memoize_non_temporal_availability(lib.origami_config_list);
                 }
             }
             const static bool flow = false;

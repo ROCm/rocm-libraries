@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
-#  include <utility>
 #endif
 
 THRUST_DIAG_PUSH
@@ -86,7 +85,7 @@ TESTS_DEFINE(IntegralVectorTests, IntegralVectorTestsParams);
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#if THRUST_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -137,63 +136,63 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestBinaryFunctional()
 }
 
 // op(T) -> T
-#define DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                           \
-  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                 \
-  {                                                                                                         \
-    using Vector    = typename TestFixture::input_type;                                                     \
-    using data_type = typename Vector::value_type;                                                          \
-                                                                                                            \
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                \
-                                                                                                            \
-    TestUnaryFunctional<Vector, Vector, thrust::operator_name<data_type>, std::operator_name<data_type>>(); \
+#define DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                                  \
+  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                        \
+  {                                                                                                                \
+    using Vector    = typename TestFixture::input_type;                                                            \
+    using data_type = typename Vector::value_type;                                                                 \
+                                                                                                                   \
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                       \
+                                                                                                                   \
+    TestUnaryFunctional<Vector, Vector, _THRUST_STD::operator_name<data_type>, ::std::operator_name<data_type>>(); \
   }
 
 // op(T) -> bool
-#define DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                              \
-  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                 \
-  {                                                                                                         \
-    using Vector    = typename TestFixture::input_type;                                                     \
-    using data_type = typename Vector::value_type;                                                          \
-                                                                                                            \
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                \
-                                                                                                            \
-    TestUnaryFunctional<Vector, Vector, thrust::operator_name<data_type>, std::operator_name<data_type>>(); \
+#define DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                                     \
+  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                        \
+  {                                                                                                                \
+    using Vector    = typename TestFixture::input_type;                                                            \
+    using data_type = typename Vector::value_type;                                                                 \
+                                                                                                                   \
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                       \
+                                                                                                                   \
+    TestUnaryFunctional<Vector, Vector, _THRUST_STD::operator_name<data_type>, ::std::operator_name<data_type>>(); \
   }
 
 // op(T,T) -> T
-#define DECLARE_BINARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                           \
-  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                  \
-  {                                                                                                          \
-    using Vector    = typename TestFixture::input_type;                                                      \
-    using data_type = typename Vector::value_type;                                                           \
-                                                                                                             \
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                 \
-                                                                                                             \
-    TestBinaryFunctional<Vector, Vector, thrust::operator_name<data_type>, std::operator_name<data_type>>(); \
+#define DECLARE_BINARY_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                                  \
+  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                         \
+  {                                                                                                                 \
+    using Vector    = typename TestFixture::input_type;                                                             \
+    using data_type = typename Vector::value_type;                                                                  \
+                                                                                                                    \
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                        \
+                                                                                                                    \
+    TestBinaryFunctional<Vector, Vector, _THRUST_STD::operator_name<data_type>, ::std::operator_name<data_type>>(); \
   }
 
 // op(T,T) -> T (for integer T only)
-#define DECLARE_BINARY_INTEGER_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                   \
-  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                  \
-  {                                                                                                          \
-    using Vector    = typename TestFixture::input_type;                                                      \
-    using data_type = typename Vector::value_type;                                                           \
-                                                                                                             \
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                 \
-                                                                                                             \
-    TestBinaryFunctional<Vector, Vector, thrust::operator_name<data_type>, std::operator_name<data_type>>(); \
+#define DECLARE_BINARY_INTEGER_ARITHMETIC_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                          \
+  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                         \
+  {                                                                                                                 \
+    using Vector    = typename TestFixture::input_type;                                                             \
+    using data_type = typename Vector::value_type;                                                                  \
+                                                                                                                    \
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                        \
+                                                                                                                    \
+    TestBinaryFunctional<Vector, Vector, _THRUST_STD::operator_name<data_type>, ::std::operator_name<data_type>>(); \
   }
 
 // op(T,T) -> bool
-#define DECLARE_BINARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                              \
-  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                  \
-  {                                                                                                          \
-    using Vector    = typename TestFixture::input_type;                                                      \
-    using data_type = typename Vector::value_type;                                                           \
-                                                                                                             \
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                 \
-                                                                                                             \
-    TestBinaryFunctional<Vector, Vector, thrust::operator_name<data_type>, std::operator_name<data_type>>(); \
+#define DECLARE_BINARY_LOGICAL_FUNCTIONAL_UNITTEST(operator_name, OperatorName)                                     \
+  TYPED_TEST(AllTypesTests, Test##OperatorName##Functional)                                                         \
+  {                                                                                                                 \
+    using Vector    = typename TestFixture::input_type;                                                             \
+    using data_type = typename Vector::value_type;                                                                  \
+                                                                                                                    \
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());                        \
+                                                                                                                    \
+    TestBinaryFunctional<Vector, Vector, _THRUST_STD::operator_name<data_type>, ::std::operator_name<data_type>>(); \
   }
 
 THRUST_DIAG_PUSH
@@ -212,45 +211,6 @@ typename _THRUST_STD::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
   return __t;
 }
 
-// Ad-hoc testing for other functionals
-TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
-{
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  int i    = 42;
-  double d = 3.14;
-
-  // pass through
-  ASSERT_EQ(thrust::identity<int>{}(i), 42);
-  ASSERT_EQ(thrust::identity<int>{}(d), 3);
-
-  // modification through
-  thrust::identity<int>{}(i) = 1337;
-  ASSERT_EQ(i, 1337);
-
-  // value categories and const
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(42)), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(i)), int&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(i))), const int&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(i))), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const int&&>(i))), const int&>::value,
-                "");
-
-  // value categories when casting to different type
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
-  // unfortunately, old versions of MSVC pick the `const int&` overload instead of `int&&`
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_MSVC_VERSION >= 1929
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
-#endif
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(d))), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value,
-                "");
-  THRUST_SUPPRESS_DEPRECATED_POP
-}
-
 TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -258,7 +218,7 @@ TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_
   using Vector = typename TestFixture::input_type;
   Vector input{0, 1, 2, 3};
   Vector output(4);
-  thrust::transform(input.begin(), input.end(), output.begin(), ::internal::identity{});
+  thrust::transform(input.begin(), input.end(), output.begin(), _THRUST_STD::identity{});
   ASSERT_EQ(input, output);
 }
 
@@ -308,7 +268,7 @@ TYPED_TEST(VectorTests, TestMaximumFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORI
 
   Vector output(4);
 
-  thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::maximum<T>());
+  thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), _THRUST_LIBCXX::maximum<T>());
 
   Vector ref{8, 6, 9, 7};
   ASSERT_EQ(output, ref);
@@ -326,7 +286,7 @@ TYPED_TEST(VectorTests, TestMinimumFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORI
 
   Vector output(4);
 
-  thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minimum<T>());
+  thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), _THRUST_LIBCXX::minimum<T>());
 
   Vector ref{5, 3, 7, 3};
   ASSERT_EQ(output, ref);
@@ -342,20 +302,11 @@ TYPED_TEST(IntegralVectorTests, TestNot1) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 
   Vector output(5);
 
-  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(::internal::identity{}));
+  thrust::transform(input.begin(), input.end(), output.begin(), _THRUST_STD::not_fn(_THRUST_STD::identity{}));
 
   Vector ref{0, 1, 0, 0, 1};
   ASSERT_EQ(output, ref);
 }
-
-// GCC 11 fails to build this test case with a spurious error in a
-// very specific scenario:
-// - GCC 11
-// - CPP system for both host and device
-// - C++11 dialect
-#if !(defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 110000 && THRUST_GCC_VERSION < 120000          \
-      && THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP \
-      && THRUST_CPP_DIALECT == 2011)
 
 TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
@@ -369,12 +320,11 @@ TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 
   Vector output(5);
 
-  thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::not_fn(thrust::equal_to<T>()));
+  thrust::transform(
+    input1.begin(), input1.end(), input2.begin(), output.begin(), _THRUST_STD::not_fn(_THRUST_STD::equal_to<T>()));
 
   Vector ref{0, 1, 1, 0, 1};
   ASSERT_EQ(output, ref);
 }
-
-#endif // Weird GCC11 failure case
 
 THRUST_DIAG_POP

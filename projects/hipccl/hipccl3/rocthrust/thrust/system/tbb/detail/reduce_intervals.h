@@ -18,15 +18,27 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/minmax.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/seq.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/reduce.h>
 #include <thrust/system/cpp/memory.h>
 #include <thrust/system/tbb/detail/execution_policy.h>
 
-#include <cassert>
-#include <type_traits>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(cassert)
+#  include _THRUST_STD_INCLUDE(type_traits)
+#else
+#  include <thrust/detail/algorithm_wrapper.h>
+#  include <type_traits>
+#endif
 
 #include <tbb/parallel_for.h>
 
@@ -69,13 +81,13 @@ struct body
     Size interval_idx = r.begin();
 
     Size offset_to_first = interval_size * interval_idx;
-    Size offset_to_last  = (thrust::min)(n, offset_to_first + interval_size);
+    Size offset_to_last  = (_THRUST_STD::min)(n, offset_to_first + interval_size);
 
     RandomAccessIterator1 my_first = first + offset_to_first;
     RandomAccessIterator1 my_last  = first + offset_to_last;
 
     // carefully pass the init value for the interval with raw_reference_cast
-    using sum_type = typename std::decay<decltype(binary_op(*my_first, *my_first))>::type;
+    using sum_type = _THRUST_STD::decay_t<decltype(binary_op(*my_first, *my_first))>::type;
     result[interval_idx] =
       thrust::reduce(thrust::seq, my_first + 1, my_last, sum_type(thrust::raw_reference_cast(*my_first)), binary_op);
   }
@@ -104,7 +116,7 @@ void reduce_intervals(
   RandomAccessIterator2 result,
   BinaryFunction binary_op)
 {
-  typename thrust::iterator_difference<RandomAccessIterator1>::type n = last - first;
+  thrust::detail::it_difference_t<RandomAccessIterator1> n = last - first;
 
   Size num_intervals = reduce_intervals_detail::divide_ri(n, interval_size);
 
@@ -121,10 +133,10 @@ void reduce_intervals(
   Size interval_size,
   RandomAccessIterator2 result)
 {
-  using value_type = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using value_type = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   return thrust::system::tbb::detail::reduce_intervals(
-    exec, first, last, interval_size, result, thrust::plus<value_type>());
+    exec, first, last, interval_size, result, _THRUST_STD::plus<value_type>());
 }
 
 } // namespace detail

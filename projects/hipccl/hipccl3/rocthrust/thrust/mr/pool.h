@@ -24,13 +24,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/algorithm_wrapper.h>
 #include <thrust/host_vector.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/memory_resource.h>
 #include <thrust/mr/pool_options.h>
 
-#include <cassert>
+#include _THRUST_STD_INCLUDE(cassert)
+#include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
@@ -247,7 +256,7 @@ public:
     m_cached_oversized = oversized_block_descriptor_ptr();
   }
 
-  THRUST_NODISCARD virtual void_ptr
+  [[nodiscard]] virtual void_ptr
   do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
     bytes = (std::max)(bytes, m_options.smallest_block_size);
@@ -433,7 +442,7 @@ public:
     assert(detail::is_power_of_2(alignment));
 
     // verify that the pointer is at least as aligned as claimed
-    assert(reinterpret_cast<detail::intmax_t>(void_ptr_traits::get(p)) % alignment == 0);
+    assert(reinterpret_cast<_THRUST_STD::intmax_t>(void_ptr_traits::get(p)) % alignment == 0);
 
     // the deallocated block is oversized and/or overaligned
     if (n > m_options.largest_block_size || alignment > m_options.alignment)

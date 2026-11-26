@@ -1,0 +1,407 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# gfx1250 swizzled-TDM (SwizzleTensorA, B and A+B) with ReuseAcrossPersistent (RAP), with and without
+# PrefetchAcrossPersistent. RAP keeps A resident in LDS across tiles, so K is bounded by LDS capacity
+# (M=64: K<=2048); sizes follow rap_gfx1250.yaml.
+TestParameters:
+  marks:
+  - skip-gfx900
+  - skip-gfx906
+  - skip-gfx908
+  - skip-gfx90a
+  - skip-gfx940
+  - skip-gfx941
+  - skip-gfx942
+  - skip-gfx950
+  - skip-gfx1010
+  - skip-gfx1011
+  - skip-gfx1012
+  - skip-gfx1030
+  - skip-gfx1100
+  - skip-gfx1101
+  - skip-gfx1102
+  - skip-gfx1200
+  - skip-gfx1201
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: false
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: false
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: true
+  Architecture: gfx1250
+  CpuThreads: 1
+  PrintLevel: 2
+  CodeObjectVersion: '4'
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: F8
+    DestDataType: F8
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    Activation: false
+    SupportUserArgs: true
+    UseBias: 0
+    SwizzleTensorA: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage:
+      - Assembly
+    ForkParameters:
+    - UseSgprForGRO:
+      - 0
+    - ForceDisableShadowInit:
+      - true
+    - TDMInst:
+      - 3
+    - HalfPLR:
+      - 0
+    - PrefetchGL2:
+      - 0
+    - TransposeLDS:
+      - -1
+    - LDSTrInst:
+      - false
+    - StaggerU:
+      - 0
+    - ScheduleIterAlg:
+      - 4
+    - PrefetchLocalRead:
+      - 1
+    - StoreRemapVectorWidth:
+      - 0
+    - GlobalSplitUAlgorithm:
+      - MultipleBuffer
+    - GlobalReadVectorWidthA:
+      - -1
+    - GlobalReadVectorWidthB:
+      - -1
+    - LocalReadVectorWidth:
+      - -1
+    - 1LDSBuffer:
+      - 0
+    - SourceSwap:
+      - true
+    - ClusterDim:
+      - - 1
+        - 1
+    - WorkGroupMapping:
+      - 1
+    - StoreVectorWidth:
+      - -1
+    - WavefrontSize:
+      - 32
+    - CompactLoopStore:
+      - false
+    - PreloadKernArgs:
+      - false
+    - MatrixInstruction: &id001
+      - - 16
+        - 16
+        - 128
+        - 1
+        - 1
+        - 2
+        - 8
+        - 2
+        - 2
+      - - 16
+        - 16
+        - 128
+        - 1
+        - 1
+        - 4
+        - 4
+        - 2
+        - 2
+    - TileProcessingStrategy:
+      - DataParallel
+    - WorkAssignment:
+      - StaticGrid
+    - DepthU:
+      - 256
+    - GlobalSplitU:
+      - 0
+    - PrefetchGlobalRead:
+      - 2
+    - PrefetchAcrossPersistent:
+      - 0
+      - 1
+    - ReuseAcrossPersistent:
+      - 1
+    - AssertSummationElementMultiple:
+      - 256
+    - ExpandPointerSwap:
+      - false
+    - TDMIterateMode:
+      - 0
+    - VectorWidthA:
+      - 1
+    - VectorWidthB:
+      - 1
+    - LdsPadA:
+      - 0
+    - LdsPadB:
+      - -1
+    - LdsBlockSizePerPadA:
+      - 0
+    - LdsBlockSizePerPadB:
+      - -1
+    BenchmarkForkParameters: null
+    JoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: &id002
+        - 64
+        - 12288
+        - 1
+        - 2048
+      - Exact: &id003
+        - 64
+        - 12288
+        - 4
+        - 256
+      - Exact: &id004
+        - 64
+        - 12288
+        - 2
+        - 1024
+      - Exact: &id005
+        - 64
+        - 12288
+        - 1
+        - 768
+      - Exact: &id006
+        - 128
+        - 12288
+        - 2
+        - 1024
+- - OperationType: GEMM
+    DataType: F8
+    DestDataType: F8
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    Activation: false
+    SupportUserArgs: true
+    UseBias: 0
+    SwizzleTensorB: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage:
+      - Assembly
+    ForkParameters:
+    - UseSgprForGRO:
+      - 0
+    - ForceDisableShadowInit:
+      - true
+    - TDMInst:
+      - 3
+    - HalfPLR:
+      - 0
+    - PrefetchGL2:
+      - 0
+    - TransposeLDS:
+      - -1
+    - LDSTrInst:
+      - false
+    - StaggerU:
+      - 0
+    - ScheduleIterAlg:
+      - 4
+    - PrefetchLocalRead:
+      - 1
+    - StoreRemapVectorWidth:
+      - 0
+    - GlobalSplitUAlgorithm:
+      - MultipleBuffer
+    - GlobalReadVectorWidthA:
+      - -1
+    - GlobalReadVectorWidthB:
+      - -1
+    - LocalReadVectorWidth:
+      - -1
+    - 1LDSBuffer:
+      - 0
+    - SourceSwap:
+      - true
+    - ClusterDim:
+      - - 1
+        - 1
+    - WorkGroupMapping:
+      - 1
+    - StoreVectorWidth:
+      - -1
+    - WavefrontSize:
+      - 32
+    - CompactLoopStore:
+      - false
+    - PreloadKernArgs:
+      - false
+    - MatrixInstruction: *id001
+    - TileProcessingStrategy:
+      - DataParallel
+    - WorkAssignment:
+      - StaticGrid
+    - DepthU:
+      - 256
+    - GlobalSplitU:
+      - 0
+    - PrefetchGlobalRead:
+      - 2
+    - PrefetchAcrossPersistent:
+      - 0
+      - 1
+    - ReuseAcrossPersistent:
+      - 1
+    - AssertSummationElementMultiple:
+      - 256
+    - ExpandPointerSwap:
+      - false
+    - TDMIterateMode:
+      - 0
+    - VectorWidthA:
+      - 1
+    - VectorWidthB:
+      - 1
+    - LdsPadA:
+      - -1
+    - LdsPadB:
+      - 0
+    - LdsBlockSizePerPadA:
+      - -1
+    - LdsBlockSizePerPadB:
+      - 0
+    BenchmarkForkParameters: null
+    JoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: *id002
+      - Exact: *id003
+      - Exact: *id004
+      - Exact: *id005
+      - Exact: *id006
+- - OperationType: GEMM
+    DataType: F8
+    DestDataType: F8
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    Activation: false
+    SupportUserArgs: true
+    UseBias: 0
+    SwizzleTensorA: true
+    SwizzleTensorB: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage:
+      - Assembly
+    ForkParameters:
+    - UseSgprForGRO:
+      - 0
+    - ForceDisableShadowInit:
+      - true
+    - TDMInst:
+      - 3
+    - HalfPLR:
+      - 0
+    - PrefetchGL2:
+      - 0
+    - TransposeLDS:
+      - -1
+    - LDSTrInst:
+      - false
+    - StaggerU:
+      - 0
+    - ScheduleIterAlg:
+      - 4
+    - PrefetchLocalRead:
+      - 1
+    - StoreRemapVectorWidth:
+      - 0
+    - GlobalSplitUAlgorithm:
+      - MultipleBuffer
+    - GlobalReadVectorWidthA:
+      - -1
+    - GlobalReadVectorWidthB:
+      - -1
+    - LocalReadVectorWidth:
+      - -1
+    - 1LDSBuffer:
+      - 0
+    - SourceSwap:
+      - true
+    - ClusterDim:
+      - - 1
+        - 1
+    - WorkGroupMapping:
+      - 1
+    - StoreVectorWidth:
+      - -1
+    - WavefrontSize:
+      - 32
+    - CompactLoopStore:
+      - false
+    - PreloadKernArgs:
+      - false
+    - MatrixInstruction: *id001
+    - TileProcessingStrategy:
+      - DataParallel
+    - WorkAssignment:
+      - StaticGrid
+    - DepthU:
+      - 256
+    - GlobalSplitU:
+      - 0
+    - PrefetchGlobalRead:
+      - 2
+    - PrefetchAcrossPersistent:
+      - 0
+      - 1
+    - ReuseAcrossPersistent:
+      - 1
+    - AssertSummationElementMultiple:
+      - 256
+    - ExpandPointerSwap:
+      - false
+    - TDMIterateMode:
+      - 0
+    - VectorWidthA:
+      - 1
+    - VectorWidthB:
+      - 1
+    - LdsPadA:
+      - 0
+    - LdsPadB:
+      - 0
+    - LdsBlockSizePerPadA:
+      - 0
+    - LdsBlockSizePerPadB:
+      - 0
+    BenchmarkForkParameters: null
+    JoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: *id002
+      - Exact: *id003
+      - Exact: *id004
+      - Exact: *id005
+      - Exact: *id006

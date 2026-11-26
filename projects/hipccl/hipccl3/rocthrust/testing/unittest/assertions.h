@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@
 #include <unittest/util.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
 #  include <type_traits>
 #endif
 
@@ -430,15 +431,15 @@ void assert_equal(
   const std::string& filename = "unknown",
   int lineno                  = -1)
 {
-  using difference_type = typename THRUST_NS_QUALIFIER::iterator_difference<ForwardIterator1>::type;
-  using InputType       = typename THRUST_NS_QUALIFIER::iterator_value<ForwardIterator1>::type;
+  using difference_type = THRUST_NS_QUALIFIER::detail::it_difference_t<ForwardIterator1>;
+  using InputType       = THRUST_NS_QUALIFIER::detail::it_value_t<ForwardIterator1>;
 
   bool failure = false;
 
-  difference_type length1 = THRUST_NS_QUALIFIER::distance(first1, last1);
-  difference_type length2 = THRUST_NS_QUALIFIER::distance(first2, last2);
+  difference_type length1 = _THRUST_STD::distance(first1, last1);
+  difference_type length2 = _THRUST_STD::distance(first2, last2);
 
-  difference_type min_length = THRUST_NS_QUALIFIER::min(length1, length2);
+  difference_type min_length = _THRUST_STD::min(length1, length2);
 
   unittest::UnitTestFailure f;
   f << "[" << filename << ":" << lineno << "] ";
@@ -507,8 +508,8 @@ void assert_equal(
   const std::string& filename = "unknown",
   int lineno                  = -1)
 {
-  using InputType = typename THRUST_NS_QUALIFIER::iterator_traits<ForwardIterator1>::value_type;
-  assert_equal(first1, last1, first2, last2, THRUST_NS_QUALIFIER::equal_to<InputType>(), filename, lineno);
+  using InputType = typename _THRUST_STD::iterator_traits<ForwardIterator1>::value_type;
+  assert_equal(first1, last1, first2, last2, _THRUST_STD::equal_to<InputType>(), filename, lineno);
 }
 
 template <typename ForwardIterator1, typename ForwardIterator2>
@@ -522,7 +523,7 @@ void assert_almost_equal(
   const double a_tol          = DEFAULT_ABSOLUTE_TOL,
   const double r_tol          = DEFAULT_RELATIVE_TOL)
 {
-  using InputType = typename THRUST_NS_QUALIFIER::iterator_traits<ForwardIterator1>::value_type;
+  using InputType = typename _THRUST_STD::iterator_traits<ForwardIterator1>::value_type;
   assert_equal(first1, last1, first2, last2, almost_equal_to<InputType>(a_tol, r_tol), filename, lineno);
 }
 
@@ -789,4 +790,4 @@ void check_assert_throws(
   }
 }
 
-}; // end namespace unittest
+} // end namespace unittest

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,8 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/functional.h>
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>
 
@@ -55,7 +54,7 @@ gather(execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, Items
     thrust::make_permutation_iterator(items, map_first),
     thrust::make_permutation_iterator(items, map_last),
     result,
-    ::internal::identity{});
+    _THRUST_STD::identity{});
 }
 
 template <class Derived, class MapIt, class StencilIt, class ItemsIt, class ResultIt, class Predicate>
@@ -74,7 +73,7 @@ ResultIt THRUST_HOST_DEVICE gather_if(
     thrust::make_permutation_iterator(items, map_last),
     stencil,
     result,
-    ::internal::identity{},
+    _THRUST_STD::identity{},
     predicate);
 }
 
@@ -82,7 +81,7 @@ template <class Derived, class MapIt, class StencilIt, class ItemsIt, class Resu
 ResultIt THRUST_HOST_DEVICE gather_if(
   execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, StencilIt stencil, ItemsIt items, ResultIt result)
 {
-  return hip_rocprim::gather_if(policy, map_first, map_last, stencil, items, result, ::internal::identity{});
+  return hip_rocprim::gather_if(policy, map_first, map_last, stencil, items, result, _THRUST_STD::identity{});
 }
 
 } // namespace hip_rocprim

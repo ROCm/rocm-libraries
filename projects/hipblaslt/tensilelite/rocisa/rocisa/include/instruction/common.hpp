@@ -24,6 +24,7 @@
 #include "enum.hpp"
 #include "instruction.hpp"
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -303,7 +304,7 @@ namespace rocisa
                     = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
-                splitSrcs(srcs, srcs1, srcs2);
+                splitSrcs64(srcs, srcs1, srcs2);
                 // s_add_u32 sets SCC, s_addc_u32 consumes it (carry is implicit).
                 instructions
                     = {std::make_shared<SAddU32>(dst1, srcs1[0], srcs1[1], comment),
@@ -1635,14 +1636,18 @@ namespace rocisa
     struct SBarrier : public Instruction
     {
         SBarrier(const bool separate = false, const bool wait = false,
-                 const bool clusterBarrier = false, const std::string& comment = "")
+                 const bool clusterBarrier = false, const std::string& comment = "",
+                 const int tensorcnt = -1)
             : Instruction(InstType::INST_NOTYPE, comment)
             , separate(separate)
             , wait(wait)
             , clusterBarrier(clusterBarrier)
             , hasNewBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasNewBarrier")))
             , hasClusterBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasClusterBarrier")))
+            , tensorcnt(tensorcnt)
         {
+            if(tensorcnt < -1 || tensorcnt > 63)
+                throw std::invalid_argument("SBarrier tensorcnt must be -1 or in [0, 63]");
             if(hasNewBarrier)
             {
                 int code = -1;
@@ -1680,6 +1685,7 @@ namespace rocisa
             , clusterBarrier(other.clusterBarrier)
             , hasNewBarrier(other.hasNewBarrier)
             , hasClusterBarrier(other.hasClusterBarrier)
+            , tensorcnt(other.tensorcnt)
         {
         }
 
@@ -1705,9 +1711,12 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment(instStr);
+            const std::string completion = tensorcnt >= 0
+                ? "s_wait_tensorcnt " + std::to_string(tensorcnt) + "\n" : "";
+            return formatWithComment(completion + instStr);
         }
 
+        int getTensorcnt() const { return tensorcnt; }
         bool getSeparate() const { return separate; }
         bool getWait() const { return wait; }
         bool getClusterBarrier() const { return clusterBarrier; }
@@ -1725,6 +1734,10 @@ namespace rocisa
         // exact form that was emitted into instStr.
         bool hasNewBarrier;
         bool hasClusterBarrier;
+        // Maximum outstanding tensor operations at this barrier. This explicit
+        // pipeline contract remains required when entry-path inference sees no
+        // producer for a later iteration's rotating LDS bank. -1 is inferred.
+        int tensorcnt;
     };
 
     // s_barrier_signal_isfirst: like SBarrier signal, but the first wave to
@@ -2274,6 +2287,28 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SGetRegB32>(*this);
+        }
+    };
+
+    struct SSendMsgRtnB32 : public CommonInstruction
+    {
+        SSendMsgRtnB32(const std::shared_ptr<Container>& dst,
+                       const InstructionInput&           src,
+                       const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_sendmsg_rtn_b32");
+        }
+
+        SSendMsgRtnB32(const SSendMsgRtnB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSendMsgRtnB32>(*this);
         }
     };
 
@@ -3564,7 +3599,23 @@ namespace rocisa
                     = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
-                splitSrcs(srcs, srcs1, srcs2);
+                splitSrcs64(srcs, srcs1, srcs2);
+                // VOP2 takes a literal only in src0, so an immediate goes first (the add is
+                // commutative). The carry-in add reads vcc as well, which leaves no room for a
+                // literal at all: its half of an immediate must be an inline constant.
+                if(std::holds_alternative<int>(srcs1[1]) && !std::holds_alternative<int>(srcs1[0]))
+                {
+                    std::swap(srcs1[0], srcs1[1]);
+                    std::swap(srcs2[0], srcs2[1]);
+                }
+                for(const auto& s : srcs2)
+                    if(std::holds_alternative<int>(s)
+                       && (std::get<int>(s) < -16 || std::get<int>(s) > 64))
+                        throw std::invalid_argument(
+                            "64-bit vector add: cannot split an immediate whose high half "
+                            + std::to_string(std::get<int>(s))
+                            + " is not an inline constant (-16 to 64); v_addc_co_u32 cannot "
+                              "encode it next to its carry");
                 auto vcc = std::make_shared<VCC>();
                 instructions
                     = {std::make_shared<VAddCOU32>(dst1, vcc, srcs1[0], srcs1[1], comment),
@@ -5234,6 +5285,35 @@ namespace rocisa
         }
     };
 
+    struct VMaximumMinimumF32 : public CommonInstruction
+    {
+        VMaximumMinimumF32(const std::shared_ptr<Container>& dst,
+                           const InstructionInput&           src0,
+                           const InstructionInput&           src1,
+                           const InstructionInput&           src2,
+                           const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_maximumminimum_f32");
+        }
+
+        VMaximumMinimumF32(const VMaximumMinimumF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMaximumMinimumF32>(*this);
+        }
+    };
+
     struct VMinF16 : public CommonInstruction
     {
         VMinF16(const std::shared_ptr<Container>& dst,
@@ -5496,11 +5576,12 @@ namespace rocisa
                     const InstructionInput&           src1,
                     const std::shared_ptr<Container>& src2    = std::make_shared<VCC>(),
                     std::optional<SDWAModifiers>      sdwa    = std::nullopt,
-                    const std::string&                comment = "")
+                    const std::string&                comment = "",
+                    std::optional<DPPModifiers>       dpp     = std::nullopt)
             : CommonInstruction(InstType::INST_B32,
                                 dst,
                                 {src0, src1, src2},
-                                std::nullopt,
+                                dpp,
                                 sdwa,
                                 std::nullopt,
                                 comment)
@@ -6452,6 +6533,17 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VWritelaneB32>(*this);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // Only the selected lane changes; every other lane reads old dst.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+            {
+                params.push_back(dst);
+            }
+            return params;
         }
     };
 

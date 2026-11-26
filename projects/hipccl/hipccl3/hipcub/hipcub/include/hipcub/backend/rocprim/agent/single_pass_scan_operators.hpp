@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -336,13 +336,11 @@ public:
  * \tparam T                 Type of the values scanned.
  * \tparam ScanOpT           Scan operation type.
  * \tparam ScanTileStateT    Scan status type.
- * \tparam LEGACY_PTX_ARCH   <b>[optional]</b> Unused (deprecated).
  * \tparam DelayConstructorT <b>[optional]</b> Unused (CUB's implementation detail).
  */
 template<typename T,
          typename ScanOpT,
          typename ScanTileStateT,
-         int LEGACY_PTX_ARCH        = 0,
          typename DelayConstructorT = void /* detail::default_delay_constructor_t<T> */>
 class TilePrefixCallbackOp
 {

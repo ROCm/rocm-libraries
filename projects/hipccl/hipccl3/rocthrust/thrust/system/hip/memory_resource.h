@@ -1,6 +1,6 @@
 /*
  *  Copyright 2018-2020 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,18 +15,25 @@
  *  limitations under the License.
  */
 
-/*! \file thrust/system/hip/memory_resource.h
- *  \brief Managing memory associated with Thrust's hip system.
+/*! \file hip/memory_resource.h
+ *  \brief Memory resources for the HIP system.
  */
 
 #pragma once
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/memory_resource.h>
 #include <thrust/system/detail/bad_alloc.h>
-#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/system/hip/error.h>
 #include <thrust/system/hip/pointer.h>
@@ -37,6 +44,7 @@ namespace system
 {
 namespace hip
 {
+
 //! \cond
 namespace detail
 {
@@ -48,29 +56,22 @@ template <allocation_fn Alloc, deallocation_fn Dealloc, typename Pointer>
 class hip_memory_resource final : public mr::memory_resource<Pointer>
 {
 public:
-  Pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
+  Pointer do_allocate(std::size_t bytes, [[maybe_unused]] std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
-    (void) alignment;
-
     void* ret;
     hipError_t status = Alloc(&ret, bytes);
 
     if (status != hipSuccess)
     {
-      // Clear the HIP global error state.
-      hipError_t clear_error_status = hipGetLastError();
-      THRUST_UNUSED_VAR(clear_error_status);
+      (void) hipGetLastError(); // Clear the HIP global error state.
       throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
     }
 
     return Pointer(ret);
   }
 
-  void do_deallocate(Pointer p, std::size_t bytes, std::size_t alignment) override
+  void do_deallocate(Pointer p, [[maybe_unused]] std::size_t bytes, [[maybe_unused]] std::size_t alignment) override
   {
-    (void) bytes;
-    (void) alignment;
-
     hipError_t status = Dealloc(thrust::detail::pointer_traits<Pointer>::get(p));
 
     if (status != hipSuccess)
@@ -94,7 +95,7 @@ using device_memory_resource = detail::hip_memory_resource<hipMalloc, hipFree, t
 using managed_memory_resource =
   detail::hip_memory_resource<detail::hipMallocManaged, hipFree, thrust::hip::universal_pointer<void>>;
 using pinned_memory_resource =
-  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_pointer<void>>;
+  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_host_pinned_pointer<void>>;
 
 } // namespace detail
 //! \endcond
@@ -123,4 +124,5 @@ using thrust::system::hip::memory_resource;
 using thrust::system::hip::universal_host_pinned_memory_resource;
 using thrust::system::hip::universal_memory_resource;
 } // namespace hip
+
 THRUST_NAMESPACE_END

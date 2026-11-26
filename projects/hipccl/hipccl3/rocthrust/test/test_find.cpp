@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+
+#include _THRUST_STD_INCLUDE(cstdint)
 
 TESTS_DEFINE(FindTestsVector, FullTestsParams);
 TESTS_DEFINE(FindTests, NumericalTestsParams);
@@ -155,7 +157,7 @@ TEST(FindTests, TestFindIfDispatchExplicit)
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::find_if(sys, vec.begin(), vec.end(), ::internal::identity{});
+  thrust::find_if(sys, vec.begin(), vec.end(), _THRUST_STD::identity{});
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -173,7 +175,7 @@ TEST(FindTests, TestFindIfDispatchImplicit)
 
   thrust::device_vector<int> vec(1);
 
-  thrust::find_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
+  thrust::find_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), _THRUST_STD::identity{});
 
   ASSERT_EQ(13, vec.front());
 }
@@ -209,7 +211,7 @@ TEST(FindTests, TestFindIfNotDispatchExplicit)
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::find_if_not(sys, vec.begin(), vec.end(), ::internal::identity{});
+  thrust::find_if_not(sys, vec.begin(), vec.end(), _THRUST_STD::identity{});
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -227,7 +229,7 @@ TEST(FindTests, TestFindIfNotDispatchImplicit)
 
   thrust::device_vector<int> vec(1);
 
-  thrust::find_if_not(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
+  thrust::find_if_not(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), _THRUST_STD::identity{});
 
   ASSERT_EQ(13, vec.front());
 }
@@ -344,12 +346,12 @@ void TestFindWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
-  thrust::detail::intmax_t distance_low_value = thrust::distance(begin, thrust::find(thrust::device, begin, end, 17));
+  _THRUST_STD::intmax_t distance_low_value = _THRUST_STD::distance(begin, thrust::find(thrust::device, begin, end, 17));
 
-  thrust::detail::intmax_t distance_high_value =
-    thrust::distance(begin, thrust::find(thrust::device, begin, end, (1ll << magnitude) - 17));
+  _THRUST_STD::intmax_t distance_high_value =
+    _THRUST_STD::distance(begin, thrust::find(thrust::device, begin, end, (1ll << magnitude) - 17));
 
   ASSERT_EQ(distance_low_value, 16);
   ASSERT_EQ(distance_high_value, (1ll << magnitude) - 18);
@@ -387,8 +389,6 @@ public:
 
 TEST(FindTests, TestFindAsymmetricEquality)
 { // Regression test for NVIDIA/thrust#1229
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   thrust::host_vector<int> v(1000);
   thrust::sequence(v.begin(), v.end());
   thrust::device_vector<int> dv(v);

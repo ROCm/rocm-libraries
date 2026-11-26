@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
@@ -53,7 +53,8 @@
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
+
 #  include <functional>
 #  include <type_traits>
 
@@ -72,7 +73,7 @@ struct dispatch;
 
 // sort keys
 template <>
-struct dispatch<::thrust::detail::false_type>
+struct dispatch<THRUST_NS_QUALIFIER::detail::false_type>
 {
   template <class KeysIt, class ItemsIt, class Size, class CompareOp>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -92,7 +93,7 @@ struct dispatch<::thrust::detail::false_type>
 
 // sort pairs
 template <>
-struct dispatch<::thrust::detail::true_type>
+struct dispatch<THRUST_NS_QUALIFIER::detail::true_type>
 {
   template <class KeysIt, class ItemsIt, class Size, class CompareOp>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -123,9 +124,9 @@ template <typename SORT_ITEMS, typename Derived, typename KeysIt, typename Items
 THRUST_HIP_RUNTIME_FUNCTION void merge_sort(
   execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<KeysIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<KeysIt>;
 
-  size_type count = static_cast<size_type>(thrust::distance(keys_first, keys_last));
+  size_type count = static_cast<size_type>(_THRUST_STD::distance(keys_first, keys_last));
 
   if (count == 0)
   {
@@ -162,7 +163,7 @@ struct dispatch;
 
 // sort keys in ascending order
 template <class KeyOrVoid>
-struct dispatch<thrust::detail::false_type, thrust::less<KeyOrVoid>>
+struct dispatch<_THRUST_STD::false_type, _THRUST_STD::less<KeyOrVoid>>
 {
   template <class KeysIt, class ItemsIt, class Size>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -190,7 +191,7 @@ struct dispatch<thrust::detail::false_type, thrust::less<KeyOrVoid>>
 
 // sort keys in descending order
 template <class KeyOrVoid>
-struct dispatch<thrust::detail::false_type, thrust::greater<KeyOrVoid>>
+struct dispatch<_THRUST_STD::false_type, _THRUST_STD::greater<KeyOrVoid>>
 {
   template <class KeysIt, class ItemsIt, class Size>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -218,7 +219,7 @@ struct dispatch<thrust::detail::false_type, thrust::greater<KeyOrVoid>>
 
 // sort pairs in ascending order
 template <class KeyOrVoid>
-struct dispatch<thrust::detail::true_type, thrust::less<KeyOrVoid>>
+struct dispatch<_THRUST_STD::true_type, _THRUST_STD::less<KeyOrVoid>>
 {
   template <class KeysIt, class ItemsIt, class Size>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -248,7 +249,7 @@ struct dispatch<thrust::detail::true_type, thrust::less<KeyOrVoid>>
 
 // sort pairs in descending order
 template <class KeyOrVoid>
-struct dispatch<thrust::detail::true_type, thrust::greater<KeyOrVoid>>
+struct dispatch<_THRUST_STD::true_type, _THRUST_STD::greater<KeyOrVoid>>
 {
   template <class KeysIt, class ItemsIt, class Size>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -276,21 +277,13 @@ struct dispatch<thrust::detail::true_type, thrust::greater<KeyOrVoid>>
   }
 }; // struct dispatch -- sort pairs in descending order;
 
-template <class SORT_ITEMS, class KeyOrVoid>
-struct dispatch<SORT_ITEMS, ::std::less<KeyOrVoid>> : dispatch<SORT_ITEMS, thrust::less<KeyOrVoid>>
-{};
-
-template <class SORT_ITEMS, class KeyOrVoid>
-struct dispatch<SORT_ITEMS, ::std::greater<KeyOrVoid>> : dispatch<SORT_ITEMS, thrust::greater<KeyOrVoid>>
-{};
-
 template <typename SORT_ITEMS, typename Derived, typename KeysIt, typename ItemsIt, typename CompareOp>
 THRUST_HIP_RUNTIME_FUNCTION void
 radix_sort(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp)
 {
-  using size_type = typename iterator_traits<KeysIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<KeysIt>;
 
-  const size_type count = static_cast<size_type>(thrust::distance(keys_first, keys_last));
+  const size_type count = static_cast<size_type>(_THRUST_STD::distance(keys_first, keys_last));
 
   if (count == 0)
   {
@@ -324,15 +317,16 @@ radix_sort(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_las
 namespace __smart_sort
 {
 
-// TODO(bgruber): we can drop thrust::less etc. when they truly alias to the ::std ones
+// TODO(bgruber): we can drop _THRUST_STD::less etc. when they truly alias to the ::std ones
 template <class Key, class CompareOp>
 using can_use_primitive_sort = ::std::integral_constant<
   bool,
   ::std::is_arithmetic<Key>::value
-    && (::std::is_same<CompareOp, thrust::less<Key>>::value || ::std::is_same<CompareOp, ::std::less<Key>>::value
-        || ::std::is_same<CompareOp, thrust::less<void>>::value || ::std::is_same<CompareOp, ::std::less<void>>::value
-        || ::std::is_same<CompareOp, thrust::greater<Key>>::value || ::std::is_same<CompareOp, ::std::greater<Key>>::value
-        || ::std::is_same<CompareOp, thrust::greater<void>>::value
+    && (::std::is_same<CompareOp, _THRUST_STD::less<Key>>::value || ::std::is_same<CompareOp, ::std::less<Key>>::value
+        || ::std::is_same<CompareOp, _THRUST_STD::less<void>>::value || ::std::is_same<CompareOp, ::std::less<void>>::value
+        || ::std::is_same<CompareOp, _THRUST_STD::greater<Key>>::value
+        || ::std::is_same<CompareOp, ::std::greater<Key>>::value
+        || ::std::is_same<CompareOp, _THRUST_STD::greater<void>>::value
         || ::std::is_same<CompareOp, ::std::greater<void>>::value)>;
 
 template <class SORT_ITEMS,
@@ -341,7 +335,7 @@ template <class SORT_ITEMS,
           class KeysIt,
           class ItemsIt,
           class CompareOp,
-          ::std::enable_if_t<!can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+          ::std::enable_if_t<!can_use_primitive_sort<thrust::detail::it_value_t<KeysIt>, CompareOp>::value, int> = 0>
 THRUST_HIP_RUNTIME_FUNCTION void
 smart_sort(Policy& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
@@ -354,7 +348,7 @@ template <class SORT_ITEMS,
           class KeysIt,
           class ItemsIt,
           class CompareOp,
-          ::std::enable_if_t<can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+          ::std::enable_if_t<can_use_primitive_sort<thrust::detail::it_value_t<KeysIt>, CompareOp>::value, int> = 0>
 THRUST_HIP_RUNTIME_FUNCTION void smart_sort(
   execution_policy<Policy>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
@@ -375,19 +369,18 @@ void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt f
   {
     THRUST_HOST static void par(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, CompareOp compare_op)
     {
-      using item_t  = thrust::iterator_value_t<ItemsIt>;
+      using item_t  = thrust::detail::it_value_t<ItemsIt>;
       item_t* null_ = nullptr;
-      __smart_sort::smart_sort<thrust::detail::false_type, thrust::detail::false_type>(
-        policy, first, last, null_, compare_op);
+      __smart_sort::smart_sort<_THRUST_STD::false_type, _THRUST_STD::false_type>(policy, first, last, null_, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, CompareOp compare_op)
     {
       thrust::stable_sort(cvt_to_seq(derived_cast(policy)), first, last, compare_op);
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   workaround::par(policy, first, last, compare_op);
 #  else
   workaround::seq(policy, first, last, compare_op);
@@ -412,10 +405,10 @@ void THRUST_HOST_DEVICE stable_sort_by_key(
     THRUST_HOST static void
     par(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values, CompareOp compare_op)
     {
-      __smart_sort::smart_sort<thrust::detail::true_type, thrust::detail::false_type>(
+      __smart_sort::smart_sort<_THRUST_STD::true_type, _THRUST_STD::false_type>(
         policy, keys_first, keys_last, values, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static void
     seq(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values, CompareOp compare_op)
     {
@@ -424,7 +417,7 @@ void THRUST_HOST_DEVICE stable_sort_by_key(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   workaround::par(policy, keys_first, keys_last, values, compare_op);
 #  else
   workaround::seq(policy, keys_first, keys_last, values, compare_op);
@@ -444,14 +437,14 @@ void THRUST_HOST_DEVICE sort_by_key(
 template <class Derived, class ItemsIt>
 void THRUST_HOST_DEVICE sort(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using item_type = typename thrust::iterator_value<ItemsIt>::type;
+  using item_type = thrust::detail::it_value_t<ItemsIt>;
   hip_rocprim::sort(policy, first, last, less<item_type>());
 }
 
 template <class Derived, class ItemsIt>
 void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using item_type = typename thrust::iterator_value<ItemsIt>::type;
+  using item_type = thrust::detail::it_value_t<ItemsIt>;
   hip_rocprim::stable_sort(policy, first, last, less<item_type>());
 }
 
@@ -459,7 +452,7 @@ template <class Derived, class KeysIt, class ValuesIt>
 void THRUST_HOST_DEVICE
 sort_by_key(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values)
 {
-  using key_type = typename thrust::iterator_value<KeysIt>::type;
+  using key_type = thrust::detail::it_value_t<KeysIt>;
   hip_rocprim::sort_by_key(policy, keys_first, keys_last, values, less<key_type>());
 }
 
@@ -467,7 +460,7 @@ template <class Derived, class KeysIt, class ValuesIt>
 void THRUST_HOST_DEVICE
 stable_sort_by_key(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values)
 {
-  using key_type = typename thrust::iterator_value<KeysIt>::type;
+  using key_type = thrust::detail::it_value_t<KeysIt>;
   hip_rocprim::stable_sort_by_key(policy, keys_first, keys_last, values, less<key_type>());
 }
 

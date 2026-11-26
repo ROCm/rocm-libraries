@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -103,17 +103,103 @@ extern int64_t c_i32_overflow;
 #define LIMITED_VRAM_STRING "skip: VRAM"
 
 /* ============================================================================================ */
-/*! \brief  Random number generator which generates NaN values */
+/*! \brief  Random number generation for the client test data */
 
-using hipblas_rng_t = std::mt19937;
-extern hipblas_rng_t hipblas_rng, hipblas_seed;
+// Random number engine for the client test data (SplitMix64). Its state is one 64-bit word, so it
+// is cheap to seed; the parallel fills reseed it for every block of elements they write.
+// Satisfies UniformRandomBitGenerator, so it works with the std:: distributions.
+class hipblas_rng_t
+{
+public:
+    using result_type = uint64_t;
 
-// Reset the seed (mainly to ensure repeatability of failures in a given suite)
+    explicit hipblas_rng_t(uint64_t seed = 0)
+        : m_state(seed)
+    {
+    }
+
+    static constexpr result_type min()
+    {
+        return 0;
+    }
+
+    static constexpr result_type max()
+    {
+        return ~result_type(0);
+    }
+
+    result_type operator()()
+    {
+        uint64_t z = (m_state += 0x9e3779b97f4a7c15ull);
+        z          = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+        z          = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+        return z ^ (z >> 31);
+    }
+
+private:
+    uint64_t m_state;
+};
+
+// The fixed seed every random sequence starts from
+extern const hipblas_rng_t g_hipblas_seed;
+
+// Engine used by the random generators below. It is thread_local so that threads never share
+// engine state: glibc rand() and a single shared engine serialize (or race) when an OpenMP
+// parallel fill calls them from many threads.
+extern thread_local hipblas_rng_t t_hipblas_rng;
+
+// Reset the calling thread's random sequence (mainly to ensure repeatability of failures in a given
+// suite)
 inline void hipblas_seedrand()
 {
-    hipblas_rng = hipblas_seed;
+    t_hipblas_rng = g_hipblas_seed;
 }
 
+// Seeding for one parallel fill, done through each thread's own engine (t_hipblas_rng). The fill
+// draws one seed from the calling thread's random sequence when it starts, and every thread
+// reseeds its t_hipblas_rng from that seed and the position of each block it writes. The values
+// therefore do not depend on which thread writes a block, so a fill produces the same data for any
+// number of OpenMP threads and any schedule. The calling thread also writes blocks, which reseeds
+// its engine, so its random sequence is restored when the fill ends: the next fill continues from
+// the same point whatever the thread count.
+class hipblas_parallel_fill_seeder
+{
+public:
+    hipblas_parallel_fill_seeder()
+        : m_seed(t_hipblas_rng())
+        , m_saved(t_hipblas_rng)
+    {
+    }
+
+    ~hipblas_parallel_fill_seeder()
+    {
+        t_hipblas_rng = m_saved;
+    }
+
+    hipblas_parallel_fill_seeder(const hipblas_parallel_fill_seeder&) = delete;
+    hipblas_parallel_fill_seeder& operator=(const hipblas_parallel_fill_seeder&) = delete;
+
+    // Call in the parallel loop, before generating the values of block `block` of batch `batch`:
+    // reseeds the calling thread's t_hipblas_rng
+    void reseed_thread_rng(uint64_t batch, uint64_t block) const
+    {
+        t_hipblas_rng = hipblas_rng_t(mix(mix(m_seed ^ batch) ^ block));
+    }
+
+private:
+    static uint64_t mix(uint64_t x)
+    {
+        return hipblas_rng_t(x)();
+    }
+
+    uint64_t      m_seed;
+    hipblas_rng_t m_saved;
+};
+
+// Number of vector elements generated from one block seed
+constexpr int64_t hipblas_fill_block_size = 4096;
+
+/*! \brief  Random number generator which generates NaN values */
 class hipblas_nan_rng
 {
     // Generate random NaN values
@@ -128,7 +214,7 @@ class hipblas_nan_rng
             T      fp;
         } x;
         do
-            x.u = std::uniform_int_distribution<UINT_T>{}(hipblas_rng);
+            x.u = std::uniform_int_distribution<UINT_T>{}(t_hipblas_rng);
         while(!(x.u & (((UINT_T)1 << SIG) - 1))); // Reject Inf (mantissa == 0)
         x.u |= (((UINT_T)1 << EXP) - 1) << SIG; // Exponent = all 1's
         return x.fp; // NaN with random bits
@@ -139,12 +225,12 @@ public:
     template <typename T, typename std::enable_if<std::is_integral<T>{}, int>::type = 0>
     explicit operator T()
     {
-        return std::uniform_int_distribution<T>{}(hipblas_rng);
+        return std::uniform_int_distribution<T>{}(t_hipblas_rng);
     }
 
     explicit operator signed char()
     {
-        return static_cast<signed char>(std::uniform_int_distribution<int>{}(hipblas_rng));
+        return static_cast<signed char>(std::uniform_int_distribution<int>{}(t_hipblas_rng));
     }
 
     // Random NaN double
@@ -198,7 +284,7 @@ public:
     // explicit operator hipblasInt8Complex()
     // {
     //     return static_cast<int8_t>(
-    //         std::uniform_int_distribution<unsigned short>(1, 3)(hipblas_rng));
+    //         std::uniform_int_distribution<unsigned short>(1, 3)(t_hipblas_rng));
     // }
 };
 
@@ -239,8 +325,7 @@ inline hipblasBfloat16 hipblas_negate(hipblasBfloat16 x)
 template <typename T>
 T random_generator()
 {
-    // return rand()/( (T)RAND_MAX + 1);
-    return T(rand() % 10 + 1);
+    return T(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng));
 };
 
 /*! \brief  generate a random NaN number */
@@ -255,7 +340,8 @@ inline T random_nan_generator()
 template <>
 inline hipblasHalf random_generator<hipblasHalf>()
 {
-    return float_to_half(float((rand() % 3 + 1))); // generate an integer number in range [1,2,3]
+    return float_to_half(
+        float(std::uniform_int_distribution<int>(1, 3)(t_hipblas_rng))); // range [1,2,3]
 };
 
 // for hipblasBfloat16, generate float, and convert to hipblasBfloat16
@@ -263,7 +349,7 @@ template <>
 inline hipblasBfloat16 random_generator<hipblasBfloat16>()
 {
     return float_to_bfloat16(
-        float((rand() % 3 + 1))); // generate an integer number in range [1,2,3]
+        float(std::uniform_int_distribution<int>(1, 3)(t_hipblas_rng))); // range [1,2,3]
 }
 
 // for std::complex<float>, generate 2 floats
@@ -271,7 +357,8 @@ inline hipblasBfloat16 random_generator<hipblasBfloat16>()
 template <>
 inline std::complex<float> random_generator<std::complex<float>>()
 {
-    return {float(rand() % 10 + 1), float(rand() % 10 + 1)};
+    return {float(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng)),
+            float(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng))};
 }
 
 // for std::complex<double>, generate 2 doubles
@@ -279,15 +366,15 @@ inline std::complex<float> random_generator<std::complex<float>>()
 template <>
 inline std::complex<double> random_generator<std::complex<double>>()
 {
-    return {double(rand() % 10 + 1), double(rand() % 10 + 1)};
+    return {double(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng)),
+            double(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng))};
 }
 
 /*! \brief  generate a random number in range [-1,-2,-3,-4,-5,-6,-7,-8,-9,-10] */
 template <typename T>
 inline T random_generator_negative()
 {
-    // return rand()/( (T)RAND_MAX + 1);
-    return -T(rand() % 10 + 1);
+    return -T(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng));
 };
 
 // for hipblasHalf, generate float, and convert to hipblasHalf
@@ -295,7 +382,7 @@ inline T random_generator_negative()
 template <>
 inline hipblasHalf random_generator_negative<hipblasHalf>()
 {
-    return float_to_half(-float((rand() % 3 + 1)));
+    return float_to_half(-float(std::uniform_int_distribution<int>(1, 3)(t_hipblas_rng)));
 };
 
 // for hipblasBfloat16, generate float, and convert to hipblasBfloat16
@@ -303,7 +390,7 @@ inline hipblasHalf random_generator_negative<hipblasHalf>()
 template <>
 inline hipblasBfloat16 random_generator_negative<hipblasBfloat16>()
 {
-    return float_to_bfloat16(-float((rand() % 3 + 1)));
+    return float_to_bfloat16(-float(std::uniform_int_distribution<int>(1, 3)(t_hipblas_rng)));
 };
 
 // for complex, generate two values, convert both to negative
@@ -313,13 +400,15 @@ inline hipblasBfloat16 random_generator_negative<hipblasBfloat16>()
 template <>
 inline std::complex<float> random_generator_negative<std::complex<float>>()
 {
-    return {float(-(rand() % 10 + 1)), float(-(rand() % 10 + 1))};
+    return {float(-(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng))),
+            float(-(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng)))};
 }
 
 template <>
 inline std::complex<double> random_generator_negative<std::complex<double>>()
 {
-    return {double(-(rand() % 10 + 1)), double(-(rand() % 10 + 1))};
+    return {double(-(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng))),
+            double(-(std::uniform_int_distribution<int>(1, 10)(t_hipblas_rng)))};
 }
 
 // HPL
@@ -327,7 +416,7 @@ inline std::complex<double> random_generator_negative<std::complex<double>>()
 template <typename T>
 inline T random_hpl_generator()
 {
-    return std::uniform_real_distribution<double>(-0.5, 0.5)(hipblas_rng);
+    return std::uniform_real_distribution<double>(-0.5, 0.5)(t_hipblas_rng);
 }
 
 // for hipblasBfloat16, generate float, and convert to hipblasBfloat16
@@ -336,14 +425,14 @@ template <>
 inline hipblasBfloat16 random_hpl_generator()
 {
     return hipblasBfloat16(
-        float_to_bfloat16(std::uniform_real_distribution<float>(-0.5f, 0.5f)(hipblas_rng)));
+        float_to_bfloat16(std::uniform_real_distribution<float>(-0.5f, 0.5f)(t_hipblas_rng)));
 }
 
 template <>
 inline hipblasHalf random_hpl_generator()
 {
     return hipblasHalf(
-        float_to_half(std::uniform_real_distribution<float>(-0.5f, 0.5f)(hipblas_rng)));
+        float_to_half(std::uniform_real_distribution<float>(-0.5f, 0.5f)(t_hipblas_rng)));
 }
 
 /* ============================================================================================= */
@@ -531,6 +620,8 @@ typedef enum hipblasClientProcessor
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250

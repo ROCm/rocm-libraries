@@ -59,6 +59,8 @@ double test_prob;
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
+// Probability of verifying that a transform left its input buffer alone
+double input_preservation_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -67,6 +69,9 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
+// Flag to indicate that only quick tests have been requested (cases
+// that we wouldn't want to run in smoke tests or emulation).
+bool quick_tests_only = false;
 // Constraints for the hipfftw tests
 size_t      max_length_for_hipfftw_test;
 size_t      max_nbatch_for_hipfftw_test;
@@ -371,8 +376,16 @@ int main(int argc, char* argv[])
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests (disabled by "
-                   "default to alleviate redundancy with rocfft-test)")
+                   "default to alleviate redundancy with rocfft-test). "
+                   "2D or 3D emulation test probabilities are scaled relative to test_prob: "
+                   "emulation_prob is used directly when test_prob is 1 and scaled down by the "
+                   "ratio of 1D test count to 2D or 3D test count as test_prob approaches 0.")
         ->default_val(0.0)
+        ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--input_preservation_prob",
+                   input_preservation_prob,
+                   "Probability of checking that an out-of-place transform left its input intact")
+        ->default_val(0.1)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
@@ -404,7 +417,12 @@ int main(int argc, char* argv[])
         ->check(CLI::IsMember(
             {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
         ->expected(1)
-        ->excludes("--test_prob", "--emulation_prob", "--unittest_prob", "--callback_prob", "--R")
+        ->excludes("--test_prob",
+                   "--emulation_prob",
+                   "--unittest_prob",
+                   "--callback_prob",
+                   "--input_preservation_prob",
+                   "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths.
 
@@ -413,6 +431,12 @@ int main(int argc, char* argv[])
 
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
+
+            // Input preservation is not an emulation test target.
+            input_preservation_prob = 0;
+
+            // Very large transforms are not an emulation test target.
+            quick_tests_only = true;
 
             if(emulationtype == emulation_quick)
             {
@@ -534,7 +558,8 @@ int main(int argc, char* argv[])
         ->each([&](const std::string&) {
             // The objective is to have an test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
-            test_prob = 0.002;
+            test_prob        = 0.002;
+            quick_tests_only = true;
         });
     // Token string to fully specify fft params for the manual test.
     std::string test_token;
@@ -592,8 +617,6 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--odist", manual_params.odist, "Logical distance between output batches")
         ->default_val(0);
-    non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
-    non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.

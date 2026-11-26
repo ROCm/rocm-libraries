@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
+#include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
 #include <array>
 #include <deque>
@@ -43,15 +44,11 @@
 
 TESTS_DEFINE(IsContiguousIteratorTests, FullTestsParams);
 
-THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::string::iterator>::value));
-
-THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::wstring::iterator>::value));
-
-THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::string_view::iterator>::value));
-
-THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::wstring_view::iterator>::value));
-
-THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<std::vector<bool>::iterator>::value));
+static_assert(thrust::is_contiguous_iterator_v<std::string::iterator>);
+static_assert(thrust::is_contiguous_iterator_v<std::wstring::iterator>);
+static_assert(thrust::is_contiguous_iterator_v<std::string_view::iterator>);
+static_assert(thrust::is_contiguous_iterator_v<std::wstring_view::iterator>);
+static_assert(!thrust::is_contiguous_iterator_v<std::vector<bool>::iterator>);
 
 TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator)
 {
@@ -60,41 +57,44 @@ TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<T*>::value));
+  static_assert(thrust::is_contiguous_iterator_v<T*>);
+  static_assert(thrust::is_contiguous_iterator_v<T const*>);
+  static_assert(thrust::is_contiguous_iterator_v<thrust::device_ptr<T>>);
+  static_assert(thrust::is_contiguous_iterator_v<typename std::vector<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::vector<T>::reverse_iterator>);
+  static_assert(thrust::is_contiguous_iterator_v<typename std::array<T, 1>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::list<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::deque<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::set<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::multiset<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::map<T, T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::multimap<T, T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::unordered_set<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::unordered_multiset<T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::unordered_map<T, T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<typename std::unordered_multimap<T, T>::iterator>);
+  static_assert(!thrust::is_contiguous_iterator_v<std::istream_iterator<T>>);
+  static_assert(!thrust::is_contiguous_iterator_v<std::ostream_iterator<T>>);
+}
 
-  THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<T const*>::value));
+TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator_cvref)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
-  THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<thrust::device_ptr<T>>::value));
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<typename std::vector<T>::iterator>::value));
+  static_assert(thrust::is_contiguous_iterator_v<T* const>);
+  static_assert(thrust::is_contiguous_iterator_v<T* volatile>);
+  static_assert(thrust::is_contiguous_iterator_v<T*&>);
+  static_assert(thrust::is_contiguous_iterator_v<T* const&>);
+  static_assert(thrust::is_contiguous_iterator_v<T* volatile&>);
 
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::vector<T>::reverse_iterator>::value));
-
-  THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<typename std::array<T, 1>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::list<T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::deque<T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::set<T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::multiset<T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::map<T, T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::multimap<T, T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::unordered_set<T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::unordered_multiset<T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::unordered_map<T, T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<typename std::unordered_multimap<T, T>::iterator>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<std::istream_iterator<T>>::value));
-
-  THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<std::ostream_iterator<T>>::value));
+  static_assert(!thrust::is_contiguous_iterator_v<std::vector<bool>::iterator const>);
+  static_assert(!thrust::is_contiguous_iterator_v<std::vector<bool>::iterator volatile>);
+  static_assert(!thrust::is_contiguous_iterator_v<std::vector<bool>::iterator&>);
+  static_assert(!thrust::is_contiguous_iterator_v<std::vector<bool>::iterator const&>);
+  static_assert(!thrust::is_contiguous_iterator_v<std::vector<bool>::iterator volatile&>);
 }
 
 TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator_vectors)
@@ -103,7 +103,7 @@ TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator_vectors)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<typename Vector::iterator>::value));
+  static_assert(thrust::is_contiguous_iterator_v<typename Vector::iterator>);
 }
 
 struct expect_pointer
@@ -131,37 +131,33 @@ TYPED_TEST(IsContiguousIteratorTests, test_try_unwrap_contiguous_iterator)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   // Raw pointers should pass whether expecting pointers or passthrough.
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<T*, T*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<T*, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<T const*, T const*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<T const*, T const*, expect_passthrough>::value));
+  static_assert(check_unwrapped_iterator<T*, T*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<T*, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<T const*, T const*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<T const*, T const*, expect_passthrough>::value);
 
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<thrust::device_ptr<T>, T*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<thrust::device_ptr<T const>, T const*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::vector<T>::iterator, T*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT(
-    (check_unwrapped_iterator<typename std::vector<T>::reverse_iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::array<T, 1>::iterator, T*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT(
-    (check_unwrapped_iterator<typename std::array<T const, 1>::iterator, T const*, expect_pointer>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::list<T>::iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::deque<T>::iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::set<T>::iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::multiset<T>::iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT(
-    (check_unwrapped_iterator<typename std::map<T, T>::iterator, std::pair<T const, T>*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((
-    check_unwrapped_iterator<typename std::multimap<T, T>::iterator, std::pair<T const, T>*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT(
-    (check_unwrapped_iterator<typename std::unordered_set<T>::iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT(
-    (check_unwrapped_iterator<typename std::unordered_multiset<T>::iterator, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT(
-    (check_unwrapped_iterator<typename std::unordered_map<T, T>::iterator, std::pair<T const, T>*, expect_passthrough>::
-       value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<typename std::unordered_multimap<T, T>::iterator,
-                                                 std::pair<T const, T>*,
-                                                 expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<std::istream_iterator<T>, T*, expect_passthrough>::value));
-  THRUST_STATIC_ASSERT((check_unwrapped_iterator<std::ostream_iterator<T>, void, expect_passthrough>::value));
+  static_assert(check_unwrapped_iterator<thrust::device_ptr<T>, T*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<thrust::device_ptr<T const>, T const*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<typename std::vector<T>::iterator, T*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<typename std::vector<T>::reverse_iterator, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<typename std::array<T, 1>::iterator, T*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<typename std::array<T const, 1>::iterator, T const*, expect_pointer>::value);
+  static_assert(check_unwrapped_iterator<typename std::list<T>::iterator, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<typename std::deque<T>::iterator, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<typename std::set<T>::iterator, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<typename std::multiset<T>::iterator, T*, expect_passthrough>::value);
+  static_assert(
+    check_unwrapped_iterator<typename std::map<T, T>::iterator, std::pair<T const, T>*, expect_passthrough>::value);
+  static_assert(
+    check_unwrapped_iterator<typename std::multimap<T, T>::iterator, std::pair<T const, T>*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<typename std::unordered_set<T>::iterator, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<typename std::unordered_multiset<T>::iterator, T*, expect_passthrough>::value);
+  static_assert(
+    check_unwrapped_iterator<typename std::unordered_map<T, T>::iterator, std::pair<T const, T>*, expect_passthrough>::
+      value);
+  static_assert(check_unwrapped_iterator<typename std::unordered_multimap<T, T>::iterator,
+                                         std::pair<T const, T>*,
+                                         expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<std::istream_iterator<T>, T*, expect_passthrough>::value);
+  static_assert(check_unwrapped_iterator<std::ostream_iterator<T>, void, expect_passthrough>::value);
 }

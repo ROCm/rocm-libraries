@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,13 +27,18 @@
 
 #include <cuda/std/__functional/invoke.h>
 
+#include <cuda/std/utility>
+
 BEGIN_HIPCUB_NAMESPACE
 
 namespace detail
 {
 
 template<typename Invokable, typename InputT, typename InitT = InputT>
-using accumulator_t = ::cuda::std::__accumulator_t<Invokable, InputT, InitT>;
+using accumulator_t = _HIPCUB_STD::__accumulator_t<Invokable, InputT, InitT>;
+
+using arg_min = cub::detail::arg_min;
+using arg_max = cub::detail::arg_max;
 
 } // namespace detail
 

@@ -26,6 +26,8 @@
  *
  ******************************************************************************/
 
+// rocThrust
+#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
@@ -44,7 +46,7 @@ inline bool is_valid(const size_t size, const size_t maxi)
     thrust::device_vector<T> out_vals(size);
     return true;
   }
-  catch (const ::thrust::system::detail::bad_alloc& e)
+  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
   {
     return false;
   }
@@ -91,7 +93,7 @@ struct unique_benchmark : public primbench::benchmark_interface
       out_keys.begin(),
       out_vals.begin());
 
-    const size_t unique_elements = thrust::distance(out_keys.begin(), new_key_end);
+    const size_t unique_elements = _THRUST_STD::distance(out_keys.begin(), new_key_end);
 
     state.set_items(m_items);
     state.add_reads<T>(m_items);

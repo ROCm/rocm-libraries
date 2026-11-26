@@ -73,8 +73,8 @@ auto GetConvTestCasesWrw(miopenDataType_t datatype)
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        auto p =
-            miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X);
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950 |
+                                                              Gpu::gfx120X | Gpu::gfx117X);
         return p;
     }();
     return params;
@@ -108,27 +108,27 @@ TEST_P(CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE, ConvWinoRageRx
     this->RunTest(miopen::solver::conv::ConvWinoRageRxS<2, 3>{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverWinoRage2x3Fwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverWinoRage2x3Bwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverWinoRage2x3Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesWrw(miopenHalf))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverWinoRage2x3DevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenHalf)[0])));
@@ -242,27 +242,27 @@ TEST_P(CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_NONE,
     this->RunTest(miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedWinoRageRxSFwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedWinoRageRxSBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedWinoRageRxSWrw_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWCWrw(miopenHalf))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCasesNHWC(miopenHalf)[0])));

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -14,6 +15,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -487,6 +490,58 @@ TEST(TestGpuValidatorFactory, TemplatedCreatesInt32)
 }
 
 // ============================================================================
+// Ragged rejection tests
+// ============================================================================
+
+const std::vector<int64_t> K_RAGGED_DIMS = {2, 2, 3, 2};
+const std::vector<int64_t> K_RAGGED_STRIDES = {12, 2, 4, 1};
+
+template <typename T>
+RaggedTensor<T> makeRaggedTensor()
+{
+    const std::vector<int32_t> offsets = {0, 8, 20};
+    auto offsetTensor = std::make_shared<Tensor<int32_t>>(
+        std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
+    for(size_t i = 0; i < offsets.size(); ++i)
+    {
+        offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
+    }
+    return RaggedTensor<T>(K_RAGGED_DIMS, K_RAGGED_STRIDES, SDPA_SEQ_AXIS, offsetTensor);
+}
+
+template <typename T>
+void expectRaggedRejected(const IReferenceValidation& validator)
+{
+    auto reference = makeRaggedTensor<T>();
+    auto implementation = makeRaggedTensor<T>();
+    EXPECT_THROW(validator.allClose(reference, implementation), std::invalid_argument);
+
+    Tensor<T> dense(K_RAGGED_DIMS, K_RAGGED_STRIDES);
+    EXPECT_THROW(validator.allClose(dense, implementation), std::invalid_argument);
+}
+
+TEST(TestGpuValidationRaggedRejection, FpValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<float>(*validator);
+}
+
+TEST(TestGpuValidationRaggedRejection, IntValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<int32_t>(*validator);
+}
+
+TEST(TestGpuValidationRaggedRejection, RmsValidatorThrowsOnRaggedTensors)
+{
+    const auto validator = createGpuRmsValidator(hipdnn_frontend::DataType::FLOAT, 1e-5f);
+    ASSERT_NE(validator, nullptr);
+    expectRaggedRejected<float>(*validator);
+}
+
+// ============================================================================
 // Constructor validation tests
 // ============================================================================
 
@@ -521,7 +576,7 @@ class TestGpuVsCpuValidation : public ::testing::Test
 {
 };
 
-using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type>;
+using GpuCpuFpTypes = ::testing::Types<float, HalfType, BFloat16Type, double>;
 TYPED_TEST_SUITE(TestGpuVsCpuValidation, GpuCpuFpTypes, );
 
 TYPED_TEST(TestGpuVsCpuValidation, AgreeOnPass)
@@ -582,6 +637,50 @@ TYPED_TEST(TestGpuVsCpuValidation, AgreeOnFail)
 
     ASSERT_EQ(gpuResult, cpuResult)
         << "GPU and CPU validators disagree: GPU=" << gpuResult << ", CPU=" << cpuResult;
+}
+
+TEST(TestGpuVsCpuValidationFp64, AgreeBeyondFloatRangeAndResolution)
+{
+    SKIP_IF_NO_DEVICES();
+
+    struct Case
+    {
+        double reference;
+        double implementation;
+        float atol;
+        float rtol;
+        bool expectedPass;
+    };
+    const double aboveFloatMax = 1e39;
+    const std::vector<Case> cases = {
+        {1e300, 1e300 * (1.0 + 5e-7), 0.0f, 1e-6f, true},
+        {1e300, 1e301, 0.0f, 1e-6f, false},
+        {1e300, -1e300, 0.0f, 1e-6f, false},
+        {aboveFloatMax, aboveFloatMax * (1.0 + 5e-7), 0.0f, 1e-6f, true},
+        {aboveFloatMax, 2.0 * aboveFloatMax, 0.0f, 1e-6f, false},
+        {aboveFloatMax, 1.0, 0.0f, 1e-6f, false},
+        {1.0, 1.0 + 1e-13, 1e-12f, 0.0f, true},
+        {1.0, 1.0 + 1e-9, 1e-12f, 0.0f, false},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << "reference=" << testCase.reference
+                     << " implementation=" << testCase.implementation << " atol=" << testCase.atol
+                     << " rtol=" << testCase.rtol);
+
+        Tensor<double> ref({1});
+        Tensor<double> impl({1});
+        ref.memory().hostData()[0] = testCase.reference;
+        impl.memory().hostData()[0] = testCase.implementation;
+
+        const GpuFpReferenceValidation<double> gpuValidator(testCase.atol, testCase.rtol);
+        const CpuFpReferenceValidation<double> cpuValidator(testCase.atol, testCase.rtol);
+
+        EXPECT_EQ(gpuValidator.allClose(ref, impl), testCase.expectedPass);
+        EXPECT_EQ(cpuValidator.allClose(ref, impl), testCase.expectedPass);
+    }
 }
 
 // ============================================================================

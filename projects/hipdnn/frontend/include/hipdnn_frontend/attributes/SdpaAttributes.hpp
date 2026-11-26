@@ -101,6 +101,8 @@ public:
         Scale_S = 18,
         Scale_O = 19,
         SINK_TOKEN = 20,
+        CU_SEQ_LEN_Q = 21, ///< Cumulative Q sequence lengths, INT32 (B+1,1,1,1); forward only
+        CU_SEQ_LEN_KV = 22, ///< Cumulative KV sequence lengths, INT32 (B+1,1,1,1); forward only
     };
     typedef InputNames input_names;
 
@@ -125,13 +127,23 @@ public:
     std::optional<bool> generate_stats;
     bool alibi_mask = false;
     bool padding_mask = false;
-    bool causal_mask = false; // Deprecated
-    bool causal_mask_bottom_right = false; // Deprecated
+    /**
+     * @brief Deprecated; kept for graphs persisted before the causal setters changed. Do not set
+     * directly: use set_causal_mask*() or the diagonal-band setters. Backends resolve them as if
+     * the matching setter ran before every bound and alignment setter, so left_bound, a
+     * right_bound >= 0 or (for causal_mask) diagonal_alignment refines them. Setting both, or any
+     * bound below -1, is invalid.
+     */
+    bool causal_mask = false;
+    bool causal_mask_bottom_right = false;
 
     // Scalar attributes
     std::optional<float> dropout_probability;
     std::optional<float> attn_scale_value;
+    /// Left diagonal-band bound: each query row keeps this many keys, including the diagonal;
+    /// -1 is unbounded and 0 is rejected.
     std::optional<int64_t> left_bound;
+    /// Right diagonal-band bound: keys up to this many past the diagonal are kept; -1 is unbounded.
     std::optional<int64_t> right_bound;
     std::optional<int32_t> max_seq_len_kv;
 
@@ -181,6 +193,20 @@ public:
     std::shared_ptr<TensorAttributes> get_seq_len_kv() const
     {
         return getInput(InputNames::SEQ_LEN_KV);
+    }
+    /// @brief Cumulative Q sequence lengths tensor.
+    /// @return The tensor, or null if unset.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_cu_seq_len_q() const
+    {
+        return getInput(InputNames::CU_SEQ_LEN_Q);
+    }
+    /// @brief Cumulative KV sequence lengths tensor.
+    /// @return The tensor, or null if unset.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_cu_seq_len_kv() const
+    {
+        return getInput(InputNames::CU_SEQ_LEN_KV);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_seed() const
@@ -362,6 +388,44 @@ public:
     SdpaAttributes& set_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
+    }
+    /**
+     * @brief Set the cumulative Q sequence lengths (forward only; cuDNN 9.24+, mixed with a
+     * seq_len_* tensor on the other side 9.25+).
+     *
+     * Exclusive prefix sums of the per-batch Q lengths: INT32, B+1 entries, starting at 0 (for
+     * lengths 4, 3, 8 the tensor holds 0, 4, 7, 15). A 1-D (B+1) tensor is promoted to
+     * (B+1,1,1,1) during graph validation, in either call order. Requires padding_mask(true),
+     * excludes seq_len_q, and the KV side must also carry a length tensor (seq_len_kv or
+     * cu_seq_len_kv). The graph then needs an engine plugin reporting API version 1.6.0 or
+     * newer.
+     * @param value The cumulative Q sequence length tensor.
+     * @return Reference to this object for chaining.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_q(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_Q, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_q(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_Q, std::move(value));
+    }
+    /**
+     * @brief Set the cumulative KV sequence lengths. Same rules as set_cu_seq_len_q().
+     * @param value The cumulative KV sequence length tensor.
+     * @return Reference to this object for chaining.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_kv(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_KV, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_KV, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_seed(const std::shared_ptr<TensorAttributes>& value)
@@ -597,16 +661,43 @@ public:
         padding_mask = value;
         return *this;
     }
+    /**
+     * @brief Request a top-left causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to TOP_LEFT and right_bound to 0. The deprecated causal_mask
+     * member is not modified, and later bound or alignment setters take precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_causal_mask(bool value)
     {
-        causal_mask = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
+    /**
+     * @brief Request a bottom-right causal mask (cuDNN semantics).
+     *
+     * Sets diagonal_alignment to BOTTOM_RIGHT and right_bound to 0. The deprecated
+     * causal_mask_bottom_right member is not modified, and later bound or alignment setters take
+     * precedence.
+     *
+     * @param value true applies the mask; false is a no-op.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_causal_mask_bottom_right(bool value)
     {
-        causal_mask_bottom_right = value;
+        if(value)
+        {
+            set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+            set_diagonal_band_right_bound(0);
+        }
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -633,12 +724,37 @@ public:
         attn_scale_value = value;
         return *this;
     }
+    /**
+     * @brief Set the left bound of the diagonal attention band (sliding window).
+     *
+     * Follows cuDNN: a left bound of L keeps the L keys ending at the diagonal, diagonal
+     * included, so query i attends to keys j with j > i + offset - L (offset is 0 for
+     * TOP_LEFT and seq_kv - seq_q for BOTTOM_RIGHT). Must be >= 1, or -1 for unbounded.
+     * A FlashAttention-style window_size_left = W is the same window as a left bound of W + 1.
+     *
+     * Two values differ from cuDNN. -1 means unbounded here, where cuDNN leaves the bound
+     * unset. 0 is rejected in both directions, where cuDNN 9.10 and later accepts it in the
+     * forward pass: a provider whose kernels take FlashAttention's window would pass L - 1,
+     * turning 0 into -1, which those kernels read as unbounded.
+     *
+     * @param value The left bound L > 0, or -1 for unbounded. Graph validation rejects 0 and
+     *              values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_left_bound(int64_t value)
     {
         left_bound = value;
         return *this;
     }
+    /**
+     * @brief Set the right diagonal-band bound (cuDNN semantics).
+     *
+     * right_bound = R keeps keys up to R past the diagonal; 0 is causal.
+     *
+     * @param value R >= 0, or -1 for unbounded. Graph validation rejects values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_right_bound(int64_t value)
     {
@@ -675,12 +791,12 @@ public:
     /**
      * @brief Custom equality hooks for SDPA-specific attributes
      *
-     * Compares all scalar/flag/enum configuration — stats generation, masking
-     * modes, dropout probability, attention scale, diagonal band bounds,
+     * Logical equality compares all scalar/flag/enum configuration that defines
+     * the mathematical semantics of the attention operation — stats generation,
+     * masking modes, dropout probability, attention scale, diagonal band bounds,
      * paged-attention limits, diagonal alignment, compute-core mode, and
-     * implementation strategy — all of which define the mathematical
-     * semantics of the attention operation rather than tensor layout, so
-     * logical and strict equality coincide here.
+     * implementation strategy. The advisory unfuse_fma_hint is not lowered
+     * (Graph::sdpa warns and ignores it), so only strict equality compares it.
      */
     bool logicallyEqualsImpl(const SdpaAttributes& other) const
     {
@@ -694,11 +810,10 @@ public:
                && mma_core_mode == other.mma_core_mode && implementation == other.implementation;
     }
 
-    /// @brief Strict equality delegates to logical equality; no layout-only
-    ///        fields exist in this class to distinguish the two checks.
+    /// @brief Strict equality adds the advisory unfuse_fma_hint to logical equality.
     bool strictEqualsImpl(const SdpaAttributes& other) const
     {
-        return logicallyEqualsImpl(other);
+        return logicallyEqualsImpl(other) && unfuse_fma_hint == other.unfuse_fma_hint;
     }
     // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more
@@ -712,7 +827,15 @@ public:
     {
         return set_generate_stats(!value);
     }
-    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    /**
+     * @brief cuDNN-compatible alias of set_diagonal_band_left_bound().
+     *
+     * A window length of n keeps the n keys ending at the diagonal, as in cuDNN.
+     *
+     * @param value Window length n: keys per query row, including the diagonal. n > 0, or -1
+     *              for unbounded; graph validation rejects 0 and values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sliding_window_length(int value)
     {

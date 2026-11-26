@@ -54,17 +54,13 @@ from typing import Tuple
 
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.io import store_scalar_from_f32
-from rocke.helpers.spec import SignatureBuilder, kernel_name_join
+from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_implicit_gemm_wgrad import (
     _DEFAULT_WS_REPLICAS,
     _wg_M,
     _wg_N,
 )
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
 
 
 # Default tile sizes for the cast kernel.  Each workgroup handles one
@@ -236,8 +232,8 @@ def build_conv_wgrad_workspace_reduce(
 def wgrad_reduce_grid(spec: WgradReduceSpec) -> Tuple[int, int, int]:
     """Return the ``(x, y, z)`` grid dimensions for this reduce spec."""
     return (
-        _ceil_div(spec.wg_N, spec.tile_n),
-        _ceil_div(spec.wg_M, spec.tile_m),
+        ceil_div(spec.wg_N, spec.tile_n),
+        ceil_div(spec.wg_M, spec.tile_m),
         spec.groups,
     )
 

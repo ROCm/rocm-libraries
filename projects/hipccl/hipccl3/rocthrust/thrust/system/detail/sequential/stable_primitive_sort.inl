@@ -48,12 +48,12 @@ namespace stable_primitive_sort_detail
 
 template <typename Iterator>
 struct enable_if_bool_sort
-    : _THRUST_STD::enable_if<_THRUST_STD::is_same<bool, typename thrust::iterator_value<Iterator>::type>::value>
+    : _THRUST_STD::enable_if<_THRUST_STD::is_same<bool, thrust::detail::it_value_t<Iterator>>::value>
 {};
 
 template <typename Iterator>
 struct disable_if_bool_sort
-    : thrust::detail::disable_if<_THRUST_STD::is_same<bool, typename thrust::iterator_value<Iterator>::type>::value>
+    : thrust::detail::disable_if<_THRUST_STD::is_same<bool, thrust::detail::it_value_t<Iterator>>::value>
 {};
 
 template <typename DerivedPolicy, typename RandomAccessIterator>
@@ -62,7 +62,7 @@ typename enable_if_bool_sort<RandomAccessIterator>::type THRUST_HOST_DEVICE stab
 {
   // use stable_partition if we're sorting bool
   // stable_partition puts true values first, so we need to logical_not
-  sequential::stable_partition(exec, first, last, thrust::logical_not<bool>());
+  sequential::stable_partition(exec, first, last, _THRUST_STD::logical_not<bool>());
 }
 
 template <typename DerivedPolicy, typename RandomAccessIterator>
@@ -93,8 +93,8 @@ typename enable_if_bool_sort<RandomAccessIterator1>::type THRUST_HOST_DEVICE sta
   // stable_partition puts true values first, so we need to logical_not
   sequential::stable_partition(
     exec,
-    thrust::make_zip_iterator(thrust::make_tuple(keys_first, values_first)),
-    thrust::make_zip_iterator(thrust::make_tuple(keys_last, values_first)),
+    thrust::make_zip_iterator(keys_first, values_first),
+    thrust::make_zip_iterator(keys_last, values_first),
     logical_not_first());
 }
 

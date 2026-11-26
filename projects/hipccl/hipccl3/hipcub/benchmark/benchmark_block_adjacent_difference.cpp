@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ struct subtract_left
 
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -111,7 +111,7 @@ struct subtract_left_partial_tile
         // Try to evenly distribute the length of tile_sizes between all the trials
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -159,7 +159,7 @@ struct subtract_right
 
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -205,7 +205,7 @@ struct subtract_right_partial_tile
         // Try to evenly distribute the length of tile_sizes between all the trials
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -385,7 +385,7 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(int64_t, 256, false);
     BENCHMARK_TYPE(double, 256, false);
 
-    if(!std::is_same<Benchmark, subtract_right_partial_tile>::value)
+    if(!std::is_same_v<Benchmark, subtract_right_partial_tile>)
     {
         BENCHMARK_TYPE(int, 256, true);
         BENCHMARK_TYPE(float, 256, true);

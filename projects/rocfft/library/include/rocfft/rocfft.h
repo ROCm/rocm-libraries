@@ -124,10 +124,15 @@ typedef enum rocfft_precision_e
 
 /*! @brief Result placement
  *  @details Declares where the output of the transform should be
- *  placed.  Note that input buffers may still be overwritten
- *  during execution of a transform, even if the transform is not
- *  in-place.
-*/
+ *  placed.  Note that complex-to-real transforms may overwrite
+ *  their input buffers during execution, even if the transform is
+ *  not in-place.  Input buffers of all other transform types are
+ *  left unmodified when the transform is not in-place.  This 
+ *  guarantee covers only writes made by rocFFT itself; writes made 
+ *  by user-defined callbacks, e.g., through a load callback's data
+ *  pointer or through cbdata, are not covered and may modify 
+ *  the input.
+ */
 typedef enum rocfft_result_placement_e
 {
     rocfft_placement_inplace,
@@ -230,8 +235,12 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_create(rocfft_plan*                  pla
  *  arrays have one pointer per brick in the input or output field,
  *  provided in the order that the bricks were added to the field.
  *
- *  Note that input buffers may still be overwritten during execution
- *  of a transform, even if the transform is not in-place.
+ *  Note that complex-to-real transforms may overwrite their input
+ *  buffers during execution, even if the transform is not in-place.
+ *  Where an input field is set, this applies to the buffers of its
+ *  individual bricks.  Input buffers of all other transform types
+ *  are left unmodified when the transform is not in-place.  Setting
+ *  load or store callbacks does not change this.
  *
  *  The final parameter in this function is a rocfft_execution_info
  *  handle. This optional parameter serves as a way for the user to control
@@ -296,7 +305,8 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
- *  output.
+ *  output. Planar array types are not supported if a field is set for
+ *  either input or output.
  *  @note Non-zero offsets are not supported yet.
  * 
  *  @param[in, out] description description handle
@@ -372,10 +382,6 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  plan description.  The callback function is provided as a named
  *  symbol in SPIR-V bitcode.
  *
- *  Note: JIT callbacks cannot currently be used on transforms that
- *  have fields or bricks also specified on the same plan description.
- *  This support will be added in a future release of rocFFT.
- *
  *  Load callbacks have the following signature:
  *
  *  @code
@@ -404,6 +410,10 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
+ *  In a multi-process transform, each rank must provide bitcode that
+ *  performs the same load operation as the bitcode on other ranks
+ *  (or none at all).
+ *
  *  @param[in] description description handle
  *  @param[in] symbol_name name of the symbol in the bitcode
  *  @param[in] bitcode_data pointer to bitcode data
@@ -423,10 +433,6 @@ ROCFFT_EXPORT rocfft_status
  *  @details Set a Just-In-Time (JIT) store callback on a plan
  *  description.  The callback function is provided as a named symbol
  *  in SPIR-V bitcode.
- *
- *  Note: JIT callbacks cannot currently be used on transforms that
- *  have fields or bricks also specified on the same plan description.
- *  This support will be added in a future release of rocFFT.
  *
  *  Store callbacks have the following signature:
  *
@@ -455,6 +461,10 @@ ROCFFT_EXPORT rocfft_status
  *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
+ *
+ *  In a multi-process transform, each rank must provide bitcode that
+ *  performs the same store operation as the bitcode on other ranks
+ *  (or none at all).
  *
  *  @param[in] description description handle
  *  @param[in] symbol_name name of the symbol in the bitcode
@@ -680,17 +690,12 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  transform.  Function pointer callbacks are a deprecated feature
  *  in rocFFT, and users should use JIT callbacks instead.
  *
- *  Callback function pointers/data are given as arrays, with one
- *  function/data pointer per brick in the input field of the plan.
- *  Load callbacks require at least one brick in the input field to
- *  be assigned to the current device used at plan creation. A plan
- *  with no input field specified is considered to have one brick on
- *  the current device used at plan creation.
- *
- *  All functions in the array must perform the same logical
- *  operation.  That is, any function in the array must be
- *  substitutable for any other function in the array if the data
- *  being loaded were moved to another brick.
+ *  Callback function pointers/data are given as arrays with exactly
+ *  one entry.  Function pointer callbacks cannot be used on transforms
+ *  that have fields specified on the plan description:
+ *  ::rocfft_execute returns ::rocfft_status_invalid_arg_value in that
+ *  case.  The specified arrays must remain valid until either the execution
+ *  info is destroyed or callbacks are cleared from it.
  *
  *  The provided function pointers replace any previously-specified
  *  load callback for this execution info handle.
@@ -757,17 +762,12 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback_data(rocfft_
  *  transform.  Function pointer callbacks are a deprecated feature
  *  in rocFFT, and users should use JIT callbacks instead.
  *
- *  Callback function pointers/data are given as arrays, with one
- *  function/data pointer per brick in the output field of the plan.
- *  Store callbacks require at least one brick in the output field to
- *  be assigned to the current device used at plan creation. A plan
- *  with no output field specified is considered to have one brick on
- *  the current device used at plan creation.
- *
- *  All functions in the array must perform the same logical
- *  operation.  That is, any function in the array must be
- *  substitutable for any other function in the array if the data
- *  being stored were moved to another brick.
+ *  Callback function pointers/data are given as arrays with exactly
+ *  one entry.  Function pointer callbacks cannot be used on transforms
+ *  that have fields specified on the plan description:
+ *  ::rocfft_execute returns ::rocfft_status_invalid_arg_value in that
+ *  case.  The specified arrays must remain valid until either the execution
+ *  info is destroyed or callbacks are cleared from it.
  *
  *  The provided function pointers replace any previously-specified
  *  store callback for this execution info handle.

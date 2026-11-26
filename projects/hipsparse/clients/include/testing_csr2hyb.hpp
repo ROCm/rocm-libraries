@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -49,8 +50,7 @@ void testing_csr2hyb_bad_arg(const Arguments& argus)
     int n         = 100;
     int safe_size = 100;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -125,8 +125,7 @@ void testing_csr2hyb(Arguments argus)
     int                     user_ell_width = argus.ell_width;
     std::string             filename       = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -182,7 +181,7 @@ void testing_csr2hyb(Arguments argus)
         }
 
         // Test invalid user_ell_width
-        int max_allowed_ell_nnz_per_row = (2 * nnz - 1) / m + 1;
+        int64_t max_allowed_ell_nnz_per_row = (2 * static_cast<int64_t>(nnz) - 1) / m + 1;
         if(user_ell_width < 0 || user_ell_width > max_allowed_ell_nnz_per_row)
         {
             status = hipsparseXcsr2hyb(handle,
@@ -213,7 +212,7 @@ void testing_csr2hyb(Arguments argus)
             ell_max_width = std::max(hcsr_row_ptr[i + 1] - hcsr_row_ptr[i], ell_max_width);
         }
 
-        int width_limit = (2 * nnz - 1) / m + 1;
+        int64_t width_limit = (2 * static_cast<int64_t>(nnz) - 1) / m + 1;
         if(ell_max_width > width_limit)
         {
             status = hipsparseXcsr2hyb(handle,
@@ -240,9 +239,9 @@ void testing_csr2hyb(Arguments argus)
     std::vector<T>   hhyb_coo_val_gold;
 
     // Host csr2hyb conversion
-    int ell_width = 0;
-    int ell_nnz   = 0;
-    int coo_nnz   = 0;
+    int     ell_width = 0;
+    int64_t ell_nnz   = 0;
+    int     coo_nnz   = 0;
 
     if(part == HIPSPARSE_HYB_PARTITION_AUTO || part == HIPSPARSE_HYB_PARTITION_USER)
     {
@@ -257,7 +256,7 @@ void testing_csr2hyb(Arguments argus)
             ell_width = user_ell_width;
         }
 
-        ell_nnz = ell_width * m;
+        ell_nnz = static_cast<int64_t>(ell_width) * m;
 
         // Determine COO nnz
         for(int i = 0; i < m; ++i)
@@ -277,7 +276,7 @@ void testing_csr2hyb(Arguments argus)
             int row_nnz = hcsr_row_ptr[i + 1] - hcsr_row_ptr[i];
             ell_width   = (row_nnz > ell_width) ? row_nnz : ell_width;
         }
-        ell_nnz = ell_width * m;
+        ell_nnz = static_cast<int64_t>(ell_width) * m;
     }
 
     // Allocate host memory
@@ -322,7 +321,9 @@ void testing_csr2hyb(Arguments argus)
         unit_check_general(1, 1, 1, &m, &dhyb->m);
         unit_check_general(1, 1, 1, &n, &dhyb->n);
         unit_check_general(1, 1, 1, &ell_width, &dhyb->ell_width);
-        unit_check_general(1, 1, 1, &ell_nnz, &dhyb->ell_nnz);
+        // The mirrored hyb struct exposes rocSPARSE's 32-bit ell_nnz, clamped to INT32_MAX.
+        int ell_nnz_32 = static_cast<int>(std::min<int64_t>(ell_nnz, INT32_MAX));
+        unit_check_general(1, 1, 1, &ell_nnz_32, &dhyb->ell_nnz);
         unit_check_general(1, 1, 1, &coo_nnz, &dhyb->coo_nnz);
 
         CHECK_HIP_ERROR(hipMemcpy(hhyb_ell_col_ind.data(),

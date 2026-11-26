@@ -36,7 +36,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER
+#if _CCCL_CUDA_COMPILATION()
 #  include <thrust/system/cuda/config.h>
 
 #  include <thrust/distance.h>
@@ -69,7 +69,7 @@ template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
 struct transform_pair_of_input_iterators_t
 {
   using self_t            = transform_pair_of_input_iterators_t;
-  using difference_type   = typename iterator_traits<InputIt1>::difference_type;
+  using difference_type   = thrust::detail::it_difference_t<InputIt1>;
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
@@ -187,19 +187,19 @@ mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, Inp
   const auto transform_first =
     detail::transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>(first1, first2, binary_pred);
   const auto result = cuda_cub::find_if_not(
-    policy, transform_first, transform_first + thrust::distance(first1, last1), ::cuda::std::__identity{});
-  return thrust::make_pair(first1 + thrust::distance(transform_first, result),
-                           first2 + thrust::distance(transform_first, result));
+    policy, transform_first, transform_first + _THRUST_STD::distance(first1, last1), ::cuda::std::identity{});
+  return thrust::make_pair(first1 + _THRUST_STD::distance(transform_first, result),
+                           first2 + _THRUST_STD::distance(transform_first, result));
 
   // FIXME(bgruber): the following code should be equivalent and not require a dedicated iterator. However, it
   // additionally requires the value_type to constructible/destructible on the device, which should be fixed at some
   // point. See also: https://github.com/NVIDIA/cccl/issues/3591
 #  if 0
-  const auto n            = thrust::distance(first1, last1);
+  const auto n            = _THRUST_STD::distance(first1, last1);
   const auto first        = make_zip_iterator(first1, first2);
   const auto last         = make_zip_iterator(last1, first2 + n);
   const auto mismatch_pos = cuda_cub::find_if_not(policy, first, last, make_zip_function(binary_pred));
-  const auto dist         = thrust::distance(first, mismatch_pos);
+  const auto dist         = _THRUST_STD::distance(first, mismatch_pos);
   return thrust::make_pair(first1 + dist, first2 + dist);
 #  endif
 }
@@ -208,8 +208,8 @@ template <class Derived, class InputIt1, class InputIt2>
 pair<InputIt1, InputIt2> _CCCL_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
-  using InputType1 = typename thrust::iterator_value<InputIt1>::type;
-  return cuda_cub::mismatch(policy, first1, last1, first2, equal_to<InputType1>());
+  using InputType1 = thrust::detail::it_value_t<InputIt1>;
+  return cuda_cub::mismatch(policy, first1, last1, first2, ::cuda::std::equal_to<InputType1>());
 }
 
 } // namespace cuda_cub

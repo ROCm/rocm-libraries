@@ -36,9 +36,10 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/allocator_aware_execution_policy.h>
-#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/system/cuda/detail/execution_policy.h>
 #include <thrust/system/cuda/detail/util.h>
+
+#include <cuda/stream_ref>
 
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
@@ -51,12 +52,11 @@ private:
   cudaStream_t stream;
 
 public:
-  _CCCL_EXEC_CHECK_DISABLE
   _CCCL_HOST_DEVICE execute_on_stream_base(cudaStream_t stream_ = default_stream())
       : stream(stream_)
   {}
 
-  THRUST_RUNTIME_FUNCTION Derived on(cudaStream_t const& s) const
+  _CCCL_HOST_DEVICE Derived on(::cudaStream_t s) const
   {
     Derived result = derived_cast(*this);
     result.stream  = s;
@@ -81,7 +81,7 @@ public:
       : stream(stream_)
   {}
 
-  THRUST_RUNTIME_FUNCTION Derived on(cudaStream_t const& s) const
+  _CCCL_HOST_DEVICE Derived on(::cudaStream_t s) const
   {
     Derived result = derived_cast(*this);
     result.stream  = s;
@@ -105,9 +105,9 @@ struct execute_on_stream : execute_on_stream_base<execute_on_stream>
   using base_t = execute_on_stream_base<execute_on_stream>;
 
   _CCCL_HOST_DEVICE execute_on_stream()
-      : base_t(){};
+      : base_t() {};
   _CCCL_HOST_DEVICE execute_on_stream(cudaStream_t stream)
-      : base_t(stream){};
+      : base_t(stream) {};
 };
 
 struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_stream_nosync>
@@ -115,16 +115,14 @@ struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_strea
   using base_t = execute_on_stream_nosync_base<execute_on_stream_nosync>;
 
   _CCCL_HOST_DEVICE execute_on_stream_nosync()
-      : base_t(){};
+      : base_t() {};
   _CCCL_HOST_DEVICE execute_on_stream_nosync(cudaStream_t stream)
-      : base_t(stream){};
+      : base_t(stream) {};
 };
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 struct par_t
     : execution_policy<par_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
 {
   using base_t = execution_policy<par_t>;
 
@@ -134,18 +132,15 @@ struct par_t
 
   using stream_attachment_type = execute_on_stream;
 
-  THRUST_RUNTIME_FUNCTION stream_attachment_type on(cudaStream_t const& stream) const
+  _CCCL_HOST_DEVICE stream_attachment_type on(::cudaStream_t s) const
   {
-    return execute_on_stream(stream);
+    return execute_on_stream(s);
   }
 };
-_CCCL_SUPPRESS_DEPRECATED_POP
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 struct par_nosync_t
     : execution_policy<par_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
 {
   using base_t = execution_policy<par_nosync_t>;
 
@@ -155,9 +150,9 @@ struct par_nosync_t
 
   using stream_attachment_type = execute_on_stream_nosync;
 
-  THRUST_RUNTIME_FUNCTION stream_attachment_type on(cudaStream_t const& stream) const
+  _CCCL_HOST_DEVICE stream_attachment_type on(::cudaStream_t s) const
   {
-    return execute_on_stream_nosync(stream);
+    return execute_on_stream_nosync(s);
   }
 
 private:
@@ -168,7 +163,6 @@ private:
     return false;
   }
 };
-_CCCL_SUPPRESS_DEPRECATED_POP
 
 _CCCL_GLOBAL_CONSTANT par_t par;
 

@@ -27,9 +27,12 @@
 #include "format.hpp"
 #include "helper.hpp"
 
+#include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
@@ -116,13 +119,95 @@ namespace rocisa
         }
     }
 
+    // Splits the sources of a 64-bit integer add into its low and high 32-bit halves. A register
+    // pair splits into its two registers. An immediate splits into its low 32 bits and its high
+    // 32 bits, the sign extension for a 32-bit value; copying the immediate into both halves, as
+    // splitSrcs does for packed operations, would also add it times 2^32. An immediate above 2^31
+    // reaches here as a double holding an integer. A symbol cannot be split and is rejected.
+    // A double is exact only below 2^53 in magnitude; at or beyond that, a Python integer may
+    // have been rounded on its way in, so it is rejected rather than split as another value.
+    inline void splitSrcs64(const std::vector<InstructionInput>& srcs,
+                            std::vector<InstructionInput>&       srcs1,
+                            std::vector<InstructionInput>&       srcs2)
+    {
+        for(const auto& s : srcs)
+        {
+            std::visit(
+                [&srcs1, &srcs2](auto&& arg) -> void {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr(std::is_same_v<T, std::shared_ptr<rocisa::Container>>)
+                    {
+                        auto regContainer = std::dynamic_pointer_cast<RegisterContainer>(arg);
+
+                        auto [r1, r2] = regContainer->splitRegContainer();
+                        srcs1.push_back(r1);
+                        srcs2.push_back(r2);
+                    }
+                    else if constexpr(std::is_same_v<T, int>)
+                    {
+                        srcs1.push_back(arg);
+                        srcs2.push_back(arg < 0 ? -1 : 0);
+                    }
+                    else if constexpr(std::is_same_v<T, double>)
+                    {
+                        if(arg != std::trunc(arg) || std::fabs(arg) >= 0x1p53)
+                            throw std::invalid_argument(
+                                "64-bit add: cannot split immediate " + std::to_string(arg)
+                                + ", which is not an integer below 2^53 in magnitude, into"
+                                  " 32-bit halves");
+                        const uint64_t v = static_cast<uint64_t>(static_cast<int64_t>(arg));
+                        srcs1.push_back(static_cast<int>(static_cast<uint32_t>(v)));
+                        srcs2.push_back(static_cast<int>(static_cast<uint32_t>(v >> 32)));
+                    }
+                    else
+                    {
+                        throw std::invalid_argument("64-bit add: cannot split immediate '" + arg
+                                                    + "' into 32-bit halves");
+                    }
+                },
+                s);
+        }
+    }
+
+    // What a GIR action does.  Values mirror StinkyTofu's GirActionKind; the converter casts.
+    enum class GirActionKind : uint8_t
+    {
+        Other,
+        Ds,
+        Tensor,
+        Wmma
+    };
+
+    // One shared-memory touch this instruction makes.  It is a fact ABOUT THE INSTRUCTION, so it
+    // rides on it rather than in a side table the frame contract keys by action id.
+    struct GirAccess
+    {
+        bool isWrite    = false;
+        int  operand    = -1; // id of the (operand, region) pair this touch names
+        int  ring       = 1;
+        int  genId      = -1; // -1 = not bound to a generation
+        int  gdelta     = 0;
+        int  absolute   = -1; // -1 = relative, not pinned
+        bool crossAgent = false;
+    };
+
+    struct GirActionData
+    {
+        uint64_t               actionId     = 0;
+        uint64_t               anchorAction = 0;
+        GirActionKind          kind         = GirActionKind::Other;
+        std::vector<GirAccess> accesses;
+    };
+
     struct Instruction : public Item
     {
-        InstType         instType;
-        std::string      comment;
-        std::string      instStr;
-        bool             outputInlineAsm;
+        InstType                      instType;
+        std::string                   comment;
+        std::string                   instStr;
+        bool                          outputInlineAsm;
         std::shared_ptr<MemTokenData> m_memToken;
+        // Complete GIR semantic action record carried with every physical realization.
+        std::shared_ptr<GirActionData> m_girAction;
 
         Instruction(InstType instType, const std::string& comment = "")
             : instType(instType)
@@ -138,9 +223,10 @@ namespace rocisa
             , comment(other.comment)
             , instStr(other.instStr)
             , outputInlineAsm(other.outputInlineAsm)
-            , m_memToken(other.m_memToken
-                             ? std::make_shared<MemTokenData>(*other.m_memToken)
-                             : nullptr)
+            , m_memToken(other.m_memToken ? std::make_shared<MemTokenData>(*other.m_memToken)
+                                          : nullptr)
+            , m_girAction(other.m_girAction ? std::make_shared<GirActionData>(*other.m_girAction)
+                                            : nullptr)
         {
         }
 
@@ -152,6 +238,20 @@ namespace rocisa
         std::shared_ptr<MemTokenData> getMemToken() const
         {
             return m_memToken;
+        }
+
+        void setGirActionData(uint64_t                      actionId,
+                              uint64_t                      anchorAction,
+                              GirActionKind                 kind,
+                              const std::vector<GirAccess>& accesses)
+        {
+            m_girAction = std::make_shared<GirActionData>(
+                GirActionData{actionId, anchorAction, kind, accesses});
+        }
+
+        std::shared_ptr<GirActionData> getGirActionData() const
+        {
+            return m_girAction;
         }
 
         std::shared_ptr<Item> clone() const override
@@ -244,7 +344,8 @@ namespace rocisa
                     hasVgpr = true;
                 }
             }
-            if(!hasVgpr){
+            if(!hasVgpr)
+            {
                 if(getVgprMsb() == -1)
                     // Base layer WA: -2 means no-vgpr inst
                     rocIsa::getInstance().setVgprMsb(-2);
@@ -252,14 +353,16 @@ namespace rocisa
             }
             int newVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
             int oriVal = getVgprMsb();
-            if(newVal != oriVal && !outputInlineAsm){
+            if(newVal != oriVal && !outputInlineAsm)
+            {
                 // Base layer WA: need to store previous msb value in [15:8] bits.
                 //int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
-		// only set newVal until compiler support it
-                int setVal = newVal;
-                std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
-                std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
-                    ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
+                // only set newVal until compiler support it
+                int         setVal     = newVal;
+                std::string msbStr     = "s_set_vgpr_msb " + std::to_string(setVal);
+                std::string msbComment = std::string(
+                    "src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1])
+                    + ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
                 msbStr = formatStr(false, msbStr, msbComment, false);
                 // Base layer WA: add a no-vgpr inst if oriVal is non-determined and right after label
                 if(oriVal == -1)

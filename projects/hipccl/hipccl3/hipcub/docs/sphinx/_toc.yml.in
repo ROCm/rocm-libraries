@@ -3,6 +3,9 @@
 root: index
 subtrees:
 
+  - entries:
+    - file: about/hipCUB-cccl-updates
+      title: hipCUB CCCL 3.0.3 updates
   - caption: Install
     entries:
     - file: install/install
@@ -11,6 +14,8 @@ subtrees:
       title: Build from source
   - caption: Reference
     entries:
+    - url: https://rocm.docs.amd.com/projects/primbench/en/latest
+      title: Benchmarking with Primbench
     - file: api-reference/data-type-support
       title: Precision support
     - file: doxygen/html/index

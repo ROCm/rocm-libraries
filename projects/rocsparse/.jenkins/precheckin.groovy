@@ -43,9 +43,9 @@ def runCI =
     {
         platform, project->
 
-        // Fast, CPU-only unit tests first as an early gate (no GPU required).
-        commonGroovy.runUnitTestCommand(platform, project)
-
+        // runTestCommand launches rocsparse-unit-test and
+        // rocsparse-unit-test-device. Those launches live in that method
+        // because Math CI does not execute statements before it here.
         def gfilter = "*quick*:*pre_checkin*"
         commonGroovy.runTestCommand(platform, project, gfilter, true)
     }

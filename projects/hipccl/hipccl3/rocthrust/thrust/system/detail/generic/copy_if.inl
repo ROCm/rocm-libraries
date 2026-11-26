@@ -26,20 +26,22 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/copy_if.h>
-#include <thrust/detail/integer_traits.h>
 #include <thrust/detail/internal_functional.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/distance.h>
 #include <thrust/functional.h>
-#include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/scan.h>
 #include <thrust/scatter.h>
 #include <thrust/system/detail/generic/copy_if.h>
 #include <thrust/transform.h>
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <limits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -65,12 +67,12 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
   OutputIterator result,
   Predicate pred)
 {
-  const auto n = static_cast<IndexType>(thrust::distance(first, last));
+  const auto n = static_cast<IndexType>(_THRUST_STD::distance(first, last));
 
   // compute {0,1} predicates
   thrust::detail::temporary_array<IndexType, DerivedPolicy> predicates(exec, n);
   thrust::transform(
-    exec, stencil, stencil + n, predicates.begin(), thrust::detail::predicate_to_integral<Predicate, IndexType>(pred));
+    exec, stencil, stencil + n, predicates.begin(), thrust::detail::predicate_to_integral<Predicate, IndexType>{pred});
 
   // scan {0,1} predicates
   thrust::detail::temporary_array<IndexType, DerivedPolicy> scatter_indices(exec, n);
@@ -80,7 +82,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
     predicates.end(),
     scatter_indices.begin(),
     static_cast<IndexType>(0),
-    thrust::plus<IndexType>());
+    _THRUST_STD::plus<IndexType>());
 
   // scatter the true elements
   thrust::scatter_if(exec, first, last, scatter_indices.begin(), predicates.begin(), result);
@@ -121,7 +123,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
   OutputIterator result,
   Predicate pred)
 {
-  using difference_type = typename thrust::iterator_traits<InputIterator1>::difference_type;
+  using difference_type = thrust::detail::it_difference_t<InputIterator1>;
 
   // empty sequence
   if (first == last)
@@ -129,15 +131,14 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
     return result;
   }
 
-  difference_type n = thrust::distance(first, last);
+  difference_type n = _THRUST_STD::distance(first, last);
 
   // create an unsigned version of n (we know n is positive from the comparison above)
   // to avoid a warning in the compare below
   ::internal::make_unsigned_t<difference_type> unsigned_n(n);
 
   // use 32-bit indices when possible (almost always)
-  if (sizeof(difference_type) > sizeof(unsigned int)
-      && unsigned_n > thrust::detail::integer_traits<unsigned int>::const_max)
+  if (sizeof(difference_type) > sizeof(unsigned int) && unsigned_n > _THRUST_STD::numeric_limits<unsigned int>::max())
   {
     result = detail::copy_if<difference_type>(exec, first, last, stencil, result, pred);
   } // end if

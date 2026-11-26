@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -36,10 +36,10 @@
 #include <thrust/pair.h>
 #include <thrust/random/uniform_real_distribution.h>
 
-#include <cmath>
-#include <limits>
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/random/detail/erfcinv.h>
 #endif
 
@@ -119,10 +119,10 @@ protected:
   {
     // implementation from Boost
     // allow for Koenig lookup
-    using std::cos;
-    using std::log;
-    using std::sin;
-    using std::sqrt;
+    using _THRUST_STD::cos;
+    using _THRUST_STD::log;
+    using _THRUST_STD::sin;
+    using _THRUST_STD::sqrt;
 
     if (!m_valid)
     {
@@ -153,9 +153,7 @@ private:
 template <typename RealType>
 struct normal_distribution_base
 {
-#if (defined(__NVCC__) || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-     || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)                                         \
-  || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#if THRUST_CUDA_COMPILATION() && !THRUST_CUDA_COMPILER(NVHPC)
   using type = normal_distribution_nvcc<RealType>;
 #else
   using type = normal_distribution_portable<RealType>;

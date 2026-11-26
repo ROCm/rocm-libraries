@@ -5,11 +5,16 @@
 #include "Node.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/detail/ResampleBwdPacker.hpp>
 #include <hipdnn_frontend/detail/ResampleBwdUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/node/detail/CheckedShapeMath.hpp>
+#include <hipdnn_frontend/node/detail/ResampleParamsValidation.hpp>
+
+#include <string>
 
 namespace hipdnn_frontend::graph
 {
@@ -51,6 +56,19 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "ResampleBwdNode missing dx (output) for pre-validation");
 
+        // The modes must be ones the lowering can express; padding_mode may stay unset
+        HIPDNN_RETURN_IF_FALSE(
+            toBackendResampleMode(attributes.get_resample_mode()).has_value(),
+            ErrorCode::INVALID_VALUE,
+            "ResampleBwdNode resample mode "
+                + std::to_string(static_cast<int>(attributes.get_resample_mode()))
+                + " is not supported by hipDNN lowering");
+        HIPDNN_RETURN_IF_FALSE(toBackendPaddingMode(attributes.get_padding_mode()).has_value(),
+                               ErrorCode::INVALID_VALUE,
+                               "ResampleBwdNode padding mode "
+                                   + std::to_string(static_cast<int>(attributes.get_padding_mode()))
+                                   + " is not supported by hipDNN lowering");
+
         // Validate required tensor dimensions
         HIPDNN_RETURN_IF_TRUE(attributes.get_dy()->get_dim().empty(),
                               ErrorCode::ATTRIBUTE_NOT_SET,
@@ -76,6 +94,13 @@ public:
             return {ErrorCode::INVALID_VALUE,
                     "ResampleBwdNode input DY must have at least rank 3 (N, C, spatial...)"};
         }
+
+        HIPDNN_CHECK_ERROR(detail::validateResampleParams("ResampleBwdNode",
+                                                          dy->get_dim().size() - 2,
+                                                          attributes.get_window(),
+                                                          attributes.get_stride(),
+                                                          attributes.get_pre_padding(),
+                                                          attributes.get_post_padding()));
 
         auto dx = attributes.get_dx();
         if(!dx->get_dim().empty() && dx->get_dim().size() < 3)
@@ -127,13 +152,29 @@ public:
         if(dxDims.empty())
         {
             auto& dyDims = dyTensor->get_dim();
-            dxDims.resize(dyDims.size());
+            HIPDNN_RETURN_IF_TRUE(dyDims.empty(),
+                                  ErrorCode::ATTRIBUTE_NOT_SET,
+                                  "ResampleBwdNode missing dy dimensions for inferring dx "
+                                  "dimensions");
+            HIPDNN_RETURN_IF_LT(
+                dyDims.size(),
+                3,
+                ErrorCode::INVALID_VALUE,
+                "ResampleBwdNode input DY must have at least rank 3 (N, C, spatial...)");
 
             auto& prePadding = attributes.get_pre_padding();
             auto& postPadding = attributes.get_post_padding();
             auto& strideVec = attributes.get_stride();
             auto& windowVec = attributes.get_window();
 
+            HIPDNN_CHECK_ERROR(detail::requireResampleParams("ResampleBwdNode",
+                                                             dyDims.size() - 2,
+                                                             windowVec,
+                                                             strideVec,
+                                                             prePadding,
+                                                             postPadding));
+
+            dxDims.resize(dyDims.size());
             dxDims[0] = dyDims[0]; // N (batch)
             dxDims[1] = dyDims[1]; // C (channels preserved)
 
@@ -143,8 +184,23 @@ public:
             for(size_t i = 2; i < dyDims.size(); ++i)
             {
                 const size_t spatialIdx = i - 2;
-                dxDims[i] = (dyDims[i] - 1) * strideVec[spatialIdx] - prePadding[spatialIdx]
-                            - postPadding[spatialIdx] + windowVec[spatialIdx];
+                HIPDNN_CHECK_ERROR(detail::checkedTransposedExtent("ResampleBwdNode",
+                                                                   spatialIdx,
+                                                                   dyDims[i],
+                                                                   strideVec[spatialIdx],
+                                                                   prePadding[spatialIdx],
+                                                                   postPadding[spatialIdx],
+                                                                   windowVec[spatialIdx],
+                                                                   dxDims[i]));
+
+                HIPDNN_RETURN_IF_LT(dxDims[i],
+                                    1,
+                                    ErrorCode::INVALID_VALUE,
+                                    "ResampleBwdNode: inferred dx extent ("
+                                        + std::to_string(dxDims[i]) + ") at spatial index "
+                                        + std::to_string(spatialIdx)
+                                        + " is not positive for the given dy, window, stride "
+                                          "and padding");
             }
 
             dxTensor->set_dim(dxDims);

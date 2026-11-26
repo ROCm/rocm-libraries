@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@
 #  include <type_traits>
 #endif
 
-template <typename Input, typename CompareFunction = thrust::less<key_value<Input, Input>>>
+template <typename Input, typename CompareFunction = _THRUST_STD::less<key_value<Input, Input>>>
 struct ParamsMerge
 {
   using input_type       = Input;
@@ -44,22 +44,22 @@ public:
 };
 
 using MergeKeyValueTestsParams = ::testing::Types<
-  ParamsMerge<short, thrust::less<key_value<short, short>>>,
-  ParamsMerge<int, thrust::less<key_value<int, int>>>,
-  ParamsMerge<long long, thrust::less<key_value<long long, long long>>>,
-  ParamsMerge<unsigned short, thrust::less<key_value<unsigned short, unsigned short>>>,
-  ParamsMerge<unsigned int, thrust::less<key_value<unsigned int, unsigned int>>>,
-  ParamsMerge<unsigned long long, thrust::less<key_value<unsigned long long, unsigned long long>>>,
-  ParamsMerge<float, thrust::less<key_value<float, float>>>,
-  ParamsMerge<double, thrust::less<key_value<double, double>>>,
-  ParamsMerge<short, thrust::greater<key_value<short, short>>>,
-  ParamsMerge<int, thrust::greater<key_value<int, int>>>,
-  ParamsMerge<long long, thrust::greater<key_value<long long, long long>>>,
-  ParamsMerge<unsigned short, thrust::greater<key_value<unsigned short, unsigned short>>>,
-  ParamsMerge<unsigned int, thrust::greater<key_value<unsigned int, unsigned int>>>,
-  ParamsMerge<unsigned long long, thrust::greater<key_value<unsigned long long, unsigned long long>>>,
-  ParamsMerge<float, thrust::greater<key_value<float, float>>>,
-  ParamsMerge<double, thrust::greater<key_value<double, double>>>>;
+  ParamsMerge<short, _THRUST_STD::less<key_value<short, short>>>,
+  ParamsMerge<int, _THRUST_STD::less<key_value<int, int>>>,
+  ParamsMerge<long long, _THRUST_STD::less<key_value<long long, long long>>>,
+  ParamsMerge<unsigned short, _THRUST_STD::less<key_value<unsigned short, unsigned short>>>,
+  ParamsMerge<unsigned int, _THRUST_STD::less<key_value<unsigned int, unsigned int>>>,
+  ParamsMerge<unsigned long long, _THRUST_STD::less<key_value<unsigned long long, unsigned long long>>>,
+  ParamsMerge<float, _THRUST_STD::less<key_value<float, float>>>,
+  ParamsMerge<double, _THRUST_STD::less<key_value<double, double>>>,
+  ParamsMerge<short, _THRUST_STD::greater<key_value<short, short>>>,
+  ParamsMerge<int, _THRUST_STD::greater<key_value<int, int>>>,
+  ParamsMerge<long long, _THRUST_STD::greater<key_value<long long, long long>>>,
+  ParamsMerge<unsigned short, _THRUST_STD::greater<key_value<unsigned short, unsigned short>>>,
+  ParamsMerge<unsigned int, _THRUST_STD::greater<key_value<unsigned int, unsigned int>>>,
+  ParamsMerge<unsigned long long, _THRUST_STD::greater<key_value<unsigned long long, unsigned long long>>>,
+  ParamsMerge<float, _THRUST_STD::greater<key_value<float, float>>>,
+  ParamsMerge<double, _THRUST_STD::greater<key_value<double, double>>>>;
 
 TYPED_TEST_SUITE(MergeKeyValueTestsClass, MergeKeyValueTestsParams);
 
@@ -68,14 +68,14 @@ TESTS_DEFINE(MergeKeyValueTests, FullTestsParams);
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge(Args&&... args) -> decltype(thrust::merge(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  if constexpr (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, _THRUST_STD::less<T>, CompareOp>;
     return thrust::merge(std::forward<Args>(args)..., C{});
   }
   __builtin_unreachable();
@@ -113,7 +113,7 @@ TYPED_TEST(MergeKeyValueTestsClass, TestMergeKeyValue)
         h_b[i] = T(h_keys_b[i], h_values_b[i]);
       }
 
-      THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<compare_function>::value)
+      if constexpr (_THRUST_STD::is_void<compare_function>::value)
       {
         thrust::stable_sort(h_a.begin(), h_a.end());
         thrust::stable_sort(h_b.begin(), h_b.end());
@@ -121,8 +121,8 @@ TYPED_TEST(MergeKeyValueTestsClass, TestMergeKeyValue)
       else
       {
         // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
-        using C =
-          _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
+        using C = _THRUST_STD::
+          conditional_t<_THRUST_STD::is_void<compare_function>::value, _THRUST_STD::less<T>, compare_function>;
         thrust::stable_sort(h_a.begin(), h_a.end(), C{});
         thrust::stable_sort(h_b.begin(), h_b.end(), C{});
       }

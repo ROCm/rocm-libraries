@@ -59,6 +59,8 @@ static inline auto get_ck_common_compiler_flag(const Handle& handle)
     if(StartsWith(device_name, "gfx"))
     {
         std::string gfxid = device_name.substr(3);
+        // Target variants such as "gfx1250-strict" share the base target's CK config.
+        gfxid = gfxid.substr(0, gfxid.find('-'));
         std::transform(gfxid.begin(), gfxid.end(), gfxid.begin(), ::toupper);
         compiler_flag << " -DCK_AMD_GPU_GFX" << gfxid;
     }

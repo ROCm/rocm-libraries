@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -52,18 +52,27 @@ struct execution_policy;
 // specialize execution_policy for tag
 template <>
 struct execution_policy<tag> : thrust::execution_policy<tag>
-{};
+{
+  using tag_type = tag;
+};
 
 // tag's definition comes before the generic definition of execution_policy
 struct tag : execution_policy<tag>
 {
-  THRUST_HOST_DEVICE constexpr tag() {}
+  constexpr tag() = default;
+
+  // allow any execution_policy to convert to the sequential tag. required for minimum_system to pick the sequential one
+  template <typename DerivedPolicy>
+  THRUST_HOST_DEVICE tag(const thrust::execution_policy<DerivedPolicy>&)
+  {}
 };
 
 // allow conversion to tag when it is not a successor
 template <typename Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
+  using tag_type = tag;
+
   // allow conversion to tag
   THRUST_HOST_DEVICE inline operator tag() const
   {
@@ -71,7 +80,7 @@ struct execution_policy : thrust::execution_policy<Derived>
   }
 };
 
-THRUST_INLINE_CONSTANT tag seq;
+THRUST_GLOBAL_CONSTANT tag seq;
 
 } // namespace sequential
 } // namespace detail

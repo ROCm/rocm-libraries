@@ -277,6 +277,120 @@ namespace TensileLite
     using TypedGemm_F8NH_FP8_FP8_S
         = TypedGemm<Float8_fnuz, Half, Float8_fnuz, Float8_fnuz, float, float, Float8_fnuz>;
 
+    // Half-to-Float8 narrowing: remaining wide outputs and B8 mixed storage.
+    using TypedGemm_H_F8_S_S    = TypedGemm<Half, Half, float, float, float, float, Float8>;
+    using TypedGemm_H_F8_B_S    = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, Float8>;
+    using TypedGemm_HF8_FP8_B_S = TypedGemm<Half, Float8, BFloat16, BFloat16, float, float, Float8>;
+    using TypedGemm_F8H_FP8_B_S = TypedGemm<Float8, Half, BFloat16, BFloat16, float, float, Float8>;
+    using TypedGemm_H_B8_S_S    = TypedGemm<Half, Half, float, float, float, float, BFloat8>;
+    using TypedGemm_H_B8_B_S    = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, BFloat8>;
+    using TypedGemm_HB8_FP8_H_S = TypedGemm<Half, BFloat8, Half, Half, float, float, BFloat8>;
+    using TypedGemm_B8H_FP8_H_S = TypedGemm<BFloat8, Half, Half, Half, float, float, BFloat8>;
+    using TypedGemm_HB8_FP8_S_S = TypedGemm<Half, BFloat8, float, float, float, float, BFloat8>;
+    using TypedGemm_B8H_FP8_S_S = TypedGemm<BFloat8, Half, float, float, float, float, BFloat8>;
+    using TypedGemm_HB8_FP8_B_S
+        = TypedGemm<Half, BFloat8, BFloat16, BFloat16, float, float, BFloat8>;
+    using TypedGemm_B8H_FP8_B_S
+        = TypedGemm<BFloat8, Half, BFloat16, BFloat16, float, float, BFloat8>;
+    using TypedGemm_H_F8N_S_S = TypedGemm<Half, Half, float, float, float, float, Float8_fnuz>;
+    using TypedGemm_H_F8N_B_S
+        = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, Float8_fnuz>;
+    using TypedGemm_HF8N_FP8_B_S
+        = TypedGemm<Half, Float8_fnuz, BFloat16, BFloat16, float, float, Float8_fnuz>;
+    using TypedGemm_F8NH_FP8_B_S
+        = TypedGemm<Float8_fnuz, Half, BFloat16, BFloat16, float, float, Float8_fnuz>;
+    using TypedGemm_H_B8N_S_S = TypedGemm<Half, Half, float, float, float, float, BFloat8_fnuz>;
+    using TypedGemm_H_B8N_B_S
+        = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, BFloat8_fnuz>;
+    using TypedGemm_HB8N_FP8_H_S
+        = TypedGemm<Half, BFloat8_fnuz, Half, Half, float, float, BFloat8_fnuz>;
+    using TypedGemm_B8NH_FP8_H_S
+        = TypedGemm<BFloat8_fnuz, Half, Half, Half, float, float, BFloat8_fnuz>;
+    using TypedGemm_HB8N_FP8_S_S
+        = TypedGemm<Half, BFloat8_fnuz, float, float, float, float, BFloat8_fnuz>;
+    using TypedGemm_B8NH_FP8_S_S
+        = TypedGemm<BFloat8_fnuz, Half, float, float, float, float, BFloat8_fnuz>;
+    using TypedGemm_HB8N_FP8_B_S
+        = TypedGemm<Half, BFloat8_fnuz, BFloat16, BFloat16, float, float, BFloat8_fnuz>;
+    using TypedGemm_B8NH_FP8_B_S
+        = TypedGemm<BFloat8_fnuz, Half, BFloat16, BFloat16, float, float, BFloat8_fnuz>;
+
+    // Mixed Float8/BFloat8 compute inputs with at least one Half storage operand.
+    using TypedGemm_H_F8B8_S_S = TypedGemm<Half, Half, float, float, float, float, Float8, BFloat8>;
+    using TypedGemm_H_F8B8_B_S
+        = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, Float8, BFloat8>;
+    using TypedGemm_HB8_F8B8_H_S
+        = TypedGemm<Half, BFloat8, Half, Half, float, float, Float8, BFloat8>;
+    using TypedGemm_F8H_F8B8_H_S
+        = TypedGemm<Float8, Half, Half, Half, float, float, Float8, BFloat8>;
+    using TypedGemm_HB8_F8B8_S_S
+        = TypedGemm<Half, BFloat8, float, float, float, float, Float8, BFloat8>;
+    using TypedGemm_F8H_F8B8_S_S
+        = TypedGemm<Float8, Half, float, float, float, float, Float8, BFloat8>;
+    using TypedGemm_HB8_F8B8_B_S
+        = TypedGemm<Half, BFloat8, BFloat16, BFloat16, float, float, Float8, BFloat8>;
+    using TypedGemm_F8H_F8B8_B_S
+        = TypedGemm<Float8, Half, BFloat16, BFloat16, float, float, Float8, BFloat8>;
+    using TypedGemm_H_B8F8_S_S = TypedGemm<Half, Half, float, float, float, float, BFloat8, Float8>;
+    using TypedGemm_H_B8F8_B_S
+        = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, BFloat8, Float8>;
+    using TypedGemm_HF8_B8F8_H_S
+        = TypedGemm<Half, Float8, Half, Half, float, float, BFloat8, Float8>;
+    using TypedGemm_B8H_B8F8_H_S
+        = TypedGemm<BFloat8, Half, Half, Half, float, float, BFloat8, Float8>;
+    using TypedGemm_HF8_B8F8_S_S
+        = TypedGemm<Half, Float8, float, float, float, float, BFloat8, Float8>;
+    using TypedGemm_B8H_B8F8_S_S
+        = TypedGemm<BFloat8, Half, float, float, float, float, BFloat8, Float8>;
+    using TypedGemm_HF8_B8F8_B_S
+        = TypedGemm<Half, Float8, BFloat16, BFloat16, float, float, BFloat8, Float8>;
+    using TypedGemm_B8H_B8F8_B_S
+        = TypedGemm<BFloat8, Half, BFloat16, BFloat16, float, float, BFloat8, Float8>;
+    using TypedGemm_H_F8B8N_S_S
+        = TypedGemm<Half, Half, float, float, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_H_F8B8N_B_S
+        = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_HB8N_F8B8N_H_S
+        = TypedGemm<Half, BFloat8_fnuz, Half, Half, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_F8NH_F8B8N_H_S
+        = TypedGemm<Float8_fnuz, Half, Half, Half, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_HB8N_F8B8N_S_S
+        = TypedGemm<Half, BFloat8_fnuz, float, float, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_F8NH_F8B8N_S_S
+        = TypedGemm<Float8_fnuz, Half, float, float, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_HB8N_F8B8N_B_S = TypedGemm<Half,
+                                               BFloat8_fnuz,
+                                               BFloat16,
+                                               BFloat16,
+                                               float,
+                                               float,
+                                               Float8_fnuz,
+                                               BFloat8_fnuz>;
+    using TypedGemm_F8NH_F8B8N_B_S
+        = TypedGemm<Float8_fnuz, Half, BFloat16, BFloat16, float, float, Float8_fnuz, BFloat8_fnuz>;
+    using TypedGemm_H_B8F8N_S_S
+        = TypedGemm<Half, Half, float, float, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_H_B8F8N_B_S
+        = TypedGemm<Half, Half, BFloat16, BFloat16, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_HF8N_B8F8N_H_S
+        = TypedGemm<Half, Float8_fnuz, Half, Half, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_B8NH_B8F8N_H_S
+        = TypedGemm<BFloat8_fnuz, Half, Half, Half, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_HF8N_B8F8N_S_S
+        = TypedGemm<Half, Float8_fnuz, float, float, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_B8NH_B8F8N_S_S
+        = TypedGemm<BFloat8_fnuz, Half, float, float, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_HF8N_B8F8N_B_S
+        = TypedGemm<Half, Float8_fnuz, BFloat16, BFloat16, float, float, BFloat8_fnuz, Float8_fnuz>;
+    using TypedGemm_B8NH_B8F8N_B_S = TypedGemm<BFloat8_fnuz,
+                                               Half,
+                                               BFloat16,
+                                               BFloat16,
+                                               float,
+                                               float,
+                                               BFloat8_fnuz,
+                                               Float8_fnuz>;
+
 #ifndef _WIN32
     using TypedGemm_F6_S_S = TypedGemm<Float6x32, Float6x32, float, float>;
     using TypedGemm_BF6_S_S = TypedGemm<BFloat6x32, BFloat6x32, float, float>;
@@ -330,5 +444,34 @@ namespace TensileLite
     using TypedGemm_B6F8_S_S = TypedGemm<BFloat6x32, Float8, float, float, float, float, BFloat6x32, Float8>;
     using TypedGemm_B8B6_S_S = TypedGemm<BFloat8, BFloat6x32, float, float, float, float, BFloat8, BFloat6x32>;
     using TypedGemm_B6B8_S_S = TypedGemm<BFloat6x32, BFloat8, float, float, float, float, BFloat6x32, BFloat8>;
+    // Half/BFloat16 dest for 6-bit and 6-bit/other mixed gemms (RR custom kernels)
+    using TypedGemm_F6_H_S = TypedGemm<Float6x32, Float6x32, Half, Half, float, float, Float6x32, Float6x32>;
+    using TypedGemm_F6_B_S = TypedGemm<Float6x32, Float6x32, BFloat16, BFloat16, float, float, Float6x32, Float6x32>;
+    using TypedGemm_BF6_H_S = TypedGemm<BFloat6x32, BFloat6x32, Half, Half, float, float, BFloat6x32, BFloat6x32>;
+    using TypedGemm_BF6_B_S = TypedGemm<BFloat6x32, BFloat6x32, BFloat16, BFloat16, float, float, BFloat6x32, BFloat6x32>;
+    using TypedGemm_F6B6_H_S = TypedGemm<Float6x32, BFloat6x32, Half, Half, float, float, Float6x32, BFloat6x32>;
+    using TypedGemm_F6B6_B_S = TypedGemm<Float6x32, BFloat6x32, BFloat16, BFloat16, float, float, Float6x32, BFloat6x32>;
+    using TypedGemm_B6F6_H_S = TypedGemm<BFloat6x32, Float6x32, Half, Half, float, float, BFloat6x32, Float6x32>;
+    using TypedGemm_B6F6_B_S = TypedGemm<BFloat6x32, Float6x32, BFloat16, BFloat16, float, float, BFloat6x32, Float6x32>;
+    using TypedGemm_F6F4_H_S = TypedGemm<Float6x32, Float4x2, Half, Half, float, float, Float6x32, Float4x2>;
+    using TypedGemm_F4F6_H_S = TypedGemm<Float4x2, Float6x32, Half, Half, float, float, Float4x2, Float6x32>;
+    using TypedGemm_F6F8_H_S = TypedGemm<Float6x32, Float8, Half, Half, float, float, Float6x32, Float8>;
+    using TypedGemm_F6F8_B_S = TypedGemm<Float6x32, Float8, BFloat16, BFloat16, float, float, Float6x32, Float8>;
+    using TypedGemm_F8F6_H_S = TypedGemm<Float8, Float6x32, Half, Half, float, float, Float8, Float6x32>;
+    using TypedGemm_F8F6_B_S = TypedGemm<Float8, Float6x32, BFloat16, BFloat16, float, float, Float8, Float6x32>;
+    using TypedGemm_F6B8_H_S = TypedGemm<Float6x32, BFloat8, Half, Half, float, float, Float6x32, BFloat8>;
+    using TypedGemm_F6B8_B_S = TypedGemm<Float6x32, BFloat8, BFloat16, BFloat16, float, float, Float6x32, BFloat8>;
+    using TypedGemm_B8F6_H_S = TypedGemm<BFloat8, Float6x32, Half, Half, float, float, BFloat8, Float6x32>;
+    using TypedGemm_B8F6_B_S = TypedGemm<BFloat8, Float6x32, BFloat16, BFloat16, float, float, BFloat8, Float6x32>;
+    using TypedGemm_B6F4_H_S = TypedGemm<BFloat6x32, Float4x2, Half, Half, float, float, BFloat6x32, Float4x2>;
+    using TypedGemm_F4B6_H_S = TypedGemm<Float4x2, BFloat6x32, Half, Half, float, float, Float4x2, BFloat6x32>;
+    using TypedGemm_B6F8_H_S = TypedGemm<BFloat6x32, Float8, Half, Half, float, float, BFloat6x32, Float8>;
+    using TypedGemm_B6F8_B_S = TypedGemm<BFloat6x32, Float8, BFloat16, BFloat16, float, float, BFloat6x32, Float8>;
+    using TypedGemm_F8B6_H_S = TypedGemm<Float8, BFloat6x32, Half, Half, float, float, Float8, BFloat6x32>;
+    using TypedGemm_F8B6_B_S = TypedGemm<Float8, BFloat6x32, BFloat16, BFloat16, float, float, Float8, BFloat6x32>;
+    using TypedGemm_B6B8_H_S = TypedGemm<BFloat6x32, BFloat8, Half, Half, float, float, BFloat6x32, BFloat8>;
+    using TypedGemm_B6B8_B_S = TypedGemm<BFloat6x32, BFloat8, BFloat16, BFloat16, float, float, BFloat6x32, BFloat8>;
+    using TypedGemm_B8B6_H_S = TypedGemm<BFloat8, BFloat6x32, Half, Half, float, float, BFloat8, BFloat6x32>;
+    using TypedGemm_B8B6_B_S = TypedGemm<BFloat8, BFloat6x32, BFloat16, BFloat16, float, float, BFloat8, BFloat6x32>;
 #endif // !_WIN32
 } // namespace TensileLite

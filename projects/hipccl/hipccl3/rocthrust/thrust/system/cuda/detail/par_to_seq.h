@@ -28,6 +28,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/seq.h>
 #include <thrust/system/cuda/detail/par.h>
 
@@ -36,11 +44,11 @@ namespace cuda_cub
 {
 
 template <int PAR>
-struct has_par : thrust::detail::true_type
+struct has_par : _THRUST_STD::true_type
 {};
 
 template <>
-struct has_par<0> : thrust::detail::false_type
+struct has_par<0> : _THRUST_STD::false_type
 {};
 
 template <class Policy>

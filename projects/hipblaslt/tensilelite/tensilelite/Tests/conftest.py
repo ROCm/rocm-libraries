@@ -1,0 +1,418 @@
+################################################################################
+#
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+import pytest
+import os
+import sys
+
+try:
+    import xdist  # noqa
+except ImportError:
+    @pytest.fixture(scope="session")
+    def worker_id():
+        return None
+
+testdir = os.path.dirname(__file__)
+moddir = os.path.dirname(testdir)
+rootdir = os.path.dirname(moddir)
+if testdir not in sys.path:
+    sys.path.insert(0, testdir)
+sys.path.append(rootdir)
+
+
+def pytest_report_header(config):
+    # pytest captures the workers' "Launching N threads" lines; show each worker's pool budget.
+    import importlib
+
+    # One --tx entry per pytest-xdist worker, after -n auto and --maxprocesses are applied.
+    workers = len(getattr(config.option, "tx", None) or []) or 1
+    try:
+        parallel = importlib.import_module("tensilelite.Common.Parallel")
+        return parallel.describePoolSizeBudget(workers)
+    except Exception as e:  # a header must never fail the session
+        return "TensileLite pool budget: unavailable (%s)" % e
+
+
+def pytest_addoption(parser):
+    parser.addoption("--tensile-options")
+    parser.addoption("--global-parameters")
+    parser.addoption("--prebuilt-client")
+    parser.addoption("--no-common-build", action="store_true")
+    parser.addoption("--builddir", "--client-dir")
+    parser.addoption("--timing-file", default=None)
+    parser.addoption("--gpu-targets", default=None,
+        help="Semicolon-separated GPU targets (e.g. gfx942). "
+             "Overrides hardware auto-detection.")
+    parser.addoption("--build-only", action="store_true", default=False,
+        help="Run only the build phase (no benchmarking). "
+             "Requires --artifact-dir.")
+    parser.addoption("--use-cache", action="store_true", default=False,
+        help="Run using previously built cache. "
+             "Requires --artifact-dir.")
+    parser.addoption("--artifact-dir", default=None,
+        help="Directory for cross-machine test artifacts. "
+             "With --build-only: compressed build outputs are written here. "
+             "With --use-cache: previously built artifacts are read from here. "
+             "Required when either --build-only or --use-cache is set.")
+
+@pytest.fixture(scope="session")
+def timing_path(pytestconfig, tmpdir_factory):
+    userDir = pytestconfig.getoption("--timing-file")
+    if userDir is not None:
+        return userDir
+    return str(tmpdir_factory.mktemp("results") / "timing.csv")
+
+@pytest.fixture(autouse=True)
+def incremental_timer(request, worker_lock_instance, timing_path):
+    #import pdb
+    #pdb.set_trace()
+    import datetime
+    start = datetime.datetime.now()
+    yield
+    stop = datetime.datetime.now()
+
+    testtime = stop - start
+    with worker_lock_instance:
+        with open(timing_path, "a") as f:
+            f.write("{},{}\n".format(request.node.name, testtime.total_seconds()))
+
+@pytest.fixture(scope="session")
+def builddir(pytestconfig, tmpdir_factory):
+    userDir = pytestconfig.getoption("--builddir")
+    if userDir is not None:
+        return userDir
+    return str(tmpdir_factory.mktemp("0_Build"))
+
+@pytest.fixture(scope="session")
+def worker_gpu_id(worker_id):
+    """
+    Computes the GPU token this xdist worker is pinned to via
+    HIP_VISIBLE_DEVICES, mirroring the modulo-wrapping logic in
+    assign_gpu_to_worker(). The returned token also doubles as a stable
+    per-physical-GPU key for worker_lock_path. Returns None when there is no
+    xdist worker, or when running under the FFM emulator (where each worker
+    gets its own emulator instance instead of sharing a physical GPU).
+    """
+    if not worker_id or worker_id == "master":
+        return None
+    if os.environ.get("HSA_MODEL_MEMFILE"):
+        return None
+
+    import re
+    from tensilelite.ParallelExecution import detectAvailableGpus
+
+    match = re.search(r'\d+', worker_id)
+    if not match:
+        return None
+    worker_num = int(match.group())
+
+    # amd-smi (used by detectAvailableGpus) enumerates every physical GPU on
+    # the system via the driver layer, ignoring ROCR_VISIBLE_DEVICES/
+    # HIP_VISIBLE_DEVICES (HSA-runtime-level restrictions that scope what
+    # HIP/HSA applications may use). Honor an existing restriction instead of
+    # amd-smi's system-wide count so workers only wrap onto devices the caller
+    # actually allowed.
+    #
+    # ROCR and HIP live in different index spaces, so the pinned token is
+    # derived differently:
+    #   * HIP_VISIBLE_DEVICES values are the ids HIP ultimately consumes (into
+    #     the ROCR-filtered set, if ROCR is also set, otherwise the physical
+    #     set), so assign the selected id itself, not a bare ordinal.
+    #   * ROCR_VISIBLE_DEVICES filters at the HSA layer and HIP re-indexes the
+    #     survivors from 0, so the token is the 0-based ordinal into that set.
+    def _parse(var):
+        value = os.environ.get(var)
+        return [d.strip() for d in value.split(",") if d.strip()] if value else []
+
+    hip_devices = _parse("HIP_VISIBLE_DEVICES")
+    if hip_devices:
+        return hip_devices[worker_num % len(hip_devices)]
+
+    rocr_devices = _parse("ROCR_VISIBLE_DEVICES")
+    if rocr_devices:
+        return str(worker_num % len(rocr_devices))
+
+    return str(worker_num % detectAvailableGpus())
+
+@pytest.fixture(scope="session")
+def worker_lock_path(tmp_path_factory, worker_id, worker_gpu_id):
+    if not worker_id:
+        return None
+
+    # Under FFM each worker gets its own emulator instance, so there is
+    # no GPU contention — give each worker a private lock so client
+    # invocations can run in parallel across workers.
+    if os.environ.get("HSA_MODEL_MEMFILE"):
+        return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+
+    # On real hardware, workers only avoid GPU contention when
+    # assign_gpu_to_worker() gave them *distinct* physical GPUs. If the
+    # worker count exceeds the number of visible GPUs (e.g. a single GPU
+    # pinned via ROCR_VISIBLE_DEVICES), multiple workers wrap around onto
+    # the same physical device. Key the lock by GPU id rather than worker
+    # id so those workers still serialize their client subprocesses
+    # instead of racing unsynchronized on the same GPU.
+    if worker_gpu_id is not None:
+        return tmp_path_factory.getbasetemp().parent / f"client_execution_gpu{worker_gpu_id}.lock"
+
+    return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+
+@pytest.fixture(scope="session", autouse=True)
+def assign_gpu_to_worker(worker_id, worker_gpu_id):
+    """
+    Assigns a GPU to each pytest-xdist worker using modulo arithmetic.
+    Worker IDs are in format 'gw0', 'gw1', 'gw2', etc.
+    Sets HIP_VISIBLE_DEVICES to isolate GPU access per worker.
+
+    If you have N GPUs and M workers:
+    - Worker 0 -> GPU 0, Worker 1 -> GPU 1, ..., Worker N-1 -> GPU N-1
+    - Worker N -> GPU 0, Worker N+1 -> GPU 1, etc. (wraps around)
+    """
+    if not worker_id or worker_id == "master":
+        # Single worker or master process - use all GPUs
+        return
+
+    base_memfile = os.environ.get("HSA_MODEL_MEMFILE", "")
+    if base_memfile:
+        os.environ["HSA_MODEL_MEMFILE"] = f"{base_memfile}_{worker_id}"
+        print(f"Worker {worker_id}: HSA_MODEL_MEMFILE={os.environ['HSA_MODEL_MEMFILE']}")
+        return
+
+    if worker_gpu_id is not None:
+        os.environ['HIP_VISIBLE_DEVICES'] = str(worker_gpu_id)
+        print(f"Worker {worker_id} assigned to GPU {worker_gpu_id}")
+    else:
+        print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
+
+@pytest.fixture(autouse=True)
+def _restore_valid_parameters_isa():
+    """Put ``validParameters["ISA"]`` back after each test.
+
+    ``assignGlobalParameters`` rebinds that entry to the isa map it was given.
+    ``test_valid_parameters_structure`` snapshots the static list, whose second
+    entry is gfx803. A gfx942 assignment that does not restore leaves the next
+    test on this worker comparing against ``(9, 4, *)``.
+    """
+    from tensilelite.Common.ValidParameters import validParameters
+
+    saved = validParameters.get("ISA")
+    saved_isa = None if saved is None else list(saved)
+    try:
+        yield
+    finally:
+        if saved_isa is None:
+            validParameters.pop("ISA", None)
+        else:
+            validParameters["ISA"] = saved_isa
+
+
+@pytest.fixture(autouse=True)
+def clear_ffm_memfile_per_test():
+   """
+   Unlinks the worker's HSA_MODEL_MEMFILE after each test so the next
+   tensilelite-client subprocess starts with a fresh FFM emulator backing.
+   Helps isolate flakiness caused by residual state in the shared memfile
+   between consecutive tests on the same worker.
+   """
+   yield
+   memfile = os.environ.get("HSA_MODEL_MEMFILE")
+   if not memfile:
+     return
+   try:
+     os.unlink(memfile)
+   except FileNotFoundError:
+     pass
+   except OSError as e:
+     print(f"warn: could not unlink {memfile}: {e}", file=sys.stderr)
+
+@pytest.fixture
+def tensile_script_path():
+    return os.path.join(moddir, 'bin', 'Tensile')
+
+@pytest.fixture
+def worker_lock_instance(worker_lock_path):
+    if not worker_lock_path:
+        return open(os.devnull)
+
+    import filelock
+    return filelock.FileLock(str(worker_lock_path))
+
+@pytest.fixture
+def tensile_args(request, pytestconfig, builddir, worker_lock_path):
+    from tensile_args import tensileArgs
+    world = request.node.get_closest_marker("world")
+    return tensileArgs(pytestconfig.getoption, worker_lock_path, world.args if world else None)
+
+def visibleDeviceCount():
+    """
+    Number of devices HIP will expose to this process.
+
+    detectAvailableGpus() reports the physical count and ignores both variables.
+    """
+    counts = [
+        len([d for d in value.split(",") if d.strip()])
+        for value in (os.environ.get("ROCR_VISIBLE_DEVICES"),
+                      os.environ.get("HIP_VISIBLE_DEVICES"))
+        if value is not None
+    ]
+    if counts:
+        return min(counts)
+
+    from tensilelite.ParallelExecution import detectAvailableGpus
+    return detectAvailableGpus()
+
+_UNSET = object()
+
+
+def commSkipMark(config, devices):
+    """Mark to apply to a `comm` test that needs `devices` devices, or None when it can run here."""
+    if config.getoption("--build-only", default=False):
+        return None
+
+    if hasattr(config, "workerinput"):
+        return pytest.mark.skip(
+            reason=f"comm tests need {devices} devices; assign_gpu_to_worker pins each "
+                   "xdist worker to one")
+
+    count = visibleDeviceCount()
+    if count < devices:
+        return pytest.mark.skip(
+            reason=f"comm tests need {devices} visible HIP devices, found {count}")
+    return None
+
+
+def dpxSkipMark(config):
+    """Mark to apply to a `dpx` test, or None when this machine has a GPU in DPX mode.
+
+    `dpx` tests need the two partitions of one GPU, which can reach each other's memory. Two
+    separate cards (SPX) are not enough, so the number of devices is not what is checked; see
+    gpu_detection.dpx_pairs.
+    """
+    if config.getoption("--build-only", default=False):
+        return None
+
+    if hasattr(config, "workerinput"):
+        return pytest.mark.skip(
+            reason="dpx tests need two partitions of one GPU; assign_gpu_to_worker pins each "
+                   "xdist worker to one")
+
+    from gpu_detection import has_dpx
+    if not has_dpx():
+        return pytest.mark.skip(
+            reason="dpx tests need a GPU in DPX mode: two visible HIP devices that are the two "
+                   "partitions of one GPU (same PCI domain, bus and device, different function)")
+    return None
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Report how many logic-corpus-dependent tests ran in this lane and how many skipped.
+
+    Without this line a lane that lacks the corpus reads as covered as one that
+    has it, since these skips look like any other. See ``Tests/unit/logic_corpus.py``.
+    """
+    outcomes = {}
+    for category in ("passed", "failed", "error", "skipped"):
+        outcomes[category] = {
+            report.nodeid
+            for report in terminalreporter.stats.get(category, [])
+            if "needs_logic_corpus" in getattr(report, "keywords", {})
+        }
+    ran = outcomes["passed"] | outcomes["failed"] | outcomes["error"]
+    skipped = outcomes["skipped"] - ran
+    if not ran and not skipped:
+        return
+    terminalreporter.write_sep("-", "logic corpus")
+    terminalreporter.write_line(
+        f"needs_logic_corpus: {len(ran)} ran, {len(skipped)} skipped"
+        + (" (corpus not present; set HIPBLASLT_LOGIC_ROOT to point at it)" if skipped else "")
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Mainly for tests that aren't simple YAML files (including unit tests).
+    Adds a mark for the root directory name to each test.
+
+    Also skips `comm` tests unless this process can reach the devices they
+    need: the largest world they are marked with, or two.
+    """
+    commSkips = {}
+    dpxSkip = _UNSET
+
+    for item in items:
+
+        relpath = item.fspath.relto(testdir)
+        components = relpath.split(os.path.sep)
+        # print(f"Items: {item}, Testdir: {testdir}, Components: {components}")
+        if len(components) > 0 and len(components[0]) > 0:
+            item.add_marker(getattr(pytest.mark, components[0]))
+
+        if item.get_closest_marker("comm"):
+            world = item.get_closest_marker("world")
+            devices = max(world.args) if world else 2
+            if devices not in commSkips:
+                commSkips[devices] = commSkipMark(config, devices)
+            if commSkips[devices] is not None:
+                item.add_marker(commSkips[devices])
+
+        if item.get_closest_marker("dpx"):
+            if dpxSkip is _UNSET:
+                dpxSkip = dpxSkipMark(config)
+            if dpxSkip is not None:
+                item.add_marker(dpxSkip)
+
+@pytest.fixture
+def useGlobalParameters(tensile_args):
+    from tensilelite import Common
+    from tensilelite import run
+    import argparse
+
+    class gpUpdater:
+        def __init__(self, **params):
+            self.additionalParams = params
+
+        def __enter__(self):
+            argParser = argparse.ArgumentParser()
+            run.addCommonArguments(argParser)
+            args = argParser.parse_args(tensile_args)
+
+            Common.restoreDefaultGlobalParameters()
+            if args.CxxCompiler:
+                Common.globalParameters["CxxCompiler"] = args.CxxCompiler
+            isa = Common.detectGlobalCurrentISA(args.device)
+            Common.assignGlobalParameters({}, isa)
+
+            overrideParameters = run.argUpdatedGlobalParameters(args)
+            for key, value in overrideParameters.items():
+                Common.globalParameters[key] = value
+
+            for key, value in self.additionalParams.items():
+                Common.globalParameters[key] = value
+
+            return Common.globalParameters
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            Common.restoreDefaultGlobalParameters()
+
+    return gpUpdater

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -63,7 +63,6 @@ using InternalWarpExchangeImpl
 template<typename InputT,
          int                   ITEMS_PER_THREAD,
          int                   LOGICAL_WARP_THREADS    = HIPCUB_DEVICE_WARP_THREADS,
-         int                   ARCH                    = HIPCUB_ARCH,
          WarpExchangeAlgorithm WARP_EXCHANGE_ALGORITHM = WARP_EXCHANGE_SMEM>
 class WarpExchange
     : private detail::InternalWarpExchangeImpl<InputT,

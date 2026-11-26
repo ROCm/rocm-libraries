@@ -27,18 +27,15 @@
 #endif // no system header
 
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/config/cpp_compatibility.h>
 
-#include <cstddef>
+#include _THRUST_STD_INCLUDE(cstddef)
 
 #define THRUST_MR_DEFAULT_ALIGNMENT alignof(THRUST_NS_QUALIFIER::detail::max_align_t)
 
 #if THRUST_HAS_INCLUDE(<memory_resource>)
 #  define THRUST_MR_STD_MR_HEADER <memory_resource>
 #  define THRUST_MR_STD_MR_NS     std::pmr
-// clang-format off
 #elif THRUST_HAS_INCLUDE(<experimental/memory_resource>)
-// clang-format on
 #  define THRUST_MR_STD_MR_HEADER <experimental/memory_resource>
 #  define THRUST_MR_STD_MR_NS     std::experimental::pmr
 #endif

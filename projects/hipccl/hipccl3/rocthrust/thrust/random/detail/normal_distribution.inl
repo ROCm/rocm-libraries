@@ -26,14 +26,12 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/integer_traits.h>
 #include <thrust/random/normal_distribution.h>
 #include <thrust/random/uniform_real_distribution.h>
 
+#include _THRUST_STD_INCLUDE(cstdint)
 // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
 #include _THRUST_STD_INCLUDE(limits)
-
-#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 

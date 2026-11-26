@@ -52,7 +52,7 @@ THRUST_HOST_DEVICE OutputIterator gather(
     thrust::make_permutation_iterator(input_first, map_first),
     thrust::make_permutation_iterator(input_first, map_last),
     result,
-    ::internal::identity{});
+    _THRUST_STD::identity{});
 } // end gather()
 
 template <typename DerivedPolicy,
@@ -68,7 +68,7 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
   RandomAccessIterator input_first,
   OutputIterator result)
 {
-  return thrust::gather_if(exec, map_first, map_last, stencil, input_first, result, ::internal::identity{});
+  return thrust::gather_if(exec, map_first, map_last, stencil, input_first, result, _THRUST_STD::identity{});
 } // end gather_if()
 
 template <typename DerivedPolicy,
@@ -92,7 +92,7 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
     thrust::make_permutation_iterator(input_first, map_last),
     stencil,
     result,
-    ::internal::identity{},
+    _THRUST_STD::identity{},
     pred);
 } // end gather_if()
 

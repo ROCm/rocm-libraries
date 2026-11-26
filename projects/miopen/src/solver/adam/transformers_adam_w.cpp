@@ -64,7 +64,8 @@ ConvSolution TransformersAdamW::GetSolution(const ExecutionContext& context,
                 {"GTYPE", grad_dtype},
                 {"CTYPE", ptype_size > 4 ? "double" : "float"},
             }
-            << GetDataTypeKBP(problem.GetParamDesc().GetType());
+            << GetDataTypeKBP(problem.GetParamDesc().GetType(),
+                              context.GetStream().GetDeviceName());
 
         constexpr size_t local_size = 256;
         auto& handle                = context.GetStream();

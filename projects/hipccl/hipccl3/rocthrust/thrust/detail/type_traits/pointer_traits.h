@@ -25,9 +25,11 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
+#include <thrust/detail/type_traits/is_thrust_pointer.h>
 #include <thrust/iterator/iterator_traits.h>
 
 #include _THRUST_STD_INCLUDE(cstddef)
@@ -145,31 +147,6 @@ struct rebind_pointer<
 namespace pointer_traits_detail
 {
 
-template <typename Ptr, typename Enable = void>
-struct pointer_raw_pointer_impl
-{};
-
-template <typename T>
-struct pointer_raw_pointer_impl<T*>
-{
-  using type = T*;
-};
-
-template <typename Ptr>
-struct pointer_raw_pointer_impl<Ptr, _THRUST_STD::void_t<typename Ptr::raw_pointer>>
-{
-  using type = typename Ptr::raw_pointer;
-};
-
-} // namespace pointer_traits_detail
-
-template <typename T>
-struct pointer_raw_pointer : pointer_traits_detail::pointer_raw_pointer_impl<T>
-{};
-
-namespace pointer_traits_detail
-{
-
 template <typename Void>
 struct capture_address
 {
@@ -190,7 +167,7 @@ struct capture_address
 template <typename T>
 struct pointer_to_param
     : thrust::detail::eval_if<_THRUST_STD::is_void<T>::value,
-                              thrust::detail::identity_<capture_address<T>>,
+                              _THRUST_STD::type_identity<capture_address<T>>,
                               _THRUST_STD::add_lvalue_reference<T>>
 {};
 
@@ -315,8 +292,7 @@ struct pointer_traits<const void*>
 };
 
 template <typename FromPtr, typename ToPtr>
-struct is_pointer_system_convertible
-    : _THRUST_STD::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
+struct is_pointer_system_convertible : _THRUST_STD::is_convertible<iterator_system_t<FromPtr>, iterator_system_t<ToPtr>>
 {};
 
 template <typename FromPtr, typename ToPtr>
@@ -332,25 +308,19 @@ struct is_void_pointer_system_convertible
                        is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
-// this could be a lot better, but for our purposes, it's probably
-// sufficient just to check if pointer_raw_pointer<T> has meaning
-template <typename T>
-struct is_thrust_pointer : is_metafunction_defined<pointer_raw_pointer<T>>
-{};
-
 // avoid inspecting traits of the arguments if they aren't known to be pointers
 template <typename FromPtr, typename ToPtr>
 struct lazy_is_pointer_convertible
-    : thrust::detail::eval_if<is_thrust_pointer<FromPtr>::value && is_thrust_pointer<ToPtr>::value,
+    : thrust::detail::eval_if<is_thrust_pointer_v<FromPtr> && is_thrust_pointer_v<ToPtr>,
                               is_pointer_convertible<FromPtr, ToPtr>,
-                              thrust::detail::identity_<thrust::detail::false_type>>
+                              _THRUST_STD::type_identity<_THRUST_STD::false_type>>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct lazy_is_void_pointer_system_convertible
-    : thrust::detail::eval_if<is_thrust_pointer<FromPtr>::value && is_thrust_pointer<ToPtr>::value,
+    : thrust::detail::eval_if<is_thrust_pointer_v<FromPtr> && is_thrust_pointer_v<ToPtr>,
                               is_void_pointer_system_convertible<FromPtr, ToPtr>,
-                              thrust::detail::identity_<thrust::detail::false_type>>
+                              _THRUST_STD::type_identity<_THRUST_STD::false_type>>
 {};
 
 template <typename FromPtr, typename ToPtr, typename T = void>

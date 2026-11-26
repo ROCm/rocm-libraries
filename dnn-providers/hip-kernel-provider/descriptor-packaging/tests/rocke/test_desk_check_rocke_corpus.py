@@ -14,8 +14,12 @@ Each invariant gets a positive case (a real packed fixture) and a negative one (
 fixture engineered to violate it), so no check only ever sees valid data. The
 producer-agnostic halves of invariants 2 and 3 are also held on a real hip pack
 in ``tests/test_desk_check_invariants.py``.
+
+The real-bundle regressions at the end also hold the shipped dense attention specs to
+the C++ ingestor's restated launch geometry.
 """
 
+import dataclasses
 import json
 import shutil
 
@@ -27,14 +31,16 @@ from hkp_pack.desk_check import (
     symbol_distinctness,
     toc_key_uniqueness,
 )
-from hkp_pack.pipeline import run_pipeline
+from hkp_pack.rocke_compile import build_spec
 from pack_helpers import (
     _EXAMPLES,
     _ROOT_IDS,
+    GENERIC_TARGETS,
     _read,
     _require_bundles,
     _run_cli,
     read_shipped,
+    run_pipeline,
     write_shipped,
 )
 
@@ -57,7 +63,14 @@ def desk_check_fixture(fixtures_dir):
 
 
 @pytest.fixture(scope="module")
-def packed_desk_check(tmp_path_factory, desk_check_fixture, hipcc, rocm_kpack_dir):
+def packed_desk_check(
+    tmp_path_factory,
+    desk_check_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+):
     """Real pack of the desk_check fixture (two genuinely distinct
     attention_dense variants: head_size 64 and 128, both batch=1)."""
     tmp_path = tmp_path_factory.mktemp("desk_check_pack")
@@ -65,14 +78,24 @@ def packed_desk_check(tmp_path_factory, desk_check_fixture, hipcc, rocm_kpack_di
         source_root=desk_check_fixture,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
     return read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
 
 
-def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
+def _pack_mutated(
+    tmp_path,
+    desk_check_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    mutate,
+):
     """Copy the desk_check fixture, apply `mutate` to its KDP doc, pack it
     for real, and return the shipped KDP doc."""
     src = tmp_path / "src"
@@ -85,7 +108,9 @@ def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
         source_root=src,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -148,11 +173,20 @@ class TestInvariant1MetadataSpecDrift:
 class TestInvariant2DuplicateMatcherTuples:
     def test_distinct_variants_report_no_duplicates(self, packed_desk_check):
         assert (
-            duplicate_matcher_tuples(_kernels(packed_desk_check), _MATCHER_FIELDS) == {}
+            duplicate_matcher_tuples(
+                _kernels(packed_desk_check), _MATCHER_FIELDS, GENERIC_TARGETS
+            )
+            == {}
         )
 
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
-        self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
+        self,
+        tmp_path,
+        desk_check_fixture,
+        hip_compiler,
+        hip_path,
+        device_lib_path,
+        rocm_kpack_dir,
     ):
         """Negative case, packed for real: two kernels whose spec differs only in a
         field outside the matcher tuple (seqlen_q) collapse to one
@@ -168,9 +202,17 @@ class TestInvariant2DuplicateMatcherTuples:
             doc["kernelDescriptors"].append(dup)
 
         shipped = _pack_mutated(
-            tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
+            tmp_path,
+            desk_check_fixture,
+            hip_compiler,
+            hip_path,
+            device_lib_path,
+            rocm_kpack_dir,
+            mutate,
         )
-        dupes = duplicate_matcher_tuples(_kernels(shipped), _MATCHER_FIELDS)
+        dupes = duplicate_matcher_tuples(
+            _kernels(shipped), _MATCHER_FIELDS, GENERIC_TARGETS
+        )
         assert dupes == {(1, 64): 2}, dupes
 
 
@@ -183,7 +225,13 @@ class TestInvariant3TocKeyUniqueness:
         assert distinct == total == 2
 
     def test_real_pack_of_a_genuine_duplicate_spec_collides_on_one_toc_key(
-        self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
+        self,
+        tmp_path,
+        desk_check_fixture,
+        hip_compiler,
+        hip_path,
+        device_lib_path,
+        rocm_kpack_dir,
     ):
         """Negative case, packed for real: two UKDs with byte-identical
         (source, builder, spec) collapse onto ONE toc_key."""
@@ -195,7 +243,13 @@ class TestInvariant3TocKeyUniqueness:
             doc["kernelDescriptors"] = [doc["kernelDescriptors"][0], twin]
 
         shipped = _pack_mutated(
-            tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
+            tmp_path,
+            desk_check_fixture,
+            hip_compiler,
+            hip_path,
+            device_lib_path,
+            rocm_kpack_dir,
+            mutate,
         )
         distinct, total = toc_key_uniqueness(_kernels(shipped))
         assert total == 2
@@ -217,7 +271,13 @@ class TestInvariant4SymbolNonUniquenessTolerated:
         assert distinct == total == 2
 
     def test_real_pack_where_symbol_is_shared_but_toc_key_disambiguates(
-        self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
+        self,
+        tmp_path,
+        desk_check_fixture,
+        hip_compiler,
+        hip_path,
+        device_lib_path,
+        rocm_kpack_dir,
     ):
         """Packed for real: attention_dense's kernel_name() omits `batch`, so two
         variants differing only in batch share one symbol while remaining two
@@ -233,7 +293,13 @@ class TestInvariant4SymbolNonUniquenessTolerated:
             doc["kernelDescriptors"] = [doc["kernelDescriptors"][1], other_batch]
 
         shipped = _pack_mutated(
-            tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
+            tmp_path,
+            desk_check_fixture,
+            hip_compiler,
+            hip_path,
+            device_lib_path,
+            rocm_kpack_dir,
+            mutate,
         )
         kernels = _kernels(shipped)
         distinct_sym, total = symbol_distinctness(kernels)
@@ -286,7 +352,7 @@ class TestCliEndToEnd:
 
 
 # Real-bundle regressions against every git-tracked rocKE bundle the repository
-# carries -- no pack, no hipcc, no GPU.
+# carries -- no pack, no HIP compiler, no GPU.
 @pytest.mark.quick
 @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
 def test_real_rocke_example_dtype_vocabularies_are_not_drift(rocke_root):
@@ -297,11 +363,18 @@ def test_real_rocke_example_dtype_vocabularies_are_not_drift(rocke_root):
     every rocKE kernel that ships."""
     for kdp in _require_bundles(rocke_root):
         kernels = _kernels(_read(kdp))
-        spec = kernels[0]["kernel_source"]["spec"]
+        # A multi-launch kernel (RFC 0017 section 15.1) has `sources`, not `kernel_source`;
+        # every launch of one kernel carries the variant's spec, so the first one serves.
+        source = kernels[0].get("kernel_source") or next(
+            iter(kernels[0]["sources"].values())
+        )
+        spec = source["spec"]
         meta = kernels[0]["metadata"]
-        # The premise: two different spellings of one type. A failure here
-        # means the bundle changed and the regression needs re-grounding.
-        assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
+        # The premise: two different spellings of one type (bf16/BF16,
+        # fp16/FP16, ...). A failure here means the bundle changed and the
+        # regression needs re-grounding.
+        assert spec["dtype"] != meta["dtype"], kdp
+        assert spec["dtype"].upper() == meta["dtype"], kdp
         assert metadata_spec_drift(kernels, ("dtype",)) == [], kdp
 
 
@@ -315,3 +388,66 @@ def test_real_rocke_example_passes_out_of_the_box(rocke_root):
         assert proc.returncode == 0, str(kdp) + proc.stdout + proc.stderr
         assert "metadata/authored-spec drift: none" in proc.stdout, kdp
         assert "duplicate matcher tuples: none" in proc.stdout, kdp
+
+
+def _ingestor_geometry(spec):
+    """The C++ ingestor's launch geometry, restated: `gfx950AttentionDenseGeometry()`
+    (src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp),
+    grid `(ceil(Sq / block_m), Hq, B)` and block `(block_m / 32 * 64, 1, 1)`."""
+    nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
+    grid = (nqb, spec.num_query_heads, spec.batch)
+    return grid, (spec.block_m // 32 * 64, 1, 1)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
+def test_real_attention_dense_bundles_launch_with_the_ingestor_geometry(
+    rocke_root, rocke_importable
+):
+    """The C++ ingestor relaunches each packed dense attention binary with its own
+    restated geometry, while the binary's block order is whatever the packed spec
+    resolves to in rocKE; an order with another grid runs out of bounds under that
+    launch, with no error. Nothing at pack time compares the two, and the C++
+    geometry tests pin literals, so every shipped `build_attention_dense` spec, built
+    the way the packer builds it, must give the restated grid and block: at its
+    canonical shape and at one with 4 query blocks and batch 3, so an order whose
+    grid coincides with the restated one at the canonical shape cannot pass."""
+    import importlib
+
+    from hkp_pack.rocke_compile import _module_from_source, _resolve_spec_class
+
+    # A multi-launch kernel carries `sources` and no `kernel_source`.
+    kernels = [
+        (kdp, k)
+        for kdp in _require_bundles(rocke_root)
+        for k in _kernels(_read(kdp))
+        if k.get("kernel_source", {}).get("builder") == "build_attention_dense"
+    ]
+    if not kernels:
+        pytest.skip(f"{rocke_root.parent} ships no build_attention_dense kernel")
+    mismatches = set()
+    for kdp, kernel in kernels:
+        source = kernel["kernel_source"]
+        module = importlib.import_module(_module_from_source(source["source"]))
+        spec_cls = _resolve_spec_class(module, getattr(module, source["builder"]))
+        spec = build_spec(spec_cls, source["spec"])
+        seqlen = 4 * spec.block_m
+        for shape in ({}, {"batch": 3, "seqlen_q": seqlen, "seqlen_kv": seqlen}):
+            launched = dataclasses.replace(spec, **shape)
+            got = (
+                module.attention_dense_grid(launched),
+                module.attention_dense_block(launched),
+            )
+            if got != _ingestor_geometry(launched):
+                mismatches.add(
+                    f"{kernel['name']} ({launched.resolved_nonpersist_decode}): "
+                    f"B={launched.batch} Sq={launched.seqlen_q} gives {got}, the "
+                    f"ingestor launches {_ingestor_geometry(launched)}"
+                )
+    assert not mismatches, (
+        f"{len(mismatches)} shipped launch(es) disagree with the ingestor geometry; pin "
+        "the block order in the generator config "
+        "(projects/hipdnn/tools/IngestorGenerator/configs/<bundle>.yaml) and "
+        "regenerate, or teach the C++ geometry that order:\n  "
+        + "\n  ".join(sorted(mismatches)[:10])
+    )

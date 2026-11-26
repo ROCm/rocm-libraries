@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@ set(hipblas_test_source
   hipblas_gtest_main.cpp
   hipblas_test.cpp
   auxil/auxiliary_gtest.cpp
+  auxil/init_gtest.cpp
   auxil/set_get_mode_gtest.cpp
   auxil/set_get_matrix_vector_gtest.cpp
   blas1/asum_gtest.cpp
@@ -166,7 +167,7 @@ if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
 endif()
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   target_link_libraries( hipblas-test PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
@@ -174,12 +175,7 @@ if(HIP_PLATFORM STREQUAL amd)
   endif( )
 
 else( )
-  target_include_directories( hipblas-test
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
-
-  target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
+  target_link_libraries( hipblas-test PRIVATE hip::host CUDA::cudart )
 endif( )
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)

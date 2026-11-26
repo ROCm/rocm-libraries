@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/pair.h>
 
@@ -180,7 +187,7 @@ mismatch(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2);
  *  using Iterator = thrust::device_vector<int>::iterator;
  *  thrust::pair<Iterator,Iterator> result;
  *
- *  result = thrust::mismatch(thrust::device, vec1.begin(), vec1.end(), vec2.begin(), thrust::equal_to<int>());
+ *  result = thrust::mismatch(thrust::device, vec1.begin(), vec1.end(), vec2.begin(), _THRUST_STD::equal_to<int>());
  *
  *  // result.first  is vec1.begin() + 2
  *  // result.second is vec2.begin() + 2
@@ -233,7 +240,7 @@ THRUST_HOST_DEVICE thrust::pair<InputIterator1, InputIterator2> mismatch(
  *  using Iterator = thrust::device_vector<int>::iterator;
  *  thrust::pair<Iterator,Iterator> result;
  *
- *  result = thrust::mismatch(vec1.begin(), vec1.end(), vec2.begin(), thrust::equal_to<int>());
+ *  result = thrust::mismatch(vec1.begin(), vec1.end(), vec2.begin(), _THRUST_STD::equal_to<int>());
  *
  *  // result.first  is vec1.begin() + 2
  *  // result.second is vec2.begin() + 2

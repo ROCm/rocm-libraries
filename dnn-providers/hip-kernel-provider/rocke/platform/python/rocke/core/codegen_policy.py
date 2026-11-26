@@ -48,6 +48,18 @@ def normalize_scheduler_strategy(value: object) -> str | None:
     )
 
 
+def scheduler_strategy_reason(value: object) -> str | None:
+    """Why ``value`` is not a scheduler strategy (the ValueError text of
+    :func:`normalize_scheduler_strategy`), or ``None`` when it is one. The C++
+    engine's twin is ``rocke_scheduler_strategy_reason``."""
+
+    try:
+        normalize_scheduler_strategy(value)
+    except ValueError as e:
+        return str(e)
+    return None
+
+
 @dataclass(frozen=True)
 class CodegenPolicy:
     """Validated code-generation choices belonging to one compiled kernel."""
@@ -93,4 +105,5 @@ __all__ = [
     "codegen_policy_for_kernel",
     "codegen_policy_from_attrs",
     "normalize_scheduler_strategy",
+    "scheduler_strategy_reason",
 ]

@@ -30,6 +30,7 @@
 #include "bench_utils.hpp"
 
 // rocThrust
+#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>
@@ -70,7 +71,8 @@ struct reduce_benchmark : public primbench::benchmark_interface
     out_keys = in_keys;
     in_vals  = thrust::device_vector<T>(m_items);
 
-    const size_t unique_keys = thrust::distance(out_keys.begin(), thrust::unique(out_keys.begin(), out_keys.end()));
+    const size_t unique_keys =
+      _THRUST_STD::distance(out_keys.begin(), thrust::unique(out_keys.begin(), out_keys.end()));
     thrust::device_vector<T> out_vals;
     out_vals = thrust::device_vector<T>(unique_keys);
 

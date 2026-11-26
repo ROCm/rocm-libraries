@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
@@ -58,11 +58,11 @@ transform(execution_policy<Derived>& policy, InputIt first, InputIt last, Output
 namespace __copy
 {
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
-  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::true_type)
+OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
+  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, _THRUST_STD::true_type)
 {
-  using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
-  const auto n  = thrust::distance(first, last);
+  using InputTy = thrust::detail::it_value_t<InputIt>;
+  const auto n  = _THRUST_STD::distance(first, last);
   if (n > 0)
   {
     hipError_t status;
@@ -78,14 +78,14 @@ OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_RUNTIME_FUNCTION device_to_device(
-  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, thrust::detail::false_type)
+OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
+  execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, _THRUST_STD::false_type)
 {
-  return hip_rocprim::transform(policy, first, last, result, ::internal::identity{});
+  return hip_rocprim::transform(policy, first, last, result, _THRUST_STD::identity{});
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_RUNTIME_FUNCTION
+OutputIt THRUST_HIP_RUNTIME_FUNCTION
 device_to_device(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   return device_to_device(

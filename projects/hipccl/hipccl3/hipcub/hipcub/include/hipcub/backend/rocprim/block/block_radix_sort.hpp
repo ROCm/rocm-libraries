@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -74,33 +74,24 @@ constexpr auto tuple_bit_size_impl()
 
 template<class... Args>
 struct tuple_bit_size<::hipcub::tuple<Args...>>
-    : public std::integral_constant<std::size_t, tuple_bit_size_impl<::hipcub::tuple<Args...>, 0>()>
+    : public std::integral_constant<size_t, tuple_bit_size_impl<::hipcub::tuple<Args...>, 0>()>
 {};
 
 } // namespace detail
 
-template<
-    typename KeyT,
-    int BLOCK_DIM_X,
-    int ITEMS_PER_THREAD,
-    typename ValueT = NullType,
-    int RADIX_BITS = 4, /* ignored */
-    bool MEMOIZE_OUTER_SCAN = true, /* ignored */
-    BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS, /* ignored */
-    hipSharedMemConfig SMEM_CONFIG = hipSharedMemBankSizeFourByte, /* ignored */
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int PTX_ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename KeyT,
+         int BLOCK_DIM_X,
+         int ITEMS_PER_THREAD,
+         typename ValueT                         = NullType,
+         int                RADIX_BITS           = 4, /* ignored */
+         bool               MEMOIZE_OUTER_SCAN   = true, /* ignored */
+         BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS, /* ignored */
+         hipSharedMemConfig SMEM_CONFIG          = hipSharedMemBankSizeFourByte, /* ignored */
+         int                BLOCK_DIM_Y          = 1,
+         int                BLOCK_DIM_Z          = 1>
 class BlockRadixSort
-    : private ::rocprim::block_radix_sort<
-        KeyT,
-        BLOCK_DIM_X,
-        ITEMS_PER_THREAD,
-        ValueT,
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::
+          block_radix_sort<KeyT, BLOCK_DIM_X, ITEMS_PER_THREAD, ValueT, BLOCK_DIM_Y, BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,

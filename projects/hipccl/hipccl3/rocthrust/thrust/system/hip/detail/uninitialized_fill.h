@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
@@ -49,23 +49,15 @@ THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-
 namespace __uninitialized_fill
 {
-
 template <class Iterator, class T>
 struct functor
 {
   Iterator items;
   T value;
 
-  using value_type = typename iterator_traits<Iterator>::value_type;
-
-  THRUST_HIP_FUNCTION
-  functor(Iterator items_, T const& value_)
-      : items(items_)
-      , value(value_)
-  {}
+  using value_type = thrust::detail::it_value_t<Iterator>;
 
   template <class Size>
   void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
@@ -74,7 +66,7 @@ struct functor
 
     ::new (static_cast<void*>(&out)) value_type(value);
   }
-}; // struct functor
+};
 
 } // namespace __uninitialized_fill
 
@@ -82,17 +74,14 @@ template <class Derived, class Iterator, class Size, class T>
 Iterator THRUST_HOST_DEVICE
 uninitialized_fill_n(execution_policy<Derived>& policy, Iterator first, Size count, T const& x)
 {
-  using functor_t = __uninitialized_fill::functor<Iterator, T>;
-
-  hip_rocprim::parallel_for(policy, functor_t(first, x), count);
-
+  hip_rocprim::parallel_for(policy, __uninitialized_fill::functor<Iterator, T>{first, x}, count);
   return first + count;
 }
 
 template <class Derived, class Iterator, class T>
 void THRUST_HOST_DEVICE uninitialized_fill(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& x)
 {
-  hip_rocprim::uninitialized_fill_n(policy, first, thrust::distance(first, last), x);
+  hip_rocprim::uninitialized_fill_n(policy, first, _THRUST_STD::distance(first, last), x);
 }
 
 } // namespace hip_rocprim

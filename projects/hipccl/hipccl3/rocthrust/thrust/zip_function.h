@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,13 +35,16 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/modern_gcc_required.h>
-#if !defined(THRUST_LEGACY_GCC)
 
-#  include <thrust/detail/functional/address_stability.h>
-#  include <thrust/detail/type_deduction.h>
-#  include <thrust/tuple.h>
-#  include <thrust/type_traits/integer_sequence.h>
+#include <thrust/detail/type_deduction.h>
+#include <thrust/tuple.h>
+#include <thrust/type_traits/integer_sequence.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#else
+#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -60,8 +63,6 @@ namespace zip_detail
 {
 
 // Add workaround for decltype(auto) on C++11-only compilers:
-#  if THRUST_CPP_DIALECT >= 2017
-
 THRUST_EXEC_CHECK_DISABLE
 template <typename Function, typename Tuple, std::size_t... Is>
 THRUST_HOST_DEVICE decltype(auto) apply_impl(Function&& func, Tuple&& args, index_sequence<Is...>)
@@ -72,24 +73,9 @@ THRUST_HOST_DEVICE decltype(auto) apply_impl(Function&& func, Tuple&& args, inde
 template <typename Function, typename Tuple>
 THRUST_HOST_DEVICE decltype(auto) apply(Function&& func, Tuple&& args)
 {
-  constexpr auto tuple_size = thrust::tuple_size<typename std::decay<Tuple>::type>::value;
+  constexpr auto tuple_size = thrust::tuple_size<_THRUST_STD::decay_t<Tuple>>::value;
   return apply_impl(THRUST_FWD(func), THRUST_FWD(args), make_index_sequence<tuple_size>{});
 }
-
-#  else // THRUST_CPP_DIALECT
-
-THRUST_EXEC_CHECK_DISABLE
-template <typename Function, typename Tuple, std::size_t... Is>
-THRUST_HOST_DEVICE auto apply_impl(Function&& func, Tuple&& args, index_sequence<Is...>)
-  THRUST_DECLTYPE_RETURNS(func(thrust::get<Is>(THRUST_FWD(args))...))
-
-    template <typename Function, typename Tuple>
-    THRUST_HOST_DEVICE auto apply(Function&& func, Tuple&& args) THRUST_DECLTYPE_RETURNS(apply_impl(
-      THRUST_FWD(func),
-      THRUST_FWD(args),
-      make_index_sequence<thrust::tuple_size<typename std::decay<Tuple>::type>::value>{}))
-
-#  endif // THRUST_CPP_DIALECT
 
 } // namespace zip_detail
 } // namespace detail
@@ -130,8 +116,8 @@ THRUST_HOST_DEVICE auto apply_impl(Function&& func, Tuple&& args, index_sequence
  *    thrust::device_vector<float> C{2.f, 3.f, 4.f};
  *    thrust::device_vector<float> D(3);
  *
- *    auto begin = thrust::make_zip_iterator(thrust::make_tuple(A.begin(), B.begin(), C.begin()));
- *    auto end = thrust::make_zip_iterator(thrust::make_tuple(A.end(), B.end(), C.end()));
+ *    auto begin = thrust::make_zip_iterator(A.begin(), B.begin(), C.begin());
+ *    auto end = thrust::make_zip_iterator(A.end(), B.end(), C.end());
  *
  *    // The following four invocations of transform are equivalent:
  *    // Transform with 3-tuple
@@ -164,32 +150,17 @@ public:
 
   /*! Constructs a \p zip_function with the provided function object \p func. */
   THRUST_HOST_DEVICE zip_function(Function func)
-      : func(std::move(func))
+      : func(_THRUST_STD::move(func))
   {}
 
   /*! Applies the N-ary function object to elements of the tuple \p args. */
-// Add workaround for decltype(auto) on C++11-only compilers:
-#  if THRUST_CPP_DIALECT >= 2017
+  // Add workaround for decltype(auto) on C++11-only compilers:
 
   template <typename Tuple>
   THRUST_HOST_DEVICE decltype(auto) operator()(Tuple&& args) const
   {
     return detail::zip_detail::apply(func, THRUST_FWD(args));
   }
-
-#  else // THRUST_CPP_DIALECT
-
-  // Can't just use THRUST_DECLTYPE_RETURNS here since we need to use
-  // std::declval for the signature components:
-  template <typename Tuple>
-  THRUST_HOST_DEVICE auto operator()(Tuple&& args) const
-    noexcept(noexcept(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args))))
-      -> decltype(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args)))
-  {
-    return detail::zip_detail::apply(func, THRUST_FWD(args));
-  }
-
-#  endif // THRUST_CPP_DIALECT
 
   //! Returns a reference to the underlying function.
   THRUST_HOST_DEVICE Function& underlying_function() const
@@ -209,9 +180,9 @@ private:
  *  \see zip_function
  */
 template <typename Function>
-THRUST_HOST_DEVICE zip_function<typename std::decay<Function>::type> make_zip_function(Function&& fun)
+THRUST_HOST_DEVICE zip_function<_THRUST_STD::decay_t<Function>> make_zip_function(Function&& fun)
 {
-  using func_t = typename std::decay<Function>::type;
+  using func_t = _THRUST_STD::decay_t<Function>;
   return zip_function<func_t>(THRUST_FWD(fun));
 }
 
@@ -223,21 +194,17 @@ THRUST_HOST_DEVICE zip_function<typename std::decay<Function>::type> make_zip_fu
 
 THRUST_NAMESPACE_END
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-_LIBCUDACXX_BEGIN_NAMESPACE_CUDA
-#  else
-THRUST_NAMESPACE_BEGIN
-namespace detail
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+_THRUST_LIBCXX_BEGIN_NAMESPACE_CUDA
+#else
+namespace internal
 {
-#  endif
+#endif
 template <typename F>
 struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::zip_function<F>> : proclaims_copyable_arguments<F>
 {};
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-_LIBCUDACXX_END_NAMESPACE_CUDA
-#  else
-}
-THRUST_NAMESPACE_END
-#  endif
-
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+_THRUST_LIBCXX_END_NAMESPACE_CUDA
+#else
+} // namespace internal
 #endif

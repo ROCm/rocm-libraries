@@ -222,7 +222,8 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
@@ -231,7 +232,7 @@ bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         return false;
     }
@@ -680,7 +681,8 @@ bool GemmFwd1x1_0_1::IsSlow(const ExecutionContext& context,
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
@@ -689,7 +691,7 @@ bool GemmFwd1x1_0_1::IsSlow(const ExecutionContext& context,
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         return false;
     }
@@ -998,7 +1000,8 @@ bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     const std::string& arch        = context.GetStream().GetDeviceName();
     const std::set<std::string> mi = {"gfx942", "gfx955"};
     const bool is_mi               = mi.find(arch) != mi.end();
-    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx11            = StartsWith(arch, "gfx110") || StartsWith(arch, "gfx115");
+    const bool is_gfx117           = StartsWith(arch, "gfx117");
     const bool is_gfx12            = StartsWith(arch, "gfx12");
 
     auto b                      = problem.GetBatchSize();
@@ -1009,7 +1012,7 @@ bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescripti
     auto channels_per_group     = c / g;
     auto spatial_work_per_group = s * channels_per_group;
 
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
     {
         // GemmFwdRest - SPB-only filtering
         // Analysis: 63.8% terrible cases - batch fragmentation dominant

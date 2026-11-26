@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,9 +32,9 @@
 
 #include "../../../config.hpp"
 
-#include "../thread/thread_operators.hpp"
-
 #include <rocprim/block/block_scan.hpp> // IWYU pragma: export
+
+#include _HIPCUB_STD_INCLUDE(functional)
 
 #include <type_traits>
 
@@ -61,22 +61,17 @@ enum BlockScanAlgorithm
         = detail::to_BlockScanAlgorithm_enum(::rocprim::block_scan_algorithm::using_warp_scan)
 };
 
-template<
-    typename T,
-    int BLOCK_DIM_X,
-    BlockScanAlgorithm ALGORITHM = BLOCK_SCAN_RAKING,
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename T,
+         int                BLOCK_DIM_X,
+         BlockScanAlgorithm ALGORITHM   = BLOCK_SCAN_RAKING,
+         int                BLOCK_DIM_Y = 1,
+         int                BLOCK_DIM_Z = 1>
 class BlockScan
-    : private ::rocprim::block_scan<
-        T,
-        BLOCK_DIM_X,
-        static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::block_scan<T,
+                                    BLOCK_DIM_X,
+                                    static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
+                                    BLOCK_DIM_Y,
+                                    BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
@@ -121,12 +116,14 @@ public:
     }
 
     template<typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void InclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::inclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::inclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<int ITEMS_PER_THREAD>
@@ -145,13 +142,16 @@ public:
     }
 
     template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void InclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                      BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void InclusiveSum(T (&input)[ITEMS_PER_THREAD],
+                             T (&output)[ITEMS_PER_THREAD],
+                             BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::inclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::inclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<typename ScanOp>
@@ -241,12 +241,14 @@ public:
     }
 
     template<typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void ExclusiveSum(T input, T& output, BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::exclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::exclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<int ITEMS_PER_THREAD>
@@ -265,13 +267,16 @@ public:
     }
 
     template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
-    HIPCUB_DEVICE inline
-    void ExclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
-                      BlockPrefixCallbackOp& block_prefix_callback_op)
+    HIPCUB_DEVICE
+    inline void ExclusiveSum(T (&input)[ITEMS_PER_THREAD],
+                             T (&output)[ITEMS_PER_THREAD],
+                             BlockPrefixCallbackOp& block_prefix_callback_op)
     {
-        base_type::exclusive_scan(
-            input, output, temp_storage_, block_prefix_callback_op, ::hipcub::Sum()
-        );
+        base_type::exclusive_scan(input,
+                                  output,
+                                  temp_storage_,
+                                  block_prefix_callback_op,
+                                  _HIPCUB_STD::plus<>{});
     }
 
     template<typename ScanOp>

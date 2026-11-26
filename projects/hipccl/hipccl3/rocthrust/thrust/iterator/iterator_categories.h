@@ -213,5 +213,3 @@ using random_access_host_iterator_tag = _THRUST_STD::random_access_iterator_tag;
  */
 
 THRUST_NAMESPACE_END
-
-#include <thrust/iterator/detail/universal_categories.h>

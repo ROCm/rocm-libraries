@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ int main()
   // compute indices of nonzero elements
   using IndexIterator = thrust::device_vector<int>::iterator;
 
-  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), ::internal::identity{});
+  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), _THRUST_STD::identity{});
   // indices now contains [1,2,5,7]
 
   // print result

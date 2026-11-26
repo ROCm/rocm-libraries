@@ -168,9 +168,305 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(1024u, 128u, 32, true,  true),  // transposed A
         std::make_tuple(1024u, 128u, 32, false, false), // non-transposed B
         std::make_tuple(1024u, 204u, 32, true,  true),  // M=204, non-32-aligned (was failing)
-        std::make_tuple(1024u, 213u, 32, true,  true)   // M=213, non-32-aligned (was failing)
+        std::make_tuple(1024u, 213u, 32, true,  true),  // M=213, non-32-aligned (was failing)
+        // 1x128 block scaling (MXBlockA/MXBlockB = 128).
+        std::make_tuple(1024u, 128u, 128, true,  true),  // transposed A
+        std::make_tuple(1024u, 128u, 128, false, false), // non-transposed B
+        std::make_tuple(1024u, 204u, 128, true,  true)   // free dim not block-aligned
     )
 );
+
+class MXDataGenPaddedLeadingDimTest
+    : public ::testing::TestWithParam<std::tuple<hipDataType, bool, bool, MXScaleLayout>>
+{
+};
+
+TEST_P(MXDataGenPaddedLeadingDimTest, PreservesLogicalDataAndScaleLayout)
+{
+    auto [dataType, isTranspose, isMatrixA, scaleLayout] = GetParam();
+
+    constexpr size_t rows       = 256;
+    constexpr size_t cols       = 256;
+    constexpr size_t stride     = 320;
+    constexpr size_t mxBlock    = 32;
+    constexpr size_t scaleCount       = rows / mxBlock * cols;
+    constexpr size_t paddedScaleCount = stride / mxBlock * cols;
+    constexpr size_t guardSize        = 64;
+    constexpr uint8_t sentinel        = 0x5A;
+
+    constexpr size_t paddedElements     = stride * cols;
+    constexpr size_t paddedDataElements = stride * (cols - 1) + rows;
+
+    size_t const denseBytes = dataType == HIP_R_8F_E4M3
+                                  ? rows * cols
+                                  : (dataType == static_cast<hipDataType>(HIP_R_6F_E3M2)
+                                         ? (rows * cols * 6 + 7) / 8
+                                         : (rows * cols + 1) / 2);
+    size_t const paddedBytes = dataType == HIP_R_8F_E4M3
+                                   ? paddedDataElements
+                                   : (dataType == static_cast<hipDataType>(HIP_R_6F_E3M2)
+                                          ? (paddedDataElements * 6 + 7) / 8
+                                          : (paddedDataElements + 1) / 2);
+
+    std::vector<uint8_t> denseData(denseBytes, 0);
+    std::vector<uint8_t> paddedData(paddedBytes + guardSize, sentinel);
+    std::vector<uint8_t> denseScale(scaleCount, 0);
+    std::vector<uint8_t> paddedScale(paddedScaleCount + guardSize, sentinel);
+
+    auto denseRef = generateMXInput(dataType,
+                                    HIP_R_8F_UE8M0,
+                                    denseData.data(),
+                                    denseScale.data(),
+                                    rows,
+                                    cols,
+                                    rows,
+                                    isTranspose,
+                                    mxBlock,
+                                    1,
+                                    isMatrixA,
+                                    scaleLayout,
+                                    "Bounded",
+                                    -1.0f,
+                                    1.0f);
+    auto paddedRef = generateMXInput(dataType,
+                                     HIP_R_8F_UE8M0,
+                                     paddedData.data(),
+                                     paddedScale.data(),
+                                     rows,
+                                     cols,
+                                     stride,
+                                     isTranspose,
+                                     mxBlock,
+                                     1,
+                                     isMatrixA,
+                                     scaleLayout,
+                                     "Bounded",
+                                     -1.0f,
+                                     1.0f);
+
+    EXPECT_EQ(denseScale,
+              std::vector<uint8_t>(paddedScale.begin(), paddedScale.begin() + scaleCount));
+    EXPECT_TRUE(std::all_of(paddedScale.begin() + scaleCount,
+                            paddedScale.end(),
+                            [](uint8_t v) { return v == sentinel; }));
+    EXPECT_TRUE(std::all_of(paddedData.begin() + paddedBytes,
+                            paddedData.end(),
+                            [](uint8_t v) { return v == sentinel; }));
+
+    ASSERT_EQ(denseRef.size(), rows * cols);
+    ASSERT_EQ(paddedRef.size(), paddedElements);
+    size_t const elementBits = dataType == HIP_R_8F_E4M3
+                                   ? 8
+                                   : (dataType == static_cast<hipDataType>(HIP_R_6F_E3M2) ? 6 : 4);
+    size_t const denseColumnBytes  = rows * elementBits / 8;
+    size_t const paddedColumnBytes = stride * elementBits / 8;
+    for(size_t col = 0; col < cols; ++col)
+    {
+        EXPECT_TRUE(std::equal(denseData.begin() + col * denseColumnBytes,
+                               denseData.begin() + (col + 1) * denseColumnBytes,
+                               paddedData.begin() + col * paddedColumnBytes));
+        EXPECT_TRUE(std::equal(denseRef.begin() + col * rows,
+                               denseRef.begin() + (col + 1) * rows,
+                               paddedRef.begin() + col * stride));
+        if(col + 1 < cols)
+            EXPECT_TRUE(std::all_of(paddedData.begin() + col * paddedColumnBytes + denseColumnBytes,
+                                    paddedData.begin() + (col + 1) * paddedColumnBytes,
+                                    [](uint8_t v) { return v == 0; }));
+        EXPECT_TRUE(std::all_of(paddedRef.begin() + col * stride + rows,
+                                paddedRef.begin() + (col + 1) * stride,
+                                [](float v) { return v == 0.0f; }));
+    }
+}
+
+TEST(MXDataGenPaddedLeadingDimValidationTest, RejectsInvalidLeadingDimensions)
+{
+    constexpr size_t rows    = 256;
+    constexpr size_t cols    = 256;
+    constexpr size_t mxBlock = 32;
+
+    constexpr uint8_t sentinel = 0x5A;
+    std::vector<uint8_t> data(rows * cols, sentinel);
+    std::vector<uint8_t> scale(rows / mxBlock * cols, sentinel);
+    auto generate = [&](size_t stride) {
+        return generateMXInput(HIP_R_8F_E4M3,
+                               HIP_R_8F_UE8M0,
+                               data.data(),
+                               scale.data(),
+                               rows,
+                               cols,
+                               stride,
+                               true,
+                               mxBlock,
+                               1,
+                               true,
+                               MXScaleLayout::None,
+                               "Bounded",
+                               -1.0f,
+                               1.0f);
+    };
+
+    for(size_t stride : {size_t{0}, rows - 1})
+    {
+        EXPECT_THROW(generate(stride), std::invalid_argument);
+        EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t v) { return v == sentinel; }));
+        EXPECT_TRUE(std::all_of(scale.begin(), scale.end(), [](uint8_t v) { return v == sentinel; }));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PaddedOperands,
+    MXDataGenPaddedLeadingDimTest,
+    ::testing::Values(std::make_tuple(HIP_R_8F_E4M3, true, true, MXScaleLayout::None),
+                      std::make_tuple(HIP_R_8F_E4M3, false, false, MXScaleLayout::None),
+                      std::make_tuple(HIP_R_8F_E4M3, true, true, MXScaleLayout::GFX1250),
+                      std::make_tuple(HIP_R_8F_E4M3, false, false, MXScaleLayout::GFX1250),
+                      std::make_tuple(static_cast<hipDataType>(HIP_R_6F_E3M2),
+                                      true,
+                                      true,
+                                      MXScaleLayout::None),
+                      std::make_tuple(static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                      false,
+                                      false,
+                                      MXScaleLayout::None),
+                      std::make_tuple(HIP_R_8F_E4M3, false, true, MXScaleLayout::None),
+                      std::make_tuple(static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                      true,
+                                      false,
+                                      MXScaleLayout::None)));
+
+// ============================================================================
+// 1x128 block scaling
+//
+// Every other case in this file pins mxBlock to 32. These tests pin the
+// generator's block granularity itself: with MXBlockA/MXBlockB = 128 one scale
+// must cover 128 contiguous K elements, so the generator must emit K/128 scales
+// per free-dim column -- not K/32. A generator that silently ignored mxBlock and
+// kept 32-element blocks would still produce plausible-looking data, so the
+// checks below are on the *granularity*, not just on the values being finite.
+//
+// Layout for these calls (isTranspose=true, isMatrixA=true): rows=K, cols=M,
+// column-major with stride=rows, so element (k, m) lives at data index
+// m*rows + k and its scale at scale index m*(rows/mxBlock) + k/mxBlock.
+// ============================================================================
+
+/** @brief UE8M0 exponent byte -> float scale (bias 127). */
+static float decodeUE8M0(uint8_t byte)
+{
+    return std::ldexp(1.0f, static_cast<int>(byte) - 127);
+}
+
+/**
+ * @brief The generator must write exactly (rows/mxBlock)*cols scale bytes.
+ *
+ * The buffer is sized for the 32-block case (4x too large for mxBlock=128) and
+ * pre-filled with a sentinel that bounded [-1,1] input can never produce: 0xAB
+ * decodes to 2^44, and scales for data bounded to [-1,1] have exponent <= 127.
+ * If the generator ignored mxBlock and kept writing at 32 granularity, the tail
+ * would be overwritten and the sentinel check would fail.
+ */
+TEST(MXDataGenBlock128, ScaleGranularityIsBlock128)
+{
+    constexpr uint64_t rows    = 1024; // K
+    constexpr uint64_t cols    = 128; // M
+    constexpr int      mxBlock = 128;
+
+    const size_t numPacked     = (rows * cols + 1) / 2;
+    const size_t expectedScales = (rows / mxBlock) * cols;
+    const size_t oversized      = (rows / 32) * cols; // what a 32-block generator would write
+
+    ASSERT_EQ(oversized, expectedScales * 4u);
+
+    constexpr uint8_t kSentinel = 0xAB;
+    std::vector<uint8_t> data(numPacked, 0);
+    std::vector<uint8_t> scale(oversized, kSentinel);
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
+                    data.data(), scale.data(),
+                    rows, cols, rows, /*isTranspose=*/true,
+                    mxBlock, 1, /*isMatrixA=*/true,
+                    MXScaleLayout::None, "Bounded", -1.f, 1.f);
+
+    size_t written = 0;
+    for(size_t i = 0; i < expectedScales; ++i)
+        if(scale[i] != kSentinel)
+            ++written;
+    EXPECT_GT(written, 0u) << "generator wrote no scales at mxBlock=128";
+
+    for(size_t i = expectedScales; i < oversized; ++i)
+        ASSERT_EQ(scale[i], kSentinel)
+            << "scale byte " << i << " past the K/128 region was overwritten; the generator "
+            << "is emitting scales at a finer granularity than mxBlock=128";
+}
+
+/**
+ * @brief All 128 elements of an MX block must share one scale.
+ *
+ * Dequantized reference = fp4_value * blockScale, and FP4 E2M1 has only eight
+ * magnitudes. So dividing each reference value by the scale read at 128
+ * granularity must land back on that set. If the generator actually applied a
+ * distinct scale per 32 elements, three quarters of the elements in each block
+ * would be divided by the wrong power of two and fall off the FP4 grid.
+ *
+ * Parameterized over 32 as well so a mistake in the index mapping above fails
+ * the known-good control case too, rather than silently passing at 128.
+ */
+class MXBlockScaleGranularityTest : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(MXBlockScaleGranularityTest, DequantizedValuesLieOnTheFP4Grid)
+{
+    const int mxBlock = GetParam();
+
+    constexpr uint64_t rows = 512; // K
+    constexpr uint64_t cols = 64; // M
+
+    const size_t numPacked  = (rows * cols + 1) / 2;
+    const size_t kBlocks    = rows / mxBlock;
+    const size_t numScales  = kBlocks * cols;
+
+    std::vector<uint8_t> data(numPacked, 0);
+    std::vector<uint8_t> scale(numScales, 0);
+
+    auto ref = generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
+                               data.data(), scale.data(),
+                               rows, cols, rows, /*isTranspose=*/true,
+                               mxBlock, 1, /*isMatrixA=*/true,
+                               MXScaleLayout::None, "Bounded", -1.f, 1.f);
+
+    ASSERT_EQ(ref.size(), rows * cols);
+
+    // FP4 E2M1 magnitudes.
+    const std::vector<float> grid = {0.f, 0.5f, 1.f, 1.5f, 2.f, 3.f, 4.f, 6.f};
+
+    size_t checked = 0, nonZero = 0;
+    for(uint64_t m = 0; m < cols; ++m)
+    {
+        for(uint64_t k = 0; k < rows; ++k)
+        {
+            const float s = decodeUE8M0(scale[m * kBlocks + k / mxBlock]);
+            ASSERT_GT(s, 0.f) << "zero/denormal scale at m=" << m << " kblock=" << k / mxBlock;
+
+            const float q = std::abs(ref[m * rows + k]) / s;
+            const bool  onGrid
+                = std::any_of(grid.begin(), grid.end(),
+                              [&](float g) { return std::abs(q - g) <= 1e-3f * std::max(1.f, g); });
+            ASSERT_TRUE(onGrid)
+                << "dequantized value " << ref[m * rows + k] << " / scale " << s << " = " << q
+                << " is not an FP4 E2M1 magnitude (m=" << m << ", k=" << k
+                << ", mxBlock=" << mxBlock << "); the scale is not shared across the whole block";
+            ++checked;
+            if(q != 0.f)
+                ++nonZero;
+        }
+    }
+    EXPECT_EQ(checked, rows * cols);
+    EXPECT_GT(nonZero, 0u) << "all-zero data proves nothing about scale granularity";
+}
+
+INSTANTIATE_TEST_SUITE_P(BlockSizes,
+                         MXBlockScaleGranularityTest,
+                         ::testing::Values(32, 128));
 
 // ============================================================================
 // PreSwizzle scale tests
@@ -519,4 +815,14 @@ TEST(MXScaleLayoutFormat, MapsScalingFormatToLayout)
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx950"), MXScaleLayout::None);
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx1250"), MXScaleLayout::GFX1250);
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE4M3, "gfx942"), MXScaleLayout::None);
+    EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0_128_4_EXT, "gfx950"),
+              MXScaleLayout::Tile128x4);
+}
+
+TEST(MXScaleLayoutInPlace, RejectsTile128x4)
+{
+    std::vector<uint8_t> scale(128 * 4, 127);
+    EXPECT_THROW(
+        applyMXScaleLayoutInPlace(scale.data(), scale.size(), MXScaleLayout::Tile128x4, 128, 4, 32),
+        std::runtime_error);
 }

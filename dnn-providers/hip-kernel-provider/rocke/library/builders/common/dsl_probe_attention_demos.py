@@ -11,20 +11,25 @@ This driver re-exposes exactly those demos from the library side where
 
 Usage::
 
-    # occupancy table for the tiled-2D attention sweep
-    python dsl_probe_attention_demos.py --probe occupancy
+    # occupancy table for the tiled-2D attention sweep (arch: gfx950, gfx942, gfx90a)
+    python dsl_probe_attention_demos.py --probe occupancy [--arch gfx950]
 
     # config sweep (build-only, no GPU required)
-    python dsl_probe_attention_demos.py --probe config_sweep
+    python dsl_probe_attention_demos.py --probe config_sweep [--arch gfx950]
 
     # LLVM-IR intrinsic histogram
-    python dsl_probe_attention_demos.py --probe intrinsic_counts
+    python dsl_probe_attention_demos.py --probe intrinsic_counts [--arch gfx950]
 
     # ISA category summary
     python dsl_probe_attention_demos.py --probe isa_inspect [--arch gfx950]
 
     # LLVM vs HIP backend HSACO size comparison
     python dsl_probe_attention_demos.py --probe lowering_compare [--arch gfx950]
+
+``--arch`` accepts every target rocKE can lower for. The demo kernels come from
+the gfx950 attention builder, so a target without their intrinsics reports a
+per-entry failure naming the missing intrinsic. ``occupancy`` also needs
+resource caps for the target, which exist for gfx950, gfx942 and gfx90a only.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from pathlib import Path
 # platform/dsl_docs; locate it via the sanctioned rocke.assets accessor (proper
 # library→platform import) rather than raw path math.
 from rocke.assets import dsl_docs_dir  # noqa: E402
+from rocke.core.arch import known_arches
 
 _PROBES = dsl_docs_dir() / "optimization" / "utilities" / "tools" / "dsl_probes"
 sys.path.insert(0, str(_PROBES))
@@ -119,7 +125,7 @@ def _demo_occupancy(arch_name: str) -> None:
     probe_occupancy(entries, arch=arch)
 
 
-def _demo_config_sweep() -> None:
+def _demo_config_sweep(arch: str) -> None:
     base = UnifiedAttention2DTiledSpec(
         head_size=64,
         block_size=32,
@@ -153,10 +159,11 @@ def _demo_config_sweep() -> None:
         base_spec=base,
         overrides=overrides,
         only_build=True,
+        arch=arch,
     )
 
 
-def _demo_intrinsic_counts() -> None:
+def _demo_intrinsic_counts(arch: str) -> None:
     specs = [
         (
             "baseline_mw16",
@@ -187,7 +194,7 @@ def _demo_intrinsic_counts() -> None:
         ),
     ]
     entries = [(label, build_unified_attention_2d_tiled(spec)) for label, spec in specs]
-    probe_intrinsic_counts(entries)
+    probe_intrinsic_counts(entries, arch=arch)
 
 
 def _demo_isa_inspect(arch: str) -> None:
@@ -243,18 +250,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--arch",
-        choices=list(ARCH_BY_NAME.keys()),
+        choices=list(known_arches()),
         default="gfx950",
-        help="GPU arch (used by occupancy, isa_inspect, lowering_compare)",
+        help="GPU arch the demo kernels are built or lowered for",
     )
     args = p.parse_args(argv)
 
     if args.probe == "occupancy":
+        if args.arch not in ARCH_BY_NAME:
+            p.error(
+                f"--probe occupancy has resource caps only for "
+                f"{', '.join(ARCH_BY_NAME)}; got {args.arch}"
+            )
         _demo_occupancy(args.arch)
     elif args.probe == "config_sweep":
-        _demo_config_sweep()
+        _demo_config_sweep(args.arch)
     elif args.probe == "intrinsic_counts":
-        _demo_intrinsic_counts()
+        _demo_intrinsic_counts(args.arch)
     elif args.probe == "isa_inspect":
         _demo_isa_inspect(args.arch)
     elif args.probe == "lowering_compare":

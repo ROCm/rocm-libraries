@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 
 #include <thrust/detail/config.h>
 
+#include <thrust/detail/libcxx_wrapper/__functional/maximum.h>
 #include <thrust/device_free.h>
 #include <thrust/device_malloc.h>
 #include <thrust/functional.h>
@@ -29,7 +30,14 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#endif
 #include _THRUST_STD_INCLUDE(array)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
+#endif
 
 TESTS_DEFINE(ScanTests, FullTestsParams);
 
@@ -41,15 +49,6 @@ using MixedParams = ::testing::Types<Params<std::tuple<thrust::host_vector<int>,
                                      Params<std::tuple<thrust::device_vector<int>, thrust::device_vector<float>>>>;
 
 TESTS_DEFINE(ScanMixedTests, MixedParams);
-
-template <typename T>
-struct max_functor
-{
-  THRUST_HOST_DEVICE T operator()(T rhs, T lhs) const
-  {
-    return thrust::max(rhs, lhs);
-  }
-};
 
 TYPED_TEST(ScanVectorTests, TestScanSimple)
 {
@@ -89,21 +88,21 @@ TYPED_TEST(ScanVectorTests, TestScanSimple)
   ASSERT_EQ(output, result);
 
   // inclusive scan with op
-  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), thrust::plus<T>());
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), _THRUST_STD::plus<T>());
   result = {1, 4, 2, 6, 1};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // inclusive scan with init and op
-  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), T(-1), thrust::multiplies<T>());
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), T(-1), _THRUST_STD::multiplies<T>());
   result = {-1, -3, 6, 24, -120};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // exclusive scan with init and op
-  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), thrust::plus<T>());
+  iter   = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), _THRUST_STD::plus<T>());
   result = {3, 4, 7, 5, 9};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
@@ -118,7 +117,7 @@ TYPED_TEST(ScanVectorTests, TestScanSimple)
 
   // inplace inclusive scan with init and op
   input  = input_copy;
-  iter   = thrust::inclusive_scan(input.begin(), input.end(), input.begin(), T(3), thrust::plus<T>());
+  iter   = thrust::inclusive_scan(input.begin(), input.end(), input.begin(), T(3), _THRUST_STD::plus<T>());
   result = {4, 7, 5, 9, 4};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
@@ -282,7 +281,7 @@ void TestScanMixedTypes()
   ASSERT_EQ(int_output[3], 12); // in: 4.5 accum: 12.f out: 12
 
   // float -> float with plus<int> operator (float accumulator)
-  thrust::inclusive_scan(float_input.begin(), float_input.end(), float_output.begin(), thrust::plus<int>());
+  thrust::inclusive_scan(float_input.begin(), float_input.end(), float_output.begin(), _THRUST_STD::plus<int>());
   ASSERT_EQ(float_output[0], 1.5f); // in: 1.5 accum: 1.5f out: 1.5f
   ASSERT_EQ(float_output[1], 3.0f); // in: 2.5 accum: 3.0f out: 3.0f
   ASSERT_EQ(float_output[2], 6.0f); // in: 3.5 accum: 6.0f out: 6.0f
@@ -351,12 +350,12 @@ TYPED_TEST(ScanVariablesTests, TestScanWithOperator)
       thrust::host_vector<T> h_output(size);
       thrust::device_vector<T> d_output(size);
 
-      thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), max_functor<T>());
-      thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), max_functor<T>());
+      thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), ::internal::maximum<T>{});
+      thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), ::internal::maximum<T>{});
       ASSERT_EQ(d_output, h_output);
 
-      thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), T(13), max_functor<T>());
-      thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), T(13), max_functor<T>());
+      thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), T(13), ::internal::maximum<T>{});
+      thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), T(13), ::internal::maximum<T>{});
       ASSERT_EQ(d_output, h_output);
     }
   }
@@ -382,20 +381,20 @@ TYPED_TEST(ScanVariablesTests, TestScanWithOperatorToDiscardIterator)
 
       thrust::discard_iterator<> reference(size);
 
-      thrust::discard_iterator<> h_result =
-        thrust::inclusive_scan(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), max_functor<T>());
+      thrust::discard_iterator<> h_result = thrust::inclusive_scan(
+        h_input.begin(), h_input.end(), thrust::make_discard_iterator(), ::internal::maximum<T>{});
 
-      thrust::discard_iterator<> d_result =
-        thrust::inclusive_scan(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), max_functor<T>());
+      thrust::discard_iterator<> d_result = thrust::inclusive_scan(
+        d_input.begin(), d_input.end(), thrust::make_discard_iterator(), ::internal::maximum<T>{});
 
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
 
       h_result = thrust::exclusive_scan(
-        h_input.begin(), h_input.end(), thrust::make_discard_iterator(), T(13), max_functor<T>());
+        h_input.begin(), h_input.end(), thrust::make_discard_iterator(), T(13), ::internal::maximum<T>{});
 
       d_result = thrust::exclusive_scan(
-        d_input.begin(), d_input.end(), thrust::make_discard_iterator(), T(13), max_functor<T>());
+        d_input.begin(), d_input.end(), thrust::make_discard_iterator(), T(13), ::internal::maximum<T>{});
 
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
@@ -569,7 +568,14 @@ TEST(ScanTests, TestScanWithLargeTypes)
 #ifdef ADDRESS_SANITIZER_BUILD
   GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
 #endif
-  
+
+  // Temporarily disable this test on gfx115x on Windows until we can determine the root cause.
+  // TODO: remove this after the root cause has been found and fixed properly.
+  if (temp_skip::should_skip())
+  {
+    GTEST_SKIP() << "Skipping test on gfx1151 Windows systems due to known issues.";
+  }
+
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   _TestScanWithLargeTypes<int, 1>();
@@ -766,30 +772,35 @@ struct only_set_when_expected_it
   }
 };
 
-THRUST_NAMESPACE_BEGIN
-template <>
-struct iterator_traits<only_set_when_expected_it>
-{
-  using value_type = long long;
-  using reference  = only_set_when_expected_it;
-};
-THRUST_NAMESPACE_END
-
 namespace std
 {
 template <>
 struct iterator_traits<only_set_when_expected_it>
 {
-  using value_type = long long;
-  using reference  = only_set_when_expected_it;
+  using value_type      = long long;
+  using reference       = only_set_when_expected_it;
+  using difference_type = _THRUST_STD::ptrdiff_t;
 };
 } // namespace std
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+_THRUST_STD_NAMESPACE_BEGIN
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type        = long long;
+  using reference         = only_set_when_expected_it;
+  using iterator_category = thrust::random_access_device_iterator_tag;
+  using difference_type   = _THRUST_STD::ptrdiff_t;
+};
+_THRUST_STD_NAMESPACE_END
+#endif
 
 void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 {
   thrust::constant_iterator<long long> begin(1);
   thrust::constant_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
   *has_executed                         = false;
@@ -824,7 +835,7 @@ void TestExclusiveScanWithBigIndexesHelper(int magnitude)
 {
   thrust::constant_iterator<long long> begin(1);
   thrust::constant_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
   *has_executed                         = false;

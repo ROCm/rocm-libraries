@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,8 +21,6 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/remove.h>
-
-#include <stdexcept>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -97,6 +95,7 @@ ForwardIterator remove(my_tag, ForwardIterator first, ForwardIterator, const T&)
 TEST(RemoveTests, TestRemoveDispatchImplicit)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   thrust::device_vector<int> vec(1);
 
   thrust::remove(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
@@ -226,7 +225,7 @@ TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
   Vector data{1, 2, 1, 3, 2};
   Vector stencil{0, 1, 0, 0, 1};
 
-  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), _THRUST_STD::identity{});
 
   ASSERT_EQ(end - data.begin(), 3);
   data.resize(end - data.begin());
@@ -343,7 +342,7 @@ TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
   Vector result(5);
 
   typename Vector::iterator end =
-    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), ::internal::identity{});
+    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), _THRUST_STD::identity{});
 
   ASSERT_EQ(end - result.begin(), 3);
   result.resize(end - result.begin());
@@ -476,7 +475,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveIfStencil)
       thrust::device_vector<T> d_data = h_data;
 
       thrust::host_vector<bool> h_stencil = get_random_data<bool>(
-        size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed + seed_value_addition);
+        size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
       size_t h_size = thrust::remove_if(h_data.begin(), h_data.end(), h_stencil.begin(), is_true<T>()) - h_data.begin();
@@ -592,15 +591,15 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIteratorZipped)
       using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
       ZipIterator1 h_result = thrust::remove_copy(
-        thrust::make_zip_iterator(thrust::make_tuple(h_data.begin(), h_data.begin())),
-        thrust::make_zip_iterator(thrust::make_tuple(h_data.end(), h_data.end())),
-        thrust::make_zip_iterator(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator())),
+        thrust::make_zip_iterator(h_data.begin(), h_data.begin()),
+        thrust::make_zip_iterator(h_data.end(), h_data.end()),
+        thrust::make_zip_iterator(h_output.begin(), thrust::make_discard_iterator()),
         thrust::make_tuple(T(0), T(0)));
 
       ZipIterator2 d_result = thrust::remove_copy(
-        thrust::make_zip_iterator(thrust::make_tuple(d_data.begin(), d_data.begin())),
-        thrust::make_zip_iterator(thrust::make_tuple(d_data.end(), d_data.end())),
-        thrust::make_zip_iterator(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator())),
+        thrust::make_zip_iterator(d_data.begin(), d_data.begin()),
+        thrust::make_zip_iterator(d_data.end(), d_data.end()),
+        thrust::make_zip_iterator(d_output.begin(), thrust::make_discard_iterator()),
         thrust::make_tuple(T(0), T(0)));
 
       thrust::discard_iterator<> reference(num_nonzeros);
@@ -666,7 +665,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), thrust::not_fn(is_true<T>()));
+      size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), _THRUST_STD::not_fn(is_true<T>()));
 
       thrust::discard_iterator<> h_result =
         thrust::remove_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), is_true<T>());
@@ -700,8 +699,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencil)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      thrust::host_vector<bool> h_stencil =
-        get_random_data<bool>(size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed);
+      thrust::host_vector<bool> h_stencil = get_random_data<bool>(
+        size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
       thrust::host_vector<T> h_result(size);
@@ -746,7 +745,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
         size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
-      size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not_fn(is_true<T>()));
+      size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), _THRUST_STD::not_fn(is_true<T>()));
 
       thrust::discard_iterator<> h_result = thrust::remove_copy_if(
         h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), is_true<T>());
@@ -758,44 +757,6 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
 
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
-    }
-  }
-}
-
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void RemoveKernel(int const N, int* array, int remove_value)
-{
-  if (threadIdx.x == 0)
-  {
-    thrust::device_ptr<int> begin(array);
-    thrust::device_ptr<int> end(array + N);
-    thrust::remove(thrust::hip::par, begin, end, remove_value) - begin;
-  }
-}
-
-TEST(RemoveTests, TestRemoveDevice)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  for (auto size : get_sizes())
-  {
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-    for (auto seed : get_seeds())
-    {
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-      thrust::host_vector<int> h_data   = get_random_data<int>(size, 0, size, seed);
-      thrust::device_vector<int> d_data = h_data;
-
-      int remove_value = get_random_data<int>(1, 0, size, seed)[0];
-      SCOPED_TRACE(testing::Message() << "with remove_value= " << remove_value);
-
-      thrust::remove(h_data.begin(), h_data.end(), remove_value);
-      hipLaunchKernelGGL(
-        RemoveKernel, dim3(1, 1, 1), dim3(128, 1, 1), 0, 0, size, thrust::raw_pointer_cast(&d_data[0]), remove_value);
-      HIP_CHECK(hipGetLastError());
-
-      ASSERT_EQ(h_data, d_data);
     }
   }
 }

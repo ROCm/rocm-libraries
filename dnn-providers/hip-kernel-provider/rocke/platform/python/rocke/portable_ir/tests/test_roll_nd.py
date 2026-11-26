@@ -16,6 +16,7 @@ import json
 import math
 import unittest
 
+from rocke.core.intexpr import eval_intexpr, magic_division_constants
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.portable_ir.src.recording_builder import record_kernel
 from rocke.portable_ir.src.roll_nd import roll_nd
@@ -27,9 +28,7 @@ from rocke.portable_ir.src.roller import (
 )
 from rocke.portable_ir.utils.recipe_expand import (
     equiv_reason,
-    eval_intexpr,
     expand_recipe,
-    magic_division_constants,
     recipes_equiv,
 )
 
@@ -70,7 +69,7 @@ def build_magic(C):
     The emitted constants are a `ceil(log2 C)` shift and a multiplier keyed on
     C's odd part, so no polynomial in C fits either. Uses the production helper
     rather than hand-written numbers, so the test tracks the real idiom."""
-    from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
+    from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 
     b = IRBuilder(f"magic_C{C}")
     A = b.param("A", PtrType(F32, "global"), readonly=True, align=16)
@@ -308,7 +307,7 @@ class TestRollNdShapeAxes(unittest.TestCase):
 class TestBinarySearchTripCount(unittest.TestCase):
     """`ceil(log2(n+1))` -- the trip count of a binary search over `n` items.
 
-    Found by sweeping kernels/gfx950: all three tiled attention kernels size their
+    Found by sweeping the production kernels: all three tiled attention kernels size their
     sequence-lookup loop this way, and `num_seqs` refused for want of the model
     even though the recipe schema could already express it. `magic_shift` computes
     `ceil(log2 x)` and both evaluators recurse into its operand, so the fix was to
@@ -359,7 +358,7 @@ class TestCandidateModels(unittest.TestCase):
         Python ones against each other here; the C VM is pinned by
         `test_recipe_roller.py::test_standalone_cli_regenerates_magic_division_constants`.
         """
-        from rocke.helpers.transforms import calculate_magic_numbers
+        from rocke.helpers.magic_division import calculate_magic_numbers
 
         for d in [1, 2, 3, 5, 7, 8, 9, 64, 96, 128, 160, 192, 224, 256, 384, 1000]:
             mult, shift = calculate_magic_numbers(d)

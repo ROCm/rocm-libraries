@@ -89,9 +89,13 @@ expensive array format validation tests run in `rocfft-test` under the GoogleTes
 #### Bitwise reproducibility tests
 
 rocFFT tests bitwise reproducibility by hashing each output and re-running the suite to confirm that
-the hashes match. The hash is SHA-256. The implementation is in the rocFFT repository; tests do not
-use `std::hash`, which is not stable across runs.  Bitwise reproducibility requires the same rocFFT
-version, the same ROCm compiler, runtime, and driver, and the same GPU model.
+the hashes match. Each element's raw IEEE-754 bits are mixed with its logical position (batch index
+times elements per batch, plus the row-major index) using a fixed splitmix64 finalizer, and the
+results are summed. The fingerprint therefore does not depend on how the buffer is split across
+threads or on strides and padding, but it does change when elements move. The implementation is in
+`shared/fft_hash.h`; tests do not use `std::hash`, which is not stable across compilers, standard
+libraries, or processes. Bitwise reproducibility requires the same rocFFT version, the same ROCm
+compiler, runtime, and driver, and the same GPU model.
 
 
 #### Memory canary tests
@@ -102,8 +106,13 @@ discontiguous.  We have a number of ad-hoc lengths which verify this behaviour i
 accuracy test suite, and manually-specified test cases can verify this with the --checkstride
 command-line option.
 
-In addition, out-of-place complex-to-complex transforms preserve the input data.  There is a testing
-gap for this in rocFFT.
+In addition, out-of-place complex-to-complex and real forward (real-to-complex) transforms preserve
+the input data; only complex-to-real transforms may overwrite it.  The accuracy test suite verifies
+this by digesting the whole input allocation before and after the transform, for both the forward
+transform and the round-trip inverse.  Since that costs two copies of the input back to the host,
+only a sampled fraction of the eligible cases is checked - use the --input_preservation_prob
+command-line option to control that fraction.  Transforms with callbacks are subject to the same
+behaviour, and are checked alongside the rest.  Multi-device (brick/field) layouts are not covered.
 
 #### Samples
 

@@ -61,15 +61,16 @@ target_include_directories(rocisa-cpp
 )
 
 block()
+    # nanobind requires Python to be found first.
+    if(ROCISA_USE_STABLE_ABI)
+        find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
+    else()
+        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+    endif()
+
     if(ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
-        # nanobind requires Python to be found first.
-        if(ROCISA_USE_STABLE_ABI)
-            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
-        else()
-            find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
-        endif()
         find_package(nanobind REQUIRED CONFIG)
     else()
         include(FetchContent)
@@ -79,9 +80,6 @@ block()
           GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
         )
         FetchContent_MakeAvailable(nanobind)
-        if(ROCISA_USE_STABLE_ABI)
-            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
-        endif()
     endif()
 
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
@@ -160,13 +158,6 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        # Both steppings need the bindings, and they are separate entries in
-        # GPU_TARGETS, so a strict-only build matches neither if only one is named.
-        if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-            set(STINKYTOFU_BUILD_PYTHON ON)
-        else()
-            set(STINKYTOFU_BUILD_PYTHON OFF)
-        endif()
         add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         set(_stinkytofu_from_subdirectory TRUE)
     else()
@@ -174,11 +165,6 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-                set(STINKYTOFU_BUILD_PYTHON ON)
-            else()
-                set(STINKYTOFU_BUILD_PYTHON OFF)
-            endif()
             add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         endblock()
         set(_stinkytofu_from_subdirectory TRUE)
@@ -296,49 +282,6 @@ block()
         )
     endif()
 
-    # Stage the standalone stinkytofu Python module next to _rocisa so it
-    # resolves from the build tree at runtime.
-    if(TARGET stinkytofu_python)
-        add_dependencies(_rocisa stinkytofu_python)
-
-        set_target_properties(stinkytofu_python PROPERTIES
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
-            BUILD_RPATH "$ORIGIN"
-            INSTALL_RPATH "$ORIGIN"
-        )
-
-        configure_file(
-            "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
-            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
-            COPYONLY
-        )
-        # The staged _build_info.py drives the standalone _stinkytofu.so guard.
-        configure_file(
-            "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
-            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
-            @ONLY
-        )
-
-        # Stage intrinsics.st.bc next to _stinkytofu.so for runtime loading.
-        if(TARGET intrinsics_compiled)
-            add_dependencies(_rocisa intrinsics_compiled)
-
-            set(_intrinsics_bc_src "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
-            set(_intrinsics_bc_dst "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/intrinsics.st.bc")
-            add_custom_command(
-                OUTPUT "${_intrinsics_bc_dst}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${_intrinsics_bc_src}" "${_intrinsics_bc_dst}"
-                DEPENDS intrinsics_compiled "${_intrinsics_bc_src}"
-                COMMENT "Staging intrinsics.st.bc next to _stinkytofu.so"
-                VERBATIM
-            )
-            add_custom_target(rocisa_stage_intrinsics ALL
-                DEPENDS "${_intrinsics_bc_dst}")
-            add_dependencies(_rocisa rocisa_stage_intrinsics)
-        endif()
-    endif()
-
     if(ROCISA_STANDALONE)
         # scikit-build-core wheel install rules: place _rocisa and __init__.py into the
         # rocisa/ package directory in the wheel.
@@ -361,9 +304,9 @@ block()
         # TheRock computes install RPATHs relative to this target location.
         set_property(TARGET _rocisa PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
             "${_rocisa_install_dir}")
-        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
-            DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+            DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with

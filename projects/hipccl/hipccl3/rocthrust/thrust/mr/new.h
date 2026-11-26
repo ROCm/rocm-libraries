@@ -1,6 +1,6 @@
 /*
  *  Copyright 2018 NVIDIA Corporation
- *  Modifications Copyright 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ namespace mr
  *  \{
  */
 
-#if !THRUST_DOXYGEN_INVOKED
+#ifndef THRUST_DOXYGEN_INVOKED
 class new_delete_resource_base : public memory_resource<>
 {
 public:
@@ -67,17 +67,17 @@ public:
 #  endif
   }
 
-  void do_deallocate(void* p, std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
+  void do_deallocate(void* p,
+                     [[maybe_unused]] std::size_t bytes,
+                     [[maybe_unused]] std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
 #  if defined(__cpp_aligned_new)
 #    if defined(__cpp_sized_deallocation)
     ::operator delete(p, bytes, std::align_val_t(alignment));
 #    else
-    (void) bytes;
     ::operator delete(p, std::align_val_t(alignment));
 #    endif
 #  else
-    (void) alignment;
     char* ptr = static_cast<char*>(p);
     // calculate where the offset is stored
     std::size_t* offset = reinterpret_cast<std::size_t*>(ptr + bytes);
@@ -87,7 +87,7 @@ public:
 #  endif
   }
 };
-#endif // !THRUST_DOXYGEN_INVOKED
+#endif
 
 /*! A memory resource that uses global operators new and delete to allocate and deallocate memory. Uses
  * alignment-enabled overloads when available, otherwise uses regular overloads and implements alignment requirements by

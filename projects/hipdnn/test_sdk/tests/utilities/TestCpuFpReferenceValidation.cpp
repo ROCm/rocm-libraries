@@ -32,6 +32,19 @@ float validationEpsilon()
 {
     return static_cast<float>(std::numeric_limits<T>::epsilon());
 }
+
+bool fp64AllClose(double reference,
+                  double implementation,
+                  float absoluteTolerance,
+                  float relativeTolerance)
+{
+    const CpuFpReferenceValidation<double> refValidation(absoluteTolerance, relativeTolerance);
+    Tensor<double> referenceTensor({1});
+    Tensor<double> implementationTensor({1});
+    referenceTensor.setHostValue(reference, 0);
+    implementationTensor.setHostValue(implementation, 0);
+    return refValidation.allClose(referenceTensor, implementationTensor);
+}
 } // namespace
 
 /* ======== CpuFpReferenceValidation tests ======== */
@@ -368,6 +381,65 @@ TEST(TestCpuFpReferenceValidation, TensorSameElementCountDifferentDims)
     // Should return false because dimensions don't match
     // even though element counts are the same
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForOrderOfMagnitudeErrorNear1e300)
+{
+    EXPECT_TRUE(fp64AllClose(1e300, 1e300 * (1.0 + 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(1e300, 1e301, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForSignFlipNear1e300)
+{
+    EXPECT_TRUE(fp64AllClose(1e300, 1e300 * (1.0 - 5e-7), 0.0f, 1e-6f));
+    EXPECT_TRUE(fp64AllClose(-1e300, -1e300 * (1.0 + 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(1e300, -1e300, 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(-1e300, 1e300, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForDifferingValuesAboveFloatMax)
+{
+    const double aboveFloatMax = 1e39;
+    ASSERT_GT(aboveFloatMax, static_cast<double>(std::numeric_limits<float>::max()));
+
+    EXPECT_TRUE(fp64AllClose(aboveFloatMax, aboveFloatMax, 0.0f, 0.0f));
+    EXPECT_FALSE(fp64AllClose(aboveFloatMax,
+                              std::nextafter(aboveFloatMax, std::numeric_limits<double>::max()),
+                              0.0f,
+                              0.0f));
+
+    EXPECT_TRUE(fp64AllClose(aboveFloatMax, aboveFloatMax * (1.0 + 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(aboveFloatMax, 2.0 * aboveFloatMax, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForWrongValueAgainstReferenceAboveFloatMax)
+{
+    const double aboveFloatMax = 1e39;
+
+    EXPECT_TRUE(fp64AllClose(aboveFloatMax, aboveFloatMax * (1.0 - 5e-7), 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(aboveFloatMax, 1.0, 0.0f, 1e-6f));
+    EXPECT_FALSE(fp64AllClose(-aboveFloatMax, 0.0, 0.0f, 1e-6f));
+}
+
+TEST(TestCpuFpReferenceValidationFp64, FailsForDriftBelowFloatResolution)
+{
+    EXPECT_TRUE(fp64AllClose(1.0, 1.0 + 1e-13, 1e-12f, 0.0f));
+    EXPECT_FALSE(fp64AllClose(1.0, 1.0 + 1e-9, 1e-12f, 0.0f));
+}
+
+TEST(TestCpuFpReferenceValidation, RelativeToleranceScalesWithTheReference)
+{
+    const CpuFpReferenceValidation<float> refValidation(0.0f, 0.6f);
+    Tensor<float> reference({1});
+    Tensor<float> implementation({1});
+
+    reference.setHostValue(1.0f, 0);
+    implementation.setHostValue(2.0f, 0);
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+
+    reference.setHostValue(2.0f, 0);
+    implementation.setHostValue(1.0f, 0);
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
 }
 
 /* ================================================= */
@@ -885,6 +957,27 @@ TEST(TestCpuFpReferenceValidationMatchingInf, FactorySelectsTheRelaxedComparison
     EXPECT_TRUE(matchingInfValidation->allClose(tensor1, tensor2));
 }
 
+TEST(TestCpuIntReferenceValidationBoolean, FactoryComparesBooleanOutputsExactly)
+{
+    const auto validation = createAllCloseValidator(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN, 1.0f, 1.0f);
+    Tensor<bool> expected({4}, {2});
+    Tensor<bool> actual({4}, {2});
+    expected.fillTensorWithValue(0.0f);
+    actual.fillTensorWithValue(0.0f);
+    expected.setHostValue(true, 1);
+    actual.setHostValue(true, 1);
+    EXPECT_TRUE(validation->allClose(expected, actual));
+    actual.setHostValue(false, 1);
+    EXPECT_FALSE(validation->allClose(expected, actual));
+    actual.setHostValue(true, 1);
+    actual.setHostValue(true, 3);
+    EXPECT_FALSE(validation->allClose(expected, actual));
+    EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(
+                     hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN, 0.0f, 0.0f),
+                 std::runtime_error);
+}
+
 TEST(TestCpuFpReferenceValidationMatchingInf, FactoryRejectsIntegerDataTypes)
 {
     EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(
@@ -961,3 +1054,125 @@ TYPED_TEST(CpuIntReferenceValidationSentinel, PassesForNonSentinelValues)
 }
 
 /* ================================================= */
+
+/* ======== Ragged comparison tests (TYPED_TEST across fp types) ======== */
+
+template <typename T>
+class CpuFpReferenceValidationRagged : public ::testing::Test
+{
+};
+
+using RaggedFpValidationTypes = ::testing::Types<float, half, bfloat16>;
+TYPED_TEST_SUITE(CpuFpReferenceValidationRagged, RaggedFpValidationTypes, );
+
+TYPED_TEST(CpuFpReferenceValidationRagged, PassesForIdenticalTensors)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, SkipsInBlockNaNReference)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+    reference.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 1, 1, 2, 1);
+    implementation.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsForInBlockDifference)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+    implementation.setHostValue(TypeParam(2.0f), 1, 1, 2, 1);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsWhenEveryReferenceValueIsNaN)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsForMismatchedRaggedLayouts)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto reference = createRaggedSdpaTensor<TypeParam>(0.5f);
+    auto implementation = createRaggedSdpaTensor<TypeParam>(0.5f, {0, 3, 5});
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TYPED_TEST(CpuFpReferenceValidationRagged, FailsForRaggedAgainstDense)
+{
+    const CpuFpReferenceValidation<TypeParam> refValidation;
+    auto ragged = createRaggedSdpaTensor<TypeParam>(0.5f);
+    Tensor<TypeParam> dense(RAGGED_SDPA_DIMS);
+    dense.fillTensorWithValue(0.5f);
+
+    EXPECT_FALSE(refValidation.allClose(ragged, dense));
+    EXPECT_FALSE(refValidation.allClose(dense, ragged));
+}
+
+TEST(TestCpuIntReferenceValidationRagged, PassesForIdenticalTensors)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    auto reference = createRaggedSdpaTensor<int32_t>(7.0f);
+    auto implementation = createRaggedSdpaTensor<int32_t>(7.0f);
+
+    EXPECT_TRUE(refValidation.allClose(reference, implementation));
+}
+
+TEST(TestCpuIntReferenceValidationRagged, FailsForInBlockDifference)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    auto reference = createRaggedSdpaTensor<int32_t>(7.0f);
+    auto implementation = createRaggedSdpaTensor<int32_t>(7.0f);
+    implementation.setHostValue(8, 1, 1, 2, 1);
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+TEST(TestCpuIntReferenceValidationRagged, FailsForMismatchedRaggedLayouts)
+{
+    const CpuIntReferenceValidation<int32_t> refValidation;
+    auto reference = createRaggedSdpaTensor<int32_t>(7.0f);
+    auto implementation = createRaggedSdpaTensor<int32_t>(7.0f, {0, 3, 5});
+
+    EXPECT_FALSE(refValidation.allClose(reference, implementation));
+}
+
+/* ================================================= */
+
+// fp8 outputs (cuDNN sdpa_fp8 O) get a validator from the data-type factory, which compares
+// decoded values: one fp8 step apart fails a tight tolerance and passes a loose one.
+TEST(TestCpuFpReferenceValidationFp8, FactoryComparesDecodedValues)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto check = [](DataType dataType, auto tag) {
+        using Fp8 = decltype(tag);
+        Tensor<Fp8> a({4});
+        Tensor<Fp8> b({4});
+        for(int64_t i = 0; i < 4; ++i)
+        {
+            a.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+            b.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+        }
+        EXPECT_TRUE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        b.setHostValue(Fp8(4.5f), 3); // the next E4M3 value after 4
+        EXPECT_FALSE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        EXPECT_TRUE(createAllCloseValidator(dataType, 0.0f, 0.13f)->allClose(a, b));
+    };
+    check(DataType::FP8_E4M3, fp8_e4m3{});
+    check(DataType::FP8_E4M3_FNUZ, fp8_e4m3_fnuz{});
+}

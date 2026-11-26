@@ -28,10 +28,30 @@
 #define GAURD_MIOPEN_AI_HEURISTICS_HPP_
 
 #include <miopen/config.h>
+#include <string>
+
+namespace miopen {
+namespace ai {
+namespace common {
+
+// Normalize a device/arch name for AI-heuristic model lookups and gates: drop any runtime
+// sub-target suffix ("gfx1250-strict" -> "gfx1250") or feature flags ("gfx1250:sramecc+" ->
+// "gfx1250"). The base gfx* names contain no '-' or ':', so trimming at the first such
+// separator maps a reported variant back to the arch the shipped per-arch models are keyed on.
+// Defined outside the AI-feature guard below: the grouped-conv solvers' IsModelApplicable call it
+// unconditionally, so it must exist even when both AI options are off.
+inline std::string NormalizeArch(const std::string& name)
+{
+    return name.substr(0, name.find_first_of("-:"));
+}
+
+} // namespace common
+} // namespace ai
+} // namespace miopen
+
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <unordered_map>
 #include <typeinfo>
-#include <string>
 #include <vector>
 #include <algorithm>
 #include <queue>
@@ -100,6 +120,43 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
 // 3D). Derived from EngineeredConvFeatures itself so the count cannot drift from the vector it
 // describes; use this instead of hardcoding the size. Defined in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim = 2);
+
+// Default derived-feature names in the fixed positional order (the base block: 18 for 2D, 19 for
+// 3D with the appended ``log_d_in``). Used for models whose metadata lists no ``derived_features``
+// so both engineered-feature extractors can always drive EngineeredConvFeaturesByName instead of
+// branching to the positional EngineeredConvFeatures.
+// EngineeredConvFeaturesByName(DefaultDerivedFeatureNames) is pinned equal to
+// EngineeredConvFeatures by CPU_ConvAiEngineeredConvFeaturesByName_NONE tests.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> DefaultDerivedFeatureNames(int spatial_dim = 2);
+
+// Self-describing variant: emits the engineered features in the order named by the model metadata's
+// ``derived_features`` list. Supports the standard block plus optional GEMM-dim tile-divisibility
+// (divfeat) features - a model opts in simply by listing their names, so no code flags are needed.
+// ``phys_in_channels`` is the physical (direction-normalized) in_channels for cpg_in/is_depthwise -
+// not problem.GetInChannels(), which is the forward-output channel for backward problems.
+// ``data_type`` drives the dtype-aware K-pack feature. Must match
+// ConvInputPreprocessor.derived_feature_names() in MIOpenFF training. Throws on an unknown feature
+// name.
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineeredConvFeaturesByName(std::size_t N,
+                             std::size_t C_in,
+                             std::size_t C_out,
+                             std::size_t H_in,
+                             std::size_t W_in,
+                             std::size_t H_out,
+                             std::size_t W_out,
+                             std::size_t K_h,
+                             std::size_t K_w,
+                             std::size_t groups,
+                             std::size_t num_cu,
+                             ConvDirection direction,
+                             int spatial_dim,
+                             std::size_t D_in,
+                             std::size_t D_out,
+                             std::size_t K_d,
+                             std::size_t phys_in_channels,
+                             miopenDataType_t data_type,
+                             const std::vector<std::string>& names);
 
 // True if a TunaNet input feature is categorical (one-hot encoded) rather than numeric. Shared by
 // the immed_mode/2D and ND TunaNet encoders so the categorical/numeric split stays consistent in
@@ -196,11 +253,15 @@ class MetadataND
 {
 private:
     std::string model_prefix;
-    bool is_valid;   // Error handling flag
-    int spatial_dim; // 2 or 3 - dimension this model supports
+    std::string arch; // normalized device arch (e.g. "gfx1250"), dimension-independent
+    bool is_valid;    // Error handling flag
+    int spatial_dim;  // 2 or 3 - dimension this model supports
 
     // Loaded data (const members like 2D pattern)
     std::vector<std::string> features;
+    // Ordered engineered-feature names from the metadata's "derived_features"; empty for models
+    // that predate named engineered features, which then use the fixed positional engineered block.
+    std::vector<std::string> derived_feature_names;
     size_t num_inputs;
     size_t num_outputs;
     size_t num_solvers;
@@ -219,6 +280,7 @@ private:
     // Helper functions for construction
     static std::optional<int> LoadSpatialDim(const std::string& arch);
     static std::optional<std::vector<std::string>> LoadFeatures(const std::string& arch);
+    static std::vector<std::string> LoadDerivedFeatures(const std::string& arch);
     static std::optional<size_t> LoadNumInputs(const std::string& arch);
     static std::optional<size_t> LoadNumCu(const std::string& arch);
     static std::optional<size_t> LoadNumOutputs(const std::string& arch);
@@ -261,6 +323,10 @@ public:
      */
     const std::string& GetModelPrefix() const { return model_prefix; }
 
+    /// Normalized device arch (e.g. "gfx942", "gfx950", "gfx1250"), independent of dimension;
+    /// use this for arch-exact feature gates instead of substring-matching the model prefix.
+    const std::string& GetArch() const { return arch; }
+
     /**
      * @brief Get the spatial dimension this model supports
      * @return 2 for 2D models, 3 for 3D models
@@ -273,6 +339,12 @@ public:
      * @note Call IsValid() first to ensure data is available
      */
     const std::vector<std::string>& GetFeatures() const { return features; }
+
+    /**
+     * @brief Ordered engineered-feature names from the metadata's "derived_features".
+     * @return Names in emission order; empty for older models (use the positional block then).
+     */
+    const std::vector<std::string>& GetDerivedFeatureNames() const { return derived_feature_names; }
 
     /**
      * @brief Get number of input features recorded in metadata ("num_inputs").
@@ -427,6 +499,13 @@ protected:
  */
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
+
+/**
+ * @brief Check if TunaNet models (legacy 2D or ND) are bundled for the given device
+ * @param device GPU device name (e.g., "gfx942", "gfx1250")
+ * @return true if the system db ships .tn.model files for this device
+ */
+MIOPEN_INTERNALS_EXPORT bool HasBundledTunaNetModels(const std::string& device);
 
 /// Engineered input-feature vector for the TunaNetND input encoder: categorical one-hots
 /// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and

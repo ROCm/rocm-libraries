@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
@@ -80,7 +80,7 @@ generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Gener
 template <class Derived, class OutputIt, class Generator>
 void THRUST_HOST_DEVICE generate(execution_policy<Derived>& policy, OutputIt first, OutputIt last, Generator generator)
 {
-  hip_rocprim::generate_n(policy, first, thrust::distance(first, last), generator);
+  hip_rocprim::generate_n(policy, first, _THRUST_STD::distance(first, last), generator);
 }
 
 } // namespace hip_rocprim

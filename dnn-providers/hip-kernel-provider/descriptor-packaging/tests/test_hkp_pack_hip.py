@@ -9,8 +9,7 @@ from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
-from hkp_pack.pipeline import run_pipeline
-from pack_helpers import read_shipped
+from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
 
 ARCHES = ["gfx942", "gfx950", "gfx90a"]
 
@@ -34,16 +33,25 @@ def _inline_ukds(out_dir, kdp_name):
 
 
 @pytest.fixture(scope="session")
-def built(tmp_path_factory, main_fixture, hipcc, rocm_kpack_dir):
+def built(
+    tmp_path_factory,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+):
     """Compile + prune + pack the main fixture once for the 3-arch matrix."""
     base = tmp_path_factory.mktemp("built")
     results = run_pipeline(
         source_root=main_fixture,
         arches=ARCHES,
         out_root=base / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=base / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     return {
         "root": base,
@@ -86,8 +94,8 @@ def test_int1_compile_and_place(built):
 
 def test_int2_symbol_in_real_elf(built):
     # Read the intermediate .co compiled on disk (the pre-pack artifact),
-    # not the packed/round-tripped blob: the symbols must be in the ELF hipcc
-    # produced. The intermediate hsaco UKD names its .co via kernel_source.file.
+    # not the packed/round-tripped blob: the symbols must be in the ELF the
+    # compiler produced. The intermediate hsaco UKD names its .co via kernel_source.file.
     inter = built["inter"] / "gfx942"
     pa = _read(inter / "pointwise.kdp.json")["kernelDescriptors"][0]
     pa_co = (inter / pa["kernel_source"]["file"]).read_bytes()
@@ -186,16 +194,25 @@ def test_prn3_exact_post_prune_set(built):
         assert _arch_files(built["out"] / arch) == want, arch
 
 
-def test_prn4_empty_arch_skip(tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir):
+def test_prn4_empty_arch_skip(
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+):
     logs = []
     results = run_pipeline(
         source_root=empty_arch_fixture,
         arches=["gfx942", "gfx950"],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         log=logs.append,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     assert results["gfx950"].skipped
     assert not (tmp_path / "out" / "gfx950").exists()
@@ -356,60 +373,115 @@ def test_self_describing_ukd(built, rocm_kpack_dir):
 
 
 # --- D. Negatives: compile-spec --------------------------------------------
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=("gfx942",)):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches=("gfx942",),
+    hip_path=None,
+    device_lib_path=None,
+):
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 
-def test_neg_missing_source(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_missing_source(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "Copy.cpp").unlink()
     with pytest.raises(HkpPackError, match="source not found"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
-def test_neg_compile_failed(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_compile_failed(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "Copy.cpp").write_text("this is not valid hip source\n", encoding="utf-8")
     with pytest.raises(HkpPackError, match="compile failed"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 @pytest.mark.quick
-def test_neg_malformed_build(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_malformed_build(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)
     doc["kernelDescriptors"][0]["kernel_source"]["build"] = {"defines": [1, 2, 3]}
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="invalid build"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 # --- D. Negatives: descriptor ----------------------------------------------
 @pytest.mark.quick
-def test_neg_malformed_json(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_malformed_json(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "copy.kdp.json").write_text("{ not json", encoding="utf-8")
     with pytest.raises(HkpPackError, match="malformed descriptor JSON"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 @pytest.mark.quick
-def test_neg_missing_field(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_missing_field(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)
     del doc["kernelDescriptors"][0]["priority"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'priority'"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 _KPACK_SOURCE = {
@@ -449,7 +521,7 @@ def test_neg_kpack_source_missing_field(tmp_path, main_fixture, field):
     src = _copy_fixture(tmp_path, main_fixture)
     _author_kpack_source(src, drop=field)
     with pytest.raises(HkpPackError, match=f"missing required field '{field}'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -458,13 +530,15 @@ def test_kpack_source_complete_is_accepted(tmp_path, main_fixture):
     # rejected for some reason of its own would read as the drop being caught.
     src = _copy_fixture(tmp_path, main_fixture)
     _author_kpack_source(src)
-    flat = load_flat_input(src)
+    flat = load_flat_input(src, GENERIC_TARGETS)
     kdp = next(d for d in flat.kdps() if d.path.name == "copy.kdp.json")
     assert kdp.doc["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
 
 
 @pytest.mark.quick
-def test_neg_dangling_id(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_dangling_id(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)
@@ -473,10 +547,19 @@ def test_neg_dangling_id(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
     with pytest.raises(
         HkpPackError, match="unknown descriptor Id 'ued-does-not-exist'"
     ):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
-def test_neg_sha256_mismatch(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_sha256_mismatch(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     build = {
         "defines": {
             "HIP_PLUGIN_COPY_TYPE": "float",
@@ -490,15 +573,23 @@ def test_neg_sha256_mismatch(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
             source_root=main_fixture,
             arches=["gfx942"],
             out_root=tmp_path / "out",
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
             expected_sha256={key: "0" * 64},
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
 
 
 def test_neg_toc_key_collision(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    monkeypatch,
 ):
     src = _copy_fixture(tmp_path, main_fixture)
     from hkp_pack import pipeline
@@ -514,12 +605,29 @@ def test_neg_toc_key_collision(
         lambda source, build: "COLLIDE",
     )
     with pytest.raises(HkpPackError, match="toc_key collision"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 # --- D. CLI / arch-selection -----------------------------------------------
-def test_cli1_single_arch(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
-    results = _run(main_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+def test_cli1_single_arch(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
+    results = _run(
+        main_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert (tmp_path / "out" / "gfx942").is_dir()
     assert not (tmp_path / "out" / "gfx950").exists()
     assert not (tmp_path / "out" / "gfx90a").exists()
@@ -527,14 +635,18 @@ def test_cli1_single_arch(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
 
 
 @pytest.mark.quick
-def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_cli2_empty_gpu_targets(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     results = run_pipeline(
         source_root=main_fixture,
         arches=[],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     assert results == {}
     assert not (tmp_path / "out").exists()
@@ -543,7 +655,7 @@ def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
 # --- Unit: pruning reachability + wildcard ---------------------------------
 @pytest.mark.quick
 def test_wildcard_arch_matches(main_fixture):
-    flat = load_flat_input(main_fixture)
+    flat = load_flat_input(main_fixture, GENERIC_TARGETS)
     wild = next(k for k in flat.kdps() if k.id == "kdp-pointwise-wild")
     from hkp_pack.descriptors import arch_matches
 
@@ -589,10 +701,12 @@ def test_same_ukd_id_across_shards_distinct_content(built):
 
 
 # --- Compiler determinism (C-008) ------------------------------------------
-def test_determinism_same_variant_twice(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
-    # -fuse-cuid=none makes hipcc emit byte-identical .co for identical inputs, so
-    # the sha256 stamped on each shipped UKD is stable across builds. Two full
-    # runs of the same fixture must yield identical UKD sha256 values.
+def test_determinism_same_variant_twice(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
+    # -fuse-cuid=none makes the compiler emit byte-identical .co for identical
+    # inputs, so the sha256 stamped on each shipped UKD is stable across builds.
+    # Two full runs of the same fixture must yield identical UKD sha256 values.
     def _shas(out):
         result = {}
         for kdp in sorted((out).glob("gfx942/*.kdp.json")):
@@ -606,17 +720,21 @@ def test_determinism_same_variant_twice(tmp_path, main_fixture, hipcc, rocm_kpac
         source_root=main_fixture,
         arches=["gfx942"],
         out_root=tmp_path / "out1",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter1",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     run_pipeline(
         source_root=main_fixture,
         arches=["gfx942"],
         out_root=tmp_path / "out2",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter2",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     a, b = _shas(tmp_path / "out1"), _shas(tmp_path / "out2")
     assert a and a == b
@@ -628,16 +746,20 @@ def test_fuse_cuid_pinned_after_authored_flags():
     # clang's last-flag-wins keeps it regardless of what the author wrote.
     from pathlib import Path
 
-    from hkp_pack.hip_compile import _hipcc_command
+    from hkp_pack.hip_compile import _hip_compile_command
 
     build = {"flags": ["-fuse-cuid=random", "-O3"]}
-    cmd = _hipcc_command("hipcc", Path("src.cpp"), "gfx942", build, Path("out.co"))
+    cmd = _hip_compile_command(
+        "clang++", Path("src.cpp"), "gfx942", build, Path("out.co")
+    )
     assert cmd.count("-fuse-cuid=none") == 1
     assert cmd.index("-fuse-cuid=none") > cmd.index("-fuse-cuid=random")
 
 
 @pytest.mark.quick
-def test_neg_authored_fuse_cuid_flag(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_neg_authored_fuse_cuid_flag(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # An authored -fuse-cuid flag is reserved and rejected at load.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -647,27 +769,54 @@ def test_neg_authored_fuse_cuid_flag(tmp_path, main_fixture, hipcc, rocm_kpack_d
     ]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="invalid build"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir)
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 # --- Non-descriptor .json warn/skip (C-007) --------------------------------
-def test_non_descriptor_json_skipped(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_non_descriptor_json_skipped(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # A stray .json whose name carries no <type> token is skipped, not fatal.
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "notes.json").write_text('{"arbitrary": true}\n', encoding="utf-8")
-    results = _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+    results = _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert set(results) == {"gfx942"}
     assert not (tmp_path / "out" / "gfx942" / "notes.json").exists()
 
 
 @pytest.mark.quick
-def test_unknown_type_token_still_errors(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_unknown_type_token_still_errors(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # A file that IS type-tagged (<name>.<type>.json) but with an unrecognized
     # token still hard-errors; only token-less files are skipped.
     src = _copy_fixture(tmp_path, main_fixture)
     (src / "stray.bogus.json").write_text('{"id": "x"}\n', encoding="utf-8")
     with pytest.raises(HkpPackError, match="unknown type token 'bogus'"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            arches=["gfx942"],
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 # --- E. Standalone UKD -----------------------------------------------------
@@ -748,7 +897,9 @@ def test_standalone_ukd_pruned_from_nonreferencing_shard(built):
 
 
 @pytest.mark.quick
-def test_standalone_ukd_dangling_id(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_standalone_ukd_dangling_id(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # A KDP referencing a UKD id string with no matching .ukd.json hard-errors.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "pointwise.kdp.json"
@@ -756,11 +907,19 @@ def test_standalone_ukd_dangling_id(tmp_path, main_fixture, hipcc, rocm_kpack_di
     doc["kernelDescriptors"].append("ukd-does-not-exist")
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="unknown UKD Id 'ukd-does-not-exist'"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            arches=["gfx942"],
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 def test_standalone_ukd_shared_by_two_kdps_stored_once(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # Two KDPs on the same arch both reference the one standalone UKD -> its blob
     # is stored once (deduped by variant_key), not once per referencing KDP.
@@ -769,19 +928,20 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     # and pointwise.kdp.json reference the same standalone id on gfx942.
     p = src / "copy.kdp.json"
     doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
     # A second referencing KDP is a second CONSUMER: it resolves to its own engine
     # and KMD, so the UKD declares what it claims for that pair too. Every field of
-    # kmd-copy is matcher-only here -- a hip source compiles no specialization --
+    # the copy KMD is matcher-only here -- a hip source compiles no specialization --
     # but the claim is stated rather than inferred from silence.
     ukd_path = src / _STANDALONE_UKD_FILE
     ukd_doc = _read(ukd_path)
     consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
     consumers.append(
         {
-            "engine_id": "ued-copy",
-            "kmd_id": "kmd-copy",
+            "engine_id": _read(src / "copy.ued.json")["id"],
+            "kmd_id": _read(src / "copy.kmd.json")["id"],
             "metadata_fields": [],
             "matcher_only_fields": ["block_size", "dtype"],
             "bindings": {},
@@ -789,7 +949,15 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
         }
     )
     ukd_path.write_text(json.dumps(ukd_doc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     kpack = _load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(
         tmp_path / "out" / "gfx942" / "kpack" / "hip_kernel_provider_gfx942.kpack"
@@ -801,7 +969,7 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
 
 
 def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     """The same second reference with the declaration left alone. A UKD several
     engines reference carries one entry per engine, and silence is not a waiver:
@@ -810,29 +978,50 @@ def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="expected exactly one"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            arches=["gfx942"],
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 def test_standalone_ukd_referenced_by_wildcard_kdp(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
-    # A standalone UKD referenced by a wildcard KDP (arch []) ships in every shard.
     src = _copy_fixture(tmp_path, main_fixture)
+    wild_doc = _read(src / _STANDALONE_UKD_FILE)
+    wild_doc["id"] = "ukd-pointwise-add-f32-b128-wild"
+    del wild_doc["arch"]
+    wild_file = "pointwise_add_b128_wild.ukd.json"
+    (src / wild_file).write_text(json.dumps(wild_doc), encoding="utf-8")
     p = src / "pointwise_wild.kdp.json"
     doc = _read(p)
-    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    doc["kernelDescriptors"].append(wild_doc["id"])
     p.write_text(json.dumps(doc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", "gfx90a"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", "gfx90a"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     for arch in ("gfx942", "gfx90a"):
-        assert (tmp_path / "out" / arch / _STANDALONE_UKD_FILE).exists(), arch
+        assert (tmp_path / "out" / arch / wild_file).exists(), arch
 
 
 @pytest.mark.quick
 def test_standalone_ukd_id_collides_with_inline(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # An inline UKD sharing an id with a standalone UKD is a hard error.
     src = _copy_fixture(tmp_path, main_fixture)
@@ -842,11 +1031,21 @@ def test_standalone_ukd_id_collides_with_inline(
     doc["kernelDescriptors"][0]["id"] = _STANDALONE_UKD_ID
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="collides with a standalone UKD"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            arches=["gfx942"],
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 # --- F. Per-UKD arch ------------------------------------------------------
-def test_per_ukd_arch_filters_standalone(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_per_ukd_arch_filters_standalone(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # A standalone UKD narrowed to gfx942 ships only in the gfx942 shard; the
     # pointwise KDP still ships in gfx950 on its wildcard inline UKDs alone.
     src = _copy_fixture(tmp_path, main_fixture)
@@ -854,7 +1053,15 @@ def test_per_ukd_arch_filters_standalone(tmp_path, main_fixture, hipcc, rocm_kpa
     doc = _read(p)
     doc["arch"] = ["gfx942"]
     p.write_text(json.dumps(doc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", "gfx950"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert (tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
     # The narrowed standalone drops out of gfx950, but its inline UKDs are
@@ -889,7 +1096,7 @@ def test_every_shipped_ukd_stamped_with_shard_arch(built):
 
 @pytest.mark.quick
 def test_ukd_arch_not_subset_of_kdp_hard_errors(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # A standalone UKD arch outside the referencing KDP's arch is a hard error
     # at load, independent of the requested GPU targets.
@@ -899,30 +1106,41 @@ def test_ukd_arch_not_subset_of_kdp_hard_errors(
     doc["arch"] = ["gfx90a"]  # pointwise KDP is [gfx942, gfx950]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="is not a subset of KDP"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            arches=["gfx942"],
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 def test_ukd_arch_subset_wildcard_combinations_accepted(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
-    # (a) UKD explicit subset of KDP explicit; (b) UKD wildcard + KDP explicit;
-    # (c) KDP wildcard + UKD explicit. Each loads without error and emits the
-    # standalone into the expected shard(s).
+    # (a) UKD explicit subset of KDP explicit; (c) KDP wildcard + UKD explicit.
+    # Each loads without error and emits the standalone into the expected shard(s).
+    # The legal wildcard-UKD shape is the inline UKD inheriting a concrete KDP's arch,
+    # covered by _ACCEPTED["inline_inheriting_a_concrete_kdp"].
     # (a) explicit subset: b128 -> [gfx942] under pointwise KDP [gfx942, gfx950].
     src_a = _copy_fixture(tmp_path / "a", main_fixture)
     p = src_a / _STANDALONE_UKD_FILE
     doc = _read(p)
     doc["arch"] = ["gfx942"]
     p.write_text(json.dumps(doc), encoding="utf-8")
-    _run(src_a, tmp_path / "a", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
+    _run(
+        src_a,
+        tmp_path / "a",
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", "gfx950"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert (tmp_path / "a" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "a" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
-
-    # (b) UKD wildcard (unchanged fixture) under explicit KDP -> ships in both.
-    src_b = _copy_fixture(tmp_path / "b", main_fixture)
-    _run(src_b, tmp_path / "b", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
-    assert (tmp_path / "b" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
-    assert (tmp_path / "b" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
 
     # (c) KDP wildcard + UKD explicit: reference b128 (arch [gfx942]) from the
     # wildcard KDP; it ships only in gfx942.
@@ -935,13 +1153,21 @@ def test_ukd_arch_subset_wildcard_combinations_accepted(
     wdoc = _read(wp)
     wdoc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     wp.write_text(json.dumps(wdoc), encoding="utf-8")
-    _run(src_c, tmp_path / "c", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx90a"])
+    _run(
+        src_c,
+        tmp_path / "c",
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", "gfx90a"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert (tmp_path / "c" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "c" / "out" / "gfx90a" / _STANDALONE_UKD_FILE).exists()
 
 
 def test_empty_kdp_dropped_and_generics_pruned(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # Widen copy.kdp to [gfx942, gfx950] but narrow its inline Copy UKD to
     # [gfx942]. On gfx950 the KDP empties out: it is dropped and its exclusive
@@ -952,7 +1178,15 @@ def test_empty_kdp_dropped_and_generics_pruned(
     doc["arch"] = ["gfx942", "gfx950"]
     doc["kernelDescriptors"][0]["arch"] = ["gfx942"]
     p.write_text(json.dumps(doc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", "gfx950"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     gone = (
         "copy.kdp.json",
         "copy.umd.json",
@@ -969,7 +1203,7 @@ def test_empty_kdp_dropped_and_generics_pruned(
 
 
 def test_wildcard_kdp_narrowed_per_kernel(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # A wildcard KDP survives every arch, but a UKD it references narrowed to
     # gfx942 ships only there -- the KDP survives gfx90a on its wildcard inline
@@ -983,7 +1217,15 @@ def test_wildcard_kdp_narrowed_per_kernel(
     wdoc = _read(wp)
     wdoc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     wp.write_text(json.dumps(wdoc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", "gfx90a"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", "gfx90a"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert (tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "out" / "gfx90a" / _STANDALONE_UKD_FILE).exists()
     # The wildcard KDP itself survives both shards.
@@ -993,7 +1235,7 @@ def test_wildcard_kdp_narrowed_per_kernel(
 
 @pytest.mark.quick
 def test_multi_kdp_subset_violation_hard_errors(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # Two KDPs reference the same standalone with incompatible arches: the UKD
     # arch is admissible under one referencing KDP but not the other, so the
@@ -1011,7 +1253,15 @@ def test_multi_kdp_subset_violation_hard_errors(
     cdoc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     cp.write_text(json.dumps(cdoc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="is not a subset of KDP"):
-        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+        _run(
+            src,
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            arches=["gfx942"],
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
 
 
 # --- G. Global id uniqueness -------------------------
@@ -1022,7 +1272,7 @@ def test_neg_duplicate_standalone_ukd_ids(tmp_path, main_fixture):
     dup = _read(src / _STANDALONE_UKD_FILE)
     (src / "dup.ukd.json").write_text(json.dumps(dup), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1033,7 +1283,7 @@ def test_neg_duplicate_kdp_ids(tmp_path, main_fixture):
     doc["id"] = "kdp-pointwise"  # already the id of pointwise.kdp.json
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1041,10 +1291,12 @@ def test_neg_duplicate_generic_ids(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kmd.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # already the id of pointwise.kmd.json
+    # pointwise.kmd.json's id in another letter case: the loader parses both
+    # spellings to the same UUID.
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"].upper()
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1054,10 +1306,10 @@ def test_neg_cross_type_id_reuse_rejected(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "pointwise.ued.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # a KMD id, different type
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"]  # a KMD id, different type
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- H. Version enforcement --------------------------
@@ -1069,7 +1321,7 @@ def test_neg_file_backed_missing_version(tmp_path, main_fixture):
     del doc["version"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'version'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1081,7 +1333,7 @@ def test_neg_malformed_version(tmp_path, main_fixture, bad):
     doc["version"] = bad
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="invalid version"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1093,7 +1345,7 @@ def test_neg_inline_ukd_missing_version(tmp_path, main_fixture):
     del doc["kernelDescriptors"][0]["version"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'version'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- I. UED scoped name ------------------------------
@@ -1105,20 +1357,20 @@ def test_neg_ued_name_not_scoped(tmp_path, main_fixture):
     doc["name"] = "Pointwise engine"  # unscoped
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="scoped"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
 def test_scoped_ued_name_loads_clean(main_fixture):
     # The renamed fixture UED (test_fixture:pointwise) validates without error.
-    flat = load_flat_input(main_fixture)
-    ued = next(d for d in flat.by_type("ued") if d.id == "ued-pointwise")
+    flat = load_flat_input(main_fixture, GENERIC_TARGETS)
+    ued = next(d for d in flat.by_type("ued") if d.path.name == "pointwise.ued.json")
     assert ued.doc["name"] == "test_fixture:pointwise"
 
 
 # --- J. Provenance protection ------------------------
 def test_authored_provenance_cannot_hijack(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # The shipped provenance block is the generated traceability record: an authored
     # value for a field the producer writes is overwritten, while an authored field
@@ -1135,7 +1387,15 @@ def test_authored_provenance_cannot_hijack(
         }
     )
     p.write_text(json.dumps(doc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     prov = read_shipped(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)[
         "provenance"
     ]
@@ -1155,7 +1415,7 @@ def test_non_object_provenance_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = "HIJACKED"
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="provenance must be an object"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 def _share_contract_onto_kdp(kdp_path):
@@ -1175,13 +1435,21 @@ def _share_contract_onto_kdp(kdp_path):
 
 
 def test_kdp_level_contract_is_inherited_and_ships(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
 ):
     # A declaration written once on the KDP covers every inline kernel under it, so a
     # reader with only the shipped shard still resolves a full consumer list for each.
     src = _copy_fixture(tmp_path, main_fixture)
     _share_contract_onto_kdp(src / "pointwise.kdp.json")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+    _run(
+        src,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942"],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
 
     out = tmp_path / "out" / "gfx942"
     shipped = read_shipped(out / "pointwise.kdp.json")
@@ -1214,7 +1482,7 @@ def test_effective_spec_on_a_kdp_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = {"effective_spec": {"schema_version": 1}}
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="effective_spec is reserved"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1227,7 +1495,7 @@ def test_a_malformed_kdp_contract_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = {"specialization_contract": {"schema_version": 1}}
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="specialization_contract must be"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- K. Drop diagnostics + arch warning --------------
@@ -1239,11 +1507,13 @@ def test_orphan_standalone_ukd_warns(tmp_path, main_fixture):
     orphan["id"] = "ukd-orphan"
     (src / "orphan.ukd.json").write_text(json.dumps(orphan), encoding="utf-8")
     logs = []
-    load_flat_input(src, log=logs.append)
+    load_flat_input(src, GENERIC_TARGETS, log=logs.append)
     assert any("orphan.ukd.json" in m and "not referenced" in m for m in logs)
 
 
-def test_empty_pruned_kdp_is_logged(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_empty_pruned_kdp_is_logged(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # A KDP whose only UKD filters out for an arch is dropped with a log line.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -1256,10 +1526,12 @@ def test_empty_pruned_kdp_is_logged(tmp_path, main_fixture, hipcc, rocm_kpack_di
         source_root=src,
         arches=["gfx950"],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         log=logs.append,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     assert any("copy.kdp.json" in m and "filtered out for gfx950" in m for m in logs)
 
@@ -1278,7 +1550,9 @@ def test_bare_arch_boundaries():
             _reject_nonbare_arch([bad], "where")
 
 
-def test_nonbare_arch_is_rejected(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
+def test_nonbare_arch_is_rejected(
+    tmp_path, main_fixture, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir
+):
     # A feature-suffixed arch matches no shard, so the KDP prunes everywhere and
     # the pack would otherwise exit 0 having installed nothing.
     src = _copy_fixture(tmp_path, main_fixture)
@@ -1291,7 +1565,9 @@ def test_nonbare_arch_is_rejected(tmp_path, main_fixture, hipcc, rocm_kpack_dir)
             source_root=src,
             arches=["gfx942"],
             out_root=tmp_path / "out",
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )

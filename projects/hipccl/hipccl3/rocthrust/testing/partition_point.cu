@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -41,11 +41,11 @@ void TestPartitionPointSimple()
 
   Iterator last = v.begin() + 4;
   Iterator ref  = first + 3;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, _THRUST_STD::identity{}));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, _THRUST_STD::identity{}));
 }
 DECLARE_VECTOR_UNITTEST(TestPartitionPointSimple);
 
@@ -114,11 +114,11 @@ void TestPartitionPointWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(0);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   test_less_than fn = {(1ll << magnitude) - 17};
 
-  ASSERT_EQUAL(thrust::distance(begin, thrust::partition_point(thrust::device, begin, end, fn)),
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, thrust::partition_point(thrust::device, begin, end, fn)),
                (1ll << magnitude) - 17);
 }
 

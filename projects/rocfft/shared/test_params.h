@@ -33,10 +33,13 @@ extern size_t random_seed;
 extern double test_prob;
 extern double unittest_prob;
 extern double emulation_prob;
+extern double input_preservation_prob;
 extern double complex_interleaved_prob_factor;
 extern double real_prob_factor;
 extern double complex_planar_prob_factor;
 extern double callback_prob_factor;
+extern double very_large_prob_factor;
+extern bool   quick_tests_only;
 
 extern double half_epsilon;
 extern double single_epsilon;

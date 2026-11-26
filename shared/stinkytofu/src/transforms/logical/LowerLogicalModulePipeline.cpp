@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -36,6 +37,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -45,9 +47,11 @@
 
 namespace stinkytofu {
 
-void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config) {
+void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config,
+                                const AsmCapsConfig& caps) {
     PassManager pm;
     pm.setGemmTileConfig(config);
+    pm.setAsmCapsConfig(caps);
     pm.addPass(createCompositeInstructionLoweringPass());
     pm.addPass(createToStinkyAsmPass());
     pm.run(func);
@@ -59,6 +63,10 @@ GemmTileConfig configFromOptions(std::array<int, 3> arch,
                                  const StinkyAsmModule::ModuleOptions& opts) {
     GemmTileConfig cfg;
     cfg.arch = arch;
+    // Carry the concrete stepping identity so ToStinkyAsmPass can disambiguate
+    // steppings that share an ISA triple (e.g. gfx1250 vs gfx1250v0) and select
+    // the matching per-arch cost table, mirroring rocisa's toStinkyTofuModule.
+    cfg.archName = opts.ArchName;
     cfg.TileA0 = static_cast<uint32_t>(opts.TileA0);
     cfg.TileB0 = static_cast<uint32_t>(opts.TileB0);
     cfg.TileM0 = static_cast<uint32_t>(opts.TileM0);
@@ -67,6 +75,24 @@ GemmTileConfig configFromOptions(std::array<int, 3> arch,
     cfg.NumGRM = opts.NumGRM;
     cfg.NumWaves = static_cast<uint32_t>(opts.WaveGroup0 * opts.WaveGroup1);
     return cfg;
+}
+
+// Mirror of Backend::configurePassManager(): take the explicitly requested mode
+// when TensileLite forwarded rocisa's asmCaps, else auto-probe via comgr. The
+// asm-side pipeline derives its caps this way, and ToStinkyAsmPass must see the
+// same verdict or a split ds_* half crossing a VGPR MSB bank loses its offset.
+AsmCapsConfig capsFromOptions(std::array<int, 3> arch, const StinkyAsmModule::ModuleOptions& opts) {
+    auto msbVal = opts.VgprMsbMode;
+    if (msbVal < 0 || msbVal > static_cast<int>(VgprMsbMode::Msb16)) msbVal = 0;
+
+    AsmCapsConfig caps;
+    caps.vgprMsbMode = static_cast<VgprMsbMode>(msbVal);
+    if (caps.vgprMsbMode == VgprMsbMode::None) {
+        caps = ToolchainCaps::probe(resolveArchId(arch, opts.ArchName));
+    }
+    caps.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
+    caps.enableXnackReplay = opts.EnableXnackReplay;
+    return caps;
 }
 
 }  // anonymous namespace
@@ -87,27 +113,37 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     BasicBlock* entryBB = func.getEntryBlock();
     assert(entryBB && "StinkyAsmModule must have an entry basic block");
 
-    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    // Honor the concrete stepping identity (ModuleOptions.ArchName) when the two
+    // steppings share an ISA triple (gfx1250 vs gfx1250v0), so the emitted asm
+    // uses the correct per-arch cost table -- matching rocisa's toStinkyTofuModule.
+    GfxArchID archId = resolveArchId(arch, moduleOptions.ArchName);
 
     {
-        PyLogicalFunction pyFunc(&func);
-
         const auto& instructions = module.getInstructions();
         const auto& directives = module.getSetDirectives();
+        const auto& conditionalDirectives = module.getConditionalDirectives();
         const auto& labels = module.getLabels();
         const auto& textBlocks = module.getTextBlocks();
         const auto& groupMarkers = module.getGroupMarkers();
+        const auto& callableMarkers = module.getCallableMarkers();
         size_t dirIdx = 0;
+        size_t condIdx = 0;
         size_t lblIdx = 0;
         size_t tbIdx = 0;
         size_t gmIdx = 0;
+        size_t cmIdx = 0;
 
         // Active group names stack — tracks which groups the current
         // instruction position is inside.  Only groups that are also
         // registered (via addGroup above) will actually be updated.
         std::vector<std::string> activeGroups;
+        std::vector<std::string> entryActiveGroups;
+        std::string currentCallableName;
 
-        AsmIRBuilder irBuilder(*entryBB, archId);
+        BasicBlock* currentBB = entryBB;
+        auto irBuilder = std::make_unique<AsmIRBuilder>(*currentBB, archId);
+        std::vector<std::unique_ptr<PyLogicalFunction>> pyFunctions;
+        pyFunctions.push_back(std::make_unique<PyLogicalFunction>(&func));
 
         // Process group markers whose position/order are eligible at the
         // current emission point.  Group markers toggle the active-group
@@ -139,7 +175,7 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         };
 
         auto emitNextItem = [&](int type) {
-            const auto instsCountBefore = entryBB->size();
+            const auto instsCountBefore = currentBB->size();
             switch (type) {
                 case 0: {
                     AsmDirective* dir = IRBase::createIR<AsmDirective>();
@@ -147,13 +183,13 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                     dir->name = ".set";
                     dir->symbol = directives[dirIdx].symbol;
                     dir->value = directives[dirIdx].value;
-                    entryBB->appendIR(dir);
+                    currentBB->appendIR(dir);
                     ++dirIdx;
                     break;
                 }
                 case 1: {
                     StinkyInstruction* labelInst =
-                        irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
+                        irBuilder->createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
                     if (!labels[lblIdx].comment.empty()) {
                         labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
                     }
@@ -164,14 +200,58 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                     AsmDirective* dir = IRBase::createIR<AsmDirective>();
                     dir->kind = AsmDirectiveKind::TEXTBLOCK;
                     dir->value = textBlocks[tbIdx].text;
-                    entryBB->appendIR(dir);
+                    currentBB->appendIR(dir);
                     ++tbIdx;
+                    break;
+                }
+                case 3: {
+                    const auto& marker = callableMarkers[cmIdx++];
+                    if (marker.isBegin) {
+                        assert(currentBB == entryBB && "nested callable functions are unsupported");
+                        irBuilder->createFunctionAsmPlacementMarker(marker.name);
+                        asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
+                        entryActiveGroups = activeGroups;
+                        activeGroups.clear();
+                        currentCallableName = marker.name;
+                        Function& callable = asmModule->createFunction(marker.name, true);
+                        currentBB = callable.getEntryBlock();
+                        assert(currentBB && "callable Function must have an entry basic block");
+                        pyFunctions.push_back(std::make_unique<PyLogicalFunction>(&callable));
+                        irBuilder = std::make_unique<AsmIRBuilder>(*currentBB, archId);
+                    } else {
+                        assert(currentBB != entryBB &&
+                               "callable end marker without a begin marker");
+                        assert(marker.name == currentCallableName &&
+                               "mismatched callable end marker");
+                        currentBB = entryBB;
+                        activeGroups = entryActiveGroups;
+                        entryActiveGroups.clear();
+                        currentCallableName.clear();
+                        irBuilder = std::make_unique<AsmIRBuilder>(*currentBB, archId);
+                    }
+                    return;
+                }
+                case 4: {
+                    const auto& entry = conditionalDirectives[condIdx++];
+                    AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                    if (entry.kind == ConditionalDirectiveKind::IF) {
+                        dir->kind = AsmDirectiveKind::IF;
+                        dir->name = ".if";
+                        dir->condition = entry.payload;
+                    } else {
+                        dir->kind = AsmDirectiveKind::ENDIF;
+                        dir->name = ".endif";
+                        dir->comment = entry.payload;
+                    }
+                    currentBB->appendIR(dir);
                     break;
                 }
                 default:
                     break;
             }
-            asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
+            if (currentBB == entryBB) {
+                asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
+            }
         };
 
         auto emitItemsAtPosition = [&](size_t pos) {
@@ -194,6 +274,17 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                     bestOrder = textBlocks[tbIdx].order;
                     bestType = 2;
                 }
+                if (cmIdx < callableMarkers.size() && callableMarkers[cmIdx].position <= pos &&
+                    callableMarkers[cmIdx].order < bestOrder) {
+                    bestOrder = callableMarkers[cmIdx].order;
+                    bestType = 3;
+                }
+                if (condIdx < conditionalDirectives.size() &&
+                    conditionalDirectives[condIdx].position <= pos &&
+                    conditionalDirectives[condIdx].order < bestOrder) {
+                    bestOrder = conditionalDirectives[condIdx].order;
+                    bestType = 4;
+                }
 
                 if (bestType == -1) break;
                 // Process any group markers that precede this item.
@@ -207,9 +298,11 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
             // Process group markers at this instruction position.
             processGroupMarkers(i, SIZE_MAX);
 
-            const auto instsCountBefore = entryBB->size();
-            entryBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
-            asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
+            const auto instsCountBefore = currentBB->size();
+            currentBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
+            if (currentBB == entryBB) {
+                asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
+            }
         }
         // Trailing items (after all instructions)
         emitItemsAtPosition(SIZE_MAX);
@@ -237,7 +330,12 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
             }
         }
 
-        runLogicalLoweringPipeline(func, configFromOptions(arch, moduleOptions));
+        assert(currentBB == entryBB && "unterminated callable function body");
+        const GemmTileConfig loweringConfig = configFromOptions(arch, moduleOptions);
+        const AsmCapsConfig loweringCaps = capsFromOptions(arch, moduleOptions);
+        for (Function* function : asmModule->getFunctions()) {
+            runLogicalLoweringPipeline(*function, loweringConfig, loweringCaps);
+        }
     }
 
     return asmModule;

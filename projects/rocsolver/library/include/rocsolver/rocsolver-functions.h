@@ -12,7 +12,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
@@ -14118,7 +14118,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgesvd_batched(rocblas_handle handle,
     returns.
 
     \note
-    When ```m`` >> ``n`` (or ``n`` >> ``m``) the algorithm could be sped up by compressing
+    When ``m`` >> ``n`` (or ``n`` >> ``m``) the algorithm could be sped up by compressing
     the matrix \f$A_l\f$ via a QR (or LQ) factorization, and working with the
     triangular factor afterwards (thin-SVD). If the singular vectors are also
     requested, its computation could be sped up as well via executing some
@@ -29194,7 +29194,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_destroy_rfinfo(rocsolver_rfinfo rfinfo
     by the direct solver \ref rocsolver_scsrrf_solve "CSRRF_SOLVE".
 
     \details
-    @param[in]
+    @param[in,out]
     rfinfo      #rocsolver_rfinfo.
                 The rfinfo struct to be set up.
     @param[in]
@@ -29499,7 +29499,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_splitlu(rocblas_handle handle,
     @param[in]
     ldb         rocblas_int. ldb >= n.
                 The leading dimension of B.
-    @param[out]
+    @param[in,out]
     rfinfo      rocsolver_rfinfo.
                 Structure that holds the meta data generated in the analysis phase.
     ********************************************************************/
@@ -29606,7 +29606,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_analysis(rocblas_handle handle,
     pivQ        pointer to rocblas_int. Array on the GPU of dimension n.
                 Contains the pivot indices representing the permutation matrix Q, that is, the
                 order in which the columns of matrix M were rearranged.
-    @param[in]
+    @param[in,out]
     rfinfo      rocsolver_rfinfo.
                 Structure that holds the meta data generated in the analysis phase.
     ********************************************************************/
@@ -29704,7 +29704,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_refactlu(rocblas_handle handle,
     pivQ        pointer to rocblas_int. Array on the GPU of dimension n.
                 Contains the pivot indices representing the permutation matrix Q, that is, the
                 order in which the columns of matrix M were rearranged.
-    @param[in]
+    @param[in,out]
     rfinfo      #rocsolver_rfinfo.
                 Structure that holds the meta data generated in the analysis phase.
     ********************************************************************/
@@ -29810,7 +29810,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcsrrf_refactchol(rocblas_handle handl
     @param[in]
     ldb         rocblas_int. ldb >= n.
                 The leading dimension of B.
-    @param[in]
+    @param[in,out]
     rfinfo      rocsolver_rfinfo.
                 Structure that holds the metadata generated in the analysis phase.
     ********************************************************************/

@@ -63,7 +63,7 @@ THRUST_HOST_DEVICE void scatter_if(
   InputIterator3 stencil,
   RandomAccessIterator output)
 {
-  thrust::scatter_if(exec, first, last, map, stencil, output, ::internal::identity{});
+  thrust::scatter_if(exec, first, last, map, stencil, output, _THRUST_STD::identity{});
 } // end scatter_if()
 
 template <typename DerivedPolicy,
@@ -82,7 +82,7 @@ THRUST_HOST_DEVICE void scatter_if(
   Predicate pred)
 {
   thrust::transform_if(
-    exec, first, last, stencil, thrust::make_permutation_iterator(output, map), ::internal::identity{}, pred);
+    exec, first, last, stencil, thrust::make_permutation_iterator(output, map), _THRUST_STD::identity{}, pred);
 } // end scatter_if()
 
 } // end namespace generic

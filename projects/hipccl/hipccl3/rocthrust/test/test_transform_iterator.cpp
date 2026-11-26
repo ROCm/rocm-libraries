@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,17 +15,12 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-// suppress warnings on thrust::identity
-THRUST_SUPPRESS_DEPRECATED_PUSH
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-
 #include <thrust/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
+#include <thrust/logical.h>
 #include <thrust/reduce.h>
 #include <thrust/sequence.h>
 #include <thrust/universal_vector.h>
@@ -39,13 +34,9 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <functional>
+#  include <iterator>
 #  include <type_traits>
-#  include <utility>
 #endif
-
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC
 
 using VectorTestsParams = ::testing::Types<
   Params<thrust::host_vector<signed char>>,
@@ -63,23 +54,47 @@ using VectorTestsParams = ::testing::Types<
 
 TESTS_DEFINE(TransformIteratorTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveTransformIteratorTests, NumericalTestsParams);
-TESTS_DEFINE(VectorTransformIteratorTests, VectorTestsParams);
+TESTS_DEFINE(TransformIteratorVectorTests, VectorTestsParams);
 
-TEST(TransformIteratorTests, UsingHip)
+// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+TEST(TransformIteratorTests, TestTransformIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+  using func    = _THRUST_STD::negate<int>;
+  using base_it = thrust::host_vector<int>::iterator;
+
+  using it     = thrust::transform_iterator<func, base_it>;
+  using traits = _THRUST_STD::iterator_traits<it>;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, _THRUST_STD::random_access_iterator_tag>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
 }
 
-TYPED_TEST(VectorTransformIteratorTests, TestTransformIterator)
+TYPED_TEST(TransformIteratorVectorTests, TestTransformIterator)
 {
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using UnaryFunction = thrust::negate<T>;
+  using UnaryFunction = _THRUST_STD::negate<T>;
   using Iterator      = typename Vector::iterator;
 
   Vector input(4);
@@ -97,14 +112,14 @@ TYPED_TEST(VectorTransformIteratorTests, TestTransformIterator)
   ASSERT_EQ(output, ref);
 }
 
-TYPED_TEST(VectorTransformIteratorTests, TestMakeTransformIterator)
+TYPED_TEST(TransformIteratorVectorTests, TestMakeTransformIterator)
 {
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using UnaryFunction = thrust::negate<T>;
+  using UnaryFunction = _THRUST_STD::negate<T>;
   using Iterator      = typename Vector::iterator;
 
   Vector input(4);
@@ -138,12 +153,12 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TestTransformIteratorReduce)
     thrust::device_vector<T> d_data = h_data;
 
     // run on host
-    T h_result = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                                thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()));
+    T h_result = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), _THRUST_STD::negate<T>()),
+                                thrust::make_transform_iterator(h_data.end(), _THRUST_STD::negate<T>()));
 
     // run on device
-    T d_result = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
-                                thrust::make_transform_iterator(d_data.end(), thrust::negate<T>()));
+    T d_result = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), _THRUST_STD::negate<T>()),
+                                thrust::make_transform_iterator(d_data.end(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQ(h_result, d_result);
   }
@@ -159,8 +174,6 @@ struct ExtractValue
 
 TEST(TransformIteratorTests, TestTransformIteratorNonCopyable)
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   thrust::host_vector<std::unique_ptr<int>> hv(4);
   hv[0].reset(new int{1});
   hv[1].reset(new int{2});
@@ -172,24 +185,6 @@ TEST(TransformIteratorTests, TestTransformIteratorNonCopyable)
   ASSERT_EQ(transformed[1], 2);
   ASSERT_EQ(transformed[2], 3);
   ASSERT_EQ(transformed[3], 4);
-}
-
-struct DeviceOp
-{
-  __device__ int operator()(int)
-  {
-    return int{};
-  }
-};
-
-/// Tests compilation of device-only operators.
-TEST(TransformIteratorTests, TestDeviceOperator)
-{
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  thrust::device_vector<int> dv(1);
-  auto iter = thrust::make_transform_iterator(dv.begin(), DeviceOp{});
-  THRUST_UNUSED_VAR(iter);
 }
 
 struct flip_value
@@ -220,10 +215,6 @@ struct forward
 
 TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   using _THRUST_STD::is_same;
   using _THRUST_STD::negate;
   {
@@ -233,31 +224,22 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it)::reference, bool&>::value, ""); // ordinary reference
     static_assert(is_same<decltype(it)::value_type, bool>::value, "");
 
-    auto it_tr_val = thrust::make_transform_iterator(it, flip_value{});
+    [[maybe_unused]] auto it_tr_val = thrust::make_transform_iterator(it, flip_value{});
     static_assert(is_same<decltype(it_tr_val)::reference, bool>::value, "");
     static_assert(is_same<decltype(it_tr_val)::value_type, bool>::value, "");
-    (void) it_tr_val;
 
-    auto it_tr_ref = thrust::make_transform_iterator(it, pass_ref{});
+    [[maybe_unused]] auto it_tr_ref = thrust::make_transform_iterator(it, pass_ref{});
     static_assert(is_same<decltype(it_tr_ref)::reference, const bool&>::value, "");
     static_assert(is_same<decltype(it_tr_ref)::value_type, bool>::value, "");
-    (void) it_tr_ref;
 
-    auto it_tr_fwd = thrust::make_transform_iterator(it, forward{});
+    [[maybe_unused]] auto it_tr_fwd = thrust::make_transform_iterator(it, forward{});
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, "");
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
-    (void) it_tr_fwd;
 
-    auto it_tr_tid = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_tid)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
-    (void) it_tr_tid;
-
-    auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
+    auto it_tr_cid = thrust::make_transform_iterator(it, _THRUST_STD::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
-    (void) it_tr_cid;
   }
 
   {
@@ -267,31 +249,22 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it)::reference, thrust::device_reference<bool>>::value, ""); // proxy reference
     static_assert(is_same<decltype(it)::value_type, bool>::value, "");
 
-    auto it_tr_val = thrust::make_transform_iterator(it, flip_value{});
+    [[maybe_unused]] auto it_tr_val = thrust::make_transform_iterator(it, flip_value{});
     static_assert(is_same<decltype(it_tr_val)::reference, bool>::value, "");
     static_assert(is_same<decltype(it_tr_val)::value_type, bool>::value, "");
-    (void) it_tr_val;
 
-    auto it_tr_ref = thrust::make_transform_iterator(it, pass_ref{});
+    [[maybe_unused]] auto it_tr_ref = thrust::make_transform_iterator(it, pass_ref{});
     static_assert(is_same<decltype(it_tr_ref)::reference, const bool&>::value, "");
     static_assert(is_same<decltype(it_tr_ref)::value_type, bool>::value, "");
-    (void) it_tr_ref;
 
-    auto it_tr_fwd = thrust::make_transform_iterator(it, forward{});
+    [[maybe_unused]] auto it_tr_fwd = thrust::make_transform_iterator(it, forward{});
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, ""); // wrapped reference is decayed
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
-    (void) it_tr_fwd;
 
-    auto it_tr_tid = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_tid)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
-    (void) it_tr_tid;
-
-    auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
+    auto it_tr_cid = thrust::make_transform_iterator(it, _THRUST_STD::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
-    (void) it_tr_cid;
   }
 
   {
@@ -301,52 +274,53 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it)::reference, std::vector<bool>::reference>::value, ""); // proxy reference
     static_assert(is_same<decltype(it)::value_type, bool>::value, "");
 
-    auto it_tr_val = thrust::make_transform_iterator(it, flip_value{});
+    [[maybe_unused]] auto it_tr_val = thrust::make_transform_iterator(it, flip_value{});
     static_assert(is_same<decltype(it_tr_val)::reference, bool>::value, "");
     static_assert(is_same<decltype(it_tr_val)::value_type, bool>::value, "");
-    (void) it_tr_val;
 
-    auto it_tr_ref = thrust::make_transform_iterator(it, pass_ref{});
+    [[maybe_unused]] auto it_tr_ref = thrust::make_transform_iterator(it, pass_ref{});
     static_assert(is_same<decltype(it_tr_ref)::reference, const bool&>::value, "");
     static_assert(is_same<decltype(it_tr_ref)::value_type, bool>::value, "");
-    (void) it_tr_ref;
 
-    auto it_tr_fwd = thrust::make_transform_iterator(it, forward{});
+    [[maybe_unused]] auto it_tr_fwd = thrust::make_transform_iterator(it, forward{});
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, ""); // proxy reference is decayed
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
-    (void) it_tr_fwd;
 
-    auto it_tr_ide = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_ide)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_ide)::value_type, bool>::value, "");
-    (void) it_tr_ide;
-
-    auto it_tr_tid = thrust::make_transform_iterator(it, thrust::identity<bool>{});
-    static_assert(is_same<decltype(it_tr_tid)::reference, bool>::value, ""); // identity<bool>::value_type
-    static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
-    (void) it_tr_tid;
-
-    auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
+    auto it_tr_cid = thrust::make_transform_iterator(it, _THRUST_STD::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
-    (void) it_tr_cid;
   }
-  THRUST_SUPPRESS_DEPRECATED_POP
 }
 
 TEST(TransformIteratorTests, TestTransformIteratorIdentity)
 {
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   thrust::device_vector<int> v(3, 42);
 
-  ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), thrust::identity<int>{}), 42);
-  ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), thrust::identity<>{}), 42);
-  ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
+  ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), _THRUST_STD::identity{}), 42);
   using namespace thrust::placeholders;
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), _1), 42);
-  THRUST_SUPPRESS_DEPRECATED_POP
+}
+
+TEST(TransformIteratorTests, UsingHip)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+}
+
+struct DeviceOp
+{
+  __device__ int operator()(int)
+  {
+    return int{};
+  }
+};
+
+/// Tests compilation of device-only operators.
+TEST(TransformIteratorTests, TestDeviceOperator)
+{
+  thrust::device_vector<int> dv(1);
+  auto iter = thrust::make_transform_iterator(dv.begin(), DeviceOp{});
+  (void) iter;
 }

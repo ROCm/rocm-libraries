@@ -45,7 +45,23 @@ name    = rocke_engine.gemm_kernel_name(spec)              # -> str
 | `gemm_is_valid(spec, arch)`     | `rocke_gemm_universal_is_valid_spec` | `(bool, reason)` |
 | `gemm_kernel_name(spec)`        | `rocke_gemm_universal_kernel_name` | `str` |
 
-`arch` defaults to `"gfx950"`.
+`arch` is required: there is no default target, and an empty string raises.
+
+### Compiler selection
+
+Automatic LLVM flavor selection in Python bindings delegates to
+`rocke.core.lower_llvm._resolve_llvm_flavor()`. Both spec-based lowering and
+`lower_serialized_ir` pass its concrete result to the C++ engine, keeping them
+consistent with Python lowering and Python's COMGR selection. Standalone native
+`AUTO` discovery has no knowledge of Python's bundled libraries.
+
+Caller-owned spec builders retain native build validation before compiler
+resolution and are protected through resolution and lowering by RAII cleanup.
+MFMA lowering resolves before its legacy builder, which returns no ownership
+handle. Compiler failure can therefore precede native MFMA build validation.
+Serialized IR is parsed before AUTO resolution and owns its builder before
+initialization. An explicit `lower_serialized_ir(..., flavor="llvm20")` bypasses
+automatic selection and remains available for offline emission.
 
 ### Error model
 

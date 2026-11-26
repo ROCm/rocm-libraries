@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,13 +21,17 @@
 
 #include <unittest/unittest.h>
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
+
 template <typename Iterator>
 void test(Iterator first, Iterator last)
 {
   using System = typename thrust::iterator_system<Iterator>::type;
   System system;
   thrust::detail::trivial_sequence<Iterator, System> ts(system, first, last);
-  using ValueType = typename thrust::iterator_traits<Iterator>::value_type;
+  using ValueType = typename _THRUST_STD::iterator_traits<Iterator>::value_type;
 
   ASSERT_EQUAL_QUIET((ValueType) ts.begin()[0], ValueType(0, 11));
   ASSERT_EQUAL_QUIET((ValueType) ts.begin()[1], ValueType(2, 11));
@@ -43,8 +47,8 @@ void test(Iterator first, Iterator last)
 
   using TrivialIterator = typename thrust::detail::trivial_sequence<Iterator, System>::iterator_type;
 
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<Iterator>::value, false);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TrivialIterator>::value, true);
+  ASSERT_EQUAL(thrust::is_contiguous_iterator_v<Iterator>, false);
+  ASSERT_EQUAL(thrust::is_contiguous_iterator_v<TrivialIterator>, true);
 }
 
 template <class Vector>
@@ -53,8 +57,7 @@ void TestTrivialSequence()
   Vector A{0, 2, 1, 0, 1};
   Vector B{11, 11, 13, 10, 12};
 
-  test(thrust::make_zip_iterator(thrust::make_tuple(A.begin(), B.begin())),
-       thrust::make_zip_iterator(thrust::make_tuple(A.end(), B.end())));
+  test(thrust::make_zip_iterator(A.begin(), B.begin()), thrust::make_zip_iterator(A.end(), B.end()));
 
   Vector refA{0, 2, 1, 0, 1};
   ASSERT_EQUAL(A, refA);

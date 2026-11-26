@@ -61,6 +61,12 @@ if(ROCBLAS_ENABLE_TENSILE)
     set(ROCBLAS_TENSILE_INSTALL_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/rocblas/library" CACHE PATH "Path to tensile library")
   endif()
   set(ROCBLAS_TENSILE_SUBDIR_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../Tensile" CACHE STRING "Path to Tensile subdirectory")
+  # GPU_TARGETS remains the full offload list for the rocBLAS library.
+  set(ROCBLAS_TENSILE_ARCH_SKIPLIST "amdgcnspirv;gfx1250-strict" CACHE STRING
+    "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/tensile-arch-skiplist.cmake")
+  rocblas_tensile_arch_skiplist_c_literals(ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                           ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS)
 endif()
 set(ROCBLAS_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
 
@@ -107,6 +113,25 @@ if(ROCBLAS_ENABLE_AMD_SMI)
   find_package(amd_smi REQUIRED)
 endif()
 
+if(ROCBLAS_ENABLE_TENSILE)
+  # Expand "all" here so Tensile_ARCHITECTURE is always recomputed and never
+  # left stale in the cache from an earlier explicit GPU_TARGETS configure.
+  if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    include("${ROCBLAS_TENSILE_SUBDIR_PATH}/next-cmake/cmake/TensileSupportedArchitectures.cmake")
+    tensile_get_base_architectures(_tensile_input_archs)
+  else()
+    set(_tensile_input_archs ${GPU_TARGETS})
+  endif()
+  rocblas_filter_tensile_arch_skiplist(_tensile_input_archs ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                       _tensile_archs _tensile_excluded_archs)
+  rocblas_tensile_use_stub_if_empty(_tensile_archs
+    "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/blas3/Tensile/Logic/asm_full"
+    "${_tensile_input_archs}" "${ROCBLAS_TENSILE_ARCH_SKIPLIST}")
+  if(_tensile_excluded_archs)
+    message(STATUS "Skipping in Tensile (ROCBLAS_TENSILE_ARCH_SKIPLIST): ${_tensile_excluded_archs}")
+  endif()
+  set(Tensile_ARCHITECTURE "${_tensile_archs}" CACHE STRING "Tensile to use which architecture?" FORCE)
+endif()
 if(ROCBLAS_ENABLE_TENSILE)
   if(NOT ROCBLAS_ENABLE_SUPERBUILD)
     message(STATUS "Adding Tensile from subdirectory: ${ROCBLAS_TENSILE_SUBDIR_PATH}")
@@ -265,7 +290,8 @@ rocm_export_targets(
 
 if(ROCBLAS_ENABLE_TENSILE)
   rocm_install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library/"
-               DESTINATION "${ROCBLAS_TENSILE_INSTALL_DIR}" COMPONENT runtime)
+               DESTINATION "${ROCBLAS_TENSILE_INSTALL_DIR}" COMPONENT runtime
+               PATTERN "*gfx000*" EXCLUDE)
 endif()
 
 if(ROCBLAS_ENABLE_CLIENT)
@@ -368,8 +394,50 @@ rocm_create_package(
 
 if(ROCBLAS_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
   message(STATUS "Configuring code coverage target")
+  # Locate the host profile runtime so coverage targets can link it directly.
+  # Passing -fprofile-instr-generate to a HIP link instead makes the driver
+  # give clang-linker-wrapper a --device-linker=...profile.bc option, which puts
+  # the device profile runtime and its __llvm_profile_sections_* table into the
+  # device image; the HIP runtime then aborts registering that table at profile
+  # dump, after every test has already passed (AIROCBLAS-1404 / AISPARSE-778).
+  #
+  # The profile runtime is not self-contained: its ROCm platform object pulls in
+  # the device-drain and symbol-interception helpers, so those archives have to
+  # be named too. Link them as a group, since they reference each other.
+  set(ROCBLAS_PROFILE_RUNTIME)
+  foreach(_rt clang_rt.profile clang_rt.profile_rocm
+              clang_rt.interception clang_rt.sanitizer_common)
+    foreach(_suffix "-x86_64" "")
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER}
+                              --print-file-name=lib${_rt}${_suffix}.a
+                      OUTPUT_VARIABLE _rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(EXISTS "${_rt_path}")
+        list(APPEND ROCBLAS_PROFILE_RUNTIME "${_rt_path}")
+        break()
+      endif()
+    endforeach()
+  endforeach()
+  if(NOT ROCBLAS_PROFILE_RUNTIME)
+    message(FATAL_ERROR
+      "BUILD_CODE_COVERAGE: could not locate the clang profile runtime")
+  endif()
+  message(STATUS "Host profile runtime: ${ROCBLAS_PROFILE_RUNTIME}")
+  set(ROCBLAS_PROFILE_RUNTIME
+      -Wl,--start-group ${ROCBLAS_PROFILE_RUNTIME} -Wl,--end-group
+      ${CMAKE_DL_LIBS} -lpthread -lrt)
+
   target_compile_options(rocblas PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rocblas PRIVATE -fprofile-instr-generate)
+  # Instrument host code only. Device-side coverage makes the HIP runtime abort
+  # while dumping the profile at process exit, after every test has already
+  # passed (AIROCBLAS-1404, same failure as AISPARSE-778). Both halves matter:
+  # the compile flags suppress the __profd_* counter globals, and the host-only
+  # link keeps the AMDGPU profile runtime, which contributes
+  # __llvm_profile_sections_*, out of the device image.
+  target_compile_options(rocblas PRIVATE
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
+  target_link_options(rocblas PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocblas PRIVATE ${ROCBLAS_PROFILE_RUNTIME})
 
   set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
   set(coverage_test_arguments

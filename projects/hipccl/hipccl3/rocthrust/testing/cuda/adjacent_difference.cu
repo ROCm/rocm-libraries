@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -54,8 +54,8 @@ void TestAdjacentDifferenceDevice(ExecutionPolicy exec, const size_t n)
 
   ASSERT_EQUAL(h_output, d_output);
 
-  thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
-  adjacent_difference_kernel<<<1, 1>>>(exec, d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
+  thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::plus<T>());
+  adjacent_difference_kernel<<<1, 1>>>(exec, d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::plus<T>());
   {
     cudaError_t const err = cudaDeviceSynchronize();
     ASSERT_EQUAL(cudaSuccess, err);
@@ -64,8 +64,8 @@ void TestAdjacentDifferenceDevice(ExecutionPolicy exec, const size_t n)
   ASSERT_EQUAL(h_output, d_output);
 
   // in-place operation
-  thrust::adjacent_difference(h_input.begin(), h_input.end(), h_input.begin(), thrust::plus<T>());
-  adjacent_difference_kernel<<<1, 1>>>(exec, d_input.begin(), d_input.end(), d_input.begin(), thrust::plus<T>());
+  thrust::adjacent_difference(h_input.begin(), h_input.end(), h_input.begin(), _THRUST_STD::plus<T>());
+  adjacent_difference_kernel<<<1, 1>>>(exec, d_input.begin(), d_input.end(), d_input.begin(), _THRUST_STD::plus<T>());
   {
     cudaError_t const err = cudaDeviceSynchronize();
     ASSERT_EQUAL(cudaSuccess, err);
@@ -113,9 +113,9 @@ DECLARE_UNITTEST(TestAdjacentDifferenceCudaStreams);
 struct detect_wrong_difference
 {
   using difference_type   = void;
-  using value_type        = void;
+  using value_type        = long long;
   using pointer           = void;
-  using reference         = void;
+  using reference         = detect_wrong_difference;
   using iterator_category = ::cuda::std::output_iterator_tag;
 
   bool* flag;
@@ -152,7 +152,7 @@ void TestAdjacentDifferenceWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> all_differences_correct = thrust::device_malloc<bool>(1);
   *all_differences_correct                         = true;

@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
@@ -48,7 +55,9 @@ struct execution_policy;
 // specialize execution_policy for tag
 template <>
 struct execution_policy<tag> : thrust::system::cpp::detail::execution_policy<tag>
-{};
+{
+  using tag_type = tag;
+};
 
 // tag's definition comes before the
 // generic definition of execution_policy

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,6 +33,16 @@
 #include <list>
 
 #include <unittest/unittest.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
+#endif
+
+#if _CCCL_COMPILER(GCC, >=, 11)
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
 
 void TestCopyFromConstIterator()
 {
@@ -99,15 +109,15 @@ void TestCopyToDiscardIteratorZipped()
 
   // copy from host_vector
   ZipIterator1 h_result = thrust::copy(
-    thrust::make_zip_iterator(thrust::make_tuple(h_input.begin(), h_input.begin())),
-    thrust::make_zip_iterator(thrust::make_tuple(h_input.end(), h_input.end())),
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::make_discard_iterator(), h_output.begin())));
+    thrust::make_zip_iterator(h_input.begin(), h_input.begin()),
+    thrust::make_zip_iterator(h_input.end(), h_input.end()),
+    thrust::make_zip_iterator(thrust::make_discard_iterator(), h_output.begin()));
 
   // copy from device_vector
   ZipIterator2 d_result = thrust::copy(
-    thrust::make_zip_iterator(thrust::make_tuple(d_input.begin(), d_input.begin())),
-    thrust::make_zip_iterator(thrust::make_tuple(d_input.end(), d_input.end())),
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::make_discard_iterator(), d_output.begin())));
+    thrust::make_zip_iterator(d_input.begin(), d_input.begin()),
+    thrust::make_zip_iterator(d_input.end(), d_input.end()),
+    thrust::make_zip_iterator(thrust::make_discard_iterator(), d_output.begin()));
 
   ASSERT_EQUAL(h_output, h_input);
   ASSERT_EQUAL(d_output, d_input);
@@ -459,7 +469,7 @@ struct always_true
   THRUST_HOST_DEVICE bool operator()(const object_with_non_trivial_ctor&)
   {
     return true;
-  };
+  }
 };
 
 } // namespace
@@ -526,7 +536,7 @@ void TestCopyCountingIterator()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyCountingIterator);
 
 template <typename Vector>
-void TestCopyZipIterator()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestCopyZipIterator()
 {
   using T = typename Vector::value_type;
 
@@ -545,9 +555,9 @@ void TestCopyZipIterator()
   Vector v3(3, T(0));
   Vector v4(3, T(0));
 
-  thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
-               thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
-               thrust::make_zip_iterator(thrust::make_tuple(v3.begin(), v4.begin())));
+  thrust::copy(thrust::make_zip_iterator(v1.begin(), v2.begin()),
+               thrust::make_zip_iterator(v1.end(), v2.end()),
+               thrust::make_zip_iterator(v3.begin(), v4.begin()));
 
   ASSERT_EQUAL(v1, v3);
   ASSERT_EQUAL(v2, v4);
@@ -564,7 +574,7 @@ void TestCopyConstantIteratorToZipIterator()
 
   thrust::copy(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
                thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
-               thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())));
+               thrust::make_zip_iterator(v1.begin(), v2.begin()));
 
   Vector ref1{4, 4, 4};
   Vector ref2{7, 7, 7};
@@ -731,24 +741,40 @@ namespace detail
 // We need this type to pass as a non-const ref for unary_transform_functor
 // to compile:
 template <>
-struct is_non_const_reference<only_set_when_expected_it> : thrust::true_type
-{};
+inline constexpr bool is_non_const_reference_v<only_set_when_expected_it> = true;
 } // end namespace detail
+THRUST_NAMESPACE_END
 
+namespace std
+{
 template <>
 struct iterator_traits<only_set_when_expected_it>
 {
   using value_type        = long long;
   using reference         = only_set_when_expected_it;
   using iterator_category = thrust::random_access_device_iterator_tag;
+  using difference_type   = _THRUST_STD::ptrdiff_t;
 };
-THRUST_NAMESPACE_END
+} // namespace std
+
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+_THRUST_STD_NAMESPACE_BEGIN
+template <>
+struct iterator_traits<only_set_when_expected_it>
+{
+  using value_type        = long long;
+  using reference         = only_set_when_expected_it;
+  using iterator_category = thrust::random_access_device_iterator_tag;
+  using difference_type   = _THRUST_STD::ptrdiff_t;
+};
+_THRUST_STD_NAMESPACE_END
+#  endif
 
 void TestCopyWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(0);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
   *has_executed                         = false;

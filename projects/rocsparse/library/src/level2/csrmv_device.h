@@ -26,6 +26,15 @@
 
 #include "rocsparse_common.hpp"
 
+// gfx12 and gfx13 order the stores before releasing other workgroups with __threadfence; from
+// gfx1250 on there is no s_waitcnt. SPIR-V uses __threadfence on every processor, so it stays
+// correct on processors newer than this list.
+#if defined(__GFX12__) || defined(__GFX13__) || defined(__SPIRV__)
+#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 1
+#else
+#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 0
+#endif
+
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE,
@@ -559,6 +568,9 @@ namespace rocsparse
             // First, figure out which workgroup you are in the row.
             // You can use that to find the global ID for the first workgroup calculating
             // this long row.
+            // row_blocks, wg_ids and wg_flags may start at a row-block offset when the
+            // host splits the row blocks over several launches, so first_wg_in_row is
+            // negative when the row started in an earlier launch.
             J        first_wg_in_row = gid - wg_ids[gid];
             uint32_t compare_value   = wg_flags[gid];
 
@@ -589,7 +601,7 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-#if defined(__GFX12__)
+#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
@@ -1309,7 +1321,7 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-#if defined(__GFX12__)
+#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");

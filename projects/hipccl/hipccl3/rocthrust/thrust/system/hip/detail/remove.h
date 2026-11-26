@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/detail/copy_if.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -51,14 +51,14 @@ template <class Derived, class InputIt, class StencilIt, class Predicate>
 InputIt THRUST_HOST_DEVICE
 remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, stencil, first, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, stencil, first, _THRUST_STD::not_fn(predicate));
 }
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class Predicate>
 InputIt THRUST_HOST_DEVICE remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, first, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, first, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
@@ -80,21 +80,21 @@ OutputIt THRUST_HOST_DEVICE remove_copy_if(
   OutputIt result,
   Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, stencil, result, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, stencil, result, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate>
 OutputIt THRUST_HOST_DEVICE
 remove_copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, result, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, result, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>
 OutputIt THRUST_HOST_DEVICE
 remove_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, const T& value)
 {
-  thrust::detail::equal_to_value<T> pred(value);
+  thrust::detail::equal_to_value<T> pred{value};
   return hip_rocprim::remove_copy_if(policy, first, last, result, pred);
 }
 

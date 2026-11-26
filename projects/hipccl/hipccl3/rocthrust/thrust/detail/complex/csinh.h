@@ -50,7 +50,10 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
+#include <thrust/detail/complex/cexp.h>
 #include <thrust/detail/complex/math_private.h>
+
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -166,7 +169,7 @@ THRUST_HOST_DEVICE inline complex<double> csinh(const complex<double>& z)
     {
       return (complex<double>(x * x, x * (y - y)));
     }
-    return (complex<double>(x * cos(y), infinity<double>() * sin(y)));
+    return (complex<double>(x * cos(y), _THRUST_STD::numeric_limits<double>::infinity() * sin(y)));
   }
 
   /*

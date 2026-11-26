@@ -44,6 +44,10 @@ cublasFillMode_t hip2cuda_fill(hipsolverFillMode_t fill);
 
 hipsolverFillMode_t cuda2hip_fill(cublasFillMode_t fill);
 
+cublasDiagType_t hip2cuda_diag(hipsolverDiagType_t diag);
+
+hipsolverDiagType_t cuda2hip_diag(cublasDiagType_t diag);
+
 cublasSideMode_t hip2cuda_side(hipsolverSideMode_t side);
 
 hipsolverSideMode_t cuda2hip_side(cublasSideMode_t side);

@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,11 +42,13 @@
 
 #  include <rocprim/rocprim.hpp>
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/sort.h>
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -62,8 +64,8 @@ template <typename KeysIt,
 inline void
 __partial_sort(thrust::hip_rocprim::par_t policy, KeysIt first, KeysIt middle, KeysIt last, CompareOp compare_op)
 {
-  const size_t count = static_cast<size_t>(thrust::distance(first, last));
-  const size_t n     = static_cast<size_t>(thrust::distance(first, middle));
+  const size_t count = static_cast<size_t>(_THRUST_STD::distance(first, last));
+  const size_t n     = static_cast<size_t>(_THRUST_STD::distance(first, middle));
 
   if (count == 0 || n == 0)
   {
@@ -106,8 +108,8 @@ inline void __partial_sort_copy(
   RandomIt d_last,
   CompareOp compare_op)
 {
-  const size_t count   = static_cast<size_t>(thrust::distance(first, last));
-  const size_t d_count = static_cast<size_t>(thrust::distance(d_first, d_last));
+  const size_t count   = static_cast<size_t>(_THRUST_STD::distance(first, last));
+  const size_t d_count = static_cast<size_t>(_THRUST_STD::distance(d_first, d_last));
 
   if (count == 0 || d_count == 0)
   {
@@ -145,8 +147,8 @@ template <typename KeysIt,
             nullptr>
 inline void __nth_element(thrust::hip_rocprim::par_t policy, KeysIt first, KeysIt nth, KeysIt last, CompareOp compare_op)
 {
-  const size_t count = static_cast<size_t>(thrust::distance(first, last));
-  const size_t n     = static_cast<size_t>(thrust::distance(first, nth));
+  const size_t count = static_cast<size_t>(_THRUST_STD::distance(first, last));
+  const size_t n     = static_cast<size_t>(_THRUST_STD::distance(first, nth));
 
   if (count == 0)
   {
@@ -182,7 +184,7 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::sort(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::sort(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -201,7 +203,14 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::sort(THRUST_NS_QUALIFIER::device, f, l, ::std::move(fn));
+      },
+      "hipstdpar sort: failed to synchronize",
+      r
+  );
 }
 
 template <typename I,
@@ -229,7 +238,7 @@ inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::stable_sort(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::stable_sort(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -248,7 +257,14 @@ inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::stable_sort(THRUST_NS_QUALIFIER::device, f, l, ::std::move(fn));
+      },
+      "hipstdpar stable_sort: failed to synchronize",
+      r
+  );
 }
 
 template <typename I,
@@ -299,7 +315,14 @@ partial_sort(execution::parallel_unsequenced_policy, KeysIt first, KeysIt middle
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  ::thrust::__partial_sort(::thrust::device, first, middle, last, compare_op);
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::__partial_sort(THRUST_NS_QUALIFIER::device, first, middle, last, ::std::move(fn));
+      },
+      "hipstdpar partial_sort: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename KeysIt, typename CompareOp, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
@@ -317,8 +340,8 @@ template <typename KeysIt, enable_if_t<hipstd::is_offloadable_iterator<KeysIt>()
 inline void partial_sort(execution::parallel_unsequenced_policy policy, KeysIt first, KeysIt middle, KeysIt last)
 {
   ::hipstd::warn_if_no_xnack();
-  using item_type = typename thrust::iterator_value<KeysIt>::type;
-  std::partial_sort(policy, first, middle, last, thrust::less<item_type>());
+  using item_type = thrust::detail::it_value_t<KeysIt>;
+  std::partial_sort(policy, first, middle, last, _THRUST_STD::less<item_type>());
 }
 // END PARTIAL_SORT
 
@@ -365,7 +388,14 @@ inline void partial_sort_copy(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, compare_op);
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::__partial_sort_copy(THRUST_NS_QUALIFIER::device, first, last, d_first, d_last, ::std::move(fn));
+      },
+      "hipstdpar partial_sort_copy: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename ForwardIt,
@@ -390,8 +420,8 @@ inline void partial_sort_copy(
   execution::parallel_unsequenced_policy policy, ForwardIt first, ForwardIt last, RandomIt d_first, RandomIt d_last)
 {
   ::hipstd::warn_if_no_xnack();
-  using item_type = typename thrust::iterator_value<ForwardIt>::type;
-  std::partial_sort_copy(policy, first, last, d_first, d_last, thrust::less<item_type>());
+  using item_type = thrust::detail::it_value_t<ForwardIt>;
+  std::partial_sort_copy(policy, first, last, d_first, d_last, _THRUST_STD::less<item_type>());
 }
 // END PARTIAL_SORT_COPY
 
@@ -402,7 +432,7 @@ inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::is_sorted(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::is_sorted(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -421,7 +451,7 @@ inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::is_sorted(::thrust::device, f, l, ::std::move(r));
+  return THRUST_NS_QUALIFIER::is_sorted(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
 }
 
 template <typename I,
@@ -449,7 +479,7 @@ inline I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::is_sorted_until(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::is_sorted_until(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -468,7 +498,7 @@ inline I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::is_sorted_until(::thrust::device, f, l, ::std::move(r));
+  return THRUST_NS_QUALIFIER::is_sorted_until(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
 }
 
 template <typename I,
@@ -519,7 +549,14 @@ nth_element(execution::parallel_unsequenced_policy, KeysIt first, KeysIt nth, Ke
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  ::thrust::__nth_element(::thrust::device, first, nth, last, compare_op);
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn) {
+          return THRUST_NS_QUALIFIER::__nth_element(THRUST_NS_QUALIFIER::device, first, nth, last, ::std::move(fn));
+      },
+      "hipstdpar nth_element: failed to synchronize",
+      compare_op
+  );
 }
 
 template <typename KeysIt, enable_if_t<!hipstd::is_offloadable_iterator<KeysIt>()>* = nullptr>
@@ -537,8 +574,8 @@ template <typename KeysIt, enable_if_t<hipstd::is_offloadable_iterator<KeysIt>()
 inline void nth_element(execution::parallel_unsequenced_policy policy, KeysIt first, KeysIt nth, KeysIt last)
 {
   ::hipstd::warn_if_no_xnack();
-  using item_type = typename thrust::iterator_value<KeysIt>::type;
-  std::nth_element(policy, first, nth, last, thrust::less<item_type>());
+  using item_type = thrust::detail::it_value_t<KeysIt>;
+  std::nth_element(policy, first, nth, last, _THRUST_STD::less<item_type>());
 }
 // END NTH_ELEMENT
 } // namespace std

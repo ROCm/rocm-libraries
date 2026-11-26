@@ -6,13 +6,35 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/detail/GraphTensorIds.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/NodeType.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
+
+namespace hipdnn_frontend::detail
+{
+
+// Inserts a non-null tensor and, if it has one, its ragged-offset tensor right after
+// it, so the ragged-offset tensor also receives a UID and takes part in duplicate-UID
+// checks, variant-pack validation and lowering.
+inline void insertTensorWithAux(OrderedTensorSet& tensors,
+                                const std::shared_ptr<graph::TensorAttributes>& tensor)
+{
+    if(!tensor)
+    {
+        return;
+    }
+    tensors.insert(tensor);
+    if(tensor->has_ragged_offset())
+    {
+        tensors.insert(tensor->get_ragged_offset());
+    }
+}
+
+} // namespace hipdnn_frontend::detail
 
 namespace hipdnn_frontend::graph
 {
@@ -59,9 +81,7 @@ public:
 
     virtual void
         // NOLINTNEXTLINE(readability-identifier-naming)
-        gather_hipdnn_tensors(
-            [[maybe_unused]] std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
-            const
+        gather_hipdnn_tensors([[maybe_unused]] detail::OrderedTensorSet& allTensors) const
     {
     }
 
@@ -166,8 +186,8 @@ protected:
         return {};
     }
 
-    void gatherHipdnnTensorsSubtree(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const
+    // Collects the tensors of this node, then of each sub-node in _sub_nodes order.
+    void gatherHipdnnTensorsSubtree(detail::OrderedTensorSet& allTensors) const
     {
         gather_hipdnn_tensors(allTensors);
 
@@ -208,32 +228,16 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    void gather_hipdnn_tensors(
-        std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors) const override
+    void gather_hipdnn_tensors(detail::OrderedTensorSet& allTensors) const override
     {
-        // Collect a tensor and any auxiliary tensors it references (e.g. its
-        // ragged-offset tensor), so auxiliaries also receive UIDs and take part
-        // in variant-pack validation and lowering.
-        auto insertWithAux = [&](const std::shared_ptr<TensorAttributes>& tensor) {
-            if(!tensor)
-            {
-                return;
-            }
-            allTensors.insert(tensor);
-            if(tensor->has_ragged_offset())
-            {
-                allTensors.insert(tensor->get_ragged_offset());
-            }
-        };
-
         for(auto& [_, tensor] : self().attributes.inputs)
         {
-            insertWithAux(tensor);
+            detail::insertTensorWithAux(allTensors, tensor);
         }
 
         for(auto& [_, tensor] : self().attributes.outputs)
         {
-            insertWithAux(tensor);
+            detail::insertTensorWithAux(allTensors, tensor);
         }
     }
 
@@ -242,7 +246,9 @@ public:
         if(self().attributes.compute_data_type == DataType::NOT_SET)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "Node " + self().attributes.name + " does not have a compute_data_type set"};
+                    "Node " + self().attributes.name
+                        + " does not have a compute_data_type set. Set the graph data types "
+                          "before adding nodes: a node copies them when it is added."};
         }
 
         for(const auto& tensorAttr : getNodeOutputTensorAttributes())

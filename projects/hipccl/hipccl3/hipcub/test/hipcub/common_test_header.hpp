@@ -22,11 +22,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -49,10 +47,15 @@
 #include <algorithm>
 #endif
 
+#include <hipcub/libcxx.hpp>
+
+#include _HIPCUB_LIBCXX_INCLUDE(cmath)
+#include _HIPCUB_STD_INCLUDE(limits)
+
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp
 // Including test_utils.hpp by itself will cause a compile error.
-#define TEST_UTILS_INCLUDE_GAURD
+#define TEST_UTILS_INCLUDE_GUARD
 #include "test_utils.hpp"
 
 #if defined(__clang__)
@@ -79,6 +82,23 @@
         exit(error); \
     } \
 }
+
+#define HIP_CHECK_MEMORY(condition)                                                         \
+    {                                                                                       \
+        hipError_t error = condition;                                                       \
+        if(error == hipErrorOutOfMemory)                                                    \
+        {                                                                                   \
+            std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
+            (void)hipGetLastError(); /*reset error code to hipSuccess*/                     \
+            break;                                                                          \
+        }                                                                                   \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                      << std::endl;                                                         \
+            exit(error);                                                                    \
+        }                                                                                   \
+    }
 
 #define INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, ...) \
     namespace Id##line {                                              \
@@ -115,7 +135,7 @@ inline char* __get_env(const char* name)
     return env;
 }
 
-inline void clean_env(char* env)
+inline void clean_env([[maybe_unused]] char* env)
 {
 #ifdef _MSC_VER
     if(env != nullptr)
@@ -123,7 +143,6 @@ inline void clean_env(char* env)
         free(env);
     }
 #endif
-    (void)env;
 }
 
 inline int obtain_device_from_ctest()

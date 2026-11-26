@@ -10,3 +10,4 @@ include: stress_test_batched.yaml
 include: stress_test_large_matrices.yaml
 include: stress_test_transpose.yaml
 include: stress_test_alpha_beta.yaml
+include: extended_gtest.yaml

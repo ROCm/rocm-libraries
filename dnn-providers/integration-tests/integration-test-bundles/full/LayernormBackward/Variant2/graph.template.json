@@ -21,7 +21,7 @@
         "x_tensor_uid": 3
       },
       "name": "LayernormBackward_0",
-      "normalized_dim_count": 1,
+      "normalized_dim_count": "${case.attributes.normalized_dim_count}",
       "outputs": {
         "dbias_tensor_uid": 0,
         "dscale_tensor_uid": 1,

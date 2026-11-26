@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ TEST(TabulateTests, TestTabulateDispatchExplicit)
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::tabulate(sys, vec.begin(), vec.end(), ::internal::identity{});
+  thrust::tabulate(sys, vec.begin(), vec.end(), _THRUST_STD::identity{});
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -73,7 +73,7 @@ TEST(TabulateTests, TestTabulateDispatchImplicit)
 
   thrust::device_vector<int> vec(1);
 
-  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
+  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), _THRUST_STD::identity{});
 
   ASSERT_EQ(13, vec.front());
 }
@@ -87,7 +87,7 @@ TYPED_TEST(TabulateVectorTests, TestTabulateSimple)
 
   Vector v(5);
 
-  thrust::tabulate(v.begin(), v.end(), ::internal::identity{});
+  thrust::tabulate(v.begin(), v.end(), _THRUST_STD::identity{});
 
   Vector ref{0, 1, 2, 3, 4};
   ASSERT_EQ(v, ref);
@@ -101,34 +101,6 @@ TYPED_TEST(TabulateVectorTests, TestTabulateSimple)
 
   ref = {0, 1, 8, 27, 64};
   ASSERT_EQ(v, ref);
-}
-
-template <class OutputType>
-struct nonconst_op
-{
-  THRUST_HIP_FUNCTION
-  OutputType operator()(size_t idx)
-  {
-    return (OutputType) (idx >= 3);
-  }
-};
-
-TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
-{
-  using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  Vector v(5);
-
-  thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
-
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], T(0));
-  ASSERT_EQ(v[2], T(0));
-  ASSERT_EQ(v[3], T(1));
-  ASSERT_EQ(v[4], T(1));
 }
 
 TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
@@ -167,8 +139,36 @@ TEST(TabulateTests, TestTabulateToDiscardIterator)
 
     thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                      thrust::discard_iterator<thrust::device_system_tag>(size),
-                     ::internal::identity{});
+                     _THRUST_STD::identity{});
   }
 
   // nothing to check -- just make sure it compiles
+}
+
+template <typename OutputType>
+struct nonconst_op
+{
+  THRUST_HIP_FUNCTION
+  OutputType operator()(size_t idx)
+  {
+    return (OutputType) (idx >= 3);
+  }
+};
+
+TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  Vector v(5);
+
+  thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
+
+  ASSERT_EQ(v[0], 0);
+  ASSERT_EQ(v[1], 0);
+  ASSERT_EQ(v[2], 0);
+  ASSERT_EQ(v[3], 1);
+  ASSERT_EQ(v[4], 1);
 }

@@ -36,8 +36,8 @@
 
 #include _THRUST_STD_INCLUDE(utility)
 
-#include <cstdint>
-#include <limits>
+#include _THRUST_STD_INCLUDE(cstdint)
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -63,7 +63,7 @@ struct RadixEncoder<char>
 {
   THRUST_HOST_DEVICE unsigned char operator()(char x) const
   {
-    if (std::numeric_limits<char>::is_signed)
+    if (_THRUST_STD::numeric_limits<char>::is_signed)
     {
       return static_cast<unsigned char>(x) ^ static_cast<unsigned char>(1) << (8 * sizeof(unsigned char) - 1);
     }
@@ -193,7 +193,7 @@ inline THRUST_HOST_DEVICE void radix_shuffle_n(
   Integer bit_shift,
   size_t* histogram)
 {
-  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   // note that we are going to mutate the histogram during this sequential scatter
   thrust::scatter(
@@ -221,15 +221,15 @@ THRUST_HOST_DEVICE void radix_shuffle_n(
   Integer bit_shift,
   size_t* histogram)
 {
-  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   // note that we are going to mutate the histogram during this sequential scatter
   thrust::scatter(
     exec,
-    thrust::make_zip_iterator(thrust::make_tuple(keys_first, values_first)),
-    thrust::make_zip_iterator(thrust::make_tuple(keys_first + n, values_first + n)),
+    thrust::make_zip_iterator(keys_first, values_first),
+    thrust::make_zip_iterator(keys_first + n, values_first + n),
     thrust::make_transform_iterator(keys_first, bucket_functor<RadixBits, KeyType>(bit_shift, histogram)),
-    thrust::make_zip_iterator(thrust::make_tuple(keys_result, values_result)));
+    thrust::make_zip_iterator(keys_result, values_result));
 }
 
 template <unsigned int RadixBits,
@@ -247,7 +247,7 @@ THRUST_HOST_DEVICE void radix_sort(
   RandomAccessIterator4 vals2,
   const size_t N)
 {
-  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   using Encoder     = RadixEncoder<KeyType>;
   using EncodedType = decltype(_THRUST_STD::declval<Encoder>()(_THRUST_STD::declval<KeyType>()));
@@ -533,7 +533,7 @@ THRUST_HOST_DEVICE void radix_sort(
   RandomAccessIterator2 keys2,
   const size_t N)
 {
-  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
   radix_sort_dispatcher<sizeof(KeyType)>()(exec, keys1, keys2, N);
 }
 
@@ -550,7 +550,7 @@ THRUST_HOST_DEVICE void radix_sort(
   RandomAccessIterator4 vals2,
   const size_t N)
 {
-  using KeyType = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
   radix_sort_dispatcher<sizeof(KeyType)>()(exec, keys1, keys2, vals1, vals2, N);
 }
 
@@ -560,7 +560,7 @@ template <typename DerivedPolicy, typename RandomAccessIterator>
 THRUST_HOST_DEVICE void stable_radix_sort(
   sequential::execution_policy<DerivedPolicy>& exec, RandomAccessIterator first, RandomAccessIterator last)
 {
-  using KeyType = typename thrust::iterator_value<RandomAccessIterator>::type;
+  using KeyType = thrust::detail::it_value_t<RandomAccessIterator>;
 
   size_t N = last - first;
 
@@ -576,8 +576,8 @@ THRUST_HOST_DEVICE void stable_radix_sort_by_key(
   RandomAccessIterator1 last1,
   RandomAccessIterator2 first2)
 {
-  using KeyType   = typename thrust::iterator_value<RandomAccessIterator1>::type;
-  using ValueType = typename thrust::iterator_value<RandomAccessIterator2>::type;
+  using KeyType   = thrust::detail::it_value_t<RandomAccessIterator1>;
+  using ValueType = thrust::detail::it_value_t<RandomAccessIterator2>;
 
   size_t N = last1 - first1;
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,8 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/detail/minmax.h>
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/distance.h>
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/iterator/zip_iterator.h>
@@ -62,7 +61,7 @@ T THRUST_HOST_DEVICE inner_product(
   ReduceOp reduce_op,
   ProductOp product_op)
 {
-  const auto n     = thrust::distance(first1, last1);
+  const auto n     = _THRUST_STD::distance(first1, last1);
   const auto first = make_transform_iterator(make_zip_iterator(first1, first2), make_zip_function(product_op));
   return hip_rocprim::reduce_n(policy, first, n, init, reduce_op);
 }

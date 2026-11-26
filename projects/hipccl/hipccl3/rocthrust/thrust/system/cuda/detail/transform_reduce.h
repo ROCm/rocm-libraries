@@ -36,17 +36,15 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER
+#if _CCCL_CUDA_COMPILATION()
 #  include <thrust/system/cuda/config.h>
 
 #  include <cub/device/device_reduce.cuh>
 #  include <cub/util_math.cuh>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/minmax.h>
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
-#  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/system/cuda/detail/cdp_dispatch.h>
@@ -57,7 +55,8 @@
 #  include <thrust/system/cuda/detail/par_to_seq.h>
 #  include <thrust/system/cuda/detail/util.h>
 
-#  include <cstdint>
+#  include <cuda/std/cstdint>
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
@@ -131,8 +130,8 @@ template <class Derived, class InputIt, class TransformOp, class T, class Reduce
 T _CCCL_HOST_DEVICE transform_reduce(
   execution_policy<Derived>& policy, InputIt first, InputIt last, TransformOp transform_op, T init, ReduceOp reduce_op)
 {
-  using size_type           = typename iterator_traits<InputIt>::difference_type;
-  const size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  using size_type           = thrust::detail::it_difference_t<InputIt>;
+  const size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
 
   THRUST_CDP_DISPATCH(
     (init = thrust::cuda_cub::detail::transform_reduce_n_impl(policy, first, num_items, transform_op, init, reduce_op);),

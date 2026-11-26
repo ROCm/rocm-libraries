@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 template<bool Exclusive, class T, class BinaryFunction>
 auto run_device_scan(void*             temporary_storage,
                      size_t&           storage_size,
@@ -53,17 +55,16 @@ auto run_device_scan(void*             temporary_storage,
 }
 
 template<bool Exclusive, class T, class BinaryFunction>
-auto run_device_scan(void*             temporary_storage,
-                     size_t&           storage_size,
-                     T*                input,
-                     T*                output,
-                     const T           initial_value,
-                     const size_t      input_size,
-                     BinaryFunction    scan_op,
-                     const hipStream_t stream) ->
+auto run_device_scan(void*                    temporary_storage,
+                     size_t&                  storage_size,
+                     T*                       input,
+                     T*                       output,
+                     [[maybe_unused]] const T initial_value,
+                     const size_t             input_size,
+                     BinaryFunction           scan_op,
+                     const hipStream_t        stream) ->
     typename std::enable_if<!Exclusive, hipError_t>::type
 {
-    (void)initial_value;
     return hipcub::DeviceScan::InclusiveScan(temporary_storage,
                                              storage_size,
                                              input,
@@ -93,7 +94,7 @@ auto run_device_scan_by_key(void*             temporary_storage,
                                                   scan_op,
                                                   initial_value,
                                                   static_cast<int>(input_size),
-                                                  hipcub::Equality(),
+                                                  _HIPCUB_STD::equal_to<>(),
                                                   stream);
 }
 
@@ -116,7 +117,7 @@ auto run_device_scan_by_key(void*   temporary_storage,
                                                   output,
                                                   scan_op,
                                                   static_cast<int>(input_size),
-                                                  hipcub::Equality(),
+                                                  _HIPCUB_STD::equal_to<>(),
                                                   stream);
 }
 
@@ -300,8 +301,8 @@ int main(int argc, char* argv[])
     // commented/removed).
 
     // Add benchmarks
-    CREATE_BENCHMARKS(hipcub::Sum, sum_tag);
-    CREATE_BENCHMARKS(hipcub::Min, min_tag);
+    CREATE_BENCHMARKS(benchmark_utils::plus, sum_tag);
+    CREATE_BENCHMARKS(benchmark_utils::minimum, min_tag);
 
     executor.run();
 }

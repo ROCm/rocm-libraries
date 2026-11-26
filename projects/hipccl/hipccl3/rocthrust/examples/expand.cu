@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,9 +40,11 @@
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
 OutputIterator expand(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, OutputIterator output)
 {
-  using difference_type = typename thrust::iterator_difference<InputIterator1>::type;
+  // Note: _THRUST_STD refers to ::hip::std if libhipcxx is available;
+  // otherwise it falls back to ::std.
+  using difference_type = typename _THRUST_STD::iterator_traits<InputIterator1>::difference_type;
 
-  difference_type input_size  = thrust::distance(first1, last1);
+  difference_type input_size  = _THRUST_STD::distance(first1, last1);
   difference_type output_size = thrust::reduce(first1, last1);
 
   // scan the counts to obtain output offsets for each input element
@@ -60,13 +62,13 @@ OutputIterator expand(InputIterator1 first1, InputIterator1 last1, InputIterator
 
   // compute max-scan over the output indices, filling in the holes
   thrust::inclusive_scan(
-    output_indices.begin(), output_indices.end(), output_indices.begin(), thrust::maximum<difference_type>());
+    output_indices.begin(), output_indices.end(), output_indices.begin(), _THRUST_LIBCXX::maximum<difference_type>());
 
   // gather input values according to index array (output = first2[output_indices])
   thrust::gather(output_indices.begin(), output_indices.end(), first2, output);
 
   // return output + output_size
-  thrust::advance(output, output_size);
+  _THRUST_STD::advance(output, output_size);
   return output;
 }
 
@@ -80,7 +82,7 @@ void print(const std::string& s, const Vector& v)
   std::cout << std::endl;
 }
 
-int main(void)
+int main()
 {
   int counts[] = {3, 5, 2, 0, 1, 3, 4, 2, 4};
   int values[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};

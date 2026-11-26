@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,6 @@
 
 // hipcub API
 #include <hipcub/device/device_reduce.hpp>
-#include <hipcub/iterator/constant_input_iterator.hpp>
 
 // Params for tests
 template<class InputType, class OutputType = InputType, bool UseGraphs = false>
@@ -62,19 +61,197 @@ using HipcubDeviceReduceTestsParams = ::testing::Types<
     DeviceReduceParams<int, double>,
     DeviceReduceParams<test_utils::half, test_utils::half>,
     DeviceReduceParams<test_utils::bfloat16, test_utils::bfloat16>,
-    DeviceReduceParams<int, long, true>
+    DeviceReduceParams<test_utils::half, float>,
+    DeviceReduceParams<test_utils::bfloat16, float>,
 #ifdef __HIP_PLATFORM_AMD__
-    ,
-    DeviceReduceParams<test_utils::half,
-                       float>, // Doesn't work on NVIDIA / CUB
-    DeviceReduceParams<test_utils::bfloat16,
-                       float>, // Doesn't work on NVIDIA / CUB
-    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
-    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
+    DeviceReduceParams<int, long, true>,
 #endif
-    >;
+    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
+    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>>;
+
+// Device numeric_limits for custom_test_type<T>
+_HIPCUB_STD_NAMESPACE_BEGIN
+
+template<class T>
+struct numeric_limits<test_utils::custom_test_type<T>>
+{
+    static constexpr bool is_specialized = true;
+
+    static constexpr test_utils::custom_test_type<T> min() noexcept
+    {
+        return {_HIPCUB_STD::numeric_limits<T>::min(), _HIPCUB_STD::numeric_limits<T>::min()};
+    }
+
+    static constexpr test_utils::custom_test_type<T> lowest() noexcept
+    {
+        return {_HIPCUB_STD::numeric_limits<T>::lowest(), _HIPCUB_STD::numeric_limits<T>::lowest()};
+    }
+
+    static constexpr test_utils::custom_test_type<T> max() noexcept
+    {
+        return {_HIPCUB_STD::numeric_limits<T>::max(), _HIPCUB_STD::numeric_limits<T>::max()};
+    }
+};
+
+_HIPCUB_STD_NAMESPACE_END
 
 TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
+
+TEST(HipcubDeviceReduceTests, EnvReduce)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = int;
+    using U = float;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+            if(test_utils::precision<U>::value * size > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                break;
+            }
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
+            std::vector<U> output(1, (U)0.0f);
+
+            T* d_input;
+            U* d_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected results on host using the same accumulator type than on device
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
+            using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
+            Sum    sum_op;
+            AccumT tmp_result
+                = AccumT(0.0f); // test_utils::plus uses as initial type the output type
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                tmp_result = sum_op(tmp_result, input[i]);
+            }
+            const U expected = static_cast<U>(tmp_result);
+
+            // Run
+            HIP_CHECK(hipcub::DeviceReduce::Reduce(d_input,
+                                                   d_output,
+                                                   input.size(),
+                                                   test_utils::plus{},
+                                                   U(0.0f)));
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(hipMemcpy(output.data(),
+                                d_output,
+                                output.size() * sizeof(U),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output[0],
+                                        expected,
+                                        test_utils::precision<U>::value * size));
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
+
+TEST(HipcubDeviceReduceTests, EnvReduceSum)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = int;
+    using U = float;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size= " << size);
+            if(test_utils::precision<U>::value * size > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                break;
+            }
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
+            std::vector<U> output(1, (U)0.0f);
+
+            T* d_input;
+            U* d_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected results on host using the same accumulator type than on device
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
+            using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
+            Sum    sum_op;
+            AccumT tmp_result
+                = AccumT(0.0f); // test_utils::plus uses as initial type the output type
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                tmp_result = sum_op(tmp_result, input[i]);
+            }
+            const U expected = static_cast<U>(tmp_result);
+
+            // Run
+            HIP_CHECK(hipcub::DeviceReduce::Sum(d_input, d_output, input.size()));
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(hipMemcpy(output.data(),
+                                d_output,
+                                output.size() * sizeof(U),
+                                hipMemcpyDeviceToHost));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output[0],
+                                        expected,
+                                        test_utils::precision<U>::value * size));
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+        }
+    }
+}
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
 {
@@ -123,11 +300,12 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Calculate expected results on host using the same accumulator type than on device
-            using Sum =
-                typename AlgebraicSelector<hipcub::Sum, T, U>::type; // For custom_type_test tests
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
             using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
             Sum    sum_op;
-            AccumT tmp_result = AccumT(0.0f); // hipcub::Sum uses as initial type the output type
+            AccumT tmp_result
+                = AccumT(0.0f); // test_utils::plus uses as initial type the output type
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 tmp_result = sum_op(tmp_result, input[i]);
@@ -138,15 +316,15 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             size_t temp_storage_size_bytes;
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            if constexpr(std::is_same<T, test_utils::half>::value
-                         || std::is_same<T, test_utils::bfloat16>::value)
+            if constexpr(std::is_same_v<T, test_utils::half>
+                         || std::is_same_v<T, test_utils::bfloat16>)
             {
                 HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
                                                        temp_storage_size_bytes,
                                                        d_input,
                                                        d_output,
                                                        input.size(),
-                                                       ExtendedFloatBinOp<hipcub::Sum>(),
+                                                       ExtendedFloatBinOp<test_utils::plus>(),
                                                        U(0.f),
                                                        stream));
             }
@@ -172,15 +350,15 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            if constexpr(std::is_same<T, test_utils::half>::value
-                         || std::is_same<T, test_utils::bfloat16>::value)
+            if constexpr(std::is_same_v<T, test_utils::half>
+                         || std::is_same_v<T, test_utils::bfloat16>)
             {
                 HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
                                                        temp_storage_size_bytes,
                                                        d_input,
                                                        d_output,
                                                        input.size(),
-                                                       ExtendedFloatBinOp<hipcub::Sum>(),
+                                                       ExtendedFloatBinOp<test_utils::plus>(),
                                                        U(0.f),
                                                        stream));
             }
@@ -266,10 +444,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
             // Calculate expected results on host using the same accumulator type than on device
             using Min    = typename MinSelector<T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<hipcub::Min, T, U>;
+            using AccumT = hipcub::detail::accumulator_t<test_utils::minimum, T, U>;
             Min    min_op;
             AccumT tmp_result = test_utils::numeric_limits<
-                AccumT>::max(); // hipcub::Min uses as initial type the input type
+                AccumT>::max(); // test_utils::minimum uses as initial type the input type
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 tmp_result = min_op(tmp_result, input[i]);
@@ -380,7 +558,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMaximum)
 
             // Calculate expected results on host using the same accumulator type than on device
             using Max    = typename MaxSelector<T, U>::type; // For custom_type_test tests
-            using AccumT = hipcub::detail::accumulator_t<hipcub::Max, T, U>;
+            using AccumT = hipcub::detail::accumulator_t<test_utils::maximum, T, U>;
             Max    max_op;
             AccumT tmp_result = test_utils::numeric_limits<AccumT>::min();
             for(unsigned int i = 0; i < input.size(); i++)
@@ -686,8 +864,8 @@ void test_argminmax2(typename TestFixture::input_type empty_value)
     using T             = typename TestFixture::input_type;
     using Iterator      = typename hipcub::ArgIndexInputIterator<T*, int>;
     using argidx_type   = typename Iterator::value_type;
-    using extremum_type = typename argidx_type::value_type;
-    using index_type    = typename argidx_type::key_type;
+    using extremum_type = decltype(std::declval<argidx_type>().value);
+    using index_type    = decltype(std::declval<argidx_type>().key);
 
     DispatchFunction function;
 
@@ -788,6 +966,7 @@ void test_argminmax2(typename TestFixture::input_type empty_value)
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_extremum));
+            HIP_CHECK(hipFree(d_index));
             HIP_CHECK(hipFree(d_temp_storage));
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(index[0], expected.key));
@@ -886,13 +1065,15 @@ void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
     if(size > 0)
     {
         // all +/- infinity should produce +/- infinity
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 0));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(0)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, value));
     }
     else
     {
         // empty input should produce a special value
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 1));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(1)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, empty_value));
     }
 }
@@ -952,13 +1133,15 @@ void test_argminmax_extremum(TypeParam value, TypeParam empty_value)
     if(size > 0)
     {
         // all +/- infinity should produce +/- infinity
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 0));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(0)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, value));
     }
     else
     {
         // empty input should produce a special value
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 1));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(1)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, empty_value));
     }
 }
@@ -1050,14 +1233,14 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
                 hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
 
             // Calculate expected results on host using the same accumulator type than on device
-            using Sum =
-                typename AlgebraicSelector<hipcub::Sum, T, U>::type; // For custom_type_test tests
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
             using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
 
             Sum             reduction_op;
             TestTransformOp transform_op;
             const U         init(10);
-            AccumT          tmp_result = init; // hipcub::Sum uses as initial type the output type
+            AccumT tmp_result = init; // test_utils::plus uses as initial type the output type
             for(size_t i = 0; i < input.size(); ++i)
             {
                 tmp_result = reduction_op(tmp_result, transform_op(input[i]));
@@ -1160,7 +1343,7 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
 
     using T            = typename TestFixture::input_type;
     using U            = typename TestFixture::output_type;
-    using IteratorType                  = rocprim::constant_iterator<T>;
+    using IteratorType                  = test_utils::constant_iterator<T>;
     const std::vector<size_t> exponents = {30, 31, 32, 33, 34};
     for(auto exponent : exponents)
     {
@@ -1219,7 +1402,7 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            const std::size_t result = output[0];
+            const size_t result = output[0];
             ASSERT_EQ(result, size);
 
             HIP_CHECK(hipFree(d_output));

@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/mr/memory_resource.h>
 #include <thrust/mr/validator.h>
@@ -61,7 +68,7 @@ public:
    * \param alignment specifies the alignment for the allocation.
    *  Defaults to THRUST_MR_DEFAULT_ALIGNMENT.
    */
-  THRUST_NODISCARD virtual Pointer
+  [[nodiscard]] virtual Pointer
   do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
     return static_cast<Pointer>(m_upstream->do_allocate(bytes, alignment));

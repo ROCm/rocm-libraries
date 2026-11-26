@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import hashlib
 import json
@@ -11,13 +12,13 @@ import pytest
 from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
-from hkp_pack.pipeline import run_pipeline
 from hkp_pack.rocke_compile import (
     build_spec,
+    code_object_identity,
     compile_rocke_variant,
     rocke_variant_key,
 )
-from pack_helpers import read_shipped
+from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
 
 ARCH = "gfx950"
 
@@ -32,14 +33,24 @@ def _copy_fixture(tmp_path, fixture):
     return dst
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=(ARCH,)):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches=(ARCH,),
+    hip_path=None,
+    device_lib_path=None,
+):
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 
@@ -161,9 +172,12 @@ def _write_stub_pkg(tmp_path, body, pkg="stubpkg", sub="sub", mod="mod"):
 
 
 class _FakeArtifact:
-    def __init__(self, name, data):
+    def __init__(self, name, data, llvm_text, isa, options):
         self.kernel_name = name
         self.hsaco = data
+        self.llvm_text = llvm_text
+        self.isa = isa
+        self.options = options
 
 
 class _FakeComgrError(Exception):
@@ -177,8 +191,20 @@ STUB_ARGUMENTS = [
 ]
 
 
-def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
-    """Stub the comgr entry, recording the backend the producer requested.
+_STUB_IR = "; stub IR"
+_STUB_ISA = f"amdgcn-amd-amdhsa--{ARCH}"
+_STUB_OPTIONS = ("-O3",)
+
+
+def _patch_compiler(
+    monkeypatch,
+    name="stub_symbol",
+    data=None,
+    llvm_text=_STUB_IR,
+    isa=_STUB_ISA,
+    options=_STUB_OPTIONS,
+):
+    """Stub the comgr entry, recording the backend and arch the producer requested.
 
     The recorder exists so a test can assert the producer PINS the backend
     rather than merely tolerating one. Without it, dropping the pin would leave
@@ -190,6 +216,9 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     before any guard under test is reached. Synthesising that note needs
     msgpack, so the default -- and only the default -- is gated on it; a caller
     supplying its own bytes needs nothing.
+
+    `llvm_text`, `isa` and `options` are what the stub artifact reports COMGR
+    compiled.
     """
     if data is None:
         requires_msgpack()
@@ -200,7 +229,8 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
 
     def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
         seen["backend"] = backend
-        return _FakeArtifact(name, data)
+        seen.setdefault("arches", []).append(arch)
+        return _FakeArtifact(name, data, llvm_text, isa, tuple(options))
 
     monkeypatch.setattr(
         rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
@@ -215,6 +245,9 @@ _GOOD_STUB = """
     class StubSpec:
         n: int
         label: str = "x"
+
+    def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+        return True, ""
 
     def build_stub(spec: StubSpec, *, arch="gfx950"):
         return ("kernel", spec, arch)
@@ -235,6 +268,42 @@ def test_adapter_import_build_capture(tmp_path, monkeypatch):
     # default: the wheel has no C++ engine, so an unpinned request degrades to
     # Python via a fallback and the artifact misreports which engine built it.
     assert seen["backend"] == "python"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "changed, value, moves",
+    [
+        ("data", b"\x7fELF-rebuilt", False),
+        ("llvm_text", "; other IR", True),
+        ("isa", f"amdgcn-amd-amdhsa--{ARCH}:xnack-", True),
+        ("options", ("-O3", "-mllvm", "-amdgpu-mfma-vgpr-form"), True),
+    ],
+)
+def test_identity_follows_what_comgr_compiled_not_the_code_object(
+    tmp_path, monkeypatch, changed, value, moves
+):
+    """`code_object_identity` digests the IR, ISA name and options COMGR compiled, so
+    a compiler that only rebuilds the bytes keeps it while the sha256 moves."""
+    src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg=f"stubpkg_identity_{changed}")
+    base = {"data": b"\x7fELF-stub"}
+
+    def _observations(**inputs):
+        _patch_compiler(monkeypatch, **inputs)
+        _co, _symbol, observations = compile_rocke_variant(
+            src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
+        )
+        return observations
+
+    before = _observations(**base)
+    after = _observations(**{**base, changed: value})
+    assert before["code_object_identity"] == code_object_identity(
+        [_STUB_IR], _STUB_ISA, list(_STUB_OPTIONS)
+    )
+    assert (before["code_object_identity"] != after["code_object_identity"]) is moves
+    assert (before["code_object_sha256"] != after["code_object_sha256"]) is (
+        changed == "data"
+    )
 
 
 @pytest.mark.quick
@@ -356,6 +425,9 @@ def test_adapter_invalid_spec_post_init(tmp_path, monkeypatch):
                 if self.n < 0:
                     raise ValueError("n must be non-negative")
 
+        def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+            return True, ""
+
         def build_stub(spec: StubSpec, *, arch="gfx950"):
             return ("kernel", spec, arch)
     """
@@ -373,6 +445,9 @@ def test_adapter_arch_not_supported(tmp_path, monkeypatch):
         @dataclasses.dataclass
         class StubSpec:
             n: int
+
+        def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+            return True, ""
 
         def build_stub(spec: StubSpec, *, arch="gfx950"):
             if arch != "gfx950":
@@ -408,6 +483,9 @@ def test_adapter_builder_call_failure_wrapped(tmp_path, monkeypatch):
         @dataclasses.dataclass
         class StubSpec:
             n: int
+
+        def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+            return True, ""
 
         def build_stub(spec: StubSpec, *, arch="gfx950"):
             raise ValueError("builder blew up")
@@ -461,7 +539,7 @@ def test_variant_key_stem_is_source_stem():
 # --- D. rocke validation accept/reject (quick, comgr-free) ------------------
 @pytest.mark.quick
 def test_validation_accepts_rocke_ukd(tmp_path, rocke_fixture, rocke_ukd):
-    flat = load_flat_input(_copy_fixture(tmp_path, rocke_fixture))
+    flat = load_flat_input(_copy_fixture(tmp_path, rocke_fixture), GENERIC_TARGETS)
     kdp = next(k for k in flat.kdps() if k.id == "kdp-attention")
     ks = kdp.doc["kernelDescriptors"][0]["kernel_source"]
     assert ks["kind"] == "rocke"
@@ -476,7 +554,7 @@ def test_validation_rejects_missing_builder(tmp_path, rocke_fixture):
     del doc["kernelDescriptors"][0]["kernel_source"]["builder"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'builder'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -487,7 +565,7 @@ def test_validation_rejects_missing_spec(tmp_path, rocke_fixture):
     del doc["kernelDescriptors"][0]["kernel_source"]["spec"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'spec'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -498,7 +576,7 @@ def test_validation_rejects_non_object_spec(tmp_path, rocke_fixture):
     doc["kernelDescriptors"][0]["kernel_source"]["spec"] = "not-an-object"
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="invalid spec"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -512,7 +590,7 @@ def test_validation_standalone_rocke_admitted(tmp_path, rocke_fixture):
     doc["kernelDescriptors"] = [standalone_id]
     kdp_path.write_text(json.dumps(doc), encoding="utf-8")
     (src / "attention.ukd.json").write_text(json.dumps(inline), encoding="utf-8")
-    flat = load_flat_input(src)
+    flat = load_flat_input(src, GENERIC_TARGETS)
     assert standalone_id in flat.ukd_by_id()
 
 
@@ -545,9 +623,23 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
 
 
 def test_rocke_compiles_and_packs(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
     ukd = shipped["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
@@ -577,6 +669,8 @@ def test_rocke_compiles_and_packs(
         "by_value",
         "by_value",
         "by_value",
+        "by_value",
+        "by_value",
     ]
     assert [a["name"] for a in signature] == [
         "q_ptr",
@@ -587,18 +681,34 @@ def test_rocke_compiles_and_packs(
         "batch",
         "seqlen_q",
         "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
     ]
 
 
 def test_rocke_symbol_capture_differs_from_builder(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
     from kernels.gfx950.attention_dense import (
         AttentionDenseSpec,
         build_attention_dense,
     )
 
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
     symbol = ukd["kernel_source"]["symbol"]
     expected = build_attention_dense(
@@ -609,12 +719,26 @@ def test_rocke_symbol_capture_differs_from_builder(
 
 
 def test_rocke_arch_scoping(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """A gfx950-scoped rocke UKD under a gfx942+gfx950 KDP packs only for gfx950;
     targeting gfx942 excludes the UKD before compile, so the gfx950-only builder
     is never invoked and no gfx942 shard is produced."""
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
@@ -641,6 +765,9 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
             @dataclasses.dataclass
             class StubSpec:
                 n: int
+
+            def is_valid_spec(spec: StubSpec, *, arch="gfx950"):
+                return True, ""
 
             def build_stub(spec: StubSpec, *, arch="gfx950"):
                 return ("kernel", spec, arch)
@@ -753,11 +880,372 @@ def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_d
     (root / "collide.kdp.json").write_text(json.dumps(kdp), encoding="utf-8")
 
     with pytest.raises(HkpPackError, match="toc_key collision"):
-        pipeline.run_pipeline(
+        run_pipeline(
             source_root=root,
             arches=[ARCH],
             out_root=tmp_path / "out",
-            hipcc="hipcc-not-invoked",
+            hip_compiler="compiler-not-invoked",
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
+
+
+# --- F. kernel_source.target: native vs generic compile target ---------------
+_TARGET_STUB = """
+    import dataclasses
+
+    SEEN = []
+
+    @dataclasses.dataclass
+    class StubSpec:
+        n: int
+
+    def is_valid_spec(spec: StubSpec, arch):
+        SEEN.append(("predicate", arch))
+        return True
+
+    def build_stub(spec: StubSpec, *, arch="gfx1151"):
+        SEEN.append(("builder", arch))
+        return ("kernel", spec, arch)
+"""
+
+
+def _target_kdp(src, arches, target, ukd_arch=None):
+    ks = {"kind": "rocke", "source": src, "builder": "build_stub", "spec": {"n": 1}}
+    if target is not None:
+        ks["target"] = target
+    ukd = {
+        "version": "0.1",
+        "id": "ukd-target",
+        "name": "Target",
+        "kernel_source": ks,
+        "metadata": {},
+        "priority": 0,
+    }
+    if ukd_arch is not None:
+        ukd["arch"] = ukd_arch
+    return {
+        "version": "0.1",
+        "id": "kdp-target",
+        "name": "Target",
+        "arch": list(arches),
+        "matchers": [],
+        "engine": None,
+        "dispatch": None,
+        "kernelDescriptors": [ukd],
+    }
+
+
+def _write_target_root(tmp_path, kdp):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "target.kdp.json").write_text(json.dumps(kdp), encoding="utf-8")
+    return root
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "shard, generic", [("gfx1151", "gfx11-generic"), ("gfx1201", "gfx12-generic")]
+)
+def test_generic_target_compiles_for_the_generic_processor(
+    tmp_path, monkeypatch, rocke_importable, shard, generic
+):
+    """The predicate, the builder and comgr all see the generic processor, while
+    the observations stay bound to the shard the object is packed for."""
+    import importlib
+
+    pkg = f"targetpkg_{shard}"
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg=pkg)
+    _name, _data, seen = _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    co, _symbol, observations = compile_rocke_variant(
+        src, "build_stub", {"n": 1}, shard, tmp_path / "co", target="generic"
+    )
+    module = importlib.import_module(f"{pkg}.sub.mod")
+    assert module.SEEN == [("predicate", generic), ("builder", generic)]
+    assert seen["arches"] == [generic]
+    assert observations["arch"] == shard
+    assert observations["compile_target"] == generic
+    # A generic object is a different variant from a native compile of one spec.
+    assert co.name == f"{rocke_variant_key(src, 'build_stub', {'n': 1}, 'generic')}.co"
+    assert rocke_variant_key(src, "build_stub", {"n": 1}, "generic") != (
+        rocke_variant_key(src, "build_stub", {"n": 1})
+    )
+
+
+@pytest.mark.quick
+def test_native_target_is_the_default_and_keeps_its_key(tmp_path, monkeypatch):
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_native")
+    _name, _data, seen = _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    co, _symbol, observations = compile_rocke_variant(
+        src, "build_stub", {"n": 1}, "gfx1151", tmp_path / "co"
+    )
+    assert seen["arches"] == ["gfx1151"]
+    assert observations["compile_target"] == "gfx1151"
+    # "native" stays out of the key payload, so pre-existing keys are unchanged.
+    assert rocke_variant_key(src, "build_stub", {"n": 1}, "native") == (
+        rocke_variant_key(src, "build_stub", {"n": 1})
+    )
+    assert co.name == f"{rocke_variant_key(src, 'build_stub', {'n': 1})}.co"
+
+
+@pytest.mark.quick
+def test_generic_target_rejects_a_shard_without_a_generic_processor(
+    tmp_path, monkeypatch, rocke_importable
+):
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_nogeneric")
+    _name, _data, seen = _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    with pytest.raises(HkpPackError, match="no LLVM generic processor target"):
+        compile_rocke_variant(
+            src, "build_stub", {"n": 1}, "gfx950", tmp_path / "co", target="generic"
+        )
+    assert "arches" not in seen, "nothing may compile for a shard it cannot serve"
+
+
+@pytest.mark.quick
+def test_unknown_target_is_rejected_by_the_producer(tmp_path, monkeypatch):
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_unknown")
+    _patch_compiler(monkeypatch, data=b"\x7fELF-stub")
+    with pytest.raises(HkpPackError, match="kernel_source.target 'gfx11-generic'"):
+        compile_rocke_variant(
+            src,
+            "build_stub",
+            {"n": 1},
+            "gfx1151",
+            tmp_path / "co",
+            target="gfx11-generic",
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("target", ["Generic", "gfx11-generic", "", 1, None])
+def test_unknown_target_is_rejected_at_load(tmp_path, target):
+    kdp = _target_kdp("pkg/sub/mod.py", ["gfx1151"], target)
+    kdp["kernelDescriptors"][0]["kernel_source"]["target"] = target
+    root = _write_target_root(tmp_path, kdp)
+    with pytest.raises(HkpPackError, match="invalid target"):
+        load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("target", ["native", "generic"])
+def test_known_targets_load(tmp_path, target):
+    root = _write_target_root(
+        tmp_path, _target_kdp("pkg/sub/mod.py", ["gfx1151"], target)
+    )
+    load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+def test_generic_target_records_compile_target_per_shard(
+    tmp_path, monkeypatch, rocke_importable
+):
+    """The walk carries the compile target per shard, and an arch-restricted UKD
+    never reaches a shard its arch list excludes."""
+    from hkp_pack import pipeline
+
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_walk")
+    # In-process compiles, so the stubbed comgr entry is the one that runs.
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    _name, _data, seen = _patch_compiler(monkeypatch)
+    kdp = _target_kdp(src, ["gfx1151", "gfx1201"], "generic")
+    restricted = copy.deepcopy(kdp["kernelDescriptors"][0])
+    restricted.update(id="ukd-target-gfx11", name="Target gfx11", arch=["gfx1151"])
+    restricted["kernel_source"]["spec"] = {"n": 2}
+    kdp["kernelDescriptors"].append(restricted)
+    root = _write_target_root(tmp_path, kdp)
+    flat = load_flat_input(root, GENERIC_TARGETS)
+
+    expected = {
+        "gfx1151": ("gfx11-generic", {"ukd-target", "ukd-target-gfx11"}),
+        "gfx1201": ("gfx12-generic", {"ukd-target"}),
+    }
+    for shard, (generic, ids) in expected.items():
+        inter = pipeline.compile_intermediate(
+            flat, root, shard, "compiler-not-invoked", tmp_path / "inter" / shard
+        )
+        records = [u for k in inter.kdps for u in k.ukds]
+        assert {u.id for u in records} == ids
+        for record in records:
+            assert record.compile_target == generic
+            assert record.observations["arch"] == shard
+            assert record.observations["compile_target"] == generic
+    assert sorted(set(seen["arches"])) == ["gfx11-generic", "gfx12-generic"]
+
+
+@pytest.mark.quick
+def test_generic_target_provenance_names_the_compile_target(
+    tmp_path, monkeypatch, rocm_kpack_dir, rocke_importable
+):
+    """The shipped provenance tells a reader which processor the object was built
+    for, and the compiler's evidence binds that same value to the shard."""
+    from hkp_pack import agreement
+
+    src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_pack")
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    _patch_compiler(monkeypatch)
+    native = copy.deepcopy(_target_kdp(src, ["gfx1151"], None))
+    root = _write_target_root(
+        tmp_path, _target_kdp(src, ["gfx1151", "gfx1201"], "generic")
+    )
+    native["id"] = "kdp-native"
+    native["kernelDescriptors"][0].update(id="ukd-native", name="Native")
+    native["kernelDescriptors"][0]["kernel_source"]["spec"] = {"n": 3}
+    (root / "native.kdp.json").write_text(json.dumps(native), encoding="utf-8")
+
+    run_pipeline(
+        source_root=root,
+        arches=["gfx1151", "gfx1201"],
+        out_root=tmp_path / "out",
+        hip_compiler="compiler-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+    for shard, generic in (("gfx1151", "gfx11-generic"), ("gfx1201", "gfx12-generic")):
+        ukd = read_shipped(tmp_path / "out" / shard / "target.kdp.json")[
+            "kernelDescriptors"
+        ][0]
+        assert ukd["arch"] == [shard]
+        assert ukd["provenance"]["compile_target"] == generic
+        observations = ukd["provenance"]["effective_spec"]["observations"]
+        assert observations["arch"] == shard
+        assert observations["compile_target"] == generic
+        payload = _kpack_archive(rocm_kpack_dir, tmp_path / "out", shard).get_kernel(
+            ukd["kernel_source"]["toc_key"], shard
+        )
+        agreement.verify(ukd, [], payload)
+        # Relabelling a generic object as native breaks the evidence binding.
+        forged = copy.deepcopy(ukd)
+        forged["provenance"]["compile_target"] = shard
+        forged["provenance"]["effective_spec"]["descriptor_digest"] = (
+            agreement.descriptor_binding(forged)
+        )
+        with pytest.raises(HkpPackError, match="compile-target binding"):
+            agreement.verify(forged, [], payload)
+    native_ukd = read_shipped(tmp_path / "out" / "gfx1151" / "native.kdp.json")[
+        "kernelDescriptors"
+    ][0]
+    assert native_ukd["provenance"]["compile_target"] == "gfx1151"
+
+
+# A producer whose kernels state launch facts. A kernel stating parameter facts
+# or an exact workgroup size is checked on the host before each launch only by
+# rocke's KernelLauncher.from_artifact; a packed code object carries none of
+# those rows and the ingestor launches it with its own geometry, so the packer
+# must refuse it rather than ship it with its checks gone.
+_CONTRACT_PRODUCER = """
+    import dataclasses
+
+    from rocke.core.ir import I32, IRBuilder, PtrType, F32
+    from rocke.helpers import KernelModule
+
+    @dataclasses.dataclass
+    class FactSpec:
+        n: int
+
+    def _kernel(name, *, fact=False, workgroup_size=False):
+        b = IRBuilder(name)
+        if workgroup_size:
+            b.kernel.attrs["workgroup_size"] = 64
+        b.param("out", PtrType(F32, "global"))
+        b.param("n", I32, ge=1) if fact else b.param("n", I32)
+        b.ret()
+        return b.kernel
+
+    def is_valid_spec(spec: FactSpec, *, arch="gfx950"):
+        return True, ""
+
+    def build_with_a_fact(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_a_fact", fact=True)
+
+    def build_with_a_workgroup_size(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_a_workgroup_size", workgroup_size=True)
+
+    def build_module_with_a_fact(spec: FactSpec, *, arch="gfx950"):
+        return KernelModule(
+            primary=_kernel("plain_primary"),
+            companions={"merge": _kernel("fact_companion", fact=True)},
+        )
+
+    def build_without_facts(spec: FactSpec, *, arch="gfx950"):
+        return _kernel("states_nothing")
+
+    def build_with_a_gpu_check(spec: FactSpec, *, arch="gfx950"):
+        b = IRBuilder("checks_on_the_gpu")
+        out = b.param("out", PtrType(I32, "global"))
+        cu = b.param("cu", PtrType(I32, "global"), readonly=True)
+        loaded = b.readfirstlane(b.global_load(cu, b.const_i32(0), I32))
+        b.global_store(out, b.const_i32(0), b.gpu_checked_value(loaded, ge=0, le=100))
+        b.ret()
+        return b.kernel
+"""
+
+
+_FACTS_REASON = (
+    "parameters carry facts, which a launch from a code object or from a launch "
+    "plan does not check"
+)
+_WORKGROUP_SIZE_REASON = (
+    "the kernel states an exact workgroup size, which a code object does not "
+    "carry, so a launch from the code object alone would not check its block"
+)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("builder", "kernel_name", "reason"),
+    [
+        ("build_with_a_fact", "states_a_fact", _FACTS_REASON),
+        (
+            "build_with_a_workgroup_size",
+            "states_a_workgroup_size",
+            _WORKGROUP_SIZE_REASON,
+        ),
+        ("build_module_with_a_fact", "fact_companion", _FACTS_REASON),
+    ],
+)
+def test_a_kernel_stating_launch_facts_is_refused_before_it_is_compiled(
+    tmp_path, rocke_importable, builder, kernel_name, reason
+):
+    """The refusal names the builder, the kernel and what it states, and comes
+    before any compile: no code object is written."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_contract")
+    with pytest.raises(HkpPackError) as raised:
+        compile_rocke_variant(src, builder, {"n": 1}, ARCH, tmp_path / "co")
+    assert str(raised.value) == (
+        f"builder '{builder}' @ {ARCH} returned kernel '{kernel_name}': {reason} -- "
+        "launch it through KernelLauncher.from_artifact instead of packing it"
+    )
+    assert not (tmp_path / "co").exists()
+
+
+@pytest.mark.quick
+def test_a_kernel_checking_a_value_on_the_gpu_is_refused_before_it_is_compiled(
+    tmp_path, rocke_importable
+):
+    """A gpu_checked_value reports a false fact only through the kernel's
+    GPU-check word, which the ingestor does not read: refused, before any
+    compile."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_gpu_check")
+    with pytest.raises(HkpPackError) as raised:
+        compile_rocke_variant(
+            src, "build_with_a_gpu_check", {"n": 1}, ARCH, tmp_path / "co"
+        )
+    assert str(raised.value) == (
+        f"builder 'build_with_a_gpu_check' @ {ARCH} returned kernel "
+        "'checks_on_the_gpu': only rocke's runtime reads this kernel's GPU-check "
+        "word, so a false gpu_checked_value fact would go unseen -- launch it "
+        "through KernelLauncher.from_artifact instead of packing it"
+    )
+    assert not (tmp_path / "co").exists()
+
+
+def test_a_kernel_stating_no_launch_facts_still_packs(
+    tmp_path, rocke_available, rocke_importable
+):
+    """The same producer's fact-free kernel compiles through comgr and packs."""
+    src = _write_stub_pkg(tmp_path, _CONTRACT_PRODUCER, pkg="stubpkg_contract_ok")
+    co, symbol, _observations = compile_rocke_variant(
+        src, "build_without_facts", {"n": 1}, ARCH, tmp_path / "co"
+    )
+    assert symbol == "states_nothing"
+    assert co.read_bytes()[:4] == b"\x7fELF"

@@ -7,9 +7,15 @@
 // License text and pinned upstream version: THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
 
+/**
+ * @file graph_wrapper.h
+ * @brief cuDNN FE graph::Graph implemented over a hipDNN frontend graph.
+ *
+ * Include via cudnn_frontend.h; not a supported direct include.
+ */
+
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -25,23 +31,24 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
+#include <hipdnn_compatibility/cudnn/detail/note_triage.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 {
-// Node signatures in this file mirror upstream cudnn-frontend at the version
-// pinned in cudnn_frontend_version.h (its graph_interface.h and
-// node_interface.h). Upstream grows node arity between minor releases, so
-// bumping the pin without re-diffing the signatures silently breaks source
-// compatibility for hipified consumers; this assert forces that re-diff.
+// Node signatures mirror upstream graph_interface.h / node_interface.h at the pinned version.
+// Upstream changes node arity between minor releases; re-diff them before bumping the pin.
 static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "cuDNN FE version pin changed: re-diff every Graph node signature in this "
               "file against upstream graph_interface.h / node_interface.h at the new tag, "
+              "update the upstream version and commit in frontend/THIRD_PARTY_LICENSES.md, "
               "then update this assert.");
 
 // NOLINTBEGIN(readability-identifier-naming): the whole class mirrors cuDNN's
@@ -74,6 +81,10 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
         }                                                \
     } while(0)
 
+/// @brief cuDNN FE graph::Graph that builds and runs a wrapped hipDNN graph.
+/// @note As in cuDNN FE, a copy shares the nodes, tensors, operation graph and built execution
+/// plans, and owns its plan list, engine filters and selected plan. Nodes added to one copy are
+/// not in the other.
 class Graph : public ErrorRecorder<Graph>
 {
 public:
@@ -81,17 +92,11 @@ public:
     Graph(Graph&&) = default;
     Graph& operator=(Graph&&) = default;
 
-    // Copyable, because upstream's Graph is and idiomatic cuDNN source relies on
-    // it (`return std::make_tuple(graph, ...)` from a builder lambda). The copy
-    // aliases: both objects drive the same native hipDNN graph, and both see the
-    // same tensors, exactly as an upstream copy shares its nodes and backend
-    // descriptors through shared_ptr. Wrapper-side scalars (_mode, _stage, the
-    // recorded error) are duplicated, so advancing one copy past a build stage
-    // leaves the other's view stale — the same shallow-copy caveat upstream has
-    // with its own per-copy plan candidate index.
+    // Copyable because cuDNN FE source returns graphs by value.
     Graph(const Graph&) = default;
     Graph& operator=(const Graph&) = default;
 
+    /// @brief Validates the graph; also returns any error recorded by an earlier unsupported call.
     error_t validate()
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -99,12 +104,13 @@ public:
         CHECK_CUDNN_FRONTEND_ERROR(validateOwnedTensors());
         if(hasOperationGraphState())
         {
-            return _graph->validate();
+            return _graph.validate();
         }
 
         return {};
     }
 
+    /// @brief Lowers the graph to a hipDNN operation graph.
     error_t build_operation_graph(cudnnHandle_t handle)
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -116,7 +122,7 @@ public:
             return {};
         }
 
-        auto err = _graph->build_operation_graph(handle);
+        auto err = _graph.build_operation_graph(handle);
         if(err.is_good())
         {
             _stage = Stage::OpGraphBuilt;
@@ -124,6 +130,7 @@ public:
         return err;
     }
 
+    /// @brief Deviceless build: succeeds only for an empty graph, otherwise returns INVALID_VALUE.
     error_t build_operation_graph()
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -138,7 +145,11 @@ public:
         return unsupportedDevicelessBuildError();
     }
 
-    error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    /// @brief Creates execution plans and applies pending plan filters.
+    /// @note A, B and FALLBACK run hipDNN's ModeA, ModeB and model-free selection, one query
+    ///       per mode in order, as upstream; OPENSOURCE is accepted with a warning and runs as
+    ///       FALLBACK. Upstream requires @p modes; the default {A} is a hipDNN convenience.
+    error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::A})
     {
         warnUnhonoredHeuristicModes(modes);
 
@@ -146,40 +157,40 @@ public:
 
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
-        auto err = _graph->create_execution_plans(modes);
+        auto err = _graph.create_execution_plans(modes);
         if(err.is_bad())
         {
             return err;
         }
 
         _planCreationModes = modes;
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
         _stage = Stage::PlansCreated;
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
         return err;
     }
 
+    /// @brief Checks that the created execution plans are supported.
     error_t check_support()
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
-        return _graph->check_support();
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
+        return _graph.check_support();
     }
 
+    /// @brief Same as check_support(); the handle is unused.
     error_t check_support(cudnnHandle_t handle)
     {
         static_cast<void>(handle);
         return check_support();
     }
 
-    // hipDNN extension, no upstream cuDNN frontend equivalent: probes whether any
-    // engine can run the graph, without creating or building plans. Mirrors the
-    // native method, which auto-builds the operation graph, so a successful probe
-    // leaves the graph built. Never regresses a later stage; the probe neither
-    // creates nor invalidates plans.
+    /// @brief hipDNN extension: reports whether any engine can run the graph; creates no plans.
+    /// @note Builds the operation graph as a side effect.
     error_t is_supported_ext(cudnnHandle_t handle,
-                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+                             const std::vector<HeurMode_t>& modes = {HeurMode_t::A})
     {
         warnUnhonoredHeuristicModes(modes);
 
@@ -188,7 +199,7 @@ public:
         CHECK_CUDNN_FRONTEND_ERROR(validateOwnedTensors());
         if(hasOperationGraphState())
         {
-            CHECK_CUDNN_FRONTEND_ERROR(_graph->is_supported_ext(handle, modes));
+            CHECK_CUDNN_FRONTEND_ERROR(_graph.is_supported_ext(handle, modes));
         }
 
         if(!stageAtLeast(Stage::OpGraphBuilt))
@@ -198,6 +209,7 @@ public:
         return {};
     }
 
+    /// @brief Builds execution plans; `doMultithreadedBuilds` is logged and ignored.
     error_t build_plans(BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
                         bool doMultithreadedBuilds = false)
     {
@@ -209,25 +221,18 @@ public:
 
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
-
-        // Native build_plans(HEURISTICS_CHOICE) only ever inspects the active
-        // plan, so a filter that bars the top-ranked engine fails the build
-        // outright. cuDNN instead narrows the candidate set, so retarget onto the
-        // top-ranked survivor first.
-        if(policy == BuildPlanPolicy_t::HEURISTICS_CHOICE)
+        // A repeat build leaves the built plan in place, so only the filters are pushed and
+        // native decides; a survivor check would fail a repeat build that cuDNN accepts.
+        if(_stage == Stage::PlansBuilt)
         {
-            int64_t survivingIndex = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(findPlanIndexIfActiveBarred(survivingIndex));
-            if(survivingIndex >= 0)
-            {
-                CHECK_CUDNN_FRONTEND_ERROR(_graph->build_plan_at_index(survivingIndex));
-                _stage = Stage::PlansBuilt;
-                return {};
-            }
+            CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters(_planCreationModes));
+        }
+        else
+        {
+            CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
         }
 
-        auto err = _graph->build_plans(policy);
+        auto err = _graph.build_plans(policy);
         if(err.is_good())
         {
             _stage = Stage::PlansBuilt;
@@ -235,6 +240,7 @@ public:
         return err;
     }
 
+    /// @brief Same as build_plans(policy, doMultithreadedBuilds); the handle is unused.
     error_t build_plans(const cudnnHandle_t& handle,
                         BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
                         bool doMultithreadedBuilds = false)
@@ -243,6 +249,7 @@ public:
         return build_plans(policy, doMultithreadedBuilds);
     }
 
+    /// @brief Builds the plan at `index`, creating plans first if needed.
     error_t build_plan_at_index(int64_t index)
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -254,26 +261,29 @@ public:
             CHECK_CUDNN_FRONTEND_ERROR(create_execution_plans());
         }
         CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->build_plan_at_index(index));
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.build_plan_at_index(index));
         _stage = Stage::PlansBuilt;
         return {};
     }
 
+    /// @brief Same as build_plan_at_index(index); the handle is unused.
     error_t build_plan_at_index(const cudnnHandle_t& handle, int64_t index)
     {
         static_cast<void>(handle);
         return build_plan_at_index(index);
     }
 
+    /// @brief Returns the number of created execution plans.
     int64_t get_execution_plan_count() const
     {
         if(hasOperationGraphState())
         {
-            return _graph->get_execution_plan_count();
+            return _graph.get_execution_plan_count();
         }
         return stageAtLeast(Stage::PlansCreated) ? 1 : 0;
     }
 
+    /// @brief Returns the number of applicable hipDNN engines, in hipDNN's ranking order.
     error_t get_engine_count(int64_t& count)
     {
         count = 0;
@@ -285,6 +295,7 @@ public:
         return {};
     }
 
+    /// @brief Returns the engine's knobs; hipDNN knobs with no KnobType_t mapping are omitted.
     error_t get_knobs_for_engine(int64_t engineIndex, std::vector<Knob>& knobs)
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -297,12 +308,13 @@ public:
         CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
 
         std::vector<hipdnn_frontend::Knob> nativeKnobs;
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->get_knobs_for_engine(nativeEngineId, nativeKnobs));
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_knobs_for_engine(nativeEngineId, nativeKnobs));
         hipdnn_frontend::compatibility::cudnn_frontend::detail::projectNativeKnobs(nativeKnobs,
                                                                                    knobs);
         return {};
     }
 
+    /// @brief Creates a plan for engine `engineIndex` with the given knob choices.
     error_t create_execution_plan(int64_t engineIndex,
                                   const std::unordered_map<KnobType_t, int64_t>& knobs)
     {
@@ -318,39 +330,43 @@ public:
         if(!knobs.empty())
         {
             std::vector<hipdnn_frontend::Knob> nativeKnobs;
-            CHECK_CUDNN_FRONTEND_ERROR(_graph->get_knobs_for_engine(nativeEngineId, nativeKnobs));
+            CHECK_CUDNN_FRONTEND_ERROR(_graph.get_knobs_for_engine(nativeEngineId, nativeKnobs));
             CHECK_CUDNN_FRONTEND_ERROR(
                 hipdnn_frontend::compatibility::cudnn_frontend::detail::makeNativeKnobSettings(
                     knobs, nativeKnobs, settings));
         }
 
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->create_execution_plan_ext(nativeEngineId, settings));
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.create_execution_plan_ext(nativeEngineId, settings));
         _stage = Stage::PlansCreated;
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters());
         return {};
     }
 
+    /// @brief Returns the active plan's name.
     error_t get_plan_name(std::string& name) const
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->get_plan_name(name);
+        return _graph.get_plan_name(name);
     }
 
+    /// @brief Returns the name of the plan at `index`.
     error_t get_plan_name_at_index(int64_t index, std::string& name) const
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->get_plan_name_at_index(index, name);
+        return _graph.get_plan_name_at_index(index, name);
     }
 
+    /// @brief Returns the workspace size of the plan at `index`.
     error_t get_workspace_size_plan_at_index(int64_t index, int64_t& workspaceSize) const
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->get_workspace_size_plan_at_index(index, workspaceSize);
+        return _graph.get_workspace_size_plan_at_index(index, workspaceSize);
     }
 
+    /// @brief Returns the workspace size of the plan at `index`, or 0 on failure (logged).
     int64_t get_workspace_size_plan_at_index(int64_t index) const
     {
         int64_t workspaceSize = 0;
@@ -363,10 +379,7 @@ public:
         return workspaceSize;
     }
 
-    // cuDNN re-queries the plan's workspace under runtime shape overrides.
-    // hipDNN has no override-aware workspace query, so an empty override list
-    // degrades to the plain query and a non-empty one is refused rather than
-    // answered with a size that ignores the overrides.
+    /// @brief Plan workspace query; non-empty shape overrides return GRAPH_NOT_SUPPORTED.
     error_t get_workspace_size_plan_at_index(
         cudnnHandle_t handle,
         int64_t index,
@@ -385,6 +398,7 @@ public:
                 "Runtime shape override workspace query is unsupported by this shim"};
     }
 
+    /// @brief Plan workspace query, or 0 on failure (logged); non-empty overrides fail.
     int64_t get_workspace_size_plan_at_index(
         cudnnHandle_t handle,
         int64_t index,
@@ -403,6 +417,7 @@ public:
         return workspaceSize;
     }
 
+    /// @brief Returns the behavior notes of the active plan's engine.
     error_t get_behavior_notes(std::vector<BehaviorNote_t>& notes) const
     {
         notes.clear();
@@ -410,10 +425,11 @@ public:
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
 
         int64_t engineId = -1;
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->get_execution_plan_engine_id(engineId));
-        return _graph->get_behavior_notes_for_engine(engineId, notes);
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_execution_plan_engine_id(engineId));
+        return _graph.get_behavior_notes_for_engine(engineId, notes);
     }
 
+    /// @brief Returns the behavior notes of the plan at `index`.
     error_t get_behavior_notes_for_plan_at_index(int64_t index,
                                                  std::vector<BehaviorNote_t>& notes) const
     {
@@ -422,20 +438,14 @@ public:
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
 
         std::string planName;
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->get_plan_name_at_index(index, planName));
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName))
-        {
-            return {error_code_t::INVALID_VALUE,
-                    "Cannot resolve engine id for plan '" + planName
-                        + "'; per-plan behavior-note query is unsupported for unknown engines"};
-        }
-
-        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(planName);
-        return _graph->get_behavior_notes_for_engine(engineId, notes);
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_plan_name_at_index(index, planName));
+        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
+        return _graph.get_behavior_notes_for_engine(engineId, notes);
     }
 
+    /// @brief Runs the full validate-to-build_plans sequence.
     error_t build(const cudnnHandle_t& handle,
-                  const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK},
+                  const std::vector<HeurMode_t>& modes = {HeurMode_t::A},
                   BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
                   bool doMultithreadedBuilds = false)
     {
@@ -446,6 +456,7 @@ public:
         return build_plans(policy, doMultithreadedBuilds);
     }
 
+    /// @brief Deviceless build: succeeds only for an empty graph; the arguments are ignored.
     error_t build(const std::vector<HeurMode_t>& modes,
                   BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
                   bool doMultithreadedBuilds = false)
@@ -461,67 +472,70 @@ public:
         return build_operation_graph();
     }
 
+    /// @brief Sets the graph name.
     Graph& set_name(const std::string& name)
     {
-        _graph->set_name(name);
+        _graph.set_name(name);
         return *this;
     }
 
+    /// @brief hipDNN extension: returns the graph name.
     const std::string& get_name() const
     {
-        return _graph->get_name();
+        return _graph.get_name();
     }
 
+    /// @brief Sets the default I/O data type.
     Graph& set_io_data_type(DataType_t type)
     {
-        _graph->set_io_data_type(type);
+        _graph.set_io_data_type(type);
         return *this;
     }
 
+    /// @brief hipDNN extension: returns the default I/O data type.
     DataType_t get_io_data_type() const
     {
-        return _graph->get_io_data_type();
+        return _graph.get_io_data_type();
     }
 
+    /// @brief Sets the default compute data type.
     Graph& set_compute_data_type(DataType_t type)
     {
-        _graph->set_compute_data_type(type);
+        _graph.set_compute_data_type(type);
         return *this;
     }
 
+    /// @brief hipDNN extension: returns the default compute data type.
     DataType_t get_compute_data_type() const
     {
-        return _graph->get_compute_data_type();
+        return _graph.get_compute_data_type();
     }
 
+    /// @brief Sets the default intermediate data type.
     Graph& set_intermediate_data_type(DataType_t type)
     {
-        _graph->set_intermediate_data_type(type);
+        _graph.set_intermediate_data_type(type);
         return *this;
     }
 
+    /// @brief hipDNN extension: returns the default intermediate data type.
     DataType_t get_intermediate_data_type() const
     {
-        return _graph->get_intermediate_data_type();
+        return _graph.get_intermediate_data_type();
     }
 
 #ifdef HIPDNN_ENABLE_SDPA
-    // Native set_override_shape_enabled is SDPA-gated (see Graph.hpp); mirror
-    // that gating here so the shim never calls a method the frontend omits.
-    // Not part of cuDNN's graph::Graph surface, so nothing cuDNN-spelled relies
-    // on it in a compat-only (SDPA-off) build.
+    // Native set_override_shape_enabled exists only in SDPA-enabled builds.
+    /// @brief Enables runtime shape overrides.
     Graph& set_override_shape_enabled(bool isEnabled)
     {
-        _graph->set_override_shape_enabled(isEnabled);
+        _graph.set_override_shape_enabled(isEnabled);
         return *this;
     }
 #endif // HIPDNN_ENABLE_SDPA
 
-    // Setter triage: hints that are safe to drop (dynamic-shape, kernel-cache)
-    // log and continue; requests the shim cannot honor without changing results
-    // (SM targeting, device properties) record an error that surfaces at the next
-    // validate()/build. The asymmetry is deliberate — do not "normalize" one
-    // group to the other.
+    // Droppable hints log and continue; requests that would change results record an error.
+    /// @brief Accepted for source compatibility; logged and ignored.
     Graph& set_dynamic_shape_enabled(bool isEnabled)
     {
         static_cast<void>(isEnabled);
@@ -529,6 +543,7 @@ public:
         return *this;
     }
 
+    /// @brief Accepted for source compatibility; logged and ignored.
     Graph& set_kernel_cache(const std::shared_ptr<KernelCache>& cache)
     {
         static_cast<void>(cache);
@@ -536,8 +551,7 @@ public:
         return *this;
     }
 
-    // SM targeting / device properties are unsupported (see triage note above):
-    // record so the next validate()/build surfaces the error.
+    /// @brief Unsupported: records INVALID_VALUE, reported by the next validate() or build step.
     Graph& set_sm_count(int32_t count)
     {
         static_cast<void>(count);
@@ -546,6 +560,7 @@ public:
         return *this;
     }
 
+    /// @brief Unsupported: records INVALID_VALUE, reported by the next validate() or build step.
     Graph& set_sm_version(int32_t version)
     {
         static_cast<void>(version);
@@ -554,6 +569,7 @@ public:
         return *this;
     }
 
+    /// @brief Unsupported: records INVALID_VALUE, reported by the next validate() or build step.
     Graph& set_device_properties(const std::shared_ptr<const DeviceProperties>& deviceProperties)
     {
         static_cast<void>(deviceProperties);
@@ -562,112 +578,95 @@ public:
         return *this;
     }
 
-    // --- Plan-selection note filters ---------------------------------------
-    //
-    // Inline triage: advisory filters warn-and-ignore, while exclusions that
-    // request a numerical guarantee hipDNN cannot prove record an error.
+    // Per-note dispositions live in detail/note_triage.h.
 
+    /// @brief NONDETERMINISTIC restricts plans to engines that report it.
+    /// @note STRICT_NAN_PROP records GRAPH_NOT_SUPPORTED; other notes are logged and ignored.
     Graph& select_numeric_notes(const std::vector<NumericalNote_t>& notes)
     {
         for(const auto note : notes)
         {
-            if(note != NumericalNote_t::NOT_SET)
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring select_numeric_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << "); hipDNN exposes no per-plan numerical-note metadata.");
-            }
+            applyNote("select_numeric_notes",
+                      note,
+                      cudnn_frontend::detail::triageSelect(note),
+                      [this](NumericalNote_t mapped) {
+                          if(mapped != NumericalNote_t::NONDETERMINISTIC)
+                          {
+                              return false;
+                          }
+                          _selectedNumericalNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
 
+    /// @brief NONDETERMINISTIC excludes engines that report it, so only engines that claim
+    /// deterministic results remain.
+    /// @note DOWN_CONVERT_INPUTS and REDUCED_PRECISION_REDUCTION record GRAPH_NOT_SUPPORTED;
+    /// other notes are logged and ignored.
     Graph& deselect_numeric_notes(const std::vector<NumericalNote_t>& notes)
     {
         for(const auto note : notes)
         {
-            if(note == NumericalNote_t::NOT_SET)
-            {
-                continue;
-            }
-
-            if(note == NumericalNote_t::NONDETERMINISTIC
-               || note == NumericalNote_t::REDUCED_PRECISION_REDUCTION)
-            {
-                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
-                            std::string{"deselect_numeric_notes("}
-                                + hipdnn_frontend::to_string(note)
-                                + ") requests a guarantee this shim cannot enforce; refusing to "
-                                  "run rather than return a plan the caller excluded");
-                continue;
-            }
-
-            HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_numeric_notes("
-                               << hipdnn_frontend::to_string(note)
-                               << "); hipDNN exposes no per-plan numerical-note metadata.");
+            applyNote("deselect_numeric_notes",
+                      note,
+                      cudnn_frontend::detail::triageDeselect(note),
+                      [this](NumericalNote_t mapped) {
+                          if(mapped != NumericalNote_t::NONDETERMINISTIC)
+                          {
+                              return false;
+                          }
+                          _deselectedNumericalNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
 
+    /// @brief Restricts plans to engines that report these behavior notes.
+    /// @note A cuDNN-only note, which no hipDNN engine reports, records GRAPH_NOT_SUPPORTED.
     Graph& select_behavior_notes(const std::vector<BehaviorNote_t>& notes)
     {
         for(const auto note : notes)
         {
-            if(note == BehaviorNote_t::NOT_SET)
-            {
-                continue;
-            }
-            if(hipdnn_frontend::isKnownBehaviorNote(note))
-            {
-                _selectedBehaviorNotes.push_back(note);
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] select_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << ") will filter hipDNN engines by behavior metadata.");
-            }
-            else
-            {
-                // Selecting a note no hipDNN engine can emit is unsatisfiable:
-                // record an error rather than return a plan that ignores the
-                // request. Deselecting the same note is a safe no-op (below).
-                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
-                            "select_behavior_notes requested a behavior note that no hipDNN "
-                            "engine reports; the request cannot be satisfied");
-            }
+            applyNote("select_behavior_notes",
+                      note,
+                      cudnn_frontend::detail::triageSelect(note),
+                      [this](BehaviorNote_t mapped) {
+                          _selectedBehaviorNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
 
+    /// @brief Excludes engines that report these behavior notes.
+    /// @note cuDNN-only notes are logged and ignored; no hipDNN engine reports them.
     Graph& deselect_behavior_notes(const std::vector<BehaviorNote_t>& notes)
     {
         for(const auto note : notes)
         {
-            if(note == BehaviorNote_t::NOT_SET)
-            {
-                continue;
-            }
-            if(hipdnn_frontend::isKnownBehaviorNote(note))
-            {
-                _deselectedBehaviorNotes.push_back(note);
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] deselect_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << ") will filter hipDNN engines by behavior metadata.");
-            }
-            else
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << "); hipDNN engines do not report this cuDNN behavior note.");
-            }
+            applyNote("deselect_behavior_notes",
+                      note,
+                      cudnn_frontend::detail::triageDeselect(note),
+                      [this](BehaviorNote_t mapped) {
+                          _deselectedBehaviorNotes.push_back(mapped);
+                          return true;
+                      });
         }
         return *this;
     }
 
+    /// @brief Excludes plans whose workspace exceeds `workspace` bytes.
     Graph& deselect_workspace_greater_than(int64_t workspace)
     {
         _maxWorkspaceAllowed = workspace;
-        _graph->deselect_workspace_greater_than(workspace);
+        _graph.deselect_workspace_greater_than(workspace);
         return *this;
     }
 
+    /// @brief Unsupported for non-zero limits: records GRAPH_NOT_SUPPORTED; 0 is a no-op.
     Graph& deselect_shared_mem_greater_than(int64_t sharedMem)
     {
         if(sharedMem != 0)
@@ -679,23 +678,29 @@ public:
         return *this;
     }
 
+    /// @brief Excludes engines by name; replaces the list, and an empty list clears it.
+    /// @note Names are hipDNN engine names, not cuDNN engine names.
     Graph& deselect_engines(const std::vector<std::string>& engineNames)
     {
-        _barredEngineNames.insert(_barredEngineNames.end(), engineNames.begin(), engineNames.end());
-        _graph->deselect_engines(engineNames);
+        _barredEngineNames = engineNames;
+        _barredEngineIndices.clear();
+        _graph.deselect_engines(engineNames);
         return *this;
     }
 
+    /// @brief hipDNN extension: excludes engines by index, as counted by get_engine_count().
+    /// @note Replaces the list it shares with the name overload: the last call of either kind
+    /// wins, and an empty list clears it.
     Graph& deselect_engines(const std::vector<int64_t>& engineIndices)
     {
-        // Store cuDNN-shaped indices only. Translation to native engine IDs needs
-        // the ranked engine list, which does not exist until the operation graph
-        // is built, so it is deferred to applyPendingPlanFilters() after build.
-        _barredEngineIndices.insert(
-            _barredEngineIndices.end(), engineIndices.begin(), engineIndices.end());
+        // Indices resolve to native engine IDs only after the operation graph is built;
+        // pushPlanFilters() does the translation.
+        _barredEngineIndices = engineIndices;
+        _barredEngineNames.clear();
         return *this;
     }
 
+    /// @brief Creates a graph tensor from `tensorAttributes`.
     std::shared_ptr<Tensor_attributes> tensor(const Tensor_attributes& tensorAttributes)
     {
         auto tensorPtr = hipdnn_frontend::graph::Graph::tensor(tensorAttributes);
@@ -703,36 +708,43 @@ public:
         return tensorPtr;
     }
 
+    /// @brief Creates a scalar tensor from a float value.
     std::shared_ptr<Tensor_attributes> tensor(const float& scalar, ScalarType scalarType)
     {
         return scalarTensor(scalar, scalarType);
     }
 
+    /// @brief Creates a scalar tensor from a half value.
     std::shared_ptr<Tensor_attributes> tensor(const half& scalar, ScalarType scalarType)
     {
         return scalarTensor(scalar, scalarType);
     }
 
+    /// @brief Creates a scalar tensor from a nv_bfloat16 value.
     std::shared_ptr<Tensor_attributes> tensor(const nv_bfloat16& scalar, ScalarType scalarType)
     {
         return scalarTensor(scalar, scalarType);
     }
 
+    /// @brief Creates a scalar tensor from a int32_t value.
     std::shared_ptr<Tensor_attributes> tensor(const int32_t& scalar, ScalarType scalarType)
     {
         return scalarTensor(scalar, scalarType);
     }
 
+    /// @brief Creates a scalar tensor from a int64_t value.
     std::shared_ptr<Tensor_attributes> tensor(const int64_t& scalar, ScalarType scalarType)
     {
         return scalarTensor(scalar, scalarType);
     }
 
+    /// @brief Creates a scalar tensor from a double value.
     std::shared_ptr<Tensor_attributes> tensor(const double& scalar, ScalarType scalarType)
     {
         return scalarTensor(scalar, scalarType);
     }
 
+    /// @brief Creates a tensor with the properties of `tensorAttributes` but no UID.
     std::shared_ptr<Tensor_attributes>
         tensor_like(const std::shared_ptr<Tensor_attributes>& tensorAttributes,
                     const std::string& name = std::string{})
@@ -742,6 +754,7 @@ public:
         return tensorPtr;
     }
 
+    /// @brief Copies the attributes of the tensor with `uid`; INVALID_VALUE if not found.
     error_t query_tensor_attributes_of_uid(int64_t uid, Tensor_attributes& tensorAttributes) const
     {
         if(auto tensorPtr = findOwnedTensorByUid(uid))
@@ -752,7 +765,7 @@ public:
 
         if(hasOperationGraphState())
         {
-            auto nativeTensors = _graph->getTensorsByUid();
+            auto nativeTensors = _graph.getTensorsByUid();
             auto it = nativeTensors.find(uid);
             if(it != nativeTensors.end() && it->second)
             {
@@ -764,68 +777,65 @@ public:
         return {error_code_t::INVALID_VALUE, "Tensor UID was not found"};
     }
 
-    // --- Node-adding methods -----------------------------------------------
-    //
-    // Tier-1 nodes with a 1:1 hipDNN engine forward straight to the wrapped
-    // graph and flip the graph into Native mode so the plan lifecycle runs
-    // against hipDNN. Nodes take their *_attributes BY VALUE, matching cuDNN FE.
-    // Tier-2 nodes with no hipDNN equivalent are stamped by
-    // HIPDNN_CUDNN_SHIM_FAIL_NODE: they record GRAPH_NOT_SUPPORTED (surfaced at
-    // the next validate()/build_operation_graph()) and return a live,
-    // graph-registered placeholder tensor so the consumer's fluent chain (e.g.
-    // ->set_output(...)) does not dereference null before the error surfaces.
+    // Node methods forward to the wrapped hipDNN graph and take *_attributes by value.
 
+    /// @brief Adds a convolution forward node.
     std::shared_ptr<Tensor_attributes> conv_fprop(std::shared_ptr<Tensor_attributes> x,
                                                   std::shared_ptr<Tensor_attributes> w,
                                                   Conv_fprop_attributes attributes)
     {
-        auto output = _graph->conv_fprop(std::move(x), std::move(w), std::move(attributes));
+        auto output = _graph.conv_fprop(std::move(x), std::move(w), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a convolution data-gradient node.
     std::shared_ptr<Tensor_attributes> conv_dgrad(std::shared_ptr<Tensor_attributes> dy,
                                                   std::shared_ptr<Tensor_attributes> w,
                                                   Conv_dgrad_attributes attributes)
     {
-        auto output = _graph->conv_dgrad(std::move(dy), std::move(w), std::move(attributes));
+        auto output = _graph.conv_dgrad(std::move(dy), std::move(w), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a convolution weight-gradient node.
     std::shared_ptr<Tensor_attributes> conv_wgrad(std::shared_ptr<Tensor_attributes> dy,
                                                   std::shared_ptr<Tensor_attributes> x,
                                                   Conv_wgrad_attributes attributes)
     {
-        auto output = _graph->conv_wgrad(std::move(dy), std::move(x), std::move(attributes));
+        auto output = _graph.conv_wgrad(std::move(dy), std::move(x), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a batch normalization training node.
     std::array<std::shared_ptr<Tensor_attributes>, 5>
         batchnorm(std::shared_ptr<Tensor_attributes> x,
                   std::shared_ptr<Tensor_attributes> scale,
                   std::shared_ptr<Tensor_attributes> bias,
                   Batchnorm_attributes attributes)
     {
-        auto outputs = _graph->batchnorm(
+        auto outputs = _graph.batchnorm(
             std::move(x), std::move(scale), std::move(bias), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds a batch normalization backward node.
     std::array<std::shared_ptr<Tensor_attributes>, 3>
         batchnorm_backward(std::shared_ptr<Tensor_attributes> dy,
                            std::shared_ptr<Tensor_attributes> x,
                            std::shared_ptr<Tensor_attributes> scale,
                            Batchnorm_backward_attributes attributes)
     {
-        auto outputs = _graph->batchnorm_backward(
+        auto outputs = _graph.batchnorm_backward(
             std::move(dy), std::move(x), std::move(scale), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds a batch normalization inference node.
     std::shared_ptr<Tensor_attributes>
         batchnorm_inference(std::shared_ptr<Tensor_attributes> x,
                             std::shared_ptr<Tensor_attributes> mean,
@@ -834,50 +844,54 @@ public:
                             std::shared_ptr<Tensor_attributes> bias,
                             Batchnorm_inference_attributes attributes)
     {
-        auto output = _graph->batchnorm_inference(std::move(x),
-                                                  std::move(mean),
-                                                  std::move(invVariance),
-                                                  std::move(scale),
-                                                  std::move(bias),
-                                                  std::move(attributes));
+        auto output = _graph.batchnorm_inference(std::move(x),
+                                                 std::move(mean),
+                                                 std::move(invVariance),
+                                                 std::move(scale),
+                                                 std::move(bias),
+                                                 std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a layer normalization node.
     std::array<std::shared_ptr<Tensor_attributes>, 3>
         layernorm(std::shared_ptr<Tensor_attributes> x,
                   std::shared_ptr<Tensor_attributes> scale,
                   std::shared_ptr<Tensor_attributes> bias,
                   Layernorm_attributes attributes)
     {
-        auto outputs = _graph->layernorm(
+        auto outputs = _graph.layernorm(
             std::move(x), std::move(scale), std::move(bias), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds a layer normalization backward node.
     std::array<std::shared_ptr<Tensor_attributes>, 3>
         layernorm_backward(std::shared_ptr<Tensor_attributes> dy,
                            std::shared_ptr<Tensor_attributes> x,
                            std::shared_ptr<Tensor_attributes> scale,
                            Layernorm_backward_attributes attributes)
     {
-        auto outputs = _graph->layernorm_backward(
+        auto outputs = _graph.layernorm_backward(
             std::move(dy), std::move(x), std::move(scale), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds an RMS normalization node.
     std::array<std::shared_ptr<Tensor_attributes>, 2>
         rmsnorm(std::shared_ptr<Tensor_attributes> x,
                 std::shared_ptr<Tensor_attributes> scale,
                 Rmsnorm_attributes attributes)
     {
-        auto outputs = _graph->rmsnorm(std::move(x), std::move(scale), std::move(attributes));
+        auto outputs = _graph.rmsnorm(std::move(x), std::move(scale), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds an RMS normalization backward node.
     std::array<std::shared_ptr<Tensor_attributes>, 3>
         rmsnorm_backward(std::shared_ptr<Tensor_attributes> dy,
                          std::shared_ptr<Tensor_attributes> x,
@@ -885,88 +899,97 @@ public:
                          std::shared_ptr<Tensor_attributes> invVariance,
                          Rmsnorm_backward_attributes attributes)
     {
-        auto outputs = _graph->rmsnorm_backward(std::move(dy),
-                                                std::move(x),
-                                                std::move(scale),
-                                                std::move(invVariance),
-                                                std::move(attributes));
+        auto outputs = _graph.rmsnorm_backward(std::move(dy),
+                                               std::move(x),
+                                               std::move(scale),
+                                               std::move(invVariance),
+                                               std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds a matrix multiplication node.
     std::shared_ptr<Tensor_attributes> matmul(std::shared_ptr<Tensor_attributes> a,
                                               std::shared_ptr<Tensor_attributes> b,
                                               Matmul_attributes attributes)
     {
-        auto output = _graph->matmul(std::move(a), std::move(b), std::move(attributes));
+        auto output = _graph.matmul(std::move(a), std::move(b), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a unary pointwise node.
     std::shared_ptr<Tensor_attributes> pointwise(std::shared_ptr<Tensor_attributes> a,
                                                  Pointwise_attributes attributes)
     {
-        auto output = _graph->pointwise(std::move(a), std::move(attributes));
+        auto output = _graph.pointwise(std::move(a), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a binary pointwise node.
     std::shared_ptr<Tensor_attributes> pointwise(std::shared_ptr<Tensor_attributes> a,
                                                  std::shared_ptr<Tensor_attributes> b,
                                                  Pointwise_attributes attributes)
     {
-        auto output = _graph->pointwise(std::move(a), std::move(b), std::move(attributes));
+        auto output = _graph.pointwise(std::move(a), std::move(b), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a ternary pointwise node.
     std::shared_ptr<Tensor_attributes> pointwise(std::shared_ptr<Tensor_attributes> a,
                                                  std::shared_ptr<Tensor_attributes> b,
                                                  std::shared_ptr<Tensor_attributes> c,
                                                  Pointwise_attributes attributes)
     {
         auto output
-            = _graph->pointwise(std::move(a), std::move(b), std::move(c), std::move(attributes));
+            = _graph.pointwise(std::move(a), std::move(b), std::move(c), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a reduction node.
     std::shared_ptr<Tensor_attributes> reduction(std::shared_ptr<Tensor_attributes> a,
                                                  Reduction_attributes attributes)
     {
-        auto output = _graph->reduction(std::move(a), std::move(attributes));
+        auto output = _graph.reduction(std::move(a), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a resample node.
     std::array<std::shared_ptr<Tensor_attributes>, 2> resample(std::shared_ptr<Tensor_attributes> x,
                                                                Resample_attributes attributes)
     {
-        auto outputs = _graph->resample(std::move(x), std::move(attributes));
+        auto outputs = _graph.resample(std::move(x), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds a block-scale quantize node.
     std::array<std::shared_ptr<Tensor_attributes>, 2>
         block_scale_quantize(std::shared_ptr<Tensor_attributes> x,
                              Block_scale_quantize_attributes attributes)
     {
-        auto outputs = _graph->block_scale_quantize(std::move(x), std::move(attributes));
+        auto outputs = _graph.block_scale_quantize(std::move(x), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds a block-scale dequantize node.
     std::shared_ptr<Tensor_attributes>
         block_scale_dequantize(std::shared_ptr<Tensor_attributes> x,
                                std::shared_ptr<Tensor_attributes> scale,
                                Block_scale_dequantize_attributes attributes)
     {
         auto output
-            = _graph->block_scale_dequantize(std::move(x), std::move(scale), std::move(attributes));
+            = _graph.block_scale_dequantize(std::move(x), std::move(scale), std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a mixture-of-experts grouped matmul node.
     std::shared_ptr<Tensor_attributes>
         moe_grouped_matmul(std::shared_ptr<Tensor_attributes> token,
                            std::shared_ptr<Tensor_attributes> weight,
@@ -975,32 +998,35 @@ public:
                            std::shared_ptr<Tensor_attributes> tokenKs,
                            Moe_grouped_matmul_attributes attributes)
     {
-        auto output = _graph->moe_grouped_matmul(std::move(token),
-                                                 std::move(weight),
-                                                 std::move(firstTokenOffset),
-                                                 std::move(tokenIndex),
-                                                 std::move(tokenKs),
-                                                 std::move(attributes));
+        auto output = _graph.moe_grouped_matmul(std::move(token),
+                                                std::move(weight),
+                                                std::move(firstTokenOffset),
+                                                std::move(tokenIndex),
+                                                std::move(tokenKs),
+                                                std::move(attributes));
         _mode = Mode::Native;
         return output;
     }
 
+    /// @brief Adds a mixture-of-experts grouped matmul backward node.
     std::shared_ptr<Tensor_attributes>
         moe_grouped_matmul_bwd(std::shared_ptr<Tensor_attributes> dOutput,
                                std::shared_ptr<Tensor_attributes> token,
                                std::shared_ptr<Tensor_attributes> firstTokenOffset,
                                Moe_grouped_matmul_bwd_attributes attributes)
     {
-        auto dweight = _graph->moe_grouped_matmul_bwd(std::move(dOutput),
-                                                      std::move(token),
-                                                      std::move(firstTokenOffset),
-                                                      std::move(attributes));
+        auto dweight = _graph.moe_grouped_matmul_bwd(std::move(dOutput),
+                                                     std::move(token),
+                                                     std::move(firstTokenOffset),
+                                                     std::move(attributes));
         _mode = Mode::Native;
         return dweight;
     }
 
-    // --- Tier-2 fail-stub nodes (no hipDNN engine yet) ---------------------
+    // Nodes with no hipDNN engine yet.
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(bn_finalize,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1011,11 +1037,15 @@ public:
                                  const BN_finalize_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 6>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(genstats,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const Genstats_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 2>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(dbn_weight,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1025,6 +1055,8 @@ public:
                                  const DBN_weight_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 5>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(instancenorm,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1032,6 +1064,8 @@ public:
                                  const Instancenorm_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 3>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(instancenorm_backward,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1039,6 +1073,8 @@ public:
                                  const Instancenorm_backward_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 3>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(adalayernorm,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1046,6 +1082,8 @@ public:
                                  const AdaLayernorm_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 3>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(adalayernorm_backward,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1053,35 +1091,46 @@ public:
                                  const AdaLayernorm_backward_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 3>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(rng,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
                                  const Rng_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(reshape,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const Reshape_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(transpose,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const Transpose_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(rope,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
                                  const RoPE_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(rope_backward,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
                                  const RoPE_backward_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
-    // FP8 version
+    /// @brief Unsupported (FP8): records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1095,7 +1144,8 @@ public:
                                  const SDPA_fp8_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 4>)
 
-    // MXFP8 version
+    /// @brief Unsupported (MXFP8): records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1106,7 +1156,8 @@ public:
                                  const SDPA_fp8_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 3>)
 
-    // FP8 version
+    /// @brief Unsupported (FP8): records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8_backward,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1129,7 +1180,8 @@ public:
                                  const SDPA_fp8_backward_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 7>)
 
-    // MXFP8 version
+    /// @brief Unsupported (MXFP8): records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8_backward,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1151,6 +1203,8 @@ public:
                                  const SDPA_fp8_backward_attributes&),
                                 std::array<std::shared_ptr<Tensor_attributes>, 6>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(diagonal_band_mask,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
@@ -1161,34 +1215,38 @@ public:
                                  const DiagonalBandMask_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(slice,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const Slice_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    /// @brief Unsupported: records GRAPH_NOT_SUPPORTED, reported by the next validate() or
+    /// build_operation_graph().
     HIPDNN_CUDNN_SHIM_FAIL_NODE(concatenate,
                                 (const std::vector<std::shared_ptr<Tensor_attributes>>&,
                                  const Concatenate_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
 #ifdef HIPDNN_ENABLE_SDPA
+    /// @brief Adds an SDPA forward node; an unset mma_core_mode defaults to HALF.
     std::array<std::shared_ptr<Tensor_attributes>, 2> sdpa(std::shared_ptr<Tensor_attributes> q,
                                                            std::shared_ptr<Tensor_attributes> k,
                                                            std::shared_ptr<Tensor_attributes> v,
                                                            SDPA_attributes attributes)
     {
-        // cuDNN's Graph::sdpa defaults mma_core_mode to HALF when unset; hipDNN
-        // leaves it NOT_SET and omits the attribute, so replicate the default.
+        // hipDNN leaves mma_core_mode NOT_SET; apply cuDNN FE's HALF default.
         if(attributes.mma_core_mode == DataType_t::NOT_SET)
         {
             attributes.set_mma_core_mode(DataType_t::HALF);
         }
-        auto outputs
-            = _graph->sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
+        auto outputs = _graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 
+    /// @brief Adds an SDPA backward node.
     std::array<std::shared_ptr<Tensor_attributes>, 3>
         sdpa_backward(std::shared_ptr<Tensor_attributes> q,
                       std::shared_ptr<Tensor_attributes> k,
@@ -1198,18 +1256,19 @@ public:
                       std::shared_ptr<Tensor_attributes> stats,
                       SDPA_backward_attributes attributes)
     {
-        auto outputs = _graph->sdpa_backward(std::move(q),
-                                             std::move(k),
-                                             std::move(v),
-                                             std::move(o),
-                                             std::move(dO),
-                                             std::move(stats),
-                                             std::move(attributes));
+        auto outputs = _graph.sdpa_backward(std::move(q),
+                                            std::move(k),
+                                            std::move(v),
+                                            std::move(o),
+                                            std::move(dO),
+                                            std::move(stats),
+                                            std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
 #endif // HIPDNN_ENABLE_SDPA
 
+    /// @brief Executes the active plan with tensor-keyed device pointers.
     error_t
         execute(cudnnHandle_t handle,
                 std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorToPointerMap,
@@ -1218,9 +1277,10 @@ public:
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->execute(handle, tensorToPointerMap, workspace);
+        return _graph.execute(handle, tensorToPointerMap, workspace);
     }
 
+    /// @brief Executes the active plan with UID-keyed device pointers.
     error_t execute(cudnnHandle_t handle,
                     std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
                     void* workspace) const
@@ -1228,9 +1288,11 @@ public:
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->execute(handle, tensorUidToPointerMap, workspace);
+        return _graph.execute(handle, tensorUidToPointerMap, workspace);
     }
 
+    /// @brief Executes the active plan with runtime shape overrides.
+    /// @note Without HIPDNN_ENABLE_SDPA, non-empty overrides return INVALID_VALUE.
     error_t execute(cudnnHandle_t handle,
                     std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
                     void* workspace,
@@ -1243,22 +1305,23 @@ public:
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
 
 #ifdef HIPDNN_ENABLE_SDPA
-        return _graph->execute(handle,
-                               tensorUidToPointerMap,
-                               workspace,
-                               overrideUids,
-                               overrideShapes,
-                               overrideStrides);
+        return _graph.execute(handle,
+                              tensorUidToPointerMap,
+                              workspace,
+                              overrideUids,
+                              overrideShapes,
+                              overrideStrides);
 #else
         if(overrideUids.empty() && overrideShapes.empty() && overrideStrides.empty())
         {
-            return _graph->execute(handle, tensorUidToPointerMap, workspace);
+            return _graph.execute(handle, tensorUidToPointerMap, workspace);
         }
         return {error_code_t::INVALID_VALUE,
                 "Runtime shape override execute is unavailable in this build"};
 #endif
     }
 
+    /// @brief Unsupported: returns INVALID_VALUE (no UID mapping for a flat pointer array).
     error_t execute(cudnnHandle_t handle, void** sortedUserPtrs, int nUser, void* workspace) const
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -1272,6 +1335,7 @@ public:
                 "Flat pointer-array execute is unsupported by this shim"};
     }
 
+    /// @brief Executes the plan at `planIndex`.
     error_t execute_plan_at_index(cudnnHandle_t handle,
                                   std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
                                   void* workspace,
@@ -1279,9 +1343,10 @@ public:
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->execute_plan_at_index(handle, tensorUidToPointerMap, workspace, planIndex);
+        return _graph.execute_plan_at_index(handle, tensorUidToPointerMap, workspace, planIndex);
     }
 
+    /// @brief Executes the plan at `planIndex`; INVALID_VALUE if any tensor has no UID.
     error_t execute_plan_at_index(
         cudnnHandle_t handle,
         std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
@@ -1302,6 +1367,7 @@ public:
         return execute_plan_at_index(handle, uidMap, workspace, planIndex);
     }
 
+    /// @brief Autotunes the built plans; `userImpl` is ignored.
     error_t autotune(cudnnHandle_t handle,
                      std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
                      void* workspace,
@@ -1309,9 +1375,11 @@ public:
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->autotune(handle, tensorUidToPointerMap, workspace, userImpl);
+        CHECK_CUDNN_FRONTEND_ERROR(pushFiltersForCreatedPlans());
+        return _graph.autotune(handle, tensorUidToPointerMap, workspace, userImpl);
     }
 
+    /// @brief Autotunes the built plans; `userImpl` is ignored.
     error_t autotune(cudnnHandle_t handle,
                      std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
                      void* workspace,
@@ -1319,9 +1387,12 @@ public:
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
-        return _graph->autotune(handle, tensorMap, workspace, userImpl);
+        CHECK_CUDNN_FRONTEND_ERROR(pushFiltersForCreatedPlans());
+        return _graph.autotune(handle, tensorMap, workspace, userImpl);
     }
 
+    /// @brief Executes plan 0 once with the given buffers.
+    /// @note Upstream takes only a handle; this shim needs the buffers to run the plan.
     // NOLINTNEXTLINE(readability-make-member-function-const)
     error_t warmup(cudnnHandle_t handle,
                    std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
@@ -1330,6 +1401,8 @@ public:
         return execute_plan_at_index(handle, tensorUidToPointerMap, workspace, 0);
     }
 
+    /// @brief Executes plan 0 once with the given buffers.
+    /// @note Upstream takes only a handle; this shim needs the buffers to run the plan.
     // NOLINTNEXTLINE(readability-make-member-function-const)
     error_t warmup(cudnnHandle_t handle,
                    std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
@@ -1338,6 +1411,7 @@ public:
         return execute_plan_at_index(handle, tensorMap, workspace, 0);
     }
 
+    /// @brief Unsupported: returns GRAPH_NOT_SUPPORTED.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     error_t populate_cuda_graph(cudnnHandle_t handle,
                                 std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
@@ -1352,6 +1426,7 @@ public:
                 "populate_cuda_graph is unsupported by this shim"};
     }
 
+    /// @brief Unsupported: returns GRAPH_NOT_SUPPORTED.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     error_t populate_cuda_graph(
         cudnnHandle_t handle,
@@ -1367,6 +1442,7 @@ public:
                 "populate_cuda_graph is unsupported by this shim"};
     }
 
+    /// @brief Unsupported: returns GRAPH_NOT_SUPPORTED.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     error_t update_cuda_graph(cudnnHandle_t handle,
                               std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
@@ -1380,6 +1456,7 @@ public:
         return {error_code_t::GRAPH_NOT_SUPPORTED, "update_cuda_graph is unsupported by this shim"};
     }
 
+    /// @brief Unsupported: returns GRAPH_NOT_SUPPORTED.
     // NOLINTBEGIN(readability-convert-member-functions-to-static)
     error_t
         update_cuda_graph(cudnnHandle_t handle,
@@ -1395,6 +1472,7 @@ public:
     }
     // NOLINTEND(readability-convert-member-functions-to-static)
 
+    /// @brief Returns the active plan's workspace size; 0 for an empty graph.
     error_t get_workspace_size(int64_t& workspaceSize) const
     {
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
@@ -1409,13 +1487,11 @@ public:
             return noExecutionPlanError();
         }
 
-        return _graph->get_workspace_size(workspaceSize);
+        return _graph.get_workspace_size(workspaceSize);
     }
 
-    // cuDNN keeps this fallible-to-0 overload for source compatibility. Note it
-    // cannot distinguish a legitimate zero-workspace graph from a failed query:
-    // both return 0 (the failure is logged). Prefer the error_t& overload when
-    // the distinction matters.
+    /// @brief Returns the workspace size, or 0 on failure (logged).
+    /// @note Use the error_t overload to tell a failure from a zero-size workspace.
     int64_t get_workspace_size() const
     {
         int64_t workspaceSize = 0;
@@ -1428,6 +1504,7 @@ public:
         return workspaceSize;
     }
 
+    /// @brief Workspace query; non-empty shape overrides return GRAPH_NOT_SUPPORTED.
     error_t get_workspace_size(cudnnHandle_t handle,
                                int64_t& workspaceSize,
                                const std::vector<int64_t>& overrideUids,
@@ -1444,6 +1521,7 @@ public:
                 "Runtime shape override workspace query is unsupported by this shim"};
     }
 
+    /// @brief Workspace query, or 0 on failure (logged); non-empty overrides fail.
     int64_t get_workspace_size(cudnnHandle_t handle,
                                const std::vector<int64_t>& overrideUids,
                                const std::vector<std::vector<int64_t>>& overrideShapes,
@@ -1460,28 +1538,25 @@ public:
         return workspaceSize;
     }
 
+    /// @brief Returns the workspace autotune() needs; 0 for an empty graph.
     int64_t get_autotune_workspace_size() const
     {
         if(!hasOperationGraphState())
         {
             return 0;
         }
-        return _graph->get_autotune_workspace_size();
+        return _graph.get_autotune_workspace_size();
     }
 
-    // cuDNN prints the frontend's own graph description; hipDNN can only
-    // serialize a lowered backend descriptor, so a graph that has not reached
-    // build_operation_graph() prints as an empty object rather than failing.
+    /// @brief Returns the lowered graph as hipDNN JSON, or "{}" before build_operation_graph().
     std::string print() const
     {
         if(!hasOperationGraphState())
         {
             return "{}";
         }
-        // as_const: dereferencing the shared_ptr yields a non-const graph even
-        // here, and the native non-const overload lowers the graph as a side
-        // effect. A const query must not mutate what it reports on.
-        auto [text, err] = std::as_const(*_graph).to_json();
+        // as_const: the non-const native to_json() lowers the graph as a side effect.
+        auto [text, err] = std::as_const(_graph).to_json();
         if(err.is_bad())
         {
             CUDNN_FE_LOG_LABEL("ERROR: Serializing graph to JSON failed: " << err.get_message());
@@ -1490,17 +1565,18 @@ public:
         return text;
     }
 
+    /// @brief Serializes the graph without lowering it; INVALID_VALUE if it has not been lowered.
     error_t serialize(std::vector<uint8_t>& data) const
     {
         if(!hasOperationGraphState())
         {
             return serializeWithoutOperationGraphError();
         }
-        // as_const for the same reason as print(): the const overload reports on
-        // the backend descriptor the graph already has, and refuses if it has none.
-        return std::as_const(*_graph).serialize(data);
+        // as_const: see print().
+        return std::as_const(_graph).serialize(data);
     }
 
+    /// @brief Validates, lowers if needed, and serializes the graph.
     error_t serialize(std::vector<uint8_t>& data)
     {
         CHECK_CUDNN_FRONTEND_ERROR(validate());
@@ -1510,33 +1586,35 @@ public:
         }
         // Non-const: keep the native auto-lowering overload, so serializing a
         // described-but-unbuilt graph still works.
-        return _graph->serialize(data);
+        return _graph.serialize(data);
     }
 
+    /// @brief Restores a serialized graph, and its plan if the blob carries one.
+    /// @note `enforcePrecompiled` is ignored; upstream has no such parameter.
     error_t deserialize(cudnnHandle_t handle,
                         const std::vector<uint8_t>& data,
                         bool enforcePrecompiled = false)
     {
         static_cast<void>(enforcePrecompiled);
-        auto err = _graph->deserialize(handle, data);
+        auto err = _graph.deserialize(handle, data);
         if(err.is_good())
         {
             clearWrapperGraphState();
             _mode = Mode::Native;
-            // Trust the native graph on whether a compiled plan was actually
-            // embedded: a handle-bearing deserialize only installs one when the
-            // blob carried an execution plan. Without it the graph is described
-            // and finalized but planless, so do not claim PlansBuilt.
+            // A handle-bearing deserialize installs a plan only if the blob carried one;
+            // otherwise the graph is finalized but planless.
             _stage
-                = _graph->get_execution_plan_count() > 0 ? Stage::PlansBuilt : Stage::OpGraphBuilt;
+                = _graph.get_execution_plan_count() > 0 ? Stage::PlansBuilt : Stage::OpGraphBuilt;
         }
         return err;
     }
 
+    /// @brief hipDNN extension: restores a serialized graph without a handle.
+    /// @note `enforcePrecompiled` is ignored.
     error_t deserialize(const std::vector<uint8_t>& data, bool enforcePrecompiled = false)
     {
         static_cast<void>(enforcePrecompiled);
-        auto err = _graph->deserialize(data);
+        auto err = _graph.deserialize(data);
         if(err.is_good())
         {
             clearWrapperGraphState();
@@ -1565,11 +1643,9 @@ private:
         PlansBuilt
     };
 
-    // shared_ptr, not a value: the native graph is move-only (its backend
-    // descriptors are unique_ptr), so sharing it is what makes the wrapper
-    // copyable. Never null.
-    std::shared_ptr<hipdnn_frontend::graph::Graph> _graph
-        = std::make_shared<hipdnn_frontend::graph::Graph>();
+    // Held by value: copying the wrapper copies the native graph, which shares nodes, tensors
+    // and built descriptors as a cuDNN FE copy does and owns its plan list and filters.
+    hipdnn_frontend::graph::Graph _graph;
     std::vector<std::shared_ptr<Tensor_attributes>> _ownedTensors;
     std::optional<int64_t> _maxWorkspaceAllowed;
     std::vector<int64_t> _barredEngineIndices;
@@ -1578,6 +1654,8 @@ private:
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
     std::vector<BehaviorNote_t> _deselectedBehaviorNotes;
+    std::vector<NumericalNote_t> _selectedNumericalNotes;
+    std::vector<NumericalNote_t> _deselectedNumericalNotes;
     std::unordered_set<int64_t> _shimBarredEngineIds;
 
     Mode _mode = Mode::Empty;
@@ -1593,18 +1671,19 @@ private:
         return static_cast<int>(_stage) >= static_cast<int>(stage);
     }
 
-    error_t refreshEngineIndexMap(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    // Engine indices are a property of the operation graph, as in cuDNN: they always follow
+    // the FALLBACK ranking, whatever heuristic modes created the plans, so get_engine_count,
+    // get_knobs_for_engine, create_execution_plan and deselect_engines agree on every index.
+    error_t refreshEngineIndexMap()
     {
         _engineIndexToNativeEngineId.clear();
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
-        return _graph->get_ranked_engine_ids(_engineIndexToNativeEngineId, modes);
+        return _graph.get_ranked_engine_ids(_engineIndexToNativeEngineId, {HeurMode_t::FALLBACK});
     }
 
-    error_t mapEngineIndex(int64_t engineIndex,
-                           int64_t& nativeEngineId,
-                           const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    error_t mapEngineIndex(int64_t engineIndex, int64_t& nativeEngineId)
     {
-        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap(modes));
+        CHECK_CUDNN_FRONTEND_ERROR(refreshEngineIndexMap());
         if(engineIndex < 0
            || static_cast<size_t>(engineIndex) >= _engineIndexToNativeEngineId.size())
         {
@@ -1619,20 +1698,21 @@ private:
     }
 
     error_t mapEngineIndices(const std::vector<int64_t>& engineIndices,
-                             std::vector<int64_t>& nativeEngineIds,
-                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+                             std::vector<int64_t>& nativeEngineIds)
     {
         nativeEngineIds.clear();
         nativeEngineIds.reserve(engineIndices.size());
         for(const auto engineIndex : engineIndices)
         {
             int64_t nativeEngineId = -1;
-            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId, modes));
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndex(engineIndex, nativeEngineId));
             nativeEngineIds.push_back(nativeEngineId);
         }
         return {};
     }
 
+    // Filters set after plan creation take effect here, on the next check_support(),
+    // build_plans() (before a plan is built) or build_plan_at_index().
     error_t applyPendingFiltersForCreatedPlans()
     {
         if(!stageAtLeast(Stage::PlansCreated))
@@ -1642,142 +1722,206 @@ private:
         return applyPendingPlanFilters(_planCreationModes);
     }
 
+    // Pushes the filters without the survivor check; autotune() uses it so its native
+    // evaluation sees the current filters.
+    error_t pushFiltersForCreatedPlans()
+    {
+        if(!stageAtLeast(Stage::PlansCreated))
+        {
+            return {};
+        }
+        return pushPlanFilters(_planCreationModes);
+    }
+
+    // Pushes the filters, then fails when none of the created plans survives them.
     error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
-        // create_execution_plans() clears the native graph's filter state, so the
-        // shim's record of what it barred is rebuilt on every pass rather than
-        // accumulated.
+        CHECK_CUDNN_FRONTEND_ERROR(pushPlanFilters(modes));
+
+        if(_shimBarredEngineIds.empty() || _graph.get_execution_plan_count() == 0)
+        {
+            return {};
+        }
+        int64_t survivingIndex = -1;
+        return findTopSurvivingPlanIndex(survivingIndex);
+    }
+
+    // Makes the native graph's filters equal the ones this shim holds. The native
+    // deselect_engines() replaces its list, so one call carries the union of the names or
+    // mapped indices and the engines the note filters bar, even when that union is empty:
+    // that is how a cleared filter reaches native. The shim's record of what it barred is
+    // rebuilt on every pass. Nothing is written to native until every mapping and note read
+    // has succeeded.
+    error_t pushPlanFilters(const std::vector<HeurMode_t>& modes)
+    {
         _shimBarredEngineIds.clear();
 
-        if(_maxWorkspaceAllowed.has_value())
+        for(const auto& name : _barredEngineNames)
         {
-            _graph->deselect_workspace_greater_than(*_maxWorkspaceAllowed);
-        }
-        if(!_barredEngineNames.empty())
-        {
-            _graph->deselect_engines(_barredEngineNames);
-            for(const auto& name : _barredEngineNames)
-            {
-                _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameToId(name));
-            }
+            _shimBarredEngineIds.insert(hipdnn_data_sdk::utilities::engineNameOrIdToId(name));
         }
         if(!_barredEngineIndices.empty())
         {
             std::vector<int64_t> nativeEngineIds;
-            CHECK_CUDNN_FRONTEND_ERROR(
-                mapEngineIndices(_barredEngineIndices, nativeEngineIds, modes));
-            _graph->deselect_engines(nativeEngineIds);
+            CHECK_CUDNN_FRONTEND_ERROR(mapEngineIndices(_barredEngineIndices, nativeEngineIds));
             _shimBarredEngineIds.insert(nativeEngineIds.begin(), nativeEngineIds.end());
         }
+        CHECK_CUDNN_FRONTEND_ERROR(applyEngineMetadataFilters(modes));
 
-        return applyBehaviorNoteFilters(modes);
+        _graph.deselect_engines(
+            std::vector<int64_t>(_shimBarredEngineIds.begin(), _shimBarredEngineIds.end()));
+        if(_maxWorkspaceAllowed.has_value())
+        {
+            _graph.deselect_workspace_greater_than(*_maxWorkspaceAllowed);
+        }
+        return {};
     }
 
-    error_t applyBehaviorNoteFilters(const std::vector<HeurMode_t>& modes)
+    // Behavior-note and numerical-note filters bar engines by per-engine metadata.
+    error_t applyEngineMetadataFilters(const std::vector<HeurMode_t>& modes)
     {
-        if(_selectedBehaviorNotes.empty() && _deselectedBehaviorNotes.empty())
+        const bool filterBehavior
+            = !_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty();
+        const bool filterNumerical
+            = !_selectedNumericalNotes.empty() || !_deselectedNumericalNotes.empty();
+        if(!filterBehavior && !filterNumerical)
         {
             return {};
         }
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
         std::vector<int64_t> engineIds;
-        CHECK_CUDNN_FRONTEND_ERROR(_graph->get_ranked_engine_ids(engineIds, modes));
-        if(engineIds.empty())
-        {
-            return {};
-        }
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.get_ranked_engine_ids(engineIds, modes));
 
         std::vector<int64_t> enginesToBar;
         enginesToBar.reserve(engineIds.size());
         for(const auto engineId : engineIds)
         {
-            std::vector<BehaviorNote_t> engineNotes;
-            CHECK_CUDNN_FRONTEND_ERROR(
-                _graph->get_behavior_notes_for_engine(engineId, engineNotes));
-            if(!behaviorNotesMatch(engineNotes))
+            if(isShimBarred(engineId))
+            {
+                continue;
+            }
+            bool bar = false;
+            if(filterNumerical)
+            {
+                std::vector<NumericalNote_t> engineNotes;
+                CHECK_CUDNN_FRONTEND_ERROR(
+                    _graph.get_numerical_notes_for_engine(engineId, engineNotes));
+                bar = !cudnn_frontend::detail::numericalNotesMatch(
+                    _selectedNumericalNotes, _deselectedNumericalNotes, engineNotes);
+            }
+            if(!bar && filterBehavior)
+            {
+                std::vector<BehaviorNote_t> engineNotes;
+                CHECK_CUDNN_FRONTEND_ERROR(
+                    _graph.get_behavior_notes_for_engine(engineId, engineNotes));
+                bar = !cudnn_frontend::detail::behaviorNotesMatch(
+                    _selectedBehaviorNotes, _deselectedBehaviorNotes, engineNotes);
+            }
+            if(bar)
             {
                 enginesToBar.push_back(engineId);
             }
         }
 
-        if(enginesToBar.size() == engineIds.size())
-        {
-            return {error_code_t::GRAPH_NOT_SUPPORTED,
-                    "Behavior-note filters removed every applicable hipDNN engine"};
-        }
-        if(!enginesToBar.empty())
-        {
-            _graph->deselect_engines(enginesToBar);
-            _shimBarredEngineIds.insert(enginesToBar.begin(), enginesToBar.end());
-        }
+        // The pass pushes these to native together with the other bars.
+        _shimBarredEngineIds.insert(enginesToBar.begin(), enginesToBar.end());
         return {};
     }
 
-    // Report the top-ranked plan that survives this shim's own engine filters, or
-    // -1 when the active plan already survives and native can build it directly.
-    // Plan order is not guaranteed to match ranked-engine order, so each plan's
-    // engine is resolved through its own name.
-    error_t findPlanIndexIfActiveBarred(int64_t& survivingIndex)
+    bool isShimBarred(int64_t engineId) const
     {
-        survivingIndex = -1;
-        if(_shimBarredEngineIds.empty())
-        {
-            return {};
-        }
+        return _shimBarredEngineIds.count(engineId) != 0;
+    }
 
-        int64_t activeEngineId = -1;
-        if(_graph->get_execution_plan_engine_id(activeEngineId).is_bad()
-           || _shimBarredEngineIds.count(activeEngineId) == 0)
-        {
-            return {};
-        }
-
-        const int64_t planCount = _graph->get_execution_plan_count();
-        for(int64_t index = 0; index < planCount; ++index)
+    // Survival is judged against everything this shim barred, so an engine
+    // excluded by deselect_engines cannot count as a survivor of a metadata
+    // filter. Plan order is not guaranteed to match ranked-engine order, so each
+    // plan's engine is resolved through its own name.
+    error_t findTopSurvivingPlanIndex(int64_t& index) const
+    {
+        const int64_t planCount = _graph.get_execution_plan_count();
+        for(index = 0; index < planCount; ++index)
         {
             std::string planName;
-            if(_graph->get_plan_name_at_index(index, planName).is_bad())
+            if(_graph.get_plan_name_at_index(index, planName).is_bad())
             {
                 continue;
             }
-            // An engine whose name does not resolve cannot be matched against the
-            // barred set. Treat it as a survivor: only ids this shim explicitly
-            // barred are known to be excluded, and native re-checks its own filter
-            // before building.
-            if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(planName)
-               || _shimBarredEngineIds.count(hipdnn_data_sdk::utilities::engineNameToId(planName))
-                      == 0)
+            // Plugin engines come back as their hex id rather than a registered
+            // name; engineNameOrIdToId resolves both forms.
+            if(!isShimBarred(hipdnn_data_sdk::utilities::engineNameOrIdToId(planName)))
             {
-                survivingIndex = index;
                 return {};
             }
         }
 
+        index = -1;
         return {error_code_t::GRAPH_NOT_SUPPORTED,
-                "Engine filters removed every applicable hipDNN execution plan"};
+                "No created hipDNN execution plan survives the plan filters ("
+                    + activePlanFilterNames() + ")"};
     }
 
-    bool behaviorNotesMatch(const std::vector<BehaviorNote_t>& engineNotes) const
+    std::string activePlanFilterNames() const
     {
-        for(const auto required : _selectedBehaviorNotes)
-        {
-            if(required != BehaviorNote_t::NOT_SET
-               && std::find(engineNotes.begin(), engineNotes.end(), required) == engineNotes.end())
+        std::string names;
+        const auto append = [&names](const char* name) {
+            if(!names.empty())
             {
-                return false;
+                names += ", ";
             }
-        }
-        for(const auto excluded : _deselectedBehaviorNotes)
+            names += name;
+        };
+        if(!_barredEngineNames.empty() || !_barredEngineIndices.empty())
         {
-            if(excluded != BehaviorNote_t::NOT_SET
-               && std::find(engineNotes.begin(), engineNotes.end(), excluded) != engineNotes.end())
-            {
-                return false;
-            }
+            append("deselect_engines");
         }
-        return true;
+        if(!_selectedBehaviorNotes.empty() || !_deselectedBehaviorNotes.empty())
+        {
+            append("behavior notes");
+        }
+        if(!_selectedNumericalNotes.empty())
+        {
+            append("select_numeric_notes(NONDETERMINISTIC)");
+        }
+        if(!_deselectedNumericalNotes.empty())
+        {
+            append("deselect_numeric_notes(NONDETERMINISTIC)");
+        }
+        return names;
     }
+
+    // onMap returns false when this setter cannot honor the mapped note; that fails closed.
+    template <typename Note, typename OnMap>
+    void applyNote(const char* method,
+                   Note note,
+                   cudnn_frontend::detail::NoteAction action,
+                   OnMap&& onMap)
+    {
+        switch(action)
+        {
+        case cudnn_frontend::detail::NoteAction::NO_OP:
+            return;
+        case cudnn_frontend::detail::NoteAction::WARN:
+            HIPDNN_FE_LOG_WARN("[cudnn_frontend] "
+                               << cudnn_frontend::detail::noteMessage(method, note, action));
+            return;
+        case cudnn_frontend::detail::NoteAction::MAP:
+            if(std::forward<OnMap>(onMap)(note))
+            {
+                CUDNN_FE_LOG_LABEL(cudnn_frontend::detail::noteMessage(method, note, action));
+                return;
+            }
+            break;
+        case cudnn_frontend::detail::NoteAction::RECORD_ERROR:
+        default: // unknown actions fail closed
+            break;
+        }
+        recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                    cudnn_frontend::detail::noteMessage(
+                        method, note, cudnn_frontend::detail::NoteAction::RECORD_ERROR));
+    }
+
     template <typename T>
     std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
     {
@@ -1807,10 +1951,10 @@ private:
             }
 
             hipdnn_frontend::graph::GraphAttributes context;
-            context.set_name(_graph->get_name())
-                .set_compute_data_type(_graph->get_compute_data_type())
-                .set_intermediate_data_type(_graph->get_intermediate_data_type())
-                .set_io_data_type(_graph->get_io_data_type());
+            context.set_name(_graph.get_name())
+                .set_compute_data_type(_graph.get_compute_data_type())
+                .set_intermediate_data_type(_graph.get_intermediate_data_type())
+                .set_io_data_type(_graph.get_io_data_type());
             tensorPtr->fill_from_context(context);
             CHECK_CUDNN_FRONTEND_ERROR(tensorPtr->validate());
         }
@@ -1833,13 +1977,7 @@ private:
     {
         for(const auto mode : modes)
         {
-            if(mode != HeurMode_t::FALLBACK)
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
-                                   << hipdnn_frontend::to_string(mode)
-                                   << " is accepted but not honored; hipDNN uses fallback "
-                                      "selection. Plan choice may differ from cuDNN.");
-            }
+            cudnn_frontend::detail::warnUnhonoredHeuristicMode(mode);
         }
     }
 
@@ -1866,16 +2004,20 @@ private:
         _maxWorkspaceAllowed.reset();
         _barredEngineIndices.clear();
         _planCreationModes = {HeurMode_t::FALLBACK};
-        _barredEngineNames.clear();
+        // _barredEngineNames survives, as cuDNN keeps barred_engine_names across deserialize.
         _engineIndexToNativeEngineId.clear();
         _selectedBehaviorNotes.clear();
         _deselectedBehaviorNotes.clear();
+        _selectedNumericalNotes.clear();
+        _deselectedNumericalNotes.clear();
+        _shimBarredEngineIds.clear();
         _recordedError.reset();
         _mode = Mode::Empty;
         _stage = Stage::Described;
     }
 };
 
+/// @brief Writes print() to `os`.
 inline std::ostream& operator<<(std::ostream& os, const Graph& graph)
 {
     return os << graph.print();

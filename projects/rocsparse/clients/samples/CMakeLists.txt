@@ -48,6 +48,11 @@ endfunction()
 # weird compiler flags on Windows.
 if(NOT WIN32)
   add_rocsparse_example(example_c_headers.c)
+  add_rocsparse_example(example_c_headers_debugging.c)
+  foreach(target example_c_headers example_c_headers_debugging)
+    set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_options(${target} PRIVATE -pedantic-errors -Werror=strict-prototypes)
+  endforeach()
 endif()
 
 # Auxiliary
@@ -119,9 +124,7 @@ add_rocsparse_example(example_spgemm.cpp)
 add_rocsparse_example(example_spgeam.cpp)
 add_rocsparse_example(example_spgeam_2.cpp)
 add_rocsparse_example(example_spgeam_3.cpp)
-if(ROCSPARSE_ENABLE_SPMAT_SCALE)
-  add_rocsparse_example(example_spmat_scale.cpp)
-endif()
+add_rocsparse_example(example_spmat_scale.cpp)
 
 # Managed
 add_rocsparse_example(example_csrmv_managed.cpp)
@@ -181,6 +184,18 @@ endif()
 
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
+
+# The rocsparse_spsort examples need rocsparse_spsort, which is only built with BUILD_WITH_SPSORT.
+if(NOT BUILD_WITH_SPSORT)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_spsort[^/]*\\.cpp$")
+endif()
+
+
+if(NOT BUILD_WITH_TRSM_REFACTORING)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_dnmat_transpose.cpp$")
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX "/example_rocsparse_dnmat_copy_data.cpp$")
+endif()
+
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})

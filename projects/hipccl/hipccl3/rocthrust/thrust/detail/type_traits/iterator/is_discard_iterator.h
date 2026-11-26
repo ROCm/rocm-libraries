@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/discard_iterator.h>
 
@@ -26,11 +33,11 @@ namespace detail
 {
 
 template <typename Iterator>
-struct is_discard_iterator : public thrust::detail::false_type
+struct is_discard_iterator : public _THRUST_STD::false_type
 {};
 
 template <typename System>
-struct is_discard_iterator<thrust::discard_iterator<System>> : public thrust::detail::true_type
+struct is_discard_iterator<thrust::discard_iterator<System>> : public _THRUST_STD::true_type
 {};
 
 } // end namespace detail

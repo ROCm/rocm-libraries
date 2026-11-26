@@ -22,12 +22,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/config.h>
+
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/mr/polymorphic_adaptor.h>
 #include <thrust/mr/validator.h>
 
-#include <limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
@@ -83,7 +93,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p allocator.
+    /*! The alias \p other gives the type of the rebound \p allocator.
      */
     using other = allocator<U, MR>;
   };
@@ -95,7 +105,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE size_type max_size() const
   {
-    return (std::numeric_limits<size_type>::max)() / sizeof(T);
+    return (_THRUST_STD::numeric_limits<size_type>::max)() / sizeof(T);
   }
 
   /*! Constructor.
@@ -117,7 +127,7 @@ public:
    *  \param n number of elements to allocate
    *  \return a pointer to the newly allocated storage.
    */
-  THRUST_NODISCARD THRUST_HOST pointer allocate(size_type n)
+  [[nodiscard]] THRUST_HOST pointer allocate(size_type n)
   {
     return static_cast<pointer>(mem_res->do_allocate(n * sizeof(T), alignof(T)));
   }
@@ -187,7 +197,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p stateless_resource_allocator.
+    /*! The alias \p other gives the type of the rebound \p stateless_resource_allocator.
      */
     using other = stateless_resource_allocator<U, Upstream>;
   };

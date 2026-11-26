@@ -27,7 +27,10 @@
 // numbers is covered by DAGSchedulerPassTest.cpp and tests/filecheck/dag_*.stir.
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
@@ -43,7 +46,7 @@ TEST(HWModel, Gfx1250KnownDefaults) {
 
     EXPECT_EQ(hw.lds.readQueueDepth, 16);
     EXPECT_EQ(hw.lds.readDrainLatency, 0);
-    EXPECT_EQ(hw.lds.readThrottleLatency, 72);
+    EXPECT_EQ(hw.lds.readCreditLifetime, 72);
 
     EXPECT_EQ(hw.barrier.signalToWaitLatency, 11);
     EXPECT_EQ(hw.barrier.jumpOverheadCycles, 6);
@@ -92,7 +95,7 @@ TEST(HWModel, Gfx1250v0MatchesGfx1250ForNow) {
 
     EXPECT_EQ(v0.lds.readQueueDepth, base.lds.readQueueDepth);
     EXPECT_EQ(v0.lds.readDrainLatency, base.lds.readDrainLatency);
-    EXPECT_EQ(v0.lds.readThrottleLatency, base.lds.readThrottleLatency);
+    EXPECT_EQ(v0.lds.readCreditLifetime, base.lds.readCreditLifetime);
     EXPECT_EQ(v0.barrier.signalToWaitLatency, base.barrier.signalToWaitLatency);
     EXPECT_EQ(v0.hazards.rules, base.hazards.rules);
 }
@@ -189,18 +192,31 @@ TEST(HWModelDsIssue, UnmodelledShareIsInert) {
         << "an arch that does not model pipe sharing must keep the ISA cost";
 }
 
-// The lookup key must stay unique and gfx1250v0 must keep mirroring gfx1250; no numbers pinned.
+// The lookup key must stay unique, src rules must not be stricter than dst ones, and gfx1250v0
+// must keep mirroring gfx1250; no numbers pinned.
 TEST(HWModel, Gfx1250WaitHideFormTable) {
     const HWModel& hw = hwModelForArch(kGfx1250);
 
-    // Two rows sharing a {costLatency, dstVgprs} key would make the lookup order-dependent.
+    // Two rows sharing a {costLatency, dstVgprs, scaled} key would make the lookup
+    // order-dependent.
     for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
         for (size_t j = i + 1; j < hw.waitHide.forms.size(); ++j) {
             const auto& a = hw.waitHide.forms[i];
             const auto& b = hw.waitHide.forms[j];
-            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs)
-                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs;
+            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs &&
+                         a.scaled == b.scaled)
+                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs << " scaled "
+                << a.scaled;
         }
+    }
+
+    for (const auto& form : hw.waitHide.forms) {
+        // No mixed rule without a lead: the pass counts a mixed rule's VALUs from the lead on.
+        for (const auto* rs : {&form.xdl, &form.csmacc})
+            for (const auto* rh : {&rs->dst, &rs->src})
+                if (rh->mix.on()) {
+                    EXPECT_GT(rh->mix.lead, 0) << "lead-less mixed rule";
+                }
     }
 
     // A deliberate alias, not an accidental fallthrough.
@@ -208,10 +224,30 @@ TEST(HWModel, Gfx1250WaitHideFormTable) {
     ASSERT_EQ(v0.waitHide.forms.size(), hw.waitHide.forms.size());
     EXPECT_EQ(v0.waitHide.vmVsrcLds, hw.waitHide.vmVsrcLds);
     EXPECT_EQ(v0.waitHide.vmVsrcTex, hw.waitHide.vmVsrcTex);
-    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
-        EXPECT_EQ(v0.waitHide.forms[i].costLatency, hw.waitHide.forms[i].costLatency);
-        EXPECT_EQ(v0.waitHide.forms[i].dstVgprs, hw.waitHide.forms[i].dstVgprs);
-        EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
-        EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
+    EXPECT_EQ(v0.waitHide.vmVsrcBridge, hw.waitHide.vmVsrcBridge);
+    EXPECT_TRUE(v0.waitHide.noLatchCsmacc == hw.waitHide.noLatchCsmacc);
+    EXPECT_TRUE(v0.waitHide.dpmacc == hw.waitHide.dpmacc);
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i)
+        EXPECT_TRUE(v0.waitHide.forms[i] == hw.waitHide.forms[i]) << "row " << i;
+}
+
+// archName disambiguates steppings sharing a triple (gfx1250 vs gfx1250v0).
+TEST(ArchResolve, ArchNameDisambiguatesSharedTriple) {
+    const auto& helper = ArchHelper::getInstance();
+    if (helper.getArchInfo(std::string("gfx1250v0")) == nullptr ||
+        helper.getArchInfo(std::string("gfx1250")) == nullptr) {
+        GTEST_SKIP() << "build does not register both gfx1250 and gfx1250v0";
     }
+
+    const std::array<int, 3> triple = {12, 5, 0};
+
+    // Empty name: resolve by triple alone -> the first-registered stepping.
+    EXPECT_EQ(resolveArchId(triple, ""), getGfxArchID(12, 5, 0));
+
+    // A concrete name picks the matching stepping within the same triple.
+    EXPECT_EQ(resolveArchId(triple, "gfx1250v0"), getGfxArchID("gfx1250v0"));
+    EXPECT_EQ(resolveArchId(triple, "gfx1250"), getGfxArchID("gfx1250"));
+
+    // The two steppings are distinct identities, so v0 is not the triple default.
+    EXPECT_NE(resolveArchId(triple, "gfx1250v0"), resolveArchId(triple, ""));
 }

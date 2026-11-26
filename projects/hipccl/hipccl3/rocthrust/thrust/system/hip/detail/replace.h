@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/detail/internal_functional.h>
 #  include <thrust/system/hip/detail/transform.h>
 
@@ -52,29 +52,18 @@ struct constant_f
 {
   T value;
 
-  THRUST_HIP_FUNCTION
-  constant_f(T const& x)
-      : value(x)
-  {}
-
   template <class U>
   THRUST_HIP_DEVICE_FUNCTION T operator()(U const&) const
   {
     return value;
   }
-}; // struct constant_f
+};
 
 template <class Predicate, class NewType, class OutputType>
 struct new_value_if_f
 {
   Predicate pred;
   NewType new_value;
-
-  THRUST_HIP_FUNCTION
-  new_value_if_f(Predicate pred_, NewType new_value_)
-      : pred(pred_)
-      , new_value(new_value_)
-  {}
 
   template <class T>
   OutputType THRUST_HIP_DEVICE_FUNCTION operator()(T const& x)
@@ -87,7 +76,7 @@ struct new_value_if_f
   {
     return pred(y) ? new_value : x;
   }
-}; // struct new_value_if_f
+};
 
 } // namespace __replace
 
@@ -96,15 +85,14 @@ void THRUST_HOST_DEVICE
 replace(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& old_value, T const& new_value)
 {
   using thrust::placeholders::_1;
-
-  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>(new_value), _1 == old_value);
+  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>{new_value}, _1 == old_value);
 }
 
 template <class Derived, class Iterator, class Predicate, class T>
 void THRUST_HOST_DEVICE
 replace_if(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate pred, T const& new_value)
 {
-  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>(new_value), pred);
+  hip_rocprim::transform_if(policy, first, last, first, __replace::constant_f<T>{new_value}, pred);
 }
 
 template <class Derived, class Iterator, class StencilIt, class Predicate, class T>
@@ -116,7 +104,7 @@ void THRUST_HOST_DEVICE replace_if(
   Predicate pred,
   T const& new_value)
 {
-  hip_rocprim::transform_if(policy, first, last, stencil, first, __replace::constant_f<T>(new_value), pred);
+  hip_rocprim::transform_if(policy, first, last, stencil, first, __replace::constant_f<T>{new_value}, pred);
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate, class T>
@@ -128,9 +116,9 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   Predicate predicate,
   T const& new_value)
 {
-  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using output_type    = thrust::detail::it_value_t<OutputIt>;
   using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
-  return hip_rocprim::transform(policy, first, last, result, new_value_if_t(predicate, new_value));
+  return hip_rocprim::transform(policy, first, last, result, new_value_if_t{predicate, new_value});
 }
 
 template <class Derived, class InputIt, class StencilIt, class OutputIt, class Predicate, class T>
@@ -143,9 +131,9 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   Predicate predicate,
   T const& new_value)
 {
-  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using output_type    = thrust::detail::it_value_t<OutputIt>;
   using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
-  return hip_rocprim::transform(policy, first, last, stencil, result, new_value_if_t(predicate, new_value));
+  return hip_rocprim::transform(policy, first, last, stencil, result, new_value_if_t{predicate, new_value});
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>
@@ -158,7 +146,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy(
   T const& new_value)
 {
   return hip_rocprim::replace_copy_if(
-    policy, first, last, result, thrust::detail::equal_to_value<T>(old_value), new_value);
+    policy, first, last, result, thrust::detail::equal_to_value<T>{old_value}, new_value);
 }
 
 } // namespace hip_rocprim

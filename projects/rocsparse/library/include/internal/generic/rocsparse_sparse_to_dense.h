@@ -72,7 +72,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="sparse_to_dense_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B
 *  <tr><td>rocsparse_datatype_f16_r
 *  <tr><td>rocsparse_datatype_bf16_r

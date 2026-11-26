@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,6 +34,12 @@
 
 // Version
 #include "hipcub_version.hpp" // IWYU pragma: export
+
+// Manage std implementation
+#include "libcxx.hpp" // IWYU pragma: export
+
+// For _CCCL_IMPLICIT_SYSTEM_HEADER
+#include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
 
 #define HIPCUB_NAMESPACE hipcub
 
@@ -112,6 +118,8 @@ END_HIPCUB_NAMESPACE
     #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
 
     #include <cub/util_arch.cuh>
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
     #define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
@@ -164,14 +172,9 @@ BEGIN_HIPCUB_NAMESPACE
 /// If `error` is not `hipSuccess`, prints an error message containing the source filename and
 /// line information to the standard error output.
 /// \note This only happens if `HIPCUB_STDERR` is defined.
-inline
-hipError_t Debug(
-    hipError_t      error,
-    const char*     filename,
-    int             line)
+inline hipError_t
+    Debug(hipError_t error, [[maybe_unused]] const char* filename, [[maybe_unused]] int line)
 {
-    (void)filename;
-    (void)line;
 #ifdef HIPCUB_STDERR
     if (error)
     {
@@ -198,19 +201,6 @@ END_HIPCUB_NAMESPACE
 
 #ifndef HipcubLog
     #define HipcubLog(msg) ::hipcub::Log(msg, __FILE__, __LINE__)
-#endif
-
-#if __cpp_if_constexpr
-    #define HIPCUB_IF_CONSTEXPR constexpr
-#else
-    #if defined(_MSC_VER) && !defined(__clang__)
-        // MSVC (and not Clang pretending to be MSVC) unconditionally exposes if constexpr (even in C++14 mode),
-        // moreover it triggers warning C4127 (conditional expression is constant) when not using it. nvcc will
-        // be calling cl.exe for host-side codegen.
-        #define HIPCUB_IF_CONSTEXPR constexpr
-    #else
-        #define HIPCUB_IF_CONSTEXPR
-    #endif
 #endif
 
 #ifdef DOXYGEN_SHOULD_SKIP_THIS // Documentation only
@@ -241,5 +231,82 @@ END_HIPCUB_NAMESPACE
         #define HIPCUB_DETAIL_DEBUG_SYNC_VALUE false
     #endif
 #endif // HIPCUB_ROCPRIM_API
+
+/// \brief Wrapper macro for C++20 'requires'.
+#define HIPCUB_REQUIRES(...) _CCCL_REQUIRES(__VA_ARGS__)
+
+/// \brief Wrapper macro for `template`.
+///
+/// Works together with `HIPCUB_REQUIRES`, such that if concepts are not
+/// supported the implementation of requires falls back to `enable_if`
+/// and templates.
+/// E.g. this code:
+/// \code{.cpp}
+/// HIPCUB_TEMPLATE(class T)
+/// HIPCUB_REQUIRES(_HIPCUB_STD::some_concept<T>)
+/// void some_function() {}
+/// \endcode
+/// would be preprocessed into
+/// \code{.cpp}
+/// template<class T> requires _HIPCUB_STD::some_concept<T>
+/// void some_function() {}
+/// \endcode
+/// if concepts are supported, or into something equivalent to
+/// \code{.cpp}
+/// template<class T, typename std::enable_if<(_HIPCUB_STD::some_concept<T>)>::type* = nullptr>
+/// void some_function() {}
+/// \endcode
+/// if they are not.
+#define HIPCUB_TEMPLATE(...) _CCCL_TEMPLATE(__VA_ARGS__)
+
+#ifndef HIPCUB_TRAIT
+    #if defined(__HIP_PLATFORM_NVIDIA__)
+        #define HIPCUB_TRAIT(__TRAIT, ...) _CCCL_TRAIT(__TRAIT, __VA_ARGS__)
+    #else
+        #define HIPCUB_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
+    #endif
+#endif // HIPCUB_TRAIT
+
+#ifndef HIPCUB_RETURN_ON_ERROR
+    #define HIPCUB_RETURN_ON_ERROR(...)       \
+        do                                    \
+        {                                     \
+            hipError_t error = (__VA_ARGS__); \
+            if(error != hipSuccess)           \
+            {                                 \
+                return error;                 \
+            }                                 \
+        }                                     \
+        while(0)
+#endif // HIPCUB_RETURN_ON_ERROR
+
+#ifndef HIPCUB_TRY_CUDA_API
+    #define HIPCUB_TRY_CUDA_API(_NAME, _MSG, ...)                               \
+        do                                                                      \
+        {                                                                       \
+            const ::hipError_t __status = _NAME(__VA_ARGS__);                   \
+            switch(__status)                                                    \
+            {                                                                   \
+                case ::hipSuccess: break;                                       \
+                default:                                                        \
+                    (void)::hipGetLastError();                                  \
+                    _HIPCUB_LIBCXX::__throw_cuda_error(__status, _MSG, #_NAME); \
+            }                                                                   \
+        }                                                                       \
+        while(0)
+#endif // HIPCUB_TRY_CUDA_API
+
+#ifndef HIPCUB_ASSERT_CUDA_API
+    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)     \
+        do                                               \
+        {                                                \
+            [[maybe_unused]]                             \
+            const ::hipError_t __status                  \
+                = _NAME(__VA_ARGS__);                    \
+            (void)::hipGetLastError();                   \
+            _CCCL_ASSERT(__status == ::hipSuccess, _MSG); \
+        }                                                \
+        while(0)
+#endif // HIPCUB_ASSERT_CUDA_API
 
 #endif // HIPCUB_CONFIG_HPP_

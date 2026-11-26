@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -116,7 +116,7 @@ using device_t = thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::detail::par_t
  *    thrust::for_each(exec, data, data + 4, ignore_argument());
  *
  *    // can't dispatch thrust::transform because no overload exists for my_policy:
- *    //thrust::transform(exec, data, data, + 4, data, ::internal::identity{}); // error!
+ *    //thrust::transform(exec, data, data, + 4, data, _THRUST_STD::identity{}); // error!
  *
  *    return 0;
  *  }
@@ -176,7 +176,7 @@ struct execution_policy : thrust::detail::execution_policy_base<DerivedPolicy>
  *    thrust::for_each(exec, data, data + 4, ignore_argument());
  *
  *    // dispatch thrust::transform whose behavior our policy inherits
- *    thrust::transform(exec, data, data, + 4, data, ::internal::identity{});
+ *    thrust::transform(exec, data, data, + 4, data, _THRUST_STD::identity{});
  *
  *    return 0;
  *  }
@@ -235,7 +235,7 @@ struct host_execution_policy : thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::e
  *    thrust::for_each(exec, data, data + 4, ignore_argument());
  *
  *    // dispatch thrust::transform whose behavior our policy inherits
- *    thrust::transform(exec, data, data, + 4, data, ::internal::identity{});
+ *    thrust::transform(exec, data, data, + 4, data, _THRUST_STD::identity{});
  *
  *    return 0;
  *  }
@@ -298,13 +298,13 @@ static const detail::host_t host;
  *  algorithm dispatch at Thrust's device system by providing \p thrust::device as an algorithm parameter.
  *
  *  Explicit dispatch can be useful in avoiding the introduction of data copies into containers such as
- *  \p thrust::device_vector or to avoid wrapping e.g. raw pointers allocated by the HIP API with types
+ *  \p thrust::device_vector or to avoid wrapping e.g. raw pointers allocated by the CUDA or HIP API with types
  *  such as \p thrust::device_ptr.
  *
  *  The user must take care to guarantee that the iterators provided to an algorithm are compatible with
  *  the device backend system. For example, raw pointers allocated by <tt>std::malloc</tt> typically
  *  cannot be dereferenced by a GPU. For this reason, raw pointers allocated by host APIs should not be mixed
- *  with a \p thrust::device algorithm invocation when the device backend is HIP.
+ *  with a \p thrust::device algorithm invocation when the device backend is CUDA or HIP.
  *
  *  The type of \p thrust::device is implementation-defined.
  *
@@ -337,7 +337,7 @@ static const detail::host_t host;
  *  \see host_execution_policy
  *  \see thrust::device
  */
-THRUST_INLINE_CONSTANT detail::device_t device;
+THRUST_GLOBAL_CONSTANT detail::device_t device;
 
 // define seq for the purpose of Doxygenating it
 // it is actually defined elsewhere

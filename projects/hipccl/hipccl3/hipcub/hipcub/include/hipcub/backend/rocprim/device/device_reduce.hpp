@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,6 +33,7 @@
 #include "../../../config.hpp"
 
 #include "../../../util_deprecated.hpp"
+#include "../detail/util_env.hpp"
 #include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 
@@ -46,8 +47,11 @@
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
 
+#include _HIPCUB_LIBCXX_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(limits)
+
 #include <iterator>
-#include <limits>
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail
@@ -66,7 +70,7 @@ HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
 template<class T>
 HIPCUB_HOST_DEVICE inline T get_lowest_value()
 {
-    return std::numeric_limits<T>::lowest();
+    return _HIPCUB_STD::numeric_limits<T>::lowest();
 }
 
 template<>
@@ -86,7 +90,7 @@ HIPCUB_HOST_DEVICE inline hip_bfloat16 get_lowest_value<hip_bfloat16>()
 template<class T>
 HIPCUB_HOST_DEVICE inline T get_max_value()
 {
-    return std::numeric_limits<T>::max();
+    return _HIPCUB_STD::numeric_limits<T>::max();
 }
 
 template<>
@@ -116,7 +120,7 @@ template<class T>
 inline auto get_lowest_special_value() ->
     typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
 {
-    return -std::numeric_limits<T>::infinity();
+    return -_HIPCUB_STD::numeric_limits<T>::infinity();
 }
 
 template<>
@@ -146,7 +150,7 @@ template<typename T>
 inline auto get_max_special_value() ->
     typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
 {
-    return std::numeric_limits<T>::infinity();
+    return _HIPCUB_STD::numeric_limits<T>::infinity();
 }
 
 template<>
@@ -196,6 +200,37 @@ public:
 
     template<typename InputIteratorT,
              typename OutputIteratorT,
+             typename ReductionOpT,
+             typename T,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Reduce(InputIteratorT  d_in,
+                             OutputIteratorT d_out,
+                             NumItemsT       num_items,
+                             ReductionOpT    reduction_op,
+                             T               init,
+                             EnvT            env = {})
+    {
+        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Reduce(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_out,
+                                                    num_items,
+                                                    reduction_op,
+                                                    init,
+                                                    stream);
+                                  });
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
              typename ReduceOpT,
              typename T,
              typename NumItemsT>
@@ -229,17 +264,48 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using InputT  = typename std::iterator_traits<InputIteratorT>::value_type;
-        using OutputT = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using InitT   = hipcub::detail::non_void_value_t<OutputT, InputT>;
+        using InputT  = detail::it_value_t<InputIteratorT>;
+        using OutputT = detail::it_value_t<OutputIteratorT>;
+        using InitT   = detail::non_void_value_t<OutputT, InputT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_out,
                       num_items,
-                      ::hipcub::Sum(),
+                      _HIPCUB_STD::plus<>{},
                       InitT(0),
                       stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        Sum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        using InputT            = detail::it_value_t<InputIteratorT>;
+        using OutputT           = detail::it_value_t<OutputIteratorT>;
+        using InitT             = detail::non_void_value_t<OutputT, InputT>;
+        using ReductionOpT      = _HIPCUB_STD::plus<>;
+        const auto reduction_op = ReductionOpT{};
+
+        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Reduce(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_out,
+                                                    num_items,
+                                                    reduction_op,
+                                                    InitT(0),
+                                                    stream);
+                                  });
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
@@ -264,13 +330,13 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using T = detail::it_value_t<InputIteratorT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_out,
                       num_items,
-                      ::hipcub::Min(),
+                      _HIPCUB_LIBCXX::minimum<>{},
                       detail::get_max_value<T>(),
                       stream);
     }
@@ -302,8 +368,8 @@ public:
                                                      hipStream_t     stream = 0)
     {
         using OffsetT      = NumItemsT;
-        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
-        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T            = detail::it_value_t<InputIteratorT>;
+        using O            = detail::it_value_t<OutputIteratorT>;
         using OutputTupleT = hipcub::detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
 
         using OutputValueT = typename OutputTupleT::Value;
@@ -381,13 +447,13 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using T = detail::it_value_t<InputIteratorT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_out,
                       num_items,
-                      ::hipcub::Max(),
+                      _HIPCUB_LIBCXX::maximum<>{},
                       detail::get_lowest_value<T>(),
                       stream);
     }
@@ -419,9 +485,9 @@ public:
                                                      hipStream_t     stream = 0)
     {
         using OffsetT      = NumItemsT;
-        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
-        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = hipcub::detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
+        using T            = detail::it_value_t<InputIteratorT>;
+        using O            = detail::it_value_t<OutputIteratorT>;
+        using OutputTupleT = detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
 
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
@@ -546,8 +612,7 @@ public:
                     NumItemsT                 num_items,
                     hipStream_t               stream = 0)
     {
-        using key_compare_op
-            = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIteratorT>::value_type>;
+        using key_compare_op = ::rocprim::equal_to<detail::it_value_t<KeysInputIteratorT>>;
         return ::rocprim::reduce_by_key(d_temp_storage,
                                         temp_storage_bytes,
                                         d_keys_in,

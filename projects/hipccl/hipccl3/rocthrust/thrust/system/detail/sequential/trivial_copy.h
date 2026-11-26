@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,10 +23,16 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/nv_target.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/system/detail/sequential/general_copy.h>
 
-#include <cstring>
+#include _THRUST_STD_INCLUDE(cstring)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -42,17 +48,12 @@ THRUST_HOST_DEVICE T* trivial_copy_n(const T* first, std::ptrdiff_t n, T* result
   if (n == 0)
   {
     // If `first` or `result` is an invalid pointer,
-    // the behavior of `std::memmove` is undefined, even if `n` is zero.
+    // the behavior of `_THRUST_STD::memmove` is undefined, even if `n` is zero.
     return result;
   }
 
-  T* return_value = nullptr;
-
-  NV_IF_TARGET(NV_IS_HOST,
-               (std::memmove(result, first, n * sizeof(T)); return_value = result + n;),
-               ( // NV_IS_DEVICE:
-                 return_value = thrust::system::detail::sequential::general_copy_n(first, n, result);));
-  return return_value;
+  _THRUST_STD::memmove(result, first, n * sizeof(T));
+  return result + n;
 } // end trivial_copy_n()
 
 } // end namespace sequential

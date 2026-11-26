@@ -34,15 +34,14 @@
 cmake_minimum_required(VERSION 3.25.2)
 
 # --- hipCCL umbrella version ---
-# NOTE(hipccl3): placeholder starting point. This versions the hipCCL
-# umbrella only - the CPack package and find_package(hipccl) - NOT the
-# individual components, which keep their own 4.7.0 line (see the Component
-# versioning note below). The intent is for this to eventually track the
-# CCCL version it corresponds to, so that find_package(hipccl 3.0.0) lines up
-# with find_package(CCCL 3.0.0); that change belongs with the CCCL 3.0
-# merge-forward work, not before it.
-set(HIPCCL_VERSION_MAJOR 0)
-set(HIPCCL_VERSION_MINOR 1)
+# NOTE(hipccl3): this versions the hipCCL umbrella only - the CPack package
+# and find_package(hipccl) - NOT the individual components, which keep their
+# own 4.x line (see the Component versioning note below). It tracks the CCCL
+# major line this layout snapshots (3.0, matching HIPCUB_CCCL_VERSION_*), so
+# find_package(hipccl 3.0.0) lines up with find_package(CCCL 3.0.0). hipccl2
+# is the CCCL 2.x snapshot and is versioned 2.8.0.
+set(HIPCCL_VERSION_MAJOR 3)
+set(HIPCCL_VERSION_MINOR 0)
 set(HIPCCL_VERSION_PATCH 0)
 set(HIPCCL_VERSION "${HIPCCL_VERSION_MAJOR}.${HIPCCL_VERSION_MINOR}.${HIPCCL_VERSION_PATCH}")
 
@@ -99,6 +98,15 @@ option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
 # HIPCUB_CCCL_VERSION_* variables are the same pattern: "my version" and "the
 # CCCL version I correspond to" are separate things.
 
+# --- Legacy API ---
+# Enables APIs/behavior from before CCCL 3.0 parity that were restored in rocPRIM and hipCUB
+# for backward compatibility (e.g. with older PyTorch releases). The value is baked into the
+# installed rocprim_version.hpp / hipcub_version.hpp as ROCPRIM_USE_LEGACY_API and
+# HIPCUB_USE_LEGACY_API. rocprim/hipcub declare the same option, so it can also be set when
+# configuring either of them directly.
+option(HIPCCL_USE_LEGACY_API
+    "Enable legacy APIs from before CCCL 3.0 parity, restored for backward compatibility" ON)
+
 # --- Component selection ---
 option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)
 option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" ON)
@@ -139,28 +147,19 @@ if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCTHRUST ON CACHE BOOL "" FORCE)
 endif()
 
-if(HIPCCL_BUILD_ROCPRIM)
-    add_subdirectory_with_message(
-        COMPONENT rocprim
-        PREFIX_PATH .
-        EXPECT_TARGET rocprim
-    )
+option(HIPCCL_ENABLE_COVERAGE "Build rocPRIM, rocThrust, hipCUB with code coverage enabled" OFF)
+
+if(DEFINED BUILD_CODE_COVERAGE)
+    message(DEPRECATION "BUILD_CODE_COVERAGE is deprecated and will be removed soon; use HIPCCL_ENABLE_COVERAGE instead.")
+    set(HIPCCL_ENABLE_COVERAGE ${BUILD_CODE_COVERAGE} CACHE BOOL "" FORCE)
+    unset(BUILD_CODE_COVERAGE CACHE)
+    unset(BUILD_CODE_COVERAGE)
 endif()
 
-if(HIPCCL_BUILD_HIPCUB)
-    add_subdirectory_with_message(
-        COMPONENT hipcub
-        PREFIX_PATH .
-        EXPECT_TARGET hipcub
-    )
-endif()
-
-if(HIPCCL_BUILD_ROCTHRUST)
-    add_subdirectory_with_message(
-        COMPONENT rocthrust
-        PREFIX_PATH .
-        EXPECT_TARGET rocthrust
-    )
+if(HIPCCL_ENABLE_COVERAGE)
+    set(ROCPRIM_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+    set(ROCTHRUST_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+    set(HIPCUB_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
 endif()
 
 if(HIPCCL_BUILD_LIBHIPCXX)
@@ -182,10 +181,39 @@ if(HIPCCL_BUILD_LIBHIPCXX)
         )
     endif()
 
+    # NOTE(hipccl3): built before rocprim/hipcub/rocthrust so that the
+    # libhipcxx::libhipcxx target already exists by the time hipcub/rocthrust
+    # run their hard libhipcxx>=3.4 check (see require_libhipcxx.cmake) -
+    # otherwise that check would incorrectly fail even though
+    # HIPCCL_BUILD_LIBHIPCXX=ON was set to satisfy it from source.
     add_subdirectory_with_message(
         COMPONENT libhipcxx
         PREFIX_PATH .
         EXPECT_TARGET libhipcxx::libhipcxx
+    )
+endif()
+
+if(HIPCCL_BUILD_ROCPRIM)
+    add_subdirectory_with_message(
+        COMPONENT rocprim
+        PREFIX_PATH .
+        EXPECT_TARGET rocprim
+    )
+endif()
+
+if(HIPCCL_BUILD_HIPCUB)
+    add_subdirectory_with_message(
+        COMPONENT hipcub
+        PREFIX_PATH .
+        EXPECT_TARGET hipcub
+    )
+endif()
+
+if(HIPCCL_BUILD_ROCTHRUST)
+    add_subdirectory_with_message(
+        COMPONENT rocthrust
+        PREFIX_PATH .
+        EXPECT_TARGET rocthrust
     )
 endif()
 

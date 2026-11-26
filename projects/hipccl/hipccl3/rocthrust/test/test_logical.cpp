@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,16 +34,16 @@ TYPED_TEST(LogicalTests, TestAllOf)
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), _THRUST_STD::identity{}), true);
 
   v[1] = T{0};
 
-  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), _THRUST_STD::identity{}), false);
 
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::all_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 0, _THRUST_STD::identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 1, _THRUST_STD::identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 2, _THRUST_STD::identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin() + 1, v.begin() + 2, _THRUST_STD::identity{}), false);
 }
 
 template <class InputIterator, class Predicate>
@@ -92,16 +92,16 @@ TYPED_TEST(LogicalTests, TestAnyOf)
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), _THRUST_STD::identity{}), true);
 
   v[1] = 0;
 
-  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), _THRUST_STD::identity{}), true);
 
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::any_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 0, _THRUST_STD::identity{}), false);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 1, _THRUST_STD::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 2, _THRUST_STD::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin() + 1, v.begin() + 2, _THRUST_STD::identity{}), false);
 }
 
 template <class InputIterator, class Predicate>
@@ -150,16 +150,16 @@ TYPED_TEST(LogicalTests, TestNoneOf)
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), _THRUST_STD::identity{}), false);
 
   v[1] = 0;
 
-  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), _THRUST_STD::identity{}), false);
 
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
-  ASSERT_EQ(thrust::none_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 0, _THRUST_STD::identity{}), true);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 1, _THRUST_STD::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 2, _THRUST_STD::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin() + 1, v.begin() + 2, _THRUST_STD::identity{}), true);
 }
 
 template <class InputIterator, class Predicate>

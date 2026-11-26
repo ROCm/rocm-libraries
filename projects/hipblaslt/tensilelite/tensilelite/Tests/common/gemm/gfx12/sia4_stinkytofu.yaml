@@ -1,0 +1,67 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# A0-compatible test: ScheduleIterAlg 4 (SIA4/StinkyToFu) validation
+# Enables: instruction scheduling, Expert Mode2, CP/SW prefetch, InitCByWMMA
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Test SIA4 scheduling framework
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+        - DepthU: [32, 64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]  # SIA4 StinkyToFu
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [32, 32, 1, 32]     # Small
+          - Exact: [64, 64, 1, 64]     # Medium
+          - Exact: [128, 128, 1, 128]  # Larger
+          - Exact: [256, 256, 1, 256]  # Large
+          - Exact: [63, 65, 1, 67]     # Odd
+          - Exact: [97, 97, 1, 97]     # Prime
+          - Exact: [64, 256, 1, 128]   # Non-square
+          - Exact: [256, 64, 1, 128]   # Wide
+          - Exact: [64, 64, 5, 64]     # Batched
+          # === RANGE SIZES ===
+          - Range: [ [32, 32, 128], [32, 32, 128], [1], [64] ]
+          - Range: [ [63, 1, 65], [63, 1, 65], [1], [64] ]

@@ -40,7 +40,6 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/attributes.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/detail/iterator_adaptor_base.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -128,7 +127,7 @@ template <typename Derived,
           typename Reference  = use_default,
           typename Difference = use_default>
 class THRUST_DECLSPEC_EMPTY_BASES iterator_adaptor
-    : public detail::iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type
+    : public detail::make_iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type
 {
   /*! \cond
    */
@@ -137,7 +136,7 @@ class THRUST_DECLSPEC_EMPTY_BASES iterator_adaptor
 
 protected:
   using super_t =
-    typename detail::iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type;
+    typename detail::make_iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type;
 
   /*! \endcond
    */
@@ -193,7 +192,7 @@ protected:
 
 private: // Core iterator interface for iterator_facade
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE typename iterator_adaptor::reference dereference() const
+  THRUST_HOST_DEVICE reference dereference() const
   {
     return *m_iterator;
   }
@@ -206,7 +205,7 @@ private: // Core iterator interface for iterator_facade
   }
 
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE void advance(typename iterator_adaptor::difference_type n)
+  THRUST_HOST_DEVICE void advance(difference_type n)
   {
     // XXX statically assert on random_access_traversal_tag
 
@@ -230,7 +229,7 @@ private: // Core iterator interface for iterator_facade
 
   THRUST_EXEC_CHECK_DISABLE
   template <typename OtherDerived, typename OtherIterator, typename V, typename S, typename T, typename R, typename D>
-  THRUST_HOST_DEVICE typename iterator_adaptor::difference_type
+  THRUST_HOST_DEVICE difference_type
   distance_to(iterator_adaptor<OtherDerived, OtherIterator, V, S, T, R, D> const& y) const
   {
     return y.base() - m_iterator;

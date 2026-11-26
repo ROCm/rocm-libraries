@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -36,24 +36,24 @@ void TestIsPartitionedSimple()
   Vector v{1, 1, 1, 0};
 
   // empty partition
-  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.begin(), ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.begin(), _THRUST_STD::identity{}));
 
   // one element true partition
-  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 1, ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 1, _THRUST_STD::identity{}));
 
   // just true partition
-  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 2, ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 2, _THRUST_STD::identity{}));
 
   // both true & false partitions
-  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.end(), ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin(), v.end(), _THRUST_STD::identity{}));
 
   // one element false partition
-  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin() + 3, v.end(), ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(true, thrust::is_partitioned(v.begin() + 3, v.end(), _THRUST_STD::identity{}));
 
   v = {1, 0, 1, 1};
 
   // not partitioned
-  ASSERT_EQUAL_QUIET(false, thrust::is_partitioned(v.begin(), v.end(), ::internal::identity{}));
+  ASSERT_EQUAL_QUIET(false, thrust::is_partitioned(v.begin(), v.end(), _THRUST_STD::identity{}));
 }
 DECLARE_VECTOR_UNITTEST(TestIsPartitionedSimple);
 

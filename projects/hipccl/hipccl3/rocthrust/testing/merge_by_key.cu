@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -129,14 +129,14 @@ void TestMergeByKeyDispatchImplicit()
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  if constexpr (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge_by_key(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, _THRUST_STD::less<T>, CompareOp>;
     return thrust::merge_by_key(std::forward<Args>(args)..., C{});
   }
   __builtin_unreachable();
@@ -161,7 +161,7 @@ void TestMergeByKey(size_t n)
     const thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
     const thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-    THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+    if constexpr (_THRUST_STD::is_void<CompareOp>::value)
     {
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
@@ -169,7 +169,7 @@ void TestMergeByKey(size_t n)
     else
     {
       // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-      using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+      using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, _THRUST_STD::less<T>, CompareOp>;
       thrust::stable_sort(h_a_keys.begin(), h_a_keys.end(), C{});
       thrust::stable_sort(h_b_keys.begin(), h_b_keys.end(), C{});
     }
@@ -273,7 +273,7 @@ DECLARE_VARIABLE_UNITTEST(TestMergeByKeyToDiscardIterator);
 template <typename T>
 void TestMergeByKeyDescending(size_t n)
 {
-  TestMergeByKey<T, thrust::greater<T>>(n);
+  TestMergeByKey<T, _THRUST_STD::greater<T>>(n);
 }
 DECLARE_VARIABLE_UNITTEST(TestMergeByKeyDescending);
 

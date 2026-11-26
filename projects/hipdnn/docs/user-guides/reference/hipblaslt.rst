@@ -25,3 +25,19 @@ The hipBLASLt provider plugin supports standalone Matmul (GEMM, general matrix m
 - Transposed inputs: Supported.
 - Batched matmuls: Only equal batch sizes are supported, along with broadcasting when one input has a single batch (batch=1).
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
+- ReLU parameters (``RELU_FWD``): An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope.
+
+  - Standard ReLU: no upper clip and a lower clip of 0 (or unset).
+  - Clamp: ``relu_upper_clip`` set; the lower bound is ``relu_lower_clip``, or 0 if unset (so ReLU6 needs only the upper clip).
+  - Not supported: a non-zero ``relu_lower_clip_slope`` (leaky ReLU; hipBLASLt has no such epilogue), or a non-zero ``relu_lower_clip`` without an upper clip.
+
+The hipBLASLt provider plugin also supports MX (microscaling) block-scaled Matmul. The graph has two ``BlockScaleDequantize`` nodes that feed one Matmul node. It has these constraints:
+
+- A and B data types: ``FP8_E4M3``, ``FP8_E5M2``, ``FP6_E2M3``, ``FP6_E3M2``, or ``FP4_E2M1``.
+- Scale tensors: ``FP8_E8M0``, one value for each block of 32 elements along the K axis.
+- Output data types: ``FP32``, ``FP16``, or ``BFP16``.
+- Batch size: 1 only.
+- Shape: ``M`` and ``N`` multiples of 16, ``K`` a multiple of 128.
+- Layout: A and B are packed row- or column-major matrices; each scale tensor is a packed row- or column-major matrix in either order, whatever its operand's order; the output is a packed row-major matrix. Padded leading dimensions are not supported.
+- FP8 A with FP6 B: only with a row-major (K-contiguous) A; a column-major A returns incorrect results in hipBLASLt (#10811) and is not supported.
+- Hardware support depends on the GPU architecture and the hipBLASLt version. On gfx1250, A and B must both be K-contiguous (A row-major, B column-major), and only the type pairs hipBLASLt has gfx1250 kernels for are supported (it has none for FP6 inputs).

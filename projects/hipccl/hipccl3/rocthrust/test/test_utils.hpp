@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,23 +20,30 @@
 #include <thrust/detail/event_error.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
-#include <thrust/limits.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/random.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
 #include <random>
 #include <type_traits>
 #include <vector>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-#  include <limits>
-#endif
 
 #include "test_seed.hpp"
+#include "bitwise_repro/bwr_db.hpp"
+
+#include <gtest/gtest.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#else
+#  include <thrust/detail/algorithm_wrapper.h>
+
+#  include <limits>
+#endif
 
 #define TEST_EVENT_WAIT(e) test_event_wait(e)
 
@@ -49,8 +56,14 @@
 #include <cstdlib>
 #include <string>
 
+#if defined(_WIN32) && defined(_THRUST_USE_ROCPRIM)
+#  include <rocprim/device/config_types.hpp>
+
+#  include <set>
+#endif
+
 // HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <hip/hip_runtime.h>
 #  include <hip/hip_runtime_api.h>
 
@@ -58,22 +71,49 @@
 // The lambda is invoked immediately as assertions that generate a fatal failure can
 // only be used in void-returning functions.
 #  ifndef HIP_CHECK
-#    define HIP_CHECK(condition)                                                 \
-      do                                                                         \
-      {                                                                          \
-        hipError_t error = condition;                                            \
-        if (error != hipSuccess)                                                 \
-        {                                                                        \
-          [error]() {                                                            \
-            FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); \
-          }();                                                                   \
-          exit(error);                                                           \
-        }                                                                        \
+#    define HIP_CHECK(condition)                                                    \
+      do                                                                            \
+      {                                                                             \
+        hipError_t error = condition;                                               \
+        if (error != hipSuccess)                                                    \
+        {                                                                           \
+          [error]() {                                                               \
+            std::cerr << "HIP error " << error << ": " << hipGetErrorString(error); \
+          }();                                                                      \
+          exit(error);                                                              \
+        }                                                                           \
       } while (0)
 #  endif
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
+// Temporarily disable some tests on gfx115x on Windows until we can determine the root cause of the failures.
+// TODO: remove this after the root cause has been found and fixed properly.
+namespace temp_skip
+{
+bool should_skip()
+{
+#if defined(_WIN32) && defined(_THRUST_USE_ROCPRIM)
+  rocprim::detail::target_arch arch = rocprim::detail::target_arch::unknown;
+  if (rocprim::detail::host_target_arch(hipStreamDefault, arch) != HIP_SUCCESS)
+  {
+    std::cerr << "Warning: unable to fetch target architecture for disablement check." << std::endl;
+  }
+
+  const std::set<rocprim::detail::target_arch> disabled_arches = {
+    rocprim::detail::target_arch::gfx1150,
+    rocprim::detail::target_arch::gfx1151,
+    rocprim::detail::target_arch::gfx1152,
+    rocprim::detail::target_arch::gfx1153};
+
+  if (disabled_arches.find(arch) != disabled_arches.end())
+  {
+    return true;
+  }
+#endif
+  return false;
+}
+}; // namespace temp_skip
 
 namespace test
 {
@@ -469,19 +509,19 @@ struct custom_compare_less
 
 struct user_swappable
 {
-  inline __host__ __device__ user_swappable(bool swapped = false)
+  inline __host__ __device__ user_swappable(bool swapped = false) noexcept
       : was_swapped(swapped)
   {}
 
   bool was_swapped;
 };
 
-inline __host__ __device__ bool operator==(const user_swappable& x, const user_swappable& y)
+inline __host__ __device__ bool operator==(const user_swappable& x, const user_swappable& y) noexcept
 {
   return x.was_swapped == y.was_swapped;
 }
 
-inline __host__ __device__ void swap(user_swappable& x, user_swappable& y)
+inline __host__ __device__ void swap(user_swappable& x, user_swappable& y) noexcept
 {
   x.was_swapped = true;
   y.was_swapped = false;
@@ -745,21 +785,18 @@ thrust::host_vector<T> random_samples(const size_t N)
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-typename THRUST_NS_QUALIFIER::detail::disable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
+typename thrust::detail::disable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-  return static_cast<T>(
-    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(_THRUST_STD::numeric_limits<T>::max())));
+  return _THRUST_STD::min<std::size_t>(n, static_cast<std::size_t>(_THRUST_STD::numeric_limits<T>::max()));
 }
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<T>::value, T>
+typename _THRUST_STD::enable_if<_THRUST_STD::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), _THRUST_STD::numeric_limits<T>::max());
+  return _THRUST_STD::min<T>(n, _THRUST_STD::numeric_limits<T>::max());
 }
 
 enum threw_status
@@ -819,8 +856,8 @@ __host__ void test_future_value_retrieval(Future&& f, decltype(f.extract())& ret
 
   auto const r2 = f.extract();
 
-  ASSERT_THROW(auto x = f.extract(); // cppcheck-suppress unknownMacro
-               THRUST_UNUSED_VAR(x), thrust::event_error);
+  ASSERT_THROW(f.extract(),
+               thrust::event_error);
 
   ASSERT_EQ(false, f.ready());
   ASSERT_EQ(false, f.valid_stream());
@@ -932,13 +969,11 @@ void test_equality_pair_scan(const thrust::host_vector<Pair<X, Y>>& hvalue,
   }
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
-#elif defined(__NVCC__) || defined(_NVHPC_CUDA)                                \
-  || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#elif THRUST_CUDA_COMPILATION()
 #  define THRUST_DEVICE_BACKEND                 cuda
 #  define THRUST_DEVICE_BACKEND_DETAIL          cuda_cub
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) cuda##name

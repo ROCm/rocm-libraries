@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,9 +43,8 @@ struct inclusive_scan
 
     template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
     __device__
-    static void run(const T* input, T* output, const T init)
+    static void run(const T* input, T* output, [[maybe_unused]] const T init)
     {
-        (void)init;
         const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
         T values[ItemsPerThread];
@@ -57,10 +56,10 @@ struct inclusive_scan
         using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
         __shared__ typename bscan_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            bscan_t(storage).InclusiveScan(values, values, hipcub::Sum());
+            bscan_t(storage).InclusiveScan(values, values, benchmark_utils::plus{});
         }
 
         for(unsigned int k = 0; k < ItemsPerThread; k++)
@@ -93,10 +92,10 @@ struct exclusive_scan
         using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
         __shared__ typename bscan_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            bscan_t(storage).ExclusiveScan(values, values, init, hipcub::Sum());
+            bscan_t(storage).ExclusiveScan(values, values, init, benchmark_utils::plus{});
         }
 
         for(unsigned int k = 0; k < ItemsPerThread; k++)
