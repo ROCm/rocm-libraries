@@ -24,6 +24,7 @@
 #  10  rejected by both engines: gfx942 (no 16-byte LDS DMA)
 #  11  rejected by both engines: stride 2
 #  12  rejected by both engines: C = 12 (not a multiple of 8)
+#  13..16  configs 0, 3, 5 and 6 with the conv + bias
 from dataclasses import replace
 
 from _emit_common import run_emit
@@ -64,6 +65,9 @@ def _spec(idx: int):
         11: (S(problem=replace(_p(), stride=2)), "gfx950"),
         12: (S(problem=_p(cpg=12)), "gfx950"),
     }
+    for i, base in enumerate((0, 3, 5, 6)):
+        spec, arch = cfgs[base]
+        cfgs[13 + i] = (replace(spec, bias=True), arch)
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")
     return cfgs[idx]

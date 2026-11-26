@@ -149,6 +149,17 @@ static int make_cfg(int idx, rocke_fwd_flex_mfma_spec_t* s, const char** arch)
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 7, 7, 3, -1, 1, 1, 1);
         return 0;
+    case 17: /* config 0 with the conv + bias */
+    case 18: /* config 1 with the conv + bias */
+    case 19: /* config 5 with the conv + bias */
+    case 20: /* config 2 with the conv + bias (split_c 2: tail declared only) */
+    {
+        static const int base[4] = {0, 1, 5, 2};
+        if(make_cfg(base[idx - 17], s, arch) != 0)
+            return -1;
+        s->bias = true;
+        return 0;
+    }
     default:
         return -1;
     }

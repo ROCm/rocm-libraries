@@ -26,6 +26,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_fits_lds, max_threads_per_block */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div, ... */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_fwd_small_wmma_internal.h" /* rocke_fwd_small_common_shape_ok */
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
@@ -233,14 +234,14 @@ rocke_status_t rocke_fwd_smallc_mfma_kernel_name(const rocke_fwd_smallc_mfma_spe
     snprintf(ow, sizeof ow, "ow%d", spec->out_w);
     snprintf(tb, sizeof tb, "tb%d", spec->tiles_per_block);
     const char* parts[] = {f, st, pad, cc, wk, wp, tk, tp, oh, ow, tb, spec->prefetch ? "pf" : ""};
-    const char* flag_names[] = {"bf16"};
-    int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
+    const char* flag_names[] = {"cbias", "bf16"};
+    int flag_on[] = {spec->bias ? 1 : 0, rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallc_mfma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
                                   flag_names,
                                   flag_on,
-                                  1,
+                                  2,
                                   out,
                                   out_cap,
                                   NULL);
@@ -401,14 +402,14 @@ rocke_status_t rocke_fwd_smallk_mfma_kernel_name(const rocke_fwd_smallk_mfma_spe
     snprintf(oh, sizeof oh, "oh%d", spec->out_h);
     snprintf(ow, sizeof ow, "ow%d", spec->out_w);
     const char* parts[] = {f, st, pad, padw, kk, w, oh, ow};
-    const char* flag_names[] = {"bf16"};
-    int flag_on[] = {rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
+    const char* flag_names[] = {"cbias", "bf16"};
+    int flag_on[] = {spec->bias ? 1 : 0, rocke_direct_conv_problem_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallk_mfma",
                                   parts,
                                   sizeof(parts) / sizeof(parts[0]),
                                   flag_names,
                                   flag_on,
-                                  1,
+                                  2,
                                   out,
                                   out_cap,
                                   NULL);
@@ -593,6 +594,7 @@ struct sc_ctx
 
     std::vector<std::vector<rocke_value_t*>> a_frags, win_off;
     std::vector<rocke_value_t*> lane_ty, lane_tx, lane_base;
+    std::vector<rocke_value_t*> bias_m; /* conv + bias: one fp32 quad per m tile */
 };
 
 struct sc_geom
@@ -827,8 +829,13 @@ void sc_compute_store(sc_ctx& c, const sc_geom& g)
             }
             scf_if_enter(b, cond);
             {
+                /* The bias add first: Python computes the value it stores
+                 * before the store's offset. */
+                rocke_value_t* acc = accs[m * c.TN + tn];
+                if(!c.bias_m.empty())
+                    acc = rocke_b_fadd(b, acc, c.bias_m[(size_t)m]);
                 rocke_value_t* off = rocke_b_add(b, px_off, k);
-                rocke_value_t* val = rocke_dconv_trunc_f32(b, c.bf16, accs[m * c.TN + tn]);
+                rocke_value_t* val = rocke_dconv_trunc_f32(b, c.bf16, acc);
                 rocke_b_global_store_vN(b, params->D, off, val, 4, 8);
             }
             rocke_b_region_leave(b);
@@ -875,7 +882,10 @@ rocke_kernel_def_t*
     const int T = spec->tiles_per_block;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", c.THREADS);
-    rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &c.params, c.io_type);
+    else
+        rocke_dconv_emit_params(b, &c.params, "fwd", c.io_type);
     const rocke_dconv_params_t* params = &c.params;
 
     c.c0 = ci(b, 0);
@@ -965,6 +975,21 @@ rocke_kernel_def_t*
                     = rocke_b_masked_global_load(b, params->Bp, idx, ok, c.zero_e, c.io_type, 2);
             }
             c.a_frags[m].push_back(rocke_b_vec_pack(b, elems, 8, c.io_type));
+        }
+    }
+
+    /* ---- conv + bias: bias[k .. k+4) of each m tile's lane quad (tile
+     * independent), as fp32. */
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
+        for(int m = 0; m < c.TM; ++m)
+        {
+            rocke_value_t* x = tile_row(b, c.wave_k, c.TM, m, c.c16);
+            rocke_value_t* y = rocke_b_mul(b, c.lgrp, c.c4);
+            rocke_value_t* z = rocke_b_add(b, x, y);
+            rocke_value_t* k = rocke_b_add(b, c.k_blk, z);
+            c.bias_m.push_back(rocke_conv_bias_load_vec_f32(b, bias_rsrc, k, 4, c.io_type, c.c0));
         }
     }
 
@@ -1162,7 +1187,10 @@ rocke_kernel_def_t*
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     rocke_dconv_params_t pr;
-    rocke_dconv_emit_params(b, &pr, "fwd", io_type);
+    if(spec->bias)
+        rocke_dconv_emit_params_bias(b, &pr, io_type);
+    else
+        rocke_dconv_emit_params(b, &pr, "fwd", io_type);
     const rocke_dconv_params_t* params = &pr;
 
     rocke_value_t* c0 = ci(b, 0);
@@ -1364,6 +1392,19 @@ rocke_kernel_def_t*
     }
     rocke_b_sync_lds_only(b);
 
+    /* ---- conv + bias: bias[k] of each of the K channels, as fp32, added to
+     * the overlap-added sums. */
+    std::vector<rocke_value_t*> bias_k;
+    if(spec->bias)
+    {
+        rocke_value_t* bias_rsrc = rocke_conv_bias_rsrc(b, params->Bias, params->Bias_bytes);
+        for(int k = 0; k < K; ++k)
+        {
+            rocke_value_t* x = ci(b, k);
+            bias_k.push_back(rocke_conv_bias_load_f32(b, bias_rsrc, x, io_type, c0));
+        }
+    }
+
     /* ---- overlap-add: one output pixel (all K channels) per thread and pass. */
     const int n_it = (int)rocke_ceil_div((long long)OH * OW, THREADS);
     for(int it = 0; it < n_it; ++it)
@@ -1430,6 +1471,8 @@ rocke_kernel_def_t*
                     rocke_value_t* v = rocke_b_vec_extract(b, lv, 0);
                     acc = (acc == NULL) ? v : rocke_b_fadd(b, acc, v);
                 }
+            if(!bias_k.empty())
+                acc = rocke_b_fadd(b, acc, bias_k[(size_t)k]);
             sums[k] = acc;
         }
         rocke_value_t* y_off = nhw_off(

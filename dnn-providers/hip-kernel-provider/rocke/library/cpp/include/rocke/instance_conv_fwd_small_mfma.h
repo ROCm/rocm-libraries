@@ -79,6 +79,7 @@ typedef struct rocke_fwd_smallc_mfma_spec
     int tiles_per_block; /* default 1 */
     bool prefetch; /* default false */
     int wave_size; /* default 64 */
+    bool bias; /* default false: conv + bias (Bias / Bias_bytes tail) */
 } rocke_fwd_smallc_mfma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */
@@ -145,6 +146,7 @@ typedef struct rocke_fwd_smallk_mfma_spec
     int out_h; /* default 16 */
     int out_w; /* default 16 */
     int wave_size; /* default 64 */
+    bool bias; /* default false: conv + bias (Bias / Bias_bytes tail) */
 } rocke_fwd_smallk_mfma_spec_t;
 
 rocke_fwd_smallk_mfma_spec_t rocke_fwd_smallk_mfma_spec_default(void);

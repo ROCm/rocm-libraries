@@ -60,6 +60,10 @@ typedef struct rocke_fwd_flex_mfma_spec
     int split_c; /* default 1 */
     const char* name; /* default "fwd_flex_mfma" */
     int wave_size; /* default 64 */
+    /* Conv + bias: the (Bias, Bias_bytes) tail, bias[k] added to the fp32
+     * accumulators before the rounding. A split_c > 1 pass only declares the
+     * tail (one kernarg block with the fold, which adds the bias). */
+    bool bias; /* default false */
 } rocke_fwd_flex_mfma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */
@@ -76,7 +80,7 @@ void rocke_fwd_flex_mfma_grid(const rocke_fwd_flex_mfma_spec_t* spec, int grid[3
 long long rocke_fwd_flex_mfma_workspace_bytes(const rocke_fwd_flex_mfma_spec_t* spec);
 
 /* kernel_name(): kernel_name_join(name, f{KH}x{KW}, p{PAD}x{PAD_W}, s{stride},
- * d{dil_h}x{dil_w}, k{bk}, sc{split_c}, [bf16]). */
+ * d{dil_h}x{dil_w}, k{bk}, sc{split_c}, [cbias], [bf16]). */
 rocke_status_t rocke_fwd_flex_mfma_kernel_name(const rocke_fwd_flex_mfma_spec_t* spec,
                                                char* out,
                                                size_t out_cap);

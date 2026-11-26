@@ -38,6 +38,12 @@
 #  rejected by both engines:
 #  15  fwd_smallc_mfma on gfx1250 (wave32)
 #  16  fwd_smallk_mfma with C=36 (not a multiple of 8)
+#  conv + bias (bias=True) forms of earlier configs:
+#  17..19  small C: configs 0, 1 (prefetched tiles) and 6 (partial channel
+#          block)
+#  20..22  small K: configs 8 (K=4), 9 (K=3, per-channel stores) and 12 (K=8)
+from dataclasses import replace
+
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_fwd_small_mfma import (
@@ -65,7 +71,14 @@ def _p(*, K=3, PAD=1, S=1, C=3, Kout=64, dtype="bf16", H=32, W=40, KW=None, pad_
     )
 
 
+_BIAS_BASE = 17
+_BIAS_CFGS = (0, 1, 6, 8, 9, 12)
+
+
 def _spec(idx: int):
+    if _BIAS_BASE <= idx < _BIAS_BASE + len(_BIAS_CFGS):
+        spec, arch = _spec(_BIAS_CFGS[idx - _BIAS_BASE])
+        return replace(spec, bias=True), arch
     C = FwdSmallcMfmaSpec
     K = FwdSmallkMfmaSpec
     cfgs = {

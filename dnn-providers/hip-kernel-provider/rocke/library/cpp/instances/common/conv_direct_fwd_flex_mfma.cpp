@@ -21,6 +21,7 @@
 #include "rocke/arch_target.h" /* rocke_arch_target_from_gfx, rocke_mma_catalog_has_shape */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_{async_lds_max_dwords,mma} */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
+#include "rocke/instance_conv_bias.h"
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp"
 #include "rocke/intexpr.h" /* rocke_intexpr_checked_mul */
@@ -38,7 +39,7 @@ constexpr int kRot = 97; /* per-round rotation of the item walk */
 constexpr int kWaves = 8;
 constexpr int64_t kOob = ((int64_t)1 << 31) - 1;
 
-const char* bf16_flag[1] = {"bf16"};
+const char* name_flags[2] = {"cbias", "bf16"};
 
 /* a * b, saturated at INT64_MAX (Python's ints do not wrap). */
 long long mul_sat(long long a, long long b)
@@ -159,8 +160,8 @@ extern "C" rocke_status_t
     snprintf(k_buf, sizeof k_buf, "k%d", s->bk);
     snprintf(sc_buf, sizeof sc_buf, "sc%d", s->split_c);
     const char* parts[6] = {f_buf, p_buf, s_buf, d_buf, k_buf, sc_buf};
-    int on[1] = {problem_is_bf16(p) ? 1 : 0};
-    return rocke_kernel_name_join(s->name, parts, 6, bf16_flag, on, 1, out, out_cap, NULL);
+    int on[2] = {s->bias ? 1 : 0, problem_is_bf16(p) ? 1 : 0};
+    return rocke_kernel_name_join(s->name, parts, 6, name_flags, on, 2, out, out_cap, NULL);
 }
 
 extern "C" bool rocke_fwd_flex_mfma_is_valid_spec(const rocke_fwd_flex_mfma_spec_t* s,
@@ -348,7 +349,14 @@ rocke_kernel_def_t*
     rocke_attr_set_bool(b, &b->kernel->attrs, "lds_alias_scopes", true);
     rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", 2);
     rocke_dconv_params_t P;
-    rocke_dconv_emit_params(b, &P, "fwd", io_type);
+    if(spec->bias)
+    {
+        rocke_dconv_emit_params_bias(b, &P, io_type);
+    }
+    else
+    {
+        rocke_dconv_emit_params(b, &P, "fwd", io_type);
+    }
     if(!rocke_ir_builder_ok(b))
     {
         return NULL;
@@ -669,6 +677,8 @@ rocke_kernel_def_t*
     const rocke_type_t* i32x2 = rocke_vector_type(b, i32_t, 2);
     const rocke_type_t* half8 = rocke_vector_type(b, io_type, 8);
     V d_rsrc = rocke_b_buffer_rsrc(b, P.D, P.D_bytes);
+    /* Conv + bias, unsplit only: a split_c > 1 pass leaves its slabs raw. */
+    V bias_rsrc = (spec->bias && SP == 1) ? rocke_conv_bias_rsrc(b, P.Bias, P.Bias_bytes) : NULL;
 
     auto epilogue = [&](const std::vector<V>& accs, V t) {
         V tl = e.divi(t, SP);
@@ -687,15 +697,34 @@ rocke_kernel_def_t*
         {
             V qa = e.muli(e.div(q, c2), 16);
             V kq = e.add(qa, e.muli(e.mod(q, c2), 8));
+            /* Before the swap, accumulator kt of a lane holds the 4 channels
+             * kbase + kt*16 + (q%2)*8 + (q/2)*4 .. +3: one bias quad per kt. */
+            std::vector<V> bias_kt;
+            if(bias_rsrc != NULL)
+            {
+                V qb = e.muli(e.mod(q, c2), 8);
+                V kqb = e.add(qb, e.muli(e.div(q, c2), 4));
+                for(int kt = 0; kt < KT; ++kt)
+                {
+                    V kb = e.add(e.addi(kbase, kt * 16), kqb);
+                    bias_kt.push_back(
+                        rocke_conv_bias_load_vec_f32(b, bias_rsrc, kb, 4, io_type, c0));
+                }
+            }
+            auto acc_of = [&](int i) -> V {
+                if(bias_kt.empty())
+                    return accs[i];
+                return rocke_b_fadd(b, accs[i], bias_kt[(size_t)(i % KT)]);
+            };
             for(int xt = 0; xt < kXT; ++xt)
             {
                 V x = e.addi(xbase, xt * 16);
                 for(int cc = 0; cc < KT / 2; ++cc)
                 {
                     V da = rocke_b_vec_bitcast(
-                        b, rocke_dconv_trunc_f32(b, bf16, accs[xt * KT + 2 * cc]), i32x2);
+                        b, rocke_dconv_trunc_f32(b, bf16, acc_of(xt * KT + 2 * cc)), i32x2);
                     V db = rocke_b_vec_bitcast(
-                        b, rocke_dconv_trunc_f32(b, bf16, accs[xt * KT + 2 * cc + 1]), i32x2);
+                        b, rocke_dconv_trunc_f32(b, bf16, acc_of(xt * KT + 2 * cc + 1)), i32x2);
                     V lo0, hi0, lo1, hi1;
                     V a0 = rocke_b_vec_extract(b, da, 0);
                     rocke_b_permlane32_swap(b, a0, rocke_b_vec_extract(b, db, 0), &lo0, &hi0);
