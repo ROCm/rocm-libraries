@@ -632,12 +632,14 @@ namespace
     }
 
     /**********************************************************************************
-     * Get the kernels of a Tensile solution, split along n when the grid would       *
-     * exceed HIP's y limit (maxGridSize[1], 65535 workgroups). Tensile maps the      *
-     * column tiles of C to grid y and launches with hipExtModuleLaunchKernel,        *
-     * which does not check that limit. On gfx12 the workgroup ID in y is 16 bits,    *
-     * so the tiles past 65536 reran the first tiles and the columns past them were   *
-     * never written. Each part is a column range of C solved with the same solution. *
+     * Get the kernels of a Tensile solution, split along n on gfx12 when the grid    *
+     * would exceed HIP's y limit (maxGridSize[1], 65535 workgroups). Tensile maps    *
+     * the column tiles of C to grid y and launches with hipExtModuleLaunchKernel,    *
+     * which does not check that limit. gfx12 delivers the workgroup ID in y in 16    *
+     * bits (ttmp7[15:0]), so the tiles past 65536 reran the first tiles and the      *
+     * columns past them were never written. Other archs read it from a 32-bit SGPR   *
+     * and run such grids correctly, so they keep a single launch. Each part is a     *
+     * column range of C solved with the same solution.                               *
      *********************************************************************************/
     template <typename Ti, typename To, typename Tc>
     rocblas_status getTensileKernels(const RocblasContractionProblem<Ti, To, Tc>& prob,
@@ -658,7 +660,9 @@ namespace
 
         const size_t grid_y_limit = deviceProp.maxGridSize[1];
         const size_t grid_y       = max_grid_y(kernels);
-        if(grid_y <= grid_y_limit)
+        // Only gfx12 delivers the workgroup ID in y in 16 bits (ttmp7[15:0]); elsewhere it is a
+        // full 32-bit SGPR and grids above maxGridSize[1] already run correctly.
+        if(grid_y <= grid_y_limit || prob.handle->getArchMajor() != 12)
             return rocblas_status_success;
 
         // grid y is the number of column tiles times a factor such as GlobalSplitU
