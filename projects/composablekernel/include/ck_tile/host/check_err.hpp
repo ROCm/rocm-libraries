@@ -512,16 +512,18 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         return false;
 
     bool res{true};
-    int err_count   = 0;
-    int64_t err     = 0;
-    int64_t max_err = std::numeric_limits<int64_t>::min();
+    int err_count    = 0;
+    uint64_t err     = 0;
+    uint64_t max_err = 0;
     for(std::size_t i = 0; i < ref.size(); ++i)
     {
         const int64_t o = *std::next(std::begin(out), i);
         const int64_t r = *std::next(std::begin(ref), i);
-        err             = std::abs(o - r);
+        // Unsigned subtraction avoids signed overflow and std::abs(INT64_MIN) UB.
+        err = (o >= r) ? (static_cast<uint64_t>(o) - static_cast<uint64_t>(r))
+                       : (static_cast<uint64_t>(r) - static_cast<uint64_t>(o));
 
-        if(err > atol)
+        if(static_cast<double>(err) > atol)
         {
             max_err = err > max_err ? err : max_err;
             err_count++;
