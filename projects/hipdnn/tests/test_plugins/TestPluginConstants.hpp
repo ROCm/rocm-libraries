@@ -45,6 +45,8 @@ inline std::string testDefaultGoodPluginPath()
         .string();
 }
 
+// Generic fake; reports K_OVERRIDE_EXECUTE_MIN_API_VERSION ("1.1.0"), below the
+// runtime pass-by-value floor.
 inline const std::string& testGoodPluginPath()
 {
     static const std::string s_testGoodPluginPath

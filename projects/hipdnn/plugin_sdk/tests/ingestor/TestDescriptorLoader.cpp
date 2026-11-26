@@ -2797,8 +2797,8 @@ INSTANTIATE_TEST_SUITE_P(
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
 
-/// The pattern compiles while the file is read, and the state manager probe accepts the
-/// compiled form.
+/// The pattern compiles while the file is read, and the state manager the loader builds
+/// serves that compiled pattern, the same instance the engine descriptor holds.
 TEST(TestDescriptorLoader, LoadsAnEngineWhoseGraphMatchIsADeclarativePattern)
 {
     const ScopedSymbols symbols;
@@ -2810,12 +2810,18 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseGraphMatchIsADeclarativePattern)
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(
-        &sets.front().set.engine.graphMatch);
+    const auto& pattern = sets.front().set.engine.graphMatchPattern;
     ASSERT_NE(pattern, nullptr);
-    ASSERT_NE(*pattern, nullptr);
-    EXPECT_EQ((*pattern)->nodeCount(), 1u);
-    EXPECT_EQ((*pattern)->rootOpcodes(), std::vector<std::string>{"pointwise"});
+    EXPECT_TRUE(sets.front().set.engine.graphMatchNativeSymbol.empty());
+    EXPECT_EQ(pattern->nodeCount(), 1u);
+    EXPECT_EQ(pattern->rootOpcodes(), std::vector<std::string>{"pointwise"});
+
+    ASSERT_NE(sets.front().stateManager, nullptr);
+    const auto& served = sets.front().stateManager->sharedState()->graphMatch();
+    const auto* servedPattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&served);
+    ASSERT_NE(servedPattern, nullptr) << "the loader-built state manager serves no pattern";
+    EXPECT_EQ(*servedPattern, pattern);
+    EXPECT_EQ(sets.front().stateManager->sharedState()->graphMatchFn(), nullptr);
 }
 
 TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
@@ -2828,9 +2834,155 @@ TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    const auto* native = std::get_if<NativeGraphMatch>(&sets.front().engine.graphMatch);
-    ASSERT_NE(native, nullptr);
-    EXPECT_EQ(native->symbol, "descriptorloader.native");
+    EXPECT_EQ(sets.front().engine.graphMatchNativeSymbol, "descriptorloader.native");
+    EXPECT_EQ(sets.front().engine.graphMatchPattern, nullptr);
+}
+
+namespace
+{
+
+const std::string NATIVE_GRAPH_MATCH_SYMBOL = "descriptorloader.native_graph_match";
+
+std::optional<BoundTokens> acceptAnyGraph(const MatchContext& /*context*/)
+{
+    return BoundTokens{};
+}
+
+/// Registers NATIVE_GRAPH_MATCH_SYMBOL for one test's duration.
+class ScopedNativeGraphMatch
+{
+public:
+    ScopedNativeGraphMatch()
+    {
+        GraphMatchRegistry::registerSymbol(NATIVE_GRAPH_MATCH_SYMBOL, &acceptAnyGraph);
+    }
+
+    ~ScopedNativeGraphMatch()
+    {
+        GraphMatchRegistry::unregisterSymbol(NATIVE_GRAPH_MATCH_SYMBOL);
+    }
+
+    ScopedNativeGraphMatch(const ScopedNativeGraphMatch&) = delete;
+    ScopedNativeGraphMatch& operator=(const ScopedNativeGraphMatch&) = delete;
+};
+
+/// The one set loaded from an engine whose UED declares @p graphMatch.
+DescriptorSet loadSetWithGraphMatch(const std::string& name, const nlohmann::json& graphMatch)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(name));
+    auto documents = makeSetDocuments('1', "test:" + name);
+    documentOfType(documents, ".ued.json")["graph_match"] = graphMatch;
+    writeDocuments(dir.path(), documents);
+    return loadFrom(dir.path()).at(0);
+}
+
+DescriptorSet loadNativeSet(const std::string& name)
+{
+    return loadSetWithGraphMatch(name, {{"native", NATIVE_GRAPH_MATCH_SYMBOL}});
+}
+
+DescriptorSet loadPatternSet(const std::string& name)
+{
+    return loadSetWithGraphMatch(name, {{"nodes", pointwisePatternNodes()}});
+}
+
+} // namespace
+
+/// Every way a caller spelled the graph_match symbol before `graph_match` had a `nodes` arm
+/// still builds a state manager for a native engine.
+TEST(TestDescriptorLoader, MakeStateManagerAcceptsEveryBaseSpelling)
+{
+    const ScopedSymbols symbols;
+    const ScopedNativeGraphMatch nativeGraphMatch;
+    const auto set = loadNativeSet("base_spellings");
+    ASSERT_EQ(set.engine.graphMatchNativeSymbol, NATIVE_GRAPH_MATCH_SYMBOL);
+    const auto expected = GraphMatchRegistry::resolve(NATIVE_GRAPH_MATCH_SYMBOL);
+    const auto graphMatchFnOf
+        = [](const auto& manager) { return manager->sharedState()->graphMatchFn(); };
+
+    EXPECT_EQ(
+        graphMatchFnOf(makeStateManager<LoaderHandle>(set, set.engine.graphMatchNativeSymbol)),
+        expected);
+    EXPECT_EQ(
+        graphMatchFnOf(makeStateManager<LoaderHandle>(set, "descriptorloader.native_graph_match")),
+        expected);
+    EXPECT_EQ(graphMatchFnOf(makeStateManager<LoaderHandle>(
+                  set, std::string{"descriptorloader.native_graph_match"})),
+              expected);
+    // A braced `{}` binds to the symbol overload and means no graph_match.
+    EXPECT_EQ(graphMatchFnOf(makeStateManager<LoaderHandle>(set, {})), nullptr);
+}
+
+TEST(TestDescriptorLoader, MakeStateManagerServesEitherArmThroughEngineGraphMatch)
+{
+    const ScopedSymbols symbols;
+    const ScopedNativeGraphMatch nativeGraphMatch;
+
+    const auto native = loadNativeSet("either_arm_native");
+    const auto nativeManager
+        = makeStateManager<LoaderHandle>(native, engineGraphMatch(native.engine));
+    EXPECT_EQ(nativeManager->sharedState()->graphMatchFn(),
+              GraphMatchRegistry::resolve(NATIVE_GRAPH_MATCH_SYMBOL));
+
+    const auto pattern = loadPatternSet("either_arm_pattern");
+    ASSERT_NE(pattern.engine.graphMatchPattern, nullptr);
+    const auto patternManager
+        = makeStateManager<LoaderHandle>(pattern, engineGraphMatch(pattern.engine));
+    EXPECT_EQ(patternManager->sharedState()->graphMatchFn(), nullptr);
+    const auto* served = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(
+        &patternManager->sharedState()->graphMatch());
+    ASSERT_NE(served, nullptr);
+    EXPECT_EQ(served->get(), pattern.engine.graphMatchPattern.get());
+}
+
+/// A symbol cannot carry a `nodes` pattern, so the symbol overload refuses a pattern engine
+/// rather than serve it with no graph_match or with a native match in its place. A braced
+/// `{}` binds to that overload too; the explicit opt-out is an empty GraphMatch.
+TEST(TestDescriptorLoader, MakeStateManagerStringOverloadRefusesAPatternEngine)
+{
+    const ScopedSymbols symbols;
+    const ScopedNativeGraphMatch nativeGraphMatch;
+    const auto set = loadPatternSet("string_refuses_pattern");
+    ASSERT_NE(set.engine.graphMatchPattern, nullptr);
+    ASSERT_TRUE(set.engine.graphMatchNativeSymbol.empty());
+
+    const auto expectRefused = [&set](const std::function<void()>& build) {
+        try
+        {
+            build();
+            ADD_FAILURE() << "expected the symbol overload to refuse a pattern engine";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            const std::string message = error.what();
+            EXPECT_NE(message.find(set.engine.name), std::string::npos) << message;
+            EXPECT_NE(message.find("engineGraphMatch"), std::string::npos) << message;
+            EXPECT_NE(message.find("GraphMatch{}"), std::string::npos) << message;
+            EXPECT_NE(message.find("std::monostate{}"), std::string::npos) << message;
+        }
+    };
+    {
+        SCOPED_TRACE("empty literal");
+        expectRefused([&set] { makeStateManager<LoaderHandle>(set, ""); });
+    }
+    {
+        SCOPED_TRACE("the engine's native symbol");
+        expectRefused(
+            [&set] { makeStateManager<LoaderHandle>(set, set.engine.graphMatchNativeSymbol); });
+    }
+    {
+        SCOPED_TRACE("braced");
+        expectRefused([&set] { makeStateManager<LoaderHandle>(set, {}); });
+    }
+    {
+        // The symbol resolves, so only the pattern guard can refuse it.
+        SCOPED_TRACE("a registered native symbol");
+        expectRefused([&set] { makeStateManager<LoaderHandle>(set, NATIVE_GRAPH_MATCH_SYMBOL); });
+    }
+
+    const auto optedOut = makeStateManager<LoaderHandle>(set, GraphMatch{});
+    EXPECT_EQ(optedOut->sharedState()->graphMatchFn(), nullptr);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(optedOut->sharedState()->graphMatch()));
 }
 
 /// Both UMDs carry criteria over a declarative pattern's binding: they compile while the
@@ -6511,7 +6663,7 @@ TEST(TestDescriptorLoader, NativeEngineSelectorRevisionIsStableForTrainedModels)
     DescriptorSet set;
     set.engine.id = fixtures::ENGINE_ID;
     set.engine.name = "test:pinned_native";
-    set.engine.graphMatch = NativeGraphMatch{"test.pinned.graph_match"};
+    set.engine.graphMatchNativeSymbol = "test.pinned.graph_match";
     set.engine.knobs = {"block_size"};
     set.schema.id = fixtures::SCHEMA_ID;
     set.matchers = {{fixtures::KERNEL_MATCHER_ID,
@@ -6553,6 +6705,163 @@ TEST(TestDescriptorLoader, ChangingAUddsFormulasChangesTheEngineSelectorRevision
 
     EXPECT_EQ(revisionWith(64, "launch_revision"), revisionWith(64, "launch_revision"));
     EXPECT_NE(revisionWith(64, "launch_revision"), revisionWith(128, "launch_revision"));
+}
+
+namespace
+{
+
+/// The smallest set engineSelectorRevision() reads, carrying @p nativeSymbol or @p pattern as
+/// its graph_match.
+DescriptorSet revisionSet(std::string nativeSymbol,
+                          std::shared_ptr<const CompiledGraphPattern> pattern = nullptr)
+{
+    DescriptorSet set;
+    set.engine.name = "test:pattern_revision";
+    set.engine.graphMatchNativeSymbol = std::move(nativeSymbol);
+    set.engine.graphMatchPattern = std::move(pattern);
+    set.engine.knobs = {"block_size"};
+    return set;
+}
+
+std::shared_ptr<const CompiledGraphPattern>
+    compileRevisionPattern(const std::string& nodes, const std::string& where = "revision.ued.json")
+{
+    return compileGraphPattern(nlohmann::json::parse(nodes), where);
+}
+
+/// `in_0=$a, in_1=$b -> out_0=$y`: the pattern every variant below changes in one way.
+const std::string BASE_REVISION_PATTERN = R"([{"kind": "op", "id": "add", "op": "pointwise",
+    "operands": {"in_0": "$a", "in_1": "$b"}, "results": {"out_0": "$y"}}])";
+
+/// `x=$x -> y=$y` over an opcode set, the base of the `one_of` variants.
+const std::string NORM_SET_PATTERN = R"([{"kind": "op", "id": "norm",
+    "op": {"one_of": ["rmsnorm", "layernorm"]},
+    "operands": {"x": "$x"}, "results": {"y": "$y"}}])";
+
+/// NORM_SET_PATTERN with its `one_of` members listed in the other order.
+const std::string NORM_SET_REORDERED_PATTERN = R"([{"kind": "op", "id": "norm",
+    "op": {"one_of": ["layernorm", "rmsnorm"]},
+    "operands": {"x": "$x"}, "results": {"y": "$y"}}])";
+
+struct PatternVariant
+{
+    std::string name;
+    std::string nodes;
+};
+
+/// Each differs from BASE_REVISION_PATTERN, NORM_SET_PATTERN or the first `layernorm` variant
+/// in what it matches or publishes, so each must select differently from every other variant.
+std::vector<PatternVariant> patternVariants()
+{
+    return {
+        {"base", BASE_REVISION_PATTERN},
+        {"unary", R"([{"kind": "op", "id": "add", "op": "pointwise",
+            "operands": {"in_0": "$a"}, "results": {"out_0": "$y"}}])"},
+        {"swapped_variables", R"([{"kind": "op", "id": "add", "op": "pointwise",
+            "operands": {"in_0": "$b", "in_1": "$a"}, "results": {"out_0": "$y"}}])"},
+        {"renamed_variable", R"([{"kind": "op", "id": "add", "op": "pointwise",
+            "operands": {"in_0": "$a", "in_1": "$c"}, "results": {"out_0": "$y"}}])"},
+        // The same variables in the same order, with $b bound to a different edge.
+        {"retargeted_edge", R"([{"kind": "op", "id": "add", "op": "pointwise",
+            "operands": {"in_0": "$a", "in_2": "$b"}, "results": {"out_0": "$y"}}])"},
+        {"optional_binding", R"([{"kind": "op", "id": "add", "op": "pointwise",
+            "operands": {"in_0": "$a", "in_1": "$b?"}, "results": {"out_0": "$y"}}])"},
+        {"renamed_node", R"([{"kind": "op", "id": "sum", "op": "pointwise",
+            "operands": {"in_0": "$a", "in_1": "$b"}, "results": {"out_0": "$y"}}])"},
+        {"opcode_set", NORM_SET_PATTERN},
+        {"opcode_set_member_replaced", R"([{"kind": "op", "id": "norm",
+            "op": {"one_of": ["rmsnorm", "batchnorm"]},
+            "operands": {"x": "$x"}, "results": {"y": "$y"}}])"},
+        // These two differ only in the edge $b binds. Both edges are required, so the unnamed
+        // optional edges are the same, and the sorted edges ([scale, x] and [bias, x]) bind
+        // the variables in the same order. Only the edge names tell the two apart.
+        {"required_edge", R"([{"kind": "op", "id": "norm", "op": "layernorm",
+            "operands": {"x": "$a", "scale": "$b"}, "results": {"y": "$y"}}])"},
+        {"moved_required_edge", R"([{"kind": "op", "id": "norm", "op": "layernorm",
+            "operands": {"x": "$a", "bias": "$b"}, "results": {"y": "$y"}}])"},
+    };
+}
+
+} // namespace
+
+/// A packer copies one UED into every arch shard and each copy compiles on its own, so the
+/// revision a model was trained against must not depend on which copy, or which file, served.
+TEST(TestDescriptorLoader, PatternEngineSelectorRevisionIsStableAcrossCompiles)
+{
+    const auto gfx942 = compileRevisionPattern(BASE_REVISION_PATTERN, "gfx942/engine.ued.json");
+    const auto gfx950 = compileRevisionPattern(BASE_REVISION_PATTERN, "gfx950/engine.ued.json");
+
+    EXPECT_EQ(engineSelectorRevision(revisionSet({}, gfx942)),
+              engineSelectorRevision(revisionSet({}, gfx950)));
+}
+
+/// A pattern that matches or publishes differently is a different selector, so a model
+/// trained against one is not served for another. That includes a pattern that binds the same
+/// variables in the same order to different edges.
+TEST(TestDescriptorLoader, PatternEngineSelectorRevisionTracksThePattern)
+{
+    std::map<std::string, std::string> revisions{
+        {"no_graph_match", engineSelectorRevision(revisionSet({}))},
+        {"native", engineSelectorRevision(revisionSet("test.revision.graph_match"))}};
+    for(const auto& variant : patternVariants())
+    {
+        revisions.emplace(
+            variant.name,
+            engineSelectorRevision(revisionSet({}, compileRevisionPattern(variant.nodes))));
+    }
+
+    for(auto lhs = revisions.begin(); lhs != revisions.end(); ++lhs)
+    {
+        for(auto rhs = std::next(lhs); rhs != revisions.end(); ++rhs)
+        {
+            EXPECT_NE(lhs->second, rhs->second) << lhs->first << " vs " << rhs->first;
+        }
+    }
+}
+
+/// Pattern equality, which collapses per-arch copies of one UED, and the selector revision
+/// share one identity: two patterns compare equal exactly when they select alike.
+TEST(TestDescriptorLoader, PatternEqualityAgreesWithTheSelectorRevision)
+{
+    auto variants = patternVariants();
+    variants.push_back({"base_recompiled", BASE_REVISION_PATTERN});
+
+    std::vector<std::pair<std::string, std::shared_ptr<const CompiledGraphPattern>>> patterns;
+    patterns.reserve(variants.size());
+    for(const auto& variant : variants)
+    {
+        patterns.emplace_back(variant.name,
+                              compileRevisionPattern(variant.nodes, variant.name + ".ued.json"));
+    }
+
+    // The base pattern and its recompiled copy are the only equal pair.
+    ASSERT_EQ(patterns.front().first, "base");
+    EXPECT_TRUE(*patterns.front().second == *patterns.back().second);
+
+    for(const auto& [lhsName, lhs] : patterns)
+    {
+        for(const auto& [rhsName, rhs] : patterns)
+        {
+            const bool sameRevision = engineSelectorRevision(revisionSet({}, lhs))
+                                      == engineSelectorRevision(revisionSet({}, rhs));
+            EXPECT_EQ(*lhs == *rhs, sameRevision) << lhsName << " vs " << rhsName;
+        }
+    }
+}
+
+/// At most one `one_of` member can match a graph node, so the order members are listed in
+/// cannot change what a pattern matches or publishes. Reordering them keeps the pattern equal
+/// and keeps the selector revision a model was trained against.
+TEST(TestDescriptorLoader, OpcodeSetMemberOrderLeavesPatternAndSelectorRevisionUnchanged)
+{
+    const auto authored = compileRevisionPattern(NORM_SET_PATTERN);
+    const auto reordered = compileRevisionPattern(NORM_SET_REORDERED_PATTERN);
+
+    EXPECT_TRUE(*authored == *reordered);
+    EXPECT_EQ(detail::compiledPatternIdentity(*authored),
+              detail::compiledPatternIdentity(*reordered));
+    EXPECT_EQ(engineSelectorRevision(revisionSet({}, authored)),
+              engineSelectorRevision(revisionSet({}, reordered)));
 }
 
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
@@ -7621,6 +7930,15 @@ INSTANTIATE_TEST_SUITE_P(
         SlotRule{"shared_workspace_without_graph_match",
                  false,
                  [](Documents& d) { documentOfType(d, ".ued.json").erase("graph_match"); },
+                 {"key 'shared_workspace' in", "requires a native graph_match"},
+                 0},
+        // The pattern compiles, so only the native-arm requirement rejects the file.
+        SlotRule{"shared_workspace_beside_a_nodes_pattern",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["graph_match"]
+                         = {{"nodes", pointwisePatternNodes()}};
+                 },
                  {"key 'shared_workspace' in", "requires a native graph_match"},
                  0},
         SlotRule{"shared_workspace_on_unslotted_engine",

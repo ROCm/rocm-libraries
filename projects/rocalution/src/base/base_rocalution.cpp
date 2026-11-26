@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -145,6 +145,27 @@ namespace rocalution
             assert(src.is_accel_());
 
             // move to accelerator
+            this->MoveToAccelerator();
+        }
+    }
+
+    template <typename ValueType>
+    void BaseRocalution<ValueType>::MoveToBackend(const BaseRocalution<ValueType>& src)
+    {
+        log_debug(this, "BaseRocalution::MoveToBackend()", (const void*&)src);
+
+        assert(this != &src);
+
+        this->local_backend_ = src.local_backend_;
+
+        if(src.is_host_())
+        {
+            this->MoveToHost();
+        }
+        else
+        {
+            assert(src.is_accel_());
+
             this->MoveToAccelerator();
         }
     }

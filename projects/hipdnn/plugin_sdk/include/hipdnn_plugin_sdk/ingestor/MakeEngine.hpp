@@ -12,7 +12,6 @@
 #include <set>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -94,61 +93,15 @@ inline nlohmann::json rankerIdentity(const HeuristicDescriptor& descriptor)
                           {"transform", descriptor.score.transform}};
 }
 
-/// What identifies an engine's graph_match to a selector revision: the bare native symbol, or
-/// the compiled pattern's nodes, variables and the opcodes each node admits. The native arm is
-/// the bare string so a native engine keeps the selector revision its trained models record.
-/// Equal patterns yield equal identities; any change to what a pattern matches yields a
-/// different one.
-inline nlohmann::json graphMatchIdentity(const GraphMatch& graphMatch)
+/// What identifies an engine's graph_match to a selector revision: the bare native symbol
+/// (empty when the engine declares none), or detail::compiledPatternIdentity() of its
+/// compiled pattern. The native arm is the bare string so a native engine keeps the selector
+/// revision its trained models record. Two patterns yield equal identities exactly when they
+/// compare equal.
+inline nlohmann::json graphMatchIdentity(const EngineDescriptor& engine)
 {
-    if(const auto* native = std::get_if<NativeGraphMatch>(&graphMatch))
-    {
-        return native->symbol;
-    }
-    const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&graphMatch);
-    if(pattern == nullptr || *pattern == nullptr)
-    {
-        return std::string{};
-    }
-    const auto& compiled = **pattern;
-    auto nodes = nlohmann::json::array();
-    for(const auto& node : compiled.nodes())
-    {
-        auto candidates = nlohmann::json::array();
-        for(const auto& candidate : node.candidates)
-        {
-            candidates.push_back(candidate.schema->opcode);
-        }
-        auto attributes = nlohmann::json::array();
-        for(const auto& attribute : node.attributes)
-        {
-            attributes.push_back({{"token", attribute.token}, {"optional", attribute.optional}});
-        }
-        auto variableNames = [&](const std::vector<size_t>& indices) {
-            auto names = nlohmann::json::array();
-            for(const auto index : indices)
-            {
-                names.push_back(compiled.variables()[index].name);
-            }
-            return names;
-        };
-        nodes.push_back({{"id", node.id},
-                         {"opcodes", std::move(candidates)},
-                         {"operands", variableNames(node.operandVariables)},
-                         {"results", variableNames(node.resultVariables)},
-                         {"attributes", std::move(attributes)}});
-    }
-    auto variables = nlohmann::json::array();
-    for(const auto& variable : compiled.variables())
-    {
-        variables.push_back({{"name", variable.name},
-                             {"graph_input", variable.graphInput},
-                             {"optional", variable.optional}});
-    }
-    return nlohmann::json{
-        {"nodes", std::move(nodes)},
-        {"variables", std::move(variables)},
-    };
+    return engine.graphMatchPattern ? compiledPatternIdentity(*engine.graphMatchPattern)
+                                    : nlohmann::json(engine.graphMatchNativeSymbol);
 }
 
 } // namespace detail
@@ -269,7 +222,7 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
 {
     auto selector = enginePredictionProvenance(set);
     selector["selector"] = "generic-untuned-v1";
-    selector["graph_match"] = detail::graphMatchIdentity(set.engine.graphMatch);
+    selector["graph_match"] = detail::graphMatchIdentity(set.engine);
     selector["knobs"] = set.engine.knobs;
     selector["rankers"] = nlohmann::json::object();
     detail::describeRankers(
@@ -432,29 +385,24 @@ inline EngineIdentity engineIdentity(const DescriptorSet& set)
     return identity;
 }
 
-/// Takes @p set by value so a caller building both an engine and its state manager
-/// builds the set once.
-/// @param graphMatch The engine's `graph_match`. std::monostate means the engine
-///        declares none and binds no tokens.
-/// @param describedBy Names the engine in a native graph_match resolution failure and in the
-///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a
-///        caller that already moved `set.engine` out must pass it, or both name nothing.
-/// @param engine The engine's identity, locating its winner-cache shard and versioning its
-///        catalog cache. Defaulted from @p set; pass it if `set.engine` was moved out, or
-///        the disk cache is disabled.
-/// @param knobs The UED's declared knobs for RFC 0019 §6.3 check 2. Defaulted from @p set;
-///        pass it if `set.engine` was moved out, or the check passes vacuously.
-///
-/// A set with `slots` builds a slotted manager, each slot's ranker built against that slot's own
-/// KMD fields and knobs (RFC 0021 §6).
-template <typename THandle>
+/// As the makeStateManager() overload that takes a symbol, declared below, except that
+/// @p graphMatchArg may be either arm of `graph_match`: std::monostate for none, a
+/// NativeGraphMatch, or a compiled `nodes` pattern. Pass engineGraphMatch(set.engine),
+/// read before @p set is moved, to serve whichever arm the UED declares.
+/// @throws std::invalid_argument a null compiled graph pattern, or as the overload that takes
+///         a symbol.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+template <typename THandle,
+          typename TGraphMatch,
+          typename = decltype(GraphMatch(std::declval<TGraphMatch>()))>
 std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(DescriptorSet set,
-                                                                      GraphMatch graphMatch,
+                                                                      TGraphMatch graphMatchArg,
                                                                       std::string describedBy = {},
                                                                       EngineIdentity engine = {},
                                                                       std::vector<std::string> knobs
                                                                       = {})
 {
+    GraphMatch graphMatch(std::move(graphMatchArg));
     if(describedBy.empty())
     {
         describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
@@ -522,28 +470,49 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(Descriptor
         std::move(engine));
 }
 
-/// The `makeStateManager` overload for callers that hold the native graph_match symbol as a
-/// string. An empty @p graphMatchSymbol means the engine declares no graph_match.
+/// Takes @p set by value so a caller building both an engine and its state manager
+/// builds the set once.
+/// @param graphMatchSymbol The engine's `graph_match` native symbol; empty means the
+///        engine declares none and binds no tokens.
+/// @param describedBy Names the engine in the graph_match resolution failure and in the
+///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a
+///        caller that already moved `set.engine` out must pass it, or both name nothing.
+/// @param engine The engine's identity, locating its winner-cache shard and versioning its
+///        catalog cache. Defaulted from @p set; pass it if `set.engine` was moved out, or
+///        the disk cache is disabled.
+/// @param knobs The UED's declared knobs for RFC 0019 §6.3 check 2. Defaulted from @p set;
+///        pass it if `set.engine` was moved out, or the check passes vacuously.
 ///
-/// The symbol is taken by value, so a string literal deduces `const char*` rather than an array
-/// type, and a braced `{}` cannot deduce it: `{}` reaches the GraphMatch overload as
-/// std::monostate, which also means no graph_match.
-template <typename THandle,
-          typename TSymbol,
-          std::enable_if_t<std::is_convertible_v<TSymbol, std::string>, int> = 0>
-[[deprecated("use NativeGraphMatch{symbol}")]] std::unique_ptr<KernelIngestorStateManager<THandle>>
+/// A set with `slots` builds a slotted manager, each slot's ranker built against that slot's own
+/// KMD fields and knobs (RFC 0021 §6).
+///
+/// Carries only the `native` arm of `graph_match`. An empty symbol means none. Pass a
+/// GraphMatch (see engineGraphMatch()) to serve a `nodes` pattern.
+/// @throws std::invalid_argument when `set.engine` has a `nodes` pattern, which a symbol
+///         cannot carry; a braced `{}` selects this overload too. Pass
+///         engineGraphMatch(set.engine) to serve the pattern, or GraphMatch{} or
+///         std::monostate{} to opt out of graph matching.
+template <typename THandle>
+std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
-                     TSymbol graphMatchSymbol,
+                     const std::string& graphMatchSymbol,
                      std::string describedBy = {},
                      EngineIdentity engine = {},
                      std::vector<std::string> knobs = {})
 {
-    return makeStateManager<THandle>(
-        std::move(set),
-        detail::graphMatchFromNativeSymbol(std::move(graphMatchSymbol)),
-        std::move(describedBy),
-        std::move(engine),
-        std::move(knobs));
+    if(set.engine.graphMatchPattern != nullptr)
+    {
+        throw std::invalid_argument(
+            describeDescriptor("engine", set.engine.name, set.engine.id)
+            + " declares a graph_match `nodes` pattern, which a graph_match symbol cannot "
+              "carry; pass engineGraphMatch(set.engine) to serve the pattern, or GraphMatch{} "
+              "or std::monostate{} to opt out of graph matching");
+    }
+    return makeStateManager<THandle>(std::move(set),
+                                     detail::graphMatchFromNativeSymbol(graphMatchSymbol),
+                                     std::move(describedBy),
+                                     std::move(engine),
+                                     std::move(knobs));
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a
@@ -564,7 +533,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto provenance = enginePredictionProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);
     auto engine = set.engine;
-    auto graphMatch = engine.graphMatch;
+    auto graphMatch = engineGraphMatch(set.engine);
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
         std::move(engine),
         makeStateManager<THandle>(std::move(set),

@@ -50,7 +50,7 @@ TEST(TestFlydslSdpaRdnaPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     const auto& set = loadedSet(FLYDSL_SDPA_RDNA.engineName);
 
     EXPECT_EQ(distinctPackIdCount(set), 1U);
-    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), FLYDSL_SDPA_RDNA.graphMatcher);
+    EXPECT_EQ(set.engine.graphMatchNativeSymbol, FLYDSL_SDPA_RDNA.graphMatcher);
 
     // SdpaAttributes is its own union arm, so admitting the node type IS the operation
     // test: there is no graph-scoped matcher to do it a second time.

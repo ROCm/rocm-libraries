@@ -28,6 +28,9 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+namespace detail
+{
+
 /// Maximum nodes in one pattern. This and MAX_PATTERN_MATCH_STEPS keep a broken or
 /// hostile UED from making compile or match unbounded.
 inline constexpr size_t MAX_PATTERN_NODES = 32;
@@ -39,9 +42,6 @@ inline constexpr size_t MAX_PATTERN_NODES = 32;
 /// is 528 at MAX_PATTERN_NODES. Only graphs with many interchangeable nodes reach the
 /// budget. Their search grows factorially, so no practical budget would finish it.
 inline constexpr size_t MAX_PATTERN_MATCH_STEPS = 65536;
-
-namespace detail
-{
 
 /// Keys a pattern node object may carry, besides extension keys.
 inline constexpr std::array<std::string_view, 5> PATTERN_NODE_KEYS{

@@ -185,7 +185,12 @@ constexpr size_t alignSharedWorkspace(size_t sharedBytes)
 /// shared size rounded up to SHARED_WORKSPACE_ALIGNMENT.
 inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
 
-/// An engine's GraphMatch with the native arm's symbol replaced by the function it names.
+/// An engine's GraphMatch as KernelIngestorSharedState holds it, with the native arm's symbol
+/// replaced by the function it names:
+///  - std::monostate: no `graph_match`.
+///  - GraphMatchFn: the `native` arm, resolved through GraphMatchRegistry.
+///  - CompiledGraphPattern: the declarative `nodes` arm. Never null.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 using ResolvedGraphMatch
     = std::variant<std::monostate, GraphMatchFn, std::shared_ptr<const CompiledGraphPattern>>;
 
@@ -235,24 +240,27 @@ class KernelIngestorSharedState
 
 public:
     /// An unslotted engine: one implicit slot.
-    /// @throws std::invalid_argument bad pack reference, two kernels sharing a metadata tuple
-    ///         that compete at the same arch tier on a device, or a null compiled graph pattern.
-    /// @throws std::runtime_error a native UMD or the engine's native graph_match names a
-    ///         symbol this build does not ship.
+    /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
+    ///         that compete at the same arch tier on a device.
+    /// @throws std::runtime_error a native UMD or the engine's graph_match names a symbol
+    ///         this build does not ship.
     ///
-    /// Matcher, dispatch, and native graph_match symbols resolve here, eagerly, so a missing
+    /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
-    /// isApplicable(). A declarative graph_match and declarative criteria arrive already
-    /// compiled.
-    /// @param describedBy Names the engine when a native graph_match symbol fails to
-    ///        resolve. That symbol lives on the UED, so unlike matcher and dispatch symbols
-    ///        it has no descriptor of its own to name.
+    /// isApplicable(). Declarative criteria arrive already compiled.
+    /// @param describedBy Names the engine in the graph_match resolution failure, which
+    ///        is the only one of the three that has no descriptor of its own to name:
+    ///        the symbol lives on the UED, so without this the diagnostic would carry
+    ///        the symbol string alone.
+    ///
+    /// Carries only the `native` arm of `graph_match`. An empty symbol means none. Pass a
+    /// GraphMatch (see engineGraphMatch()) to serve a `nodes` pattern.
     KernelIngestorSharedState(MetadataSchema schema,
                               std::vector<MatchDescriptor> matchers,
                               std::vector<DispatchDescriptor> dispatches,
                               std::vector<KernelDescriptorPack> packs,
                               std::shared_ptr<IKernelHeuristic> heuristic,
-                              GraphMatch graphMatch,
+                              const std::string& graphMatchSymbol,
                               const std::string& describedBy = {})
         : KernelIngestorSharedState(
               false,
@@ -260,7 +268,7 @@ public:
               {},
               std::move(matchers),
               std::move(dispatches),
-              std::move(graphMatch),
+              detail::graphMatchFromNativeSymbol(graphMatchSymbol),
               describedBy)
     {
     }
@@ -274,10 +282,13 @@ public:
     ///        §6); empty when the engine declares none.
     /// @throws std::invalid_argument as the unslotted constructor, and a slot list that is
     ///         empty or repeats a name.
+    ///
+    /// Carries only the `native` arm of `graph_match`. An empty symbol means none. Pass a
+    /// GraphMatch (see engineGraphMatch()) to serve a `nodes` pattern.
     KernelIngestorSharedState(std::vector<KernelSlotInput> slots,
                               std::vector<MatchDescriptor> matchers,
                               std::vector<DispatchDescriptor> dispatches,
-                              GraphMatch graphMatch,
+                              const std::string& graphMatchSymbol,
                               std::string sharedWorkspaceToken = {},
                               const std::string& describedBy = {})
         : KernelIngestorSharedState(true,
@@ -285,7 +296,57 @@ public:
                                     std::move(sharedWorkspaceToken),
                                     std::move(matchers),
                                     std::move(dispatches),
-                                    std::move(graphMatch),
+                                    detail::graphMatchFromNativeSymbol(graphMatchSymbol),
+                                    describedBy)
+    {
+    }
+
+    /// An unslotted engine whose graph_match may be either arm: std::monostate for none, a
+    /// NativeGraphMatch resolved here through GraphMatchRegistry, or a compiled `nodes`
+    /// pattern. engineGraphMatch() builds the right one from an EngineDescriptor.
+    /// Otherwise as the unslotted constructor that takes a symbol.
+    /// @throws std::invalid_argument as that constructor, or a null compiled graph pattern.
+    /// @param describedBy Names the engine when a native symbol fails to resolve or the
+    ///        pattern is null.
+    ///
+    /// @p graphMatch is deduced, so a braced `{}` cannot reach this constructor: it selects
+    /// the symbol constructor, where it means no graph_match.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
+    template <typename TGraphMatch, typename = decltype(GraphMatch(std::declval<TGraphMatch>()))>
+    KernelIngestorSharedState(MetadataSchema schema,
+                              std::vector<MatchDescriptor> matchers,
+                              std::vector<DispatchDescriptor> dispatches,
+                              std::vector<KernelDescriptorPack> packs,
+                              std::shared_ptr<IKernelHeuristic> heuristic,
+                              TGraphMatch graphMatch,
+                              const std::string& describedBy = {})
+        : KernelIngestorSharedState(
+              false,
+              implicitSlot(std::move(schema), std::move(packs), std::move(heuristic)),
+              {},
+              std::move(matchers),
+              std::move(dispatches),
+              GraphMatch(std::move(graphMatch)),
+              describedBy)
+    {
+    }
+
+    /// A slotted engine whose graph_match may be either arm, as the unslotted GraphMatch
+    /// constructor. Otherwise as the slotted constructor that takes a symbol.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
+    template <typename TGraphMatch, typename = decltype(GraphMatch(std::declval<TGraphMatch>()))>
+    KernelIngestorSharedState(std::vector<KernelSlotInput> slots,
+                              std::vector<MatchDescriptor> matchers,
+                              std::vector<DispatchDescriptor> dispatches,
+                              TGraphMatch graphMatch,
+                              std::string sharedWorkspaceToken = {},
+                              const std::string& describedBy = {})
+        : KernelIngestorSharedState(true,
+                                    slotStates(std::move(slots)),
+                                    std::move(sharedWorkspaceToken),
+                                    std::move(matchers),
+                                    std::move(dispatches),
+                                    GraphMatch(std::move(graphMatch)),
                                     describedBy)
     {
     }
@@ -322,6 +383,16 @@ public:
         return _dispatches;
     }
 
+    /// The native function this engine's graph_match symbol resolved to; nullptr when the
+    /// engine declares no graph_match or serves a `nodes` pattern (see graphMatch()).
+    GraphMatchFn graphMatchFn() const
+    {
+        const auto* native = std::get_if<GraphMatchFn>(&_graphMatch);
+        return native != nullptr ? *native : nullptr;
+    }
+
+    /// The engine's graph_match, either arm, with a native symbol resolved to its function.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
     const ResolvedGraphMatch& graphMatch() const
     {
         return _graphMatch;
@@ -975,26 +1046,29 @@ public:
     static constexpr size_t DEFAULT_WINNER_CACHE_CAPACITY = 4096;
 
     /// An unslotted engine: one implicit slot.
-    /// @throws std::invalid_argument bad pack reference, two kernels sharing a metadata tuple
-    ///         that compete at the same arch tier on a device, or a null compiled graph pattern.
-    /// @throws std::runtime_error a native UMD or the engine's native graph_match names a
-    ///         symbol this build does not ship.
+    /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
+    ///         that compete at the same arch tier on a device.
+    /// @throws std::runtime_error a native UMD or the engine's graph_match names a symbol
+    ///         this build does not ship.
     ///
-    /// Matcher, dispatch, and native graph_match symbols resolve here, eagerly, so a missing
+    /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
-    /// isApplicable(). A declarative graph_match and declarative criteria arrive already
-    /// compiled.
-    /// @param describedBy Names the engine when a native graph_match symbol fails to
-    ///        resolve. That symbol lives on the UED, so unlike matcher and dispatch symbols
-    ///        it has no descriptor of its own to name.
+    /// isApplicable(). Declarative criteria arrive already compiled.
+    /// @param describedBy Names the engine in the graph_match resolution failure, which
+    ///        is the only one of the three that has no descriptor of its own to name:
+    ///        the symbol lives on the UED, so without this the diagnostic would carry
+    ///        the symbol string alone.
     /// @param engine The engine's identity; composes the on-disk winner-cache shard path and
     ///        the version half of every `CatalogKey`. An empty name disables the disk cache.
+    ///
+    /// Carries only the `native` arm of `graph_match`. An empty symbol means none. Pass a
+    /// GraphMatch (see engineGraphMatch()) to serve a `nodes` pattern.
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
                                std::vector<KernelDescriptorPack> packs,
                                std::shared_ptr<IKernelHeuristic> heuristic,
-                               GraphMatch graphMatch,
+                               const std::string& graphMatchSymbol,
                                const std::string& describedBy = {},
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
                                EngineIdentity engine = {},
@@ -1005,7 +1079,7 @@ public:
                                                                          std::move(dispatches),
                                                                          std::move(packs),
                                                                          std::move(heuristic),
-                                                                         std::move(graphMatch),
+                                                                         graphMatchSymbol,
                                                                          describedBy),
               catalogCacheCapacity,
               std::move(engine),
@@ -1022,10 +1096,13 @@ public:
     ///        §6); empty when the engine declares none.
     /// @throws std::invalid_argument as the unslotted constructor, and a slot list that is
     ///         empty or repeats a name.
+    ///
+    /// Carries only the `native` arm of `graph_match`. An empty symbol means none. Pass a
+    /// GraphMatch (see engineGraphMatch()) to serve a `nodes` pattern.
     KernelIngestorStateManager(std::vector<KernelSlotInput> slots,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
-                               GraphMatch graphMatch,
+                               const std::string& graphMatchSymbol,
                                std::string sharedWorkspaceToken = {},
                                const std::string& describedBy = {},
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
@@ -1035,7 +1112,7 @@ public:
                                          std::move(slots),
                                          std::move(matchers),
                                          std::move(dispatches),
-                                         std::move(graphMatch),
+                                         graphMatchSymbol,
                                          std::move(sharedWorkspaceToken),
                                          describedBy),
                                      catalogCacheCapacity,
@@ -1044,67 +1121,63 @@ public:
     {
     }
 
-    /// The unslotted constructor for callers that hold the native graph_match symbol as a
-    /// string. An empty @p graphMatchSymbol means the engine declares no graph_match.
+    /// An unslotted engine whose graph_match may be either arm: std::monostate for none, a
+    /// NativeGraphMatch resolved here through GraphMatchRegistry, or a compiled `nodes`
+    /// pattern. engineGraphMatch() builds the right one from an EngineDescriptor.
+    /// Otherwise as the unslotted constructor that takes a symbol.
+    /// @throws std::invalid_argument as that constructor, or a null compiled graph pattern.
     ///
-    /// The symbol is taken by value, so a string literal deduces `const char*` rather than an
-    /// array type, and a braced `{}` cannot deduce it: `{}` reaches the GraphMatch constructor
-    /// as std::monostate, which also means no graph_match.
-    template <typename TSymbol,
-              // A slotted call with a literal describedBy instantiates this constraint for
-              // the literal; clang-tidy reports the literal's array type here, though no array
-              // is declared.
-              // NOLINTNEXTLINE(modernize-avoid-c-arrays) - see above
-              std::enable_if_t<std::is_convertible_v<TSymbol, std::string>, int> = 0>
-    [[deprecated("use NativeGraphMatch{symbol}")]] KernelIngestorStateManager(
-        MetadataSchema schema,
-        std::vector<MatchDescriptor> matchers,
-        std::vector<DispatchDescriptor> dispatches,
-        std::vector<KernelDescriptorPack> packs,
-        std::shared_ptr<IKernelHeuristic> heuristic,
-        TSymbol graphMatchSymbol,
-        const std::string& describedBy = {},
-        size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
-        EngineIdentity engine = {},
-        size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : KernelIngestorStateManager(
-              std::move(schema),
-              std::move(matchers),
-              std::move(dispatches),
-              std::move(packs),
-              std::move(heuristic),
-              detail::graphMatchFromNativeSymbol(std::move(graphMatchSymbol)),
-              describedBy,
-              catalogCacheCapacity,
-              std::move(engine),
-              winnerCacheCapacity)
+    /// @p graphMatch is deduced, so a braced `{}` cannot reach this constructor: it selects
+    /// the symbol constructor, where it means no graph_match.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
+    template <typename TGraphMatch, typename = decltype(GraphMatch(std::declval<TGraphMatch>()))>
+    KernelIngestorStateManager(MetadataSchema schema,
+                               std::vector<MatchDescriptor> matchers,
+                               std::vector<DispatchDescriptor> dispatches,
+                               std::vector<KernelDescriptorPack> packs,
+                               std::shared_ptr<IKernelHeuristic> heuristic,
+                               TGraphMatch graphMatch,
+                               const std::string& describedBy = {},
+                               size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+                               EngineIdentity engine = {},
+                               size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
+        : KernelIngestorStateManager(std::make_shared<const KernelIngestorSharedState<THandle>>(
+                                         std::move(schema),
+                                         std::move(matchers),
+                                         std::move(dispatches),
+                                         std::move(packs),
+                                         std::move(heuristic),
+                                         GraphMatch(std::move(graphMatch)),
+                                         describedBy),
+                                     catalogCacheCapacity,
+                                     std::move(engine),
+                                     winnerCacheCapacity)
     {
     }
 
-    /// The slotted constructor for callers that hold the native graph_match symbol as a
-    /// string, as the unslotted one above.
-    template <typename TSymbol,
-              std::enable_if_t<std::is_convertible_v<TSymbol, std::string>, int> = 0>
-    [[deprecated("use NativeGraphMatch{symbol}")]] KernelIngestorStateManager(
-        std::vector<KernelSlotInput> slots,
-        std::vector<MatchDescriptor> matchers,
-        std::vector<DispatchDescriptor> dispatches,
-        TSymbol graphMatchSymbol,
-        std::string sharedWorkspaceToken = {},
-        const std::string& describedBy = {},
-        size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
-        EngineIdentity engine = {},
-        size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : KernelIngestorStateManager(
-              std::move(slots),
-              std::move(matchers),
-              std::move(dispatches),
-              detail::graphMatchFromNativeSymbol(std::move(graphMatchSymbol)),
-              std::move(sharedWorkspaceToken),
-              describedBy,
-              catalogCacheCapacity,
-              std::move(engine),
-              winnerCacheCapacity)
+    /// A slotted engine whose graph_match may be either arm, as the unslotted GraphMatch
+    /// constructor. Otherwise as the slotted constructor that takes a symbol.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
+    template <typename TGraphMatch, typename = decltype(GraphMatch(std::declval<TGraphMatch>()))>
+    KernelIngestorStateManager(std::vector<KernelSlotInput> slots,
+                               std::vector<MatchDescriptor> matchers,
+                               std::vector<DispatchDescriptor> dispatches,
+                               TGraphMatch graphMatch,
+                               std::string sharedWorkspaceToken = {},
+                               const std::string& describedBy = {},
+                               size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+                               EngineIdentity engine = {},
+                               size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
+        : KernelIngestorStateManager(std::make_shared<const KernelIngestorSharedState<THandle>>(
+                                         std::move(slots),
+                                         std::move(matchers),
+                                         std::move(dispatches),
+                                         GraphMatch(std::move(graphMatch)),
+                                         std::move(sharedWorkspaceToken),
+                                         describedBy),
+                                     catalogCacheCapacity,
+                                     std::move(engine),
+                                     winnerCacheCapacity)
     {
     }
 

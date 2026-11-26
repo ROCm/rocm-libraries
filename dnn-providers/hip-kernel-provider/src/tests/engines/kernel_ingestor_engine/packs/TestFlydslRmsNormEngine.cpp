@@ -1847,10 +1847,10 @@ TEST(TestGpuFlydslRmsNormDispatch, LoadsTheModuleOnceAcrossTwoPrepares)
 std::unique_ptr<KernelIngestorStateManager<Handle>> flydslStateManager()
 {
     registerNativeIngestorSymbols();
-    // Copied: the factory takes the set by value. `graphMatch` is read from
+    // Copied: the factory takes the set by value. `graphMatchNativeSymbol` is read from
     // the loaded set, which outlives every manager built from it.
     const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
-    return makeStateManager<Handle>(set, set.engine.graphMatch);
+    return makeStateManager<Handle>(set, set.engine.graphMatchNativeSymbol);
 }
 
 /// The winner key for @p context: graph content plus device, exactly as

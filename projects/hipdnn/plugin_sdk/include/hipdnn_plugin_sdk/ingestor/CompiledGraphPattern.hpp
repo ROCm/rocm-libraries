@@ -11,7 +11,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,6 +30,9 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+namespace detail
+{
+
 /// A pattern variable.
 struct PatternVariable
 {
@@ -40,17 +42,6 @@ struct PatternVariable
     /// Bound with `?`. If the graph omits it, the match succeeds and publishes nothing for it.
     bool optional = false;
 };
-
-inline bool operator==(const PatternVariable& lhs, const PatternVariable& rhs)
-{
-    return std::tie(lhs.name, lhs.graphInput, lhs.optional)
-           == std::tie(rhs.name, rhs.graphInput, rhs.optional);
-}
-
-inline bool operator!=(const PatternVariable& lhs, const PatternVariable& rhs)
-{
-    return !(lhs == rhs);
-}
 
 /// One opcode a pattern node may match, with its edges resolved.
 struct CompiledPatternCandidate
@@ -68,20 +59,6 @@ struct CompiledPatternCandidate
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::AttributeSchema*> attributes;
 };
 
-/// The schema pointers address the single op-schema registry, so equal pointers mean the
-/// same opcode, edge, or attribute.
-inline bool operator==(const CompiledPatternCandidate& lhs, const CompiledPatternCandidate& rhs)
-{
-    return std::tie(lhs.schema, lhs.operands, lhs.results, lhs.unnamedOptionalEdges, lhs.attributes)
-           == std::tie(
-               rhs.schema, rhs.operands, rhs.results, rhs.unnamedOptionalEdges, rhs.attributes);
-}
-
-inline bool operator!=(const CompiledPatternCandidate& lhs, const CompiledPatternCandidate& rhs)
-{
-    return !(lhs == rhs);
-}
-
 /// An attribute a pattern node publishes. Every candidate declares it with the same
 /// value kind.
 struct CompiledPatternAttribute
@@ -90,16 +67,6 @@ struct CompiledPatternAttribute
     std::string token;
     bool optional = false;
 };
-
-inline bool operator==(const CompiledPatternAttribute& lhs, const CompiledPatternAttribute& rhs)
-{
-    return std::tie(lhs.token, lhs.optional) == std::tie(rhs.token, rhs.optional);
-}
-
-inline bool operator!=(const CompiledPatternAttribute& lhs, const CompiledPatternAttribute& rhs)
-{
-    return !(lhs == rhs);
-}
 
 struct CompiledPatternNode
 {
@@ -114,18 +81,7 @@ struct CompiledPatternNode
     std::vector<CompiledPatternCandidate> candidates;
 };
 
-inline bool operator==(const CompiledPatternNode& lhs, const CompiledPatternNode& rhs)
-{
-    return std::tie(
-               lhs.id, lhs.operandVariables, lhs.resultVariables, lhs.attributes, lhs.candidates)
-           == std::tie(
-               rhs.id, rhs.operandVariables, rhs.resultVariables, rhs.attributes, rhs.candidates);
-}
-
-inline bool operator!=(const CompiledPatternNode& lhs, const CompiledPatternNode& rhs)
-{
-    return !(lhs == rhs);
-}
+} // namespace detail
 
 class CompiledGraphPattern;
 
@@ -134,10 +90,13 @@ class CompiledGraphPattern;
 /// @p where names the UED in every error.
 /// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) naming the UED, the
 ///         node, and the offending name or value.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const nlohmann::json& nodes,
                                                                        const std::string& where);
 
-/// A resolved pattern. It is immutable, so threads can share one instance.
+/// A resolved pattern. It is immutable, so threads can share one instance. Integrators treat
+/// a pattern as opaque: they compile it, share it, and compare it.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 class CompiledGraphPattern
 {
     struct ConstructionKey
@@ -148,9 +107,9 @@ class CompiledGraphPattern
 public:
     CompiledGraphPattern(ConstructionKey /*key*/,
                          std::string where,
-                         std::vector<CompiledPatternNode> nodes,
+                         std::vector<detail::CompiledPatternNode> nodes,
                          std::vector<size_t> matchOrder,
-                         std::vector<PatternVariable> variables,
+                         std::vector<detail::PatternVariable> variables,
                          std::vector<std::string> rootOpcodes)
         : _where(std::move(where))
         , _nodes(std::move(nodes))
@@ -171,29 +130,31 @@ public:
         return _nodes.size();
     }
 
-    /// Nodes in authored order.
-    const std::vector<CompiledPatternNode>& nodes() const noexcept
+    /// Nodes in authored order. For the SDK's matcher; integrators treat a pattern as opaque.
+    const std::vector<detail::CompiledPatternNode>& nodes() const noexcept
     {
         return _nodes;
     }
 
     /// Indices into nodes(), with each producer before the nodes that read its results.
     /// Each step takes the first unplaced node, in authored order, whose producers are all
-    /// placed. A pattern has no dependency cycles, so such a node always exists.
+    /// placed. A pattern has no dependency cycles, so such a node always exists. For the SDK's
+    /// matcher; integrators treat a pattern as opaque.
     const std::vector<size_t>& matchOrder() const noexcept
     {
         return _matchOrder;
     }
 
-    /// Sorted by name.
-    const std::vector<PatternVariable>& variables() const noexcept
+    /// Sorted by name. For the SDK's matcher; integrators treat a pattern as opaque.
+    const std::vector<detail::PatternVariable>& variables() const noexcept
     {
         return _variables;
     }
 
     /// Opcodes a graph's root node may carry. This is the union of the opcode sets of the
     /// nodes that read no variable another node produces. Sorted and distinct. The matcher
-    /// declines a graph with a root outside this set before it searches.
+    /// declines a graph with a root outside this set before it searches. For the SDK's
+    /// matcher; integrators treat a pattern as opaque.
     const std::vector<std::string>& rootOpcodes() const noexcept
     {
         return _rootOpcodes;
@@ -204,20 +165,107 @@ private:
         compileGraphPattern(const nlohmann::json& nodes, const std::string& where);
 
     std::string _where;
-    std::vector<CompiledPatternNode> _nodes;
+    std::vector<detail::CompiledPatternNode> _nodes;
     std::vector<size_t> _matchOrder;
-    std::vector<PatternVariable> _variables;
+    std::vector<detail::PatternVariable> _variables;
     std::vector<std::string> _rootOpcodes;
 };
 
-/// Structural equality. It ignores where(), which names the file the pattern came from, so
-/// two copies of one UED compare equal.
-inline bool operator==(const CompiledGraphPattern& lhs, const CompiledGraphPattern& rhs)
+namespace detail
 {
-    return lhs.nodes() == rhs.nodes() && lhs.matchOrder() == rhs.matchOrder()
-           && lhs.variables() == rhs.variables() && lhs.rootOpcodes() == rhs.rootOpcodes();
+
+/// What decides what a pattern matches and publishes, as JSON. where() is excluded.
+/// Two patterns are equal exactly when their identities are equal.
+///
+/// Nodes keep authored order and variables keep sorted order. Candidates are sorted by
+/// opcode, and a node's attributes and each candidate's attributes are sorted by name. A
+/// graph node's attributes table belongs to one opcode, so at most one `one_of` member can
+/// match it, and member order cannot change what a node matches or publishes; it decides
+/// only the order of those lists. A `one_of` lists each opcode once. Opcode, edge and
+/// attribute names come from the single op-schema registry, so a name identifies the same
+/// entry its schema pointer does. matchOrder() and rootOpcodes() derive from nodes and
+/// variables, so they are not part of it.
+inline nlohmann::json compiledPatternIdentity(const CompiledGraphPattern& pattern)
+{
+    namespace op_schema = hipdnn_flatbuffers_sdk::data_objects::op_schema;
+
+    const auto& variables = pattern.variables();
+    const auto variableNames = [&variables](const std::vector<size_t>& indices) {
+        auto names = nlohmann::json::array();
+        for(const auto index : indices)
+        {
+            names.push_back(variables[index].name);
+        }
+        return names;
+    };
+    const auto edgeNames = [](const std::vector<const op_schema::EdgeSchema*>& edges) {
+        auto names = nlohmann::json::array();
+        for(const auto* edge : edges)
+        {
+            names.push_back(std::string(edge->name));
+        }
+        return names;
+    };
+
+    auto nodes = nlohmann::json::array();
+    for(const auto& node : pattern.nodes())
+    {
+        auto attributes = nlohmann::json::array();
+        for(const auto& attribute : node.attributes)
+        {
+            attributes.push_back({{"token", attribute.token}, {"optional", attribute.optional}});
+        }
+        std::sort(attributes.begin(), attributes.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.at("token") < rhs.at("token");
+        });
+        auto candidates = nlohmann::json::array();
+        for(const auto& candidate : node.candidates)
+        {
+            auto candidateAttributes = nlohmann::json::array();
+            for(const auto* attribute : candidate.attributes)
+            {
+                candidateAttributes.push_back(std::string(attribute->name));
+            }
+            std::sort(candidateAttributes.begin(), candidateAttributes.end());
+            candidates.push_back({{"opcode", std::string(candidate.schema->opcode)},
+                                  {"operands", edgeNames(candidate.operands)},
+                                  {"results", edgeNames(candidate.results)},
+                                  {"unnamed_optional", edgeNames(candidate.unnamedOptionalEdges)},
+                                  {"attributes", std::move(candidateAttributes)}});
+        }
+        std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.at("opcode") < rhs.at("opcode");
+        });
+        nodes.push_back({{"id", node.id},
+                         {"operands", variableNames(node.operandVariables)},
+                         {"results", variableNames(node.resultVariables)},
+                         {"attributes", std::move(attributes)},
+                         {"candidates", std::move(candidates)}});
+    }
+
+    auto variableIdentities = nlohmann::json::array();
+    for(const auto& variable : variables)
+    {
+        variableIdentities.push_back({{"name", variable.name},
+                                      {"graph_input", variable.graphInput},
+                                      {"optional", variable.optional}});
+    }
+
+    return nlohmann::json{{"nodes", std::move(nodes)},
+                          {"variables", std::move(variableIdentities)}};
 }
 
+} // namespace detail
+
+/// Structural equality, defined by detail::compiledPatternIdentity(). It ignores where(),
+/// which names the file the pattern came from, so two copies of one UED compare equal.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+inline bool operator==(const CompiledGraphPattern& lhs, const CompiledGraphPattern& rhs)
+{
+    return detail::compiledPatternIdentity(lhs) == detail::compiledPatternIdentity(rhs);
+}
+
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline bool operator!=(const CompiledGraphPattern& lhs, const CompiledGraphPattern& rhs)
 {
     return !(lhs == rhs);
@@ -468,17 +516,17 @@ inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const nlo
             std::lower_bound(variables.begin(),
                              variables.end(),
                              name,
-                             [](const PatternVariable& variable, const std::string& key) {
+                             [](const detail::PatternVariable& variable, const std::string& key) {
                                  return variable.name < key;
                              })
             - variables.begin());
     };
 
-    std::vector<CompiledPatternNode> compiled;
+    std::vector<detail::CompiledPatternNode> compiled;
     compiled.reserve(pattern.size());
     for(const auto& node : pattern)
     {
-        CompiledPatternNode resolved;
+        detail::CompiledPatternNode resolved;
         resolved.id = node.id;
         for(const auto& opcode : node.opcodes)
         {
@@ -488,7 +536,7 @@ inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const nlo
                 detail::fail(detail::patternNodeLocator(node.id, where) + ": opcode '" + opcode
                              + "' is not in the op-schema registry");
             }
-            resolved.candidates.push_back(CompiledPatternCandidate{schema, {}, {}, {}, {}});
+            resolved.candidates.push_back(detail::CompiledPatternCandidate{schema, {}, {}, {}, {}});
         }
         for(const auto& edge : node.operands)
         {

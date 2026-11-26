@@ -10,7 +10,6 @@
 #include <map>
 #include <set>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -653,9 +652,7 @@ TEST_F(TestGfx950AttentionUnified2DPacks, RanksThroughItsRegisteredScoreSymbol)
 /// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx950AttentionUnified2DPacks, CarriesNoGraphScopedMatcher)
 {
-    const auto* native = std::get_if<ingestor::NativeGraphMatch>(&_set->engine.graphMatch);
-    ASSERT_NE(native, nullptr);
-    EXPECT_FALSE(native->symbol.empty());
+    EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());
     const auto graphScoped
         = std::count_if(_set->matchers.begin(), _set->matchers.end(), [](const auto& matcher) {
               return matcher.scope == ingestor::MatchScope::GRAPH;

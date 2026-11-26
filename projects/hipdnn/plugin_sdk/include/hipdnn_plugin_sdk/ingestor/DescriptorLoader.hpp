@@ -121,9 +121,10 @@
  * the last occurrence, as a DOM parse does (see PackScan). hkp_pack is stricter: it
  * rejects a duplicate key in a KDP at pack time.
  *
- * A UED's `graph_match` carries exactly one of two arms. `native` is stored as a symbol and
- * resolved through GraphMatchRegistry when the set is validated. `nodes` is parsed and
- * compiled against the op-schema registry while the file is read. A pattern that fails an
+ * A UED's `graph_match` carries exactly one of two arms. `native` is stored as a symbol in
+ * EngineDescriptor::graphMatchNativeSymbol and resolved through GraphMatchRegistry when the
+ * set is validated. `nodes` is parsed and compiled against the op-schema registry while the
+ * file is read, into EngineDescriptor::graphMatchPattern. A pattern that fails an
  * RFC 0020 §4.3.2 or §4.3.3 check fails its file like any other format error, and no
  * engine is registered.
  *
@@ -1199,7 +1200,16 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
     {
         const auto described
             = describeDescriptor("engine", engine.name, engine.id) + " in " + where;
-        engine.graphMatch = parseGraphMatch(*it, where + " graph_match", described);
+        auto graphMatch = parseGraphMatch(*it, where + " graph_match", described);
+        if(auto* native = std::get_if<NativeGraphMatch>(&graphMatch))
+        {
+            engine.graphMatchNativeSymbol = std::move(native->symbol);
+        }
+        else if(auto* pattern
+                = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&graphMatch))
+        {
+            engine.graphMatchPattern = std::move(*pattern);
+        }
     }
 
     // RFC 0021 §6: the bound token holding the shared workspace region's size. Only a slotted
@@ -1212,7 +1222,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
             fail("key 'shared_workspace' in " + where + " requires 'slots'");
         }
         engine.sharedWorkspaceToken = requireString(root, "shared_workspace", where);
-        if(!std::holds_alternative<NativeGraphMatch>(engine.graphMatch))
+        if(engine.graphMatchNativeSymbol.empty())
         {
             fail("key 'shared_workspace' in " + where + " requires a native graph_match");
         }
@@ -3234,6 +3244,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         std::map<std::pair<DescriptorId, size_t>, std::string> criteriaErrors;
         // The same pair check for a declarative UDD's launch formulas, per (UDD, engine, slot).
         std::map<std::pair<DescriptorId, size_t>, std::string> launchErrors;
+        // What the engine publishes to those checks. The loader sets at most one arm.
+        const GraphMatch engineMatch = engineGraphMatch(engine);
 
         for(auto* packEntry : packEntries)
         {
@@ -3313,8 +3325,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                         = criteriaErrors.try_emplace(std::make_pair(matcherId, slotIndex));
                     if(inserted)
                     {
-                        checked->second = criteriaReferenceError(
-                            *matcher->criteria, engine.graphMatch, packSchema);
+                        checked->second
+                            = criteriaReferenceError(*matcher->criteria, engineMatch, packSchema);
                     }
                     if(!checked->second.empty())
                     {
@@ -3342,7 +3354,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                 if(inserted)
                 {
                     checked->second
-                        = launchReferenceError(*dispatch->launch, engine.graphMatch, packSchema);
+                        = launchReferenceError(*dispatch->launch, engineMatch, packSchema);
                 }
                 if(!checked->second.empty())
                 {
@@ -3989,13 +4001,13 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
                 resolvable = false;
             }
         }
-        if(const auto* native = std::get_if<NativeGraphMatch>(&set.engine.graphMatch);
-           native != nullptr && !GraphMatchRegistry::isRegistered(native->symbol))
+        if(!set.engine.graphMatchNativeSymbol.empty()
+           && !GraphMatchRegistry::isRegistered(set.engine.graphMatchNativeSymbol))
         {
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name
-                                    << "' names unregistered graph_match symbol '" << native->symbol
-                                    << "'; dropping it");
+                                    << "' names unregistered graph_match symbol '"
+                                    << set.engine.graphMatchNativeSymbol << "'; dropping it");
             resolvable = false;
         }
         for(const auto& dispatch : set.dispatches)
@@ -4093,7 +4105,7 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
             // Built to prove the set validates -- Container::copyEngineIds is static and
             // would otherwise advertise an id for a set that fails to construct -- and
             // returned with the set, so an engine constructed from it is not built twice.
-            built = makeStateManager<THandle>(set, set.engine.graphMatch);
+            built = makeStateManager<THandle>(set, engineGraphMatch(set.engine));
         }
         catch(const std::exception& error)
         {

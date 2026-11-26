@@ -22,16 +22,24 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+/// @file BindingPublication.hpp
+/// @brief Publishes graph and tensor facts into a BoundTokens binding (RFC 0020 §6.1).
+///
+/// The declarative pattern matcher publishes through these helpers. A native graph-match
+/// function can use them too, so both arms bind the same tokens for the same tensor.
+
 namespace hipdnn_plugin_sdk::ingestor
 {
 
 /// Builds a tensor field token such as `input_a.dtype`.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline std::string tensorField(std::string_view root, std::string_view field)
 {
     return std::string(root) + "." + std::string(field);
 }
 
 /// Builds an indexed tensor field token such as `input_a.dims[0]`.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline std::string tensorElement(std::string_view root, std::string_view field, size_t index)
 {
     return tensorField(root, field) + "[" + std::to_string(index) + "]";
@@ -129,6 +137,7 @@ inline bool isPublishedTensorField(std::string_view field)
 /// int64_t; the dtype has no enum name; the stored value disagrees with the value type;
 /// a stored or runtime-passed scalar is virtual or has more than one element; or a stored
 /// value is not finite in binary32.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline bool publishTensor(BoundTokens& bound,
                           std::string_view root,
                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor)
@@ -210,6 +219,7 @@ inline bool publishTensor(BoundTokens& bound,
 
 /// Publishes facts for the whole graph, not just the matched nodes: the
 /// PUBLISHED_GRAPH_FIELDS under the `graph` root.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline void publishGraph(BoundTokens& bound,
                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {

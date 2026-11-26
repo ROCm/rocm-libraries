@@ -176,13 +176,12 @@ const IKernelDispatchHandler<Handle>& declarativeHandler()
 /// The twin's own pattern, binding @p context as its engine does.
 std::optional<BoundTokens> bindTwin(const DescriptorSet& twin, const MatchContext& context)
 {
-    const auto* pattern
-        = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&twin.engine.graphMatch);
-    if(pattern == nullptr || *pattern == nullptr)
+    const auto& pattern = twin.engine.graphMatchPattern;
+    if(pattern == nullptr)
     {
         return std::nullopt;
     }
-    return matchGraphPattern(**pattern, context);
+    return matchGraphPattern(*pattern, context);
 }
 
 // ---------------------------------------------------------------------------

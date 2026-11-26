@@ -123,7 +123,7 @@ std::unique_ptr<KernelIngestorStateManager<StubHandle>>
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        NativeGraphMatch{graphMatchSymbol});
+        graphMatchSymbol);
 }
 
 /// With benchmarking off, buildPlan() builds one plain GenericPlan for the ranked front

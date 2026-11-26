@@ -75,6 +75,11 @@ target_link_libraries(
 # make it so tests inside folders can find files without having to use a relative path.
 target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_BINARY_DIR}/engines)
 
+# Where the engines' CMakeLists.txt write their selector dumps; the shipped-model gates
+# name this build's dump in their failure message.
+target_compile_definitions(hip_kernel_provider_tests PRIVATE
+    HKP_SELECTOR_DUMP_DIR="${CMAKE_BINARY_DIR}/selector_revisions")
+
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
@@ -255,6 +260,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
+    # The ASM SDPA engine's L1 models ship loose in the production tree, under asm_sdpa/,
+    # which the unit root does not reach. EachDeclaredModelEstimatesOnItsArchitecture asks
+    # the engine for estimates from them, so main() names that one folder as an additive root
+    # (not the whole production tree, whose packs every other suite here would then load) and
+    # the binary is built after whichever step stages it: the product pack, or the provider's
+    # own copy when production packaging is dormant.
+    #
+    # The case also gets the directory the binary is built into. It only compares that with
+    # its own directory, to tell the build tree (where every model is staged) from an install
+    # (which TheRock splits per GPU family); it never reads descriptors from it.
+    if(asm_sdpa IN_LIST HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+        if(TARGET hkp_packaging_product)
+            add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        else()
+            add_dependencies(hip_kernel_provider_tests asm_sdpa_engine_descriptors)
+        endif()
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/asm_sdpa"
+            HIPKERNELPROVIDER_ASM_SDPA_TEST_BUILD_DIR="$<TARGET_FILE_DIR:hip_kernel_provider_tests>")
+    endif()
+
     # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
     # unit tree. The fixed-arch roots pack only for their arch (_hkp_wire_fixed_arch_root);
     # the test decides from the staged shards, so no define follows GPU_TARGETS. rocKE is
@@ -312,6 +338,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             MatchersCoverBothScopes
             SubtractsInTheRightDirection
     )
+
+    hkp_product_offers_engine(_standalone_pointwise_available "hipkernel:StandalonePointwise")
+    if(_standalone_pointwise_available)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            SUITES TestStandalonePointwisePacks
+            EXPECTED_CASES
+                ShipsOneShapeDynamicKernelPerArchitecture
+                EveryKernelDeclaresTheDynamicLaunchSignature
+        )
+    endif()
 
     # FlyDSL's kernels ship in the production shard, so their census addresses that
     # pack, narrowed to the architectures FlyDSL ships for: the product pack may be

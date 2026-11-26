@@ -359,7 +359,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, IsOneSlottedEngineWithANativeGraphMatchAndAK
 {
     const auto& set = loadedSet(ENGINE_NAME);
 
-    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), GRAPH_MATCHER);
+    EXPECT_EQ(set.engine.graphMatchNativeSymbol, GRAPH_MATCHER);
     EXPECT_EQ(set.engine.sharedWorkspaceToken, SHARED_WORKSPACE_TOKEN);
     // A slotted engine's selection state is per slot.
     EXPECT_TRUE(set.packs.empty());

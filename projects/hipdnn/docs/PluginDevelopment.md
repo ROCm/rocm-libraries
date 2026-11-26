@@ -416,6 +416,10 @@ public:
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
 
+#### Engine-config workspace contract
+
+The engine-config workspace query (`getMaxWorkspaceSize` in `IEngine`, `hipdnnEnginePluginGetWorkspaceSize` in the C API) **must** return at least the workspace of any plan the engine finalizes from that config. The frontend filters by this value before it finalizes a plan (`deselect_workspace_greater_than()`), so a smaller value lets a plan through. When a workspace limit is set, the frontend rejects a plan its call finalizes over the limit; otherwise it rejects nothing and logs a WARN when WARN logging is enabled. The frontend also sizes its estimate from this value.
+
 #### Implementing `global.benchmarking`
 
 The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per catalog entry left after the knob filter and `global.workspace_size_limit` at plan build, time each on the device on the first `execute()`, and memoize the ranking per (graph content, device). The ranking survives the plan that measured it, and persists across processes when disk caching is enabled; a record is served only when it covers every kernel applicable to the graph, so a run whose filters remove a kernel benchmarks again each time. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. On a cold benchmarked build a kernel's preparation cost is paid once per candidate, and preparation errors surface at plan build; [Environment Configuration](./Environment.md#hipdnn_force_benchmarking) covers when a benchmarked record skips this. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.
@@ -467,36 +471,43 @@ A provider that builds plans with the generic kernel ingestor can let users save
 
 A Universal Engine Descriptor (UED) fills `graph_match` with one of two arms: `native`, a C++ function the provider registers, or `nodes`, a declarative graph pattern ([RFC 0020 §4.3](./rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)). Both arms are supported. This section lists what a provider that uses the generic kernel ingestor changes when it upgrades to the hipDNN that adds the `nodes` arm.
 
-#### 1. Read and pass `graph_match` as a `GraphMatch`
+#### 1. `graph_match`: nothing to change for a native engine
 
-`EngineDescriptor::graphMatch` (`hipdnn_plugin_sdk/ingestor/Descriptors.hpp`) holds the UED's `graph_match` as a `GraphMatch` variant:
+A provider whose engines use the `native` arm, or no `graph_match`, needs no code change. The declarations such a provider uses already exist in hipdnn_plugin_sdk 1.1.0, and a native engine keeps its engine selector revision, so trained heuristic models keep matching it:
 
-- `std::monostate`: the UED has no `graph_match`.
-- `NativeGraphMatch{symbol}`: the `native` arm.
-- `std::shared_ptr<const CompiledGraphPattern>`: the `nodes` arm, compiled when the UED is read.
+- `EngineDescriptor::graphMatchNativeSymbol` (`std::string`, in `hipdnn_plugin_sdk/ingestor/Descriptors.hpp`): the symbol of the `native` arm. It is empty when the UED declares no `native` arm.
+- The overloads that take the symbol as a string: the `KernelIngestorSharedState` and `KernelIngestorStateManager` constructors, and `makeStateManager<THandle>(set, symbol)`. An empty string or a braced `{}` means no `graph_match`.
+- `KernelIngestorSharedState::graphMatchFn()`: the function the native symbol resolved to.
+- `makeEngine()`, which serves whichever arm the UED declares.
 
-The `std::string EngineDescriptor::graphMatchNativeSymbol` member is removed. To read the native symbol, call `nativeGraphMatchSymbol(engine)`. It returns an empty string when the engine has no `native` arm.
+The string overloads and `graphMatchFn()` carry only the `native` arm. For an engine whose UED declares a `nodes` pattern:
 
-The unslotted and slotted `KernelIngestorStateManager<THandle>` constructors and `makeStateManager<THandle>()` take a `GraphMatch`. Their overloads that take the symbol as a string remain, marked `[[deprecated]]`; an empty string means no `graph_match`. A braced `{}` argument selects the `GraphMatch` overload, which also means no `graph_match`. The deprecated overloads will be removed in a later release.
+- `graphMatchFn()` returns `nullptr`.
+- `makeStateManager(set, symbol)` throws `std::invalid_argument`, so the pattern is never silently dropped. This includes `makeStateManager(set, {})`, because a braced `{}` selects the string overload.
 
-Before:
+##### Serving a `nodes` pattern
 
-```cpp
-const std::string symbol = set.engine.graphMatchNativeSymbol;
-auto manager = makeStateManager<MyHandle>(std::move(set), "my_provider.graph_match");
-```
+Code that builds a state manager itself, rather than through `makeEngine()`, uses the declarations below to serve a `nodes` pattern. They are introduced in hipdnn_plugin_sdk 1.2.0:
 
-After:
+- `EngineDescriptor::graphMatchPattern` (`std::shared_ptr<const CompiledGraphPattern>`): the `nodes` arm, compiled when the UED is read. It is null when the UED declares no `nodes` arm. The loader sets at most one of `graphMatchNativeSymbol` and `graphMatchPattern`.
+- `CompiledGraphPattern` and `compileGraphPattern()` (`hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp`).
+- `NativeGraphMatch`, `GraphMatch` and `engineGraphMatch()` (`Descriptors.hpp`).
+- The `KernelIngestorSharedState` and `KernelIngestorStateManager` constructors and the `makeStateManager<THandle>(set, graphMatch)` overload that take a `GraphMatch`.
+- `KernelIngestorSharedState::graphMatch()`, which returns the engine's graph match as a `ResolvedGraphMatch`: `std::monostate`, the resolved `GraphMatchFn`, or the compiled pattern.
+
+To serve whichever arm the UED declares, follow these steps:
+
+1. Call `engineGraphMatch(set.engine)` before you move `set`. It returns a `GraphMatch`: `std::monostate` for no `graph_match`, `NativeGraphMatch{symbol}` for the `native` arm, or the compiled pattern for the `nodes` arm.
+2. Pass the result to the overload that takes a `GraphMatch`.
 
 ```cpp
 using namespace hipdnn_plugin_sdk::ingestor;
 
-const std::string symbol = nativeGraphMatchSymbol(set.engine);
-auto manager
-    = makeStateManager<MyHandle>(std::move(set), NativeGraphMatch{"my_provider.graph_match"});
+auto graphMatch = engineGraphMatch(set.engine);
+auto manager = makeStateManager<MyHandle>(std::move(set), std::move(graphMatch));
 ```
 
-To serve whichever arm the UED declares, copy `set.engine.graphMatch` before you move `set`, then pass the copy. `makeEngine()` does this already. A `native` engine keeps its engine selector revision, so trained heuristic models keep matching it.
+To opt out of graph matching for an engine with a pattern, pass `GraphMatch{}` or `std::monostate{}` instead.
 
 #### 2. Remove duplicate JSON keys
 
@@ -536,7 +547,7 @@ python3 tools/hkp_pack.py \
     --out-root /tmp/hkp-check/out \
     --inter-root /tmp/hkp-check/inter \
     --arches gfx942 \
-    --hipcc /opt/rocm/bin/hipcc \
+    --hip-compiler /opt/rocm/lib/llvm/bin/clang++ \
     --generic-targets-json ../../../projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json \
     --kpack-python-dir <directory containing rocm_kpack> \
     --source-label upgrade-check

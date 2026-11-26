@@ -84,7 +84,7 @@ def _pack(root: Path, tmp_path: Path, rocm_kpack_dir, arch="gfx942"):
         source_root=root,
         arches=[arch],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="hip-compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         source_label="slotted-test",
@@ -443,6 +443,24 @@ NEGATIVE_CASES = {
     ),
     "shared_workspace_without_native_graph_match": (
         _ued(_without("graph_match")),
+        r"key 'shared_workspace' in UED fixture.ued.json requires a native graph_match",
+    ),
+    "shared_workspace_with_a_nodes_pattern": (
+        _ued(
+            lambda doc: doc.update(
+                graph_match={
+                    "nodes": [
+                        {
+                            "kind": "op",
+                            "id": "pointwise",
+                            "op": "pointwise",
+                            "operands": {"in_0": "$x"},
+                            "results": {"out_0": "$y"},
+                        }
+                    ]
+                }
+            )
+        ),
         r"key 'shared_workspace' in UED fixture.ued.json requires a native graph_match",
     ),
     "shared_workspace_empty_token": (

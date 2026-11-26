@@ -10,7 +10,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -215,8 +214,7 @@ void expectApplicability(const ApplicabilityCase& graph, bool declarativeCriteri
     registerNativeIngestorSymbols();
     auto sets = loadValidatedDescriptorSets<Handle>(scratch.path());
     ASSERT_EQ(sets.size(), 1U);
-    ASSERT_TRUE(std::holds_alternative<std::shared_ptr<const CompiledGraphPattern>>(
-        sets.front().set.engine.graphMatch));
+    ASSERT_NE(sets.front().set.engine.graphMatchPattern, nullptr);
     if(declarativeCriteria)
     {
         const auto& matchers = sets.front().set.matchers;
@@ -233,17 +231,22 @@ void expectApplicability(const ApplicabilityCase& graph, bool declarativeCriteri
         properties.gcnArchName = pack.arch.front();
     }
     const FixedDeviceResolver resolver(std::move(properties));
-    const auto engine = makeEngine<Handle, Settings, Context>(sets.front().set, resolver);
+    const auto fromSet = makeEngine<Handle, Settings, Context>(sets.front().set, resolver);
+    const auto fromLoadedState = makeEngine<Handle, Settings, Context>(
+        sets.front().set, sets.front().stateManager->sharedState(), resolver);
     const GraphFixture fixture(graph.build());
     Handle handle;
 
-    EXPECT_EQ(engine->isApplicable(handle, fixture.context().graph), graph.applicable);
+    EXPECT_EQ(fromSet->isApplicable(handle, fixture.context().graph), graph.applicable);
+    EXPECT_EQ(fromLoadedState->isApplicable(handle, fixture.context().graph), graph.applicable);
 }
 
 } // namespace
 
 /// The pattern compiles at load, the set validates, and the engine answers applicability
-/// through the compiled pattern.
+/// through the compiled pattern. Both the engine makeEngine() builds from the set and the one
+/// built over the shared state the loader validated, which is the state the provider serves
+/// (scanDescriptorSets()), answer through it.
 TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
 {
     expectApplicability(GetParam(), false);

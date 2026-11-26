@@ -449,7 +449,7 @@ inline std::unique_ptr<KernelIngestorStateManager<TestHandle>>
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        NativeGraphMatch{GRAPH_MATCH_SYMBOL},
+        GRAPH_MATCH_SYMBOL,
         "engine 'test fixture'",
         cacheCapacity);
 }
@@ -827,7 +827,7 @@ inline std::unique_ptr<StateManager>
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
         std::make_shared<NativeKernelHeuristic>(scoreSymbol),
-        NativeGraphMatch{"test.graph"},
+        "test.graph",
         "engine 'test fixture'",
         cacheCapacity);
 }
@@ -854,7 +854,7 @@ inline std::unique_ptr<StateManager>
                                           std::move(dispatches),
                                           std::vector<KernelDescriptorPack>{std::move(pack)},
                                           std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-                                          NativeGraphMatch{"test.graph"},
+                                          "test.graph",
                                           "engine 'test fixture'",
                                           StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
                                           std::move(engine),
@@ -1039,7 +1039,7 @@ inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateMana
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        NativeGraphMatch{GRAPH_MATCH_SYMBOL});
+        GRAPH_MATCH_SYMBOL);
 }
 
 inline EngineDescriptor
@@ -1495,7 +1495,7 @@ public:
 
         EngineDescriptor engine = makeEngineWithKnobs({});
         engine.name = "test:slotted";
-        engine.graphMatch = NativeGraphMatch{GRAPH_MATCH};
+        engine.graphMatchNativeSymbol = GRAPH_MATCH;
         engine.sharedWorkspaceToken = SHARED_TOKEN;
 
         std::vector<KernelSlotInput> inputs;
@@ -1554,7 +1554,7 @@ public:
             std::move(inputs),
             std::vector<MatchDescriptor>{},
             std::move(dispatches),
-            NativeGraphMatch{GRAPH_MATCH},
+            GRAPH_MATCH,
             SHARED_TOKEN,
             "engine 'slotted fixture'",
             KernelIngestorStateManager<StubHandle>::DEFAULT_CATALOG_CACHE_CAPACITY,

@@ -20,7 +20,6 @@
 #include <system_error>
 #include <unordered_set>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -261,7 +260,7 @@ void forEachRoleModel(const std::map<std::string, std::vector<DescriptorId>>& re
 }
 
 /// Every native symbol name one DescriptorSet references, across all its hook kinds:
-/// the engine's native `graph_match` symbol, every `matchers[].matchSymbol` (dispatched by
+/// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every native
 /// `dispatches[].dispatchSymbol`, and the `native.symbol` of every native UHD any role
 /// map binds, for every architecture. Harvested from pass 1's unresolved-symbol sets,
@@ -293,9 +292,9 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
     HarvestedSymbols harvested;
     for(const auto& set : sets)
     {
-        if(const auto* native = std::get_if<NativeGraphMatch>(&set.engine.graphMatch))
+        if(!set.engine.graphMatchNativeSymbol.empty())
         {
-            harvested.graphMatch.insert(native->symbol);
+            harvested.graphMatch.insert(set.engine.graphMatchNativeSymbol);
         }
         for(const auto& matcher : set.matchers)
         {

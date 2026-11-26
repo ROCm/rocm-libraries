@@ -5,6 +5,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -271,7 +273,8 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
                                       f11,
                                       f12,
                                       f13,
-                                      f14]
+                                      f14,
+                                      f15]
             = EngineDescriptor{};
     }
     {
@@ -434,7 +437,7 @@ EngineDescriptor populatedEngine()
     engine.behaviorNotes = {3};
     engine.sdkVersion = POPULATED_VERSION;
     engine.numericalNotes = std::vector<int32_t>{4};
-    engine.graphMatch = NativeGraphMatch{"graph.match"};
+    engine.graphMatchNativeSymbol = "graph.match";
     engine.revision = POPULATED_VERSION;
     engine.slots = {populatedSlot()};
     engine.sharedWorkspaceToken = "ws.bytes";
@@ -655,12 +658,14 @@ std::vector<EqualityCase> allEqualityCases()
                      "GraphMatchNativeSymbol",
                      true,
                      baseline,
-                     [](auto& v) { std::get<NativeGraphMatch>(v.graphMatch).symbol += "!"; }),
+                     [](auto& v) { v.graphMatchNativeSymbol += "!"; }),
             fieldRow(type,
-                     "GraphMatchArm",
+                     "GraphMatchPattern",
                      true,
                      baseline,
-                     [](auto& v) { v.graphMatch = compilePatternText(BINARY_POINTWISE_PATTERN); }),
+                     [](auto& v) {
+                         v.graphMatchPattern = compilePatternText(BINARY_POINTWISE_PATTERN);
+                     }),
             fieldRow(type, "Revision", true, baseline, [](auto& v) { v.revision = OTHER_VERSION; }),
             fieldRow(type, "Slots", true, baseline, [](auto& v) { v.slots.front().name += "!"; }),
             fieldRow(type,
@@ -845,16 +850,24 @@ INSTANTIATE_TEST_SUITE_P(EveryField,
                              return info.param.name;
                          });
 
+/// populatedEngine() with its native symbol replaced by @p pattern, as the loader sets at most
+/// one of the two.
+EngineDescriptor patternEngine(std::shared_ptr<const CompiledGraphPattern> pattern)
+{
+    auto engine = populatedEngine();
+    engine.graphMatchNativeSymbol.clear();
+    engine.graphMatchPattern = std::move(pattern);
+    return engine;
+}
+
 // The packer copies a UED into every arch shard, and each parse compiles its own pattern.
 // The copies must compare equal so the loader collapses them rather than dropping the id.
 TEST(TestIngestorDescriptors, SeparatelyCompiledCopiesOfOnePatternAreEqual)
 {
-    auto lhs = populatedEngine();
-    lhs.graphMatch = compileGraphPattern(nlohmann::json::parse(BINARY_POINTWISE_PATTERN),
-                                         "gfx942/engine.ued.json");
-    auto rhs = populatedEngine();
-    rhs.graphMatch = compileGraphPattern(nlohmann::json::parse(BINARY_POINTWISE_PATTERN),
-                                         "gfx950/engine.ued.json");
+    const auto lhs = patternEngine(compileGraphPattern(
+        nlohmann::json::parse(BINARY_POINTWISE_PATTERN), "gfx942/engine.ued.json"));
+    const auto rhs = patternEngine(compileGraphPattern(
+        nlohmann::json::parse(BINARY_POINTWISE_PATTERN), "gfx950/engine.ued.json"));
 
     EXPECT_TRUE(lhs == rhs);
     EXPECT_FALSE(lhs != rhs);
@@ -862,15 +875,47 @@ TEST(TestIngestorDescriptors, SeparatelyCompiledCopiesOfOnePatternAreEqual)
 
 TEST(TestIngestorDescriptors, PatternsThatBindDifferentEdgesAreNotEqual)
 {
-    auto lhs = populatedEngine();
-    lhs.graphMatch = compilePatternText(R"([{"kind": "op", "id": "pointwise", "op": "pointwise",
-        "operands": {"in_0": "$a", "in_1": "$b"}, "results": {"out_0": "$y"}}])");
-    auto rhs = populatedEngine();
-    rhs.graphMatch = compilePatternText(R"([{"kind": "op", "id": "pointwise", "op": "pointwise",
-        "operands": {"in_0": "$b", "in_1": "$a"}, "results": {"out_0": "$y"}}])");
+    const auto base = patternEngine(compilePatternText(R"([{"kind": "op", "id": "pointwise",
+        "op": "pointwise", "operands": {"in_0": "$a", "in_1": "$b"},
+        "results": {"out_0": "$y"}}])"));
+    // The same variables, swapped between the two operand edges.
+    const auto swapped = patternEngine(compilePatternText(R"([{"kind": "op", "id": "pointwise",
+        "op": "pointwise", "operands": {"in_0": "$b", "in_1": "$a"},
+        "results": {"out_0": "$y"}}])"));
+    // The same variables in the same order, with $b bound to a different edge.
+    const auto retargeted = patternEngine(compilePatternText(R"([{"kind": "op", "id": "pointwise",
+        "op": "pointwise", "operands": {"in_0": "$a", "in_2": "$b"},
+        "results": {"out_0": "$y"}}])"));
 
-    EXPECT_FALSE(lhs == rhs);
-    EXPECT_TRUE(lhs != rhs);
+    EXPECT_FALSE(base == swapped);
+    EXPECT_TRUE(base != swapped);
+    EXPECT_FALSE(base == retargeted);
+    EXPECT_TRUE(base != retargeted);
+}
+
+TEST(TestIngestorDescriptors, EngineGraphMatchReflectsTheDeclaredArm)
+{
+    auto engine = populatedEngine();
+
+    engine.graphMatchNativeSymbol.clear();
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(engineGraphMatch(engine)));
+
+    engine.graphMatchNativeSymbol = "graph.match";
+    const auto native = engineGraphMatch(engine);
+    const auto* nativeArm = std::get_if<NativeGraphMatch>(&native);
+    ASSERT_NE(nativeArm, nullptr);
+    EXPECT_EQ(nativeArm->symbol, "graph.match");
+
+    const auto pattern = compilePatternText(BINARY_POINTWISE_PATTERN);
+    engine.graphMatchNativeSymbol.clear();
+    engine.graphMatchPattern = pattern;
+    const auto compiled = engineGraphMatch(engine);
+    const auto* patternArm = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&compiled);
+    ASSERT_NE(patternArm, nullptr);
+    EXPECT_EQ(patternArm->get(), pattern.get());
+
+    engine.graphMatchNativeSymbol = "graph.match";
+    EXPECT_THROW(engineGraphMatch(engine), std::invalid_argument);
 }
 
 // Kernel metadata: values are typed by the KMD only at resolve, so an integer and a

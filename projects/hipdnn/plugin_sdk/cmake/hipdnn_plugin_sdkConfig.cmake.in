@@ -4,7 +4,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+find_dependency(hipdnn_flatbuffers_sdk @HIPDNN_PLUGIN_SDK_FLATBUFFERS_SDK_MIN_VERSION@ CONFIG REQUIRED)
 find_dependency(hipdnn_data_sdk @HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 
 # Reflects how hipDNN was built; not consumer-overridable, since ingestor/ and heuristics/uhd/

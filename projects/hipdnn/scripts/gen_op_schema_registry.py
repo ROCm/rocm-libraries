@@ -371,6 +371,8 @@ HEADER_PROLOGUE = Template(
 // scalar attributes, taken from the '${opcode}', '${input}',
 // '${output}', and '${name}' schema annotations. Static tables
 // read the caller's buffer in place: no allocation, no reflection.
+//
+// Introduced in hipdnn_flatbuffers_sdk 0.3.0.
 
 #pragma once
 

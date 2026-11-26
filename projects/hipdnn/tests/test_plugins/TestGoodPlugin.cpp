@@ -4,6 +4,8 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+
 // NOLINTNEXTLINE
 thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
@@ -21,9 +23,12 @@ public:
         return "1.0.0";
     }
 
+    /// Reports a fixed API version that supports override-execute but sits below
+    /// K_PASS_BY_VALUE_MIN_API_VERSION, so this fake stays the pre-pass-by-value
+    /// plugin regardless of the plugin SDK package version.
     const char* getPluginApiVersion() const override
     {
-        return apiVersionWithoutTweak();
+        return hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION.data();
     }
 
     int64_t getEngineId() const override

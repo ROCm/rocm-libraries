@@ -848,8 +848,9 @@ TEST(TestShapeUtils, IsTensorPackedAcceptsDenseAxisPermutations)
 TEST(TestShapeUtils, IsTensorPackedRejectsInvalidActiveStrides)
 {
     EXPECT_FALSE(isTensorPacked({2, 3}, {0, 1}));
-    // The old span formula accepted these: the span equals the element count, but a
-    // zero stride repeats offsets and a negative stride leaves gaps.
+    // For each of these two, 1 + sum((dim - 1) * stride) equals the element count, so a span
+    // check alone cannot reject them: a zero stride repeats offsets and a negative stride
+    // leaves gaps.
     EXPECT_FALSE(isTensorPacked({2, 2}, {0, 3}));
     EXPECT_FALSE(isTensorPacked({2, 2}, {4, -1}));
     EXPECT_FALSE(isTensorPacked({2, 3}, {4, 1}));
