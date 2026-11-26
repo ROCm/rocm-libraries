@@ -7188,6 +7188,18 @@ class KernelWriterAssembly(KernelWriter):
             comment="lwFO%s = lw%s + lw%s*MT%s + LDS_OFFSET_%s=%u" % (tc, tP["tileChar"], \
             self.states.unrollChar, tP["tileChar"], tc, kernel["LdsOffset%s"%tc]) ))
 
+    if kernel["LdsXorSwizzle"] and tc in ("A", "B"):
+      # addr ^= ((addr >> keyShift) & (nChunk-1)) << 4, once; stores then only add key-preserving offsets.
+      nChunk, keyShift = self.ldsXorSwzGeometry(kernel, tc)
+      swzT = self.vgprPool.checkOut(1, "ldsXorSwzWT")
+      module.add(VLShiftRightB32(dst=vgpr(swzT), shiftHex=keyShift-4, src=vgpr(destVgpr), \
+          comment="LdsXorSwizzle: addr >> %u"%(keyShift-4)))
+      module.add(VAndB32(dst=vgpr(swzT), src0=hex((nChunk-1) << 4), src1=vgpr(swzT), \
+          comment="LdsXorSwizzle: key << 4"))
+      module.add(VXorB32(dst=vgpr(destVgpr), src0=vgpr(swzT), src1=vgpr(destVgpr), \
+          comment="LdsXorSwizzle: swizzle 16B chunk"))
+      self.vgprPool.checkIn(swzT)
+
     numLwa = 0
     if tP["isA"]:
       numLwa = self.states.a.numVgprLocalWriteAddr
@@ -7603,6 +7615,12 @@ class KernelWriterAssembly(KernelWriter):
 
     return module, offset_val
 
+  def _ldsXorSwzExtraBases(self, kernel, tc):
+    """LdsXorSwizzle read bases of chunks 1..nChunk-1, kept in LocalReadAddr+1.. (chunk 0 uses +0)."""
+    if kernel["LdsXorSwizzle"] and tc in ("A", "B"):
+      return self.ldsXorSwzGeometry(kernel, tc)[0] - 1
+    return 0
+
   ##############################################################################
   # Local Read Addresses: fill LocalReadAddr+1.. from +0 (each +64K)
   ##############################################################################
@@ -7631,7 +7649,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=window * maxOff,
                            src1=vgpr("LocalReadAddr%s"%tc), comment="Reachable LDS read window %u" % window))
       return module
-    for i in range(1, numLra):
+    # LdsXorSwizzle keeps its read bases in these slots instead; skip them.
+    for i in range(1, numLra - self._ldsXorSwzExtraBases(kernel, tc)):
       module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=(i * maxOff), \
         src1=vgpr("LocalReadAddr%s"%tc), comment="Final Offset Plus %uK"%((i * maxOff) / 1024)))
     return module
@@ -7777,6 +7796,35 @@ class KernelWriterAssembly(KernelWriter):
       raise Exception(f"unsupport tc %s{tc}")
 
     module.add(self._lraFanOut(kernel, tP["tensorChar"], numVgpr))
+    nSwz = self._ldsXorSwzExtraBases(kernel, tc)
+
+    # Precompute the swizzled read base of each 16 B chunk c into LocalReadAddr+c (once), so the
+    # scheduled read stream just selects a base (no per-read ALU, no overlap with compute regs).
+    # base[c] = LocalReadAddr+0 + ((c ^ key) << 4); a WMMA lane reads row Serial%16 (+16k), so
+    # key = (row*rowBytes >> keyShift) & (nChunk-1) = (Serial >> (keyShift-log2(rowBytes))) & (nChunk-1).
+    # Slot 0 becomes base[0] last, after it has served as the source of the others.
+    if nSwz:
+      nChunk = nSwz + 1
+      assert numVgpr == nChunk, "LdsXorSwizzle: expected exactly nChunk LocalReadAddr slots"
+      _, keyShift = self.ldsXorSwzGeometry(kernel, tc)
+      rowShift = keyShift - log2(nChunk * 16)
+      sV = self.vgprPool.checkOut(1, "ldsXorSwzS")   # short-lived prologue temp only
+      module.add(VLShiftRightB32(dst=vgpr(sV), shiftHex=rowShift, src=vgpr("Serial"), \
+          comment="LdsXorSwizzle: row >> %u"%rowShift))
+      module.add(VAndB32(dst=vgpr(sV), src0=hex(nChunk-1), src1=vgpr(sV), \
+          comment="LdsXorSwizzle: key = (row >> %u) & %u"%(rowShift, nChunk-1)))
+      module.add(VLShiftLeftB32(dst=vgpr(sV), shiftHex=4, src=vgpr(sV), comment="LdsXorSwizzle: key << 4"))
+      for c in list(range(1, nChunk)) + [0]:
+        slot = "LocalReadAddr%s+%u"%(tc, c)
+        if c:
+          module.add(VXorB32(dst=vgpr(slot), src0=hex(c << 4), src1=vgpr(sV), \
+              comment="LdsXorSwizzle: (c ^ key) << 4, c=%u"%c))
+          module.add(VAddU32(dst=vgpr(slot), src0=vgpr("LocalReadAddr%s+0"%tc), src1=vgpr(slot), \
+              comment="LdsXorSwizzle: swizzled read base c=%u"%c))
+        else:
+          module.add(VAddU32(dst=vgpr(slot), src0=vgpr(sV), src1=vgpr(slot), \
+              comment="LdsXorSwizzle: swizzled read base c=0 (in place)"))
+      self.vgprPool.checkIn(sV)
 
     return module
 
@@ -16678,9 +16726,16 @@ class KernelWriterAssembly(KernelWriter):
               addrIdx = paramList[1] // 65536
               olwa = "LocalWriteAddr%s+%u"%(tc, addrIdx)
               paramList[1] -= addrIdx * 65536
+              if kernel["LdsXorSwizzle"]:
+                # LocalWriteAddr is pre-swizzled in lwaFirstOffset; valid only while the
+                # per-store offset leaves the chunk and key bits untouched.
+                nChunk, keyShift = self.ldsXorSwzGeometry(kernel, tc)
+                assert paramList[1] % (1 << (keyShift + log2(nChunk))) == 0, \
+                  "LdsXorSwizzle: write offset %u changes the swizzle key" % paramList[1]
               ds        = DSModifiers(na=1, offset=paramList[1])
               writeInst = LocalWriteX(dstAddr=vgpr(olwa), src=paramList[0], ds=ds, comment=commentWithMemToken)
             else:
+              assert not kernel["LdsXorSwizzle"], "LdsXorSwizzle: ds_store2 not supported"
               ds        = DSModifiers(na=2, offset0=paramList[2], offset1=paramList[3])
               writeInst = LocalWriteX(dstAddr=vgpr(lwa), src0=paramList[0], src1=paramList[1], ds=ds, comment=commentWithMemToken)
             # Attach LDS memory token to local write instructions so downstream
@@ -16776,6 +16831,10 @@ class KernelWriterAssembly(KernelWriter):
     mxPhase = tc in ("MXSA", "MXSB") and mxFreePhase(kernel, tc)
     assert not (mxPhase and self.states.IncLdsBufSwitch), \
       "MXS 2D phase: per-vector LocalReadAddr does not support 3+ LDS buffers"
+    # LdsXorSwizzle bases 1..nSwz flip buffers with the same XOR as slot 0: the buffer bit lies
+    # above the chunk and key bits. The immediate-offset swap leaves all of them unchanged.
+    nSwz = self._ldsXorSwzExtraBases(kernel, tc)
+    swapBasesByMask = None
     if self.states.IncLdsBufSwitch:
       # IncLdsBufSwitch case, we do not use xor. Instead, use add and max check for round back
       # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) and the non-DTL TDM TDMPlusLdsBuf path)
@@ -16811,6 +16870,7 @@ class KernelWriterAssembly(KernelWriter):
             src0=self._lraVgpr("LocalReadSwapAddr", tc, i, n), \
             src1=self._lraVgpr("LocalReadAddr", tc, i, n), \
             comment="swap Red Blk"))
+        assert not nSwz, "LdsXorSwizzle: StoreSwapAddr unsupported"
     else:
       for i in range(numLra if mxPhase else 1):
         module.add(VXorB32(
@@ -16818,8 +16878,14 @@ class KernelWriterAssembly(KernelWriter):
           src0=hex(kernel["LdsOffsetA_Blk"]), \
           src1=vgpr("LocalReadAddr%s+%u"%(tc, i)) if mxPhase else vgpr("LocalReadAddr%s"%tc), \
           comment="swap Red Blk"))
+      swapBasesByMask = kernel["LdsOffsetA_Blk"]
 
     module.add(self._lraFanOut(kernel, tc, numLra))
+    if nSwz and swapBasesByMask is not None:
+      for c in range(1, nSwz + 1):
+        slot = "LocalReadAddr%s+%u"%(tc, c)
+        module.add(VXorB32(dst=vgpr(slot), src0=hex(swapBasesByMask), src1=vgpr(slot), \
+            comment="LdsXorSwizzle: swap base c=%u"%c))
     return module
 
   ##############################################################################
@@ -16880,10 +16946,12 @@ class KernelWriterAssembly(KernelWriter):
           comment="Get other lds buffer offset value"))
         module.add(VMinI32(dst=lra, src0=lra, src1=vgpr(tmpvgpr),
                         comment="Set LRA to first buffer offset"))
+      assert not self._ldsXorSwzExtraBases(kernel, tc), "LdsXorSwizzle: StoreSwapAddr unsupported"
       self.vgprPool.checkIn(tmpvgpr)
     else:
       mxPhase = tc in ("MXSA", "MXSB") and mxFreePhase(kernel, tc)
-      for i in range(numLra if mxPhase else 1):
+      # LdsXorSwizzle bases 1..nSwz flip buffers too; reset them like slot 0.
+      for i in range(numLra if mxPhase else 1 + self._ldsXorSwzExtraBases(kernel, tc)):
         module.add(VAndB32(
           dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], i)), \
           src0=hex(kernel["LdsOffsetA_Blk"]-1), \
@@ -17045,6 +17113,17 @@ class KernelWriterAssembly(KernelWriter):
           module.addComment0("Adding additional %u pad since cumulative inc has reached %u"\
                              %(padd, kernel["LdsBlockSizePerPad%s"%tc]))
       inc = int(inc)
+
+      nSwz = self._ldsXorSwzExtraBases(kernel, tc)
+      if nSwz:
+        # LdsXorSwizzle: base c + inc is not the base of chunk c + inc/16; shift the bases instead,
+        # so each tail pass reads its chunks through slots 0.. like the first pass.
+        assert inc % 16 == 0 and padd == 0, "LdsXorSwizzle: tail-loop increment must be whole chunks"
+        step = inc // 16
+        for c in range(nSwz + 1 - step):
+          module.add(VMovB32(dst=vgpr("LocalReadAddr%s+%u"%(tc, c)), src=vgpr("LocalReadAddr%s+%u"%(tc, c + step)), \
+                             comment="LdsXorSwizzle: tail K step, base %u <- base %u"%(c, c + step)))
+        return module
 
       with self.allocTmpSgpr(1, tag="localReadInc_tmpSgprInfo") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx

@@ -3478,6 +3478,15 @@ class Solution(collections.abc.Mapping):
     state.setdefault("_inputVWA_was_auto", state["VectorWidthA"] == -1)
     state.setdefault("_inputVWB_was_auto", state["VectorWidthB"] == -1)
 
+    # LdsXorSwizzle derives its read key from the lane's LDS row, which VectorWidth>1 interleaves.
+    if state["LdsXorSwizzle"]:
+      for tc in ("A", "B"):
+        if state["VectorWidth%s"%tc] == -1:
+          state["VectorWidth%s"%tc] = 1
+        elif state["VectorWidth%s"%tc] != 1:
+          reject(state, printRejectionReason, "LdsXorSwizzle requires VectorWidth%s=1"%tc)
+          return
+
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
         regPerElem = state["ProblemType"]["MacDataTypeA"].numRegisters()
@@ -4730,6 +4739,34 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason,
                    f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
             return
+
+      # LdsXorSwizzle is implemented for the gfx11 WMMA UnrollMajorLDS bf16/fp16 path only.
+      # Runs here because the LDS row geometry needs _DepthUA/B, and LdsPad is resolved below.
+      if state["LdsXorSwizzle"]:
+        if not state["EnableMatrixInstruction"] or not isaInfoMap[isa].asmCaps["HasWMMA_V1"]:
+          reject(state, printRejectionReason, "LdsXorSwizzle: only gfx11 WMMA_V1 supported"); return
+        if state["ProblemType"]["DataType"].toChar() not in ('B', 'H'):
+          reject(state, printRejectionReason, "LdsXorSwizzle: bf16/fp16 only"); return
+        if state["ProblemType"]["TLUA"] or state["ProblemType"]["TLUB"]:
+          reject(state, printRejectionReason, "LdsXorSwizzle: requires UnrollMajorLDS (TLU=0 both)"); return
+        if state["ProblemType"]["Sparse"] or state["DirectToVgprA"] or state["DirectToVgprB"] \
+            or state["DirectToLdsA"] or state["DirectToLdsB"]:
+          reject(state, printRejectionReason, "LdsXorSwizzle: Sparse/DTV/DTL not supported"); return
+        if state["MatrixInstK"] != 16:
+          reject(state, printRejectionReason, "LdsXorSwizzle: MatrixInstK must be 16"); return
+        for tc in ("A", "B"):
+          # The swizzle replaces padding: an unset (-1) LdsPad means 0 here.
+          if state["LdsPad%s" % tc] == -1:
+            state["LdsPad%s" % tc] = 0
+          if state["LdsPad%s" % tc] != 0:
+            reject(state, printRejectionReason, "LdsXorSwizzle: replaces padding, requires LdsPad%s=0" % tc); return
+          # LDS row bytes as laid out by lwaFirstOffset: _DepthU x bytes per LDS element (bpeDS).
+          ldsType = "DataType%s" % tc if state["ConvertAfterDS"] else "MacDataType%s" % tc
+          rowBytes = int(state["_DepthU%s" % tc] * state["ProblemType"][ldsType].numBytes())
+          # The read key is derived from Serial%16 (the lane's row in a 16-row WMMA tile).
+          if rowBytes not in (32, 64, 128, 256):
+            reject(state, printRejectionReason, "LdsXorSwizzle: needs an LDS row (_DepthU%s*bpeDS) of 32..256 B" % tc); return
+          state["_LdsXorSwzRowBytes%s" % tc] = rowBytes
 
       iterModeMask = state["TDMIterateMode"]
       autoTdmIterateMode = iterModeMask == -1
@@ -7456,6 +7493,10 @@ class Solution(collections.abc.Mapping):
                  "%s 2D workgroup phase (MacroTile not aligned to MXBlockFree) does not support "
                  "%u LDS buffers" % (mxTc, numLdsBlk))
           return
+    # Neither the NumLdsBlk>=3 buffer switch (IncLdsBufSwitch) nor the register-based
+    # StoreSwapAddr swap updates the swizzled read bases; only the immediate/XOR swap does.
+    if state["LdsXorSwizzle"] and (numLdsBlk >= 3 or state["StoreSwapAddr"]):
+      reject(state, printRejectionReason, "LdsXorSwizzle: NumLdsBlk>=3 (IncLdsBufSwitch) or StoreSwapAddr unsupported")
 
     # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]

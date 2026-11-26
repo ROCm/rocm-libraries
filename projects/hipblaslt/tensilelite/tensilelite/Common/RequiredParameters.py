@@ -84,6 +84,7 @@ def getRequiredParametersMin() -> set:
         'LDSSegmentBRotate',
         'LDSSegmentInterleave',
         'WaveTileContiguousA',
+        'LdsXorSwizzle',
         'LDSTrInst',
         'LocalReadVectorWidth',
         'LocalWritePerMfma',
