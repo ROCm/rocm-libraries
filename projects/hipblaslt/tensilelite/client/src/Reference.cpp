@@ -424,6 +424,30 @@ namespace TensileLite
                 l += r;
         }
 
+        // Non-int32 types keep a single expression, so floating-point contraction
+        // is unchanged.
+        template <typename EpilogueT, typename TA, typename TB>
+        inline void epilogueAddProduct(EpilogueT& l, TA a, TB b)
+        {
+            if constexpr(std::is_same_v<EpilogueT, int32_t>)
+                epilogueAddAssign(l, epilogueMultiply<int32_t>(a, b));
+            else
+                l += a * b;
+        }
+
+        template <typename EpilogueT>
+        inline EpilogueT epilogueMulAdd(EpilogueT a, EpilogueT b, EpilogueT c)
+        {
+            if constexpr(std::is_same_v<EpilogueT, int32_t>)
+            {
+                EpilogueT r = epilogueMultiply<int32_t>(a, b);
+                epilogueAddAssign(r, c);
+                return r;
+            }
+            else
+                return a * b + c;
+        }
+
         template <typename Accumulator,
                   typename MathOpAccum = Accumulator,
                   typename TypeL,
@@ -2181,15 +2205,15 @@ namespace TensileLite
                                     AccumT alpha = effectiveAlpha;
                                     if(scaleABMode == ScaleABMode::Vector)
                                     {
-                                        alpha *= shadowScaleA[global_m];
-                                        alpha *= shadowScaleB[global_n];
+                                        epilogueMulAssign(alpha, shadowScaleA[global_m]);
+                                        epilogueMulAssign(alpha, shadowScaleB[global_n]);
                                     }
                                     else if(scaleABMode == ScaleABMode::Scalar)
                                     {
                                         if constexpr(slowPathEpilogueOrder)
                                         {
-                                            alpha *= scaleAScalar;
-                                            alpha *= scaleBScalar;
+                                            epilogueMulAssign(alpha, scaleAScalar);
+                                            epilogueMulAssign(alpha, scaleBScalar);
                                         }
                                         else
                                         {
@@ -2200,15 +2224,17 @@ namespace TensileLite
                                     {
                                         // Slow path: (alpha * sum) * scaleAlphaVec + beta * C,
                                         // each step rounded on its own.
-                                        current = alpha * current;
+                                        current = epilogueMultiply<AccumT>(alpha, current);
                                         if(useScaleAlphaVec && !deviceScalarAlpha)
                                         {
-                                            current *= shadowAlphaVec[factorDim == 1 ? global_n
-                                                                                     : global_m];
+                                            epilogueMulAssign(
+                                                current,
+                                                shadowAlphaVec[factorDim == 1 ? global_n
+                                                                              : global_m]);
                                         }
                                         if(beta != AccumT(0))
                                         {
-                                            current += beta * startingC;
+                                            epilogueAddProduct(current, beta, startingC);
                                         }
                                     }
                                     else
@@ -2276,7 +2302,7 @@ namespace TensileLite
                                                                pos,
                                                                aConjugate);
 
-                                        current += biasVal;
+                                        epilogueAddAssign(current, biasVal);
                                     }
 
                                     // E: the pre-activation value, stored as the slow
@@ -2308,7 +2334,7 @@ namespace TensileLite
                                                            dataE,
                                                            problem.getParams().activationEnum(),
                                                            actArgs);
-                                        current *= dataE;
+                                        epilogueMulAssign(current, dataE);
                                     }
                                     else if(doActivation)
                                     {
@@ -2343,7 +2369,7 @@ namespace TensileLite
                                                 inputs.gateResidual,
                                                 gateIndex,
                                                 aConjugate);
-                                        current = gateVal * current + gateVal;
+                                        current = epilogueMulAdd(gateVal, current, gateVal);
                                     }
                                     curBatchD[idxD] = current;
                                 }
@@ -2881,7 +2907,7 @@ namespace TensileLite
                                                inputs.gateResidual,
                                                gateIndex,
                                                aConjugate);
-                    resultD = gateVal * resultD + gateVal;
+                    resultD = epilogueMulAdd(gateVal, resultD, gateVal);
                 }
 
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
