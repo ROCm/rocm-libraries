@@ -146,7 +146,7 @@ def test_assign_derived_parameters_early_return(make_pt):
 def test_mapping_interface(make_pt, snapshot):
     pt = make_pt()
     summary = {
-        "len": len(pt),
+        "len_matches_keys": len(pt) == len(pt.keys()),
         "is_mapping_iter_sorted": sorted(iter(pt)) == sorted(pt.keys()),
         "getitem_datatype": pt["DataType"].toName(),
         "get_existing": pt.get("OperationType"),

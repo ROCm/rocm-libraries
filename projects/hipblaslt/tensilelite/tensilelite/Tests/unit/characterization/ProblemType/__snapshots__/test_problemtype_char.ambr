@@ -277,7 +277,7 @@
     'getitem_datatype': 'Float',
     'is_mapping_iter_sorted': True,
     'keys_is_list': True,
-    'len': 96,
+    'len_matches_keys': True,
   })
 # ---
 # name: test_no_data_type_raises

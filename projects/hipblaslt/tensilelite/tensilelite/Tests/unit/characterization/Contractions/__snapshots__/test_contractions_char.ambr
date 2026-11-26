@@ -23,7 +23,6 @@
 # ---
 # name: test_problem_predicate_compound
   dict({
-    'count': 9,
     'tags': list([
       'BufferLoadOffsetLimitCheck',
       'BufferLoadOffsetLimitCheck_Beta',
@@ -57,7 +56,6 @@
 # ---
 # name: test_problem_type_predicates
   dict({
-    'count': 30,
     'tags': list([
       'Activation',
       'ActivationComputeType',
