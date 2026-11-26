@@ -179,7 +179,7 @@ TEST_F(ElementwiseModeTest, PermutationWithReorderedModesIsSupported)
 }
 
 // Permute does not convert types, so an output whose data type differs from the input's has no
-// matching kernel and must be rejected up front.
+// matching kernel and is rejected when the plan is created.
 TEST_F(ElementwiseModeTest, PermutationWithMismatchedOutputTypeReturnsNotSupported)
 {
     int64_t                     lengths[2] = {2, 3};
@@ -207,21 +207,18 @@ TEST_F(ElementwiseModeTest, PermutationWithMismatchedOutputTypeReturnsNotSupport
               HIPTENSOR_STATUS_SUCCESS);
     ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
 
-    hiptensorPlan_t plan{};
-    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
-    ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
-
-    void* a = nullptr;
-    ASSERT_EQ(hipMalloc(&a, 2 * 3 * sizeof(uint16_t)), hipSuccess);
-    ScopeExit freeA{[&] { EXPECT_EQ(hipFree(a), hipSuccess); }};
-
-    void* b = nullptr;
-    ASSERT_EQ(hipMalloc(&b, 2 * 3 * sizeof(float)), hipSuccess);
-    ScopeExit freeB{[&] { EXPECT_EQ(hipFree(b), hipSuccess); }};
-
-    float alpha = 2.0f;
-    EXPECT_EQ(hiptensorPermute(mHandle, plan, &alpha, a, b, nullptr),
-              HIPTENSOR_STATUS_NOT_SUPPORTED);
+    // A failed call leaves the plan handle unchanged, so the sentinel is only destroyed if a plan
+    // was created after all.
+    auto const      unsetPlan = reinterpret_cast<hiptensorPlan_t>(0x1);
+    hiptensorPlan_t plan      = unsetPlan;
+    ScopeExit       destroyPlan{[&] {
+        if(plan != unsetPlan && plan != nullptr)
+        {
+            hiptensorDestroyPlan(plan);
+        }
+    }};
+    EXPECT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(plan, unsetPlan);
 }
 
 TEST_F(ElementwiseModeTest, BinaryWithSubsetModesIsSupported)
@@ -352,7 +349,7 @@ TEST_F(ElementwiseModeTest, TrinaryWithReorderedModesIsSupported)
 }
 
 // D must have the same data type as C: no instance converts types on output, so a mismatch is
-// rejected up front instead of failing later in kernel selection.
+// rejected when the plan is created.
 TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
 {
     int64_t                     lengths[2] = {2, 3};
@@ -388,20 +385,16 @@ TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
               HIPTENSOR_STATUS_SUCCESS);
     ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
 
-    hiptensorPlan_t plan{};
-    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
-    ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
-
-    void* abc = nullptr;
-    ASSERT_EQ(hipMalloc(&abc, 2 * 3 * sizeof(float)), hipSuccess);
-    ScopeExit freeAbc{[&] { EXPECT_EQ(hipFree(abc), hipSuccess); }};
-
-    void* d = nullptr;
-    ASSERT_EQ(hipMalloc(&d, 2 * 3 * sizeof(uint16_t)), hipSuccess);
-    ScopeExit freeD{[&] { EXPECT_EQ(hipFree(d), hipSuccess); }};
-
-    float scalar = 1.0f;
-    EXPECT_EQ(hiptensorElementwiseTrinaryExecute(
-                  mHandle, plan, &scalar, abc, &scalar, abc, &scalar, abc, d, nullptr),
-              HIPTENSOR_STATUS_NOT_SUPPORTED);
+    // A failed call leaves the plan handle unchanged, so the sentinel is only destroyed if a plan
+    // was created after all.
+    auto const      unsetPlan = reinterpret_cast<hiptensorPlan_t>(0x1);
+    hiptensorPlan_t plan      = unsetPlan;
+    ScopeExit       destroyPlan{[&] {
+        if(plan != unsetPlan && plan != nullptr)
+        {
+            hiptensorDestroyPlan(plan);
+        }
+    }};
+    EXPECT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(plan, unsetPlan);
 }

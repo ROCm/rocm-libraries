@@ -489,6 +489,7 @@ set(_HIPTENSOR_HOST_TESTS
   elementwise_instance_selection_test
   elementwise_mode_test
   elementwise_op_test
+  elementwise_plan_check_test
   hiptensor_options_test
   logger_test
   reduction_cpu_impl_test
