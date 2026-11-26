@@ -1820,7 +1820,7 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseBinaryMixedOperandTypesExecutes)
     constexpr int64_t IN_1_UID = 11;
     constexpr int64_t OUT_UID = 12;
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -1840,23 +1840,23 @@ TEST(TestGpuReferenceGraphExecutor, PointwiseBinaryMixedOperandTypesExecutes)
                                                        false));
     }
 
-    auto pointwiseAttrs = CreatePointwiseAttributes(builder,
-                                                    PointwiseMode::ADD,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    IN_0_UID,
-                                                    IN_1_UID,
-                                                    flatbuffers::nullopt,
-                                                    OUT_UID);
+    const auto pointwiseAttrs = CreatePointwiseAttributes(builder,
+                                                          PointwiseMode::ADD,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          IN_0_UID,
+                                                          IN_1_UID,
+                                                          flatbuffers::nullopt,
+                                                          OUT_UID);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "pointwise_node",
                                      DataType::FLOAT,
                                      NodeAttributes::PointwiseAttributes,
                                      pointwiseAttrs.Union()));
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
 
@@ -1902,9 +1902,9 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseMaxMinExecutes)
 
     for(const auto mode : {PointwiseMode::MAX_OP, PointwiseMode::MIN_OP})
     {
-        auto spec = hipdnn_test_sdk::utilities::PointwiseGraphSpec::binary(
+        const auto spec = hipdnn_test_sdk::utilities::PointwiseGraphSpec::binary(
             mode, dims, strides, dims, strides, dims, strides);
-        auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+        const auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
 
         hipdnn_data_sdk::utilities::Tensor<float> input0Tensor(dims, strides);
         hipdnn_data_sdk::utilities::Tensor<float> input1Tensor(dims, strides);
@@ -1947,7 +1947,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseCmpGtExecutes)
     constexpr int64_t IN_1_UID = 11;
     constexpr int64_t OUT_UID = 12;
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto strides = generateStrides(dims);
+    const auto strides = generateStrides(dims);
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -1967,23 +1967,23 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseCmpGtExecutes)
                                                        false));
     }
 
-    auto pointwiseAttrs = CreatePointwiseAttributes(builder,
-                                                    PointwiseMode::CMP_GT,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    IN_0_UID,
-                                                    IN_1_UID,
-                                                    flatbuffers::nullopt,
-                                                    OUT_UID);
+    const auto pointwiseAttrs = CreatePointwiseAttributes(builder,
+                                                          PointwiseMode::CMP_GT,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          IN_0_UID,
+                                                          IN_1_UID,
+                                                          flatbuffers::nullopt,
+                                                          OUT_UID);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "pointwise_node",
                                      DataType::FLOAT,
                                      NodeAttributes::PointwiseAttributes,
                                      pointwiseAttrs.Union()));
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "TestGraph", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
 
@@ -2031,14 +2031,14 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinarySelectExecutes)
 
     // The mask broadcasts along every dimension but the channels
     const std::vector<int64_t> maskDims = {1, 3, 1, 1};
-    auto maskStrides = generateStrides(maskDims);
+    const auto maskStrides = generateStrides(maskDims);
 
     auto spec = hipdnn_test_sdk::utilities::PointwiseGraphSpec::binary(
         PointwiseMode::BINARY_SELECT, dims, strides, dims, strides, dims, strides);
     spec.thirdInputDims = maskDims;
     spec.thirdInputStrides = maskStrides;
     spec.thirdInputDataType = DataType::BOOLEAN;
-    auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
+    const auto builder = hipdnn_test_sdk::utilities::createPointwiseGraph(spec);
 
     GpuReferenceGraphExecutor gpuExecutor;
     ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));

@@ -689,9 +689,9 @@ TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredForFusedBiasWithHalfOp
     // A convolution with a bias add: the convolution output is a virtual fp32 tensor, the bias is
     // fp16 or bf16 and the add computes in the bias type. The key order is mode, input0, compute,
     // output, input1.
-    for(auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
+    for(const auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
     {
-        for(auto narrow : {DataType::HALF, DataType::BFLOAT16})
+        for(const auto narrow : {DataType::HALF, DataType::BFLOAT16})
         {
             const PointwiseSignatureKey key{mode, DataType::FLOAT, narrow, DataType::FLOAT, narrow};
             EXPECT_EQ(planBuilders.count(key), 1u) << key;
