@@ -35,11 +35,13 @@ if TYPE_CHECKING:
     from rocke.helpers.compile import KernelArtifact
 
 __all__ = [
+    "DEVICE_MEMORY_HEADROOM_BYTES",
     "current_device_arch",
     "current_device_arch_in",
     "launch_with_buffers",
     "probe_device_arch",
     "run_on_device",
+    "skip_without_device_memory",
     "supported_device_arch",
 ]
 
@@ -98,6 +100,33 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
             )
         )
     return arch
+
+
+#: Device memory a large-allocation test leaves for the rest of its launch (the
+#: outputs, code objects and the runtime's own allocations), on top of what it
+#: allocates itself (:func:`skip_without_device_memory`).
+DEVICE_MEMORY_HEADROOM_BYTES = 1 << 30
+
+
+def skip_without_device_memory(
+    allocated_bytes: int, subject: str = "this test"
+) -> None:
+    """Skip unless HIP's current device has room for ``allocated_bytes`` plus
+    :data:`DEVICE_MEMORY_HEADROOM_BYTES` of total memory, naming `subject` and
+    the GiB it needs. Judged on the device's total, not its free memory, so
+    whether a case runs does not depend on what else holds memory on the device;
+    a test that needs most of it also runs alone (the ``rocke_run_alone`` mark,
+    ``rocke.tests.ctest_workers``)."""
+    from rocke.runtime.hip_module import get_device_total_memory
+
+    needed = allocated_bytes + DEVICE_MEMORY_HEADROOM_BYTES
+    total = get_device_total_memory()
+    if total is None or total < needed:
+        found = "an unknown amount" if total is None else f"{total / 2**30:.1f} GiB"
+        pytest.skip(
+            f"{subject} needs a device with {needed / 2**30:.1f} GiB of memory; "
+            f"found {found}"
+        )
 
 
 def supported_device_arch(kernel: KernelDef, arches: Collection[str]) -> str:
