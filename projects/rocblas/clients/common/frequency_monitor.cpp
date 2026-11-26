@@ -37,6 +37,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -165,16 +166,18 @@ public:
 
     ~FrequencyMonitorImp() override
     {
-        if(!m_thread.joinable())
-            return;
+        if(m_thread.joinable())
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_exit = true;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_exit = true;
+            }
+            m_cv.notify_all();
+            m_thread.join();
         }
-        m_cv.notify_all();
-        m_thread.join();
-        if(m_anchor)
-            (void)hipEventDestroy(m_anchor);
+        for(auto& anchor : m_anchors)
+            if(anchor.second)
+                (void)hipEventDestroy(anchor.second);
     }
 
     bool enabled() override
@@ -200,18 +203,28 @@ public:
 
     void start() override
     {
-        begin(false);
+        begin(nullptr);
     }
 
     void start(hipStream_t stream) override
     {
         if(!m_enabled)
             return;
-        // the sampling thread waits for this event, which the stream reaches when the timed
-        // calls queued after it start
-        if(!m_anchor && hipEventCreateWithFlags(&m_anchor, hipEventDisableTiming) != hipSuccess)
-            m_anchor = nullptr;
-        begin(m_anchor && hipEventRecord(m_anchor, stream) == hipSuccess);
+        // The sampling thread waits for this event, which the stream reaches when the timed calls
+        // queued after it start. An event is recorded only on streams of its own device, so there
+        // is one per device, kept until the monitor goes away (the sampling thread may be waiting
+        // on it).
+        hipEvent_t anchor = nullptr;
+        int        device = -1;
+        if(hipGetDevice(&device) == hipSuccess)
+        {
+            hipEvent_t& event = m_anchors[device];
+            if(!event && hipEventCreateWithFlags(&event, hipEventDisableTiming) != hipSuccess)
+                event = nullptr;
+            if(event && hipEventRecord(event, stream) == hipSuccess)
+                anchor = event;
+        }
+        begin(anchor);
     }
 
     void stop() override
@@ -284,7 +297,8 @@ private:
 #endif
     }
 
-    void begin(bool anchored)
+    // anchor: the event start(stream) recorded, or nullptr to sample from now
+    void begin(hipEvent_t anchor)
     {
         int device = -1;
         if(!m_enabled || hipGetDevice(&device) != hipSuccess || !bind_device(device))
@@ -293,8 +307,8 @@ private:
             std::lock_guard<std::mutex> lock(m_mutex);
             m_SYSCLK.assign(m_XCDCount, {});
             m_MEMCLK.clear();
-            m_anchored = anchored;
-            m_active   = true;
+            m_anchor = anchor;
+            m_active = true;
             ++m_run;
         }
         m_cv.notify_all();
@@ -381,8 +395,9 @@ private:
            && freq.current < freq.num_supported)
             s.mem = freq.frequency[freq.current] * 1e-6;
 #if AMDSMI_LIB_VERSION_MAJOR >= 25
-        // Some GPUs report the memory clock only as the UMC clock in gpu_metrics
-        else if(have_metrics && valid_clock(metrics.current_uclk))
+        // Some GPUs report the memory clock only as the UMC clock in gpu_metrics, or report 0
+        // through the clock query
+        if(s.mem == 0 && have_metrics && valid_clock(metrics.current_uclk))
             s.mem = metrics.current_uclk;
 #endif
         return s;
@@ -406,17 +421,17 @@ private:
             m_cv.wait(lock, [this] { return m_exit || m_active; });
 
             const uint64_t                run       = m_run;
-            const bool                    anchored  = m_anchored;
+            const hipEvent_t              anchor    = m_anchor;
             const amdsmi_processor_handle processor = m_processor;
             const int                     xcd_count = m_XCDCount;
             auto stopped = [this, run] { return m_exit || !m_active || run != m_run; };
 
             // start(stream): wait until the stream reaches the timed calls; cold calls queued
             // ahead of them may still be running
-            if(anchored)
+            if(anchor)
             {
                 lock.unlock();
-                (void)hipEventSynchronize(m_anchor);
+                (void)hipEventSynchronize(anchor);
                 lock.lock();
                 if(stopped())
                     continue;
@@ -453,9 +468,10 @@ private:
     std::condition_variable m_cv;
     bool                    m_active   = false;
     bool                    m_exit     = false;
-    bool                    m_anchored = false;
     uint64_t                m_run      = 0;
-    hipEvent_t              m_anchor   = nullptr; // recorded by start(stream)
+    hipEvent_t              m_anchor   = nullptr; // the run's start(stream) event, under m_mutex
+
+    std::map<int, hipEvent_t> m_anchors; // one start(stream) event per HIP device
 
     std::vector<std::vector<double>> m_SYSCLK;
     std::vector<double>              m_MEMCLK;
