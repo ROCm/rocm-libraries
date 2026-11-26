@@ -233,6 +233,12 @@ typedef struct rocke_implicit_gemm_conv_spec
      * bounds test, B is a row-major [K, Y*C] matrix. Same kernargs; tagged
      * "patch". Mirrors ImplicitGemmConvSpec.patch. */
     bool patch; /* default false */
+
+    /* dtl (gfx950, patch only): the patch GEMM's K loop as two LDS stages
+     * filled by 16-byte DRAM->LDS DMAs (inline asm), one barrier per K tile
+     * and an XOR-swizzled packed tile (16-byte chunk c of row r at slot
+     * c ^ (r & 7)). Tagged "dtl". Mirrors ImplicitGemmConvSpec.dtl. */
+    bool dtl; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

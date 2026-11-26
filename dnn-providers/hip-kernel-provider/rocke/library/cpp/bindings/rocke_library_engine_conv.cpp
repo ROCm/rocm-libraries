@@ -149,6 +149,7 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
      * loop under the spec's name. */
     s.prefetch_global_regs = dict_bool(d, "prefetch_global_regs", s.prefetch_global_regs);
     s.patch = dict_bool(d, "patch", s.patch);
+    s.dtl = dict_bool(d, "dtl", s.dtl);
     if(d.contains("lds_k_pad") && !d["lds_k_pad"].is_none())
     {
         s.has_lds_k_pad = true;

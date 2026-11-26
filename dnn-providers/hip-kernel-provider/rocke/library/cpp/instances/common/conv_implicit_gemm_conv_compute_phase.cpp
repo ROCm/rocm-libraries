@@ -319,6 +319,20 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
  * K-atom loop, honours the a_operand_override hook, and emits the compv3/compv4
  * sched_group_barrier hints at each kk step's tail.
  * ====================================================================== */
+/* Python dtl_col: chunk c of row r sits at slot c ^ (r & 7); col is
+ * chunk-aligned, so the element column is col ^ ((r << 3) & dtl_mask). */
+rocke_value_t*
+    rocke_conv_dtl_col(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
+{
+    if(!ctx->dtl)
+        return col;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* c3 = rocke_b_const_i32(b, 3);
+    rocke_value_t* sh = rocke_b_shl(b, row, c3);
+    rocke_value_t* m = rocke_b_land(b, sh, ctx->dtl_mask);
+    return rocke_b_xor(b, col, m);
+}
+
 void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                                 rocke_value_t* A_src,
                                 rocke_value_t* B_src,
@@ -413,8 +427,10 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
             else
             {
+                /* dtl_col(a_row, col_base): the dtl tile's XOR-swizzled column */
+                rocke_value_t* a_col = rocke_conv_dtl_col(ctx, a_row, col_base);
                 a_rows[mi] = rocke_conv_load_mma_operand(
-                    b, A_src, a_row, col_base, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
+                    b, A_src, a_row, a_col, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
             }
         }
 
@@ -443,8 +459,9 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 b,
                 warp_n_off,
                 rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
+            rocke_value_t* b_col = rocke_conv_dtl_col(ctx, b_row, col_base);
             b_cols[ni] = rocke_conv_load_mma_operand(
-                b, B_src, b_row, col_base, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
+                b, B_src, b_row, b_col, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
         }
 
         int flat = 0;

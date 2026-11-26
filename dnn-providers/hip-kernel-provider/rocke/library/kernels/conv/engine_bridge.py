@@ -112,6 +112,10 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # The register-prefetch K loop; dropped, the engine would build the
         # plain loop under the spec's name.
         prefetch_global_regs=spec.prefetch_global_regs,
+        # The width-folded patch GEMM's addressing and its DMA-staged K loop;
+        # dropped, the engine would build the generic kernel under their name.
+        patch=spec.patch,
+        dtl=spec.dtl,
         chiplet_swizzle=spec.chiplet_swizzle,
         chiplet_wgm=spec.chiplet_wgm,
         chiplet_num_xcds=spec.chiplet_num_xcds,

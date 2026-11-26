@@ -155,7 +155,8 @@ extern "C" {
  *     rocke_fused_moe_build_per_expert_problems, rocke_fmoe_dtype_*) are
  *     removed; it redefined rocke_fmoe_forward_spec_t and
  *     rocke_grouped_gemm_problem_t with other layouts.
- * 24: rocke_implicit_gemm_conv_spec_t gained prefetch_global_regs and patch:
+ * 24: rocke_implicit_gemm_conv_spec_t gained prefetch_global_regs, patch and
+ *     dtl, and rocke_dgrad_conv_spec_t gained dtl and prefetch_global_regs:
  *     the offsets of the earlier fields are unchanged, but an old caller
  *     leaves the new ones unset. */
 #define ROCKE_ABI_VERSION 24

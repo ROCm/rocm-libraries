@@ -165,7 +165,9 @@ typedef struct rocke_dgrad_conv_spec
      * N = Y*X*C, K = K. The record is the pointwise problem's, so the K loop
      * is unchanged; the dX store splits column n into (y, x*C + c) and lands
      * y*Wi*C + x*C + c past the patch's first element. MFMA only; rejected
-     * with split_k > 1, wavelet and groups > 1. Mirrors DgradConvSpec.patch.
+     * with split_k > 1 unless the epilogue is cshuffle (whose atomic store
+     * takes the patch columns), with wavelet and with groups > 1. Mirrors
+     * DgradConvSpec.patch.
      * Appended last; default false: every existing config is byte-identical. */
     bool patch; /* default false */
     /* tap_outer_k: stride-1 K loop as (filter tap outer) x (output-channel
@@ -194,6 +196,18 @@ typedef struct rocke_dgrad_conv_spec
     int dy_halo_setprio;
     int dy_halo_kouter_pad;
     int halo_max_wo;
+
+    /* dtl (gfx950, K-outer patch GEMM only): the K loop as two LDS stages
+     * filled by 16-byte DRAM->LDS DMAs (inline asm), one barrier per K tile;
+     * A a packed tile whose 16-byte chunk c of row r sits at slot c ^ (r & 7),
+     * B (K-outer) a packed tile whose chunk c of K row k sits at c ^ g(k).
+     * Tagged "_dtl". Mirrors DgradConvSpec.dtl. Appended last. */
+    bool dtl; /* default false */
+    /* prefetch_global_regs: the register-prefetch form of the
+     * uniform_k_decode loop (tile k+1's global reads stay in VGPRs under tile
+     * k's MFMAs, LDS-only barriers). Tagged "_pgr". Mirrors
+     * DgradConvSpec.prefetch_global_regs. Appended last. */
+    bool prefetch_global_regs; /* default false */
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

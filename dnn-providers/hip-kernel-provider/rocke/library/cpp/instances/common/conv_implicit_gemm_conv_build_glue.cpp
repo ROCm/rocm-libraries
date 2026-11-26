@@ -655,8 +655,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * ping-pong.  "compv4" alone shares the plain single-buffer loop with
          * "mem"/"compv3" and differs only in scheduling hints, so allocating a
          * second A/B tile for it was dead and charged LDS the kernel never used.
+         * dtl fills its two stages by DMA (its own two-stage loop).
          * Mirrors the Python double_buffer condition. */
-        ctx->double_buffer = spec->async_dma || spec->unroll_k;
+        ctx->double_buffer = spec->async_dma || spec->unroll_k || spec->dtl;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
@@ -929,6 +930,29 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
     rocke_schedule_policy_emit_prologue(&ctx->schedule, b);
 
+    /* Python: if spec.dtl: the fragment checks, then
+     * _dtl_mask = b.const_i32((min(_dtl_cpr, 8) - 1) << 3). */
+    ctx->dtl = spec->dtl;
+    ctx->dtl_cpr = 0;
+    ctx->dtl_mask = NULL;
+    if(ctx->dtl)
+    {
+        if(ctx->is_wmma || ctx->a_per_lane != 8 || ctx->b_per_lane != 8)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "dtl needs MFMA fragments of one 16-byte chunk");
+            return false;
+        }
+        if(overrides != NULL
+           && (overrides->a_operand_override != NULL || overrides->a_load_override != NULL))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "dtl does not take A load / operand overrides");
+            return false;
+        }
+        ctx->dtl_cpr = ctx->block_k / 8;
+        const int cpr8 = ctx->dtl_cpr < 8 ? ctx->dtl_cpr : 8;
+        ctx->dtl_mask = rocke_b_const_i32(b, (cpr8 - 1) << 3);
+    }
+
     if(!rocke_ir_builder_ok(b))
     {
         return false;
@@ -1048,6 +1072,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *                                  LDS buffers)
      *   prefetch_global_regs -> kloop_prefetch_global_regs (kloop_simple
      *                                  with tile k+1 carried in VGPRs)
+     *   dtl          -> kloop_dtl     (two DMA-filled LDS stages)
      *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4/basic
      *                                  share this; pipeline string only
      *                                  affects schedule hints inside mfma)
@@ -1075,6 +1100,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
             return NULL;
         }
         rocke_conv_emit_kloop_prefetch_global_regs(&ctx);
+    }
+    else if(spec->dtl)
+    {
+        /* The patch GEMM's DMA-staged two-stage loop (Python elif spec.dtl). */
+        rocke_conv_emit_kloop_dtl(&ctx);
     }
     else if(!ctx.async_dma)
     {
