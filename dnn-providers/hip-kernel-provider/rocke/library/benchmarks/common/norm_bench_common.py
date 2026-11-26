@@ -43,7 +43,12 @@ import statistics
 
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-from rocke.runtime import time_launches, time_launches_staged
+from rocke.runtime import (
+    time_launches,
+    time_launches_direct,
+    time_launches_ext,
+    time_launches_staged,
+)
 
 # Per-dtype ``--validate`` tolerance (max abs error vs a torch reference, both
 # compared in fp32): fp16's 5e-3 is ``ck_tile_parity``'s own calibrated
@@ -126,18 +131,35 @@ def time_candidate(
     its own stalled sample, the reported number is the median -- this is what
     ``batched_timing``'s docstring calls "what a number compared against
     hipDNN or MIOpen has to be," so a comparison against MIOpenDriver must use
-    this protocol, not ``block``.
+    this protocol, not ``block``. ``timing="direct"`` is
+    :func:`rocke.runtime.time_launches_direct`: the same one-sample-per-call
+    shape as ``staged`` but without :class:`~rocke.runtime.StallGate` --
+    MIOpen's own timing loop (``HIPOCKernelInvoke::run``) has no equivalent
+    gate, so ``direct`` isolates the gate's own contribution to a ``staged``
+    floor from a candidate that is genuinely launch-bound.
+    ``timing="ext"`` is :func:`rocke.runtime.time_launches_ext`: the events
+    ride on the kernel's own dispatch packet, exactly as MIOpen records them,
+    so it carries none of the marker-packet cost the other two
+    per-call protocols add -- the like-for-like protocol against MIOpen's
+    reported kernel time.
     """
     launcher = KernelLauncher.from_artifact(artifact)
     config = LaunchConfig(grid=grid, block=block)
-
-    def call_once() -> None:
-        launcher(args, config=config)
+    if timing == "ext":
+        samples = time_launches_ext(
+            lambda start, stop: launcher.bind(args, config=config, events=(start, stop)),
+            warmup=warmup, iters=iters,
+        )
+        return statistics.median(samples)
+    call_once = launcher.bind(args, config=config)
 
     if timing == "block":
         return time_launches(call_once, warmup=warmup, iters=iters)
     if timing == "staged":
         samples = time_launches_staged(call_once, warmup=warmup, iters=iters)
+        return statistics.median(samples)
+    if timing == "direct":
+        samples = time_launches_direct(call_once, warmup=warmup, iters=iters)
         return statistics.median(samples)
     raise ValueError(f"unknown timing protocol: {timing!r}")
 
@@ -198,11 +220,7 @@ def rank_candidates(
         _label, artifact, grid, block, call_args = plans[i]
         launcher = KernelLauncher.from_artifact(artifact)
         config = LaunchConfig(grid=grid, block=block)
-
-        def run() -> None:
-            launcher(call_args, config=config)
-
-        return run
+        return launcher.bind(call_args, config=config)
 
     def on_probe(r) -> None:
         if r.failed:
@@ -210,6 +228,8 @@ def rank_candidates(
         label = plans[r.index][0]
         print(f"  [{r.index + 1}/{n}] probe {r.probe_ms:8.3f} ms  {label}", flush=True)
 
+    # batched_timing only knows block/staged; a per-call protocol it lacks
+    # ranks under staged, then re-times its finalists under the real one.
     ranked = batched_timing.rank(
         n,
         make_run,
@@ -220,9 +240,17 @@ def rank_candidates(
         finalists=args.fast_rank_finalists,
         chunk=args.fast_rank_chunk,
         primer=args.fast_rank_primer,
-        timing=timing,
+        timing=timing if timing in ("block", "staged") else "staged",
         on_probe=on_probe,
     )
+    if timing not in ("block", "staged"):
+        for r in ranked:
+            if r.ms is not None:
+                _label, artifact, grid, block, call_args = plans[r.index]
+                r.ms = time_candidate(
+                    artifact, grid=grid, block=block, args=call_args,
+                    warmup=args.warmup, iters=args.iters, timing=timing,
+                )
     n_probed = sum(1 for r in ranked if r.probe_ms is not None)
     n_final = sum(1 for r in ranked if r.is_finalist)
     print(

@@ -87,6 +87,9 @@ edge:
                           event pair per call (:class:`StallGate`), the
                           way hipDNN's benchmark times a call; for
                           numbers compared against hipDNN or MIOpen.
+                        * :func:`time_launches_ext` -- events on the
+                          kernel's own dispatch packet, as MIOpen times
+                          a kernel; no marker-packet overhead.
 
 The previous monolithic ``launch_torch_kernel`` is now a thin
 back-compat shim over :class:`KernelLauncher` + :func:`time_launches`;
@@ -130,7 +133,13 @@ from .launcher import (
     wait_stream_and_release,
 )
 from .packing import pack_args
-from .stall_gate import StallGate, StallTimeout, time_launches_staged
+from .stall_gate import (
+    StallGate,
+    StallTimeout,
+    time_launches_direct,
+    time_launches_ext,
+    time_launches_staged,
+)
 from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
@@ -172,6 +181,8 @@ __all__ = [
     "resolve_stream",
     "synchronize_and_release",
     "time_launches",
+    "time_launches_direct",
+    "time_launches_ext",
     "time_launches_staged",
     "wait_stream_and_release",
 ]

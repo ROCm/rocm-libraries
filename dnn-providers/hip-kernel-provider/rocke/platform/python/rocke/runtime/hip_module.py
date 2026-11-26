@@ -176,6 +176,26 @@ _hipModuleLaunchKernel = _b(
     ctypes.POINTER(ctypes.c_void_p),
     ctypes.POINTER(ctypes.c_void_p),
 )
+# Takes global sizes in threads, not blocks, and records the two events on the
+# kernel's own dispatch packet -- how MIOpen times a kernel
+# (``HIPOCKernelInvoke::run``), so the span carries no marker packets.
+_hipExtModuleLaunchKernel = _b(
+    "hipExtModuleLaunchKernel",
+    _HipFunctionHandle,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_size_t,
+    ctypes.c_void_p,  # sharedMemBytes, stream
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.POINTER(ctypes.c_void_p),
+    _HipEventHandle,
+    _HipEventHandle,
+    ctypes.c_uint,  # flags
+)
 _hipDrvLaunchKernelEx = _b(
     "hipDrvLaunchKernelEx",
     ctypes.POINTER(_HipLaunchConfig),
@@ -1219,12 +1239,18 @@ class Runtime:
         shared_bytes: int = 0,
         stream: int = 0,
         cluster: Optional[Tuple[int, int, int]] = None,
+        events: Optional[Tuple["Event", "Event"]] = None,
     ) -> "Callable[[], None]":
         """Build every ctypes argument of one launch once; return a
         zero-argument callable that only enqueues it.
 
         ``cluster`` launches workgroup clusters of that shape, as in
         :meth:`launch` (``hipDrvLaunchKernelEx`` with a cluster attribute).
+
+        ``events`` is a ``(start, stop)`` pair recorded on the launch's own
+        dispatch packet (``hipExtModuleLaunchKernel``), so their span is the
+        kernel alone; see :func:`rocke.runtime.time_launches_ext`. It cannot
+        be combined with ``cluster``.
 
         For loops that launch the same kernel with the same arguments
         over and over -- the timed loop of a benchmark. :meth:`launch`
@@ -1262,6 +1288,32 @@ class Runtime:
         keep = (args_buf, size_buf, extra)
         stream_id = int(stream)
         checked = _GPU_CHECKS.word_of(fn) is not None
+
+        if events is not None:
+            if cluster is not None:
+                raise ValueError("prepare_launch: events cannot time a cluster launch")
+            start, stop = events
+            ext_args = (
+                fn,
+                *(ctypes.c_uint(g * b) for g, b in zip(grid, block)),
+                *call_args[4:7],
+                ctypes.c_size_t(shared_bytes),
+                ctypes.c_void_p(stream_id),
+                None,
+                extra,
+                start.handle,
+                stop.handle,
+                ctypes.c_uint(0),
+            )
+
+            def enqueue_timed(_keep=keep + (events,)) -> None:
+                if checked:
+                    _GPU_CHECKS.note(fn, stream_id)
+                _check(
+                    _hipExtModuleLaunchKernel(*ext_args), "hipExtModuleLaunchKernel"
+                )
+
+            return enqueue_timed
 
         if cluster is not None:
             # Validated, device-checked and built once, like the plain path's

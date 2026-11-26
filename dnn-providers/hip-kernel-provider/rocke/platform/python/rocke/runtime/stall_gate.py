@@ -52,6 +52,7 @@ from contextlib import contextmanager
 from typing import Callable, List, Optional
 
 from .hip_module import (
+    Event,
     HipError,
     Runtime,
     _check,
@@ -62,7 +63,13 @@ from .hip_module import (
     _hipStreamWaitValue32,
 )
 
-__all__ = ["StallGate", "StallTimeout", "default_gate", "time_launches_staged"]
+__all__ = [
+    "StallGate",
+    "StallTimeout",
+    "default_gate",
+    "time_launches_staged",
+    "time_launches_direct",
+]
 
 # hipDeviceAttributeCanUseStreamWaitValue (AMD-specific block of the
 # hipDeviceAttribute_t enum), hipMallocSignalMemory, hipStreamWaitValueGte.
@@ -304,6 +311,116 @@ def time_launches_staged(
                         "the measured call blocked the host on the stalled "
                         "stream; the stall watchdog released it"
                     )
+                if i >= warmup:
+                    out.append(start.elapsed_to(stop))
+    except Exception:
+        try:
+            rt.sync()
+        except Exception:  # noqa: BLE001, S110 - the call's error is the one to see
+            pass
+        raise
+    finally:
+        start.destroy()
+        stop.destroy()
+    rt.wait_stream(stream)
+    return out
+
+
+def time_launches_direct(
+    fn: Callable[[], None],
+    *,
+    warmup: int,
+    iters: int,
+    stream: int = 0,
+    runtime: Optional[Runtime] = None,
+) -> List[float]:
+    """Per-call device times of ``fn`` in milliseconds, no :class:`StallGate`.
+
+    Same per-sample shape as :func:`time_launches_staged` -- record the start
+    event, call ``fn``, record the stop event, wait on the stop event -- but
+    without arming/releasing a gate around it. This is MIOpen's own protocol
+    (``HIPOCKernelInvoke::run`` under ``MIOPEN_GPU_SYNC``/profiling: one
+    ``hipEventRecord``/``hipEventRecord``/``hipEventSynchronize`` per call,
+    no stream-wait-value isolation): MIOpen does not pay a gate's host-side
+    arm/release round trip or its enqueued ``hipStreamWaitValue32`` packet, so
+    a number meant to isolate "does our launch overhead match MIOpen's own
+    floor" has to drop the gate the same way, or it is comparing a stricter
+    protocol against a looser one.
+
+    :func:`time_launches_staged` stays the default for sweep-vs-MIOpen
+    reporting: the gate is what makes its device-time span gap-free and
+    immune to queue-overlap artifacts between consecutive samples, a
+    guarantee this function does not make. Use this one only to isolate the
+    gate's own contribution to a measured floor.
+    """
+    from .launcher import no_fence
+    from .torch_interop import resolve_stream
+
+    rt = runtime if runtime is not None else Runtime()
+    stream = resolve_stream(stream)
+    start = rt.event()
+    stop = rt.event()
+    out: List[float] = []
+    try:
+        rt.sync()
+        with _automatic_gc_paused(), no_fence():
+            for i in range(int(warmup) + int(iters)):
+                start.record(stream=stream)
+                fn()
+                stop.record(stream=stream)
+                stop.synchronize()
+                if i >= warmup:
+                    out.append(start.elapsed_to(stop))
+    except Exception:
+        try:
+            rt.sync()
+        except Exception:  # noqa: BLE001, S110 - the call's error is the one to see
+            pass
+        raise
+    finally:
+        start.destroy()
+        stop.destroy()
+    rt.wait_stream(stream)
+    return out
+
+
+def time_launches_ext(
+    bind: Callable[[Event, Event], Callable[[], None]],
+    *,
+    warmup: int,
+    iters: int,
+    stream: int = 0,
+    runtime: Optional[Runtime] = None,
+) -> List[float]:
+    """Per-call kernel times in milliseconds, events on the dispatch packet.
+
+    MIOpen times a kernel (``HIPOCKernelInvoke::run``) by handing its event
+    pair to ``hipExtModuleLaunchKernel``, which records them on the kernel's
+    own dispatch packet. :func:`time_launches_direct` records them as two
+    separate marker packets around the launch instead, and those packets add
+    device time to every sample -- for a kernel of a few microseconds, a
+    large share of the span, which makes a small kernel look slower than
+    MIOpen under the other two protocols.
+
+    ``bind(start, stop)`` returns the launch, with those events attached
+    (``KernelLauncher.bind(..., events=(start, stop))``); it is called once.
+    Each sample is one launch and a wait on the stop event.
+    """
+    from .launcher import no_fence
+    from .torch_interop import resolve_stream
+
+    rt = runtime if runtime is not None else Runtime()
+    stream = resolve_stream(stream)
+    start = rt.event()
+    stop = rt.event()
+    out: List[float] = []
+    try:
+        fn = bind(start, stop)
+        rt.sync()
+        with _automatic_gc_paused(), no_fence():
+            for i in range(int(warmup) + int(iters)):
+                fn()
+                stop.synchronize()
                 if i >= warmup:
                     out.append(start.elapsed_to(stop))
     except Exception:

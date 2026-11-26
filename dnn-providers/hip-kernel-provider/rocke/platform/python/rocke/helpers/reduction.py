@@ -41,8 +41,10 @@ __all__ = [
     "block_lds_reduce_pair",
     "block_lds_reduce_with_index",
     "block_lds_reduce_with_wave_prologue",
+    "block_lds_reduce_pair_with_wave_prologue",
     "tree_reduce",
     "welford_block_reduce",
+    "welford_block_reduce_wave_prologue",
     "welford_block_reduce_stable",
     "welford_block_reduce_stable_wave_prologue",
 ]
@@ -370,6 +372,66 @@ def block_lds_reduce_with_wave_prologue(
     return _tree_reduce_scalars(b, combine, parts)
 
 
+def block_lds_reduce_pair_with_wave_prologue(
+    b: IRBuilder,
+    val_a: Value,
+    val_c: Value,
+    lds_a: Value,
+    lds_c: Value,
+    tid: Value,
+    *,
+    block_size: int,
+    combine_a: ReduceCombine = "sum",
+    combine_c: ReduceCombine = "sum",
+    wave_size: int = 64,
+) -> Tuple[Value, Value]:
+    """Twin-channel counterpart of :func:`block_lds_reduce_with_wave_prologue`.
+
+    Same wave-XOR-first shape as the single-channel version -- each
+    channel reduces within its wavefront via ``_warp_xor_reduce`` (no
+    LDS, no barrier), then the ``num_warps`` wave-leaders exchange
+    through one shared barrier schedule, mirroring how
+    :func:`block_lds_reduce_pair` amortises its barrier count across
+    both channels. For ``block_size = 256`` / ``wave_size = 64`` this
+    replaces :func:`block_lds_reduce_pair`'s 8-round barriered tree (9
+    syncs including the initial store) with 6 shuffle stages (no sync)
+    + 1 cross-warp sync -- the missing wave-shuffle variant of the
+    naive ``(sum, sum_sq)`` form that ``LayerNorm2DSpec``'s docstring
+    calls out (``cheap_reduce`` + ``fast_reduce`` were mutually
+    exclusive because this did not exist yet).
+
+    ``lds_a`` / ``lds_c`` need only ``num_warps`` slots (reuse the
+    kernel's existing ``block_size``-element buffers; the tail is
+    simply unused, as in :func:`block_lds_reduce_with_wave_prologue`).
+    """
+    if val_a.type.name != "f32" or val_c.type.name != "f32":
+        raise ValueError("block_lds_reduce_pair_with_wave_prologue expects f32 inputs")
+
+    warp_a = _warp_xor_reduce(b, val_a, combine=combine_a, wave_size=wave_size)
+    warp_c = _warp_xor_reduce(b, val_c, combine=combine_c, wave_size=wave_size)
+
+    num_warps = block_size // wave_size
+    if num_warps == 1:
+        return warp_a, warp_c
+
+    c_wave = b.const_i32(wave_size)
+    lane = b.mod(tid, c_wave)
+    warp = b.div(tid, c_wave)
+    with b.scf_if(b.cmp_eq(lane, b.const_i32(0))):
+        b.smem_store_vN_f32(lds_a, [warp], warp_a, 1)
+        b.smem_store_vN_f32(lds_c, [warp], warp_c, 1)
+    b.sync()
+
+    parts_a: List[Value] = []
+    parts_c: List[Value] = []
+    for w in range(num_warps):
+        parts_a.append(b.vec_extract(b.smem_load_vN_f32(lds_a, b.const_i32(w), n=1), 0))
+        parts_c.append(b.vec_extract(b.smem_load_vN_f32(lds_c, b.const_i32(w), n=1), 0))
+    out_a = _tree_reduce_scalars(b, combine_a, parts_a)
+    out_c = _tree_reduce_scalars(b, combine_c, parts_c)
+    return out_a, out_c
+
+
 def welford_block_reduce(
     b: IRBuilder,
     sum_val: Value,
@@ -422,6 +484,49 @@ def welford_block_reduce(
         block_size=block_size,
         combine_a="sum",
         combine_c="sum",
+    )
+    n_total = float(count_val * block_size)
+    inv_n = b.const_f32(1.0 / n_total)
+    mean = b.fmul(total_sum, inv_n)
+    sq_mean = b.fmul(total_sumsq, inv_n)
+    var = b.fsub(sq_mean, b.fmul(mean, mean))
+    return mean, var
+
+
+def welford_block_reduce_wave_prologue(
+    b: IRBuilder,
+    sum_val: Value,
+    sum_sq_val: Value,
+    count_val: int,
+    lds_sum: Value,
+    lds_sumsq: Value,
+    tid: Value,
+    *,
+    block_size: int,
+    wave_size: int = 64,
+) -> Tuple[Value, Value]:
+    """Wave-XOR-first counterpart of :func:`welford_block_reduce`.
+
+    Same naive ``(sum, sum_sq)`` shape and the same catastrophic-
+    cancellation caveat, but reduces through
+    :func:`block_lds_reduce_pair_with_wave_prologue` instead of
+    :func:`block_lds_reduce_pair`: ``log2(block_size)`` barriers become
+    one cross-warp barrier. Pairs with :func:`welford_block_reduce_stable_wave_prologue`
+    as the ``cheap_reduce=True, fast_reduce=True`` combination in
+    ``layernorm2d`` -- the launch/sync-bound small-row-shape case where
+    the barrier count, not the arithmetic, sets the floor.
+    """
+    total_sum, total_sumsq = block_lds_reduce_pair_with_wave_prologue(
+        b,
+        sum_val,
+        sum_sq_val,
+        lds_sum,
+        lds_sumsq,
+        tid,
+        block_size=block_size,
+        combine_a="sum",
+        combine_c="sum",
+        wave_size=wave_size,
     )
     n_total = float(count_val * block_size)
     inv_n = b.const_f32(1.0 / n_total)

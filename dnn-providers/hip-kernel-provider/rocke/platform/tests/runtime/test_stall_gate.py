@@ -17,7 +17,12 @@ import os
 import weakref
 
 import pytest
-from rocke.runtime.stall_gate import StallTimeout, time_launches_staged
+from rocke.runtime.stall_gate import (
+    StallTimeout,
+    time_launches_direct,
+    time_launches_ext,
+    time_launches_staged,
+)
 
 _STREAM = 5
 _GPU = pytest.mark.skipif(not os.path.exists("/dev/kfd"), reason="needs an AMD GPU")
@@ -172,7 +177,8 @@ def test_the_callers_collector_setting_survives_a_raise(caller_enabled):
 
 
 def _busy_launch():
-    """A launch of a one-instruction kernel, or skip when none can be built."""
+    """A launch factory for a one-instruction kernel (keywords go to
+    ``prepare_launch``), or skip when none can be built."""
     import struct
 
     from rocke.runtime.hip_module import Runtime, get_device_arch
@@ -196,12 +202,100 @@ def _busy_launch():
         pytest.skip(f"cannot build a kernel here: {e}")
     rt = Runtime()
     fn = rt.load_module(hsaco).get_function("nop")
-    return rt, rt.prepare_launch(fn, (1, 1, 1), (64, 1, 1), struct.pack("<Q", 0))
+    return rt, lambda **kw: rt.prepare_launch(
+        fn, (1, 1, 1), (64, 1, 1), struct.pack("<Q", 0), **kw
+    )
+
+
+def test_direct_times_every_call_with_no_gate():
+    """Same per-sample shape as staged timing, minus every gate step."""
+    rt = _FakeRuntime()
+    out = time_launches_direct(
+        _fn(rt.log), warmup=1, iters=2, stream=_STREAM, runtime=rt
+    )
+    one = ["record:start", "fn", "record:stop", "sync:stop"]
+    assert rt.log == ["device_sync"] + one * 3 + [
+        "destroy:start",
+        "destroy:stop",
+        "wait_stream",
+    ]
+    assert out == [2.0, 2.0]
+
+
+def test_direct_a_raise_drains_before_it_propagates():
+    rt = _FakeRuntime()
+    with pytest.raises(RuntimeError, match="launch failed"):
+        time_launches_direct(_fn(rt.log, raise_on=2), warmup=0, iters=3, runtime=rt)
+    assert rt.log[-3:] == ["device_sync", "destroy:start", "destroy:stop"]
+
+
+def test_ext_binds_once_and_times_every_call_with_no_marker_packets():
+    """The events ride on the launch itself: no record, one wait per sample."""
+    rt = _FakeRuntime()
+    bound = []
+
+    def bind(start, stop):
+        bound.append((start, stop))
+        return _fn(rt.log)
+
+    out = time_launches_ext(bind, warmup=1, iters=2, stream=_STREAM, runtime=rt)
+    assert len(bound) == 1
+    one = ["fn", "sync:stop"]
+    assert rt.log == ["device_sync"] + one * 3 + [
+        "destroy:start",
+        "destroy:stop",
+        "wait_stream",
+    ]
+    assert out == [2.0, 2.0]
+
+
+def test_ext_a_raise_drains_before_it_propagates():
+    rt = _FakeRuntime()
+    with pytest.raises(RuntimeError, match="launch failed"):
+        time_launches_ext(
+            lambda start, stop: _fn(rt.log, raise_on=2),
+            warmup=0,
+            iters=3,
+            runtime=rt,
+        )
+    assert rt.log[-3:] == ["device_sync", "destroy:start", "destroy:stop"]
+
+
+@_GPU
+def test_real_ext_times_every_call():
+    _rt, prep = _busy_launch()
+    out = time_launches_ext(
+        lambda start, stop: prep(events=(start, stop)), warmup=2, iters=5
+    )
+    assert len(out) == 5
+    assert all(ms > 0 for ms in out)
+
+
+@_GPU
+def test_real_ext_refuses_a_cluster_launch():
+    rt, prep = _busy_launch()
+    start, stop = rt.event(), rt.event()
+    try:
+        with pytest.raises(ValueError, match="cluster"):
+            prep(events=(start, stop), cluster=(1, 1, 1))
+    finally:
+        start.destroy()
+        stop.destroy()
+
+
+@_GPU
+def test_real_direct_times_every_call():
+    _rt, prep = _busy_launch()
+    run = prep()
+    out = time_launches_direct(run, warmup=2, iters=5)
+    assert len(out) == 5
+    assert all(ms > 0 for ms in out)
 
 
 @_GPU
 def test_real_gate_times_every_call():
-    _rt, run = _busy_launch()
+    _rt, prep = _busy_launch()
+    run = prep()
     out = time_launches_staged(run, warmup=2, iters=5)
     assert len(out) == 5
     assert all(ms > 0 for ms in out)
@@ -211,7 +305,8 @@ def test_real_gate_times_every_call():
 def test_real_watchdog_unblocks_a_call_that_waits_on_the_stalled_stream():
     from rocke.runtime.stall_gate import StallGate
 
-    rt, run = _busy_launch()
+    rt, prep = _busy_launch()
+    run = prep()
 
     def blocking():
         run()
@@ -229,7 +324,8 @@ def test_real_device_free_inside_the_call_is_a_stall_timeout():
     from rocke.runtime.launcher import DeviceMem
     from rocke.runtime.stall_gate import StallGate
 
-    _rt, run = _busy_launch()
+    _rt, prep = _busy_launch()
+    run = prep()
     buffers = [DeviceMem(256)]
 
     def run_then_free():
@@ -247,7 +343,8 @@ def test_real_garbage_holding_device_memory_is_not_freed_inside_a_sample():
     from rocke.runtime.launcher import DeviceMem
     from rocke.runtime.stall_gate import StallGate
 
-    _rt, run = _busy_launch()
+    _rt, prep = _busy_launch()
+    run = prep()
     alive_inside = []
     with StallGate(timeout_s=0.2) as gate:
         # Start the collector's counts at zero, so the cycle below is still in

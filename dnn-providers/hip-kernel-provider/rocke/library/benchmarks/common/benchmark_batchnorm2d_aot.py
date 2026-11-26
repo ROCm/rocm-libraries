@@ -80,9 +80,14 @@ def _parse_args(argv):
     p.add_argument("--warmup", type=int, default=5)
     p.add_argument("--iters", type=int, default=25)
     p.add_argument(
-        "--timing", choices=("block", "staged"), default="staged",
+        "--timing", choices=("block", "staged", "direct", "ext"), default="staged",
         help="'staged' (default) is the protocol comparable to MIOpen/hipDNN; "
-        "'block' amortises per-call event overhead across a launch loop",
+        "'block' amortises per-call event overhead across a launch loop; "
+        "'direct' is 'staged' without the StallGate (MIOpen's own protocol "
+        "has no equivalent gate), to isolate the gate's own cost from a "
+        "candidate that is genuinely launch-bound; 'ext' records the "
+        "events on the kernel's own dispatch packet, as MIOpen does, "
+        "and is the like-for-like protocol against MIOpen kernel times",
     )
     p.add_argument(
         "--validate", action="store_true",

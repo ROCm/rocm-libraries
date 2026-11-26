@@ -70,6 +70,12 @@ CONFIGS = [
     # --- dynamic (AOT-generic) variant ---
     (4096, 256, 4, "f16", False, True),  # 35
     (2048, 128, 4, "bf16", True, True),  # 36
+    # --- fast_reduce (wave-shuffle Welford): one static, one dynamic ---
+    (4096, 256, 4, "f16", False, False, True),  # 37
+    (4096, 256, 4, "f16", False, True, True),  # 38
+    # --- cheap_reduce (MIOpen-style naive E[X^2]-E[X]^2): one static, one dynamic ---
+    (4096, 256, 4, "f16", False, False, False, True),  # 39
+    (4096, 256, 4, "f16", False, True, False, True),  # 40
 ]
 
 
@@ -79,6 +85,8 @@ def _spec(idx: int) -> LayerNorm2DSpec:
     cfg = CONFIGS[idx]
     n, bs, v, dt, smv = cfg[:5]
     dynamic = cfg[5] if len(cfg) > 5 else False
+    fast_reduce = cfg[6] if len(cfg) > 6 else False
+    cheap_reduce = cfg[7] if len(cfg) > 7 else False
     return LayerNorm2DSpec(
         n_per_block=n,
         block_size=bs,
@@ -86,6 +94,8 @@ def _spec(idx: int) -> LayerNorm2DSpec:
         dtype=dt,
         save_mean_invstd=smv,
         dynamic=dynamic,
+        fast_reduce=fast_reduce,
+        cheap_reduce=cheap_reduce,
     )
 
 
