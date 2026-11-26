@@ -2,7 +2,7 @@
 # name: test_mxf4_swizzlea_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STA_BH_Use9Tbhog1d3unw7azD0Sq5eI3mn0sCEThvRWlpGT6Fi78=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STA_BH_Usefwyp8wJ0b1lDEBy0SwlMBkKUxX2FxNYVhZp0ogd_O74=',
       'err': 0,
     }),
   ])

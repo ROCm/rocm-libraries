@@ -3228,6 +3228,56 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
         << recorder.getRecordedLogsAsString();
 }
 
+/// `trained_against.codegen_revision` is read beside the selector revision, from a UHD 1.2. It
+/// only qualifies the model, so the declared path, whose engine revision is opaque provider text,
+/// still binds on the selector revision alone.
+TEST(TestDescriptorLoader, ReadsARecordedCodegenRevision)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_codegen"));
+    const auto modelId = testUuid('e', '1');
+    auto document = declaredL1Document(modelId);
+    document["version"] = "1.2";
+    document["trained_against"]["codegen_revision"] = "codegen-old";
+    writeDocument(dir.path(), {".uhd.json", document});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& model = resolved.byMetric.at("tflops").at("default");
+    EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
+    EXPECT_EQ(model.trainedAgainstCodegenRevision, "codegen-old");
+}
+
+/// UHD 1.2 is the first version that carries `codegen_revision`: a 1.1 document recording it is
+/// refused as malformed, naming the version it needs, and a 1.3 one is skipped at the version
+/// gate, as a newer toolchain's file is.
+TEST(TestDescriptorLoader, ReadsACodegenRevisionOnlyFromAUhd12)
+{
+    const auto expectSkipped
+        = [](const std::string& version, hipdnnSeverity_t severity, const std::string& expected) {
+              SCOPED_TRACE(version);
+              auto recorder
+                  = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(severity);
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+                  uniqueDirectory("declared_l1_codegen_version"));
+              auto document = declaredL1Document(testUuid('e', '1'));
+              document["version"] = version;
+              document["trained_against"]["codegen_revision"] = "codegen-old";
+              writeDocument(dir.path(), {".uhd.json", document});
+
+              EXPECT_TRUE(loadDescriptorCatalog(dir.path()).heuristics.empty());
+              EXPECT_TRUE(recorder.hasLogContaining(severity, expected))
+                  << recorder.getRecordedLogsAsString();
+          };
+    expectSkipped("1.1", HIPDNN_SEV_ERROR, "which requires UHD version 1.2");
+    expectSkipped("1.3", HIPDNN_SEV_WARN, "declares version 1.3; this build reads 1.2");
+}
+
 /// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.
 /// Checked end to end, through a calibrated score in the requested metric.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
@@ -4402,6 +4452,22 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
+/// A sign is not part of the version grammar: "-1.2.0" names no schema, so the engine
+/// drops rather than claiming a negative major that compares below every floor.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsSigned)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signed_sdk_version"));
+    auto documents = makeSetDocuments('1', "test:signed_version");
+    documentOfType(documents, ".ued.json")["sdk_version"] = "-1.2.0";
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sdk_version'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "is not a version"));
+}
+
 /// The inverse of the UED case: `version` is required on every type, with no absence-safe
 /// default. A KMD with no version drops, and the engine whose `metadata` named it goes
 /// with it -- which is what makes the rule enforceable rather than advisory.
@@ -5071,7 +5137,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
     auto documents = makeSetDocuments('1', "test:valid");
-    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.2";
+    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.3";
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -5080,7 +5146,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     const auto& kernels = sets.front().packs.front().kernels;
     ASSERT_EQ(kernels.size(), 2u);
-    // Which two, not merely how many: the gate has to drop the entry that declared 1.2.
+    // Which two, not merely how many: the gate has to drop the entry that declared 1.3.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
@@ -5102,7 +5168,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["arch"] = nlohmann::json::array({"gfx942"});
     auto& skewed = pack.at("kernelDescriptors").front();
-    skewed["version"] = "1.2";
+    skewed["version"] = "1.3";
     skewed["arch"] = nlohmann::json::array({"gfx90a"});
     writeDocuments(dir.path(), documents);
 
@@ -5113,7 +5179,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.2"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.3"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -5154,7 +5220,7 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
 
     auto broken = makeSetDocuments('2', "test:broken");
     referenceLastKernel(broken);
-    documentOfType(broken, ".ukd.json")["version"] = "1.2";
+    documentOfType(broken, ".ukd.json")["version"] = "1.3";
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -5207,7 +5273,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["x-pack-note"] = "header";
     auto& kernels = pack.at("kernelDescriptors");
-    kernels[0]["version"] = "1.2";
+    kernels[0]["version"] = "1.3";
     kernels[1]["x-kernel-note"] = "kernel";
     writeDocuments(dir.path(), documents);
     overwritePack(dir.path(), documents, GetParam().spell(pack));
@@ -5219,7 +5285,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
     const auto& param = GetParam();
     for(const std::string warning :
-        {"extension key 'x-pack-note'", "declares version 1.2", "extension key 'x-kernel-note'"})
+        {"extension key 'x-pack-note'", "declares version 1.3", "extension key 'x-kernel-note'"})
     {
         const auto count = countLogsContaining(recorder, warning);
         if(param.exactly)
@@ -5649,7 +5715,7 @@ std::vector<OracleCase> oracleCases()
          loads,
          [] {
              auto skewed = oracleKernel(2);
-             skewed["version"] = "1.2";
+             skewed["version"] = "1.3";
              return oraclePackText(oracleHeader(),
                                    nlohmann::json::array({oracleKernel(1), skewed}));
          }},
@@ -6215,9 +6281,10 @@ TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
     EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
 }
 
-/// The selector revision digests every launch's code object, so a pack whose launch is
-/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
-/// own symbol, toc_key and sha256, and each of them counts on its own.
+/// The selector revision digests every launch's code identity, which is its sha256 for a launch
+/// that carries no `identity` (as these do not), so a pack whose launch is rebuilt does not keep
+/// a revision a ranker was trained against. Each launch carries its own symbol, toc_key and
+/// sha256, and each of them counts on its own.
 TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
 {
     const auto revisionWith
@@ -6483,37 +6550,67 @@ TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSourc
 namespace
 {
 
-/// Writes a packaged kernel whose only departure from the shape above is `sha256`, so a
-/// rejection can only be the digest and not some other part of the document.
-void writePackagedKernelWithSha256(const std::filesystem::path& where, const std::string& digest)
+/// The conforming packaged `kernel_source` of the shape above; a test changes only the key it
+/// is about.
+nlohmann::json packagedKernelSource()
 {
-    auto packaged = makeSetDocuments('1', "test:sha256");
-    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
-        = {{"kind", "kpack"},
-           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-           {"toc_key", "PointwiseAdd/block64"},
-           {"symbol", "PointwiseAdd"},
-           {"sha256", digest},
-           {"signature", packagedSignature()}};
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+            {"toc_key", "PointwiseAdd/block64"},
+            {"symbol", "PointwiseAdd"},
+            {"sha256", std::string(64, 'a')},
+            {"signature", packagedSignature()}};
+}
+
+/// Writes a UKD 1.2 packaged kernel whose only departure from packagedKernelSource() is @p key
+/// (`sha256`, or the `identity` 1.2 admits) set to @p digest, so a rejection can only be that
+/// digest and not some other part of the document.
+void writePackagedKernelWithDigest(const std::filesystem::path& where,
+                                   const std::string& key,
+                                   const std::string& digest)
+{
+    auto packaged = makeSetDocuments('1', "test:" + key);
+    auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+    kernel["version"] = "1.2";
+    kernel["kernel_source"] = packagedKernelSource();
+    kernel["kernel_source"][key] = digest;
     writeDocuments(where, packaged);
 }
 
 /// Asserts the digest is refused and that the message can be acted on: it names the key, the
 /// locator, and the text that was wrong. A rejection whose message carries none of the three
 /// sends the reader to grep the loader rather than to their own descriptor.
-void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
+void expectDigestRejected(const std::string& key,
+                          const std::string& digest,
+                          const std::string& scratchLabel)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
-    writePackagedKernelWithSha256(dir.path(), digest);
+    writePackagedKernelWithDigest(dir.path(), key, digest);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key '" + key + "' in"))
         << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
         << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "'" + digest + "'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// Asserts an empty digest is refused as an empty string, before its shape is read, so the
+/// message names the key and quotes no value.
+void expectEmptyDigestRejected(const std::string& key, const std::string& scratchLabel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithDigest(dir.path(), key, "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key '" + key + "' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "must not be empty"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -6523,38 +6620,29 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
 {
     // One character short is what a truncated copy-paste produces, and it is the case a plain
     // non-empty check cannot see.
-    expectSha256Rejected(std::string(63, 'a'), "sha256_short");
+    expectDigestRejected("sha256", std::string(63, 'a'), "sha256_short");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
 {
-    expectSha256Rejected(std::string(65, 'a'), "sha256_long");
+    expectDigestRejected("sha256", std::string(65, 'a'), "sha256_long");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
 {
     // Rejected rather than folded: the packer emits `hexdigest()` and nothing else, and two
     // spellings of one digest compare unequal wherever the field is compared as text.
-    expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
+    expectDigestRejected("sha256", std::string(64, 'A'), "sha256_upper");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
 {
-    expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
+    expectDigestRejected("sha256", std::string(63, 'a') + "z", "sha256_nonhex");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
 {
-    // requireString already refuses an empty value; the length rule must own the case anyway,
-    // in case requireString ever softens.
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
-    writePackagedKernelWithSha256(dir.path(), "");
-
-    EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
-        << recorder.getRecordedLogsAsString();
+    expectEmptyDigestRejected("sha256", "sha256_empty");
 }
 
 TEST(TestDescriptorLoader, AcceptsAConformingSha256)
@@ -6563,7 +6651,7 @@ TEST(TestDescriptorLoader, AcceptsAConformingSha256)
     // is ever tightened past "64 of [0-9a-f]".
     const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
-    writePackagedKernelWithSha256(dir.path(), digest);
+    writePackagedKernelWithDigest(dir.path(), "sha256", digest);
 
     const auto sets = loadFrom(dir.path());
 
@@ -6571,6 +6659,79 @@ TEST(TestDescriptorLoader, AcceptsAConformingSha256)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     ASSERT_FALSE(sets.front().packs.front().kernels.empty());
     EXPECT_EQ(sets.front().packs.front().kernels.front().source.sha256, digest);
+}
+
+/// The packager stamps `identity` beside `sha256` on a code object it compiled itself, on the
+/// kernel's single source and on each launch of a multi-launch kernel; it is read verbatim.
+TEST(TestDescriptorLoader, CarriesAPackagedCodeObjectIdentity)
+{
+    const std::string identity(64, 'c');
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_ok"));
+        writePackagedKernelWithDigest(dir.path(), "identity", identity);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& kernels = sets.front().packs.front().kernels;
+        EXPECT_EQ(kernels.front().source.identity, identity);
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory("identity_launch_ok"));
+        auto documents = makeSetDocuments('1', "test:identity_launch");
+        auto& document = spellAsMultiLaunch(documents);
+        document["version"] = "1.2";
+        document.at("sources").at("decode")["identity"] = identity;
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& kernel = sets.front().packs.front().kernels.front();
+        EXPECT_EQ(kernel.sources.at("decode").identity, identity);
+        EXPECT_TRUE(kernel.sources.at("merge").identity.empty());
+    }
+}
+
+/// `identity` arrived with UKD 1.2: a kernel that carries one under an older version is refused,
+/// on its single source and on a launch alike, as `sources` under 1.0 is.
+TEST(TestDescriptorLoader, RefusesAnIdentityUnderAVersionBeforeItsMinor)
+{
+    for(const bool multiLaunch : {false, true})
+    {
+        SCOPED_TRACE(multiLaunch ? "launch" : "single source");
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_1_1"));
+        auto documents = makeSetDocuments('1', "test:identity_1_1");
+        auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors").front();
+        if(multiLaunch)
+        {
+            spellAsMultiLaunch(documents).at("sources").at("decode")["identity"]
+                = std::string(64, 'c');
+        }
+        else
+        {
+            kernel["version"] = "1.1";
+            kernel["kernel_source"] = packagedKernelSource();
+            kernel["kernel_source"]["identity"] = std::string(64, 'c');
+        }
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "needs UKD 1.2"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// `identity` is held to the sha256 shape, so a truncated or mis-cased digest fails at load
+/// with the key, the locator and the value, not as a silent selector change.
+TEST(TestDescriptorLoader, RejectsAnIdentityThatIsNotASha256Digest)
+{
+    expectDigestRejected("identity", std::string(63, 'c'), "identity_short");
+    expectDigestRejected("identity", std::string(64, 'C'), "identity_upper");
+    expectEmptyDigestRejected("identity", "identity_empty");
 }
 
 namespace
@@ -6582,13 +6743,10 @@ void writePackagedKernelWithSignature(const std::filesystem::path& where,
                                       const nlohmann::json& signature)
 {
     auto packaged = makeSetDocuments('1', "test:signature");
-    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
-        = {{"kind", "kpack"},
-           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-           {"toc_key", "PointwiseAdd/block64"},
-           {"symbol", "PointwiseAdd"},
-           {"sha256", std::string(64, 'a')},
-           {"signature", signature}};
+    auto& source
+        = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"];
+    source = packagedKernelSource();
+    source["signature"] = signature;
     writeDocuments(where, packaged);
 }
 

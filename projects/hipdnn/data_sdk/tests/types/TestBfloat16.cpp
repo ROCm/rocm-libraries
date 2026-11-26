@@ -184,6 +184,40 @@ TEST_F(TestBfloat16, Bfloat16TruncateNumericLimits)
     EXPECT_EQ(std::numeric_limits<bfloat16_truncate>::lowest().data, 0xFF7F);
 }
 
+TEST_F(TestBfloat16, Bfloat16TruncatePreservesNan)
+{
+    using hipdnn_data_sdk::types::bfloat16_truncate;
+
+    // NaN payloads that sit only in the low 16 bits would truncate to an infinity pattern
+    for(const uint32_t floatBits : {0x7F800001u, 0x7F800BE5u, 0x7F80FFFFu, 0xFF800001u})
+    {
+        float f;
+        std::memcpy(&f, &floatBits, sizeof(float));
+        ASSERT_TRUE(std::isnan(f));
+
+        const bfloat16_truncate truncVal(f);
+        EXPECT_TRUE(isnan(truncVal)) << "float bits 0x" << std::hex << floatBits;
+        EXPECT_EQ(truncVal.data & 0x8000u, (floatBits >> 16) & 0x8000u)
+            << "float bits 0x" << std::hex << floatBits;
+    }
+}
+
+TEST_F(TestBfloat16, Bfloat16TruncateKeepsInfinity)
+{
+    using hipdnn_data_sdk::types::bfloat16_truncate;
+
+    for(const uint32_t floatBits : {0x7F800000u, 0xFF800000u})
+    {
+        float f;
+        std::memcpy(&f, &floatBits, sizeof(float));
+
+        const bfloat16_truncate truncVal(f);
+        EXPECT_EQ(truncVal.data, static_cast<uint16_t>(floatBits >> 16))
+            << "float bits 0x" << std::hex << floatBits;
+        EXPECT_TRUE(isinf(truncVal)) << "float bits 0x" << std::hex << floatBits;
+    }
+}
+
 // ============================================================================
 // Specific numeric_limits Value Tests
 // ============================================================================
