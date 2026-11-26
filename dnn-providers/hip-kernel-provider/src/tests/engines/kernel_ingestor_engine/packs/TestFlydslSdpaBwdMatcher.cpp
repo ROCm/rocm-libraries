@@ -2601,7 +2601,7 @@ TEST(TestFlydslSdpaBwdMatcher, SK1AFloatSinkWithoutDsinkAcceptsOnEveryEngine)
     }
 }
 
-TEST(TestFlydslSdpaBwdMatcher, SK1DsinkOnAnFp32GraphDeclinesAndASinkAloneAccepts)
+TEST(TestFlydslSdpaBwdMatcher, SK1DsinkOnAFloatGraphDeclinesAndASinkAloneAccepts)
 {
     declined(withSinkAndDsink(fp32Spec(), F32),
              "sink",
