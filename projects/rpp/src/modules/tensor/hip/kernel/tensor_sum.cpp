@@ -1266,7 +1266,8 @@ RppStatus hip_exec_tensor_sum(T* srcPtr, RpptDescPtr srcDescPtr, U* tensorSumArr
     // reachable batch count: 170 images at 8K with three channels, 682 at 4K.
     constexpr Rpp32u kScratchBufferFloats = 8294400;
     const Rpp64u partialSumUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
-    if (partialSumUpperBound > kScratchBufferFloats) return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    if (partialSumUpperBound > kScratchBufferFloats)
+        return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
@@ -1353,7 +1354,8 @@ RppStatus hip_exec_tensor_sum(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp64u* ten
     // reachable batch count: 170 images at 8K with three channels, 682 at 4K.
     constexpr Rpp32u kScratchBufferFloats = 8294400;
     const Rpp64u partialSumUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
-    if (partialSumUpperBound > kScratchBufferFloats) return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    if (partialSumUpperBound > kScratchBufferFloats)
+        return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
@@ -1436,7 +1438,8 @@ RppStatus hip_exec_tensor_sum(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp64s* ten
     // reachable batch count: 170 images at 8K with three channels, 682 at 4K.
     constexpr Rpp32u kScratchBufferFloats = 8294400;
     const Rpp64u partialSumUpperBound = static_cast<Rpp64u>(3) * gridDim_x * gridDim_y * gridDim_z;
-    if (partialSumUpperBound > kScratchBufferFloats) return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    if (partialSumUpperBound > kScratchBufferFloats)
+        return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
     if ((srcDescPtr->c == 1) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialSumArrLength = gridDim_x * gridDim_y * gridDim_z;
