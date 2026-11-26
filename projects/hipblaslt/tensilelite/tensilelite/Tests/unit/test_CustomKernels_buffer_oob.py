@@ -194,6 +194,12 @@ NO_BUFFER_OOB_KERNELS = {
     "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1": "skinny MXFP8, exact-size buffer stores",
     "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1": "skinny MXFP8, exact-size buffer stores",
     "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1": "skinny MXFP8, exact-size buffer stores",
+    # All compiled from one source.
+    **{
+        name: "vLLM wvSplitKQ, global_store only"
+        for name in custom_kernel_names()
+        if name.startswith("wvSplitKQ_vllm_")
+    },
 }
 # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
 # mask against the free size taken at entry.

@@ -38,6 +38,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Optimized
 
 * Improved w4a16 GEMM performance on gfx1151 with Stream-K kernels for prefill and dedicated kernels for 1 to 5 tokens, selected by Origami. For best performance on gfx1150 and gfx1151, pad every row of A, B, C, and D to an odd multiple of 128 bytes and pass a workspace of at least 8 MiB.
+* Improved gfx1201 performance of skinny TN GEMMs on devices that report 32 CUs (Radeon RX 9070 XT, Radeon AI PRO R9700): BF16 and FP16 with one to five tokens, and FP8 with scalar or no A and B scales, BF16 or FP16 output and one to four tokens, each with no bias or a bias of the output type, by routing them to vLLM's wave-split-K custom kernels.
 
 ### Resolved issues
 

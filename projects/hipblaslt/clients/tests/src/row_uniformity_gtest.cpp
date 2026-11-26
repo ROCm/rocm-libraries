@@ -366,8 +366,18 @@ namespace
         hipblasOperation_t transA = HIPBLAS_OP_N;
         // The type of C and D. The skinny bf16 and f16 custom kernels write D
         // in A's type. HIP_R_8F_E4M3 for abType runs an MXFP8 GEMM with
-        // pre-swizzled E8M0 block scales and takes a 16-bit dType.
+        // pre-swizzled E8M0 block scales, or with scaleAB an FP8 GEMM with
+        // scalar A and B scales, and takes a 16-bit dType.
         hipDataType dType = HIP_R_32F;
+        // The bias vector's type with useBias. The skinny custom kernels add a
+        // bias of D's type.
+        hipDataType biasType = HIP_R_32F;
+        // Neither 1 nor a power of two, alpha times the dot product rounds, so
+        // an epilogue that fuses it with the bias in some rows only shows.
+        float alpha = 1.0f;
+        // Scalar A and B scales, which an FP8 GEMM takes instead of MX block
+        // scales.
+        bool scaleAB = false;
     };
 
     size_t elementSizeOf(hipDataType type)
@@ -451,6 +461,7 @@ namespace
             static_cast<void>(hipFree(m_deviceWorkspace));
             static_cast<void>(hipFree(m_deviceScaleB));
             static_cast<void>(hipFree(m_deviceScaleA));
+            static_cast<void>(hipFree(m_deviceScales));
             static_cast<void>(hipFree(m_deviceBias));
             static_cast<void>(hipFree(m_deviceD));
             static_cast<void>(hipFree(m_deviceB));
@@ -494,7 +505,9 @@ namespace
             }
 
             if(m_problem.useBias
-               && hipMalloc(&m_deviceBias, static_cast<size_t>(m) * sizeof(float)) != hipSuccess)
+               && hipMalloc(&m_deviceBias,
+                            static_cast<size_t>(m) * elementSizeOf(m_problem.biasType))
+                      != hipSuccess)
             {
                 skipReason = "hipMalloc failed for bias vector of length " + std::to_string(m);
                 return false;
@@ -542,18 +555,18 @@ namespace
                 return false;
             }
 
-            if(m_problem.abType == HIP_R_8F_E4M3 && !setUpMxScales(skipReason))
+            if(m_problem.abType == HIP_R_8F_E4M3 && !m_problem.scaleAB
+               && !setUpMxScales(skipReason))
                 return false;
 
             if(m_problem.useBias)
             {
                 // Constant bias across rows: identical A rows + identical bias
                 // keeps the row-uniformity assertion meaningful.
-                std::vector<float> bias(static_cast<size_t>(m), 0.125f);
-                if(hipMemcpy(m_deviceBias,
-                             bias.data(),
-                             bias.size() * sizeof(float),
-                             hipMemcpyHostToDevice)
+                std::vector<float>         bias(static_cast<size_t>(m), 0.125f);
+                const std::vector<uint8_t> biasBytes = encodeOperand(bias, m_problem.biasType);
+                if(hipMemcpy(
+                       m_deviceBias, biasBytes.data(), biasBytes.size(), hipMemcpyHostToDevice)
                    != hipSuccess)
                 {
                     skipReason = "hipMemcpy of bias failed";
@@ -561,7 +574,7 @@ namespace
                 }
 
                 const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
-                const hipDataType         biasType = HIP_R_32F;
+                const hipDataType         biasType = m_problem.biasType;
                 if(hipblasLtMatmulDescSetAttribute(m_desc,
                                                    HIPBLASLT_MATMUL_DESC_EPILOGUE,
                                                    &epilogue,
@@ -579,6 +592,30 @@ namespace
                           != HIPBLAS_STATUS_SUCCESS)
                 {
                     ADD_FAILURE() << "Setting bias epilogue attributes must succeed";
+                    return false;
+                }
+            }
+
+            if(m_problem.scaleAB)
+            {
+                const float scales[2] = {1.5f, 0.625f};
+                if(hipMalloc(&m_deviceScales, sizeof(scales)) != hipSuccess
+                   || hipMemcpy(m_deviceScales, scales, sizeof(scales), hipMemcpyHostToDevice)
+                          != hipSuccess)
+                {
+                    skipReason = "hipMalloc or hipMemcpy of the A and B scales failed";
+                    return false;
+                }
+                float* scaleA = static_cast<float*>(m_deviceScales);
+                float* scaleB = scaleA + 1;
+                if(hipblasLtMatmulDescSetAttribute(
+                       m_desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                       != HIPBLAS_STATUS_SUCCESS
+                   || hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                          != HIPBLAS_STATUS_SUCCESS)
+                {
+                    ADD_FAILURE() << "Setting the A and B scale pointers must succeed";
                     return false;
                 }
             }
@@ -703,7 +740,7 @@ namespace
 
             static_cast<void>(hipMemsetAsync(m_deviceD, 0, m_hostD.size(), m_stream));
 
-            const float           alpha = 1.0f;
+            const float           alpha = m_problem.alpha;
             const float           beta  = 0.0f;
             hipblasLtMatmulAlgo_t algo  = candidate.algo;
 
@@ -764,7 +801,7 @@ namespace
         // cannot run it on this problem.
         bool runnable(hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
         {
-            const float alpha    = 1.0f;
+            const float alpha    = m_problem.alpha;
             const float beta     = 0.0f;
             size_t      required = 0;
             if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
@@ -965,6 +1002,7 @@ namespace
         void*                   m_deviceBias      = nullptr;
         void*                   m_deviceScaleA    = nullptr;
         void*                   m_deviceScaleB    = nullptr;
+        void*                   m_deviceScales    = nullptr;
         void*                   m_deviceWorkspace = nullptr;
         std::vector<float>      m_aVector;
         std::vector<float>      m_hostB;
@@ -1191,10 +1229,13 @@ namespace
 
         // Unlike checkRowUniformity, needs no witness with the mode off: the
         // default heuristic picks run once with the mode on and must either be
-        // row-uniform or refused cleanly. With gfx950Pick, the first pick on a
-        // 256-CU gfx950 must be a kernel whose name starts with it; elsewhere a
-        // problem with no pick is skipped.
-        void checkDefaultPicksUniform(const Problem& problem, const char* gfx950Pick = nullptr)
+        // row-uniform or refused cleanly. With pick, the first pick on a
+        // pickArch device that reports pickCUs CUs must be a kernel whose name
+        // starts with it; elsewhere a problem with no pick is skipped.
+        void checkDefaultPicksUniform(const Problem& problem,
+                                      const char*    pick     = nullptr,
+                                      const char*    pickArch = "gfx950",
+                                      int            pickCUs  = 256)
         {
             RowUniformityHarness harness(problem);
             prepare(harness);
@@ -1203,26 +1244,28 @@ namespace
 
             int        enumeratedCount = 0;
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
-            // The logic that routes these shapes to the gfx950 skinny kernels
-            // declares CUCount: 256, so other CU counts (MI350P, compute
-            // partitions) keep the Tensile picks. Rows for another CU count in
+            // The logic that routes these shapes to the skinny kernels declares
+            // one CU count: CUCount: 256 on gfx950, in
             //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml
             //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml
-            // that route here need expectPick to cover that count too.
-            const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
-            if(gfx950Pick != nullptr && gfx950)
+            // and CUCount: 32 (the RX 9070 XT) in asm_full/gfx1201/Range/, so
+            // other CU counts (MI350P, compute partitions, the RX 9070) keep the
+            // Tensile picks. Rows for another CU count that route here need
+            // expectPick to cover that count too.
+            const bool onArch = gpuArchName().rfind(pickArch, 0) == 0;
+            if(pick != nullptr && onArch)
                 ASSERT_NE(currentCUCount(), 0)
-                    << "TensileLite cannot describe this gfx950, so the test cannot tell whether "
-                       "the skinny-kernel logic applies";
-            const bool expectPick = gfx950Pick != nullptr && gfx950 && currentCUCount() == 256;
-            if(candidates.empty() && gfx950Pick != nullptr && !expectPick)
+                    << "TensileLite cannot describe this " << pickArch
+                    << ", so the test cannot tell whether the skinny-kernel logic applies";
+            const bool expectPick = pick != nullptr && onArch && currentCUCount() == pickCUs;
+            if(candidates.empty() && pick != nullptr && !expectPick)
                 GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
             if(expectPick)
             {
-                const std::string pick = harness.solutionName(candidates.front());
-                ASSERT_EQ(pick.rfind(gfx950Pick, 0), 0u)
-                    << "The default pick is " << pick << ", not a " << gfx950Pick << " kernel";
+                const std::string first = harness.solutionName(candidates.front());
+                ASSERT_EQ(first.rfind(pick, 0), 0u)
+                    << "The default pick is " << first << ", not a " << pick << " kernel";
             }
 
             for(const auto& candidate : candidates)
@@ -1249,6 +1292,109 @@ namespace
     TEST_F(RowUniformity_pre_checkin, HybridDynamicStagger_1536x1536x2048_SmCount160)
     {
         checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
+    }
+
+    // The gfx1201 skinny TN custom kernels (vLLM wvSplitK and wvSplitKQ)
+    // declare uniformSummationOrder in their custom.config too.
+    // Library logic routes these shapes to them on a gfx1201 that reports 32
+    // CUs, so there the default pick must be the one named; other devices check
+    // that their default picks keep rows uniform. A bias of D's type with alpha
+    // 0.7: alpha * dot rounds before the bias is added.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201Bf16_4096x1x4096)
+    {
+        checkDefaultPicksUniform({4096, 1, 4096, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSplitK_vllm_bf16_tn_n1_y1u4_gfx1201",
+                                 "gfx1201",
+                                 32);
+    }
+
+    // m % 4 != 0: the last YTILE = 4 row tile is partial.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201F16BiasTail_4097x3x10248)
+    {
+        checkDefaultPicksUniform(
+            {4097, 3, 10248, HIP_R_16F, 0, true, HIPBLAS_OP_T, HIP_R_16F, HIP_R_16F, 0.7f},
+            "wvSplitK_vllm_f16_tn_n3_y4u2_gfx1201",
+            "gfx1201",
+            32);
+    }
+
+    // m odd: the last YTILE = 2 row tile is partial.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201Bf16BiasTail_3075x5x4096)
+    {
+        checkDefaultPicksUniform(
+            {3075, 5, 4096, HIP_R_16BF, 0, true, HIPBLAS_OP_T, HIP_R_16BF, HIP_R_16BF, 0.7f},
+            "wvSplitK_vllm_bf16_tn_n5_y2u4_gfx1201",
+            "gfx1201",
+            32);
+    }
+
+    // n * K past the 32K-element LDS stage: K is staged in chunks; m odd, so
+    // the last YTILE = 2 row tile is partial too.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201Bf16BiasLdsChunked_2049x4x10248)
+    {
+        checkDefaultPicksUniform(
+            {2049, 4, 10248, HIP_R_16BF, 0, true, HIPBLAS_OP_T, HIP_R_16BF, HIP_R_16BF, 0.7f},
+            "wvSplitK_vllm_bf16_tn_n4_y2u2_gfx1201",
+            "gfx1201",
+            32);
+    }
+
+    // FP8 A and B with scalar scales: the wvSplitKQ kernels, here with FP16 D.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201F8F16_1031x2x20480)
+    {
+        checkDefaultPicksUniform({1031,
+                                  2,
+                                  20480,
+                                  HIP_R_8F_E4M3,
+                                  0,
+                                  false,
+                                  HIPBLAS_OP_T,
+                                  HIP_R_16F,
+                                  HIP_R_32F,
+                                  1.0f,
+                                  true},
+                                 "wvSplitKQ_vllm_f8_f16_tn_n2_y1u4_gfx1201",
+                                 "gfx1201",
+                                 32);
+    }
+
+    // m odd: the last YTILE = 2 row tile is partial.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201F8F16Tail_1031x3x20496)
+    {
+        checkDefaultPicksUniform({1031,
+                                  3,
+                                  20496,
+                                  HIP_R_8F_E4M3,
+                                  0,
+                                  false,
+                                  HIPBLAS_OP_T,
+                                  HIP_R_16F,
+                                  HIP_R_32F,
+                                  1.0f,
+                                  true},
+                                 "wvSplitKQ_vllm_f8_f16_tn_n3_y2u4_gfx1201",
+                                 "gfx1201",
+                                 32);
+    }
+
+    // n * K is past the 64 KB LDS stage, so the last tokens' tails come from
+    // global memory.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnGfx1201F8F16Bias_1031x4x20480)
+    {
+        checkDefaultPicksUniform({1031,
+                                  4,
+                                  20480,
+                                  HIP_R_8F_E4M3,
+                                  0,
+                                  true,
+                                  HIPBLAS_OP_T,
+                                  HIP_R_16F,
+                                  HIP_R_16F,
+                                  0.7f,
+                                  true},
+                                 "wvSplitKQ_vllm_f8_f16_tn_n4_y1u4_gfx1201",
+                                 "gfx1201",
+                                 32);
     }
 
     // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
