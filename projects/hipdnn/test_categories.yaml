@@ -36,6 +36,7 @@ test_categories:
     # Labelling the plain entry too would run the excluded tests under -L ffm-quick.
     exclude_tests:
       - "hipdnn_backend_tests"
+      - "hipdnn_public_frontend_tests"
     labels:
       - "ffm-full"
 

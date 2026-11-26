@@ -184,7 +184,7 @@ endfunction()
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_tests)
 
 clang_tidy_check(hipdnn_public_frontend_tests)
-add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR} GTEST_CATEGORIES)
 
 add_executable(
     hipdnn_public_frontend_dynamic_load_tests
