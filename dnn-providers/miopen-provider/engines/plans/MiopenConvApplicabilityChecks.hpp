@@ -64,7 +64,9 @@ void checkConvFwdBiasActivLayouts(
 //   - share one data type, one of FLOAT, HALF, BFLOAT16;
 //   - share one layout class, classified as for forward (without the strict-layout acceptance);
 //   - none be both channels-last and non-packed. A channels-first non-packed tensor is accepted:
-//     MIOpen computes it correctly.
+//     MIOpen computes it correctly;
+//   - packed or not, have strides that provably keep every element at its own address, as for
+//     forward.
 // Backward data additionally has a size limit: dy and dx must each have at most 2^31 - 1 elements.
 //
 // Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
@@ -72,7 +74,7 @@ void checkConvFwdBiasActivLayouts(
 // throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, rank
 // below 3, a negative dim, dims whose product (a zero dim counted as 1, so a zero extent does
 // not hide dims that overflow) reaches INT64_MAX, or strides for which the signed 64-bit
-// arithmetic of the SDK packing check, the sum of (dim - 1) * stride over the dims plus 1,
+// arithmetic of the sum of (dim - 1) * stride over the dims plus 1 (MIOpen's element space)
 // overflows. These are declined before the packing check and before the canonical strides are
 // formed, so the io validators never do arithmetic on the dims or strides they are given that
 // could overflow (the size check only needs non-null, non-negative dims()). Strides that do not
@@ -84,12 +86,12 @@ void validateConvFwdIoTensors(const hipdnn_flatbuffers_sdk::data_objects::Tensor
                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& w,
                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& y);
 
-// Backward data: data type, layout and channels-last packing rules for dy, w and dx.
+// Backward data: data type, layout and packing rules above for dy, w and dx.
 void validateConvBwdDataIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& w,
                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dx);
 
-// Backward weights: data type, layout and channels-last packing rules for x, dy and dw.
+// Backward weights: data type, layout and packing rules above for x, dy and dw.
 void validateConvWrwIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,
                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dw);

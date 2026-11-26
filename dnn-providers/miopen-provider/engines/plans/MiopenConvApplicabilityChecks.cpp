@@ -213,17 +213,51 @@ void checkOutputMatchesFusedDescriptor(const TensorAttributes& input,
     }
 }
 
+// Whether hasCanonicalStrides compares the strides of extent-1 dimensions.
+enum class UnitDimStrides
+{
+    COMPARED,
+    IGNORED
+};
+
+// True when `strides` equal the canonical strides of `dims` in one layout: generateStrides for
+// channels-first, generateStrides with strideOrderNhwc for channels-last. With
+// UnitDimStrides::IGNORED the strides of extent-1 dimensions are not compared, as isTensorPacked
+// ignores them. `dims` and `strides` have the same size (readTensor).
+bool hasCanonicalStrides(const std::vector<int64_t>& dims,
+                         const std::vector<int64_t>& strides,
+                         bool channelsLast,
+                         UnitDimStrides unitDimStrides)
+{
+    const auto canonical = channelsLast
+                               ? hipdnn_data_sdk::utilities::generateStrides(
+                                     dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                               : hipdnn_data_sdk::utilities::generateStrides(dims);
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        if(unitDimStrides == UnitDimStrides::IGNORED && dims[i] == 1)
+        {
+            continue;
+        }
+        if(strides[i] != canonical[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Layout class mask of a tensor, computed on the graph tensor (unpadded rank 3, 4 or 5).
 //
 // A packed tensor is channels-first when its strides equal the canonical channels-first strides of
 // its dims and channels-last when they equal the canonical channels-last strides, compared over
-// ALL dimensions including those of extent 1. The strides of an extent-1 dimension never change
-// which memory is addressed, but they are part of what the declared layout is: MIOpen's
-// HeuristicUpdateLayouts falls back to ignoring degenerate strides when the three tensors disagree,
-// which labels a mixed-layout problem as uniform and hands the descriptors to a solver that is
-// wrong on them. Judging those strides here keeps such a problem declined, while a uniform graph
-// with degenerate shapes (K == 1, C == 1 with an Rx1 filter, a 1x1 output) keeps its canonical
-// strides and is accepted.
+// ALL dimensions including those of extent 1 (UnitDimStrides::COMPARED). The strides of an
+// extent-1 dimension never change which memory is addressed, but they are part of what the
+// declared layout is: MIOpen's HeuristicUpdateLayouts falls back to ignoring degenerate strides
+// when the three tensors disagree, which labels a mixed-layout problem as uniform and hands the
+// descriptors to a solver that is wrong on them. Judging those strides here keeps such a problem
+// declined, while a uniform graph with degenerate shapes (K == 1, C == 1 with an Rx1 filter, a 1x1
+// output) keeps its canonical strides and is accepted.
 //
 // A non-packed tensor has no canonical strides, so it is classified by its layout order
 // (layoutOrder).
@@ -235,13 +269,11 @@ unsigned classifyLayout(const std::vector<int64_t>& dims,
 
     if(packed)
     {
-        if(strides == hipdnn_data_sdk::utilities::generateStrides(dims))
+        if(hasCanonicalStrides(dims, strides, /*channelsLast=*/false, UnitDimStrides::COMPARED))
         {
             mask |= LAYOUT_CHANNELS_FIRST;
         }
-        if(strides
-           == hipdnn_data_sdk::utilities::generateStrides(
-               dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size())))
+        if(hasCanonicalStrides(dims, strides, /*channelsLast=*/true, UnitDimStrides::COMPARED))
         {
             mask |= LAYOUT_CHANNELS_LAST;
         }
@@ -427,12 +459,18 @@ bool packingArithmeticFits(const std::vector<int64_t>& dims, const std::vector<i
 }
 
 // True when a tensor with a zero dim, and no negative dim, has the canonical strides of
-// channels-first or channels-last (generateStrides) and no broadcast axis (hasBroadcastAxis).
-// isTensorPacked never counts a tensor with a zero dim as packed, but such a tensor has no
-// elements, so its canonical strides are as packed as any: readTensor counts it as packed and it
-// takes its layout class from those strides (classifyLayout). generateStrides gives stride 0 to
-// every dim outer to the zero dim in the layout's memory order; when one of those dims has an
-// extent above 1 it is a broadcast axis and the tensor stays not packed.
+// channels-first or channels-last (generateStrides) on every dim of extent other than 1, and no
+// broadcast axis (hasBroadcastAxis). isTensorPacked never counts a tensor with a zero dim as
+// packed, but such a tensor has no elements, so its canonical strides are as packed as any:
+// readTensor counts it as packed. The strides of extent-1 dims are ignored here as isTensorPacked
+// ignores them, so framework strides that give a non-zero stride to an extent-1 dim outer to the
+// zero dim count too: PyTorch's [64, 64, 8, 1] for [1, 0, 8, 8], whose canonical strides are
+// [0, 64, 8, 1]. classifyLayout compares every stride, so such a tensor takes a layout class only
+// when all its strides are canonical; otherwise it has none and is judged as any packed tensor
+// without one (forward accepts it through checkForwardLayout's strict layout, backward declines it
+// by the layout rule). generateStrides gives stride 0 to every dim outer to the zero dim in the
+// layout's memory order; when one of those dims has an extent above 1 it is a broadcast axis and
+// the tensor stays not packed.
 bool isCanonicalEmptyTensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     const auto isZero = [](int64_t dim) { return dim == 0; };
@@ -443,10 +481,8 @@ bool isCanonicalEmptyTensor(const std::vector<int64_t>& dims, const std::vector<
     {
         return false;
     }
-    return strides == hipdnn_data_sdk::utilities::generateStrides(dims)
-           || strides
-                  == hipdnn_data_sdk::utilities::generateStrides(
-                      dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()));
+    return hasCanonicalStrides(dims, strides, /*channelsLast=*/false, UnitDimStrides::IGNORED)
+           || hasCanonicalStrides(dims, strides, /*channelsLast=*/true, UnitDimStrides::IGNORED);
 }
 
 // Reads one tensor and rejects shapes the checks cannot judge. `operation` prefixes every reason
@@ -566,6 +602,66 @@ void checkLayout(const char* operation,
     }
 }
 
+// True when the elements of the tensor provably do not share an address: the dimensions of extent
+// above 1, taken by increasing stride, each start at or beyond the span of the ones inside them,
+// starting from stride 1. A broadcast axis (stride 0), a negative stride and strides that
+// interleave two dimensions fail it. The check is conservative, not exact: it also fails some
+// strides whose elements are all distinct, for example [2, 4, 2, 2] with strides [16, 4, 3, 2]
+// (addresses 0, 2, 3 and 5 in each plane). A tensor with a zero extent has no elements and
+// passes. The strides passed packingArithmeticFits, so only the span of the last dimension can
+// overflow, and it needs no room for another dimension.
+bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    std::vector<size_t> axes;
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        if(dims[i] == 0)
+        {
+            return true;
+        }
+        if(dims[i] > 1)
+        {
+            axes.push_back(i);
+        }
+    }
+    std::sort(axes.begin(), axes.end(), [&strides](size_t a, size_t b) {
+        return strides[a] < strides[b];
+    });
+
+    int64_t span = 1;
+    for(size_t k = 0; k < axes.size(); ++k)
+    {
+        const size_t axis = axes[k];
+        if(strides[axis] < span)
+        {
+            return false;
+        }
+        if(!productFits(strides[axis], dims[axis]))
+        {
+            return k + 1 == axes.size();
+        }
+        span = strides[axis] * dims[axis];
+    }
+    return true;
+}
+
+// Elements that may share an address (hasDisjointElements: a broadcast axis, a negative stride,
+// overlapping or interleaved strides), declined by every operation. Such a tensor is never packed,
+// but its stride order can still match a layout and pass the layout rule. Overlapping strides such
+// as [256, 64, 5, 4] on [2, 4, 8, 8] span exactly the element count, so MIOpen counts them as
+// packed (TensorDescriptor compares the element count with GetElementSpace) and may hand them to a
+// solver that assumes dense data. Not tested on a GPU; an output (y, dx, dw) of that kind cannot
+// be written correctly at all. A tensor with a zero dim has no elements and passes.
+void checkDisjointElements(const char* operation, const TensorInfo& tensor)
+{
+    if(!hasDisjointElements(tensor.dims, tensor.strides))
+    {
+        decline(std::string(operation) + ": tensor " + tensor.name
+                + " may have elements that share an address (a zero, negative or overlapping "
+                  "stride)");
+    }
+}
+
 // Backward data and backward weights share every rule; they differ only in the roles of the three
 // tensors, which `operation` and the tensor names carry into the reasons.
 void checkBackwardTensors(const char* operation,
@@ -577,11 +673,13 @@ void checkBackwardTensors(const char* operation,
     checkLayout(operation, a, b, c);
 
     // Packing. For channels-last tensors with padded (non-packed) strides MIOpen returns wrong
-    // output (values up to 1e38, infinities, NaN). Channels-first non-packed tensors are computed
-    // correctly, so unlike forward this declines only a tensor that is both non-packed and
-    // channels-last. A non-packed tensor is classified by stride order and so carries at most one
-    // layout bit; a packed tensor never triggers this rule. Workaround tracked by ALMIOPEN-3301;
-    // remove it when the MIOpen defect ALMIOPEN-3300 is fixed.
+    // output (values up to 1e38, infinities, NaN), so a tensor that is both non-packed and
+    // channels-last is declined. Channels-first non-packed tensors (padded strides) are computed
+    // correctly and accepted. A non-packed tensor is classified by stride order and so carries at
+    // most one layout bit; a packed tensor never triggers this rule. Workaround tracked by
+    // ALMIOPEN-3301; remove it when the MIOpen defect ALMIOPEN-3300 is fixed. In either layout, a
+    // tensor whose elements may share an address is declined as in forward
+    // (checkDisjointElements).
     for(const TensorInfo* tensor : {&a, &b, &c})
     {
         if(!tensor->packed && (tensor->layoutMask & LAYOUT_CHANNELS_LAST) != 0U)
@@ -590,6 +688,7 @@ void checkBackwardTensors(const char* operation,
                     + " is channels-last and not packed; " + tensorNames(a, b, c)
                     + " must not be channels-last with padded strides");
         }
+        checkDisjointElements(operation, *tensor);
     }
 }
 
@@ -672,49 +771,6 @@ void checkForwardLayout(const TensorInfo& x, const TensorInfo& w, const TensorIn
     checkLayout(FWD_OPERATION, x, w, y);
 }
 
-// True when the elements of the tensor provably do not share an address: the dimensions of extent
-// above 1, taken by increasing stride, each start at or beyond the span of the ones inside them,
-// starting from stride 1. A broadcast axis (stride 0), a negative stride and strides that
-// interleave two dimensions fail it. The check is conservative, not exact: it also fails some
-// strides whose elements are all distinct, for example [2, 4, 2, 2] with strides [16, 4, 3, 2]
-// (addresses 0, 2, 3 and 5 in each plane). A tensor with a zero extent has no elements and
-// passes. The strides passed packingArithmeticFits, so only the span of the last dimension can
-// overflow, and it needs no room for another dimension.
-bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
-{
-    std::vector<size_t> axes;
-    for(size_t i = 0; i < dims.size(); ++i)
-    {
-        if(dims[i] == 0)
-        {
-            return true;
-        }
-        if(dims[i] > 1)
-        {
-            axes.push_back(i);
-        }
-    }
-    std::sort(axes.begin(), axes.end(), [&strides](size_t a, size_t b) {
-        return strides[a] < strides[b];
-    });
-
-    int64_t span = 1;
-    for(size_t k = 0; k < axes.size(); ++k)
-    {
-        const size_t axis = axes[k];
-        if(strides[axis] < span)
-        {
-            return false;
-        }
-        if(!productFits(strides[axis], dims[axis]))
-        {
-            return k + 1 == axes.size();
-        }
-        span = strides[axis] * dims[axis];
-    }
-    return true;
-}
-
 // Packing, forward. A non-packed tensor is accepted when the convolution is ungrouped, not 3D
 // channels-last, and hasDisjointElements holds for the tensor: MIOpen computed every such graph
 // tested correctly (padded rows, channel and batch slices, an output written into a wider buffer),
@@ -726,12 +782,7 @@ bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int
 //   the invoker of a same-shape packed problem run before it in the process, and the packed one
 //   reuses its invoker when it runs first: MIOpen's invoker cache key leaves out the strides
 //   (ALMIOPEN-3356). Remove it when that is fixed.
-// - elements that may share an address (a broadcast axis, overlapping or interleaved strides):
-//   such a tensor is never packed, but its stride order can still match a layout and pass
-//   checkForwardLayout. Overlapping strides such as [256, 64, 5, 4] on [2, 4, 8, 8] span exactly
-//   the element count, so MIOpen counts them as packed (TensorDescriptor compares the element
-//   count with GetElementSpace). Not tested on a GPU; an output of that kind cannot be written
-//   correctly at all.
+// - elements that may share an address (checkDisjointElements).
 void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorInfo& y)
 {
     const bool grouped = x.dims[1] != w.dims[1];
@@ -751,12 +802,7 @@ void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorI
             decline(prefix
                     + " is not packed; a 3D channels-last convolution needs x, w and y packed");
         }
-        if(!hasDisjointElements(tensor->dims, tensor->strides))
-        {
-            decline(prefix
-                    + " may have elements that share an address (a zero, negative or "
-                      "overlapping stride)");
-        }
+        checkDisjointElements(FWD_OPERATION, *tensor);
     }
 }
 

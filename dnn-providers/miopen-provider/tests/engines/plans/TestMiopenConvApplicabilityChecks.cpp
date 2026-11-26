@@ -424,8 +424,8 @@ void expectDeclinedAtRole(const ConvCase& tensors,
     }
 }
 
-// The reason for a forward tensor `name` that is non-packed in a convolution that needs packed
-// tensors, with the decline reason `rule` of that convolution.
+// The reason for a tensor `name` declined by the packing rule `rule` (a non-packed tensor in a
+// convolution that needs packed tensors, or a tensor whose elements may share an address).
 ReasonOf packedRuleReason(const char* rule)
 {
     return [rule](const char* name) { return std::string("tensor ") + name + " " + rule; };
@@ -513,8 +513,10 @@ struct OverflowingStrides
     std::vector<int64_t> strides;
 };
 
-// Dims that are fine on their own (the element count is small) with strides for which the SDK
-// packing check, the sum of (dim - 1) * stride plus 1 in int64_t, overflows in one of its steps.
+// Dims that are fine on their own (the element count is small) with strides for which the span
+// arithmetic, the sum of (dim - 1) * stride plus 1 in int64_t (MIOpen's element space), overflows
+// in one of its steps. The packed verdict itself is isTensorPacked's (dense and non-overlapping),
+// which forms no such sum.
 std::vector<OverflowingStrides> overflowingStrides()
 {
     constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
@@ -1227,6 +1229,74 @@ TEST(TestMiopenConvApplicabilityChecks, AcceptsEmptyTensorsWithoutAZeroStrideAxi
     }
 }
 
+// An empty tensor counts as packed when its strides are canonical on every dim of extent other
+// than 1, as isTensorPacked ignores the strides of extent-1 dims. Framework strides give such a
+// dim outer to the zero dim a non-zero stride: PyTorch's contiguous {1, 0, 8, 8} has
+// {64, 64, 8, 1} (canonical {0, 64, 8, 1}) and its channels-last {1, 4, 0, 4, 4} has
+// {64, 1, 64, 16, 4} (canonical {0, 1, 64, 16, 4}). The layout class compares every stride, so
+// the tensor has none: forward accepts it in each role through the strict layout of three packed
+// tensors (a non-packed one would be declined in what forward sees as a grouped convolution, its
+// channel count differing from the other tensors', and in a 3D channels-last one), and backward
+// declines it by the layout rule.
+TEST(TestMiopenConvApplicabilityChecks, EmptyTensorsIgnoreTheStridesOfExtentOneDims)
+{
+    struct FrameworkStridesCase
+    {
+        RankShapes shapes;
+        bool channelsLastLayout;
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+    const std::vector<FrameworkStridesCase> cases
+        = {{convShapes(), false, {1, 0, 8, 8}, {64, 64, 8, 1}},
+           {rankShapes().back(), true, {1, 4, 0, 4, 4}, {64, 1, 64, 16, 4}}};
+
+    for(const auto& frameworkCase : cases)
+    {
+        const TensorSpec empty = withStrides(frameworkCase.dims, frameworkCase.strides);
+        ASSERT_NE(empty.strides, packedStrides(empty.dims, frameworkCase.channelsLastLayout));
+
+        const ConvCase base = uniformCase(frameworkCase.shapes, frameworkCase.channelsLastLayout);
+
+        for(const Role role : ROLES)
+        {
+            SCOPED_TRACE(std::string(layoutLabel(frameworkCase.channelsLastLayout)) + " "
+                         + vecToString(frameworkCase.dims) + ", " + roleTrace(role));
+            expectAccepted(withTensorAt(base, role, empty), FORWARD_OPS);
+            expectDeclined(withTensorAt(base, role, empty), LAYOUT_REASON, BACKWARD_OPS);
+        }
+    }
+}
+
+// An empty tensor with padded strides, and no broadcast axis, is not packed: only canonical
+// strides make an empty tensor packed. It is classified by its stride order like any non-packed
+// tensor, so every operation accepts it channels-first, and backward declines it channels-last by
+// the channels-last packing rule while forward accepts it.
+TEST(TestMiopenConvApplicabilityChecks, EmptyTensorsWithPaddedStridesAreNotPacked)
+{
+    const std::vector<int64_t> dims = {0, 4, 8, 8};
+
+    // Rows of 8 laid out 10 apart.
+    const TensorSpec channelsFirstPadded = withStrides(dims, {320, 80, 10, 1});
+    ASSERT_NE(channelsFirstPadded.strides, packedStrides(dims, false));
+    // Pixels of 4 channels laid out 5 apart.
+    const TensorSpec channelsLastPadded = withStrides(dims, {320, 1, 40, 5});
+    ASSERT_NE(channelsLastPadded.strides, packedStrides(dims, true));
+
+    const ConvCase channelsFirstBase = uniformCase(convShapes(), /*channelsLastLayout=*/false);
+    const ConvCase channelsLastBase = uniformCase(convShapes(), /*channelsLastLayout=*/true);
+
+    for(const Role role : ROLES)
+    {
+        SCOPED_TRACE(roleTrace(role));
+        expectAccepted(withTensorAt(channelsFirstBase, role, channelsFirstPadded));
+
+        const ConvCase channelsLastCase = withTensorAt(channelsLastBase, role, channelsLastPadded);
+        expectAccepted(channelsLastCase, FORWARD_OPS);
+        expectDeclinedAtRole(channelsLastCase, role, channelsLastNonPackedReason, BACKWARD_OPS);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Declined: layout
 // ---------------------------------------------------------------------------------------------
@@ -1491,12 +1561,10 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesNonPackedChannelsLast)
 }
 
 // A tensor with a broadcast axis (an extent above 1 with stride 0) is never packed
-// (isTensorPacked). Forward declines it because two of its elements share an address. Backward
-// classifies it by its stride order and accepts it, as a non-packed channels-first tensor, next
-// to packed channels-first tensors; that pins how a zero-stride axis is classified through
-// isTensorPacked and the backward rules and does not say that MIOpen computes such a backward
-// convolution correctly.
-TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesBroadcastAxisBackwardAcceptsIt)
+// (isTensorPacked). Its stride order is channels-first, so the layout rule accepts it next to
+// packed channels-first tensors, and every operation declines it because two of its elements share
+// an address, whichever of the three tensors it is.
+TEST(TestMiopenConvApplicabilityChecks, EveryOperationDeclinesBroadcastAxis)
 {
     const ConvCase base = uniformCase(convShapes(), /*channelsLastLayout=*/false);
 
@@ -1508,8 +1576,8 @@ TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesBroadcastAxisBackwardAcce
         ASSERT_FALSE(isTensorPacked(broadcast.dims, broadcast.strides));
 
         SCOPED_TRACE(roleTrace(role) + " broadcast");
-        expectDeclined(withTensorAt(base, role, broadcast), SHARED_ADDRESS_REASON, FORWARD_OPS);
-        expectAccepted(withTensorAt(base, role, broadcast), BACKWARD_OPS);
+        expectDeclinedAtRole(
+            withTensorAt(base, role, broadcast), role, packedRuleReason(SHARED_ADDRESS_REASON));
     }
 }
 
@@ -1680,6 +1748,51 @@ TEST(TestMiopenConvApplicabilityChecks, ForwardDeclinesTensorsWhoseSpanMatchesBu
                          Role::DY,
                          packedRuleReason(SHARED_ADDRESS_REASON),
                          FORWARD_OPS);
+}
+
+// Backward data and backward weights decline a tensor two of whose elements share an address in
+// each of the three roles, as forward does: overlapping strides whose span equals the element
+// count (MIOpen counts them as packed; isTensorPacked does not), and overlapping or interleaved
+// strides whose span differs from it. Every stride order below is channels-first, so the layout
+// rule accepts the tensors and only the shared-address rule declines them. The canonical packed
+// graph and a disjoint non-packed tensor stay accepted.
+TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesTensorsWhoseElementsShareAnAddress)
+{
+    const ConvCase base = uniformCase(convShapes(), /*channelsLastLayout=*/false);
+    expectAccepted(base, BACKWARD_OPS);
+
+    struct OverlapCase
+    {
+        Role role;
+        TensorSpec tensor;
+    };
+    const std::vector<OverlapCase> cases = {
+        // W steps by 4 over 8 columns while H steps by 5. Span 512 = 2 * 4 * 8 * 8.
+        {Role::DX, withStrides(convXDims, {256, 64, 5, 4})},
+        // W steps by 3 over 6 columns while H steps by 4. Span 288 = 2 * 4 * 6 * 6.
+        {Role::DY, withStrides(convYDims, {144, 36, 4, 3})},
+        // W and H both step by 2 over 3. Span 144 = 4 * 4 * 3 * 3.
+        {Role::W, withStrides(convWDims, {36, 9, 2, 2})},
+        // H steps by 4 over rows 8 long: rows overlap, span below the element count.
+        {Role::DX, withStrides(convXDims, {256, 64, 4, 1})},
+        // W steps by 4 over 8 columns while H steps by 8: rows interleave.
+        {Role::DX, withStrides(convXDims, {512, 64, 8, 4})},
+    };
+
+    for(const auto& overlap : cases)
+    {
+        SCOPED_TRACE(roleTrace(overlap.role) + " " + vecToString(overlap.tensor.dims) + " strides "
+                     + vecToString(overlap.tensor.strides));
+        ASSERT_FALSE(isTensorPacked(overlap.tensor.dims, overlap.tensor.strides));
+        expectDeclinedAtRole(withTensorAt(base, overlap.role, overlap.tensor),
+                             overlap.role,
+                             packedRuleReason(SHARED_ADDRESS_REASON),
+                             BACKWARD_OPS);
+    }
+
+    const TensorSpec batchGap = withStrides(convXDims, {600, 64, 8, 1});
+    ASSERT_FALSE(isTensorPacked(batchGap.dims, batchGap.strides));
+    expectAccepted(withTensorAt(base, Role::DX, batchGap), BACKWARD_OPS);
 }
 
 // MIOpen names no layout above rank 5, so the strict layout path stops there: a batch-1 channel
