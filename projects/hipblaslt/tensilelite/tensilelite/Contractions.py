@@ -1143,6 +1143,7 @@ class InternalArgsSupport:
                  'gsu',
                  'wgm',
                  'staggerU',
+                 'persistentStaggerU',
                  'perTileExtraIters',
                  'useUniversalArgs',
                  'useSFC'
@@ -1159,6 +1160,7 @@ class InternalArgsSupport:
                    gsu = isp['SupportUserGSU'],
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
+                   persistentStaggerU = isp.get('SupportPersistentStaggerU', False),
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
                    occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
