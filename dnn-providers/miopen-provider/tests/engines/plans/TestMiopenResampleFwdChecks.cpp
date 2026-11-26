@@ -567,18 +567,29 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForIndexWithChannelsLastTensor
 }
 
 // Workaround for ALMIOPEN-3295 (see Workarounds.hpp): MIOpen's BFLOAT16 max pooling can write an
-// index into the padding, so an index with padding is declined. Padding in one spatial dimension is
-// enough. Remove this test with the workaround; the accept tests below stay.
+// index into the padding, so an index with padding is declined. Padding in any one spatial
+// dimension is enough. Remove this test with the workaround; the accept tests below stay.
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForBfloat16IndexWithPadding)
 {
-    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
-                                                {2, 3, 6, 6},
-                                                {3, 3},
-                                                {2, 2},
-                                                {0, 1},
-                                                DataType::BFLOAT16,
-                                                DataType::INT32),
-                   "on BFLOAT16 tensors requires zero padding");
+    for(const auto& xDims : {std::vector<int64_t>{2, 3, 6, 6}, std::vector<int64_t>{1, 2, 6, 6, 6}})
+    {
+        const auto spatialRank = xDims.size() - 2;
+        for(size_t padded = 0; padded < spatialRank; ++padded)
+        {
+            SCOPED_TRACE("rank " + std::to_string(xDims.size()) + ", padded dimension "
+                         + std::to_string(padded));
+            std::vector<int64_t> padding(spatialRank, 0);
+            padding[padded] = 1;
+            expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                        xDims,
+                                                        std::vector<int64_t>(spatialRank, 3),
+                                                        std::vector<int64_t>(spatialRank, 2),
+                                                        padding,
+                                                        DataType::BFLOAT16,
+                                                        DataType::INT32),
+                           "on BFLOAT16 tensors requires zero padding");
+        }
+    }
 }
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForHalfIndexWithPadding)
@@ -855,7 +866,11 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarFloatTileOverLimitInCh
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanar16BitTileAtLimit)
 {
     // 2 * (15 * 545 + 12) * 8 = 130992, + 64 = 131056.
-    expectAccepted(tileSpec({1, 2, 557, 8}, {12, 8}, {545, 1}, true, DataType::HALF));
+    for(const auto dataType : {DataType::HALF, DataType::BFLOAT16})
+    {
+        SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
+        expectAccepted(tileSpec({1, 2, 557, 8}, {12, 8}, {545, 1}, true, dataType));
+    }
 }
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForFloatTileThatFitsAs16Bit)
@@ -881,12 +896,16 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricFloatTileOverLimi
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetric16BitTileAtLimit)
 {
     // Tiles 5 x 5 x (3 + 2618): 2 * 5 * 5 * 2621 = 131050, rounded to 131056, exactly the limit.
-    expectAccepted(tileSpec({1, 2, 1, 1, 1},
-                            {2, 2, 2618},
-                            {1, 1, 1},
-                            true,
-                            DataType::HALF,
-                            std::vector<int64_t>{1, 1, 1309}));
+    for(const auto dataType : {DataType::HALF, DataType::BFLOAT16})
+    {
+        SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
+        expectAccepted(tileSpec({1, 2, 1, 1, 1},
+                                {2, 2, 2618},
+                                {1, 1, 1},
+                                true,
+                                dataType,
+                                std::vector<int64_t>{1, 1, 1309}));
+    }
 }
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForChannelsLastGlobalPoolingThanksToNormalization)
@@ -1111,13 +1130,31 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarOutputHeightAboveGrid
     expectDeclined(identityWindowSpec({1, 1, GRID_LIMIT + 1, 1}), gridLimitReason(0));
 }
 
-// The limit applies to Y, not X: a 2x1 window with padding 1 turns an input height at the limit
-// into an output height one above it.
-TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarOutputHeightAboveGridLimitFromInputAtIt)
+// The limit applies to Y, not X: in each spatial dimension of 4D and 5D graphs, a window of 2 with
+// padding 1 turns an input size at the limit into an output size one above it.
+TEST(TestMiopenResampleFwdChecks,
+     IsSupportedFalseForOutputAboveGridLimitFromInputAtItInEveryDimension)
 {
-    expectDeclined(ResampleFwdGraphSpec::packed(
-                       ResampleMode::MAXPOOL, {1, 1, GRID_LIMIT, 1}, {2, 1}, {1, 1}, {1, 0}),
-                   gridLimitReason(0));
+    for(const size_t spatialRank : {size_t{2}, size_t{3}})
+    {
+        for(size_t dim = 0; dim < spatialRank; ++dim)
+        {
+            SCOPED_TRACE("rank " + std::to_string(spatialRank + 2) + ", dimension "
+                         + std::to_string(dim));
+            std::vector<int64_t> xDims(spatialRank + 2, 1);
+            std::vector<int64_t> window(spatialRank, 1);
+            std::vector<int64_t> padding(spatialRank, 0);
+            xDims[dim + 2] = GRID_LIMIT;
+            window[dim] = 2;
+            padding[dim] = 1;
+            expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                        xDims,
+                                                        window,
+                                                        std::vector<int64_t>(spatialRank, 1),
+                                                        padding),
+                           gridLimitReason(dim));
+        }
+    }
 }
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricOutputAtGridLimitInEveryDimension)
