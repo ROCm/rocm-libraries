@@ -56,6 +56,7 @@ from kernels.conv.direct_variants import (
     direct_wgrad_fold_knobs,
     dgrad_rtc_vgprs,
     DIRECT_WGRAD_REDUCE,
+    DIRECT_WGRAD_WS_REDUCE,
     DIRECT_WGRAD_TWO_STAGE as _WGRAD_TWO_STAGE,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
@@ -5268,6 +5269,8 @@ def _helper_identity(
     # The two-stage reduce depends on its replica count alone.
     if variant == DIRECT_WGRAD_REDUCE:
         return wgrad_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
+    if variant == DIRECT_WGRAD_WS_REDUCE:
+        return wgrad_ws_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
     if variant == _WGRAD_FOLD:
         return _identity(
             arch,
@@ -5317,6 +5320,22 @@ def wgrad_reduce_identity(
         DIRECT_WGRAD_REDUCE,
         "direct_wgrad_helper",
         _WGRAD_REDUCE_CAPS,
+        {"ws_replicas": ws_replicas},
+        dtype,
+    )
+
+
+def wgrad_ws_reduce_identity(
+    arch: str, wave_size: int, ws_replicas: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The Stage 2 a two-stage implicit-GEMM wgrad binary with ``ws_replicas``
+    scratch slabs launches after itself: folds them into its 16-bit dW."""
+    return _identity(
+        arch,
+        wave_size,
+        DIRECT_WGRAD_WS_REDUCE,
+        "direct_wgrad_helper",
+        _NO_CAPS,
         {"ws_replicas": ws_replicas},
         dtype,
     )
@@ -6095,7 +6114,7 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    if variant in (_SPLIT_REDUCE, _RR_WFMT):
+    if variant in (_SPLIT_REDUCE, _RR_WFMT, DIRECT_WGRAD_WS_REDUCE):
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)

@@ -50,6 +50,7 @@ __all__ = [
     "DIRECT_FWD_TAP1D_MFMA",
     "DIRECT_FWD_ROWSTREAM_MFMA",
     "DIRECT_WGRAD_REDUCE",
+    "DIRECT_WGRAD_WS_REDUCE",
     "DIRECT_WGRAD_TWO_STAGE",
     "PER_AXIS_PAD_VARIANTS",
     "direct_dgrad_kernarg_direction",
@@ -228,6 +229,12 @@ _HELPERS = (
 # scratch slabs into dW. Cached as its own entry (one per replica count) and
 # found by exact identity, like the dgrad weight transforms.
 DIRECT_WGRAD_REDUCE = "direct_wgrad_reduce"
+# Stage 2 of a two-stage implicit-GEMM wgrad binary: folds its ws_replicas f32
+# scratch slabs into the 16-bit dW (the instance's own dtype, unlike
+# DIRECT_WGRAD_REDUCE's fp32 dW). Its extents are kernargs, so like the split-C
+# reduction it is shape-independent -- one binary per dtype and replica count,
+# cached under the wgrad helpers and found by exact identity.
+DIRECT_WGRAD_WS_REDUCE = "direct_wgrad_ws_reduce"
 # Wgrad variants that write a replicated scratch which DIRECT_WGRAD_REDUCE
 # folds (when their ws_replicas > 1). Each one's scratch is
 # ``[groups][ws_replicas][wg_M][wg_N]`` fp32 (direct_wgrad_reduce_dims).
@@ -572,6 +579,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         )
     if variant == DIRECT_WGRAD_REDUCE:
         return direct_wgrad_reduce_spec("direct_wgrad", problem, knobs["ws_replicas"])
+    if variant == DIRECT_WGRAD_WS_REDUCE:
+        from kernels.common.conv_wgrad_workspace_reduce import wgrad_reduce_aot_spec
+
+        return wgrad_reduce_aot_spec(problem.dtype, **knobs)
     if variant == DIRECT_DGRAD_TRANSPOSE:
         return dc.DirectTransposeWeightsDgradSpec(problem=problem)
     if variant == DIRECT_DGRAD_REORGANIZE:
@@ -940,7 +951,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
         if variant == "direct_depthwise_wgrad":
             spec.validate()
             return dc.is_valid_depthwise_wgrad_spec(spec, arch=arch)
-        if variant in _HELPERS or variant == DIRECT_WGRAD_REDUCE:
+        if variant in _HELPERS or variant in (DIRECT_WGRAD_REDUCE, DIRECT_WGRAD_WS_REDUCE):
             return True, "ok"
         if variant == DIRECT_SPLIT_REDUCE:
             spec.validate()
@@ -1049,6 +1060,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_wgrad_small_c": dc.build_direct_conv_wgrad,
         "direct_depthwise_wgrad": dc.build_direct_depthwise_wgrad,
         DIRECT_WGRAD_REDUCE: build_conv_wgrad_workspace_reduce,
+        DIRECT_WGRAD_WS_REDUCE: build_conv_wgrad_workspace_reduce,
         DIRECT_DGRAD_TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
         DIRECT_DGRAD_REORGANIZE: dc.build_direct_reorganize_weights,
         DIRECT_DGRAD_TRANSPOSE_RTC: dc.build_direct_transpose_weights_dgrad,
