@@ -17,13 +17,15 @@ from config_harness import assert_assembles, emit_kernels_from_config, solutions
 pytestmark = pytest.mark.unit
 _CONFIG = Path(__file__).resolve().parents[1] / "common/sgemm_scalar_load_b_asm.yaml"
 _ARCH = "gfx1151"
+# gfx12 counts scalar loads in KMcnt, separate from the LDS counter
+_ARCHS = (_ARCH, "gfx1201")
 # Problem groups of _CONFIG: (index, number of forked solutions)
 _GROUPS = {"TN": (0, 8), "TN prefetch": (1, 2), "TT": (2, 8), "TT prefetch": (3, 1), "NN": (4, 4), "NT": (5, 4)}
 
 
-def _emit(group):
+def _emit(group, arch=_ARCH):
     index, forks = _GROUPS[group]
-    results = emit_kernels_from_config(_CONFIG, limit=forks, arch=_ARCH, canonical=False,
+    results = emit_kernels_from_config(_CONFIG, limit=forks, arch=arch, canonical=False,
                                        problem_index=index, expected_fork_count=forks)
     assert len(results) == forks, group
     for name, _, error in results:
@@ -31,9 +33,9 @@ def _emit(group):
     return results
 
 
-@pytest.fixture(scope="module", params=sorted(_GROUPS))
+@pytest.fixture(scope="module", params=[(g, a) for g in sorted(_GROUPS) for a in _ARCHS], ids="-".join)
 def kernels(request):
-    return _emit(request.param)
+    return _emit(*request.param)
 
 
 def _instructions(source):
@@ -86,7 +88,7 @@ class _Ring:
                 self.inFlight.add((group, i))
             self.loadedTo = max(self.loadedTo, self.k + (1 if self.tlu else width))
             return
-        if line.startswith("s_waitcnt lgkmcnt(0)"):
+        if line.startswith("s_waitcnt lgkmcnt(0)") or line.startswith("s_wait_kmcnt 0"):
             # SMEM returns out of order with LDS, so only a full drain covers a scalar load
             self.inFlight.clear()
             return

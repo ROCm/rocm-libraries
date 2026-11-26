@@ -303,5 +303,5 @@ def iterWait(writer, kernel, u: int) -> Module:
     _, chunk, _, _, _ = _geometry(kernel)
     module = Module("ScalarLoadB wait %u" % u)
     if u % chunk == 0:
-        module.add(SWaitCnt(dscnt=0, comment="wait for scalar B (SMEM returns out of order)"))
+        module.add(SWaitCnt(dscnt=0, kmcnt=0, comment="wait for scalar B (SMEM returns out of order)"))
     return module

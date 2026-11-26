@@ -9216,16 +9216,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["DirectToVgprB"]:
         self.states.b.numVgprG2L *= 2
         self.states.b.numVgprG2LAllocated *= 2
-      if kernel.get("ScalarLoadB"):
-        self.states.b.numVgprG2L = 0
-        self.states.b.numVgprG2LAllocated = 0
-        self.states.b.numVgprG2LTailloopAllocated = 0
         bpeB = tensorParametersB["bpe"]
         bpeGRB = tensorParametersB["bpeGR"]
         if kernel["ConvertAfterDS"] and bpeB > bpeGRB:
           # DTV + covertAfterDS case, we need to allocate vgpr based on after conversion
           self.states.b.numVgprG2L *= int(bpeB // bpeGRB)
           self.states.b.numVgprG2LAllocated *= int(bpeB // bpeGRB)
+      if kernel.get("ScalarLoadB"):
+        self.states.b.numVgprG2L = 0
+        self.states.b.numVgprG2LAllocated = 0
+        self.states.b.numVgprG2LTailloopAllocated = 0
 
       # num vgprs: global -> local elements : MXSB
       if kernel["ProblemType"]["MXBlockB"]:
