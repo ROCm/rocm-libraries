@@ -8,7 +8,7 @@ import pytest
 
 import check_tier_partition as ctp
 
-YAML = textwrap.dedent("""\
+_YAML_TEXT = """\
     test_categories:
       quick:
         test_patterns: ["Quick/*", "TestHost.Named"]
@@ -22,7 +22,8 @@ YAML = textwrap.dedent("""\
         test_patterns: ["Full*"]
       ffm-quick:
         test_patterns: ["Quick/*"]
-    """)
+"""
+YAML = textwrap.dedent(_YAML_TEXT)
 
 TESTS = [
     "Quick/TestGpuA.Compare/0",
