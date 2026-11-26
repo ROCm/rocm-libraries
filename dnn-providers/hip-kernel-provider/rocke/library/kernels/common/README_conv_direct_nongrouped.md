@@ -101,6 +101,16 @@ values = ConvArgs.from_problem(problem).to_launch_values(
     a_ptr, b_ptr, d_ptr, a_bytes, b_bytes, d_bytes)
 ```
 
+A spec built with `bias` (the conv + bias forward, name and label tag
+`cbias`) appends the `Bias` / `Bias_bytes` kernargs after the block
+(`conv_direct_arg_names(bias=True)`); launch it with
+`to_launch_values(..., bias_ptr=, bias_bytes=)`. The bias (K values in the
+output dtype, read through a buffer resource of `Bias_bytes`) is added to
+the fp32 accumulators before the one rounding. With `split_c > 1` the conv
+pass keeps writing raw fp32 partials and the fold (`direct_split_reduce`,
+built with `bias` too, same kernarg block) adds it; with `group_merge` the
+channel is the merged run's absolute one.
+
 Two host-side contracts move from build time to launch time, so run
 `validate()` (or `is_valid_nongrouped_spec`) on the spec rebuilt for the
 problem actually launched — the benchmark sweep and the AOT cache's

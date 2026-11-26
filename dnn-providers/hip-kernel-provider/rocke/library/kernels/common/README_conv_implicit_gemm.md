@@ -272,7 +272,29 @@ wrote out-of-bounds when `K % vec_c == 0` but `kpg % vec_c != 0`.
 
 ### Accumulator epilogue
 
-- `ConvAccumulatorEpilogue` applies optional `bias`, `scale`, `relu`, `clamp_min`/`clamp_max` directly on MFMA f32 fragments before the D-store path.
+- `ConvAccumulatorEpilogue` applies optional `bias`, `scale`, `relu`, `clamp_min`/`clamp_max` directly on MFMA f32 fragments before the D-store path. Its `bias` is one compile-time scalar for every channel.
+
+### Per-output-channel bias (`bias`)
+
+`ImplicitGemmConvSpec.bias` (name and label tag `cbias`, `KernelIdentity.bias`) builds the conv + bias
+forward: `y[..., g*kpg + k] = round(acc_fp32 + float(Bias[g*kpg + k]))`, one rounding, the bias added to the
+fp32 accumulator fragments before the `acc_epilogue` and the store. `Bias` is a vector of K (= groups * kpg)
+values in the output dtype, passed as the trailing `Bias` / `Bias_bytes` kernargs after every other one
+(`conv_abi.conv_bias_arg_names`); the kernel reads it through a buffer resource of `Bias_bytes`, so a channel
+past it reads 0. `ConvArgs.to_launch_values(bias_ptr=, bias_bytes=)` refuses a `bias_bytes` below K 2-byte
+values. The helpers are `kernels/conv/conv_bias.py` and their C++ twin `instance_conv_bias.h`; the direct,
+Winograd and split-C forward families use the same ones.
+
+The bias is added where the whole fp32 sum exists, exactly once (`fwd_bias_stage`): the unsplit epilogue, the
+owner's fold of `split_det` 1 / 2 (and `split_tail`'s whole-K tiles), the cluster fold of `split_k_cluster`,
+and the fold kernels of the two-stage workspace split (`conv_fwd_split_k_reduce` with `bias`) and of
+`split_det` 3 (`conv_wgrad_workspace_reduce` with `bias`), whose Stage 1 keeps storing raw partials.
+`fwd_bias_conflict` (C++ `rocke_conv_fwd_bias_ok`) refuses the atomic split-K forward and the stream-K /
+hybrid segment loops, which have no single owner of an output value.
+
+AOT: the bias twins are opt-in, `ROCKE_AOT_FWD_BIAS=0,1` (default `0`, the plain binaries only), and the
+kernel cache never offers a twin for a plain problem. The dispatcher and the route tables carry no bias
+tensor and select no bias kernel; the hipDNN engine `hipkernel:Gfx950ConvFwdBiasAot` ships the gfx950 twins.
 
 ### Pointwise explicit-GEMM fast path
 
