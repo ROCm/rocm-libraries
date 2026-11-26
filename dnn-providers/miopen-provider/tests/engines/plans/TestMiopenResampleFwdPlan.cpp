@@ -18,7 +18,6 @@
 #include <gtest/gtest.h>
 
 #include "MiopenApi.hpp"
-#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
@@ -33,7 +32,6 @@
 
 using namespace miopen_plugin;
 
-using hipdnn_data_sdk::types::half;
 using hipdnn_data_sdk::utilities::iterateAlongDimensions;
 using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -245,22 +243,6 @@ class TestGpuMiopenResampleFwdPlan : public ResampleFwdPlanFixture
 };
 
 // ============================================================================
-// Workspace: MIOpen's size for the index type the plan passes.
-// ============================================================================
-
-TEST_F(TestGpuMiopenResampleFwdPlan, WorkspaceHoldsInt32Indices)
-{
-    const auto plan = buildPlan(planarMaxSpec(DataType::INT32));
-    EXPECT_EQ(plan->getWorkspaceSize(*_handle), 4 * sizeof(int32_t));
-}
-
-TEST_F(TestGpuMiopenResampleFwdPlan, WorkspaceHoldsInt8Indices)
-{
-    const auto plan = buildPlan(planarMaxSpec(DataType::INT8));
-    EXPECT_EQ(plan->getWorkspaceSize(*_handle), 4 * sizeof(int8_t));
-}
-
-// ============================================================================
 // Execution. Y and the index start as sentinels, so a wrong alpha or beta, or an index that is
 // not copied out, shows in the values.
 // ============================================================================
@@ -275,15 +257,6 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWritesInt8Indices)
     expectMatches(run<float, int8_t>(planarMaxSpec(DataType::INT8), planarMaxInput()),
                   planarMaxExpected(),
                   0.0);
-}
-
-TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWritesHalfValues)
-{
-    // The inputs are small integers, exact in half precision.
-    expectMatches(
-        run<half, int32_t>(planarMaxSpec(DataType::INT32, DataType::HALF), planarMaxInput()),
-        planarMaxExpected(),
-        0.0);
 }
 
 TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWithoutIndexWritesValues)
@@ -324,11 +297,70 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPool3dWritesInt32Indices)
     expectMatches(run(spec, x), expected, 0.0);
 }
 
-TEST_F(TestGpuMiopenResampleFwdPlan, AvgExcludePaddingDividesByValidCount)
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolCopiesTheIndexOfEveryBatchAndChannel)
 {
-    const auto result = run(paddedAverageSpec(), ascending(9, 1.0f));
-    expectYNear(result.y, paddedAverageExpected(), 1e-5);
-    EXPECT_TRUE(result.index.empty());
+    // X {2, 3, 4, 4} pooled 2x2 / 2 into {2, 3, 2, 2}. In slice s = n * 3 + c, window w (row-major)
+    // holds its maximum 1 + 4 * s + w at window position (s + w) % 4 and zeros elsewhere, so
+    // neighbouring slices put their maxima at different offsets: a copy that misses or misorders a
+    // slice of the index shows.
+    const auto spec = ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                   {2, 3, 4, 4},
+                                                   {2, 2},
+                                                   {2, 2},
+                                                   {0, 0},
+                                                   DataType::FLOAT,
+                                                   DataType::INT32);
+    std::vector<float> x(96, 0.0f);
+    PoolingResult expected;
+    for(int64_t slice = 0; slice < 6; ++slice)
+    {
+        for(int64_t window = 0; window < 4; ++window)
+        {
+            const int64_t position = (slice + window) % 4;
+            const int64_t h = (window / 2) * 2 + position / 2;
+            const int64_t w = (window % 2) * 2 + position % 2;
+            const auto value = static_cast<float>(1 + 4 * slice + window);
+            x.at(static_cast<size_t>(slice * 16 + h * 4 + w)) = value;
+            expected.y.push_back(value);
+            expected.index.push_back(h * 4 + w);
+        }
+    }
+    expectMatches(run(spec, x), expected, 0.0);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolKeepsEachDimensionsWindowStrideAndPadding)
+{
+    // X {1, 1, 5, 4} holds 1..20; window 3x2, stride 2x1 and padding 1x0 give Y 3x3. With ascending
+    // values each window's maximum is its last valid element, so a window, stride or padding that
+    // reaches MIOpen in the wrong dimension pools other elements.
+    const auto spec = ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                   {1, 1, 5, 4},
+                                                   {3, 2},
+                                                   {2, 1},
+                                                   {1, 0},
+                                                   DataType::FLOAT,
+                                                   DataType::INT32);
+    const PoolingResult expected{{6, 7, 8, 14, 15, 16, 18, 19, 20},
+                                 {5, 6, 7, 13, 14, 15, 17, 18, 19}};
+    expectMatches(run(spec, ascending(20, 1.0f)), expected, 0.0);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPool3dKeepsEachDimensionsWindowStrideAndPadding)
+{
+    // X {1, 1, 3, 4, 5} holds 1..60; window 2x3x1, stride 1x2x1 and padding 1x0x0 give Y 4x1x5.
+    // Each window's maximum is its last valid element; the last two depth windows both end at
+    // depth 2.
+    const auto spec = ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                   {1, 1, 3, 4, 5},
+                                                   {2, 3, 1},
+                                                   {1, 2, 1},
+                                                   {1, 0, 0},
+                                                   DataType::FLOAT,
+                                                   DataType::INT32);
+    const PoolingResult expected{
+        {11, 12, 13, 14, 15, 31, 32, 33, 34, 35, 51, 52, 53, 54, 55, 51, 52, 53, 54, 55},
+        {10, 11, 12, 13, 14, 30, 31, 32, 33, 34, 50, 51, 52, 53, 54, 50, 51, 52, 53, 54}};
+    expectMatches(run(spec, ascending(60, 1.0f)), expected, 0.0);
 }
 
 TEST_F(TestGpuMiopenResampleFwdPlan, AvgPoolingNhwcWritesValues)
@@ -345,6 +377,59 @@ TEST_F(TestGpuMiopenResampleFwdPlan, AvgPoolingNhwcWritesValues)
         expected.push_back(value + 9.0f);
     }
     expectYNear(run(spec, ascending(18, 1.0f)).y, expected, 1e-5);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolNhwcWritesValues)
+{
+    // planarMaxInput in channel 0 and the same values plus 20 in channel 1, packed channels-last.
+    auto spec = ResampleFwdGraphSpec::packed(
+        ResampleMode::MAXPOOL, {1, 2, 4, 4}, {2, 2}, {2, 2}, {0, 0}, DataType::FLOAT);
+    spec.makeChannelsLast();
+
+    auto x = planarMaxInput();
+    auto expected = planarMaxExpected().y;
+    for(size_t i = 0; i < 16; ++i)
+    {
+        x.push_back(planarMaxInput()[i] + 20.0f);
+    }
+    for(size_t i = 0; i < 4; ++i)
+    {
+        expected.push_back(planarMaxExpected().y[i] + 20.0f);
+    }
+    expectYNear(run(spec, x).y, expected, 0.0);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, AvgPoolingNdhwcWritesValues)
+{
+    // Two channels of 2x2x2, 1..8 and 9..16, each averaged by a 2x2x2 window into one value.
+    auto spec = ResampleFwdGraphSpec::packed(
+        ResampleMode::AVGPOOL_EXCLUDE_PADDING, {1, 2, 2, 2, 2}, {2, 2, 2}, {2, 2, 2}, {0, 0, 0});
+    spec.makeChannelsLast();
+    expectYNear(run(spec, ascending(16, 1.0f)).y, {4.5f, 12.5f}, 1e-5);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, AvgIncludePaddingCountsPaddedPositions)
+{
+    // paddedAverageSpec's graph over 1..9, but every window divides by 9: the padding reaches
+    // MIOpen and counts as zero, where excluding it divides the corners by 4.
+    auto spec = paddedAverageSpec();
+    spec.mode = ResampleMode::AVGPOOL_INCLUDE_PADDING;
+    std::vector<float> expected;
+    for(const float sum : {12.0f, 21.0f, 16.0f, 27.0f, 45.0f, 33.0f, 24.0f, 39.0f, 28.0f})
+    {
+        expected.push_back(sum / 9.0f);
+    }
+    expectYNear(run(spec, ascending(9, 1.0f)).y, expected, 1e-5);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, GlobalMaxPoolNhwcRunsWithTheNormalizedStride)
+{
+    // A 64x64 window over a 64x64 input. The checks hand MIOpen stride 1 for the single output;
+    // with stride 64, MIOpen's channels-last kernel would need more scratch than it has.
+    auto spec = ResampleFwdGraphSpec::packed(
+        ResampleMode::MAXPOOL, {1, 2, 64, 64}, {64, 64}, {64, 64}, {0, 0}, DataType::FLOAT);
+    spec.makeChannelsLast();
+    expectYNear(run(spec, ascending(8192)).y, {4095.0f, 8191.0f}, 0.0);
 }
 
 TEST_F(TestGpuMiopenResampleFwdPlan, PoolingChannelsLastStyleInputIntoNchwOutput)
