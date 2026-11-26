@@ -25,7 +25,7 @@
 #include "primbench.hpp"
 
 #define CREATE_BENCHMARK(Benchmark, T, BS, IPT) \
-    executor.queue<block_histogram_benchmark<Benchmark, T, BS, IPT>>();
+    executor.queue<block_histogram_benchmark<Benchmark, T, BS, IPT>>(entropy_reduction);
 
 #define BENCHMARK_TYPE(Benchmark, T, BS)  \
     CREATE_BENCHMARK(Benchmark, T, BS, 1) \
@@ -72,8 +72,12 @@ int main(int argc, char* argv[])
     using histogram_atomic_t = histogram<rocprim::block_histogram_algorithm::using_atomic>;
     using histogram_sort_t   = histogram<rocprim::block_histogram_algorithm::using_sort>;
 
-    BENCHMARK_ATOMIC()
-    BENCHMARK_SORT()
+    const int entropy_reductions[] = {0, 2, 4, 6};
+    for(int entropy_reduction : entropy_reductions)
+    {
+        BENCHMARK_ATOMIC()
+        BENCHMARK_SORT()
+    }
 #endif
 
     executor.run();

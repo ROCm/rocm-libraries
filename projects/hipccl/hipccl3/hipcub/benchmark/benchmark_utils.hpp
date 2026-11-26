@@ -126,6 +126,56 @@ inline T get_random_value(T min, T max)
     return get_random_data(1, min, max)[0];
 }
 
+template<class T>
+std::vector<T> generate_histogram_input(size_t  items,
+                                        int     entropy_reduction,
+                                        int64_t lower_level,
+                                        int64_t upper_level)
+{
+    if(entropy_reduction >= 5)
+    {
+        return std::vector<T>(items, (lower_level + upper_level) / 2);
+    }
+
+    const size_t max_random_size = 1024 * 1024;
+
+    std::random_device         rd;
+    std::default_random_engine gen(rd());
+    std::vector<T>             data(items);
+    std::generate(data.begin(),
+                  data.begin() + std::min(items, max_random_size),
+                  [&]()
+                  {
+                      // Reduce entropy by applying bitwise AND to random bits
+                      // "An Improved Supercomputer Sorting Benchmark", 1992
+                      // Kurt Thearling & Stephen Smith
+                      auto v = gen();
+                      for(int e = 0; e < entropy_reduction; e++)
+                      {
+                          v &= gen();
+                      }
+                      return T(lower_level + v % (upper_level - lower_level));
+                  });
+    for(size_t i = max_random_size; i < items; i += max_random_size)
+    {
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
+    }
+    return data;
+}
+
+int get_entropy_percents(int entropy_reduction)
+{
+    switch(entropy_reduction)
+    {
+        case 0: return 100;
+        case 1: return 81;
+        case 2: return 54;
+        case 3: return 33;
+        case 4: return 20;
+        default: return 0;
+    }
+}
+
 // Can't use std::prefix_sum for inclusive/exclusive scan, because
 // it does not handle short[] -> int(int a, int b) { a + b; } -> int[]
 // they way we expect. That's because sum in std::prefix_sum's implementation
