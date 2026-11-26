@@ -20,6 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# DO NOT MERGE: no-op marker that puts real project source in this PR's diff
+# alongside the therock-multi-arch-ci.yml rewire. The pair is the point, and it
+# pins both halves of TheRock's decision. The workflow edit matches
+# EXTERNAL_REPO_CALLER_WORKFLOW_PATTERNS but this file does not, so the diff is
+# CI-affecting without being CI-only: test_type must hold at "standard" rather
+# than dropping to "quick", and changed_projects must narrow to projects/rocprim
+# rather than widening to every configured project.
+
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
