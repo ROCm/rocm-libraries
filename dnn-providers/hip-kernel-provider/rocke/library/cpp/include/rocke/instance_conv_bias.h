@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_conv_bias.h -- per-output-channel bias of the convolution forward
- * kernels, C++ twin of the library's kernels/common/conv_bias.py.
+ * kernels, C++ twin of the library's kernels/conv/conv_bias.py.
  *
  *   y[n, (d,) h, w, g*kpg + k] = round(acc_fp32 + float(bias[g*kpg + k]))
  *

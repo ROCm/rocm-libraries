@@ -48,7 +48,7 @@ from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers.io import io_ir_type, pack_f32_to, store_scalar_from_f32
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 
-from kernels.common.conv_bias import (
+from kernels.conv.conv_bias import (
     conv_bias_rsrc,
     declare_conv_bias_params,
     load_conv_bias_f32,

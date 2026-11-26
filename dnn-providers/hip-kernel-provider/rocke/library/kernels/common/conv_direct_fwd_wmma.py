@@ -75,7 +75,7 @@ loop, so they are build-time capabilities, like the tile geometry.
 Conv + bias
 -----------
 ``bias=True`` takes the ``Bias`` / ``Bias_bytes`` tail after the block
-(``kernels.common.conv_bias``) and adds ``bias[k .. k+8)`` -- the 8 output
+(``kernels.conv.conv_bias``) and adds ``bias[k .. k+8)`` -- the 8 output
 channels of a lane's accumulator vector -- to the fp32 accumulators before
 they are rounded and staged in LDS, in both epilogues.
 """
@@ -92,7 +92,7 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import align_up, ceil_div
 
-from kernels.common.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,

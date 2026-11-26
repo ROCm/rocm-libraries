@@ -59,7 +59,7 @@ from rocke.core.ir import BF16, F16, I32, I64, IRBuilder, KernelDef, Value
 from rocke.core.ir import VectorType
 from rocke.helpers.spec import ceil_div
 
-from kernels.common.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_grouped import (
     I32_MAX,
     DirectConvProblem,

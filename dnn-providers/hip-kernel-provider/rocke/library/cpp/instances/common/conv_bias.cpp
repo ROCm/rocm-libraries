@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * conv_bias.cpp -- per-output-channel bias of the convolution forward kernels
- * (C++ twin of the library's kernels/common/conv_bias.py). See
+ * (C++ twin of the library's kernels/conv/conv_bias.py). See
  * instance_conv_bias.h.
  */
 #include "rocke/instance_conv_bias.h"

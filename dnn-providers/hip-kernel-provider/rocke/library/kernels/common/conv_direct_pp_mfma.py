@@ -55,7 +55,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, I64, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import ceil_div
 
-from kernels.common.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_grouped import (
     I32_MAX,
     DirectConvProblem,

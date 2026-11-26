@@ -949,7 +949,7 @@ class WinogradYxSpec:
     name: str = "conv3d_winoyx"
     # per-output-channel conv bias (forward): the epilogue adds bias[k] in fp32 to every
     # output before the bf16 rounding (after oscale / the bps scale, before the bps_out
-    # amax); trailing Bias / Bias_bytes kernargs (kernels.common.conv_bias). With ksplit
+    # amax); trailing Bias / Bias_bytes kernargs (kernels.conv.conv_bias). With ksplit
     # the main kernel writes raw partials and the reduction adds it (KsReduceSpec.bias).
     bias: bool = False
 
@@ -1476,7 +1476,7 @@ def _yx_bias_rsrc(b, spec):
     whose raw partials the reduction adds the bias to)."""
     if not getattr(spec, "bias", False) or getattr(spec, "ksplit", 1) > 1:
         return None
-    from kernels.common.conv_bias import conv_bias_rsrc, declare_conv_bias_params
+    from kernels.conv.conv_bias import conv_bias_rsrc, declare_conv_bias_params
 
     return conv_bias_rsrc(b, *declare_conv_bias_params(b, BF16))
 
@@ -1503,7 +1503,7 @@ def _yx_bias_values(b, spec, rsrc, ld, lane, n_glob):
         return _bf16x_f32(
             b, rsrc, b.add(ld.n_base, b.mul(b.mod(lane, ci(8)), ci(4))), 4
         )
-    from kernels.common.conv_bias import load_conv_bias_f32
+    from kernels.conv.conv_bias import load_conv_bias_f32
 
     return load_conv_bias_f32(b, rsrc, n_glob, BF16, ci(0))
 

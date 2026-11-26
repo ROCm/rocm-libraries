@@ -257,7 +257,7 @@ def direct_spec_takes_target_wave(variant: str, knobs: dict) -> bool:
 
 # The forward variants (and the split-C fold of the forward kernels) whose
 # spec carries ``bias``: the per-output-channel bias of a conv + bias forward
-# (kernels.common.conv_bias), added in fp32 before the one rounding to the
+# (kernels.conv.conv_bias), added in fp32 before the one rounding to the
 # output dtype. A variant's own validator refuses the forms it cannot serve;
 # every other variant (dgrad and wgrad, and their helpers -- including the
 # forward kernels a dgrad variant reuses over the transposed problem) has no

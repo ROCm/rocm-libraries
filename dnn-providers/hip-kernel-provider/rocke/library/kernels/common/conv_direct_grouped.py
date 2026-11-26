@@ -89,7 +89,7 @@ from rocke.core.ir import (
 )
 from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
-from kernels.common.conv_bias import (
+from kernels.conv.conv_bias import (
     conv_bias_rsrc,
     load_conv_bias_f32,
     load_conv_bias_run_f32,
@@ -132,13 +132,13 @@ def emit_direct_params(
 
     ``bias`` (fwd only) declares the per-output-channel bias tail after the
     block -- ``Bias`` (``io_type``) and ``Bias_bytes`` -- through
-    :func:`kernels.common.conv_bias.declare_conv_bias_params`; without it the
+    :func:`kernels.conv.conv_bias.declare_conv_bias_params`; without it the
     block is unchanged.
     """
     if bias:
         if direction != "fwd":
             raise ValueError(f"bias extends the fwd ABI only (got {direction!r})")
-        from kernels.common.conv_bias import declare_conv_bias_params
+        from kernels.conv.conv_bias import declare_conv_bias_params
 
         out = emit_direct_params(b, direction=direction, io_type=io_type)
         out["Bias"], out["Bias_bytes"] = declare_conv_bias_params(b, io_type)

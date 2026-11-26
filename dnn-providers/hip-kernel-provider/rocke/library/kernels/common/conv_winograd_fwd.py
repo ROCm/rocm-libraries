@@ -80,7 +80,7 @@ magnitude order), in one of two ways:
 
 Bias (optional, K4). With ``bias`` the output transform also takes the
 per-output-channel conv bias (the trailing ``Bias`` / ``Bias_bytes`` kernargs
-of :mod:`kernels.common.conv_bias`) and computes ``y = round(A^T M A * 2**e +
+of :mod:`kernels.conv.conv_bias`) and computes ``y = round(A^T M A * 2**e +
 bias[k])``: the bias is added in fp32 after the prescale, before the one
 rounding to the I/O dtype. K1, K2a, K2 and K3 do not change.
 
@@ -116,7 +116,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 from kernels.common._conv_implicit_gemm_common import ConvProblem
-from kernels.common.conv_bias import conv_bias_rsrc, declare_conv_bias_params
+from kernels.conv.conv_bias import conv_bias_rsrc, declare_conv_bias_params
 
 # Interpolation points of the Toom-Cook construction (plus the point at
 # infinity).

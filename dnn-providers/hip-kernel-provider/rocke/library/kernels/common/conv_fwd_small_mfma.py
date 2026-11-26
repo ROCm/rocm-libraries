@@ -58,7 +58,7 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import IRBuilder, KernelDef, Value
 from rocke.helpers.spec import ceil_div
 
-from kernels.common.conv_bias import (
+from kernels.conv.conv_bias import (
     conv_bias_rsrc,
     load_conv_bias_f32,
     load_conv_bias_vec_f32,

@@ -77,7 +77,7 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import align_up, ceil_div
 
-from kernels.common.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 from kernels.common.conv_direct_fwd_wmma import (
     _lds_frag16,
     _tdm_descriptor_3d,

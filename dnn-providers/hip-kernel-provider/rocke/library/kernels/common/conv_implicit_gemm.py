@@ -88,7 +88,7 @@ from rocke.helpers.transforms import (
 )
 from kernels.conv.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_fwd_problem_block
-from kernels.common.conv_bias import (
+from kernels.conv.conv_bias import (
     apply_implicit_gemm_conv_bias,
     conv_bias_rsrc,
     declare_conv_bias_params,

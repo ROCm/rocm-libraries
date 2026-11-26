@@ -415,7 +415,7 @@ caller passes one to `dispatch/conv_routes.py`. The other callers are
 fp32 in the epilogue of every main-kernel variant (before the bf16 rounding and the
 `bps_out` amax). With `ksplit` the main kernel keeps writing raw partials and
 `KsReduceSpec.bias` adds it in the reduction. The trailing `Bias` / `Bias_bytes`
-kernargs follow the conv bias ABI (`kernels/common/conv_bias.py`). A caller reaches it
+kernargs follow the conv bias ABI (`kernels/conv/conv_bias.py`). A caller reaches it
 through `Winograd3dDropin(..., bias=)` on a forward plan. `winograd_steps` refuses a
 bias spec, because a route request carries no bias tensor. Like the rest of the
 family, the bias has no C++ twin, parity pair or golden entry. It is checked by

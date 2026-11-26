@@ -102,7 +102,7 @@ channel loops (7x7..12x12, C >= 512).
 
 Conv + bias
 -----------
-``bias=True`` adds a per-output-channel bias (``kernels.common.conv_bias``):
+``bias=True`` adds a per-output-channel bias (``kernels.conv.conv_bias``):
 the kernel takes the ``Bias`` / ``Bias_bytes`` tail after the direct-conv
 block and adds ``bias[k]`` to the fp32 accumulators before the one rounding to
 the output dtype. With ``split_c > 1`` the conv pass declares the tail but
@@ -156,7 +156,7 @@ from kernels.common.conv_direct_grouped import (
     _trunc_f32,
     emit_direct_params,
 )
-from kernels.common.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
+from kernels.conv.conv_bias import conv_bias_rsrc, load_conv_bias_vec_f32
 
 # Global load width for the activation staging path, in halves (dwordx4).
 _X_LOAD_VEC = 8

@@ -56,7 +56,7 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import align_up, ceil_div
 
-from kernels.common.conv_bias import (
+from kernels.conv.conv_bias import (
     conv_bias_rsrc,
     load_conv_bias_f32,
     load_conv_bias_vec_f32,
