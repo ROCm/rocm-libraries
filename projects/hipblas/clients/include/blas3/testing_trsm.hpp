@@ -329,8 +329,7 @@ void testing_trsm(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dA.nmemb() + dB.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dA, dB);
         device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dB_rot(dB, dB.nmemb(), flush_batch_count);
         CHECK_DEVICE_ALLOCATION(dA_rot.memcheck());
@@ -343,19 +342,20 @@ void testing_trsm(const Arguments& arg)
             if(iter == arg.cold_iters)
                 gpu_time_used = get_time_us_sync(stream);
 
-            DAPI_DISPATCH(hipblasTrsmFn,
-                          (handle,
-                           side,
-                           uplo,
-                           transA,
-                           diag,
-                           M,
-                           N,
-                           d_alpha,
-                           dA_rot[flush_index],
-                           lda,
-                           dB_rot[flush_index],
-                           ldb));
+            // checked: the flush copies leave less memory for the workspace rocBLAS allocates
+            DAPI_CHECK(hipblasTrsmFn,
+                       (handle,
+                        side,
+                        uplo,
+                        transA,
+                        diag,
+                        M,
+                        N,
+                        d_alpha,
+                        dA_rot[flush_index],
+                        lda,
+                        dB_rot[flush_index],
+                        ldb));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
 

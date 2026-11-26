@@ -339,9 +339,11 @@ try
 
         ("flush_memory_size",
          value<uint64_t>(&arg.flush_memory_size)->default_value(0),
-         "Bytes of device memory the operand copies may occupy in the timing loop. Set to more than"
-         " the cache size so operands are evicted before they are reused. The number of copies is"
-         " flush_memory_size / operand_bytes, rounded up."
+         "Bytes of operand data to cycle through in the timing loop. Set to more than the cache size"
+         " so operands are evicted before they are reused. The number of copies is"
+         " flush_memory_size / bytes a call accesses (leading-dimension and increment gaps left out,"
+         " each operand at least 256 bytes), rounded up, and at most what fits in nine tenths of the"
+         " free device memory."
          " If you specify flush_memory_size you cannot also specify flush_batch_count")
 
         ("algo",

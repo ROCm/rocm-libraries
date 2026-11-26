@@ -446,8 +446,7 @@ void testing_gemm(const Arguments& arg)
         // we need to copy alpha and beta to the host.
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dA.nmemb() + dB.nmemb() + dC.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dA, dB, dC);
         device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dB_rot(dB, dB.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dC_rot(dC, dC.nmemb(), flush_batch_count);

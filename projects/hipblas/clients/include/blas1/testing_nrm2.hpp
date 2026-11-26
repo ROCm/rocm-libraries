@@ -159,7 +159,7 @@ void testing_nrm2(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
-        size_t flush_batch_count = hipblas_flush_batch_count(arg, (dx.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dx);
         device_rotating_buffer<T> dx_rot(dx, dx.nmemb(), flush_batch_count);
         CHECK_DEVICE_ALLOCATION(dx_rot.memcheck());
 

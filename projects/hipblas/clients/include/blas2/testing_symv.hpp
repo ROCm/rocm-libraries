@@ -277,8 +277,7 @@ void testing_symv(const Arguments& arg)
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dA.nmemb() + dx.nmemb() + dy.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dA, dx, dy);
         device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dx_rot(dx, dx.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dy_rot(dy, dy.nmemb(), flush_batch_count);

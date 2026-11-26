@@ -225,8 +225,7 @@ void testing_spr(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dx.nmemb() + dAp.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dx, dAp);
         device_rotating_buffer<T> dx_rot(dx, dx.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dAp_rot(dAp, dAp.nmemb(), flush_batch_count);
         CHECK_DEVICE_ALLOCATION(dx_rot.memcheck());

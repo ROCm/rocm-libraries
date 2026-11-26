@@ -285,8 +285,7 @@ void testing_herk(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dA.nmemb() + dC.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dA, dC);
         device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dC_rot(dC, dC.nmemb(), flush_batch_count);
         CHECK_DEVICE_ALLOCATION(dA_rot.memcheck());

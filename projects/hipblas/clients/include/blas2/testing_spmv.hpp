@@ -282,8 +282,7 @@ void testing_spmv(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dAp.nmemb() + dx.nmemb() + dy.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dAp, dx, dy);
         device_rotating_buffer<T> dAp_rot(dAp, dAp.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dx_rot(dx, dx.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dy_rot(dy, dy.nmemb(), flush_batch_count);

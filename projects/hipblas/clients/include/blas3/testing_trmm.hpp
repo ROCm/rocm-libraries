@@ -485,8 +485,8 @@ void testing_trmm(const Arguments& arg)
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
 
         // in place, B is also the output and is not rotated twice
-        size_t flush_bytes = (dA.nmemb() + dB.nmemb() + (inplace ? 0 : dOut->nmemb())) * sizeof(T);
-        size_t flush_batch_count = hipblas_flush_batch_count(arg, flush_bytes);
+        size_t flush_batch_count = inplace ? hipblas_flush_batch_count(arg, dA, dB)
+                                           : hipblas_flush_batch_count(arg, dA, dB, *dOut);
         device_rotating_buffer<T> dA_rot(dA, dA.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dB_rot(dB, dB.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dOut_rot(*dOut, dOut->nmemb(), inplace ? 1 : flush_batch_count);

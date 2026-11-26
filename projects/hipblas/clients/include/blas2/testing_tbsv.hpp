@@ -222,8 +222,7 @@ void testing_tbsv(const Arguments& arg)
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 
-        size_t flush_batch_count
-            = hipblas_flush_batch_count(arg, (dAb.nmemb() + dx_or_b.nmemb()) * sizeof(T));
+        size_t                    flush_batch_count = hipblas_flush_batch_count(arg, dAb, dx_or_b);
         device_rotating_buffer<T> dAb_rot(dAb, dAb.nmemb(), flush_batch_count);
         device_rotating_buffer<T> dx_or_b_rot(dx_or_b, dx_or_b.nmemb(), flush_batch_count);
         CHECK_DEVICE_ALLOCATION(dAb_rot.memcheck());
