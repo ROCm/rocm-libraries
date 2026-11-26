@@ -763,6 +763,7 @@ PENDING: tuple[PendingTest, ...] = (
         "2027-01-15",
         "library/tests/test_convolution_forward_aot_packaging.py",
         "library/tests/test_kernel_label.py",
+        "library/tests/test_selector_cpp_parity.py",
     ),
     PendingTest(
         "library/tests/test_conv_direct_nongrouped_tf32.py",
