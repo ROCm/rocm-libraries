@@ -25,6 +25,7 @@ SOFTWARE.
 #include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
+#include <utility>
 #include <vector>
 
 #include "framework/backend_memory.hpp"
@@ -96,10 +97,32 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), imageBytes);
 
-    // Known HOST reds (kernel defects): PKD3 k3 diverges at the row edge, and PLN PartialRoi k5
-    // reads neighbours from outside the ROI.
+    // Known HOST red (kernel defect): PLN PartialRoi k5 reads neighbours from outside the ROI.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                kGaussianFilterTolerance(cfg.dtype)));
+}
+
+// Same-layout cases plus both directions of the fused output-layout conversion, and HOST
+// PKD3-to-PLN3 widths at which the k3, k7 and k9 vector loops used to run past the row end.
+// kTailWidthSize does not reach those loop bounds.
+std::vector<WithParams<GaussianFilterParams>> gaussian_filter_configs() {
+    std::vector<WithParams<GaussianFilterParams>> configs = with_params<GaussianFilterParams>(
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f},
+         GaussianFilterParams{7, 1.0f}, GaussianFilterParams{9, 1.0f},
+         GaussianFilterParams{5, 0.25f}, GaussianFilterParams{5, 5.0f}});
+    for (const auto& [width, kernelSize] : {std::pair{13u, 3u}, {17u, 7u}, {22u, 9u}})
+        for (const TestConfig& cfg :
+             make_configs(presets::kDefaultDTypes, {LayoutConv{Layout::PKD3, Layout::PLN3}},
+                          {Roi::Full}, {Size{1, 11, width}}))
+            if (cfg.backend == RPP_HOST_BACKEND)
+                configs.push_back({cfg, GaussianFilterParams{kernelSize, 1.0f}});
+    return configs;
 }
 
 }  // namespace
@@ -114,17 +137,6 @@ TEST_P(GaussianFilterTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_gaussian_filter<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Same-layout cases plus both directions of the fused output-layout conversion.
 INSTANTIATE_TEST_SUITE_P(Image_Filter, GaussianFilterTest,
-                         ::testing::ValuesIn(with_params<GaussianFilterParams>(
-                             concat_configs({
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
-                                              {Roi::Full, Roi::Partial},
-                                              {presets::kDefaultSize, presets::kSubVectorSize}),
-                             }),
-                             {GaussianFilterParams{3, 1.0f}, GaussianFilterParams{5, 1.0f},
-                              GaussianFilterParams{7, 1.0f}, GaussianFilterParams{9, 1.0f},
-                              GaussianFilterParams{5, 0.25f}, GaussianFilterParams{5, 5.0f}})),
+                         ::testing::ValuesIn(gaussian_filter_configs()),
                          op_config_name<GaussianFilterParams>);

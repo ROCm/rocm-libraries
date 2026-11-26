@@ -252,3 +252,160 @@ def test_hashes_resolve_to_installed_objects(rows, entries, installed):
         slot = "reduce" if kernel == "dbias_reduce" else kernel
         assert set(hashes) <= set(files[slot])
     assert set(installed) == set(files)
+
+
+# --- the rung rule per (arch, dtype): gfx11-generic's committed table, and gfx942 / gfx90a on their full row set ---
+
+
+def test_gfx11_table_is_reproduced_without_the_installed_content():
+    """The committed CSV is the generator's output for gfx11-generic, byte for byte, whatever the content check says."""
+    assert sv.VERDICTS_CSV.read_text() == sv.render(sv.generate(sv.GFX11, content=None))
+
+
+def test_gfx11_routing_is_what_the_reference_derives():
+    """``selection_from_reference`` (how gfx942 and gfx90a get their routing) reproduces the bundle's routing for gfx11-generic."""
+    import csv  # noqa: PLC0415
+
+    with sv.GFX11.reference_csv.open(newline="") as fh:
+        derived = sv.selection_from_reference(list(csv.DictReader(fh)), sv.GFX11)
+    assert derived == sv.load_selection()
+
+
+CDNA9 = ("gfx942", "gfx90a")
+# The rungs of the arches, as literals (not read back from the Spec module the tool uses).
+SIXTEEN_BIT = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512)
+FP32 = (32, 64, 96, 128, 160, 192, 224, 256, 512)
+LADDERS = {"f16": SIXTEEN_BIT, "bf16": SIXTEEN_BIT, "fp32": FP32}
+
+
+def full_row_set(arch):
+    """The Spec of every pinned object of the arch: a padded object per (rung, class, dropout, dtype) and kernel, a prep per rung, a
+    standalone reduce per 16-bit dtype (the fp32 reduce kernel is inside its dQ object).
+    """
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+
+    specs = []
+    for dtype, rungs in LADDERS.items():
+        for tile in rungs:
+            specs.append(Spec("prep", dtype, tile, padded=1, arch=arch))
+            for cls in ("plain", "causal", "bias"):
+                for drop in (0, 1):
+                    for kernel in ("dkdv", "dq"):
+                        specs.append(
+                            Spec(
+                                kernel, dtype, tile, cls, "bk", drop, 1, "g1", arch=arch
+                            )
+                        )
+    specs += [Spec("dbias_reduce", d, 32, arch=arch) for d in ("f16", "bf16")]
+    return specs
+
+
+@pytest.fixture(scope="module", params=CDNA9)
+def cdna9(request, tmp_path_factory):
+    """(rows, selection) of an arch with the full row set, routed as ``write_selection`` routes a real reference."""
+    import csv  # noqa: PLC0415
+
+    arch = request.param
+    model = sv.ArchModel(arch, f"synthetic_{arch}", False, ("fp32",))
+    root = tmp_path_factory.mktemp(arch)
+    specs = full_row_set(arch)
+    assert (
+        len(specs) == 2 * 12 * (1 + 12) + 9 * (1 + 12) + 2
+    )  # 16-bit and fp32 rungs x (prep + 6 classes x 2 kernels), reduces
+    reference = root / "reference.csv"
+    with reference.open("w", newline="") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(("hash", "spec"))
+        w.writerows((s.hash(), s.key()) for s in specs)
+    sv.write_selection(model, reference, root / "selection.csv")
+    sel = sv.load_selection(root / "selection.csv")
+    rows = sv.generate(model, root / "selection.csv", content=None)
+    return model, specs, sel, rows
+
+
+def test_a_served_graph_takes_the_smallest_rung_of_its_dtype_ladder(cdna9):
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+
+    model, specs, sel, rows = cdna9
+    by_hash = {s.hash(): s for s in specs}
+    n = 0
+    for r in rows:
+        if r["verdict"] != "served":
+            continue
+        n += 1
+        ladder = LADDERS[r["dtype"]]
+        tile = next(t for t in ladder if t >= max(r["dqk"], r["dv"]))
+        prep_tile = next(t for t in ladder if t >= r["dv"])
+        for slot, want in (("prep", prep_tile), ("dkdv", tile), ("dq", tile)):
+            spec = by_hash[r[slot]]
+            assert (spec.kernel, spec.dtype, spec.tile) == (slot, r["dtype"], want), (
+                r["id"],
+                slot,
+            )
+            assert isinstance(spec, Spec) and spec.arch == model.arch
+        assert by_hash[r["dkdv"]].dropout == r["dropout"], r["id"]
+    assert n > 300
+
+
+def test_the_wide_head_dims_ride_the_512_rung_and_the_ladder_ends_at_512(cdna9):
+    _, _, _, rows = cdna9
+    by_id = {r["id"]: r for r in rows}
+    # 16-bit: no 320/384/448 rung; fp32: no 16 rung either (d33 takes 64); both serve up to 512 and the matcher declines above (DT-4)
+    for dtype in ("f16", "fp32"):
+        assert by_id[f"bnd-{dtype}-d257"]["verdict"] == "served"
+        assert by_id[f"bnd-{dtype}-d512"]["verdict"] == "served"
+        assert by_id[f"bnd-{dtype}-d513"]["verdict"] == "declined"
+        assert by_id[f"bnd-{dtype}-d513"]["rule"] == "DT-4"
+    assert (
+        by_id["bnd-f16-d17"]["verdict"] == by_id["bnd-fp32-d33"]["verdict"] == "served"
+    )
+    assert by_id["ref-hd-gt-512-f16-769"]["rule"] == "DT-4"
+    assert {r["rule"] for r in rows if "ref-hd-gt-512" in r["id"]} == {"DT-4"}
+    assert not any(r["rule"] == sv.NO_ROW for r in rows)
+
+
+def test_the_fp32_dbias_reduce_is_inside_the_dq_object(cdna9):
+    """A broadcast dBias graph names a standalone reduce object for the 16-bit dtypes only."""
+    _, specs, _, rows = cdna9
+    by_hash = {s.hash(): s for s in specs}
+    seen = set()
+    for r in rows:
+        if r["verdict"] != "served" or not sv.needs_reduce(r):
+            continue
+        seen.add(r["dtype"])
+        if r["dtype"] == "fp32":
+            assert r["reduce"] == "", r["id"]
+        else:
+            assert (by_hash[r["reduce"]].kernel, by_hash[r["reduce"]].dtype) == (
+                "dbias_reduce",
+                r["dtype"],
+            )
+    assert seen == {"f16", "bf16", "fp32"}
+
+
+def test_every_routing_entry_of_the_arch_is_reproduced(cdna9):
+    """Each routed (kernel, dtype, tile, class, dropout, store_db) entry of the full row set is taken by an exact and a padded graph."""
+    model, specs, sel, rows = cdna9
+    assert {k[2] for k in sel if k[0] == "dkdv" and k[1] == "fp32"} == set(FP32)
+    assert {k[2] for k in sel if k[0] == "dkdv" and k[1] == "bf16"} == set(SIXTEEN_BIT)
+    hit = set()
+    for r in rows:
+        if r["verdict"] != "served":
+            continue
+        ladder = LADDERS[r["dtype"]]
+        tile = next(t for t in ladder if t >= max(r["dqk"], r["dv"]))
+        cls = (
+            "bias"
+            if r["bias"] != "none"
+            else (
+                "causal"
+                if r["mask"] != "none"
+                or r["window_left"] != -1
+                or r["window_right"] != -1
+                else "plain"
+            )
+        )
+        store_db = ("requested" if r["dbias"] else "null") if cls == "bias" else ""
+        hit.add(("dkdv", r["dtype"], tile, cls, r["dropout"], ""))
+        hit.add(("dq", r["dtype"], tile, cls, r["dropout"], store_db))
+    assert {k for k in sel if k[0] in ("dkdv", "dq")} <= hit

@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 from unittest import mock
@@ -1060,6 +1061,11 @@ class FakeGh:
         if path[-2] == "runs" and int(path[-1]) in self.runs:
             return json.dumps({"status": self.runs[int(path[-1])][0]}).encode()
         if path[-1] == "jobs" and int(path[-2]) in self.runs:
+            # GitHub times out with HTTP 502 on a page of 100 jobs of a
+            # multi-arch run (run 43371512331, 343 jobs); pages of 30 load.
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(args[0]).query)
+            if int(query.get("per_page", ["30"])[0]) > 30:
+                raise FetchError(f"gh api {args[0]}: gh: Server Error (HTTP 502)")
             jobs = self.runs[int(path[-2])][1]
             return "".join(
                 json.dumps({"id": i, "name": n, "conclusion": c}) + "\n"

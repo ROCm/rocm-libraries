@@ -29,10 +29,15 @@
 
 #include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/SliceAlignment.hpp>
 
 #include "TimingInstrumentation.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <iostream>
+#include <numeric>
 #include <stdexcept>
 
 namespace TensileLite
@@ -75,7 +80,16 @@ namespace TensileLite
         }
 
         ClientProblemFactory::ClientProblemFactory(po::variables_map const& args)
+            : ClientProblemFactory(args, 0, 1)
+        {
+        }
+
+        ClientProblemFactory::ClientProblemFactory(po::variables_map const& args,
+                                                   size_t                    sliceIdx,
+                                                   size_t                    sliceCount)
             : m_problemSizes(args["problem-size"].as<std::vector<std::vector<size_t>>>())
+            , m_sliceIdx(sliceIdx)
+            , m_sliceCount(sliceCount)
             , m_stridedBatched(args["strided-batched"].as<bool>())
             , m_batchMode(args["batch-mode"].as<int>())
             , m_groupedGemm(args["grouped-gemm"].as<bool>())
@@ -211,6 +225,27 @@ namespace TensileLite
                 std::runtime_error("Currently only accepts identifier as input.");
             }
 
+            // Slice factory of --split-devices N. --split-dim M: M becomes this device's share
+            // (A split, B replicated). --split-dim N: N becomes its share (B split, A replicated).
+            // The shares are cut in createProblems, once D's type and strides are known: they are
+            // rounded so every device's D slice starts on 256 bytes when that is nearly free.
+            if(m_sliceCount > 1)
+            {
+                m_splitN   = args["split-dim"].as<std::string>() == "N";
+                if(args.count("split-align")
+                   && !SliceAlignment::parseMode(args["split-align"].as<std::string>(),
+                                                 m_splitAlign))
+                    throw std::runtime_error("--split-align must be auto, off or force");
+                auto mFree = std::find_if(m_freeIndices.begin(),
+                                          m_freeIndices.end(),
+                                          [&](auto const& f) { return f.isA != m_splitN; });
+                if(mFree == m_freeIndices.end())
+                    throw std::runtime_error(concatenate("--split-devices: problem has no free index in ",
+                                                         m_splitN ? "B" : "A"));
+                m_splitFree        = *mFree;
+                m_fullProblemSizes = m_problemSizes;
+            }
+
             // Default datatype
             rocisa::DataType type = rocisa::DataType::None;
             if(args.count("type"))
@@ -226,6 +261,7 @@ namespace TensileLite
             m_tensorStrides.resize(tensors.size());
             m_constantTypes.resize(constants.size());
             m_constantValues.resize(constants.size());
+            m_constantRandom.assign(constants.size(), false);
             // Get types and values from the information from ContractionProblem
             // May contain useless information for ClientProblemFactory
             // Get tensor types
@@ -274,8 +310,9 @@ namespace TensileLite
                 std::string valueName = "init-" + constants[i].name;
                 if(args.count(valueName))
                 {
-                    m_constantValues[i]
-                        = DataInitialization::getValue<double>(args[valueName].as<InitMode>());
+                    auto mode           = args[valueName].as<InitMode>();
+                    m_constantValues[i] = DataInitialization::getValue<double>(mode);
+                    m_constantRandom[i] = IsRandomLike(mode);
                 }
                 else
                 {
@@ -294,6 +331,8 @@ namespace TensileLite
 
             if(args.count("output-amaxD"))
                 m_outputAmaxD = args["output-amaxD"].as<bool>();
+            if(args.count("output-peerD"))
+                m_outputPeerD = args["output-peerD"].as<bool>();
 
             if(args.count("bias-type-args"))
                 m_biasTypeArgs = args["bias-type-args"].as<std::vector<rocisa::DataType>>();
@@ -380,6 +419,126 @@ namespace TensileLite
                     m_problems.push_back(static_pointer_cast<ContractionProblem>(problem));
                 }
             }
+
+            // --split-devices N: also build, per device, the problems for its slice of M.
+            int splitM = args.count("split-devices") ? args["split-devices"].as<int>() : 1;
+            if(m_sliceCount == 1 && splitM > 1)
+            {
+                if(m_groupedGemm)
+                    throw std::runtime_error("--split-devices does not support --grouped-gemm");
+                for(int d = 0; d < splitM; d++)
+                    m_slices.push_back(std::make_unique<ClientProblemFactory>(args, d, splitM));
+                for(size_t i = 0; i < m_problems.size(); i++)
+                    m_problemIndex.emplace(m_problems[i].get(), i);
+            }
+        }
+
+        // Rows (or columns) of the split dimension each of the first sliceCount-1 devices takes,
+        // cut from the full-size problem. Plain is total / sliceCount, rounded up as --split-align
+        // says so that every cut matrix's slice starts on 256 bytes; see
+        // Tensile/SliceAlignment.hpp. The cut matrices are the ones PartitionedGemm gives the rule
+        // (the split operand, C and D), so the client runs the slices the library runs, although
+        // its A, B and C are per-device buffers whose slices start at the buffer.
+        size_t ClientProblemFactory::splitShare(ContractionProblemGemm const& full) const
+        {
+            // 256 bytes = 2048 bits; elementSize is a float and fractional for fp4 and fp6.
+            auto const bits = [](TensorDescriptor const& t) {
+                return static_cast<int64_t>(
+                    std::llround(DataTypeInfo::Get(t.dataType()).elementSize * 8.0f));
+            };
+            auto const step = [](TensorDescriptor const& t, size_t dim) {
+                return static_cast<int64_t>(t.strides().at(dim));
+            };
+            auto const&                         op = m_splitN ? full.b() : full.a();
+            std::vector<SliceAlignment::Matrix> cut{
+                {m_splitN ? "B" : "A", step(op, m_splitFree.i), bits(op)},
+                {"C", step(full.c(), m_splitFree.c), bits(full.c())},
+                {"D", step(full.d(), m_splitFree.d), bits(full.d())}};
+            size_t total = full.d().sizes().at(m_splitFree.d);
+            auto   r     = SliceAlignment::split(
+                static_cast<int64_t>(total), m_sliceCount, cut, m_splitAlign);
+            if(r.share == 0)
+                throw std::runtime_error(concatenate("--split-devices=",
+                                                     m_sliceCount,
+                                                     " is larger than ",
+                                                     m_splitN ? "N=" : "M=",
+                                                     total));
+            if(m_sliceIdx == 0)
+                for(auto const& line : SliceAlignment::hints(
+                        r, m_splitN ? SliceAlignment::Dim::N : SliceAlignment::Dim::M, m_sliceCount))
+                    std::cout << "--split-devices: " << line << std::endl;
+            return static_cast<size_t>(r.share);
+        }
+
+        size_t ClientProblemFactory::numSlices() const
+        {
+            return m_slices.empty() ? 1 : m_slices.size();
+        }
+
+        ContractionProblem* ClientProblemFactory::sliceProblem(ContractionProblem const* full,
+                                                               size_t device) const
+        {
+            if(m_slices.empty())
+                return const_cast<ContractionProblem*>(full);
+            auto it = m_problemIndex.find(full);
+            if(it != m_problemIndex.end())
+                return m_slices.at(device)->m_problems.at(it->second).get();
+            throw std::runtime_error("[ClientProblemFactory] problem is not from this factory");
+        }
+
+        size_t ClientProblemFactory::sliceOffsetInD(ContractionProblem const* full,
+                                                    size_t                    device) const
+        {
+            auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(full);
+            if(m_slices.empty() || gemm == nullptr)
+                return 0;
+            auto const& free = m_slices[0]->m_splitFree;
+            // The share the slice factories cut this problem with.
+            size_t share = m_slices[0]->m_splitShares.at(m_problemIndex.at(full));
+            return device * share * gemm->d().strides().at(free.d);
+        }
+
+        std::vector<size_t> ClientProblemFactory::sliceBatchOffsets(ContractionProblem const* full,
+                                                                    size_t                    device,
+                                                                    size_t tensor) const
+        {
+            auto const* gemm
+                = dynamic_cast<ContractionProblemGemm const*>(sliceProblem(full, device));
+            if(gemm == nullptr)
+                throw std::runtime_error("[ClientProblemFactory] batch offsets need a GEMM problem");
+            if(tensor > ContractionProblemGemm::TENSOR::D)
+                throw std::runtime_error(
+                    "[ClientProblemFactory] batch offsets are for A, B, C and D only");
+
+            // The same layout as the batch pointer arrays DataInitialization builds.
+            auto const&         desc = gemm->tensors()[tensor];
+            std::vector<size_t> sizes, strides;
+            for(auto const& batch : gemm->batchIndices())
+            {
+                const size_t dim = tensor == ContractionProblemGemm::TENSOR::A   ? batch.a
+                                   : tensor == ContractionProblemGemm::TENSOR::B ? batch.b
+                                   : tensor == ContractionProblemGemm::TENSOR::C ? batch.c
+                                                                                 : batch.d;
+                sizes.push_back(desc.sizes().at(dim));
+                strides.push_back(desc.strides().at(dim));
+            }
+            const size_t elementBytes
+                = static_cast<size_t>(std::ceil(std::max(1.0f, desc.elementBytes())));
+
+            std::vector<size_t> coord(sizes.size(), 0);
+            std::vector<size_t> offsets(CoordCount(sizes.begin(), sizes.end()), 0);
+            for(size_t idx = 0; idx < offsets.size(); idx++)
+            {
+                CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+                for(size_t i = 0; i < sizes.size(); i++)
+                    offsets[idx] += coord[i] * strides[i] * elementBytes;
+            }
+            return offsets;
+        }
+
+        ClientProblemFactory const& ClientProblemFactory::sliceFactory(size_t device) const
+        {
+            return m_slices.empty() ? *this : *m_slices.at(device);
         }
 
         ClientProblemFactory::~ClientProblemFactory() = default;
@@ -473,35 +632,100 @@ namespace TensileLite
                                                 : (vectorAlphaMode == 3 || m_useBias == 3)
                                                     ? m_factorDimArgs[l]
                                                     : 0;
-                                rv.push_back(ContractionProblemGemm::FromIndexSizes(
+                                auto make = [&](std::vector<size_t> const& sizes,
+                                                std::vector<size_t> const& aS,
+                                                std::vector<size_t> const& bS,
+                                                std::vector<size_t> const& cS,
+                                                std::vector<size_t> const& dS) {
+                                    return ContractionProblemGemm::FromIndexSizes(
                                     m_freeIndices,
                                     m_batchIndices,
                                     m_boundIndices,
-                                    m_problemSizes[i],
+                                    sizes,
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::A],
-                                    aStrides,
+                                    aS,
                                     m_aOps,
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::B],
-                                    bStrides,
+                                    bS,
                                     m_bOps,
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::C],
-                                    cStrides,
+                                    cS,
                                     m_cOps,
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::D],
-                                    dStrides,
+                                    dS,
                                     m_dOps,
-                                    m_constantValues[ContractionProblemGemm::CONST::BETA]));
+                                    m_constantValues[ContractionProblemGemm::CONST::BETA]);
+                                };
+                                // Per-problem copies: the strides above may be shared by all problems.
+                                auto aS = aStrides, bS = bStrides, cS = cStrides, dS = dStrides;
+                                if(m_sliceCount > 1)
+                                {
+                                    // The problem at the full size. Its descriptors give the
+                                    // strides along the split dimension and the element sizes
+                                    // that the share is rounded with.
+                                    auto probe       = make(m_fullProblemSizes[i], aS, bS, cS, dS);
+                                    auto fullStrides = [&](ContractionProblemGemm::TENSOR t) {
+                                        return probe.tensors()[t].strides();
+                                    };
+                                    size_t total = m_fullProblemSizes[i].at(m_splitFree.d);
+                                    size_t share = splitShare(probe);
+                                    auto sliceSizes = m_fullProblemSizes[i];
+                                    sliceSizes.at(m_splitFree.d)
+                                        = m_sliceIdx + 1 < m_sliceCount
+                                              ? share
+                                              : total - share * (m_sliceCount - 1);
+
+                                    auto retighten = [&](ContractionProblemGemm::TENSOR t,
+                                                         std::vector<size_t>&           strides) {
+                                        // Strides that were tight for the full size are tight for
+                                        // this slice too. Padded strides stay as given.
+                                        if(strides.empty())
+                                            return;
+                                        auto const& desc  = probe.tensors()[t];
+                                        auto        sizes = desc.sizes();
+                                        TensorDescriptor tight(
+                                            "", desc.dataType(), sizes.begin(), sizes.end());
+                                        if(tight.strides() == strides)
+                                            strides.clear();
+                                    };
+                                    // The split operand (A for M, B for N) and C shrink with the
+                                    // slice; the other operand is replicated whole.
+                                    if(!m_splitN)
+                                        retighten(ContractionProblemGemm::TENSOR::A, aS);
+                                    else
+                                        retighten(ContractionProblemGemm::TENSOR::B, bS);
+                                    retighten(ContractionProblemGemm::TENSOR::C, cS);
+                                    // D keeps the full strides: the slice sits inside a full-size D
+                                    // at its final offset, where an all-gather can add the peers'.
+                                    // A partial list (a padded ld with the other entries left at
+                                    // the default) is resolved against the full sizes, so the batch
+                                    // stride is that of the full D and not that of the slice.
+                                    dS = fullStrides(ContractionProblemGemm::TENSOR::D);
+                                    if(m_cEqualsD)
+                                        cS = dS;
+                                    rv.push_back(make(sliceSizes, aS, bS, cS, dS));
+                                    m_splitShares.push_back(share);
+                                }
+                                else
+                                {
+                                    rv.push_back(make(m_problemSizes[i], aS, bS, cS, dS));
+                                }
 
                                 rv.back().setComputeInputTypeA(m_computeInputTypeA);
                                 rv.back().setComputeInputTypeB(m_computeInputTypeB);
                                 // A device scalar replaces the inline alpha, but its value is not
-                                // available while constructing the problem. Do not select an
-                                // AlphaValue-specialized solution from the ignored inline value.
+                                // available while constructing the problem. A random alpha or beta
+                                // is drawn again for the launch (DataInitialization), so the value
+                                // drawn here can differ from it. Do not select an AlphaValue- or
+                                // BetaValue-specialized solution from either.
+                                constexpr auto alphaIdx = ContractionProblemGemm::CONST::ALPHA;
+                                constexpr auto betaIdx  = ContractionProblemGemm::CONST::BETA;
                                 rv.back().setAlphaRestriction(
-                                    m_deviceScalarAlpha
+                                    m_deviceScalarAlpha || m_constantRandom[alphaIdx]
                                         ? ScalarValue::Any
-                                        : toScalarValueEnum(m_constantValues[
-                                              ContractionProblemGemm::CONST::ALPHA]));
+                                        : toScalarValueEnum(m_constantValues[alphaIdx]));
+                                if(m_constantRandom[betaIdx])
+                                    rv.back().setBetaRestriction(ScalarValue::Any);
                                 rv.back().setCEqualsD(m_cEqualsD);
                                 rv.back().setAlphaType(
                                     m_constantTypes[ContractionProblemGemm::CONST::ALPHA]);
@@ -517,6 +741,7 @@ namespace TensileLite
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);
                                 rv.back().setOutputAmaxD(m_outputAmaxD);
+                                rv.back().setOutputPeerD(m_outputPeerD);
                                 rv.back().setKernelLanguage(m_kernelLanguage);
                                 rv.back().setPerformanceMetric(m_performanceMetric);
                                 rv.back().setDeterministicMode(m_deterministicMode);

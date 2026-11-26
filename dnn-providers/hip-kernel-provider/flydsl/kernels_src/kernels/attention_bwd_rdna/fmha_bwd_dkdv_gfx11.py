@@ -10,13 +10,15 @@
 # exchange) and the AOTriton gfx1201 dK/dV kernel `fmha_bwd_dkdv_gfx1201_kernel.py` (MIT, reference for the transposed loop only;
 # its notice is kept in `fmha_tuning_bwd_dkdv_gfx11.py`, where `lds_bytes` and the legality walk-down are re-expressed).
 
-"""dK / dV backward attention for gfx11 (RDNA3 / 3.5, `gfx11-generic`) and gfx12 (`WMMA_V8`): the transposed loop of the forward.
+"""dK / dV backward attention for gfx11 (RDNA3 / 3.5, `gfx11-generic`), gfx12 (`v8` ABI) and gfx90a / gfx942 (`mfma16` ABI): the transposed loop of the forward.
 
 The gfx950 runtime ABI (`fmha_bwd_dkdv_gfx950.py`: argument names, order and annotations of the launcher); the launcher keeps its gfx950
 name. K and V are resident (one 16-row KV tile per team of waves), Q and dO stream through LDS, dK^T and dV^T accumulate in registers.
 
-Layout (`rdna_layout_gfx11.py`, orientation `Q_ROWS`). WMMA 16x16x16, wave32, `WMMA_V8 = False` on gfx11: A and B operands carry 16 K
-values per lane (lanes 16-31 duplicate lanes 0-15), accumulator element r of a lane is row `2r + klane`, column `lane % 16`.
+Layout (`rdna_layout_gfx11.py`, orientation `Q_ROWS`, ABI token `lay.abi_for(knobs.arch)`). WMMA 16x16x16, wave32, ABI `v16` on gfx11: A and B
+operands carry 16 K values per lane (lanes 16-31 duplicate lanes 0-15), accumulator element r of a lane is row `2r + klane`, column `lane % 16`.
+On gfx90a / gfx942 (ABI `mfma16`, wave64, `v_mfma_f32_16x16x16{f16,bf16_1k}`) an operand is 4 K values (`4 klane + t`), an accumulator 4 f32
+(row `4 klane + r`), and the accumulator registers of P / dS already are the next B operand (no exchange); the epilogue stores 4 contiguous elements.
 
     S    [q][kv]  = Q . K^T      A = Q rows (K = d, row-major LDS)         B = K pack (resident, lane l16 = kv)
     dP   [q][kv]  = dO . V^T     A = dO rows                               B = V pack
@@ -24,7 +26,7 @@ values per lane (lanes 16-31 duplicate lanes 0-15), accumulator element r of a l
     dK^T [d][kv] += Q^T . dS     A = Q^T                                   B = dS through `acc_to_operand`
 
 S, P, dP and dS have rows = q, so LSE and Delta are per accumulator element (row `2r + klane`, staged once per Q block in LDS); the
-accumulators have rows = head dim, so the epilogue (`acc_to_rows8`, one xor-16 trade) stores 8 contiguous head-dim elements per lane.
+accumulators have rows = head dim, so the epilogue (`acc_to_rows8`, one xor-16 trade) stores `acc_elems` contiguous head-dim elements per lane (8 on WMMA, 4 on MFMA16).
 The softmax scale is applied to dK at the epilogue.
 
 Residency (role-owned). A team of waves owns 16 KV rows: 1 wave unsplit (K and V packs, dK and dV accumulators), 2 under
@@ -57,7 +59,7 @@ each wave masks at its own role's bound (K role `hdim_qk`, V role `hdim_vo`).
 Dropout (compile time, `meta.dropout`): the mask is the gfx950 map (`philox.py`, Philox 4x32-10 with a 64-bit counter; the width table falls
 back to 32 for gfx11). Element (q, kv) of sequence z and query head h draws counter `offset + (z Hq + h) max_seqlen_q ceil(max_seqlen_k / 4) +
 q ceil(max_seqlen_k / 4) + kv / 4`, slot `kv % 4`, `offset = *philox_offset1 + philox_offset2`, seed `*philox_seed_ptr`; `idropout_p` is the i32
-keep threshold (`philox.dropout_threshold`), `dropout_scale` = 1 / (1 - p). The lane holds one kv column and eight q rows, so each element is
+keep threshold (`philox.dropout_threshold`), `dropout_scale` = 1 / (1 - p). The lane holds one kv column and `acc_elems` q rows (8 on WMMA, 4 on MFMA16), so each element is
 its own Philox call (4x redundant; the slot is a loop-invariant select). dV takes `keep * scale * P`, dS = P (keep * scale * dP - Delta) with the
 undropped P (the softmax denominator is undropped and baked into LSE'). A GQA group draws a distinct plane per query head.
 
@@ -77,7 +79,7 @@ Class `bias` (compile time; mutually exclusive with `causal`, as on gfx950) adds
 score: P = exp2((sm_scale S + bias - lse) log2e) with the natural lse. The bias is `(batch, q head, q row, kv col)`
 at `stride_b_batch` / `stride_b_head` / `stride_b_seq_q`, kv column contiguous; a
 broadcast dim has stride 0 (`rdna_layout_gfx11.bias_offset`). The lane of S element r reads the bias at (q row `acc_row(r)` of the
-sub-tile, its kv column): 8 scalar loads, each a plain global load at a q row and kv column clamped into the sequence (a row or column
+sub-tile, its kv column): `acc_elems` scalar loads, each a plain global load at a q row and kv column clamped into the sequence (a row or column
 past it is dead and its P is selected to 0, so the clamped value never reaches the answer). There is no byte bound derived from
 `seqlen_q * stride_b_seq_q`: a row-broadcast bias (`stride_b_seq_q == 0`, shape `(B, H, 1, Sk)`) is read in full, every q row at the
 same `seqlen_k` entries, where a bound pinned to 0 would read zeros. The exponent chain drops `nnan` (as
@@ -108,6 +110,7 @@ from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_rdna4.philox import Philox, keep_mask
 from kernels.attention_bwd_rdna import fmha_common_gfx11 as cmn
 from kernels.attention_bwd_rdna import rdna_layout_gfx11 as lay
+from kernels.attention_bwd_rdna import mfma16_gfx9 as mfma16
 from kernels.attention_bwd_rdna.fmha_tuning_bwd_dkdv_gfx11 import (
     LDS_PAD,
     ROWS_PER_WAVE,
@@ -126,7 +129,6 @@ from flydsl.compiler.kernel_function import CompilationContext
 from flydsl.expr import const_expr, gpu, range_constexpr, rocdl
 from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
-from flydsl.runtime.device import get_rocm_arch
 
 KERNEL_NAME = "fmha_bwd_dkdv_gfx11_kernel"
 _LOG2E = host_math.log2(host_math.e)
@@ -146,7 +148,7 @@ _COMPILE_HINTS = {
 _DUMP_MAGIC = 0x52444E41
 _DUMP_NOT_STORED = -1  # 0xFFFFFFFF as a signed word
 _DUMP_HEADER_F32 = 64  # 256 bytes
-_DUMP_TILE_F32 = 256  # 32 lanes x 8 elements
+_DUMP_TILE_F32 = 256  # lanes x accumulator elements: 32 x 8 (WMMA) = 64 x 4 (MFMA16)
 
 
 def _pointer_load(result_type, ptr):
@@ -225,19 +227,22 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
     if KV_ROLE and (DUMP or BIAS):
         raise ValueError("u2 builds have no dump object and no bias")
     DROPOUT = bool(meta.dropout)
-    PHILOX = Philox.for_arch(get_rocm_arch())
+    PHILOX = Philox.for_arch(knobs.arch)
     if DROPOUT and PHILOX.width != 32:
         raise ValueError(
             "the gfx11 dropout map is Philox 4x32 (the gfx950 map); the width table must fall back to 32 for this arch"
         )
     PHILOX_RN = PHILOX.randoms_per_offset
 
-    WARP_SIZE = 32
     WMMA_M = WMMA_N = WMMA_K = 16
-    # `WMMA_V8` of the vendored forward: gfx12 passes 8 K values per lane, gfx11 all 16.
-    WMMA_V8 = lay.wmma_v8_for_arch(get_rocm_arch())
-    OPW = lay.op_width(WMMA_V8)
+    ABI = lay.abi_for(
+        knobs.arch
+    )  # layout ABI token: "v16" (gfx11 WMMA), "v8" (gfx12 WMMA), "mfma16" (gfx90a / gfx942 MFMA)
+    OPW = lay.op_width(ABI)
+    WARP_SIZE = lay.warp_size(ABI)
+    ACC = lay.acc_elems(ABI)  # f32 accumulator elements per lane of a 16x16 tile
 
+    HEAD_FASTEST = knobs.grid_order == "head_fastest"
     TEAM_WAVES = knobs.team_waves
     NUM_TEAMS = NUM_WAVES // TEAM_WAVES
     BLOCK_N = ROWS_PER_WAVE * NUM_TEAMS  # BLOCK_KV
@@ -439,28 +444,38 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         tid, wave_id, lane, lane16, klane = fmha.wave_lanes(WARP_SIZE)
         klane_is_zero = fx.Int32(klane) == fx.Int32(0)
-        c_zero_v8f32 = Vec.filled(8, 0.0, fx.Float32)
+        c_zero_v8f32 = Vec.filled(ACC, 0.0, fx.Float32)
 
         def _exchange(v):
             return fx.Float32(v).shuffle_xor(fx.Int32(16), fx.Int32(WARP_SIZE))
 
-        wmma_atom = fx.make_mma_atom(
-            fx.rocdl.WMMA(WMMA_M, WMMA_N, WMMA_K, elem_dtype, fx.Float32)
-        )
+        if const_expr(ABI == lay.ABI_MFMA16):
 
-        def wmma_acc(a_op, b_op, c_v8):
-            a_frag = fx.make_rmem_tensor(OPW, elem_dtype)
-            b_frag = fx.make_rmem_tensor(OPW, elem_dtype)
-            c_frag = fx.make_rmem_tensor(8, fx.Float32)
-            a_frag.store(Vec(a_op))
-            b_frag.store(Vec(b_op))
-            c_frag.store(Vec(c_v8))
-            fx.gemm(wmma_atom, c_frag, a_frag, b_frag, c_frag)
-            return Vec(c_frag.load())
+            def wmma_acc(a_op, b_op, c_v8):
+                return Vec(mfma16.mfma_acc(dtype_str, a_op, b_op, c_v8))
 
-        # One KV tile per workgroup column: grid (kv_tile, head_k, batch).
-        kv_tile_idx = fx.Index(gpu.block_idx.x)
-        head_k = fx.Index(gpu.block_idx.y)
+        else:
+            wmma_atom = fx.make_mma_atom(
+                fx.rocdl.WMMA(WMMA_M, WMMA_N, WMMA_K, elem_dtype, fx.Float32)
+            )
+
+            def wmma_acc(a_op, b_op, c_v8):
+                a_frag = fx.make_rmem_tensor(OPW, elem_dtype)
+                b_frag = fx.make_rmem_tensor(OPW, elem_dtype)
+                c_frag = fx.make_rmem_tensor(ACC, fx.Float32)
+                a_frag.store(Vec(a_op))
+                b_frag.store(Vec(b_op))
+                c_frag.store(Vec(c_v8))
+                fx.gemm(wmma_atom, c_frag, a_frag, b_frag, c_frag)
+                return Vec(c_frag.load())
+
+        # One KV tile per workgroup column: grid (kv_tile, head_k, batch) for `kv_fastest`, (head_k, kv_tile, batch) for `head_fastest`.
+        if const_expr(HEAD_FASTEST):
+            head_k = fx.Index(gpu.block_idx.x)
+            kv_tile_idx = fx.Index(gpu.block_idx.y)
+        else:
+            kv_tile_idx = fx.Index(gpu.block_idx.x)
+            head_k = fx.Index(gpu.block_idx.y)
         start_k_i32 = fx.Int32(kv_tile_idx) * fx.Int32(BLOCK_N)
         start_k = fx.Index(start_k_i32)
 
@@ -547,9 +562,10 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             fx.Index(hdim_vo), active=PADDED_HEAD, elem_dtype=elem_dtype
         )
 
-        def load_global_f16xN(base_ptr, base64, off32):
+        def load_global_f16xN(base_ptr, base64, off32, n=VEC_WIDTH):
             return _pointer_load(
-                vxf16_type, fmha.split_ptr(base_ptr, base64, off32, elem_type)
+                Vec.make_type(n, elem_dtype),
+                fmha.split_ptr(base_ptr, base64, off32, elem_type),
             )
 
         def store_global_v8f16(base_ptr, base64, off32, val):
@@ -559,19 +575,21 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             _pointer_store(val, fmha.split_ptr(base_ptr, base64, off32, elem_type))
 
         def store_chunk(cols, write, write_elem, row, col, val):
-            """One 8-column dK / dV chunk. Padded: a chunk wholly inside the extent is one 16-byte store and a chunk that straddles it
+            """One `acc_elems`-column dK / dV chunk (8 on WMMA, 4 on MFMA16). Padded: a chunk wholly inside the extent is one vector store (16 B, 8 B on MFMA16) and a chunk that straddles it
             stores only its live elements, so the region past the extent (NaN-poisoned by the caller) is never written.
             """
             if const_expr(not PADDED_HEAD):
                 write(row, col, val)
                 return
-            with cmn._if_then(_scf.IfOp(fx.as_ir_value(cols.valid(col + fx.Index(7))))):
+            with cmn._if_then(
+                _scf.IfOp(fx.as_ir_value(cols.valid(col + fx.Index(ACC - 1))))
+            ):
                 write(row, col, val)
             straddle = cols.valid(col) & (
-                fx.Int64(col + fx.Index(7)) >= fx.Int64(cols._bound())
+                fx.Int64(col + fx.Index(ACC - 1)) >= fx.Int64(cols._bound())
             )
             with cmn._if_then(_scf.IfOp(fx.as_ir_value(straddle))):
-                for j in range_constexpr(8):
+                for j in range_constexpr(ACC):
                     with cmn._if_then(
                         _scf.IfOp(fx.as_ir_value(cols.valid(col + fx.Index(j))))
                     ):
@@ -644,13 +662,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         def _read_pack(ap, fetch, k_origin):
             """The resident B operand of one K step: `OPW` contiguous head-dim values of this lane's KV row."""
-            c0 = lay.op_origin(k_origin, klane, WMMA_V8)
-            return _cat(
-                [
-                    ap.read_v8(fetch, _kv_safe, c0 + fx.Index(8 * i), _kv_in)
-                    for i in range_constexpr(OPW // 8)
-                ]
-            )
+            c0 = lay.op_origin(k_origin, klane, ABI)
+            return _cat(cmn.read_operand_parts(ap, fetch, _kv_safe, c0, _kv_in, ABI))
 
         if const_expr(KV_ROLE):
             # The in-loop reload gates its kv row with an AND against this dword mask (one VGPR) instead of a per-element select, whose predicates
@@ -659,12 +672,15 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
             def _read_pack_reload(ap, fetch, k_origin):
                 """`_read_pack` for the in-loop reload: the row gate is a dword AND."""
-                c0 = lay.op_origin(k_origin, klane, WMMA_V8)
-                _keep = Vec.from_elements([_kv_keep] * 4, fx.Int32)
+                c0 = lay.op_origin(k_origin, klane, ABI)
+                _w = lay.read_width(ABI)
+                _keep = Vec.from_elements([_kv_keep] * (_w // 2), fx.Int32)
                 parts = []
-                for i in range_constexpr(OPW // 8):
-                    _c = c0 + fx.Index(8 * i)
-                    _raw = ap.cols.discard(fetch(_kv_safe, ap.cols.safe(_c)), _c, 8)
+                for i in range_constexpr(lay.read_count(ABI)):
+                    _c = c0 + fx.Index(_w * i)
+                    _raw = ap.cols.discard(
+                        fetch(_kv_safe, ap.cols.safe(_c), _w), _c, _w
+                    )
                     parts.append(
                         (Vec(_raw).bitcast(fx.Int32) & _keep)
                         .bitcast(elem_dtype)
@@ -696,8 +712,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 )
             my_ap = fmha.Aperture(my_cols, rows=kv_rows)
 
-            def fetch_my(row, col):
-                return load_global_f16xN(my_ptr, my_tile_base, my_toff(row, col))
+            def fetch_my(row, col, n=VEC_WIDTH):
+                return load_global_f16xN(my_ptr, my_tile_base, my_toff(row, col), n)
 
             if const_expr(not KV_ROLE):
                 packs = []
@@ -735,11 +751,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             if const_expr(not KV_ROLE):
                 v_tile_base = v_tbase(_k_start_addr)
 
-            def fetch_k(row, col):
-                return load_global_f16xN(k_ptr, k_tile_base, k_toff(row, col))
+            def fetch_k(row, col, n=VEC_WIDTH):
+                return load_global_f16xN(k_ptr, k_tile_base, k_toff(row, col), n)
 
-            def fetch_v(row, col):
-                return load_global_f16xN(v_ptr, v_tile_base, v_toff(row, col))
+            def fetch_v(row, col, n=VEC_WIDTH):
+                return load_global_f16xN(v_ptr, v_tile_base, v_toff(row, col), n)
 
             if const_expr(KV_ROLE != "dv"):
                 k_packs = [
@@ -787,26 +803,21 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             strided out of the row-major tile."""
             if const_expr(KEEP_TR_TILES):
                 return _lds_vec(
-                    lay.lds_rowmajor_operand(
-                        tr_base, tr_stride, d_col, q0, klane, WMMA_V8
-                    ),
+                    lay.lds_rowmajor_operand(tr_base, tr_stride, d_col, q0, klane, ABI),
                     OPW,
                 )
-            offs = lay.lds_transposed_operand(
-                rm_base, rm_stride, d_col, q0, klane, WMMA_V8
-            )
+            offs = lay.lds_transposed_operand(rm_base, rm_stride, d_col, q0, klane, ABI)
             return Vec.from_elements(
                 [fx.ptr_load(lds_qdo + fx.Int32(o)) for o in offs], elem_dtype
             )
 
         def _pack(vals):
-            """f32 values to one 16-bit WMMA operand; bf16 by truncation (`fmha.bf16_trunc_pack_v8`) or, with the `rne` knob, round to nearest even."""
+            """f32 values to one 16-bit WMMA / MFMA operand; bf16 by truncation (`fmha.bf16_trunc_pack_v8`) or, with the `rne` knob, round to nearest even."""
             if const_expr(dtype_str == "bf16"):
-                _pk = cmn.bf16_rne_pack_v8 if RNE else fmha.bf16_trunc_pack_v8
                 return _cat(
                     [
-                        Vec(_pk(vals[i * 8 : (i + 1) * 8], elem_dtype))
-                        for i in range_constexpr(len(vals) // 8)
+                        Vec(_part)
+                        for _part in cmn.bf16_pack_parts(vals, elem_dtype, RNE, ABI)
                     ]
                 )
             return Vec.from_elements(
@@ -887,7 +898,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         def _dump_store8(off, vals):
             """Eight f32 (element r of this lane) at f32 index `off`."""
-            for _r in range_constexpr(8):
+            for _r in range_constexpr(ACC):
                 _pointer_store(
                     fx.as_ir_value(fx.Float32(vals[_r])),
                     buffer_ops.get_element_ptr(
@@ -1050,7 +1061,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     )
                 _dump_s_tile = fx.Int32(group_of_wave) * fx.Int32(
                     N_STR * _DUMP_TILE_F32
-                ) + fx.Int32(lane) * fx.Int32(8)
+                ) + fx.Int32(lane) * fx.Int32(ACC)
                 _dump_s_writer = _dump_on & (fx.Int32(_slot) == fx.Int32(0))
 
             if const_expr(KV_ROLE):
@@ -1081,8 +1092,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         packs.append(
                             _read_pack_reload(
                                 my_ap,
-                                lambda row, col: load_global_f16xN(
-                                    my_ptr, _it_tile_base, _it_toff(row, col)
+                                lambda row, col, n=VEC_WIDTH: load_global_f16xN(
+                                    my_ptr, _it_tile_base, _it_toff(row, col), n
                                 ),
                                 _kc,
                             )
@@ -1095,8 +1106,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     v_packs = [
                         _read_pack_reload(
                             v_ap,
-                            lambda row, col: load_global_f16xN(
-                                v_ptr, _it_tile_base, _it_toff(row, col)
+                            lambda row, col, n=VEC_WIDTH: load_global_f16xN(
+                                v_ptr, _it_tile_base, _it_toff(row, col), n
                             ),
                             fx.Index(ks * WMMA_K),
                         )
@@ -1110,8 +1121,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     k_packs = [
                         _read_pack_reload(
                             k_ap,
-                            lambda row, col: load_global_f16xN(
-                                k_ptr, _it_tile_base, _it_toff(row, col)
+                            lambda row, col, n=VEC_WIDTH: load_global_f16xN(
+                                k_ptr, _it_tile_base, _it_toff(row, col), n
                             ),
                             fx.Index(ks * WMMA_K),
                         )
@@ -1139,14 +1150,14 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 fx.Index(_qs) + lane16,
                                 _kc,
                                 klane,
-                                WMMA_V8,
+                                ABI,
                             )
                             + _rm_base_off,
                             OPW,
                         )
                         _mine = wmma_acc(_a_op, packs[ks], _mine)
                     _buf = (qsub % LY.pds_bufs) * PDS_BUF_F32
-                    for _si in range_constexpr(8):
+                    for _si in range_constexpr(ACC):
                         fmha.lds_f32_store(
                             _lds_byte_base,
                             PDS_BYTE0,
@@ -1162,11 +1173,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 PDS_BYTE0,
                                 _pds_theirs + fx.Int32(_buf + _si * WARP_SIZE),
                             )
-                            for _si in range_constexpr(8)
+                            for _si in range_constexpr(ACC)
                         ]
                         _s_vals = []
                         _dp_vals = []
-                        for _si in range_constexpr(8):
+                        for _si in range_constexpr(ACC):
                             _mv = fx.Float32(Vec(_mine)[_si])
                             _ov = fx.Float32(_other[_si])
                             _s_vals.append(_role0.select(_mv, _ov))
@@ -1175,7 +1186,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         # Reduce: slot = 2 * shard + role, so the even slots sum to S and the odd ones to dP.
                         _s_vals = []
                         _dp_vals = []
-                        for _si in range_constexpr(8):
+                        for _si in range_constexpr(ACC):
                             _s_sum = None
                             _dp_sum = None
                             for _c_sh in range_constexpr(CONTRACTION_SHARDS):
@@ -1219,13 +1230,13 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 fx.Index(_qs) + lane16,
                                 fx.Index(ks * WMMA_K),
                                 klane,
-                                WMMA_V8,
+                                ABI,
                             ),
                             OPW,
                         )
                         s_acc = wmma_acc(_qa, k_packs[ks], s_acc)
                     _s_vals = [
-                        fx.Float32(Vec(s_acc)[_si]) for _si in range_constexpr(8)
+                        fx.Float32(Vec(s_acc)[_si]) for _si in range_constexpr(ACC)
                     ]
                     if const_expr(not NO_DK):
                         dp_acc = fx.as_ir_value(c_zero_v8f32)
@@ -1237,13 +1248,13 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                     fx.Index(_qs) + lane16,
                                     fx.Index(ks * WMMA_K),
                                     klane,
-                                    WMMA_V8,
+                                    ABI,
                                 ),
                                 OPW,
                             )
                             dp_acc = wmma_acc(_da, v_packs[ks], dp_acc)
                         _dp_vals = [
-                            fx.Float32(Vec(dp_acc)[_si]) for _si in range_constexpr(8)
+                            fx.Float32(Vec(dp_acc)[_si]) for _si in range_constexpr(ACC)
                         ]
 
                 # ==== P and dS: element r of a lane is q row `acc_row(r)` of this sub-tile at kv column `lane16` ====
@@ -1255,15 +1266,15 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             _bias_base,
                             _q_row_start_i32
                             + fx.Int32(_qs)
-                            + fx.Int32(lay.acc_row(_si, klane, WMMA_V8)),
+                            + fx.Int32(lay.acc_row(_si, klane, ABI)),
                             (
                                 _q_row_start_i32
                                 + fx.Int32(_qs)
-                                + fx.Int32(lay.acc_row(_si, klane, WMMA_V8))
+                                + fx.Int32(lay.acc_row(_si, klane, ABI))
                             )
                             < seqlen_q_i32,
                         )
-                        for _si in range_constexpr(8)
+                        for _si in range_constexpr(ACC)
                     ]
                     if const_expr(BIAS_F32):
                         _bias_nat = [fx.Float32(_b) for _b in _bias_raw]
@@ -1277,8 +1288,8 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 _pdrop_vals = []
                 _dpd_vals = []
                 _s_dump = []
-                for _si in range_constexpr(8):
-                    _lrow = fx.Int32(_qs) + fx.Int32(lay.acc_row(_si, klane, WMMA_V8))
+                for _si in range_constexpr(ACC):
+                    _lrow = fx.Int32(_qs) + fx.Int32(lay.acc_row(_si, klane, ABI))
                     _q_row_i32 = _q_row_start_i32 + _lrow
                     _q_ok = _q_row_i32 < seqlen_q_i32
                     _lse2 = fx.Float32(
@@ -1376,7 +1387,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 _dtile + fx.Int32(DUMP_OFF_S),
                                 [
                                     fastmath.mul(fx.Float32(_s_vals[_i]), sm_scale)
-                                    for _i in range_constexpr(8)
+                                    for _i in range_constexpr(ACC)
                                 ],
                             )
                         _dump_store8(_dtile + fx.Int32(DUMP_OFF_P), _p_vals)
@@ -1391,11 +1402,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         lay.acc_to_operand(
                             [
                                 _role0.select(_ds_vals[_r], _pdrop_vals[_r])
-                                for _r in range_constexpr(8)
+                                for _r in range_constexpr(ACC)
                             ],
                             _exchange,
                             klane_is_zero,
-                            WMMA_V8,
+                            ABI,
                         )
                     )
                     _rm_b = QRM_BASE + _rm_base_off
@@ -1418,14 +1429,12 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     if const_expr(not NO_DV):
                         _p_pack = _pack(
                             lay.acc_to_operand(
-                                _pdrop_vals, _exchange, klane_is_zero, WMMA_V8
+                                _pdrop_vals, _exchange, klane_is_zero, ABI
                             )
                         )
                     if const_expr(not NO_DK):
                         _ds_pack = _pack(
-                            lay.acc_to_operand(
-                                _ds_vals, _exchange, klane_is_zero, WMMA_V8
-                            )
+                            lay.acc_to_operand(_ds_vals, _exchange, klane_is_zero, ABI)
                         )
                     # ==== dV^T[d][kv] += dO^T . P ====
                     if const_expr(not NO_DV):
@@ -1458,7 +1467,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 # Accumulators after this iteration's two accumulating GEMMs: the partial sums over positions 0 ... `_it`.
                 _dump_acc_tile = fx.Int32(group_of_wave) * fx.Int32(
                     N_DK * _DUMP_TILE_F32
-                ) + fx.Int32(lane) * fx.Int32(8)
+                ) + fx.Int32(lane) * fx.Int32(ACC)
                 if const_expr(SPLIT_HEAD_DIM):
                     _acc_off = _role0.select(
                         fx.Int32(DUMP_OFF_DKACC), fx.Int32(DUMP_OFF_DVACC)
@@ -1475,7 +1484,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 + _acc_off
                                 + _dump_acc_tile
                                 + _dd * fx.Int32(_DUMP_TILE_F32),
-                                [Vec(accs[dc])[_i] for _i in range_constexpr(8)],
+                                [Vec(accs[dc])[_i] for _i in range_constexpr(ACC)],
                             )
                     else:
                         for dc in range_constexpr(DV_STEPS):
@@ -1486,7 +1495,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 + fx.Int32(dc * _DUMP_TILE_F32),
                                 [
                                     Vec(accs[D_STEPS + dc])[_i]
-                                    for _i in range_constexpr(8)
+                                    for _i in range_constexpr(ACC)
                                 ],
                             )
                         for dc in range_constexpr(D_STEPS):
@@ -1495,7 +1504,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 + fx.Int32(DUMP_OFF_DKACC)
                                 + _dump_acc_tile
                                 + fx.Int32(dc * _DUMP_TILE_F32),
-                                [Vec(accs[dc])[_i] for _i in range_constexpr(8)],
+                                [Vec(accs[dc])[_i] for _i in range_constexpr(ACC)],
                             )
 
             # Every wave must finish reading this Q/dO window before the next iteration overwrites it.
@@ -1506,7 +1515,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             # A loop with one carried value returns the value itself, not a list (the split's C = hd / 16 shard holds one accumulator).
             loop_results = [loop_results]
         # ---- Epilogue ----
-        # dK^T / dV^T have rows = head dim: after one xor-16 trade a lane holds 8 contiguous head-dim values of its kv row, one v8 store.
+        # dK^T / dV^T have rows = head dim: after one xor-16 trade (WMMA v16) a lane holds 8 contiguous head-dim values of its kv row, one v8 store; v8 holds 8 already, MFMA16 4 (an 8-byte store).
         _row_live = kv_row_abs_i32 < seqlen_k_i32
         if const_expr(SPLIT_HEAD_DIM and KV_ROLE):
             # Both roles run in every team; the one the build does not produce stores nothing.
@@ -1552,11 +1561,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     _rows = lay.acc_to_rows8(
                         [
                             fx.Float32(Vec(loop_results[dc])[_i])
-                            for _i in range_constexpr(8)
+                            for _i in range_constexpr(ACC)
                         ],
                         _exchange,
                         klane_is_zero,
-                        WMMA_V8,
+                        ABI,
                     )
                     _t = Vec.from_elements(
                         [
@@ -1568,9 +1577,9 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     if const_expr(CONTRACTION_SHARDS > 1):
                         _gc = fx.Index(
                             (fx.Int32(dc) + _shard_k0) * fx.Int32(WMMA_N)
-                        ) + lay.rows8_origin(klane)
+                        ) + lay.rows8_origin(klane, ABI)
                     else:
-                        _gc = fx.Index(dc * WMMA_N) + lay.rows8_origin(klane)
+                        _gc = fx.Index(dc * WMMA_N) + lay.rows8_origin(klane, ABI)
                     store_chunk(
                         my_cols, write_out, write_out_elem, kv_row_in_tile, _gc, _t
                     )
@@ -1580,11 +1589,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         _rows = lay.acc_to_rows8(
                             [
                                 fx.Float32(Vec(loop_results[dc])[_i])
-                                for _i in range_constexpr(8)
+                                for _i in range_constexpr(ACC)
                             ],
                             _exchange,
                             klane_is_zero,
-                            WMMA_V8,
+                            ABI,
                         )
                         _t = Vec.from_elements(
                             [
@@ -1598,7 +1607,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             write_dk,
                             write_dk_elem,
                             kv_row_in_tile,
-                            fx.Index(dc * WMMA_N) + lay.rows8_origin(klane),
+                            fx.Index(dc * WMMA_N) + lay.rows8_origin(klane, ABI),
                             _t,
                         )
                 if const_expr(not NO_DV):
@@ -1606,11 +1615,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         _rows = lay.acc_to_rows8(
                             [
                                 fx.Float32(Vec(loop_results[DV_ACC0 + dc])[_i])
-                                for _i in range_constexpr(8)
+                                for _i in range_constexpr(ACC)
                             ],
                             _exchange,
                             klane_is_zero,
-                            WMMA_V8,
+                            ABI,
                         )
                         _t = Vec.from_elements(
                             [fx.Float32(v).to(elem_dtype) for v in _rows], elem_dtype
@@ -1620,7 +1629,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             write_dv,
                             write_dv_elem,
                             kv_row_in_tile,
-                            fx.Index(dc * WMMA_N) + lay.rows8_origin(klane),
+                            fx.Index(dc * WMMA_N) + lay.rows8_origin(klane, ABI),
                             _t,
                         )
 
@@ -1917,7 +1926,11 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             if const_expr(getattr(op, "OPERATION_NAME", None) == "gpu.func"):
                 op.attributes["passthrough"] = ir.ArrayAttr.get(passthrough_entries)
         launcher.launch(
-            grid=(num_kv_tiles, num_head_k_idx, nseq_idx),
+            grid=(
+                (num_head_k_idx, num_kv_tiles, nseq_idx)
+                if const_expr(HEAD_FASTEST)
+                else (num_kv_tiles, num_head_k_idx, nseq_idx)
+            ),
             block=(BLOCK_SIZE, 1, 1),
             stream=stream,
         )

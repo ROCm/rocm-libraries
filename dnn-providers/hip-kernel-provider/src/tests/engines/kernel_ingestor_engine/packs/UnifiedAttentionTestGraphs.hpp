@@ -100,6 +100,8 @@ struct BasicGraphSpec
     bool alibiMask = false;
     bool paddingMask = false;
     data_objects::DataType mmaCoreMode = data_objects::DataType::UNSET;
+    /// The SDPA node's compute_data_type.
+    data_objects::DataType computeDataType = data_objects::DataType::FLOAT;
     data_objects::AttentionImplementation implementation
         = data_objects::AttentionImplementation::AUTO;
 
@@ -272,7 +274,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
     {
         nodes.push_back(data_objects::CreateNodeDirect(builder,
                                                        "sdpa",
-                                                       data_objects::DataType::FLOAT,
+                                                       spec.computeDataType,
                                                        data_objects::NodeAttributes::SdpaAttributes,
                                                        attributesFor().Union()));
     }

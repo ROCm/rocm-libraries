@@ -131,6 +131,29 @@ hipdnnPluginStatus_t invokeContainerGetEngineName(int64_t engineId, const char**
         return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
     }
 }
+
+/// Rejects an operation graph buffer that failed FlatBuffers verification, so no engine
+/// is handed a graph it cannot read.
+void throwIfInvalid(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& opGraph)
+{
+    if(!opGraph.isValid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Operation graph is not a valid serialized graph");
+    }
+}
+
+/// Rejects an engine config buffer that failed FlatBuffers verification.
+void throwIfInvalid(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper& engineConfig)
+{
+    if(!engineConfig.isValid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Engine config is not a valid serialized engine config");
+    }
+}
 } // namespace
 
 // Static plugin metadata
@@ -374,6 +397,7 @@ hipdnnPluginStatus_t
         auto& engineManager = typedHandle->getEngineManager();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
             opGraph->ptr, opGraph->size);
+        throwIfInvalid(opGraphWrapper);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
 
@@ -407,14 +431,16 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle
                             << ", engineDetails=" << static_cast<void*>(engineDetails));
 
     return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(engineDetails);
+        *engineDetails = {nullptr, 0};
         hipdnn_plugin_sdk::throwIfNull(handle);
         hipdnn_plugin_sdk::throwIfNull(opGraph);
-        hipdnn_plugin_sdk::throwIfNull(engineDetails);
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
             opGraph->ptr, opGraph->size);
+        throwIfInvalid(opGraphWrapper);
 
         engineManager.getEngineDetails(*typedHandle, opGraphWrapper, engineId, *engineDetails);
 
@@ -441,6 +467,8 @@ hipdnnPluginStatus_t
                                                                                opGraph->size);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
             engineConfig->ptr, engineConfig->size);
+        throwIfInvalid(graph);
+        throwIfInvalid(config);
         typedHandle->getEngineManager().enumerateCandidates(
             *typedHandle, graph, config, offset, limit, *engineDetails);
     });
@@ -527,6 +555,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
             engineConfig->ptr, engineConfig->size);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
             opGraph->ptr, opGraph->size);
+        throwIfInvalid(engineConfigWrapper);
+        throwIfInvalid(opGraphWrapper);
         *workspaceSize
             = engineManager.getMaxWorkspaceSize(*typedHandle, opGraphWrapper, engineConfigWrapper);
 
@@ -557,6 +587,8 @@ hipdnnPluginStatus_t
             opGraph->ptr, opGraph->size);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
             engineConfig->ptr, engineConfig->size);
+        throwIfInvalid(opGraphWrapper);
+        throwIfInvalid(engineConfigWrapper);
 
         auto& engineManager = typedHandle->getEngineManager();
 

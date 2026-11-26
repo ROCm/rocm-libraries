@@ -1,6 +1,6 @@
 # Integration test configuration for ASM_SDPA_ENGINE
 # Filters use GTest-style globs: * matches any sequence of characters
-# Later entries take precedence over earlier ones when multiple filters match
+# The first matching skip entry wins; the last matching tolerance override wins.
 
 [meta]
 version = 1
@@ -128,3 +128,13 @@ filters = ["*_SdpaBackward_*.*_fp32_*_tolf32"]
 atol = 1e-05
 rtol = 1e-05
 # END SdpaBackward tolerance classes
+
+# -- SdpaFwdPlan known engine defects --
+# SdpaFwdPlan cases with a Q, K or V descale on bf16 inputs. No reference computes them, so the result cannot be checked.
+[[test_skips]]
+filters = [
+    "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_80880308a642c59d",
+    "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_a5d80bae97805285",
+    "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_c536156446281786",
+]
+reason = "ALMIOPEN-3132: no reference accepts a Q, K or V descale on non-fp8 inputs, so the result cannot be checked"

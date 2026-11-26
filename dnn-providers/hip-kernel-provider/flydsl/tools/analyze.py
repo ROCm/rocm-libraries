@@ -129,7 +129,11 @@ def _disassembly(hsaco_path, symbol):
     """llvm-objdump's disassembly of the object, restricted to @p symbol's function when one is named."""
     llvm = llvm_bin()
     dis = subprocess.run(
-        [os.path.join(llvm, "llvm-objdump"), "-d", "--mcpu=gfx950", str(hsaco_path)],
+        [
+            os.path.join(llvm, "llvm-objdump"),
+            "-d",
+            str(hsaco_path),
+        ],  # the target is read from the ELF flags
         capture_output=True,
         text=True,
         check=True,
@@ -387,14 +391,24 @@ def undefined_writelanes(text):
 
 
 # ---------------- resources ----------------
-def occupancy(vgpr_total, lds, threads):
-    """Waves/SIMD on gfx950: 512 VGPR/lane/SIMD (unified arch+acc, 8-granule), 160 KiB LDS/CU, 4 SIMD/CU, max 8."""
+# LDS per CU by target: bounds the workgroups per CU (``occupancy``).
+LDS_PER_CU = {"gfx950": 163840, "gfx942": 65536, "gfx90a": 65536}
+
+
+def occupancy(vgpr_total, lds, threads, lds_per_cu):
+    """Waves/SIMD on gfx950 (LDS 160 KiB/CU), gfx942 and gfx90a (64 KiB/CU): 512 VGPR/lane/SIMD (unified arch+acc, 8-granule), 4 SIMD/CU, max 8."""
     alloc = max(8, (vgpr_total + 7) // 8 * 8)
     by_vgpr = min(8, 512 // alloc)
     waves_wg = (threads + 63) // 64
-    wg_lds = (163840 // lds) if lds else 1 << 30
+    wg_lds = (lds_per_cu // lds) if lds else 1 << 30
     by_lds = (wg_lds * waves_wg) // 4
     return max(0, min(by_vgpr, by_lds, 8)), by_vgpr, by_lds
+
+
+def _target_arch(target):
+    """The gfx name of an ``amdhsa.target`` string (``amdgcn-amd-amdhsa-unknown-gfx90a:sramecc+``)."""
+    m = re.search(r"(gfx[0-9a-f]+)(?::|$)", str(target))
+    return m.group(1) if m else ""
 
 
 @contextlib.contextmanager
@@ -448,7 +462,14 @@ def analyze(objdir, symbol=None):
         else (accum_off if accum_off else vg)
     )
     threads = k.get(".max_flat_workgroup_size", 256)
-    occ, ov, ol = occupancy(total, k[".group_segment_fixed_size"], threads)
+    target = str(doc.get("amdhsa.target", ""))
+    target_arch = _target_arch(target)
+    if target_arch not in LDS_PER_CU:
+        raise ValueError(
+            f"no LDS capacity for the object's target {target!r}; known: {', '.join(LDS_PER_CU)}"
+        )
+    lds_cu = LDS_PER_CU[target_arch]
+    occ, ov, ol = occupancy(total, k[".group_segment_fixed_size"], threads, lds_cu)
     arch_v = accum_off if (accum_off is not None and ag) else vg
     r = dict(
         vgpr=arch_v,
@@ -477,11 +498,9 @@ def analyze(objdir, symbol=None):
     os.environ.setdefault("LLVM_BIN", llvm_bin())
     import undefscan_issue1087 as u
 
-    if scope is None:
+    # Always scoped: undefscan_issue1087.py (verbatim) disassembles with --mcpu=gfx950, ``_disassembly`` reads the target from the ELF.
+    with _scoped_to(u, objdir / "obj.hsaco", blob, scope):
         r["tainted_buffer_accesses"] = len(u.scan(objdir / "obj.hsaco"))
-    else:
-        with _scoped_to(u, objdir / "obj.hsaco", blob, scope):
-            r["tainted_buffer_accesses"] = len(u.scan(objdir / "obj.hsaco"))
     r["exposed_1087"] = (
         "pattern"
         if (r["undef_writelanes"] or r["tainted_buffer_accesses"])

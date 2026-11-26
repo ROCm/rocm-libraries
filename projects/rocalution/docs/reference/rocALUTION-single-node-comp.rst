@@ -239,6 +239,10 @@ with arrays representation
     \text{bcsr_col_ind}[4] & = \{0, 1, 0, 1\}
   \end{array}
 
+.. note::
+
+  A BCSR matrix in rocALUTION always has :math:`mb \cdot \text{bcsr_dim}` rows and :math:`nb \cdot \text{bcsr_dim}` columns, so the padded matrix of the example above is a :math:`4 \times 4` matrix. A padded matrix can be created with :cpp:func:`rocalution::LocalMatrix::AllocateBCSR` or :cpp:func:`rocalution::LocalMatrix::SetDataPtrBCSR`. :cpp:func:`rocalution::LocalMatrix::ConvertTo` and :cpp:func:`rocalution::LocalMatrix::ConvertToBCSR` do not pad: if :math:`m` or :math:`n` is not a multiple of the block dimension, the matrix falls back to CSR and keeps its sizes.
+
 ELL storage format
 ------------------
 
@@ -491,6 +495,11 @@ CloneBackend
 ------------
 
 .. doxygenfunction:: rocalution::BaseRocalution::CloneBackend(const BaseRocalution<ValueType>&)
+
+MoveToBackend
+-------------
+
+.. doxygenfunction:: rocalution::BaseRocalution::MoveToBackend
 
 Check
 =====

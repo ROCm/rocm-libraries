@@ -488,6 +488,16 @@ namespace TensileLite
         virtual std::string description() const;
 
         /**
+         * Create a single, non-transposed 1-by-k times k-by-1 GEMM with packed
+         * operands and scalar C/D. A/B and their compute-input types use
+         * inputType; C/D use outputType. Alpha/beta types are set separately.
+         */
+        static ContractionProblemGemm GEMM_InnerProduct(rocisa::DataType inputType,
+                                                        rocisa::DataType outputType,
+                                                        size_t           k,
+                                                        double           beta);
+
+        /**
         * Create a ContractionProblemGemm representing a batched GEMM, specifying
         * strides between matrices.
         */
@@ -837,6 +847,11 @@ namespace TensileLite
             m_outputAmaxD = outputAmaxD;
         }
 
+        void setOutputPeerD(bool outputPeerD)
+        {
+            m_outputPeerD = outputPeerD;
+        }
+
         void setUseBias(int useBias)
         {
             m_useBias = useBias;
@@ -937,6 +952,11 @@ namespace TensileLite
         bool outputAmaxD() const
         {
             return m_outputAmaxD;
+        }
+
+        bool outputPeerD() const
+        {
+            return m_outputPeerD;
         }
 
         int useBias() const
@@ -1736,6 +1756,7 @@ namespace TensileLite
         bool             m_useE                    = false;
         rocisa::DataType m_auxType                 = rocisa::DataType::None;
         bool             m_outputAmaxD             = false;
+        bool             m_outputPeerD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
         int              m_mxScaleFormat           = 0;
@@ -1884,6 +1905,9 @@ namespace TensileLite
         void*       d     = nullptr;
         void*       e     = nullptr;
         void*       amaxD = nullptr;
+        // Second D buffer (OutputPeerD). `d` and `peerD` are the two buffers' batch 0, with or
+        // without batch pointer arrays: the kernel gets the distance between them.
+        void*       peerD = nullptr;
 
         void const* const* batchA    = nullptr;
         void const* const* batchB    = nullptr;

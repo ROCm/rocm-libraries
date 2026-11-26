@@ -1369,16 +1369,21 @@
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
     'AssertAlphaValue',
+    'AssertAnySizeLessThan',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
+    'AssertMXScalesPreSwizzled',
     'AssertSizeEqual',
     'AssertSizeGreaterThan',
     'AssertSizeLessThan',
     'AssertStrideAEqual',
+    'AssertStrideAMultiple',
     'AssertStrideBEqual',
+    'AssertStrideBMultiple',
     'AssertStrideCEqual',
     'AssertStrideDEqual',
     'AssertSummationElementMultiple',
+    'AssertTensorBytesLessThan',
     'BufferLoad',
     'BufferStore',
     'ClusterAIDMapping',
@@ -1497,6 +1502,7 @@
     'StaggerUStride',
     'StinkyTofuParameters',
     'StinkyTofuRegisterAllocation',
+    'StoreCachelineAlign',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1547,6 +1553,7 @@
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
+    'WaveTileContiguousA',
     'WavefrontSize',
     'WorkAssignment',
     'WorkGroup',
@@ -1639,6 +1646,10 @@
       'len': 1,
       'type': 'list',
     }),
+    'AssertAnySizeLessThan': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
         1,
@@ -1657,6 +1668,10 @@
       'len': 9,
       'type': 'list',
     }),
+    'AssertMXScalesPreSwizzled': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertSizeEqual': dict({
       'type': 'int',
       'value': -1,
@@ -1673,7 +1688,15 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertStrideAMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideBEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideBMultiple': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -1693,6 +1716,10 @@
       ]),
       'len': 9,
       'type': 'list',
+    }),
+    'AssertTensorBytesLessThan': dict({
+      'type': 'int',
+      'value': -1,
     }),
     'BufferLoad': dict({
       'head': list([
@@ -2713,6 +2740,14 @@
       'type': 'int',
       'value': -1,
     }),
+    'StoreCachelineAlign': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'StorePriorityOpt': dict({
       'head': list([
         False,
@@ -3148,6 +3183,14 @@
       'type': 'list',
     }),
     'WaveSplitK': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'WaveTileContiguousA': dict({
       'head': list([
         False,
         True,

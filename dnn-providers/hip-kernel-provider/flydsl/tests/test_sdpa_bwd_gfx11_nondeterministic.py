@@ -24,7 +24,7 @@ from generators._codeobject import GeneratorError  # noqa: E402
 from generators._instances import instances_for  # noqa: E402
 
 OP = "sdpa_bwd_prep"
-ARCH = rdna.ARCH
+ARCH = "gfx11-generic"
 PIN, OTHER = b"the pinned object", b"another build of it"
 
 
@@ -35,7 +35,7 @@ def sha(data: bytes) -> str:
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
     instance = instances_for(OP, ARCH)[0]
-    spec = rdna.specs_for("prep")[0]
+    spec = rdna.specs_for("prep", ARCH)[0]
     reference_dir = tmp_path / "reference"
     reference_dir.mkdir()
     (reference_dir / f"{spec.hash()}.hsaco").write_bytes(PIN)
@@ -76,7 +76,7 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.setattr(rdna, "verify", lambda blob, spec, where: described)
     monkeypatch.setattr(rdna, "instances_for", lambda op, arch: [instance])
     monkeypatch.setattr(
-        rdna, "specs_for", lambda kind: [spec] if kind == "prep" else []
+        rdna, "specs_for", lambda kind, arch: [spec] if kind == "prep" else []
     )
     monkeypatch.setattr(rdna.env, "assert_flydsl_version", lambda: None)
     monkeypatch.setattr(rdna.env, "prepare", lambda arch: None)
@@ -108,7 +108,7 @@ def rig(tmp_path, monkeypatch):
 
     def generate():
         return rdna.generate(
-            OP, rig.out, None, reference_dir, nondeterministic_csv=listing()
+            OP, ARCH, rig.out, None, reference_dir, nondeterministic_csv=listing()
         )
 
     rig.generate = generate

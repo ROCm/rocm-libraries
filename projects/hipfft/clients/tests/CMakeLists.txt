@@ -258,7 +258,7 @@ foreach( target ${TEST_TARGETS} )
     # specified a build time
     # TODO: amdgcnspirv is not compatible with ASAN.
     get_target_property(test_opts ${target} COMPILE_OPTIONS)
-    if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+    if( NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
       target_compile_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
       target_link_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
     endif()
@@ -323,6 +323,40 @@ foreach( target ${TEST_TARGETS} )
 
   rocm_install(TARGETS ${target} COMPONENT tests)
 endforeach()
+
+# Verify that each public header is self-sufficient in plain C.
+# Only build it when linked hipfft is new enough to guarantee this contract.
+set( HIPFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION "1.0.28" )
+set( HIPFFT_LINKED_VERSION "" )
+if( DEFINED hipfft_VERSION AND NOT "${hipfft_VERSION}" STREQUAL "" )
+  set( HIPFFT_LINKED_VERSION "${hipfft_VERSION}" )
+elseif( DEFINED hipfft_VERSION_MAJOR
+        AND DEFINED hipfft_VERSION_MINOR
+        AND DEFINED hipfft_VERSION_PATCH )
+  set( HIPFFT_LINKED_VERSION "${hipfft_VERSION_MAJOR}.${hipfft_VERSION_MINOR}.${hipfft_VERSION_PATCH}" )
+endif()
+
+if( NOT "${HIPFFT_LINKED_VERSION}" STREQUAL ""
+    AND NOT HIPFFT_LINKED_VERSION VERSION_LESS HIPFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
+  enable_language( C )
+  foreach( c_src hipfft hipfftXt hipfftMp hiplibxt )
+    add_executable( ${c_src}_c ${c_src}_c.c )
+    # Use BEFORE so that the repository's public header takes priority over
+    # any system-installed hipfft header added by directory-level
+    # include_directories() (e.g. from HIP_INCLUDE_DIRS).
+    target_include_directories( ${c_src}_c BEFORE PRIVATE
+      $<TARGET_PROPERTY:hip::hipfft,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      target_compile_definitions( ${c_src}_c PRIVATE __HIP_PLATFORM_NVIDIA__)
+    else()
+      target_link_libraries( ${c_src}_c PRIVATE hip::host )
+    endif()
+  endforeach()
+else()
+  message( STATUS
+    "Skipping C language check: linked hipfft version '${HIPFFT_LINKED_VERSION}' is older than ${HIPFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION}." )
+endif()
 
 #Ctest based Test Filter Standardization using test_categories.yaml
 

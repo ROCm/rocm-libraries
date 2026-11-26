@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -38,6 +39,7 @@
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
+#include "plancache_autotune.hpp"
 #include "util.hpp"
 
 // The elementwise kernels walk a single index space defined by the output, so an input may only
@@ -123,25 +125,41 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     auto& logger = Logger::instance();
 
     // Log API access
-    char msg[128];
+    char msg[384];
     snprintf(
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorCreate", msg);
 
-    (*handle) = new hiptensorHandle;
-
-    if(*handle == nullptr)
+    if(handle == nullptr)
     {
-        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        auto errorCode = HIPTENSOR_STATUS_INVALID_VALUE;
         snprintf(msg,
                  sizeof(msg),
                  "Initialization Error : handle = nullptr (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_ALLOC_FAILED;
+        return errorCode;
+    }
+
+    *handle = nullptr;
+
+    auto newHandle = std::unique_ptr<hiptensorHandle>(new(std::nothrow) hiptensorHandle);
+    if(newHandle == nullptr)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization Error : cannot allocate handle (%s)",
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
     }
 
     auto hip_status = hipInit(0);
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+    }
 
     if(hip_status == hipErrorInvalidDevice)
     {
@@ -151,9 +169,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
                  "Initialization error: invalid device (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_HIP_ERROR;
+        return errorCode;
     }
     else if(hip_status == hipErrorInvalidValue)
     {
@@ -161,9 +177,65 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         snprintf(
             msg, sizeof(msg), "Initialization error: (%s)", hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_INVALID_VALUE;
+        return errorCode;
+    }
+    else if(hip_status != hipSuccess)
+    {
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: hipInit failed: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
+    // The handle is bound to the device that is current on the calling thread.
+    hipDevice_t deviceId = -1;
+    hip_status           = hipGetDevice(&deviceId);
+    if(hip_status == hipSuccess)
+    {
+        hip_status = newHandle->initDevice(deviceId);
+    }
+
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: cannot query current device: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
+    auto device = newHandle->getDevice();
+    if(device.getGcnArch() == hiptensor::HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported architecture %s (%s)",
+                 (int)deviceId,
+                 device.getProperties().gcnArchName,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+    else if(device.warpSize() == hiptensor::HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported warp size %d (%s)",
+                 (int)deviceId,
+                 device.getProperties().warpSize,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
     }
 
     if(hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
@@ -173,11 +245,17 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     }
     else
     {
-        (*handle)->setPlanCache(std::make_unique<hiptensor::PlanCache>());
+        newHandle->setPlanCache(std::make_unique<hiptensor::PlanCache>());
         snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
+    // hiptensorDestroy uses the autotune manager. Create it before returning the handle: a
+    // static object that owns the handle then finishes construction after the manager, so it
+    // is destroyed before the manager at exit.
+    hiptensor::PlancacheAutotuneMgr::instance();
+
+    *handle = newHandle.release();
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
@@ -192,6 +270,10 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorDestroy", msg);
 
+    if(handle != nullptr)
+    {
+        hiptensor::PlancacheAutotuneMgr::instance()->releasePlanCache(handle->getPlanCache());
+    }
     delete handle;
 
     return HIPTENSOR_STATUS_SUCCESS;
@@ -796,7 +878,7 @@ hiptensorStatus_t hiptensorCreatePlanPreference(const hiptensorHandle_t    handl
     (*pref)->mJit              = jitMode;
 
     (*pref)->mSelectionAlgorithm = algo;
-    (*pref)->mSolution           = nullptr;
+    (*pref)->mSolution.store(nullptr);
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -946,6 +1028,15 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
 
     newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
     newPlan->mPref   = newPlan->mOwnedPref.get();
+
+    // A reduction that keeps the rank reduces nothing: hiptensorReduce runs it as the
+    // elementwise binary operation D = alpha * A + beta * C. Set that operation here,
+    // while the plan is private to this call, so executions sharing the plan only read it.
+    if(desc->mOperationType == HIPTENSOR_REDUCTION && desc->mDescA != nullptr
+       && desc->mDescD != nullptr && desc->mDescA->mLengths.size() == desc->mDescD->mLengths.size())
+    {
+        newPlan->mOwnedOpDesc->mOpAC = HIPTENSOR_OP_ADD;
+    }
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {

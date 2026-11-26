@@ -57,6 +57,23 @@ int n_waves(const rocke_direct_wgrad_tiled_spec_t* s)
     return s->waves_k * s->waves_c;
 }
 
+/* DirectWgradTiledSpec.pingpong_halves: single-group ping-pong, the two
+ * groups are the block's wave halves. */
+bool pingpong_halves(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    return s->pingpong && s->q_groups == 1;
+}
+
+/* The q_groups == 1 ping-pong keeps one more row buffer. */
+int n_buffers(const rocke_direct_wgrad_tiled_spec_t* s)
+{
+    if(pingpong_halves(s))
+    {
+        return s->prefetch + 2;
+    }
+    return s->prefetch + 1;
+}
+
 int strip_w(const rocke_direct_wgrad_tiled_spec_t* s)
 {
     return kWo / s->unfold_n;
@@ -256,7 +273,7 @@ extern "C" int rocke_direct_wgrad_tiled_unroll(const rocke_direct_wgrad_tiled_sp
     {
         return s->row_unroll;
     }
-    return std::lcm(s->prefetch + 1, s->problem.KH);
+    return std::lcm(n_buffers(s), s->problem.KH);
 }
 
 extern "C" int rocke_direct_wgrad_tiled_acc_vgprs(const rocke_direct_wgrad_tiled_spec_t* s)
@@ -274,7 +291,7 @@ extern "C" long rocke_direct_wgrad_tiled_lds_bytes(const rocke_direct_wgrad_tile
     {
         red = 2L * n_waves(s) * s->wave_k16 * s->wave_c16 * kWave * 4 * 4;
     }
-    return (s->prefetch + 1) * slot + red;
+    return n_buffers(s) * slot + red;
 }
 
 extern "C" int rocke_direct_wgrad_tiled_n_channel_tiles(const rocke_direct_wgrad_tiled_spec_t* s)
@@ -428,9 +445,9 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "q_groups must be 1 or 2");
     }
-    if(s->pingpong && s->q_groups != 2)
+    if(pingpong_halves(s) && n_waves(s) % 2)
     {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong needs q_groups == 2");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong with q_groups == 1 needs an even wave count");
     }
     if(rocke_direct_wgrad_tiled_threads_per_block(s)
        > rocke_archtarget_max_threads_per_block(target))
@@ -460,15 +477,15 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "target_blocks must be >= 1");
     }
-    /* (Python divides by prefetch + 1 here; a negative prefetch, which raises
-     * there, falls through to the prefetch check.) */
-    if(s->prefetch >= 0 && s->row_unroll % (s->prefetch + 1))
-    {
-        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of prefetch + 1");
-    }
+    /* Before the n_buffers check: prefetch -1 (-2 with the single-group
+     * ping-pong's extra buffer) makes n_buffers 0. */
     if(s->prefetch < 1)
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "prefetch must be >= 1");
+    }
+    if(s->row_unroll % n_buffers(s))
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of n_buffers");
     }
     {
         int u = rocke_direct_wgrad_tiled_unroll(s);
@@ -524,6 +541,7 @@ struct Ctx
     V c0, c1, c_two, oob;
     V c_cpg, c_kpg;
     V lane, qg, wave;
+    V pp_grp = NULL;
     V k_blk0, c_glb0, c_blk0, group;
     V a_rsrc, b_rsrc;
     std::vector<V> dy_bufs, x_bufs, dy_addr, x_addr;
@@ -669,13 +687,53 @@ V read_frag(Ctx& c, V smem, const std::vector<V>& idx)
 
 typedef std::vector<std::vector<V>> Ring; /* [KH][WK16] */
 
+/* wait_rows(lead) */
+void wait_rows(Ctx& c, bool lead)
+{
+    const Em& e = c.e;
+    if(pingpong_halves(c.spec))
+    {
+        if(lead)
+        {
+            rocke_b_s_waitcnt(e.b, -1, 0, -1);
+        }
+        else
+        {
+            rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, -1, -1);
+        }
+    }
+    else if(lead)
+    {
+        rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, 0, -1);
+    }
+    else
+    {
+        rocke_b_s_waitcnt(e.b, -1, 0, -1);
+    }
+}
+
+/* mid_barrier() */
+void mid_barrier(Ctx& c)
+{
+    wait_rows(c, false);
+    rocke_b_s_barrier_bare(c.e.b);
+    if(c.QG == 1)
+    {
+        rocke_b_sched_barrier(c.e.b, 0);
+    }
+}
+
 /* step(buf, t, ring, accs, compute, issue) */
 void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs, bool compute)
 {
     const Em& e = c.e;
-    rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, 0, -1);
+    wait_rows(c, true);
     rocke_b_s_barrier_bare(e.b);
-    issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
+    bool late = pingpong_halves(c.spec);
+    if(!late)
+    {
+        issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
+    }
     std::vector<V> newest;
     for(int mi = 0; mi < c.WK16; ++mi)
     {
@@ -683,22 +741,33 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     }
     ring.erase(ring.begin());
     ring.push_back(newest);
+    std::vector<std::vector<V>> xf(c.KW);
+    if(compute)
+    {
+        for(int s = 0; s < c.KW; ++s)
+        {
+            for(int ni = 0; ni < c.WC16; ++ni)
+            {
+                xf[s].push_back(read_frag(c, c.x_bufs[buf], c.x_idx[s][ni]));
+            }
+        }
+    }
+    if(late)
+    {
+        rocke_b_sched_barrier(e.b, 0);
+        issue_row(c, sg, (buf + c.D) % c.NB, e.addi(t, c.D));
+    }
     if(!compute)
     {
-        return;
-    }
-    std::vector<std::vector<V>> xf(c.KW);
-    for(int s = 0; s < c.KW; ++s)
-    {
-        for(int ni = 0; ni < c.WC16; ++ni)
+        if(late)
         {
-            xf[s].push_back(read_frag(c, c.x_bufs[buf], c.x_idx[s][ni]));
+            mid_barrier(c);
         }
+        return;
     }
     if(c.spec->pingpong)
     {
-        rocke_b_s_waitcnt(e.b, -1, 0, -1);
-        rocke_b_s_barrier_bare(e.b);
+        mid_barrier(c);
         rocke_b_s_setprio(e.b, 1);
     }
     for(int r = 0; r < c.KH; ++r)
@@ -718,6 +787,10 @@ void step(Ctx& c, const Seg& sg, int buf, V t, Ring& ring, std::vector<V>& accs,
     }
     if(c.spec->pingpong)
     {
+        if(c.QG == 1)
+        {
+            rocke_b_sched_barrier(e.b, 0);
+        }
         rocke_b_s_setprio(e.b, 0);
     }
     else if(c.AUTO)
@@ -744,6 +817,11 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     for(int t = 0; t < c.D; ++t)
     {
         issue_row(c, sg, t % c.NB, e.ci(t));
+    }
+    if(pingpong_halves(c.spec))
+    {
+        rocke_b_s_waitcnt(e.b, (c.D - 1) * c.N_INSTR, -1, -1);
+        e.if_(e.eq(c.pp_grp, c.c1), [&]() { rocke_b_s_barrier_bare(e.b); });
     }
     Ring ring(c.KH, std::vector<V>(c.WK16, c.zero_frag));
     for(int t = 0; t < c.T_PRO; ++t)
@@ -786,6 +864,10 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     std::vector<V> accs_out(res.begin(), res.begin() + std::min((size_t)c.n_acc, res.size()));
     rocke_b_s_waitcnt(e.b, 0, 0, -1);
     rocke_b_s_barrier_bare(e.b);
+    if(pingpong_halves(c.spec))
+    {
+        e.if_(e.eq(c.pp_grp, c.c0), [&]() { rocke_b_s_barrier_bare(e.b); });
+    }
     return accs_out;
 }
 
@@ -857,7 +939,7 @@ rocke_kernel_def_t*
     c.SEG = c.WU + c.KW - 1;
     c.STRIP = c.UN * c.SEG;
     c.D = spec->prefetch;
-    c.NB = spec->prefetch + 1;
+    c.NB = n_buffers(spec);
     c.HPB = spec->rows_per_seg;
     c.AUTO = c.HPB == 0;
     c.U = rocke_direct_wgrad_tiled_unroll(spec);
@@ -1094,10 +1176,16 @@ rocke_kernel_def_t*
         V h_end = c.AUTO ? p_H : e.smin(e.addi(h0, c.HPB), p_H);
         return SegOrigin{n0, q, h0, h_end};
     };
-    if(spec->pingpong)
+    /* Ping-pong group: the q group, or the half of the block's waves. */
+    c.pp_grp = c.qg;
+    if(pingpong_halves(spec))
+    {
+        c.pp_grp = e.divi(c.wave, c.NW / 2);
+    }
+    if(spec->pingpong && c.QG > 1)
     {
         /* Group 1 starts one barrier late. */
-        e.if_(e.eq(c.qg, c.c1), [&]() { rocke_b_s_barrier_bare(b); });
+        e.if_(e.eq(c.pp_grp, c.c1), [&]() { rocke_b_s_barrier_bare(b); });
     }
     std::vector<std::string> acc_names = iter_names("acc", c.n_acc);
     std::vector<V> zero_accs(c.n_acc, zero_acc);
@@ -1136,9 +1224,9 @@ rocke_kernel_def_t*
     {
         return NULL;
     }
-    if(spec->pingpong)
+    if(spec->pingpong && c.QG > 1)
     {
-        e.if_(e.eq(c.qg, c.c0), [&]() { rocke_b_s_barrier_bare(b); });
+        e.if_(e.eq(c.pp_grp, c.c0), [&]() { rocke_b_s_barrier_bare(b); });
     }
 
     /* ---- epilogue: atomic add into dW[total_k, KH, KW, cpg] ---- */

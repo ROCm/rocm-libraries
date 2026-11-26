@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -59,22 +59,17 @@ enum BlockReduceAlgorithm
         = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::using_warp_reduce)
 };
 
-template<
-    typename T,
-    int BLOCK_DIM_X,
-    BlockReduceAlgorithm ALGORITHM = BLOCK_REDUCE_WARP_REDUCTIONS,
-    int BLOCK_DIM_Y = 1,
-    int BLOCK_DIM_Z = 1,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
+template<typename T,
+         int                  BLOCK_DIM_X,
+         BlockReduceAlgorithm ALGORITHM   = BLOCK_REDUCE_WARP_REDUCTIONS,
+         int                  BLOCK_DIM_Y = 1,
+         int                  BLOCK_DIM_Z = 1>
 class BlockReduce
-    : private ::rocprim::block_reduce<
-        T,
-        BLOCK_DIM_X,
-        static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM),
-        BLOCK_DIM_Y,
-        BLOCK_DIM_Z
-      >
+    : private ::rocprim::block_reduce<T,
+                                      BLOCK_DIM_X,
+                                      static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM),
+                                      BLOCK_DIM_Y,
+                                      BLOCK_DIM_Z>
 {
     static_assert(
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,

@@ -167,9 +167,9 @@ class SdmaPacketEmitter:
         slot, which the caller strides by 4 because this ADD_RTN_32 writes
         4 bytes.
 
-        The caller may hand this the SAME block it used for the COPY packet --
-        8 dwords against the COPY's 13.  See emitPlacePacket's reuse note for
-        why that is safe and what ordering it requires."""
+        The caller may hand this a block whose previous packet has already been
+        placed.  See emitPlacePacket's reuse note for why that is safe and what
+        ordering it requires."""
         assert pktS % 2 == 0, (
             "pktS %r is not 2-aligned, which DW4-DW7's 64-bit zeroing requires"
             % (pktS,))

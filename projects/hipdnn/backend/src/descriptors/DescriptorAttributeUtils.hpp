@@ -14,6 +14,7 @@
 #include "HipdnnPointwiseMode.h"
 #include "HipdnnReduceTensorOp.h"
 #include "TensorDescriptor.hpp"
+#include <cstdint>
 #include <cstring>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -24,6 +25,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <limits>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -511,6 +513,159 @@ void validateConvolutionFinalize(const DataT& data,
     THROW_IF_TRUE(data.conv_mode == hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   std::string(className) + "::finalize() failed: conv_mode not set");
+}
+
+namespace detail
+{
+
+/// Sets result to a + b and returns true, or returns false if the sum overflows int64_t.
+inline bool tryAddInt64(int64_t a, int64_t b, int64_t& result)
+{
+    if((b > 0 && a > std::numeric_limits<int64_t>::max() - b)
+       || (b < 0 && a < std::numeric_limits<int64_t>::min() - b))
+    {
+        return false;
+    }
+    result = a + b;
+    return true;
+}
+
+/// Sets result to a - b and returns true, or returns false if the difference overflows int64_t.
+inline bool trySubtractInt64(int64_t a, int64_t b, int64_t& result)
+{
+    if((b < 0 && a > std::numeric_limits<int64_t>::max() + b)
+       || (b > 0 && a < std::numeric_limits<int64_t>::min() + b))
+    {
+        return false;
+    }
+    result = a - b;
+    return true;
+}
+
+/// Sets result to value * factor and returns true, or returns false if the product
+/// overflows int64_t. Requires factor >= 1.
+inline bool tryMultiplyByPositiveInt64(int64_t value, int64_t factor, int64_t& result)
+{
+    if(value > std::numeric_limits<int64_t>::max() / factor
+       || value < std::numeric_limits<int64_t>::min() / factor)
+    {
+        return false;
+    }
+    result = value * factor;
+    return true;
+}
+
+} // namespace detail
+
+/// Validates during finalize() that the convolution's spatial extents agree with its
+/// padding, stride and dilation. For each spatial index i (tensor dimension i + 2):
+///   dilatedKernel = dilation * (kernel - 1) + 1
+///   numerator     = input + prePadding + postPadding - dilatedKernel
+///   output        = numerator / stride + 1, with numerator >= 0
+/// Also requires rank >= 3, equal ranks for the three tensors, one padding, stride and
+/// dilation entry per spatial dimension, and stride and dilation >= 1. Arithmetic that
+/// would overflow int64_t is rejected. Throws HIPDNN_STATUS_BAD_PARAM on any violation.
+template <typename DataT>
+void validateConvolutionSpatialShape(const DataT& data,
+                                     const std::vector<int64_t>& inputDims,
+                                     const std::vector<int64_t>& kernelDims,
+                                     const std::vector<int64_t>& outputDims,
+                                     const char* inputName,
+                                     const char* outputName,
+                                     const char* className)
+{
+    const std::string prefix = std::string(className) + "::finalize() failed: ";
+
+    THROW_IF_TRUE(outputDims.size() < 3,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  prefix + outputName + " tensor must have at least 3 dimensions (N, C, spatial)");
+    THROW_IF_NE(kernelDims.size(),
+                outputDims.size(),
+                HIPDNN_STATUS_BAD_PARAM,
+                prefix + "weight tensor dimension count must match " + outputName
+                    + " tensor dimension count");
+    THROW_IF_NE(inputDims.size(),
+                outputDims.size(),
+                HIPDNN_STATUS_BAD_PARAM,
+                prefix + inputName + " tensor dimension count must match " + outputName
+                    + " tensor dimension count");
+
+    const size_t spatialDims = outputDims.size() - 2;
+    THROW_IF_NE(data.pre_padding.size(),
+                spatialDims,
+                HIPDNN_STATUS_BAD_PARAM,
+                prefix + "pre_padding parameter count must match spatial dimension count");
+    THROW_IF_NE(data.post_padding.size(),
+                spatialDims,
+                HIPDNN_STATUS_BAD_PARAM,
+                prefix + "post_padding parameter count must match spatial dimension count");
+    THROW_IF_NE(data.stride.size(),
+                spatialDims,
+                HIPDNN_STATUS_BAD_PARAM,
+                prefix + "stride parameter count must match spatial dimension count");
+    THROW_IF_NE(data.dilation.size(),
+                spatialDims,
+                HIPDNN_STATUS_BAD_PARAM,
+                prefix + "dilation parameter count must match spatial dimension count");
+
+    for(size_t i = 0; i < spatialDims; ++i)
+    {
+        const int64_t strideVal = data.stride[i];
+        const int64_t dilationVal = data.dilation[i];
+
+        THROW_IF_LT(strideVal,
+                    1,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    prefix + "stride at spatial index " + std::to_string(i) + " must be > 0 ("
+                        + std::to_string(strideVal) + ")");
+        THROW_IF_LT(dilationVal,
+                    1,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    prefix + "dilation at spatial index " + std::to_string(i) + " must be > 0 ("
+                        + std::to_string(dilationVal) + ")");
+
+        const int64_t inputSize = inputDims[i + 2];
+        const int64_t kernelSize = kernelDims[i + 2];
+        const int64_t outputSize = outputDims[i + 2];
+
+        int64_t kernelSpan = 0;
+        int64_t dilatedKernelSize = 0;
+        int64_t paddedInputSize = 0;
+        int64_t numerator = 0;
+        THROW_IF_FALSE(
+            detail::trySubtractInt64(kernelSize, 1, kernelSpan)
+                && detail::tryMultiplyByPositiveInt64(kernelSpan, dilationVal, kernelSpan)
+                && detail::tryAddInt64(kernelSpan, 1, dilatedKernelSize)
+                && detail::tryAddInt64(inputSize, data.pre_padding[i], paddedInputSize)
+                && detail::tryAddInt64(paddedInputSize, data.post_padding[i], paddedInputSize)
+                && detail::trySubtractInt64(paddedInputSize, dilatedKernelSize, numerator),
+            HIPDNN_STATUS_BAD_PARAM,
+            prefix + "convolution shape at spatial index " + std::to_string(i)
+                + " overflows int64");
+
+        THROW_IF_LT(numerator,
+                    0,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    prefix + inputName + " spatial dimension at index " + std::to_string(i) + " ("
+                        + std::to_string(inputSize) + ") is too small for the kernel size ("
+                        + std::to_string(kernelSize) + ") and dilation ("
+                        + std::to_string(dilationVal) + ")");
+
+        int64_t expectedOutputSize = 0;
+        THROW_IF_FALSE(detail::tryAddInt64(numerator / strideVal, 1, expectedOutputSize),
+                       HIPDNN_STATUS_BAD_PARAM,
+                       prefix + "convolution shape at spatial index " + std::to_string(i)
+                           + " overflows int64");
+
+        THROW_IF_NE(outputSize,
+                    expectedOutputSize,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    prefix + outputName + " tensor spatial dimension at index " + std::to_string(i)
+                        + " (" + std::to_string(outputSize)
+                        + ") does not match expected dimension ("
+                        + std::to_string(expectedOutputSize) + ") given " + inputName
+                        + " dimensions, kernel size, padding, stride, and dilation");
+    }
 }
 
 /// Handles the shared convolution setAttribute cases.

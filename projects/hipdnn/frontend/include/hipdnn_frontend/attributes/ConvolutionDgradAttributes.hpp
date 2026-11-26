@@ -32,8 +32,10 @@ namespace hipdnn_frontend::graph
  * @code{.cpp}
  * auto dx = graph.conv_dgrad(dy, w, ConvDgradAttributes()
  *              .set_padding({1, 1})
- *              .set_stride({1, 1}));
- * // Required before validation/build; strides may be omitted and inferred.
+ *              .set_stride({1, 1})
+ *              .set_dilation({1, 1}));
+ * // Padding, stride and dilation are all required. dx dims are required before
+ * // validation/build; strides may be omitted and inferred.
  * dx->set_dim({N, C, H, W});
  * @endcode
  *

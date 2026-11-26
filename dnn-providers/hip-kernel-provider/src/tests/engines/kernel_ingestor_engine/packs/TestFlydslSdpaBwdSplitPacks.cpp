@@ -60,10 +60,19 @@
  *   without the dBias store) carry the dQ and tail-zero kernels, the latter one of three
  *   companions shared by dtype.
  *
- * Two cases hold the gfx11 shard to the verdict table (flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv):
- * every row's graph is run through graph_match and every slot's kernel_match over the installed
- * rows, and the served rows' slot catalogs are checked for unique enrolled knob tuples. A gfx950
- * entry does not read the table.
+ * - gfx90a (mixed: the 16-bit dtypes and fp32 have different ladders): 33 prep (12, 12, 9), 222
+ *   dkdv (84, 84, 54) and 230 dq (88, 88, 54) kernels. The 16-bit ladder is 16..256 plus 512 and
+ *   its prep floor is the numeric rung below the tile; the fp32 ladder is 32..256 plus 512 and
+ *   its prep floor is the label `tail`. The dq rows that serve a dB-storing bias are
+ *   multi-launch packs; the fp32-query bias rows name the fp32 dBias reduce kernel as a second
+ *   symbol of their own code object, the 16-bit f32-bias rows the fp32 reduce companion built
+ *   from the gfx11 kernel.
+ * - gfx942: the gfx90a inventory, every dkdv row launched head-fastest.
+ *
+ * Two cases hold the gfx11, gfx90a and gfx942 shards to their verdict tables
+ * (flydsl/tests/data/sdpa_bwd_<arch>_verdicts.csv): every row's graph is run through graph_match
+ * and every slot's kernel_match over the installed rows, and the served rows' slot catalogs are
+ * checked for unique enrolled knob tuples. A gfx950 entry does not read a table.
  *
  * Every case opens by reading loadedSet(), none skips and none touches a device, so an empty
  * shard fails here instead of passing silently. The seam suite, over rows written in the test,
@@ -105,12 +114,26 @@ struct SlotCount
     size_t fp32;
 };
 
+/// What one dtype class (the 16-bit dtypes, or fp32) of an architecture's shard is built as: an
+/// architecture's ladders and dBias form may differ between the two.
+struct DtypeShape
+{
+    /// The dQ-accumulation tiles (`head_dim`) the rows are built for, ascending.
+    std::vector<int64_t> tiles;
+    /// Whether prep's `floor` is the numeric rung below its tile (rather than a label).
+    bool prepFloorIsRungBelow;
+    /// Whether the reduce kernel of the dq rows that serve a dB-storing bias is a standalone
+    /// companion object (and those rows stage no bias, as on gfx11), rather than a second kernel
+    /// of the dQ code object. Every row launches it through `sources` either way.
+    bool reduceStandalone;
+};
+
 /// What the shard of one architecture family holds.
 struct SplitContent
 {
     std::array<SlotCount, 3> slots;
-    /// The dQ-accumulation tiles (`head_dim`) the rows are built for, ascending.
-    std::vector<int64_t> tiles;
+    DtypeShape shape16Bit;
+    DtypeShape shapeFp32;
     std::set<std::string> dforms;
     /// prep rows that are the sink twin, with its two extra arguments.
     size_t prepSinkRows;
@@ -119,69 +142,119 @@ struct SplitContent
     std::set<int64_t> gqaPackValues;
     /// dq rows that serve a dB-storing bias and so name the dBias reduce kernel.
     size_t reduceRows;
-    /// Whether those rows carry the reduce kernel as a launch of `sources` (the `dq_reduce` pack);
-    /// every shipped shard does.
-    bool reduceInSources;
-    /// Whether the reduce rows are the bias rows that store dBias and stage no bias (gfx11), rather
-    /// than any bias row of the dq table.
-    bool reduceRowsStageNone;
     /// The dBias reduce kernel's symbol, per dtype width.
     const char* reduceSymbol16Bit;
     const char* reduceSymbolFp32;
+    /// The reduce symbol of a 16-bit row with an f32 bias (the fp32 reduce companion; gfx90a and
+    /// gfx942 build it from the gfx11 kernel, their fp32-query rows carry the gfx950 one).
+    const char* reduceSymbolF32Bias16Bit;
     /// Distinct standalone code objects the reduce launch of `sources` names (the dq op's
-    /// companions); 0 where the reduce is a second kernel of the row's own object.
+    /// companions).
     size_t companions;
-    /// The dkdv slot's launch grid, as the KMD names it.
-    const char* dkdvGrid;
-    /// Whether prep's `floor` is the numeric rung below its tile (rather than a label).
-    bool prepFloorIsRungBelow;
+    /// The dkdv slot's launch grids, as the KMD names them (a shard may use both spellings).
+    std::set<std::string> dkdvGrids;
     /// The content directory name of the verdict table's arch family (the manifests the table's
     /// hashes name); nullptr where the table does not apply.
     const char* verdictContent;
+    /// The verdict table's file name beside the staged manifests; nullptr where it does not apply.
+    const char* verdictTable;
     /// Tail-zero companion entries the dq rows' `sources` name (one per dtype; entries of two
     /// dtypes may resolve to the same object, whose bytes do not depend on the dtype), and the
-    /// kernel symbol they carry.
+    /// kernel symbol each dtype class carries.
     size_t tailzeroEntries;
-    const char* tailzeroSymbol;
+    const char* tailzeroSymbol16Bit;
+    const char* tailzeroSymbolFp32;
+
+    const DtypeShape& shapeOf(const std::string& dtype) const
+    {
+        return dtype == "fp32" ? shapeFp32 : shape16Bit;
+    }
 };
 
 const SplitContent GFX950_CONTENT{
     {{{"prep", 86, 34, 34, 18}, {"dkdv", 1313, 547, 484, 282}, {"dq", 962, 369, 368, 225}}},
-    {32, 64, 96, 128, 160, 192, 224, 256, 384, 512},
+    {{32, 64, 96, 128, 160, 192, 224, 256, 384, 512}, false, false},
+    {{32, 64, 96, 128, 160, 192, 224, 256, 384, 512}, false, false},
     {"rt", "bk"},
     32,
     {-1, 1},
     {-1, 1},
     301,
-    true,
-    false,
     "fmha_bwd_dbias_reduce_gfx950_kernel_1",
     "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
+    "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
     0,
-    "kheads_by_kvblocks_by_seqs",
-    false,
+    {"kheads_by_kvblocks_by_seqs"},
+    nullptr,
     nullptr,
     3,
+    "fmha_bwd_tailzero_gfx950_kernel_0",
     "fmha_bwd_tailzero_gfx950_kernel_0"};
 
 const SplitContent GFX11_CONTENT{
     {{{"prep", 33, 11, 11, 11}, {"dkdv", 222, 78, 78, 66}, {"dq", 230, 82, 82, 66}}},
-    {16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256},
+    {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256}, true, true},
+    {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256}, true, true},
     {"bk"},
     0,
     {0},
     {0},
     74,
-    true,
-    true,
     "fmha_bwd_dbias_reduce_gfx11_kernel_0",
     "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
+    "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
     3,
-    "kvblocks_by_kheads_by_seqs",
-    true,
+    {"kvblocks_by_kheads_by_seqs"},
     "gfx11-generic",
+    "sdpa_bwd_gfx11_verdicts.csv",
     3,
+    "fmha_bwd_tailzero_gfx11_kernel_0",
     "fmha_bwd_tailzero_gfx11_kernel_0"};
+
+// Row counts of the installed gfx90a content: the instances of each op's `manifest.json` per dtype, with
+// dkdv's dV-only rows (16, the `dvonly` launch of a dK-only row) not counted since they carry no descriptor row of
+// their own. The tail-zero companions of the 16-bit rows are the gfx11 kernel's, those of the fp32 rows the gfx950 one.
+const SplitContent GFX90A_CONTENT{
+    {{{"prep", 33, 12, 12, 9}, {"dkdv", 222, 84, 84, 54}, {"dq", 230, 88, 88, 54}}},
+    {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512}, true, true},
+    {{32, 64, 96, 128, 160, 192, 224, 256, 512}, false, false},
+    {"bk"},
+    0,
+    {-1, 0},
+    {-1, 0},
+    74,
+    "fmha_bwd_dbias_reduce_gfx11_kernel_0",
+    "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
+    "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
+    3,
+    {"kheads_by_kvblocks_by_seqs", "kvblocks_by_kheads_by_seqs"},
+    "gfx90a",
+    "sdpa_bwd_gfx90a_verdicts.csv",
+    3,
+    "fmha_bwd_tailzero_gfx11_kernel_0",
+    "fmha_bwd_tailzero_gfx950_kernel_0"};
+
+// Row counts of the installed gfx942 content, counted as for gfx90a: the gfx90a inventory with every dkdv row
+// launched head-fastest.
+const SplitContent GFX942_CONTENT{
+    {{{"prep", 33, 12, 12, 9}, {"dkdv", 222, 84, 84, 54}, {"dq", 230, 88, 88, 54}}},
+    {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512}, true, true},
+    {{32, 64, 96, 128, 160, 192, 224, 256, 512}, false, false},
+    {"bk"},
+    0,
+    {-1, 0},
+    {-1, 0},
+    74,
+    "fmha_bwd_dbias_reduce_gfx11_kernel_0",
+    "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
+    "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
+    3,
+    {"kheads_by_kvblocks_by_seqs"},
+    "gfx942",
+    "sdpa_bwd_gfx942_verdicts.csv",
+    3,
+    "fmha_bwd_tailzero_gfx11_kernel_0",
+    "fmha_bwd_tailzero_gfx950_kernel_0"};
 
 /// The inventory for the architecture the census entry names; the architecture is never read
 /// from the descriptors being counted. nullptr for an architecture the engine has no
@@ -191,6 +264,14 @@ const SplitContent* contentOf(const std::string& arch)
     if(arch == "gfx950")
     {
         return &GFX950_CONTENT;
+    }
+    if(arch == "gfx90a")
+    {
+        return &GFX90A_CONTENT;
+    }
+    if(arch == "gfx942")
+    {
+        return &GFX942_CONTENT;
     }
     // Every gfx11 member is served by the one gfx11-generic content.
     if(arch.rfind("gfx11", 0) == 0)
@@ -301,14 +382,12 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, IsOneSlottedEngineWithANativeGraphMatchAndAK
                                      "hipkernel.flydsl_sdpa_bwd_split.dkdv.kernel_match",
                                      "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match"}));
 
-    // The multi-launch dq dispatch is shipped exactly where dq rows carry `sources`; the two
-    // V-head dispatches exactly where a row of V heads of its own is shipped.
-    std::set<std::string> expectedDispatches{
-        "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch", DKDV_DISPATCH, DQ_DISPATCH};
-    if(content().reduceInSources)
-    {
-        expectedDispatches.insert(DQ_REDUCE_DISPATCH);
-    }
+    // Every shard ships the multi-launch dq dispatch of the rows that carry the reduce kernel as a
+    // launch; the two V-head dispatches exactly where a row of V heads of its own is shipped.
+    std::set<std::string> expectedDispatches{"hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
+                                             DKDV_DISPATCH,
+                                             DQ_DISPATCH,
+                                             DQ_REDUCE_DISPATCH};
     for(const auto& pack : slotOf(set, "dkdv").packs)
     {
         if(std::any_of(pack.kernels.begin(), pack.kernels.end(), isU2Row))
@@ -336,16 +415,21 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     const auto& set = loadedSet(ENGINE_NAME);
     const auto dispatchSymbols = dispatchSymbolsOf(set);
 
-    const std::set<int64_t> tiles(content().tiles.begin(), content().tiles.end());
     const std::set<std::string> dtypes{"f16", "bf16", "fp32"};
 
-    // The numeric floor of a prep row is the rung below its tile; the lowest rung has none.
-    std::map<int64_t, std::string> rungBelow;
-    for(size_t index = 0; index < content().tiles.size(); ++index)
-    {
-        rungBelow[content().tiles[index]]
-            = index == 0 ? std::string("0") : std::to_string(content().tiles[index - 1]);
-    }
+    // The numeric floor of a prep row is the rung below its tile on the dtype's own ladder;
+    // the lowest rung has none.
+    const auto rungBelowOf = [](const DtypeShape& shape) {
+        std::map<int64_t, std::string> rungBelow;
+        for(size_t index = 0; index < shape.tiles.size(); ++index)
+        {
+            rungBelow[shape.tiles[index]]
+                = index == 0 ? std::string("0") : std::to_string(shape.tiles[index - 1]);
+        }
+        return rungBelow;
+    };
+    const std::map<int64_t, std::string> rungBelow16Bit = rungBelowOf(content().shape16Bit);
+    const std::map<int64_t, std::string> rungBelowFp32 = rungBelowOf(content().shapeFp32);
 
     std::set<std::string> names;
     std::set<DescriptorId> ids;
@@ -403,8 +487,10 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                 const auto dtype = text("dtype");
                 EXPECT_EQ(dtypes.count(dtype), 1U) << kernel.name;
                 ++perDtype[dtype];
+                const auto& shape = content().shapeOf(dtype);
                 const auto headDim = integer("head_dim");
-                EXPECT_EQ(tiles.count(headDim), 1U) << kernel.name;
+                EXPECT_EQ(std::count(shape.tiles.begin(), shape.tiles.end(), headDim), 1)
+                    << kernel.name;
                 EXPECT_GT(integer("head_dim_v"), 0) << kernel.name;
                 EXPECT_EQ(content().dforms.count(text("dform")), 1U) << kernel.name;
                 const auto floorLabel = text("floor");
@@ -461,9 +547,10 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                 {
                     EXPECT_EQ(content().sinkValues.count(integer("sink")), 1U) << kernel.name;
                     EXPECT_EQ(text("grid"), "qblocks_by_heads_by_seqs") << kernel.name;
-                    if(content().prepFloorIsRungBelow && rungBelow.count(headDim) == 1)
+                    const auto& rungBelow = dtype == "fp32" ? rungBelowFp32 : rungBelow16Bit;
+                    if(shape.prepFloorIsRungBelow && rungBelow.count(headDim) == 1)
                     {
-                        EXPECT_EQ(floorLabel, rungBelow[headDim]) << kernel.name;
+                        EXPECT_EQ(floorLabel, rungBelow.at(headDim)) << kernel.name;
                     }
                 }
                 else if(slotName == "dkdv")
@@ -472,7 +559,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                         << kernel.name;
                     EXPECT_GT(integer("block_threads"), 0) << kernel.name;
                     EXPECT_GT(integer("block_kv"), 0) << kernel.name;
-                    EXPECT_EQ(text("grid"), content().dkdvGrid) << kernel.name;
+                    EXPECT_EQ(content().dkdvGrids.count(text("grid")), 1U) << kernel.name;
                 }
                 else
                 {
@@ -507,14 +594,16 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
 
                     // A dB-storing bias object carries the dBias reduce kernel of its scratch
                     // width: the fp32 one for an fp32 query or an f32 bias, the 16-bit one
-                    // otherwise. A bias row built without the dBias store carries none.
+                    // otherwise (a 16-bit f32-bias row of gfx90a/gfx942 names the fp32 reduce
+                    // companion built from the gfx11 kernel). A bias row built without the dBias store carries none.
                     const bool storesDb = hasBias && storeDb != 0;
                     const auto reduce = text("reduce_symbol");
-                    const bool f32Scratch = dtype == "fp32" || integer("bias_f32") == 1;
+                    const char* storedSymbol = dtype == "fp32" ? content().reduceSymbolFp32
+                                               : integer("bias_f32") == 1
+                                                   ? content().reduceSymbolF32Bias16Bit
+                                                   : content().reduceSymbol16Bit;
                     const std::string expectedSymbol
-                        = !storesDb ? std::string()
-                                    : std::string(f32Scratch ? content().reduceSymbolFp32
-                                                             : content().reduceSymbol16Bit);
+                        = !storesDb ? std::string() : std::string(storedSymbol);
                     EXPECT_EQ(reduce, expectedSymbol) << kernel.name;
                     reduceRows += reduce.empty() ? 0 : 1;
 
@@ -522,8 +611,8 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     // kernel and, on a pack that carries the reduce kernel as a launch, the
                     // dBias reduce kernel of a dB-storing bias row.
                     EXPECT_TRUE(multiLaunch) << kernel.name;
-                    const bool reduceLaunch = content().reduceInSources && storesDb;
-                    if(content().reduceRowsStageNone)
+                    const bool reduceLaunch = storesDb;
+                    if(shape.reduceStandalone)
                     {
                         // The reduce pack: bias rows storing dBias and staging none, except the
                         // f32-bias rows built without the dBias store (`store_db` 0), which
@@ -566,7 +655,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     {
                         const auto& reduceEntry = kernel.sources.at(REDUCE_LAUNCH);
                         EXPECT_EQ(reduceEntry.symbol, reduce) << kernel.name;
-                        if(content().companions != 0)
+                        if(shape.reduceStandalone)
                         {
                             companions.insert(reduceEntry.sha256);
                         }
@@ -582,14 +671,17 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     if(text("u2_role") == "dq")
                     {
                         // The V-head object, one per dtype entry like the other.
-                        std::string hvSymbol = content().tailzeroSymbol;
+                        std::string hvSymbol = content().tailzeroSymbol16Bit;
                         hvSymbol.replace(hvSymbol.find("tailzero"), 8, "tailzero_hv");
                         EXPECT_EQ(zeroEntry.symbol, hvSymbol) << kernel.name;
                         tailzeroHvByDtype[dtype].insert(zeroEntry.sha256);
                     }
                     else
                     {
-                        EXPECT_EQ(zeroEntry.symbol, content().tailzeroSymbol) << kernel.name;
+                        EXPECT_EQ(zeroEntry.symbol,
+                                  dtype == "fp32" ? content().tailzeroSymbolFp32
+                                                  : content().tailzeroSymbol16Bit)
+                            << kernel.name;
                         tailzeroByDtype[dtype].insert(zeroEntry.sha256);
                     }
                 }
@@ -820,7 +912,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
         EXPECT_EQ(sinkTwins, slotName == "prep" ? content().prepSinkRows : size_t{0});
     }
     // One argument list serves every reduce launch of the shard.
-    EXPECT_EQ(reduceShapes.size(), content().reduceInSources ? 1U : 0U);
+    EXPECT_EQ(reduceShapes.size(), 1U);
 }
 
 // ---------------------------------------------------------------------------
@@ -907,7 +999,7 @@ RowMatch matchRow(const VerdictRow& row,
 {
     DeviceProperties properties;
     properties.gcnArchName = arch;
-    properties.warpSize = 32;
+    properties.warpSize = arch.rfind("gfx9", 0) == 0 ? 64 : 32;
     const GraphFixture fixture(buildSdpaBwdGraph(specOfRow(row)), properties);
     const auto context = fixture.context();
 
@@ -949,12 +1041,12 @@ struct TableMatches
     std::array<std::vector<KernelDefinition>, 3> installed;
 };
 
-const TableMatches& tableMatches(const std::string& arch, const char* content)
+const TableMatches& tableMatches(const std::string& arch, const SplitContent& content)
 {
     static const TableMatches s_table = [&] {
         TableMatches built;
-        built.rows = loadVerdictRows();
-        built.hashes = loadManifestHashes(content);
+        built.rows = loadVerdictRows((verdictDataRoot() / content.verdictTable).string());
+        built.hashes = loadManifestHashes(content.verdictContent);
         built.installed = installedKernels(loadedSet(ENGINE_NAME));
         built.matches.reserve(built.rows.size());
         for(const auto& row : built.rows)
@@ -1082,12 +1174,12 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryVerdictRowIsServedOrDeclinedAsTheTableS
 {
     if(content().verdictContent == nullptr)
     {
-        // The table is gfx11-generic content's: this architecture's shard is held to its own
-        // inventory by the cases above.
+        // The tables are the gfx11-generic, gfx90a and gfx942 content's: this architecture's
+        // shard is held to its own inventory by the cases above.
         SUCCEED();
         return;
     }
-    const auto& table = tableMatches(arch(), content().verdictContent);
+    const auto& table = tableMatches(arch(), content());
     ASSERT_FALSE(table.rows.empty());
 
     size_t served = 0;
@@ -1140,7 +1232,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryServedRowsSlotCatalogsHaveUniqueEnrolle
             << label << ": the engine descriptor's enrolled knobs changed; update enrolledKnobs()";
     }
 
-    const auto& table = tableMatches(arch(), content().verdictContent);
+    const auto& table = tableMatches(arch(), content());
     size_t checked = 0;
     std::vector<std::string> failures;
     for(size_t index = 0; index < table.rows.size(); ++index)
@@ -1343,12 +1435,14 @@ std::optional<ManifestHashes> tryLoadManifestHashes(const char* content)
 /// The probe graphs of the table, run through graph_match and the slot's kernel_match over the
 /// installed shard: the rows served, ranked by priority (high first) then spec hash, must be
 /// the rows the model names. Where the build stages the manifests that give a row its spec hash
-/// (gfx11), the ranked lists are compared; elsewhere only whether any row serves. The engine
+/// (gfx11, gfx942, gfx90a), the ranked lists are compared; elsewhere only whether any row serves. The engine
 /// orders equal priorities by descriptor id, so this order agrees with its selection only among
 /// rows whose priorities differ.
 TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelNames)
 {
-    const std::string tableArch = arch() == "gfx950" ? "gfx950" : "gfx11-generic";
+    const std::string tableArch = arch() == "gfx950"              ? "gfx950"
+                                  : arch().rfind("gfx11", 0) == 0 ? "gfx11-generic"
+                                                                  : arch();
     const auto rows = loadProbeRows();
     const auto installed = installedKernels(loadedSet(ENGINE_NAME));
     const auto hashes = tryLoadManifestHashes(tableArch.c_str());
@@ -1369,7 +1463,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelName
 
         DeviceProperties properties;
         properties.gcnArchName = arch();
-        properties.warpSize = 32;
+        properties.warpSize = arch().rfind("gfx9", 0) == 0 ? 64 : 32;
         const GraphFixture fixture(buildSdpaBwdGraph(specOfProbe(row)), properties);
         const auto context = fixture.context();
         std::vector<const KernelDefinition*> matched;
@@ -1423,6 +1517,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelName
     }
     std::cout << "probe rows checked on " << arch() << ": " << checked << ", disagreeing "
               << failures.size() << '\n';
+    EXPECT_GT(checked, 0U) << "the probe-graph table has no row for " << tableArch;
     std::ostringstream report;
     for(const auto& failure : failures)
     {
@@ -1448,7 +1543,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks,
     std::vector<std::string> failures;
     for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
     {
-        for(const int64_t headDim : content().tiles)
+        for(const int64_t headDim : content().shape16Bit.tiles)
         {
             for(const std::string form : {"aligned", "unaligned", "f32"})
             {
@@ -1609,13 +1704,38 @@ std::set<int64_t> shippedCoverage(const std::array<std::vector<KernelDefinition>
     return covered;
 }
 
+/// prep's `vec_tail` is spelled only by the padded gfx942 and gfx90a rows; every other row of
+/// the shared KMD reads the KMD default, -1.
+TEST_F(TestFlydslSdpaBwdSplitPacks, PrepVecTailIsOneOnTheCdna9RowsAndTheKmdDefaultElsewhere)
+{
+    const auto& set = loadedSet(ENGINE_NAME);
+    const auto installed = installedKernels(set);
+    const int64_t expected = (arch() == "gfx942" || arch() == "gfx90a") ? 1 : -1;
+    ASSERT_FALSE(installed[0].empty());
+    const auto& fields = slotOf(set, slotName(SLOT_ORDER[0])).schema.fields;
+    const auto field = std::find_if(fields.begin(), fields.end(), [](const auto& candidate) {
+        return candidate.name == "vec_tail";
+    });
+    ASSERT_NE(field, fields.end());
+    ASSERT_TRUE(field->defaultValue.has_value());
+    ASSERT_EQ(std::get<int64_t>(*field->defaultValue), -1);
+    for(const auto& kernel : installed[0])
+    {
+        const auto* vecTail = tryGetMetadataField<int64_t>(kernel.metadata, "vec_tail");
+        EXPECT_EQ(vecTail == nullptr ? std::get<int64_t>(*field->defaultValue) : *vecTail, expected)
+            << kernel.name;
+    }
+}
+
 /// The constants graph_match's coverage line states (FlydslSdpaBwdCommon.hpp, the parity
 /// bands) are the head dims the loaded shard's f32-bias and `Hk != Hv` rows serve.
 TEST_F(TestFlydslSdpaBwdSplitPacks, TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe)
 {
     const auto installed = installedKernels(loadedSet(ENGINE_NAME));
     std::set<int64_t> constants;
-    const bool gfx11 = arch().rfind("gfx11", 0) == 0;
+    // gfx90a and gfx942 ship gfx11-style padded rows for these graphs, so they take the gfx11 bands.
+    const bool gfx11Bands
+        = arch().rfind("gfx11", 0) == 0 || arch() == "gfx90a" || arch() == "gfx942";
     const auto addBands = [&](const auto& bands) {
         for(const auto& band : bands)
         {
@@ -1625,7 +1745,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, TheCoverageConstantsAreTheHeadDimsTheShipped
             }
         }
     };
-    if(gfx11)
+    if(gfx11Bands)
     {
         addBands(flydsl_sdpa_bwd::GFX11_PARITY_BANDS);
     }

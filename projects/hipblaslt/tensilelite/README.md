@@ -2,6 +2,20 @@
 
 ## Building and Running Tests
 
+Benchmark-only configurations omit results CSVs unless LibraryLogic or the Ductile
+backend consumes them. To keep CSVs for manual inspection or external scripts, add
+this setting to the benchmark YAML:
+
+```yaml
+GlobalParameters:
+  ForceResultsFile: true
+```
+
+`ForceResultsFile` defaults to `false`. Required CSVs are always written for
+LibraryLogic and Ductile. The opt-in also applies to `--use-cache` reruns and
+tile-selection results. With `ForceRedoBenchmarkProblems: false`, a retained CSV
+allows completed benchmarks to be skipped on a rerun.
+
 While full test suites can be run with a single `tox` command, developers may wish to
 build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately.
 This is useful for debugging specific problems or isolating issues in a specific test.
@@ -192,6 +206,7 @@ and use it as the compiler launcher. No additional configuration is needed.
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
+* `TENSILELITE_CLIENT_FORCE_RPATH`: Tags the client's library search path as DT_RPATH, so `LD_LIBRARY_PATH` cannot replace the libraries it was built against, HIP and HSA included. Needs `patchelf`; without it, configure warns and the client keeps DT_RUNPATH (default: `ON`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
 ## How to Rebuild Object Codes Directly from Assembly

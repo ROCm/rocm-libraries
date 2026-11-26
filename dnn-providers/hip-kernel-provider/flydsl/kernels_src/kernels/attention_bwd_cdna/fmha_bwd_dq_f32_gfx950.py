@@ -88,8 +88,10 @@ from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import (
     PANEL,
     chunk_off,
     stage_panel,
+    stage_panel_rsrc,
 )  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_f32_gfx950 import (
+    EXACT_REFUSED_GFX90A,
     FmhaInputMetadata,
     bwd_dq_knobs,
 )  # noqa: E402
@@ -150,6 +152,7 @@ class _LiveKeyDq(DSplitDq):
         v_span=None,
         k_rsrc=None,
         v_rsrc=None,
+        h=0,
     ):
         if self.live_lo is None:
             return super().stage_kv(
@@ -167,33 +170,51 @@ class _LiveKeyDq(DSplitDq):
                 v_span,
                 k_rsrc,
                 v_rsrc,
+                h,
             )
         p0 = self.p0(L.wave)
-        row = k0 + L.lane // 4
-        row = fx.max(ops.imin(row, self.live_last), self.live_lo)
-        kro = ops.i64(row) * ops.i64(stride_k)
-        vro = ops.i64(row) * ops.i64(stride_v)
-        for pl in range(self.dsu):
-            p = p0 + pl
+        if ops.dma_bytes == 4:
+            # 4 B DMA (gfx90a / gfx942): the lane's row of word j is `k0 + 4 j + lane // 16`, clamped like the 16 B row below.
+            def row_offs(stride):
+                return [
+                    ops.i64(
+                        fx.max(
+                            ops.imin(k0 + 4 * j + L.lane // 16, self.live_last),
+                            self.live_lo,
+                        )
+                    )
+                    * ops.i64(stride)
+                    for j in range(4)
+                ]
+
+            kro, vro = row_offs(stride_k), row_offs(stride_v)
+        else:
+            row = k0 + L.lane // 4
+            row = fx.max(ops.imin(row, self.live_last), self.live_lo)
+            kro = ops.i64(row) * ops.i64(stride_k)
+            vro = ops.i64(row) * ops.i64(stride_v)
+        for pl in range(self.dsu_h):
+            p = p0 + (h * self.dsu_h + pl)
+            pa = p if self.halves == 1 else L.wave * self.dsu_h + pl
             owned = (p < self.fam.panels_total) if self.fam.uneven else None
             if k_rsrc is not None:
-                ops.dma_rsrc(
-                    k_rsrc,
-                    kro + ops.i64(p * PANEL + (L.lane % 4) * 4),
-                    chunk_off(p),
-                    owned,
+                stage_panel_rsrc(
+                    ops, k_rsrc, chunk_off(pa), kro, p * PANEL, L.lane, owned
                 )
-                ops.dma_rsrc(
+                stage_panel_rsrc(
+                    ops,
                     v_rsrc,
-                    vro + ops.i64(p * PANEL + (L.lane % 4) * 4),
-                    self.tile_f + chunk_off(p),
+                    self.tile_f + chunk_off(pa),
+                    vro,
+                    p * PANEL,
+                    L.lane,
                     owned,
                 )
                 continue
             stage_panel(
                 ops,
                 "K",
-                chunk_off(p),
+                chunk_off(pa),
                 k_base,
                 kro,
                 p * PANEL,
@@ -204,7 +225,7 @@ class _LiveKeyDq(DSplitDq):
             stage_panel(
                 ops,
                 "V",
-                self.tile_f + chunk_off(p),
+                self.tile_f + chunk_off(pa),
                 v_base,
                 vro,
                 p * PANEL,
@@ -231,6 +252,8 @@ def _check_scope(meta, knobs, runtime_axes):
         raise NotImplementedError(
             f"runtime axes {sorted(runtime_axes)}: the fp32 dQ kernel builds baked forms only"
         )
+    if knobs.arch == "gfx90a" and not knobs.padded_head:
+        raise ValueError(EXACT_REFUSED_GFX90A)
     if knobs.block_dmodel not in BUILT_TILES:
         raise NotImplementedError(
             f"fp32 dQ builds tiles {BUILT_TILES}, got {knobs.block_dmodel}"
@@ -293,6 +316,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
     fam = knobs.family()
     layer = _LiveKeyDq(fam)
     W, RB, BQ, DSU = fam.waves, fam.rb, fam.bq, fam.dsu
+    HALVES = fam.halves
     BLOCK = fam.block
     CAUSAL, BIAS, DROP, STORE_DB, PADDED = (
         bool(meta.causal),
@@ -321,6 +345,10 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
     HOIST = (
         TILE > HOIST_ABOVE
     )  # SGPR pressure: K / V buffer resources built once, dQ's slab base derived past the loop (the objects of tiles <= HOIST_ABOVE are pinned without it)
+    if layer.lds_bytes > fam.lds_limit:
+        raise ValueError(
+            f"tile {fam.tile}, block_m {fam.bq}: {layer.lds_bytes} B of LDS is over the {fam.lds_limit} B cap of {fam.arch}"
+        )
     LDS_WORDS = layer.lds_words
     _cache_tag = (
         KERNEL_NAME,
@@ -328,6 +356,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
         fam.bq,
         fam.sched,
         fam.waves,
+        fam.arch,
         CAUSAL,
         BIAS,
         DROP,
@@ -436,7 +465,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             gptrs["BIAS"] = f32(B, 4)
         if const_expr(STORE_DB):
             gptrs["DB"] = f32(DB, 4)
-        ops = DeviceOps(lds.buf.ptr, gptrs)
+        ops = DeviceOps(lds.buf.ptr, gptrs, fam.dma_bytes)
 
         # sequence decode: Q side bits 7:0, K side bits 15:8 (shared helpers; dense = bits 0)
         q_len, _, _ = fmha.decode_addressing(
@@ -582,7 +611,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
         for it, st in range(loop_range[0], loop_range[1], fx.Index(1), init=init_args):
             acc = _carried(st, NACC)
             k0 = I32(it) * I32(16)
-            layer.stage_kv(
+            stage_h = lambda h=0: layer.stage_kv(  # noqa: E731
                 ops,
                 L,
                 k0,
@@ -597,9 +626,14 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
                 v_span,
                 k_rsrc,
                 v_rsrc,
+                h,
             )
-            ops.wait_dma()
-            S, Pd = layer.scores(ops, L, Q_res, DO_res, mq, mv)
+            if const_expr(HALVES == 1):
+                stage_h()
+                ops.wait_dma()
+                S, Pd = layer.scores(ops, L, Q_res, DO_res, mq, mv)
+            else:
+                S, Pd = layer.scores_halves(ops, L, Q_res, DO_res, stage_h, mq, mv)
 
             # (S sum, dP sum) per group of four KV rows and the KV row of each element: block_m 16 one group, block_m 32 the two `h` pairs
             if const_expr(BQ == 16):
@@ -687,7 +721,10 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
                 )
 
             if const_expr(BQ == 16):
-                layer.accumulate16(ops, L, acc, dS)
+                if const_expr(HALVES == 1):
+                    layer.accumulate16(ops, L, acc, dS)
+                else:
+                    layer.accumulate16_halves(ops, L, acc, dS, stage_h)
             else:
                 layer.accumulate32(ops, L, acc, dS)
             ops.barrier()
