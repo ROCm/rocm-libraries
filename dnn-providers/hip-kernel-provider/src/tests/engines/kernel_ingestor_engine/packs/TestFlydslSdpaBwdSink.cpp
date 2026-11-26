@@ -752,7 +752,7 @@ TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAFloatSinkWithADsink)
     expectDeclined(SPLIT_ENGINE, specOfSink(c));
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAnFp32GraphWithASink)
+TEST_F(TestGpuFlydslSdpaBwdSink, SplitDeclinesAFloatGraphWithASink)
 {
     SinkCase c;
     c.shape.dtype = DataType::FLOAT;

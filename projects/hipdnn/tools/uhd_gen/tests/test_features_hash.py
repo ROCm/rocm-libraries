@@ -208,3 +208,74 @@ def test_reference_collection_preserves_generic_and_categorical_dependencies():
         "$attention.dims[2]",
         "$device.cu_count",
     ]
+
+
+def _counting_evaluator(monkeypatch, bound, digests=None):
+    """Stands in for hipdnn_uhd_features: refuses a request over `bound` bytes as the binary
+    does, answers each row's `n`, and records every request's rows."""
+    requests = []
+
+    def send(text, executable, mode=None):
+        if len(text.encode("utf-8")) > bound:
+            raise ValueError("Feature request exceeds the bound")
+        rows = features.json.loads(text)["rows"]
+        requests.append(rows)
+        digest = digests[len(requests) - 1] if digests else "sha256:0123456789abcdef"
+        return {
+            "features_hash": digest,
+            "feature_semantics_revision": 1,
+            "values": [[row["n"]] for row in rows],
+        }
+
+    monkeypatch.setattr(features, "MAX_REQUEST_BYTES", bound)
+    monkeypatch.setattr(features, "_send_to_evaluator", send)
+    return requests
+
+
+def test_rows_past_the_evaluator_bound_go_in_order_in_requests_within_it(monkeypatch):
+    requests = _counting_evaluator(monkeypatch, 400)
+    # Non-ASCII category values: the bound is in UTF-8 bytes, not characters.
+    rows = [{"n": index, "kind": "é" * 10} for index in range(40)]
+    digest, values = features.evaluate_feature_maps(rows, ["$n"])
+    assert len(requests) > 1
+    assert [row for request in requests for row in request] == rows
+    assert values == [[index] for index in range(40)]
+    assert digest == "sha256:0123456789abcdef"
+
+
+def test_no_rows_still_asks_the_evaluator_once_for_the_digest(monkeypatch):
+    requests = _counting_evaluator(monkeypatch, 400)
+    assert features.evaluate_feature_maps([], ["$n"]) == ("sha256:0123456789abcdef", [])
+    assert requests == [[]]
+
+
+def test_requests_of_one_signature_must_agree_on_the_digest(monkeypatch):
+    _counting_evaluator(
+        monkeypatch, 200, digests=["sha256:0123456789abcdef", "sha256:fedcba9876543210"]
+    )
+    rows = [{"n": index, "pad": "x" * 40} for index in range(10)]
+    with pytest.raises(ValueError, match="different features_hash"):
+        features.evaluate_feature_maps(rows, ["$n"])
+
+
+def test_a_row_alone_past_the_bound_is_refused_before_any_request(monkeypatch):
+    requests = _counting_evaluator(monkeypatch, 200)
+    with pytest.raises(ValueError, match="feature row 1 alone exceeds"):
+        features.evaluate_feature_maps([{"n": 0}, {"n": 1, "pad": "x" * 400}], ["$n"])
+    assert requests == []
+
+
+def test_the_evaluator_answers_split_requests_as_it_answers_one(monkeypatch, evaluator):
+    signature = ["$q.batch", {"log2": ["$q.batch"]}]
+    rows = [{"q.batch": batch} for batch in range(1, 65)]
+    whole = features.evaluate_feature_maps(rows, signature, None, evaluator)
+    monkeypatch.setattr(features, "MAX_REQUEST_BYTES", 300)
+    sent = []
+    real_send = features._send_to_evaluator
+    monkeypatch.setattr(
+        features,
+        "_send_to_evaluator",
+        lambda text, *args: sent.append(text) or real_send(text, *args),
+    )
+    assert features.evaluate_feature_maps(rows, signature, None, evaluator) == whole
+    assert len(sent) > 1

@@ -99,7 +99,15 @@ public:
     {
         return setInput(InputNames::INDEX, value);
     }
-    /// @brief Set the dx output tensor (move)
+    /**
+     * @brief Set the dx output tensor (move)
+     *
+     * Unset dx dimensions are inferred per spatial dimension as
+     * (dy - 1) * stride - pre_padding - post_padding + window; an inferred extent below 1 is
+     * rejected with INVALID_VALUE. dx dimensions set by the caller are not checked against
+     * that formula, as cuDNN does not check a caller-set Y of its forward resample (cuDNN's
+     * frontend has no backward resample node).
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     ResampleBwdAttributes& set_dx(std::shared_ptr<TensorAttributes>&& value)
     {

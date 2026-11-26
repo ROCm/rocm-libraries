@@ -11,6 +11,12 @@
 
 #include <gmock/gmock.h>
 
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <string>
+#include <vector>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
@@ -524,7 +530,7 @@ TEST(TestConvolutionWgradNode, GatherHipdnnTensor)
     const GraphAttributes graphAttributes;
     const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(dwTensor) != allTensors.end());
@@ -1097,6 +1103,172 @@ TEST(TestConvolutionWgradNode, PreValidateGroupedConvInvalidInputChannels)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateZeroDwChannelIsRejected)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 0, 3, 3});
+    dwTensor->set_stride({9, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateZeroXChannelIsRejected)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    // 0 % 3 passes the divisibility check, so the group count would be 0
+    xTensor->set_dim({1, 0, 32, 32});
+    xTensor->set_stride({1024, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateZeroDyChannelIsRejected)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 0, 32, 32});
+    dyTensor->set_stride({1024, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    // dw output channels match dy; 0 % groups passes the group divisibility check
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({0, 64, 3, 3});
+    dwTensor->set_stride({576, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNegativeDwChannelIsRejected)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 63, 32, 32});
+    dyTensor->set_stride({64512, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({63, -1, 3, 3});
+    dwTensor->set_stride({9, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    // Pins the dw input-channel positivity check (ConvolutionWgradNode.hpp): a negative
+    // channel count, not just zero, must be rejected before the group arithmetic below it.
+    EXPECT_NE(error.err_msg.find("dw tensor input channels (-1) must be positive"),
+              std::string::npos)
+        << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNegativeXChannelIsRejected)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, -3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    // Pins the x channel positivity check (ConvolutionWgradNode.hpp): a negative channel
+    // count, not just zero, must be rejected before the group arithmetic below it.
+    EXPECT_NE(error.err_msg.find("x tensor channels (-3) must be positive"), std::string::npos)
+        << error.err_msg;
 }
 
 TEST(TestConvolutionWgradNode, InferGroupedConvStrideInferenceNchwLayout)
@@ -2018,6 +2190,76 @@ TEST(TestConvolutionWgradNode, PreValidateNodeInputTooSmall)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+namespace
+{
+constexpr int64_t K_INT64_MAX = std::numeric_limits<int64_t>::max();
+// dilation * 4 wraps to 4 in two's complement
+constexpr int64_t K_WRAPPING_DILATION = (int64_t{1} << 62) + 1;
+
+// Wgrad node with x {1, 3, 8, 8}, stride 1 and the same padding before and after each spatial
+// dimension.
+ConvolutionWgradNode makeShapeOverflowWgradNode(const std::vector<int64_t>& dwDims,
+                                                const std::vector<int64_t>& dyDims,
+                                                const std::vector<int64_t>& padding,
+                                                const std::vector<int64_t>& dilation)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    xTensor->set_stride({192, 64, 8, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim(dyDims);
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim(dwDims);
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding(padding);
+    convAttributes.set_post_padding(padding);
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation(dilation);
+
+    return {std::move(convAttributes), GraphAttributes{}};
+}
+} // namespace
+
+TEST(TestConvolutionWgradNode, PreValidateNodeRejectsPaddingOverflow)
+{
+    // dy matches the extent the wrapped numerator 8 + max + max - 3 = 3 would produce
+    const auto node
+        = makeShapeOverflowWgradNode({64, 3, 3, 3}, {1, 64, 4, 6}, {K_INT64_MAX, 0}, {1, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeRejectsDilationOverflow)
+{
+    const auto node = makeShapeOverflowWgradNode(
+        {64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {K_WRAPPING_DILATION, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeLargeDilationKeepsInputTooSmallError)
+{
+    // The dilated kernel size fits int64, so the input-too-small check reports it
+    const auto node
+        = makeShapeOverflowWgradNode({64, 3, 5, 5}, {1, 64, 4, 4}, {0, 0}, {int64_t{1} << 40, 1});
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("is too small"), std::string::npos) << error.err_msg;
+    EXPECT_EQ(error.err_msg.find("overflows"), std::string::npos) << error.err_msg;
 }
 
 // =============================================================================

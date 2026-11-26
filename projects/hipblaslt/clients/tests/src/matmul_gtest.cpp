@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "hipBuffer.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
@@ -866,6 +867,21 @@ namespace
         EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
     }
 
+    // A pinned host allocation far beyond any host, checked as a test checks its buffers after the
+    // memory preflight let its case run.
+    void check_impossible_host_allocation()
+    {
+        HipHostBuffer impossible(HIP_R_8I, size_t(1) << 60);
+        CHECK_HOST_ALLOCATION(host_allocation_failure(impossible));
+    }
+
+    TEST(MatmulMemory_pre_checkin, failed_allocation_fails_a_pre_checkin_test_by_default)
+    {
+        ScopedVariable unset("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", nullptr);
+        EXPECT_FATAL_FAILURE(check_impossible_host_allocation(),
+                             MEMORY_SHORTAGE_STRING "could not allocate");
+    }
+
     // A pointer-array f16 GEMM whose batches start at the given element offsets, as in the
     // matmul_batch_offset cases.
     Arguments batch_offset_case(int64_t offset_a, int64_t offset_b, int64_t offset_c)
@@ -927,6 +943,28 @@ namespace
             GTEST_SKIP() << "the grouped GEMM cases do not run on this architecture";
         ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
         testing_matmul(grouped_unit_check_case());
+        EXPECT_FALSE(IsSkipped());
+    }
+
+    TEST(MatmulMemory_pre_checkin, grouped_unit_check_case_runs_without_a_memory_stop)
+    {
+        // A grouped case allocates and checks its host buffers once per gemm, so a check that
+        // misreads an earlier gemm's buffer stops the case for memory. The case needs well under
+        // 1 MiB, so any memory stop is a bug, and HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP fails it.
+        const int arch = hipblaslt_get_arch();
+        if(arch / 100 == 11 || (arch / 100 == 12 && arch / 10 % 10 != 5))
+            GTEST_SKIP() << "no grouped GEMM kernels for gfx" << arch;
+        Arguments arg    = unit_check_case(127, 129, 127, HIP_R_16F);
+        arg.grouped_gemm = 2;
+        arg.M[1]         = 129;
+        arg.N[1]         = 127;
+        arg.K[1]         = 129;
+        arg.lda[1]       = arg.M[1];
+        arg.ldb[1]       = arg.K[1];
+        arg.ldc[1] = arg.ldd[1] = arg.M[1];
+        arg.beta                = 2;
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        testing_matmul(arg);
         EXPECT_FALSE(IsSkipped());
     }
 
