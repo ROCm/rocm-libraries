@@ -27,27 +27,39 @@ bias. A batch-split kernel passes the whole bias to every chunk.
 
 ## Artifact
 
-The KDPs are not in this tree yet: they come from rocKE's bias catalog. A KDP is a list of
-rocKE specs that the build compiles at pack time from this tree's `rocke/`, so the build makes
-the kernels itself once the KDPs exist; like the unfused engine's, they belong in a DVC folder
-`artifacts/` (layout in `../../README.md`, "Large rocKE files live in
-DVC"). Until it is added, the bundle carries no kernel, gfx950 ships no kernel of the engine, and
-its integration check (`src/CMakeLists.txt`) is not registered; the build is unaffected. To add
-it, from `projects/hipdnn/tools/IngestorGenerator`:
+The KDPs are rocKE's bias catalog: the bias twin of every implicit-GEMM instance of the
+unfused engine's catalog, 89 per dtype in 12 packs (`<dtype>_{mem,compv3,compv4}_{plain,unroll}`).
+The direct and split-C instances have no bias twin yet: the packaging adapter
+(`gfx950_conv_fwd_aot_spec_for_identity`) refuses them by family (`AOT_BIAS_FAMILIES` in
+`rocke/library/builders/common/convolution_forward.py`), and `enumerate_conv_aot_instances.py
+--bias` reports and leaves them out. A KDP is a list of rocKE specs (`bias` = 1) that the build
+compiles at pack time from this tree's `rocke/`, so the build makes the kernels itself.
+Like the unfused engine's, the KDPs are in DVC: `artifacts/`, tracked by `artifacts.dvc`
+(layout in `../../README.md`, "Large rocKE files live in DVC"); fetch them with
+`dvc pull -r ingestor artifacts.dvc` from this folder. Without them the bundle carries no
+kernel, gfx950 ships no kernel of the engine, and its integration check
+(`src/CMakeLists.txt`) and census (`TestGfx950ConvFwdBiasAotPacks`) are not registered; the
+build is unaffected.
 
-1. `python tools/enumerate_conv_aot_instances.py --bias --rocke-root "$ROCKE"` writes the bias
-   catalog lists `configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json`: the forward
-   catalog's instances with rocKE's `bias` set, those whose bias twin the packaging adapter
-   (`gfx950_conv_fwd_aot_spec_for_identity`) packages. It needs a rocKE whose AOT forward spec
-   carries `bias`; until then every twin is refused and nothing is written.
+To regenerate it, from `projects/hipdnn/tools/IngestorGenerator` (environment as in
+`docs/gfx950_conv_fwd/aot_instances.md`, "Regenerating the bundle"):
+
+1. `python tools/enumerate_conv_aot_instances.py --bias --rocke-root "$ROCKE" --output-dir configs`
+   writes the bias catalog lists `configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json`:
+   the forward catalog's instances with rocKE's `bias` set (rocKE's AOT bias axis,
+   `aot_jobs.fwd_bias_twin`), those whose bias twin the packaging adapter packages.
 2. `python tools/make_conv_aot_config.py --bias --rocke-root "$ROCKE" --instances
    configs/gfx950_conv_fwd_bias_aot_{fp16,bf16}.instances.json --output "$WORK"/bias.yaml`
-3. `python generate.py --config "$WORK"/bias.yaml --output-dir "$GENERATED" --force`, then
-   `python tools/make_conv_aot_config.py --bias --stabilize-ids "$GENERATED"/<...>/*.kdp.json`.
-4. Keep this folder's document ids (UED, KMD, UDDs, UMD, UHD), so the KDPs name them: replace the
-   generated ones by these or pass them as prior ids. Move the KDPs into `artifacts/`, add
-   `/artifacts` to a `.gitignore` here, `dvc add artifacts`, append `remote: ingestor` to
-   `artifacts.dvc`, and `dvc push -r ingestor`.
+3. `python generate.py --config "$WORK"/bias.yaml --output-dir "$GENERATED" --force`
+   (`--new-ids` while this folder holds no KDP: the generator reuses kernel ids only from an
+   installed bundle that has them).
+4. Keep this folder's document ids (UED, KMD, UDDs, UMD, UHD) and the UED and UMD
+   themselves: rewrite the generated ids in the KDPs to these, move the KDPs into
+   `artifacts/`, then `python tools/make_conv_aot_config.py --bias --stabilize-ids
+   artifacts/*.kdp.json`. Copy the generated census
+   `tests/TestGfx950ConvFwdBiasAotPacks.cpp` to
+   `src/tests/engines/kernel_ingestor_engine/packs/` and `clang-format` it.
+5. `dvc add artifacts`, keep `remote: ingestor` in `artifacts.dvc`, and `dvc push -r ingestor`.
 
 The UED ranks with the native fallback score only (`hipkernel.gfx950_conv_fwd_bias_aot.score`,
 the unfused engine's order); no trained ranker exists for it.

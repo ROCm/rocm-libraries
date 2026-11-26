@@ -720,6 +720,33 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # Census for hipkernel:Gfx950ConvFwdBiasAot, the forward AOT catalog's bias twins. Its
+    # kernel bundle is DVC content (descriptors/rocKE/gfx950_conv_fwd_bias_aot/artifacts).
+    hkp_product_ships_engine_for_arch(_hkp_gfx950_conv_fwd_bias_aot
+                                      "hipkernel:Gfx950ConvFwdBiasAot" gfx950)
+    if(_hkp_gfx950_conv_fwd_bias_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdBiasAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwdBiasAot for "
+            "gfx950, so its census is not registered.")
+    endif()
+
     # Census for hipkernel:Gfx950ConvFwdAotSeed, the test-only seed catalog the
     # integration root carries. It reads that root's own shard, which this binary
     # otherwise never loads, so it also needs that pack built.
