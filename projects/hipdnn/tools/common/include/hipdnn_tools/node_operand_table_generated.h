@@ -36,7 +36,7 @@ struct OperandEntry
 
 /// Every operand of every node type, in schema order. Regenerated with the visitor,
 /// so a field joins it when the schema gains it.
-inline constexpr std::array<OperandEntry, 273> OPERANDS{{
+inline constexpr std::array<OperandEntry, 279> OPERANDS{{
     {"BatchnormInferenceAttributes", "x", OperandKind::TENSOR, false},
     {"BatchnormInferenceAttributes", "mean", OperandKind::TENSOR, false},
     {"BatchnormInferenceAttributes", "inv_variance", OperandKind::TENSOR, false},
@@ -209,6 +209,12 @@ inline constexpr std::array<OperandEntry, 273> OPERANDS{{
     {"SdpaBackwardAttributes", "left_bound", OperandKind::SCALAR, true},
     {"SdpaBackwardAttributes", "right_bound", OperandKind::SCALAR, true},
     {"SdpaBackwardAttributes", "diagonal_alignment", OperandKind::SCALAR, false},
+    {"SdpaBackwardAttributes", "sink_token", OperandKind::TENSOR, true},
+    {"SdpaBackwardAttributes", "dsink_token", OperandKind::TENSOR, true},
+    {"SdpaBackwardAttributes", "rng_dump", OperandKind::TENSOR, true},
+    {"SdpaBackwardAttributes", "is_deterministic_algorithm", OperandKind::SCALAR, false},
+    {"SdpaBackwardAttributes", "max_total_seq_len_q", OperandKind::SCALAR, true},
+    {"SdpaBackwardAttributes", "max_total_seq_len_kv", OperandKind::SCALAR, true},
     {"CustomOpAttributes", "input", OperandKind::TENSORS, true},
     {"CustomOpAttributes", "output", OperandKind::TENSORS, true},
     {"RMSNormBackwardAttributes", "dy", OperandKind::TENSOR, false},
