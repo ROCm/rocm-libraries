@@ -29,7 +29,9 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-TEST(CPU_test_errors_NONE, test_try)
+using CPU_test_errors_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_test_errors_NONE, test_try)
 {
     EXPECT_EQ(miopen::try_([] {}), miopenStatusSuccess);
     EXPECT_EQ(miopen::try_([] { MIOPEN_THROW(miopenStatusInternalError); }),
@@ -42,7 +44,7 @@ TEST(CPU_test_errors_NONE, test_try)
 #define X_STATUS_PAIR(status) \
     std::pair { status, #status }
 
-TEST(CPU_test_errors_NONE, test_error_string)
+TEST_P(CPU_test_errors_NONE, test_error_string)
 {
     for(auto&& [status, message] : {X_STATUS_PAIR(miopenStatusSuccess),
                                     X_STATUS_PAIR(miopenStatusNotInitialized),
@@ -60,7 +62,7 @@ TEST(CPU_test_errors_NONE, test_error_string)
     }
 }
 
-TEST(CPU_test_errors_NONE, test_miopen_throw)
+TEST_P(CPU_test_errors_NONE, test_miopen_throw)
 {
     const std::string err_msg1{"test error message"};
     const std::string err_msg2{"another error message"};
@@ -119,7 +121,7 @@ TEST(CPU_test_errors_NONE, test_miopen_throw)
         miopen::Exception);
 }
 
-TEST(CPU_test_errors_NONE, test_miopen_throw_if)
+TEST_P(CPU_test_errors_NONE, test_miopen_throw_if)
 {
     const std::string err_msg1{"test error message"};
     const std::string err_msg2{"another error message"};
@@ -181,7 +183,7 @@ TEST(CPU_test_errors_NONE, test_miopen_throw_if)
         miopen::Exception);
 }
 
-TEST(CPU_test_errors_NONE, test_exception_setcontext_directly)
+TEST_P(CPU_test_errors_NONE, test_exception_setcontext_directly)
 {
     const std::string test_file         = "test_file.cpp";
     const int test_line                 = 123;
@@ -196,3 +198,5 @@ TEST(CPU_test_errors_NONE, test_exception_setcontext_directly)
     EXPECT_EQ(ex.message, expected_message);
     EXPECT_EQ(ex.status, miopenStatusBadParm);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_test_errors_NONE, testing::Values(0));

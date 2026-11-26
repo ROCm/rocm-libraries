@@ -4,7 +4,7 @@ Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 
-## (Unreleased) hipSPARSE
+## (Unreleased) hipSPARSE 4.9.0
 
 ### Changed
 * Build dependency and test-data handling has changed:

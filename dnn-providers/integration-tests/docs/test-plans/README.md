@@ -20,6 +20,7 @@ edit the plan and the generator, not the bundles.
 |---|---|
 | [Convolution forward](convolution-fwd.md) | `ConvolutionFwd/Default`, `ConvolutionFwdPointwise/Default`, `ConvolutionFwdPointwise/Variant2` … `Variant6` (written by `reference-data-scripts/generate_conv_fwd_bundles.py`) |
 | [SDPA backward](sdpa-bwd.md) | `SdpaBackward/<Topology>` (written by `reference-data-scripts/generate_sdpa_bwd_bundles.py`) |
+| [SDPA forward](sdpa-fwd.md) | `SdpaFwdPlan/<Topology>` (made from `test-plans/sdpa-fwd/model.yaml` and `rules.yaml`; imported by `migration-scripts/import_graph.py`) |
 
 The generators are described in the
 [reference data scripts README](../../reference-data-scripts/README.md).

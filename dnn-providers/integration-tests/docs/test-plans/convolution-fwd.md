@@ -445,6 +445,28 @@ Non-dense strides are F16. The extreme int32-index case is X3.
 | X3 | N 1, C = K 1, 46341², filter 1 (y has 2,147,488,281 elements > 2³¹); fp16 and bf16 | F18 |
 | X4 | C 2048 → K 64, 14², 3×3 (accumulation 18,432) | F23 |
 
+### 3.6 Layout and stride edges (E)
+
+Strides that real models produce and that sit on the edge of what an engine can
+serve. E1–E6 differ from a uniform layout only on extent-1 dimensions; E7–E12
+slice the channels of real-size tensors; E13 and E14 mix layouts that agree only
+once the strides of extent-1 dimensions are ignored. Each shape runs once per
+core data type, in nightly. They are probes (F15 or F16).
+
+| Id | Shape | Feature | Source |
+|---|---|---|---|
+| E1, E2 | 2D, N 8, 1², 1×1, C 256 → K 64 and C 64 → K 256 | F15 x, w channels-first, y channels-last | squeeze-excitation 1×1 in a channels-first model: PyTorch allocates the output channels-last for an `[N, C, 1, 1]` input |
+| E3 | 3D, N 4, 1³, 1×1×1, C 128 → K 32 | F15 as E1 | as E1, 3D |
+| E4 | 1D, N 8, length 1, filter 1, C 256 → K 64 | F15 as E1 | as E1, 1D |
+| E5 | 2D, N 1, C = K 64, 80², 3×3, p1 | F16 `chan`, channels-first | batch-1 channel slice (YOLO-style split) |
+| E6 | 3D, N 1, C = K 32, 8×16², 3×3×3, p1 | F16 `chan`, channels-first | as E5, 3D |
+| E7, E8 | 2D, N 8, C = K 64, 56², 3×3, p1 | F16 `chan`, channels-first and channels-last | channel slice at real size |
+| E9, E10 | as E7, G 64 (depthwise) | F16 `chan`, channels-first and channels-last | depthwise convolution on a channel slice |
+| E11 | as E7, G 2 | F16 `chan`, channels-first | grouped convolution on a channel slice |
+| E12 | 3D, N 2, C = K 32, 8×28², 3×3×3, p1 | F16 `chan`, channels-last | 3D channels-last channel slice |
+| E13 | 2D, N 8, 1², 3×3, p1, C = K = G 256 | F15 as E1 | depthwise convolution on an `[N, C, 1, 1]` input |
+| E14 | 2D, N 8, C 1 → K 32, 28², 3×3 | F15 as E1 | single-channel image input: PyTorch allocates the output channels-last for a C 1 input |
+
 ---
 
 ## 4. Building the sweep
@@ -478,7 +500,7 @@ that holds its graph; the levels cascade.
 | Geometry classes S24–S62 | — | each class × rank once | × every pair of its rank; L24–L62 × 2 pairs | L24–L62 × every pair; no fused or feature crossing (T12 for S24–S46; S47–S62 are never put in the fused and feature rotations) |
 | Rejection probes | `CONVOLUTION`, asymmetric pad (S18), fp8, double | `CONVOLUTION` per rank; 6 extra types; 5 mixed pairs | × core | asymmetric padding, mixed layouts, strides and mixed types × every S shape; `CONVOLUTION`, extra types and override shape stay at nightly's × core (T11) |
 | F13 `conv_mode` | S3 | 1 per rank | × core (rank × layout × dtype) | — (T11) |
-| F15–F16 layout, strides | — | 1 case each | rank × dtype, 2 mixes and 3 stride kinds | paired with every S shape |
+| F15–F16 layout, strides | — | 1 case each | rank × dtype, 2 mixes and 3 stride kinds; E1–E14 × every core dtype (§3.6) | paired with every S shape |
 | F19–F20 types | fp8 e4m3, double | each extra type and mixed pair once | × rank × layout | F20 paired with every S shape; F19 — (T11) |
 | F21 values | uniform | + zero, const, large | + tiny, × rank × dtype; A1, A2 (long accumulation) | × core; paired with every S shape; X4 |
 | F35 | — | 1 case | × rank × dtype | — (T11) |
@@ -498,11 +520,11 @@ Cases generated (own level / cumulative):
 |---|---|---|---|---|---|---|---|
 | quick | 40 | 133 | **173** | 173 | 83 | 90 | 0 |
 | PR | 193 | 172 | **365** | 538 | 179 | 186 | 0 |
-| nightly | 1,334 | 1,020 | **2,354** | 2,892 | 1,260 | 1,092 | 2 |
-| full | 965 | 909 | **1,874** | 4,766 | 1,254 | 620 | 0 |
+| nightly | 1,376 | 1,020 | **2,396** | 2,934 | 1,260 | 1,134 | 2 |
+| full | 965 | 909 | **1,874** | 4,808 | 1,254 | 620 | 0 |
 
 By size class: quick S 173. PR S 314, H 18, M 3, R 30. Nightly S 1,613, L 385,
-M 122, H 162, A 12, R 60. Full S 976, L 831, R 47, X 20. 541 distinct conv
+M 122, H 162, A 12, E 42, R 60. Full S 976, L 831, R 47, X 20. 552 distinct conv
 geometries in all. The trims T8, T9, T11 and T12 (§4.3) remove 3,798 of the
 generated synthetic cases, 879 duplicate graphs are merged into the case that
 holds the same graph, and the R set adds 137. Counts are those of the generator;

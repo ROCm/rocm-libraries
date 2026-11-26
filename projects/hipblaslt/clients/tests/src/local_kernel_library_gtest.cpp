@@ -842,6 +842,27 @@ TEST(LocalKernelMaster, smoke_ResolveLocalIndex)
     EXPECT_EQ(f.master.resolveSolutionByIndex(local->index + 1), nullptr);
 }
 
+// A local kernel is never recorded in resolvedSolutions, so every call returns
+// it through `owner`.
+TEST(LocalKernelMaster, smoke_SolutionForCallOwnsLocalIndex)
+{
+    auto          problem = makeProblem();
+    auto          gpu     = makeGpu();
+    MasterFixture f(problem);
+    auto          local = f.registerAndMap(problem);
+
+    local->requiredHostWorkspaceSizePerProblem = 0;
+
+    for(int call = 0; call < 2; call++)
+    {
+        SolutionPtr owner;
+        EXPECT_EQ(f.master.getSolutionByIndexForCall(problem, gpu, local->index, owner),
+                  local.get());
+        EXPECT_EQ(owner, local);
+    }
+    EXPECT_EQ(f.master.resolvedSolutions.find(local->index), nullptr);
+}
+
 // The index-based calls, hipblasLtMatmul among them, find a local kernel only on
 // the processor it is pinned to, as selection does.
 TEST(LocalKernelMaster, smoke_IndexServesOnlyItsProcessor)

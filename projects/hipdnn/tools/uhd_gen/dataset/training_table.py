@@ -169,7 +169,8 @@ def best_per_shape(measured: list) -> tuple[list[int], int, dict[str, int]]:
     usable repeats were set aside, and how many rows were removed for each reason.
 
     A repeat under another engine binding is refused, not set aside, so a mix cannot hide.
-    The binding's `provider_build` is diagnostic: a rebuilt provider's measurement competes.
+    The binding's `provider_build` and `trained_against.codegen_revision` are diagnostic: a
+    rebuilt provider's measurement, or one from code objects another compiler built, competes.
     """
     from ..immediate import binding_identity
 

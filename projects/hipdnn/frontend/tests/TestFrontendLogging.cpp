@@ -166,3 +166,46 @@ TEST_F(TestFrontendLogging, SetLogLevelAffectsFrontendLogs)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "Error should pass"));
     EXPECT_EQ(recorder.getRecordedLogCount(), 1);
 }
+
+namespace
+{
+
+// The frontend appends the backend's reason after this separator, as for every backend failure.
+constexpr const char* K_BACKEND_ERROR_SEPARATOR = "Backend error: ";
+
+// The text after the backend error separator, or an empty string if there is none.
+std::string backendReason(const std::string& message)
+{
+    const auto pos = message.find(K_BACKEND_ERROR_SEPARATOR);
+    if(pos == std::string::npos)
+    {
+        return {};
+    }
+    return message.substr(pos + std::string(K_BACKEND_ERROR_SEPARATOR).size());
+}
+
+} // namespace
+
+// Test: a level the backend rejects reports the backend's reason and changes no level
+TEST_F(TestFrontendLogging, RejectedLogLevelReportsReasonAndKeepsLevel)
+{
+    ASSERT_EQ(setGlobalLogLevel(HIPDNN_SEV_WARN).code, ErrorCode::OK);
+
+    auto error = setGlobalLogLevel(static_cast<hipdnnSeverity_t>(999));
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_FALSE(backendReason(error.get_message()).empty()) << error.get_message();
+
+    EXPECT_EQ(hipdnn_data_sdk::logging::getLogLevel(), HIPDNN_SEV_WARN);
+    hipdnnSeverity_t backendLevel = HIPDNN_SEV_OFF;
+    ASSERT_EQ(getGlobalLogLevel(backendLevel).code, ErrorCode::OK);
+    EXPECT_EQ(backendLevel, HIPDNN_SEV_WARN);
+}
+
+// Test: a callback the backend rejects reports the backend's reason
+TEST_F(TestFrontendLogging, RejectedUserLogCallbackReportsReason)
+{
+    int token = 0;
+    auto error = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::SYNC, &token);
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_FALSE(backendReason(error.get_message()).empty()) << error.get_message();
+}
