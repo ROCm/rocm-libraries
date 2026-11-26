@@ -259,6 +259,19 @@ that the census shows **`aot>0`** (it routed, not fell back) *and* the result ma
 native within the dtype tolerance, across the newly translated paths (N-D linear, grouped
 conv, `'same'` padding, causal SDPA on permuted views, multi-axis LayerNorm/RMSNorm).
 
+Alongside `test_gates.py` and `test_parity.py`, the suite also has: `tests/test_census.py`
+and `tests/test_sdpa_route.py`, CPU-only like `test_gates.py`; `tests/test_sdpa_bwd_parity.py`,
+`tests/test_sdpa_bwd_hf.py`, `tests/test_sdpa_autocast.py` and `tests/test_training_gate.py`,
+GPU-only like `test_parity.py`; and the subprocess helper `tests/_sdpa_bwd_subproc.py` (not
+collected directly — the GPU parity tests launch it with `sys.executable`). The GPU
+backward tests read two environment variables to know which build-state expectation to
+assert, since the test process can't otherwise tell which provider build is loaded:
+
+| Variable | Values | Meaning |
+|----------|--------|---------|
+| `HIPDNN_TORCH_TEST_FLYDSL` | `on` / `off` | Whether the kernel-ingestor engine (FlyDSL) is loaded. Only FlyDSL serves dropout, so a test that needs a served dropout call skips cleanly unless this is `on`. |
+| `HIPDNN_TORCH_TEST_16337` | `in` / `out` | Whether hip-kernel-provider#16337 (ASM backward at gfx950 D=64/192) is in the build; only the D=64 cases depend on it. |
+
 **(c) The census is the proof-of-hipDNN + the fallback ledger.** Every routed call
 increments an `aot` counter keyed by shape; every fallback increments `native` **with a
 reason**. `native=0` across the board means nothing silently reverted to PyTorch:

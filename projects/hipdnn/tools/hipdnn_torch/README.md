@@ -106,7 +106,14 @@ hipdnn_torch/
 └── tests/
     ├── conftest.py            # gpu marker + auto-skip when provider_ready() is False
     ├── test_gates.py          # pure-CPU: native-routing stops + the pure translation helpers
-    └── test_parity.py         # gpu: each op routes (aot>0) and matches native within tol
+    ├── test_census.py         # pure-CPU: census rows/totals, note_aot engine names, stream binding
+    ├── test_sdpa_route.py     # pure-CPU: SDPA routing decisions, dropout RNG helpers, autocast cast selection, graph declarations
+    ├── test_parity.py         # gpu: each op routes (aot>0) and matches native within tol
+    ├── test_sdpa_bwd_parity.py # gpu: SDPA backward parity, dropout, checkpointing, streams, benchmarking, fallbacks
+    ├── test_sdpa_bwd_hf.py    # gpu: SDPA backward through real Hugging Face attention layers
+    ├── test_sdpa_autocast.py  # gpu: SDPA backward under torch.autocast
+    ├── test_training_gate.py  # gpu: training under the default install()
+    └── _sdpa_bwd_subproc.py   # subprocess helper for the SDPA backward cases that need a fresh process
 ```
 
 ## Quick start

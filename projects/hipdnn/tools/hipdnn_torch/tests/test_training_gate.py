@@ -1,8 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""GPU case (m): a training step under default ``install()`` (ALMIOPEN-2978).
-Marked ``gpu`` and auto-skipped by ``conftest.py`` unless a wired provider +
+"""A training step under default ``install()`` (ALMIOPEN-2978). Marked
+``gpu`` and auto-skipped by ``conftest.py`` unless a wired provider +
 HIP device is present.
 
 ``OpOverride._grad_stop`` makes the five non-SDPA ops (linear, conv,
@@ -25,7 +25,7 @@ def torch():
 
 
 def test_training_step_default_install_stops_other_ops_routes_sdpa(torch):
-    """(m) Under default ``install()``: linear and an activation (silu) must
+    """Under default ``install()``: linear and an activation (silu) must
     each stop with the gate's exact reason whenever grad is enabled and an
     operand requires grad; SDPA is exempt and must still route; and the
     resulting grads must match an identical native training step end to
@@ -94,7 +94,7 @@ def test_training_step_default_install_stops_other_ops_routes_sdpa(torch):
 
 
 def test_training_step_no_grad_nothing_stops(torch):
-    """(m) Under ``torch.no_grad()`` nothing requires backward, so the gate
+    """Under ``torch.no_grad()`` nothing requires backward, so the gate
     must not fire for a non-SDPA op even when its weight itself requires
     grad (an ordinary model parameter): the gate's predicate is ``grad
     enabled AND operand requires grad``, and grad mode is what no_grad turns

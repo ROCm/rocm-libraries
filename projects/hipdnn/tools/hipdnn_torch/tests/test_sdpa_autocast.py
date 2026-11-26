@@ -1,9 +1,10 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""GPU cases (g) and (g2): SDPA backward under ``torch.autocast`` (ALMIOPEN
--2978). Marked ``gpu`` and auto-skipped by ``conftest.py`` unless a wired
-provider + HIP device is present.
+"""SDPA backward under ``torch.autocast`` (ALMIOPEN-2978): fp32 inputs, and
+inputs mixed across dtypes, under bf16 autocast. Marked ``gpu`` and
+auto-skipped by ``conftest.py`` unless a wired provider + HIP device is
+present.
 
 Under CUDA autocast, the override casts every CUDA floating tensor argument
 (q, k, v, a float ``attn_mask``) that is not fp64 and not already the
@@ -82,10 +83,10 @@ def torch():
 
 
 # --------------------------------------------------------------------------- #
-# (g) fp32 inputs under autocast                                               #
+# Fp32 inputs under autocast                                               #
 # --------------------------------------------------------------------------- #
 def test_fp32_inputs_under_autocast_census_dtype_is_autocast_dtype(torch):
-    """(g) fp32 inputs under ``torch.autocast("cuda", dtype=bf16)``: the
+    """Fp32 inputs under ``torch.autocast("cuda", dtype=bf16)``: the
     census key's dtype is the AUTOCAST dtype (bf16), not the caller's fp32,
     and grads come back in the input dtype (fp32, the differentiable
     ``.to`` the cast uses). MHA, D=128, no mask, p=0: an unmasked shape
@@ -118,10 +119,10 @@ def test_fp32_inputs_under_autocast_census_dtype_is_autocast_dtype(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (g2) mixed-dtype autocast input                                             #
+# Mixed-dtype autocast input                                             #
 # --------------------------------------------------------------------------- #
 def test_mixed_dtype_autocast_input_casts_per_tensor(torch):
-    """(g2) q, k fp32 and v bf16 under bf16 autocast: the cast is decided
+    """Q, k fp32 and v bf16 under bf16 autocast: the cast is decided
     PER TENSOR (a cast decided from q alone would be the bug this catches)
     -- census dtype bf16, a served grad row and a served bwd row, dq/dk
     fp32, dv bf16, and all three grads equal native autocast SDPA's. MHA,
@@ -163,7 +164,7 @@ def test_mixed_dtype_autocast_input_casts_per_tensor(torch):
 
 
 def test_mixed_dtype_autocast_real_qwen3_layer(torch):
-    """(g2) A real Qwen3 attention layer with fp32 parameters under bf16
+    """A real Qwen3 attention layer with fp32 parameters under bf16
     autocast: rotary cos/sin promote q, k to fp32 while v stays bf16 -- the
     same per-tensor cast must apply end to end, reaching a served bwd row.
     The layer is GQA (4:1), so a served backward needs the kernel ingestor

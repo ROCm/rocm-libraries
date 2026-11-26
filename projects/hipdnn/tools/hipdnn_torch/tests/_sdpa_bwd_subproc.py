@@ -1,18 +1,18 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Subprocess bodies for the GPU SDPA-backward cases that need a fresh process:
+"""Subprocess bodies for the GPU SDPA-backward scenarios that need a fresh process:
 
-  * case (l): the autograd worker-thread teardown hazard is only
-    observable by actually letting the interpreter tear down -- a foreground
-    ``pytest`` process never exercises that.
-  * case (o): ``HIPDNN_TORCH_SELECT=force`` must be set before the first
+  * autograd worker-thread teardown: the hazard is only observable by
+    actually letting the interpreter tear down -- a foreground ``pytest``
+    process never exercises that.
+  * force mode: ``HIPDNN_TORCH_SELECT=force`` must be set before the first
     ``bootstrap()`` call (``bootstrap.py`` reads it once and caches the
     result), so each force-mode scenario needs its own process.
-  * case (r): the benchmarking guard needs ``HIPDNN_FORCE_BENCHMARKING`` and
+  * benchmarking guard: needs ``HIPDNN_FORCE_BENCHMARKING`` and
     ``HIPDNN_CACHE_DIR`` set before bootstrap too, and a process-exclusive
     cache root.
-  * case (s): the mixed-engine-pair ``HIPDNN_HEUR_CONFIG_PATH`` rule is a
+  * mixed engine pair: the ``HIPDNN_HEUR_CONFIG_PATH`` rule is a
     process-global preference; isolating it in its own process keeps it from
     leaking into any other test's engine selection.
 
@@ -67,7 +67,7 @@ def _route_outcome(ov, sq, skv, d, dtype_tok):
 
 
 # --------------------------------------------------------------------------- #
-# case (l): autograd worker-thread teardown                                   #
+# Autograd worker-thread teardown                                             #
 # --------------------------------------------------------------------------- #
 def _run_backward():
     import torch
@@ -101,7 +101,7 @@ def _run_forward_only():
 
 
 # --------------------------------------------------------------------------- #
-# case (o): force mode                                                        #
+# Force mode                                                                  #
 # --------------------------------------------------------------------------- #
 def _run_force(engine, shape):
     os.environ["HIPDNN_TORCH_SELECT"] = "force"
@@ -134,7 +134,7 @@ def _run_force(engine, shape):
 
 
 # --------------------------------------------------------------------------- #
-# case (r): benchmarking guard                                               #
+# Benchmarking guard                                                          #
 # --------------------------------------------------------------------------- #
 def _run_benchmark_guard():
     import torch
@@ -190,7 +190,7 @@ def _run_benchmark_guard():
 
 
 # --------------------------------------------------------------------------- #
-# case (s): mixed engine pair                                                 #
+# Mixed engine pair                                                           #
 # --------------------------------------------------------------------------- #
 def _run_mixed_pair():
     """Force mode pins one engine for every graph of a call, so it

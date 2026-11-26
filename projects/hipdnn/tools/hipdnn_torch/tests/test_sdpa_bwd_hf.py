@@ -1,24 +1,32 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""GPU case (q): real transformers attention layers through SDPA backward
-(ALMIOPEN-2978). Skips cleanly (``pytest.importorskip``) when ``transformers``
-is not installed -- it is not a dependency of the GPU provider suite.
+"""Real transformers attention layers through SDPA backward (ALMIOPEN-2978).
+Skips cleanly (``pytest.importorskip``) when ``transformers`` is not
+installed -- it is not a dependency of the GPU provider suite.
 
 One layer each of Qwen3 (D=128, GQA 4:1), a Qwen2-family config at 14 query /
 2 kv heads / D=64 (GQA 7:1 -- the Qwen2.5-0.5B shape: hidden 896 = 14*64; no
-checkpoint is downloaded, only the layer's shape), OLMo-2 (D=128, MHA) and
-GPT-2 (D=64), each with ``use_cache=False``, ``use_cache=True`` and a padded
-``attention_mask``, dropout 0, ``attn_implementation="sdpa"`` (a bare Config
-otherwise defaults to eager -- ``AttentionInterface.get_interface(None, ...)``
-``HIPDNN_TORCH_TEST_FLYDSL=on`` (the kernel-ingestor engine serves every
-shape here: no GQA/D=64/bias restriction), or the exact decline reason when
-``=off`` (GQA and D=64-without-#16337 -> ``grad: bwd:``; any mask ->
-``grad: fwd+stats:``; unmasked OLMo-2, MHA D=128 -> served by ASM); grads
-match native autograd; the recorded q/k/v strides equal the layout class of
-that variant computed from the layer's config by the per-variant stride
-formulas below (not the small fixed shape they were measured at); a served
-``bwd`` row's engine is a name, not hex.
+checkpoint is downloaded, only the layer's shape), OLMo-2 (D=128, MHA),
+GPT-2 (D=64), and a synthetic single-KV-head (MQA) shape at D=128 that
+isolates a stride-0 coverage gap under a mask; each with
+``use_cache=False``, ``use_cache=True`` and a padded ``attention_mask``,
+dropout 0, ``attn_implementation="sdpa"`` (a bare Config otherwise defaults
+to eager -- ``AttentionInterface.get_interface(None, ...)`` never reaches
+SDPA).
+
+Per variant: with ``HIPDNN_TORCH_TEST_FLYDSL=on``, every variant is served
+except the MQA layer under a mask (``repeat_kv``'s stride-0 broadcast head
+axis, see ``test_padded_mask_matches_native``); with ``=off``, GQA, D=64
+(without #16337) and any masked variant go native with a reason starting
+``grad:``, while unmasked OLMo-2 (MHA, D=128) stays served. The
+``use_cache=True`` test checks the prefill and decode steps as two
+independent shapes: a decode-step Sq=1/Skv=S+1 call can decline even when
+the prefill of the same arch is served, since ASM's shape rules need not
+cover both. Grads always match native autograd; the recorded q/k/v strides
+equal the layout class of that variant, computed from the layer's config by
+the per-variant stride formulas below (not a small fixed shape they might
+be measured at); a served ``bwd`` row's engine is a name, not hex.
 """
 
 import contextlib
@@ -105,8 +113,8 @@ def _rope_identity(torch, b, s, head_dim, device):
     embedding module returns (``cos.to(dtype=x.dtype)``). A fp32 cos/sin
     would promote q, k to fp32 through ``apply_rotary_pos_emb`` while v
     stayed bf16, changing the census dtype and breaking SDPA's dtype
-    agreement outside autocast; this is NOT case (g2)'s deliberate
-    mixed-dtype scenario (test_sdpa_autocast.py), which runs under autocast
+    agreement outside autocast; this is NOT test_sdpa_autocast.py's deliberate
+    mixed-dtype scenario, which runs under autocast
     with fp32 model parameters instead."""
     cos = torch.ones(b, s, head_dim, device=device, dtype=torch.bfloat16)
     sin = torch.zeros(b, s, head_dim, device=device, dtype=torch.bfloat16)
@@ -163,6 +171,28 @@ def transformers():
 
 
 def _qwen3_layer(torch, transformers):
+    """8 query / 2 KV heads, head_dim 128 -- a real Qwen3 shape (GQA 4:1)."""
+    from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
+    from transformers.models.qwen3.modeling_qwen3 import Qwen3Attention
+
+    config = Qwen3Config(
+        hidden_size=1024,
+        num_attention_heads=8,
+        num_key_value_heads=2,
+        head_dim=128,
+        num_hidden_layers=1,
+        attn_implementation="sdpa",
+    )
+    layer = Qwen3Attention(config, layer_idx=0).to(device="cuda", dtype=torch.bfloat16)
+    return config, layer
+
+
+def _mqa_hkv1_layer(torch, transformers):
+    """4 query heads / 1 KV head, head_dim 128 -- a single-physical-KV-head
+    (MQA) shape: under a mask, ``repeat_kv`` broadcasts that one head across
+    all 4 query heads via a stride-0 head axis (see
+    ``test_padded_mask_matches_native``). No real checkpoint uses this
+    layer; it isolates the stride-0 coverage gap from the GQA shape above."""
     from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
     from transformers.models.qwen3.modeling_qwen3 import Qwen3Attention
 
@@ -224,10 +254,11 @@ def _gpt2_layer(torch, transformers):
 
 # name -> (builder, head_dim, hq, hkv); hq != hkv marks a GQA arch.
 _ARCHS = {
-    "qwen3": (_qwen3_layer, 128, 4, 1),
+    "qwen3": (_qwen3_layer, 128, 8, 2),
     "qwen25_0_5b": (_qwen25_0_5b_layer, 64, 14, 2),
     "olmo2": (_olmo2_layer, 128, 4, 4),
     "gpt2": (_gpt2_layer, 64, 8, 8),
+    "mqa_hkv1": (_mqa_hkv1_layer, 128, 4, 1),
 }
 
 
@@ -241,12 +272,12 @@ def _run_rope_layer(torch, layer, hidden, attention_mask, cache, head_dim):
 def _run_layer(torch, arch, layer, hidden, attention_mask, cache):
     if arch == "gpt2":
         return layer(hidden, cache=cache, attention_mask=attention_mask)
-    head_dim = {"qwen3": 128, "qwen25_0_5b": 64, "olmo2": 128}[arch]
+    head_dim = {"qwen3": 128, "qwen25_0_5b": 64, "olmo2": 128, "mqa_hkv1": 128}[arch]
     return _run_rope_layer(torch, layer, hidden, attention_mask, cache, head_dim)
 
 
 def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
-    """(q): with the kernel ingestor on, every variant here is served; with
+    """With the kernel ingestor on, every variant here is served; with
     it off only unmasked MHA D=128 (olmo2) is served (by a named engine,
     not necessarily ASM) -- GQA archs and D=64 without #16337 go native with
     a reason starting ``grad:`` (not necessarily at the bwd stage: the real
@@ -266,7 +297,7 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
     flydsl = _flydsl_state()
     if flydsl is None:
         pytest.skip(
-            "HIPDNN_TORCH_TEST_FLYDSL unset; case (q) states a build-specific "
+            "HIPDNN_TORCH_TEST_FLYDSL unset; this test states a build-specific "
             "census expectation per variant"
         )
 
@@ -291,7 +322,7 @@ def _assert_served_or_declined(ov, sq, skv, d, *, arch, masked):
         )
         assert any(r.startswith("grad: fwd+stats:") for r in reasons), reasons
         return None, None
-    if arch in ("qwen3", "qwen25_0_5b"):  # GQA: no engine serves it here
+    if arch in ("qwen3", "qwen25_0_5b", "mqa_hkv1"):  # GQA: no engine serves it here
         reasons = ov.fallback_reasons()
         assert aot == 0 and native > 0, (
             f"{arch} Sq={sq},Skv={skv}: expected native, got aot={aot} "
@@ -355,7 +386,7 @@ def _assert_served_or_any_grad_decline(ov, sq, skv, d, *, label):
 
 @pytest.mark.parametrize("arch", list(_ARCHS))
 def test_use_cache_false_no_mask_matches_native_and_layout(torch, transformers, arch):
-    """(q) ``use_cache=False``, no mask: q/k are the plain BSHD view of the
+    """``use_cache=False``, no mask: q/k are the plain BSHD view of the
     projection output (q BSHD `(S*Hq*D, D, Hq*D, 1)`, k/v BSHD
     `(S*Hkv*D, D, Hkv*D, 1)`; GPT-2's q/k/v are fused `c_attn` slices,
     `(S*3*Hq*D, D, 3*Hq*D, 1)`)."""
@@ -401,7 +432,7 @@ def test_use_cache_false_no_mask_matches_native_and_layout(torch, transformers, 
 
 @pytest.mark.parametrize("arch", list(_ARCHS))
 def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
-    """(q) ``use_cache=True``: a prefill then a 1-token decode step appends
+    """``use_cache=True``: a prefill then a 1-token decode step appends
     to a ``DynamicCache``, producing a mixed per-tensor layout -- k/v become
     contiguous BHSD (`Hkv*S*D, S*D, D, 1`) while q stays a fresh BSHD view
     at the decode step (mixed layouts are structurally accepted;
@@ -476,7 +507,7 @@ def test_use_cache_true_mixed_layout_matches_native(torch, transformers, arch):
 
 @pytest.mark.parametrize("arch", list(_ARCHS))
 def test_padded_mask_matches_native(torch, transformers, arch):
-    """(q) A padded ``attention_mask``: `repeat_kv`'s expanded-MHA path
+    """A padded ``attention_mask``: `repeat_kv`'s expanded-MHA path
     (``enable_gqa=False``, ``is_causal=False``, bias from the bool mask);
     declines ``grad: fwd+stats:`` with FlyDSL off (both ASM builders reject
     any bias). For an Hkv=1 arch (qwen3), ``repeat_kv`` broadcasts the one

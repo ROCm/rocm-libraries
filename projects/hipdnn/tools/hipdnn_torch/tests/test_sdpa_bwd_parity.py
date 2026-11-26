@@ -3,11 +3,11 @@
 
 """GPU backward-routing parity tests for SDPA (ALMIOPEN-2978).
 
-Covers backward-routing test cases (a)-(l), (n)-(p), (r)-(u) -- every GPU
-case except (m) (``test_training_gate.py``), (q) (``test_sdpa_bwd_hf.py``)
-and (g)/(g2) (``test_sdpa_autocast.py``). Like ``test_parity.py``,
-every test here is marked ``gpu`` and auto-skipped by ``conftest.py`` unless a
-wired provider + HIP device is present.
+Covers every GPU backward-routing scenario except the real HF attention
+layers (``test_sdpa_bwd_hf.py``), the training-step gate
+(``test_training_gate.py``) and autocast (``test_sdpa_autocast.py``). Like
+``test_parity.py``, every test here is marked ``gpu`` and auto-skipped by
+``conftest.py`` unless a wired provider + HIP device is present.
 
 A call is *grad-eligible* (routed through the backward machinery) when
 ``dropout_p > 0`` or grad mode is on and q/k/v require grad; its forward row
@@ -24,7 +24,7 @@ environment instead of the build:
     gating on this variable.
   * ``HIPDNN_TORCH_TEST_16337`` -- ``"in"``/``"out"``: whether
     hip-kernel-provider#16337 (ASM backward at gfx950 D=64/192) is in the
-    build; only case (u)'s D=64 row depends on it.
+    build; only the FlyDSL-OFF census table's D=64 row depends on it.
 """
 
 import contextlib
@@ -233,7 +233,7 @@ def _philox_mask_fn():
 
 
 def _manual_attention_with_mask(q, k, v, keep, p, *, causal, scale=None):
-    """Manual dropout attention from an explicit keep mask -- the (a) oracle
+    """Manual dropout attention from an explicit keep mask -- an oracle
     independent of both hipDNN and native torch. Differentiable: ``q``/``k``/
     ``v`` may be autograd leaves."""
     import torch
@@ -253,7 +253,8 @@ def _manual_attention_with_mask(q, k, v, keep, p, *, causal, scale=None):
 def _fail_nth_execute(real_execute, n):
     """A patched ``OpOverride._execute`` that raises ``NotApplicable`` on
     exactly the ``n``-th call (1-based) and delegates to the real
-    implementation otherwise -- lets (b)/(i) target one specific graph's
+    implementation otherwise -- lets the generator-rewind and backward-
+    fault-injection tests target one specific graph's
     execute (fwd is always first, backward second) without reaching into
     cache-key internals. ``NotApplicable`` (not a bare exception) matters:
     the backward's native-recompute handler catches only ``except NotApplicable``
@@ -294,10 +295,10 @@ def torch():
 
 
 # --------------------------------------------------------------------------- #
-# (a) dropout mask: _philox.py oracle, optionally native as a second oracle    #
+# Dropout mask: _philox.py oracle, optionally native as a second oracle    #
 # --------------------------------------------------------------------------- #
 def test_dropout_mask_matches_philox_reference_and_native_oracle(torch):
-    """(a) The override must draw -- and use -- the exact Philox stream
+    """The override must draw -- and use -- the exact Philox stream
     AOTriton's own kernels would. Oracle: hipDNN's O AND
     dQ/dK/dV against a float64 manual-attention reference built from
     ``_philox.philox_mask`` at the seed/offset the call actually drew; if
@@ -357,7 +358,7 @@ def test_dropout_mask_matches_philox_reference_and_native_oracle(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (b) generator offset delta / RNG routing                                    #
+# Generator offset delta / RNG routing                                    #
 # --------------------------------------------------------------------------- #
 def _offset_delta(gen, seed, fn):
     gen.manual_seed(seed)
@@ -378,7 +379,7 @@ def _offset_delta(gen, seed, fn):
 def test_dropout_generator_offset_delta_matches_native(
     torch, name, hq, hkv, d, dtype, causal, mask_kind
 ):
-    """(b) The generator offset delta a call draws must equal native's delta
+    """The generator offset delta a call draws must equal native's delta
     from the identical starting state -- checked as a black box, by running
     native and the override from the same seed and diffing
     ``Generator.get_offset()``, not by re-deriving the backend's advance
@@ -430,7 +431,7 @@ def test_dropout_generator_offset_delta_matches_native(
 
 
 def test_dropout_offset_delta_matches_native_under_autocast(torch):
-    """(b) fp32 inputs under bf16 autocast: the generator delta must match
+    """Fp32 inputs under bf16 autocast: the generator delta must match
     native's even when the autocast cast runs before the dropout gate."""
     import torch.nn.functional as F
 
@@ -453,7 +454,7 @@ def test_dropout_offset_delta_matches_native_under_autocast(torch):
 
 
 def test_dropout_ck_preferred_routes_native_with_reason(torch):
-    """(b) CK-preferred flash routes native with the CK reason: hipDNN's
+    """CK-preferred flash routes native with the CK reason: hipDNN's
     dropout RNG cannot mirror CK's generator advance."""
     try:
         ck = torch.backends.cuda.ROCmFABackend.Ck
@@ -474,7 +475,7 @@ def test_dropout_ck_preferred_routes_native_with_reason(torch):
 
 
 def test_dropout_consecutive_calls_draw_different_masks(torch):
-    """(b) Two dropout calls on the same generator never reuse a Philox
+    """Two dropout calls on the same generator never reuse a Philox
     stream offset: each draws a fresh (seed, offset), so their keep masks
     differ."""
     import torch.nn.functional as F
@@ -504,7 +505,7 @@ def test_dropout_consecutive_calls_draw_different_masks(torch):
 
 
 def test_dropout_execute_failure_rewinds_generator_offset(torch, monkeypatch):
-    """(b) A forward execute failure after the RNG draw must rewind
+    """A forward execute failure after the RNG draw must rewind
     (``gen.set_offset(offset_before)``) before falling back natively: the
     final offset must equal what a direct native
     call draws from the same starting state, never double-advanced -- and
@@ -543,7 +544,7 @@ def test_dropout_execute_failure_rewinds_generator_offset(torch, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# (c) activation checkpointing                                                #
+# Activation checkpointing                                                #
 # --------------------------------------------------------------------------- #
 def _checkpoint_run(
     torch, F, q, k, v, *, use_reentrant, with_dropout_module, dropout_p
@@ -564,7 +565,7 @@ def _checkpoint_run(
 def test_checkpoint_matches_no_checkpoint_run(
     torch, use_reentrant, with_dropout_module
 ):
-    """(c) Reentrant and non-reentrant checkpoint recompute must reach the
+    """Reentrant and non-reentrant checkpoint recompute must reach the
     same routing decision on the no_grad first pass and its grad recompute,
     replay the same dropout mask, and leave the generator at the same final
     offset as an uncheckpointed call; census shows 2 hipDNN forwards (one
@@ -617,7 +618,7 @@ def test_checkpoint_matches_no_checkpoint_run(
 
 
 def test_checkpoint_declined_shape_both_passes_native(torch):
-    """(c) A shape the probes decline (D=100: not a multiple of 8,
+    """A shape the probes decline (D=100: not a multiple of 8,
     HKP-H34) must send BOTH the no_grad first pass and its grad recompute
     native under checkpoint -- the decline-the-whole-call policy applies
     independently to each pass, never a half-routed checkpoint step.
@@ -647,7 +648,7 @@ def test_checkpoint_declined_shape_both_passes_native(torch):
 
 
 def test_checkpoint_no_grad_first_pass_bit_identical_to_grad_recompute(torch):
-    """(c) The no_grad first pass and its grad recompute probe the
+    """The no_grad first pass and its grad recompute probe the
     identical graph key and draw the identical (seed, offset), so their O
     must be bit-identical, not merely within tolerance. Needs FlyDSL
     (dropout)."""
@@ -684,11 +685,11 @@ def test_checkpoint_no_grad_first_pass_bit_identical_to_grad_recompute(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (d) dO layouts unlike O                                                     #
+# dO layouts unlike O                                                     #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("kind", ["contiguous_bhsd", "expanded", "misaligned"])
 def test_do_layout_variants_match_native(torch, kind):
-    """(d) A dense BHSD-contiguous dO (HF's ``transpose(1,2).contiguous()``),
+    """A dense BHSD-contiguous dO (HF's ``transpose(1,2).contiguous()``),
     an expanded (self-overlapping, stride-0) dO, and a 16-byte-misaligned dO
     must all be copied into O's layout first with no execute error and
     grads matching native."""
@@ -730,7 +731,7 @@ def test_do_layout_variants_match_native(torch, kind):
 
 
 def test_do_size1_axis_stride_difference_is_ignored(torch):
-    """(d): a stride mismatch confined to a size-1 axis (B=1 here) must
+    """A stride mismatch confined to a size-1 axis (B=1 here) must
     NOT trigger a copy or change the result -- only axes with extent > 1
     matter; the declared dO strides are O's own."""
     import torch.nn.functional as F
@@ -755,10 +756,10 @@ def test_do_size1_axis_stride_difference_is_ignored(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (e) GQA                                                                      #
+# GQA                                                                      #
 # --------------------------------------------------------------------------- #
 def test_gqa_grad_matches_native_and_keeps_hkv(torch):
-    """(e) GQA via ``enable_gqa=True``: dK/dV keep Hkv (never expanded to
+    """GQA via ``enable_gqa=True``: dK/dV keep Hkv (never expanded to
     Hq); grads vs native autograd. FlyDSL OFF: no engine serves this GQA
     shape (observed: the stats forward itself declines, not specifically
     the backward), so the whole call goes native with a reason starting
@@ -794,10 +795,10 @@ def test_gqa_grad_matches_native_and_keeps_hkv(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (f) masks                                                                    #
+# Masks                                                                    #
 # --------------------------------------------------------------------------- #
 def test_bool_mask_and_nongrad_float_mask_route(torch):
-    """(f) A bool mask materializes to an additive bias and a non-grad float
+    """A bool mask materializes to an additive bias and a non-grad float
     mask passes through as-is; both route the same as unmasked (only a
     float mask that itself requires grad is exempt). FlyDSL OFF: both ASM
     builders reject any bias, so the whole call goes native."""
@@ -837,7 +838,7 @@ def test_bool_mask_and_nongrad_float_mask_route(torch):
 
 
 def test_mask_requiring_grad_routes_native(torch):
-    """(f) A float ``attn_mask`` that itself requires grad under grad
+    """A float ``attn_mask`` that itself requires grad under grad
     mode always goes native, whatever q/k/v need (learned dBias is out of
     scope)."""
     import torch.nn.functional as F
@@ -859,10 +860,10 @@ def test_mask_requiring_grad_routes_native(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (h) declines                                                                 #
+# Declines                                                                 #
 # --------------------------------------------------------------------------- #
 def test_d100_declines_at_forward_stage_not_bwd(torch):
-    """(h) D=100 is not a multiple of 8 (HKP-H34) -- the fresh dense dQ
+    """D=100 is not a multiple of 8 (HKP-H34) -- the fresh dense dQ
     buffer's row-padding write cannot happen, so the FORWARD stage declines
     first (D%8==0 required on CDNA); the reason must start ``grad:`` but is
     not specifically the bwd-stage reason."""
@@ -879,7 +880,7 @@ def test_d100_declines_at_forward_stage_not_bwd(torch):
 
 
 def test_misaligned_operand_declines_before_rng_draw(torch):
-    """(h) A 16-byte-misaligned q/k/v view declines ``operand: pointer
+    """A 16-byte-misaligned q/k/v view declines ``operand: pointer
     not 16-byte aligned`` -- and the override draws NOTHING of its own at
     p>0 before falling back (the host-side checks run before the probes and
     before the draw): the overall generator advance equals exactly a plain
@@ -917,7 +918,7 @@ def test_misaligned_operand_declines_before_rng_draw(torch):
 
 
 def test_seq_stride_less_than_d_declines_before_rng_draw(torch):
-    """(h) q/k/v rows must not alias (seq stride >= D, HKP-H30); a
+    """Q/k/v rows must not alias (seq stride >= D, HKP-H30); a
     narrower seq stride declines ``operand: stride``, with the same
     no-extra-draw property as the alignment decline above."""
     import torch.nn.functional as F
@@ -950,10 +951,10 @@ def test_seq_stride_less_than_d_declines_before_rng_draw(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (i) backward execute fault injection                                        #
+# Backward execute fault injection                                        #
 # --------------------------------------------------------------------------- #
 def test_p4_fault_injection_p_zero_recomputes_natively(torch, monkeypatch, caplog):
-    """(i) A backward execute failure at p==0 recomputes natively --
+    """A backward execute failure at p==0 recomputes natively --
     WARNING logged, ``bwd_recompute=1``, ``bwd_totals()`` native += 1, the
     grad row's aot UNCHANGED by the failure, the bwd row's aot stays 0, and
     the recompute must call the saved native function (sdpa.py's ``_native``
@@ -997,7 +998,7 @@ def test_p4_fault_injection_p_zero_recomputes_natively(torch, monkeypatch, caplo
 
 
 def test_p4_fault_injection_p_nonzero_raises(torch, monkeypatch):
-    """(i) At p>0 a backward execute failure RAISES -- a native recompute
+    """At p>0 a backward execute failure RAISES -- a native recompute
     would use a different (non-replayed) dropout mask, so no fallback is
     attempted. Needs FlyDSL (p>0 only ever reaches a real backward execute
     via FlyDSL)."""
@@ -1023,13 +1024,13 @@ def test_p4_fault_injection_p_nonzero_raises(torch, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# (k) MHA / GQA parity                                                         #
+# MHA / GQA parity                                                         #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("causal", [True, False])
 @pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
 @pytest.mark.parametrize("gqa", [False, True])
 def test_mha_gqa_p0_grad_matches_native(torch, gqa, dtype_name, causal):
-    """(k) p==0 MHA and GQA, causal and non-causal, bf16/fp16: dQ/dK/dV
+    """P==0 MHA and GQA, causal and non-causal, bf16/fp16: dQ/dK/dV
     match native autograd. With FlyDSL ON this asserts only that SOME
     engine served and is named (ASM may win the unmasked MHA bwd at D=128,
     and with #16337 also at D=64), not a specific one. FlyDSL OFF: GQA goes
@@ -1072,10 +1073,10 @@ def test_mha_gqa_p0_grad_matches_native(torch, gqa, dtype_name, causal):
 
 
 # --------------------------------------------------------------------------- #
-# (l) subprocess: autograd worker-thread teardown                             #
+# Subprocess: autograd worker-thread teardown                             #
 # --------------------------------------------------------------------------- #
 def test_subprocess_backward_exits_zero_and_bwd_row_served(torch):
-    """(l) The autograd worker-thread teardown hazard is checked by exit
+    """The autograd worker-thread teardown hazard is checked by exit
     code on GPU: the process must exit 0 AND the backward must have
     actually been served (MHA D=128 p=0, servable in every build state) --
     the teardown hazard needs a real hipDNN backward graph alive on the
@@ -1088,7 +1089,7 @@ def test_subprocess_backward_exits_zero_and_bwd_row_served(torch):
 
 
 def test_subprocess_forward_only_graph_held_on_ctx_exits_zero(torch):
-    """(l) A forward that builds (and the autograd ctx saves) the bwd graph,
+    """A forward that builds (and the autograd ctx saves) the bwd graph,
     then the process exits WITHOUT ever running backward: the graph (a
     hipDNN GPU resource) stays referenced only by the ctx at interpreter
     teardown, and that teardown must not hang or crash (exit 0)."""
@@ -1100,10 +1101,10 @@ def test_subprocess_forward_only_graph_held_on_ctx_exits_zero(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (n) streams                                                                  #
+# Streams                                                                  #
 # --------------------------------------------------------------------------- #
 def test_side_stream_forward_backward_matches_native_and_binds_stream(torch):
-    """(n) A side-stream grad step must execute hipDNN work on that
+    """A side-stream grad step must execute hipDNN work on that
     stream (``handle.get_stream()`` returns the side stream's raw handle)
     and match native. The side stream must wait for the default stream's
     writes to q/k/v before reading them."""
@@ -1134,7 +1135,7 @@ def test_side_stream_forward_backward_matches_native_and_binds_stream(torch):
 
 
 def test_default_stream_loop_never_calls_set_stream(torch, monkeypatch):
-    """(n) A default-stream loop must bind the stream at most once (the
+    """A default-stream loop must bind the stream at most once (the
     first call when ``bound_stream`` is still 0) and then never call
     ``set_stream`` again -- repeated calls on the same stream are a no-op.
     nanobind's ``Handle`` has no ``dynamic_attr()``, so an instance-level
@@ -1163,7 +1164,7 @@ def test_default_stream_loop_never_calls_set_stream(torch, monkeypatch):
 
 
 def test_two_threads_two_streams_outputs_match_and_counts_exact(torch):
-    """(n) ``st.lock``: two threads calling into the same installed
+    """``st.lock``: two threads calling into the same installed
     override on two different streams must not corrupt the shared census
     counters (counted under the lock) nor each other's results. The native
     reference is the function captured BEFORE ``install()`` patches the
@@ -1212,10 +1213,10 @@ def test_two_threads_two_streams_outputs_match_and_counts_exact(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (o) subprocess: force mode                                                  #
+# Subprocess: force mode                                                  #
 # --------------------------------------------------------------------------- #
 def test_subprocess_force_asm_serves_mha_no_mask(torch):
-    """(o) Force mode + ASM_SDPA_ENGINE on bf16 D=128 p=0 MHA, no mask: both
+    """Force mode + ASM_SDPA_ENGINE on bf16 D=128 p=0 MHA, no mask: both
     the fwd-with-stats graph and the bwd graph are built with ONE builder
     (ASM has both), so the whole call is served and both rows name
     ASM."""
@@ -1231,7 +1232,7 @@ def test_subprocess_force_asm_serves_mha_no_mask(torch):
 
 
 def test_subprocess_force_flydsl_bwd_engine_declines_fwd_stats(torch):
-    """(o) Force mode pins ONE engine for every graph of a call; a
+    """Force mode pins ONE engine for every graph of a call; a
     FlyDSL engine that serves only the backward makes the fwd-with-stats
     probe decline for that engine -> native with ``grad: fwd+stats:``."""
     proc = _run_subproc("force_flydsl_bwd")
@@ -1242,7 +1243,7 @@ def test_subprocess_force_flydsl_bwd_engine_declines_fwd_stats(torch):
 
 @pytest.mark.parametrize("variant", ["gqa", "mask"])
 def test_subprocess_force_asm_gqa_or_mask_declines(torch, variant):
-    """(o) ASM rejects GQA (bwd) and any bias (both builders, F1); forcing it
+    """ASM rejects GQA (bwd) and any bias (both builders); forcing it
     for either shape declines the whole call native with a ``grad:``
     reason."""
     proc = _run_subproc(f"force_asm_{variant}")
@@ -1252,10 +1253,10 @@ def test_subprocess_force_asm_gqa_or_mask_declines(torch, variant):
 
 
 # --------------------------------------------------------------------------- #
-# (p) in-place on the output                                                   #
+# In-place on the output                                                   #
 # --------------------------------------------------------------------------- #
 def test_inplace_on_output_no_custom_function_creation_error(torch):
-    """(p) The custom autograd Function returns the dense allocation, not a
+    """The custom autograd Function returns the dense allocation, not a
     view the custom-function machinery would mark ``IN_CUSTOM_FUNCTION`` --
     an in-place op on O must not raise "created inside a custom Function"."""
     import torch.nn.functional as F
@@ -1267,7 +1268,7 @@ def test_inplace_on_output_no_custom_function_creation_error(torch):
 
 
 def test_inplace_on_output_raises_at_backward_parity_with_native(torch):
-    """(p) After an in-place op on O, backward must raise for BOTH native
+    """After an in-place op on O, backward must raise for BOTH native
     (flash/efficient) and the override -- parity of failure, not a training
     success (derivatives.yaml saves ``output``; only MATH tolerates it).
     MHA, D=128, no mask, p=0: servable in every build state."""
@@ -1300,7 +1301,7 @@ def test_inplace_on_output_raises_at_backward_parity_with_native(torch):
 
 
 def test_backward_after_nonin_place_use_works_output_is_permuted_view(torch):
-    """(p) A non-in-place use must not raise, and O must be a permuted view
+    """A non-in-place use must not raise, and O must be a permuted view
     of the dense allocation ``Function.forward`` returns, not that
     allocation itself. MHA, D=128, no mask, p=0: servable in every build
     state, so the view check is meaningful regardless of which engine
@@ -1322,10 +1323,10 @@ def test_backward_after_nonin_place_use_works_output_is_permuted_view(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (r) benchmarking guard                                                       #
+# Benchmarking guard                                                       #
 # --------------------------------------------------------------------------- #
 def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_path):
-    """(r) A fresh, empty cache root under ``HIPDNN_FORCE_BENCHMARKING=1``
+    """A fresh, empty cache root under ``HIPDNN_FORCE_BENCHMARKING=1``
     must sample BOTH the stats-forward and backward graphs for an
     ingestor-served MHA bf16 D=128 p=0 shape with a non-grad, non-causal
     bias (both ASM builders reject any bias, so only ingestor engines can
@@ -1337,7 +1338,8 @@ def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_pa
     the subprocess's stderr."""
     if _flydsl_state() != "on":
         pytest.skip(
-            "HIPDNN_TORCH_TEST_FLYDSL not 'on'; case (r) needs an ingestor "
+            "HIPDNN_TORCH_TEST_FLYDSL not 'on'; this benchmarking guard needs "
+            "an ingestor "
             "engine to serve both graphs (ASM ignores benchmarking)"
         )
     cache_dir = tmp_path / "hipdnn_cache"
@@ -1434,10 +1436,10 @@ def test_benchmarking_guard_samples_both_graphs_and_writes_winners(torch, tmp_pa
 
 
 # --------------------------------------------------------------------------- #
-# (s) mixed engine pair                                                        #
+# Mixed engine pair                                                        #
 # --------------------------------------------------------------------------- #
 def test_subprocess_mixed_engine_pair_asm_fwd_flydsl_bwd(torch):
-    """(s) The census does not constrain engine pairs. Force mode cannot
+    """The census does not constrain engine pairs. Force mode cannot
     build this (it pins one engine for every graph); instead a
     ``HIPDNN_HEUR_CONFIG_PATH`` rule prefers ASM_SDPA_ENGINE for the FORWARD
     node only, on a GQA D=128 bf16 p=0 shape where ASM's forward builder
@@ -1477,10 +1479,10 @@ def test_subprocess_mixed_engine_pair_asm_fwd_flydsl_bwd(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (t) capture and determinism                                                  #
+# Capture and determinism                                                  #
 # --------------------------------------------------------------------------- #
 def test_dropout_under_cuda_graph_capture_routes_native(torch):
-    """(t) A p>0 call under CUDA-graph capture routes native with
+    """A p>0 call under CUDA-graph capture routes native with
     ``dropout: stream capturing`` -- unconditional: capture is declined
     before anything checks whether an engine could otherwise serve it."""
     import torch.nn.functional as F
@@ -1505,7 +1507,7 @@ def test_dropout_under_cuda_graph_capture_routes_native(torch):
 
 
 def test_deterministic_mode_routes_native(torch):
-    """(t) ``torch.use_deterministic_algorithms(True)`` (not warn-only) on
+    """``torch.use_deterministic_algorithms(True)`` (not warn-only) on
     the grad path routes native with ``grad: deterministic algorithms`` --
     unconditional, declined before any engine probe."""
     import torch.nn.functional as F
@@ -1525,7 +1527,7 @@ def test_deterministic_mode_routes_native(torch):
 
 
 # --------------------------------------------------------------------------- #
-# (u) gfx950 FlyDSL OFF expected census table                                 #
+# Gfx950 FlyDSL OFF expected census table                                 #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "name, hq, hkv, d, mask_kind, expect",
@@ -1539,7 +1541,7 @@ def test_deterministic_mode_routes_native(torch):
 def test_flydsl_off_expected_census_per_shape(
     torch, name, hq, hkv, d, mask_kind, expect
 ):
-    """(u) gfx950 FlyDSL OFF: ASM serves only MHA, no attn_mask, 64<D<=128
+    """Gfx950 FlyDSL OFF: ASM serves only MHA, no attn_mask, 64<D<=128
     (or 192/128), p=0 (SdpaBwdPlanBuilder.cpp:635-638, :700-716, :427-438);
     GQA goes native with a reason starting ``grad:`` (not necessarily at
     the bwd stage: observed to decline at the fwd+stats stage on gfx950),
@@ -1548,7 +1550,8 @@ def test_flydsl_off_expected_census_per_shape(
     flydsl = _flydsl_state()
     if flydsl != "off":
         pytest.skip(
-            "HIPDNN_TORCH_TEST_FLYDSL not 'off'; case (u) states a FlyDSL-OFF "
+            "HIPDNN_TORCH_TEST_FLYDSL not 'off'; this test states a "
+            "FlyDSL-OFF "
             "build's expected census"
         )
     if expect == "depends_16337":
