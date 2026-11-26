@@ -322,10 +322,10 @@ profiles, not qualified code-object resource lanes; their scheduling and registe
 allocation cannot be judged against thresholds calibrated on the reference compiler.
 The two counted gates share the `rocke_counted_sync_gate` CTest resource
 lock. On a toolchain that is not its reference toolchain (another LLVM flavor
-or comgr, or one without the target) the gate ends at preflight with exit 77,
-which the installed entry reports as a skip that names the difference. The
-installed gate forces required mode for the rest: a toolchain query that fails
-or a missing `llvm-objdump` fails once at preflight. The source runner treats
+or comgr) the gate ends at preflight with exit 77, which the installed entry
+reports as a skip that names the difference. The installed gate forces required
+mode for the rest: a toolchain query that fails, a reference comgr without a
+gate arch, or a missing `llvm-objdump` fails once at preflight. The source runner treats
 that gate as optional unless passed `--require-compiler-gate`, which counts the
 skip as a failure; an accepted optional skip reports `INCOMPLETE`, never plain
 `GREEN`.

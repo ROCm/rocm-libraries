@@ -62,14 +62,10 @@ def _unanswered_query(
 
 
 def _qualification_gap(
-    requested_flavor: str,
-    active_flavor: str,
-    comgr: str | None,
-    targets: frozenset[str],
-    arches: tuple[str, ...],
+    requested_flavor: str, active_flavor: str, comgr: str | None
 ) -> str | None:
-    """How the toolchain differs from the gate's reference toolchain, or
-    ``None`` when it is the reference toolchain."""
+    """How the toolchain differs from the gate's reference toolchain (its LLVM
+    flavor and comgr), or ``None`` when it is the reference toolchain."""
     if requested_flavor != GATE_FLAVOR:
         return (
             f"resource gate requires LLVM flavor {GATE_FLAVOR}, "
@@ -82,9 +78,31 @@ def _qualification_gap(
         )
     if not comgr_is_production(comgr):
         return f"resource gate requires ROCm {GATE_COMGR_ROCM} comgr, got {comgr}"
+    return None
+
+
+# What the preflight does about a toolchain: fail the gate, or skip it.
+_STOP = "stop"
+_SKIP = "skip"
+
+
+def _preflight_outcome(
+    requested_flavor: str,
+    active_flavor: str | None,
+    comgr: str | None,
+    targets: frozenset[str] | None,
+    arches: tuple[str, ...],
+) -> tuple[str, str] | None:
+    """``(_STOP, why)`` for a broken toolchain (a query that fails, or the
+    reference toolchain without a gate arch), ``(_SKIP, why)`` for a toolchain
+    that is not the reference one, or ``None`` for the reference toolchain."""
+    if failed := _unanswered_query(active_flavor, targets):
+        return _STOP, failed
+    if gap := _qualification_gap(requested_flavor, active_flavor, comgr):
+        return _SKIP, gap
     missing = [arch for arch in arches if arch not in targets]
     if missing:
-        return f"comgr {comgr} does not support {', '.join(missing)}"
+        return _STOP, f"comgr {comgr} does not support {', '.join(missing)}"
     return None
 
 
@@ -225,10 +243,12 @@ def pytest_collection_finish(session) -> None:
         targets = comgr_targets()
     except Exception as exc:  # noqa: BLE001 - one gate-level diagnostic
         _stop(f"counted ISA gate toolchain preflight failed: {exc}")
-    if failed := _unanswered_query(active_flavor, targets):
-        _stop(f"counted ISA gate {failed}")
-    if gap := _qualification_gap(flavor, active_flavor, comgr, targets, arches):
-        _skip_off_reference(f"counted ISA gate {gap}")
+    outcome = _preflight_outcome(flavor, active_flavor, comgr, targets, arches)
+    if outcome is not None:
+        action, why = outcome
+        if action == _SKIP:
+            _skip_off_reference(f"counted ISA gate {why}")
+        _stop(f"counted ISA gate {why}")
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(
