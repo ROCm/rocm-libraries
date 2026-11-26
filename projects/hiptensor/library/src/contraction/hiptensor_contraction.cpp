@@ -257,6 +257,12 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return checkResult;
     }
 
+    if(auto status = hiptensor::checkComputeDescriptor("hiptensorCreateContraction", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     if(!handle->getDevice().matrixCoreSupport(descCompute))
     {
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
@@ -1004,6 +1010,13 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(const hiptensorHandle_t     
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
+    }
+
+    if(auto status
+       = hiptensor::checkComputeDescriptor("hiptensorCreateContractionTrinary", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     if(!handle->getDevice().matrixCoreSupport(descCompute))

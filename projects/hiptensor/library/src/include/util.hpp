@@ -213,6 +213,26 @@ namespace hiptensor
         return false;
     }
 
+    // The scaling factors of an operation take the scalar type that its compute descriptor
+    // maps to. HIPTENSOR_COMPUTE_DESC_NONE, the integer descriptors and unknown values have no
+    // scalar type, so no operation descriptor can be created with them.
+    inline hiptensorStatus_t checkComputeDescriptor(char const*                  apiFuncName,
+                                                    hiptensorComputeDescriptor_t descCompute)
+    {
+        if(convertToHipTensorDataType(descCompute))
+        {
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        char msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "Invalid compute descriptor (0x%X): it has no scalar type",
+                 static_cast<unsigned int>(descCompute));
+        Logger::instance()->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
     /** @name static_for
      *  @{
      */
