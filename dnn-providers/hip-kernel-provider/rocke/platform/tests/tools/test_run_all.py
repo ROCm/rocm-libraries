@@ -21,6 +21,7 @@ from rocke.tests.ctest_listing import list_ctest_entries
 
 from rocke.tests.engines import IR_LOWER_CLI_ENV
 from rocke.tests.lanes import BUILD_VARIANT, SOURCE_TREE, skip_until
+from rocke.tests.platform_build import cmake_cache_entries
 
 
 @pytest.fixture
@@ -855,7 +856,10 @@ def test_fresh_build_prepares_entire_ctest_suite(
         executable.touch()
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
-    expected = executable if override else Path(shutil.which("cmake"))
+    # The parity entry runs the CMake program that configured the tree, which
+    # need not be the `cmake` on PATH (a launcher script, for one).
+    configured_cmake = Path(cmake_cache_entries(build)["CMAKE_COMMAND"])
+    expected = executable if override else configured_cmake
     assert env["ROCKE_STORAGE_TEST"] == str(expected.resolve())
     assert (build / "rocke_storage.ready").is_file()
     assert (build / "whole_suite.ready").is_file()

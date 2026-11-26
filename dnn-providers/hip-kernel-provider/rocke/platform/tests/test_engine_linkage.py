@@ -29,6 +29,7 @@ from rocke.tests.ctest_listing import (
 )
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
 from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.platform_build import cmake_cache_entries
 from rocke.tests.provider_categories import provider_category_labels
 
 PLATFORM = Path(__file__).resolve().parents[1]
@@ -146,16 +147,6 @@ EXPLICIT_GATES = {
     "rocke_library_counted_structural_gate",
     "rocke_library_counted_compiler_gate",
 }
-
-
-def _cmake_cache(build: Path) -> dict[str, str]:
-    """The ``NAME:TYPE=value`` entries of ``build``'s CMakeCache.txt, by name."""
-    entries = {}
-    for line in (build / "CMakeCache.txt").read_text().splitlines():
-        if line and not line.startswith(("#", "//")) and "=" in line:
-            key, value = line.split("=", 1)
-            entries[key.split(":", 1)[0]] = value
-    return entries
 
 
 def runs_pytest(test):
@@ -651,7 +642,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
     # <tests>/portable_ir and are named beside the installed rocke package
     # (rocke.assets.beside_package): the package's directory is the
     # CTestTestfile's in provider mode, site-packages in a standalone install.
-    cache = _cmake_cache(build)
+    cache = cmake_cache_entries(build)
     test_dir = PurePosixPath(cache["CMAKE_INSTALL_BINDIR"])
     if provider_subdir:
         test_dir /= provider_subdir

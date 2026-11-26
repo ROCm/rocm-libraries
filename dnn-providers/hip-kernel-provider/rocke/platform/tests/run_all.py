@@ -239,13 +239,16 @@ def _native_executable(
 
 
 def _cmake_home(build_root: Path) -> Path | None:
-    cache = build_root / "CMakeCache.txt"
-    if not cache.is_file():
+    """The source tree ``build_root`` was configured from, or None when it is
+    not a configured tree."""
+    if not (build_root / "CMakeCache.txt").is_file():
         return None
-    for line in cache.read_text(errors="ignore").splitlines():
-        if line.startswith("CMAKE_HOME_DIRECTORY:INTERNAL="):
-            return Path(line.split("=", 1)[1]).resolve()
-    return None
+    # Imported here, not at the top: the runner must start where rocke is not
+    # importable (an isolated `--help`).
+    from rocke.tests.platform_build import cmake_cache_entries
+
+    home = cmake_cache_entries(build_root).get("CMAKE_HOME_DIRECTORY")
+    return None if home is None else Path(home).resolve()
 
 
 def configure_pytest_build(build_root: Path, config: str) -> None:
