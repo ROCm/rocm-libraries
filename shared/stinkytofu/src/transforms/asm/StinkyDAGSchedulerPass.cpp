@@ -990,22 +990,6 @@ Layer2BarrierOverlapAnalysis::Result validateLayer2BarrierOverlaps(
     return result;
 }
 
-std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
-    if (passCtx.getGemmTileConfig().arch[0] == 12 && passCtx.getGemmTileConfig().arch[1] == 5) {
-        PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
-        return std::make_unique<CDNA5ReadyQueue>(passCtx);
-    }
-    // The SCC chain lock applyClusterBarrierSccRule sets up is carried in the node fields and
-    // honoured only by CDNA5ReadyQueue's pick loop. ReadyQueueByDAGid pops by id and reads
-    // none of them, so it would issue a handshake barrier straight through an open chain --
-    // the clobber this rule exists to prevent, and silently.
-    if (passCtx.getPassFeatureConfig().dagFeatures.clusterBarrier) {
-        STINKY_UNREACHABLE("ClusterBarrier scheduling requires CDNA5ReadyQueue");
-    }
-    PASS_DEBUG(std::cerr << "Using Default ReadyQueue for scheduling\n");
-    return std::make_unique<ReadyQueueByDAGid>(passCtx);
-}
-
 class StinkyDAGSchedulerPass : public StinkyInstPass {
    public:
     static char ID;
@@ -1117,6 +1101,24 @@ char StinkyDAGSchedulerPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
+namespace dag {
+std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
+    if (isGfx125(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1])) {
+        PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
+        return std::make_unique<CDNA5ReadyQueue>(passCtx);
+    }
+    // The SCC chain lock applyClusterBarrierSccRule sets up is carried in the node fields and
+    // honoured only by CDNA5ReadyQueue's pick loop. ReadyQueueByDAGid pops by id and reads
+    // none of them, so it would issue a handshake barrier straight through an open chain --
+    // the clobber this rule exists to prevent, and silently.
+    if (passCtx.getPassFeatureConfig().dagFeatures.clusterBarrier) {
+        STINKY_UNREACHABLE("ClusterBarrier scheduling requires CDNA5ReadyQueue");
+    }
+    PASS_DEBUG(std::cerr << "Using Default ReadyQueue for scheduling\n");
+    return std::make_unique<ReadyQueueByDAGid>(passCtx);
+}
+}  // namespace dag
+
 std::unique_ptr<Pass> createStinkyDAGSchedulerPass() {
     return std::make_unique<StinkyDAGSchedulerPass>();
 }

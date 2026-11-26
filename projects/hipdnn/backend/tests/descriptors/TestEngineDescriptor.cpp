@@ -1283,6 +1283,38 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
+TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoRejectsNegativeRequestedCount)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedWithKnobs();
+
+    const hipdnnBackendFlatbufferData_t sentinel{reinterpret_cast<const void*>(0x1), 7};
+    std::array<hipdnnBackendFlatbufferData_t, 2> knobData = {sentinel, sentinel};
+    int64_t returnedCount = 42;
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
+                                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                    -1,
+                                                    &returnedCount,
+                                                    knobData.data()),
+                               HIPDNN_STATUS_BAD_PARAM);
+
+    EXPECT_EQ(returnedCount, 42);
+    for(const auto& entry : knobData)
+    {
+        EXPECT_EQ(entry.ptr, sentinel.ptr);
+        EXPECT_EQ(entry.size, sentinel.size);
+    }
+
+    // The rejected call leaves the descriptor readable.
+    int64_t knobCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
+                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                         0,
+                                         &knobCount,
+                                         nullptr));
+    EXPECT_EQ(knobCount, 2);
+}
+
 // Catalog enumeration (HIPDNN_ATTR_ENGINE_CANDIDATE_*). The enumerator itself is
 // mocked, so these pin what the descriptor forwards and how it reports a decline.
 

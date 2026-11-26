@@ -2,7 +2,7 @@
 # name: test_mxf4_swizzleb_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_Use9Tbhog1d3unw7azD0Sq5eI3mn0sCEThvRWlpGT6Fi78=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STB_BH_Usefwyp8wJ0b1lDEBy0SwlMBkKUxX2FxNYVhZp0ogd_O74=',
       'err': 0,
     }),
   ])
@@ -10,7 +10,7 @@
 # name: test_ordinary_b_control_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgTTB5PqC4kuc1ZVDREqUOHsKMRIf81EGdBfYNrRTF05o=',
+      'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_UserArgF35MpEaSpB25ctSDHLwQ67OiocNRDGqMDJ6l4_1rKVY=',
       'err': 0,
     }),
   ])
