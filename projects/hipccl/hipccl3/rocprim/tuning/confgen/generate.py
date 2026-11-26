@@ -285,14 +285,34 @@ def keep_baseline_if_close(
     return best
 
 
+def get_radix_merge_sort_tile(key_size: int, value_size: int) -> int:
+    """Returns the items per block that radix sort's merge sort sorts before merging
+    with the block_merge config (radix_sort_block_sort_config_params_base in
+    device_config_helper.hpp). It's not tuned, and the merge tiles must fit in it too
+    (device_radix_merge_sort.hpp)."""
+    item_scale = max(key_size, value_size, 1)
+    block_size = 128 if item_scale <= 32 else 64 if item_scale <= 128 else 32
+    items_per_thread = (
+        8
+        if item_scale <= 4
+        else 4 if item_scale <= 64 else 2 if item_scale <= 256 else 1
+    )
+    return block_size * 2 * min(4, items_per_thread)
+
+
 def get_sorted_tile(
     algs, existing_block_sort, target_info: dict[str, str], data: dict[str, ty.Any]
 ) -> int:
-    """Returns the items per block of the block_sort config the library uses with a
-    block_merge config: the newly tuned one if block_sort was tuned for this target
-    too, otherwise the existing one. The merge tiles must fit in it
+    """Returns the largest items per block the merge tiles of a block_merge config can
+    have: those of the block_sort config the library uses with it (the newly tuned one
+    if block_sort was tuned for this target too, otherwise the existing one), and of
+    radix sort's merge sort, which uses the same block_merge config
     (device_merge_sort.hpp)."""
-    type_hash, _ = make_config(data)
+    type_hash, type_config = make_config(data)
+    type_sizes = {name: t["size"] for name, t in type_config["type"].items()}
+    radix_tile = get_radix_merge_sort_tile(
+        type_sizes.get("key_type", 0), type_sizes.get("value_type", 0)
+    )
     tuned = (
         algs.get("device_merge_sort_block_sort", {})
         .get(frozenset(target_info.items()), {})
@@ -309,8 +329,8 @@ def get_sorted_tile(
             f"No block_sort config found, limiting merge tiles to "
             f"{MERGE_SORT_DEFAULT_SORTED_TILE} items"
         )
-        return MERGE_SORT_DEFAULT_SORTED_TILE
-    return int(config["block_size_x"]) * int(config["ipt"])
+        return min(MERGE_SORT_DEFAULT_SORTED_TILE, radix_tile)
+    return min(int(config["block_size_x"]) * int(config["ipt"]), radix_tile)
 
 
 def get_benchmark_names(alg: str) -> list[str]:

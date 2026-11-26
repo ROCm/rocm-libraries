@@ -30,6 +30,7 @@ sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
+import confgen.generate
 import confgen.parse
 
 # Used when no block_sort config is found for a type.
@@ -54,9 +55,13 @@ class Tuner(BaseTuner):
         )
 
     def _get_sorted_tile(self, types: Dict[str, Any]) -> int:
-        """Returns the items per block of the block_sort config the library uses for
-        these types on the tuned arch. The benchmark pre-sorts with it, and the library
-        requires the merge tiles to fit in it (device_merge_sort.hpp)."""
+        """Returns the largest items per block the merge tiles can have: those of the
+        block_sort config the library uses for these types on the tuned arch (the
+        benchmark pre-sorts with it), and of radix sort's merge sort, which uses the
+        same block_merge config (see confgen.generate.get_radix_merge_sort_tile)."""
+        radix_tile = confgen.generate.get_radix_merge_sort_tile(
+            TYPE_CONFIGS[types["key_type"]].size, TYPE_CONFIGS[types["value_type"]].size
+        )
         config = confgen.parse.find_config(
             self.block_sort_configs,
             self.block_sort_fallback,
@@ -68,8 +73,8 @@ class Tuner(BaseTuner):
                 f"No block_sort config found for '{types}', limiting merge tiles to "
                 f"{DEFAULT_SORTED_TILE} items"
             )
-            return DEFAULT_SORTED_TILE
-        return int(config["block_size_x"]) * int(config["ipt"])
+            return min(DEFAULT_SORTED_TILE, radix_tile)
+        return min(int(config["block_size_x"]) * int(config["ipt"]), radix_tile)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
