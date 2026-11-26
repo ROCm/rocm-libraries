@@ -134,19 +134,40 @@ namespace
 
     TEST(UniformCheck_pre_checkin, FillRowIndexFailsEveryColumn)
     {
-        for(size_t elem : kSizes)
-        {
-            Matrix m(elem, 37, 5, 41, 41 * 5 + 3, 3);
-            ASSERT_EQ(uniform_check_fill_row_index_device(
-                          m.dev.buf(), elem, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
-                      hipSuccess);
-            UniformCheckDeviceResult r = m.check();
-            EXPECT_EQ(r.bad, uint64_t(m.cols * m.batches)) << "elem " << elem;
-            EXPECT_EQ(r.first_row(), 1);
-            EXPECT_EQ(r.first_col(), 0);
-            m.download();
-            EXPECT_EQ(*m.at(2, 36, 4), 36) << "elem " << elem;
-        }
+        // Over 256 rows, the index has nonzero bytes above byte 0.
+        constexpr int64_t kShapes[][5]
+            = {{37, 5, 41, 41 * 5 + 3, 3}, {300, 3, 305, 305 * 3 + 1, 2}};
+        for(const auto& s : kShapes)
+            for(size_t elem : kSizes)
+            {
+                Matrix m(elem, s[0], s[1], s[2], s[3], s[4]);
+                // Start from a buffer that passes, so only the fill can make the check fail.
+                m.fillRows();
+                ASSERT_EQ(m.check().bad, 0u) << "elem " << elem << " rows " << m.rows;
+
+                // Expected result: byte j of (r, c) is byte j of r, zero from byte 8 on; every
+                // other byte (the ld and stride padding) keeps its value.
+                std::vector<unsigned char> expected = m.host;
+                for(int64_t b = 0; b < m.batches; b++)
+                    for(int64_t c = 0; c < m.cols; c++)
+                        for(int64_t r = 0; r < m.rows; r++)
+                            for(size_t j = 0; j < elem; j++)
+                                expected[m.at(b, r, c) - m.host.data() + j]
+                                    = j < 8 ? static_cast<unsigned char>(uint64_t(r) >> (8 * j))
+                                            : 0;
+
+                ASSERT_EQ(
+                    uniform_check_fill_row_index_device(
+                        m.dev.buf(), elem, m.rows, m.cols, m.ld, m.stride, m.batches, nullptr),
+                    hipSuccess);
+                UniformCheckDeviceResult r = m.check();
+                EXPECT_EQ(r.bad, uint64_t(m.cols * m.batches))
+                    << "elem " << elem << " rows " << m.rows;
+                EXPECT_EQ(r.first_row(), 1);
+                EXPECT_EQ(r.first_col(), 0);
+                m.download();
+                EXPECT_TRUE(m.host == expected) << "elem " << elem << " rows " << m.rows;
+            }
     }
 
     TEST(UniformCheck_pre_checkin, CheckFindsOneFlippedBit)

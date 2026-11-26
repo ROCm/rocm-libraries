@@ -35,7 +35,8 @@ hipError_t uniform_check_fill_cols_device(void*       buf,
                                           hipStream_t stream);
 
 // Sets each element of row r to the low bytes of r, so an element a kernel leaves unwritten
-// differs from row 0 of its column. Any element_size.
+// differs from row 0 of its column, except, for a 1-byte element, in a row that is a multiple of
+// 256. Any element_size.
 hipError_t uniform_check_fill_row_index_device(void*       buf,
                                                size_t      element_size,
                                                int64_t     rows,
