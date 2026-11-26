@@ -1644,6 +1644,39 @@ sys.exit(0)
                     )
                     self.assertEqual(out.read_text(), before)
 
+    def test_a_probe_timeout_is_an_unvalidated_check_not_a_failure(self):
+        """With only timed-out probes of working cells, --check reports the
+        check unvalidated: the code --unvalidated-exit-code asks for (77, a
+        CTest skip), else the legacy failure exit."""
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        empty = {kind: [] for kind in G._compare_support(before, before).changes}
+        timed_out = [f"a.b/gfx942: ok -> {G.STATUS_TOOLCHAIN_TIMEOUT}"]
+        for exit_arguments, expected in (
+            (("--unvalidated-exit-code", "77"), 77),
+            ((), 1),
+        ):
+            with self.subTest(exit_arguments=exit_arguments):
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(
+                        G,
+                        "_compare_support",
+                        return_value=G._SupportComparison([], empty, timed_out),
+                    ),
+                ):
+                    rc = self._run(
+                        tools, out, "--only", "fabs.f32", "--check", *exit_arguments
+                    )
+                text = stdout.getvalue()
+                self.assertEqual(rc, expected)
+                self.assertIn("UNVALIDATED: 1 probes of working cells", text)
+                self.assertIn(timed_out[0], text)
+                self.assertNotIn("SUPPORT OK", text)
+                self.assertEqual(out.read_text(), before)
+
     def test_failure_summary_reports_total_and_omitted_count(self):
         out, tools = self._baseline_from_other_compiler()
         before = out.read_text()

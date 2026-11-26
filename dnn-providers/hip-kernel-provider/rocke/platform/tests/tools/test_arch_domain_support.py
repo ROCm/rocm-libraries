@@ -814,7 +814,6 @@ class SupportComparisonTest(unittest.TestCase):
             G.STATUS_NAME_ABSENT,
             G.STATUS_TARGET_UNSUPPORTED,
             G.STATUS_TOOLCHAIN_CRASH,
-            G.STATUS_TOOLCHAIN_TIMEOUT,
         ):
             with self.subTest(status=status):
                 self.assertEqual(G._cell_transition(G.STATUS_OK, status), "loss")
@@ -825,6 +824,22 @@ class SupportComparisonTest(unittest.TestCase):
                 self.assertIn(
                     f"a.b/{self.ARCH}: ok -> {status}", comparison.failures[0]
                 )
+
+    def test_a_working_cell_whose_probe_timed_out_is_unvalidated_not_lost(self):
+        """A probe that did not finish says the host was slow, not that the
+        toolchain lost support: the cell is reported as timed out, and no
+        failure is recorded."""
+        self.assertEqual(
+            G._cell_transition(G.STATUS_OK, G.STATUS_TOOLCHAIN_TIMEOUT), "loss"
+        )
+        comparison = G._compare_support(
+            self._doc(), self._doc(G.STATUS_TOOLCHAIN_TIMEOUT)
+        )
+        self.assertEqual(comparison.failures, [])
+        self.assertEqual(
+            comparison.timed_out,
+            [f"a.b/{self.ARCH}: ok -> {G.STATUS_TOOLCHAIN_TIMEOUT}"],
+        )
 
     def test_gains_and_measurement_improvements_pass(self):
         for before, after, category in (

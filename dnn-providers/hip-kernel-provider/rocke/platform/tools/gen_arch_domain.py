@@ -107,6 +107,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from importlib.resources import files as resource_files
 from pathlib import Path
 from typing import Callable, Iterator, NamedTuple
@@ -1112,6 +1113,10 @@ def _decl_table(flavor: str) -> dict[str, str]:
 class _SupportComparison(NamedTuple):
     failures: list[str]
     changes: dict[str, list[str]]
+    # Working cells whose probe did not finish within PROBE_TIMEOUT_S: the
+    # host was too slow to answer, which leaves the check unvalidated rather
+    # than showing a loss of support.
+    timed_out: Sequence[str] = ()
 
 
 # Rows are recorded states; columns are freshly measured states. Unknown
@@ -1517,6 +1522,7 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
                 "unvalidated",
             )
         },
+        [],
     )
     try:
         a, b = json.loads(committed), json.loads(fresh)
@@ -1569,7 +1575,9 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             before, after = before_cell.get("status"), after_cell.get("status")
             transition = _cell_transition(before, after)
             change = f"{key}/{arch}: {before} -> {after}"
-            if transition in ("invalid", "loss"):
+            if transition == "loss" and after == STATUS_TOOLCHAIN_TIMEOUT:
+                result.timed_out.append(change)
+            elif transition in ("invalid", "loss"):
                 result.failures.append(f"{transition} -- {change}")
             elif transition != "unchanged":
                 result.changes[transition].append(change)
@@ -2489,11 +2497,21 @@ def main() -> int:
                 if not args.verbose and len(changes) > 5:
                     summary += f" (+{len(changes) - 5} more)"
                 print(f"\n{label}: {len(changes)} -- {summary}")
-        if not comparison.failures:
-            print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
-            return 0
-        _print_support_failures(out, comparison.failures)
-        return 1
+        if comparison.failures:
+            _print_support_failures(out, comparison.failures)
+            return 1
+        if comparison.timed_out:
+            summary = "; ".join(comparison.timed_out[:5])
+            if len(comparison.timed_out) > 5:
+                summary += f" (+{len(comparison.timed_out) - 5} more)"
+            print(
+                f"\nUNVALIDATED: {len(comparison.timed_out)} probes of working "
+                f"cells did not finish within {PROBE_TIMEOUT_S:g}s on this host, "
+                f"so their support was not checked -- {summary}"
+            )
+            return _unvalidated_exit(args.unvalidated_exit_code, 1)
+        print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
+        return 0
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)

@@ -512,7 +512,10 @@ snapshot equality. In CI the entry passes `--rocke-shard-from-gtest-env`, so
 each CI shard probes and compares only the declaration keys it owns, and the
 toolchain, method and processor checks run on every shard; the shards together
 check every key once. A formerly `ok` cell must still be `ok`; becoming unavailable,
-crashing, timing out, or losing a measurement fails. Previously accepted processor
+crashing, or losing a measurement fails. A probe of an `ok` cell that does not
+finish within the probe time limit says the host was slow, not that support was
+lost: with no failure besides it, the check is unvalidated, which the entry
+reports as a skip (exit 77) naming the cells. Previously accepted processor
 names must remain accepted too. Both `ok` and `arch_absent` records require an
 accepted processor; flavor-axis negatives and no-data can precede rejection.
 
