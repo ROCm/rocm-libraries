@@ -294,12 +294,14 @@ inline bool tileEstimateOverflows(size_t elementSize,
 // (src/solver/pooling/forward2d.cpp), which MIOpen tries first for 4D pooling,
 // adds its tile span to the output height and width; PoolingForwardNd
 // (forwardNd.cpp, 5D) adds pix_*_per_work - 1 to each output size. For an output
-// size near INT_MAX the sum wraps. In 2D the global work size then exceeds 32
-// bits and miopenPoolingForward fails with miopenStatusInternalError; in 3D the
-// block count collapses and miopenPoolingForward returns success with most of Y
-// unwritten. With the default configurations 2D fails from INT_MAX - 6 and 3D
-// does not fail; tuned configurations span up to 128 outputs in 2D and 4 in 3D,
-// so the worst case fails from INT_MAX - 126.
+// size near INT_MAX the sum wraps. For 4D graphs (PoolingForward2d) the global
+// work size then exceeds 32 bits and miopenPoolingForward fails with
+// miopenStatusInternalError; for 5D graphs (PoolingForwardNd) the block count
+// collapses and miopenPoolingForward returns success with most of Y unwritten.
+// With the default configurations 4D fails from INT_MAX - 6 and 5D does not
+// fail; tuned configurations span up to 128 outputs for 4D and 4 for 5D, so 4D
+// fails from INT_MAX - 126 and 5D from INT_MAX - 2. One bound, INT_MAX - 127,
+// serves both.
 //
 // WORKAROUND_ALMIOPEN_3449_DECLINES_OUTPUT(outputExtent) is true for the output
 // spatial sizes the resample forward checks decline until the fix lands: above
@@ -309,6 +311,9 @@ inline bool tileEstimateOverflows(size_t elementSize,
 // count limit only when every other dimension of Y is 1, so the graph has one
 // channel and is pooled as channels-first in either layout.
 //
+// Remove the guard only when the fix covers both PoolingForward2d and
+// PoolingForwardNd; after a fix to one solver, make the bound rank-specific
+// instead (INT_MAX - 127 for rank 4, INT_MAX - 3 for rank 5).
 // To remove after the fix: delete this section and its macro, its call site in
 // engines/plans/MiopenResampleFwdChecks.cpp (and that file's
 // `#include "Workarounds.hpp"` once no workaround there remains), and the tests

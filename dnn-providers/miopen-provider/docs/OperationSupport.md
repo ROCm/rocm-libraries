@@ -136,6 +136,7 @@ The following table lists all operations currently supported in hipDNN:
 > INT32_MAX. A reduction to a single output element is further limited to 1,073,741,568 (about
 > 2^30) input elements.
 
+> [!NOTE]
 > **Standalone Resample Forward:** A single-node graph supports MAXPOOL, AVGPOOL_EXCLUDE_PADDING
 > and AVGPOOL_INCLUDE_PADDING across ranks 4-5, with packed X and Y sharing one datatype and
 > layout, and an FP32 compute type. Padding must be symmetric and smaller than the window, and
