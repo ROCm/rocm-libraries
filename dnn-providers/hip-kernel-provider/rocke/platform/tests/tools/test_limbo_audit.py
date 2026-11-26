@@ -394,6 +394,38 @@ def test_per_gpu_and_dtype(case, dtype):
     assert _audit(tree, lanes) == {}
 
 
+def test_an_empty_parameter_set_stands_for_no_case_where_other_lanes_have_cases(
+    tmp_path,
+):
+    """Where another lane collected real cases of the test, the placeholder
+    stands for no case, whether those cases ran or not: each real case is
+    audited itself, in limbo only when its own reasons are unrecorded."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            GFX950_FILE: _SKIPS_BY_LANE
+            + """
+CASES = {"gfx942": [1, 2], "gfx1100": []}[os.environ["FAKE_LANE"]]
+
+@pytest.mark.parametrize("case", CASES)
+def test_recorded_where_it_has_cases(case):
+    skip_for({"gfx942": skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")})
+
+@pytest.mark.parametrize("case", CASES)
+def test_unrecorded_where_it_has_cases(case):
+    skip_for({"gfx942": "the kernel is refused here"})
+""",
+        },
+    )
+    lanes = {
+        lane: _run_lane(tree, tmp_path / lane, lane) for lane in ("gfx942", "gfx1100")
+    }
+    assert set(_audit(tree, lanes)) == {
+        (GFX950_FILE, "test_unrecorded_where_it_has_cases[1]"),
+        (GFX950_FILE, "test_unrecorded_where_it_has_cases[2]"),
+    }
+
+
 @pytest.mark.parametrize("last", ["undeclared", "declared"])
 def test_a_lane_keeps_the_recorded_reason_of_one_entry_that_left_a_test_out(
     tmp_path, last

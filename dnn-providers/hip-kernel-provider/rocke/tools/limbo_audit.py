@@ -68,12 +68,9 @@ __all__ = [
 
 ROCKE_DIR = Path(__file__).resolve().parents[1]
 _GFX = re.compile(r"\bgfx[0-9a-f]+\b")
-# pytest's skip reason for the placeholder case of a test whose parameter set is
-# empty in that run (a parameter set that depends on the GPU, for one).
-_EMPTY_PARAMETER_SET = "got empty parameter set"
-# The placeholder's parameter id (one part of the id of a test with stacked
-# parametrizes); it still names the placeholder when a skip mark of the test or
-# its module gives the skip reason instead.
+# The parameter id of the placeholder case pytest makes for a test whose
+# parameter set is empty in a run (a parameter set that depends on the GPU, for
+# one); one part of the id of a test with stacked parametrizes.
 _EMPTY_PARAMETER_SET_ID = "NOTSET"
 # How far a test got in a lane, lowest first; a lane keeps the furthest. An
 # unfinished test was to run, but its process ended first (run_records).
@@ -253,22 +250,11 @@ def _accounted_for(test: TestId, lanes: list[LaneRun]) -> bool:
     return recorded > 0
 
 
-def _placeholder_of_a_test_that_ran(
-    test: TestId, lanes: list[LaneRun], ran_functions: set[TestId]
-) -> bool:
-    """Whether ``test`` is the placeholder pytest makes where a test's parameter
-    set is empty, of a test another case of which ran: no case is missing."""
-    path, node = test
-    function, _, parameter_id = node.partition("[")
-    return (path, function) in ran_functions and (
-        _EMPTY_PARAMETER_SET_ID in parameter_id.removesuffix("]").split("-")
-        or all(
-            reason.startswith(_EMPTY_PARAMETER_SET)
-            for lane in lanes
-            if lane.collected(test)
-            for reason in lane.reasons_not_run(test)
-        )
-    )
+def _is_empty_parameter_set_placeholder(node: str) -> bool:
+    """Whether the test ``node`` is the placeholder pytest makes where a test's
+    parameter set is empty."""
+    _, _, parameter_id = node.partition("[")
+    return _EMPTY_PARAMETER_SET_ID in parameter_id.removesuffix("]").split("-")
 
 
 def audit(lanes: list[LaneRun], universe: Iterable[TestId] = ()) -> list[LimboTest]:
@@ -284,11 +270,19 @@ def audit(lanes: list[LaneRun], universe: Iterable[TestId] = ()) -> list[LimboTe
         if path not in known_files
     }
     ran = {test for test in tests if any(lane.ran(test) for lane in lanes)}
-    ran_functions = {(path, node.partition("[")[0]) for path, node in ran}
+    # A test whose parameter set is empty in one run and not in another has
+    # its real cases audited one by one, so its placeholder stands for no case.
+    functions_with_cases = {
+        (path, node.partition("[")[0])
+        for path, node in tests
+        if not _is_empty_parameter_set_placeholder(node)
+    }
     limbo = []
     for test in sorted(tests - ran):
-        if _accounted_for(test, lanes) or _placeholder_of_a_test_that_ran(
-            test, lanes, ran_functions
+        path, node = test
+        if _accounted_for(test, lanes) or (
+            _is_empty_parameter_set_placeholder(node)
+            and (path, node.partition("[")[0]) in functions_with_cases
         ):
             continue
         limbo.append(
