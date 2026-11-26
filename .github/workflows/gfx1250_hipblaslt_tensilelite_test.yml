@@ -13,7 +13,7 @@
 # Planned for removal once TheRock's multi-arch builds produce gfx1250-strict artifacts
 # (ROCm/TheRock#8350) and gfx1250-strict runners are available in TheRock CI.
 #
-# Per-PR: on pull_request, for non-draft PRs by ROCm org members (forks included)
+# Per-PR: on pull_request, for non-draft PRs (or drafts labelled ci:run-on-draft) by ROCm org members (forks included)
 # that touch hipBLASLt/TensileLite or this workflow outside docs; the TensileLite
 # tests are skipped when only hipBLASLt's library and clients change
 # (.github/gfx1250-hw-ci-paths.toml). The org label comes from

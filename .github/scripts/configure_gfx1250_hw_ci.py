@@ -50,6 +50,10 @@ PATHS = Path(__file__).resolve().parents[1] / "gfx1250-hw-ci-paths.toml"
 # "organization: streamhpc" (the streamhpc team's label) is left out: that team doesn't
 # work on hipBLASLt or TensileLite, and a manual dispatch still covers a one-off PR.
 ORG_LABELS = {"organization: ROCm"}
+# A draft PR is skipped unless it carries this label, so an author can get hardware
+# results before marking the PR ready (and before code owners are requested). Same label
+# and meaning as TheRock's multi-arch CI (configure_multi_arch_ci.py RUN_ON_DRAFT_LABEL).
+DRAFT_RUN_LABEL = "ci:run-on-draft"
 
 log = logging.getLogger("configure_gfx1250_hw_ci")
 
@@ -99,14 +103,29 @@ def decide(env, changed_files, rules):
 
     pr = env.get("PR", "")
     label = env.get("LABEL", "")
-    if env.get("ACTION") == "labeled" and label not in ORG_LABELS:
-        return Decision(
-            False, False, f"Skipping: label '{label}' does not affect this workflow"
-        )
-    if env.get("DRAFT") == "true":
-        return Decision(False, False, f"Skipping: PR #{pr} is a draft")
+    draft = env.get("DRAFT") == "true"
     labels = env.get("LABELS")
-    if labels is not None and not ORG_LABELS & set(json.loads(labels) or []):
+    label_set = set(json.loads(labels) or []) if labels is not None else None
+    if env.get("ACTION") == "labeled":
+        # Only two label events can start a run: the org label arriving, or the draft-run
+        # label on a draft (a ready PR already ran on its push).
+        if label == DRAFT_RUN_LABEL and not draft:
+            return Decision(
+                False,
+                False,
+                f"Skipping: PR #{pr} is not a draft; it runs without '{DRAFT_RUN_LABEL}'",
+            )
+        if label != DRAFT_RUN_LABEL and label not in ORG_LABELS:
+            return Decision(
+                False, False, f"Skipping: label '{label}' does not affect this workflow"
+            )
+    if draft and (label_set is None or DRAFT_RUN_LABEL not in label_set):
+        return Decision(
+            False,
+            False,
+            f"Skipping: PR #{pr} is a draft (label '{DRAFT_RUN_LABEL}' runs it)",
+        )
+    if label_set is not None and not ORG_LABELS & label_set:
         return Decision(False, False, f"Skipping: PR #{pr} has no ROCm org label")
 
     if changed_files is None:
