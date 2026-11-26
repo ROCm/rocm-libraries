@@ -97,13 +97,14 @@ def _enumerate_chunk(
     across chunks are resolved by the caller, which merges the chunks in order
     and so keeps the same first occurrence a single serial walk would.
 
-    ``addr64`` (fwd-only; see ``kernels.conv.aot_jobs._direction_jobs``) is
-    only forwarded for ``direction == "fwd"`` -- wgrad/dgrad do not accept it.
+    ``addr64`` (fwd/wgrad only; see ``kernels.conv.aot_jobs._direction_jobs``)
+    is only forwarded for ``direction in ("fwd", "wgrad")`` -- dgrad does not
+    accept it.
     """
     out: List[Tuple[str, BuildJob]] = []
     seen = set()
     n_raw = 0
-    extra = {"addr64": True} if addr64 and direction == "fwd" else {}
+    extra = {"addr64": True} if addr64 and direction in ("fwd", "wgrad") else {}
     for job in _direction_jobs(
         direction,
         arch,
@@ -213,9 +214,9 @@ def enumerate_jobs(
     kernels for those launch modes x ``streamk_reductions``.
 
     ``addr64`` (default ``False``, so every existing cache build is
-    unaffected) additionally includes the large-tensor forward-addressing
-    subset (fwd-only; see ``kernels.conv.aot_jobs._fwd_addr64_jobs``) for
-    every geometry it accepts.
+    unaffected) additionally includes the large-tensor addressing subset
+    (fwd or wgrad; see ``kernels.conv.aot_jobs._fwd_addr64_jobs`` /
+    ``_wgrad_addr64_jobs``) for every geometry it accepts.
 
     With ``validate=True`` (the default) each candidate is run through its
     direction's spec validator first, so the returned list is what will
@@ -519,8 +520,8 @@ def compile_all(
     ``streamk_modes`` opts the wgrad stream-K kernels in (see
     :data:`CACHE_WGRAD_STREAMK_MODES`).
 
-    ``addr64`` (default ``False``) opts the large-tensor forward-addressing
-    kernels in (fwd-only; see ``enumerate_jobs``).
+    ``addr64`` (default ``False``) opts the large-tensor addressing kernels
+    in (fwd or wgrad; see ``enumerate_jobs``).
 
     Compilation is embarrassingly parallel and dominated by LLVM, so it fans
     out over processes; ``jobs`` defaults to one but the caller normally passes
@@ -890,9 +891,10 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
                 split_k=extras["split_k"],
                 ws_ptr=extras["ws_ptr"],
                 ws_bytes=extras["ws_bytes"],
+                addr64=identity.addr64,
             )
         return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).to_launch_values(
-            *ptrs, *sizes
+            *ptrs, *sizes, addr64=identity.addr64
         )
     if direction == "wgrad":
         return ConvArgs.from_problem(
@@ -903,6 +905,7 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
             split_k=extras.get("split_k", 1),
             ws_ptr=extras.get("ws_ptr"),
             ws_bytes=extras.get("ws_bytes"),
+            addr64=identity.addr64,
         )
     return ConvArgs.from_problem(
         problem, direction="dgrad", tile_m=tm, tile_n=tn

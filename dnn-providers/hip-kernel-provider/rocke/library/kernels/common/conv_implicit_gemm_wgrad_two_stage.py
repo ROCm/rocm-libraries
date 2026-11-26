@@ -127,6 +127,7 @@ def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
         dtype_d=spec.data.dtype_d,
         is_3d=spec.problem.is_3d,
         two_stage=True,
+        addr64=spec.addr64,
     )
 
 
@@ -171,6 +172,7 @@ def wgrad_stage1_launch_values(
         X_bytes,
         dW_bytes,
         split_k=split_k,
+        addr64=spec.addr64,
         ws_ptr=ws_ptr,
         ws_bytes=ws_bytes,
     )
@@ -236,6 +238,9 @@ def build_implicit_gemm_conv_wgrad_two_stage(
             ws_replicas=spec.ws_replicas,
             reduction="workspace",
             allow_unsplit=False,
+            addr64=spec.addr64,
+            dtype_a=spec.data.dtype_a,
+            dtype_b=spec.data.dtype_b,
         )
         spec = dc_replace(spec, split_k=resolved.split_k)
 

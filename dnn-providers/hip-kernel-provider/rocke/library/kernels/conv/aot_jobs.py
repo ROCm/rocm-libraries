@@ -1329,6 +1329,85 @@ def _fwd_addr64_jobs(
     )
 
 
+def _wgrad_addr64_geometry(geometry: tuple, mma_family: str) -> bool:
+    """Whether an addr64 (large-tensor wgrad addressing) kernel is built for
+    ``geometry``: MFMA, pipeline "mem" only -- the plain sync K-loop
+    ``WgradConvSpec.validate()`` requires for addr64 (see its guard block).
+    A config subset, like :func:`_fwd_addr64_geometry`, not a full product.
+    """
+    _tm, _tn, _tk, _wm, _wn, _wt, pipeline, _epilogue, _atom = geometry
+    return mma_family == "mma" and pipeline == "mem"
+
+
+def _wgrad_addr64_jobs(
+    arch: str,
+    da: str,
+    db: str,
+    dd: str,
+    flavor: str,
+    wave_size: int,
+    geometry: tuple,
+    mma_family: str,
+) -> Iterator[BuildJob]:
+    """addr64 wgrad kernels for one geometry: no unroll_k/async_dma, scalar
+    vector widths -- the minimal catalog subset, mirroring
+    :func:`_fwd_addr64_jobs`'s scope choice, but swept over
+    ``(grouped, split_k, two_stage)`` (:data:`_GROUPED` x
+    :data:`CACHE_WGRAD_SPLIT_KS` x :func:`_wgrad_two_stages`) since
+    ``WgradConvSpec.addr64``'s ``validate()`` accepts all three (its GPU
+    numeric coverage already exercises them -- see
+    ``test_conv_wgrad_addr64_guard.py``'s module docstring). Stream-K addr64
+    stays uncached (``validate()`` itself rejects it). Nothing is built for a
+    geometry :func:`_wgrad_addr64_geometry` excludes.
+    """
+    from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
+
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    if not _wgrad_addr64_geometry(geometry, mma_family):
+        return
+    for grouped, split_k in itertools.product(_GROUPED, CACHE_WGRAD_SPLIT_KS):
+        for two_stage in _wgrad_two_stages(split_k):
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                vector_size_a=1,
+                vector_size_b=1,
+                vector_size_c=1,
+                unroll_k=False,
+                async_dma=False,
+                split_k=split_k,
+                two_stage=two_stage,
+                addr64=True,
+            )
+            if two_stage:
+                cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="wgrad",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=grouped,
+                    **cfg,
+                ),
+                direction="wgrad",
+                spec_kwargs=cfg,
+                caps=dict(grouped=grouped),
+            )
+
+
 def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     """The fwd async loaders' chunk widths, for the identity.
 
@@ -1429,6 +1508,7 @@ def _wgrad_jobs(
     llvm_flavor: Optional[str] = None,
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    addr64: bool = False,
 ) -> Iterator[BuildJob]:
     from kernels.common.conv_implicit_gemm_wgrad import (
         _DEFAULT_WS_REPLICAS,
@@ -1666,6 +1746,13 @@ def _wgrad_jobs(
                 direction="wgrad",
                 spec_kwargs=cfg,
                 caps=dict(grouped=True, group_merge=gm),
+            )
+        if addr64:
+            geometry = (
+                tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom,
+            )
+            yield from _wgrad_addr64_jobs(
+                arch, da, db, dd, flavor, wave_size, geometry, mma_family
             )
 
 
@@ -2223,6 +2310,10 @@ def count_jobs(
                         geo[7], geo[1], dtype, streamk_modes, streamk_reductions
                     )
                 )
+                if addr64 and _wgrad_addr64_geometry(geo, mma_family):
+                    total += len(_GROUPED) * sum(
+                        len(_wgrad_two_stages(sk)) for sk in CACHE_WGRAD_SPLIT_KS
+                    )
             elif direction == "dgrad":
                 total += vecs * sum(
                     len(_dgrad_tap_outer_variants(caps, wave_size, pipeline))
@@ -2247,9 +2338,9 @@ def _direction_jobs(
     addr64: bool = False,
     **kw,
 ) -> Iterator[BuildJob]:
-    if addr64 and direction != "fwd":
+    if addr64 and direction not in ("fwd", "wgrad"):
         raise ValueError(
-            f"addr64 is a forward-only variant (got direction={direction!r})"
+            f"addr64 is a fwd/wgrad-only variant (got direction={direction!r})"
         )
     wave_size = target.wave_size
     mma_family = "wmma" if wave_size == 32 else "mma"
@@ -2265,6 +2356,7 @@ def _direction_jobs(
             split_ks,
             streamk_modes=streamk_modes,
             streamk_reductions=streamk_reductions,
+            addr64=addr64,
             **kw,
         )
     if direction == "dgrad":

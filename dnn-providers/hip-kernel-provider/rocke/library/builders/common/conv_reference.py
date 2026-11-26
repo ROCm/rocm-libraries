@@ -187,6 +187,124 @@ def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
         return dW_ncdhw.permute(0, 2, 3, 4, 1).contiguous()
 
 
+def _sawtooth_cycle_sum(n: int, period: int) -> float:
+    """``sum_{i=0}^{n-1} ((i % period) - (period-1)/2)`` in closed form.
+
+    A full period's terms are ``0, 1, ..., period-1`` shifted to be zero-mean
+    (``(period-1)/2`` is their exact mean), so each complete cycle sums to
+    exactly ``0`` regardless of ``period``'s parity; only the trailing partial
+    cycle (``n % period`` terms) contributes. This keeps the sum's magnitude
+    bounded by ``O(period**2)`` no matter how large ``n`` is -- the point,
+    since ``n`` here is ``N`` and can genuinely overflow i32 byte addressing.
+    """
+    rem = n % period
+    return rem * (rem - 1) / 2.0 - rem * (period - 1) / 2.0
+
+
+def wgrad_ramp_reference(p, period: int = 16) -> list:
+    """Expected ``dW[:, y, x, :]`` under the "sawtooth" pattern, with no torch
+    call and no full-tensor reference computation.
+
+    Pair with :func:`wgrad_ramp_operands`: ``dY`` is all ones and ``X[n]`` is
+    a zero-mean sawtooth of ``n`` (``(n % period) - (period-1)/2``) broadcast
+    over every channel/spatial position. Every image then contributes
+    identically regardless of its spatial content, so the
+    ``K_wg = N*Ho*Wo`` reduction collapses to one closed-form sum per
+    ``(y, x)`` tap, shared by every ``(k, c)`` -- a cheap, dependency-free
+    check that the addr64 K-loop's N-axis decode is sound at genuinely
+    overflowing N, independent of whatever ``torch.nn.grad.conv2d_weight``
+    does at that scale (it has been observed to be wrong at large channel
+    counts; see the session notes for ``wgrad_reference``).
+
+    The sawtooth's zero mean (:func:`_sawtooth_cycle_sum`) keeps the expected
+    value bounded by ``O(period**2) * Ho * Wo`` regardless of ``N`` -- unlike
+    a plain ``n % period`` ramp, whose sum grows with ``N`` and overflows a
+    fp16 output at the N this check targets. ``period`` must stay small
+    enough that ``(period-1)/2`` (a half-integer) and the bounded sum both
+    stay exact in fp16 -- the default of 16 keeps every magnitude well under
+    fp16's 2**11 exact-integer range even for large Ho*Wo.
+
+    Returns a ``(Y, X)`` nested list of the expected float value per tap.
+    """
+    n_sum = _sawtooth_cycle_sum(p.N, period)
+
+    def _valid_count(out_extent, stride, pad, dil, in_extent, tap):
+        return sum(
+            1
+            for o in range(out_extent)
+            if 0 <= o * stride - pad + tap * dil < in_extent
+        )
+
+    expected = []
+    for y in range(p.Y):
+        n_ho = _valid_count(p.Ho, p.sH, p.pH, p.dH, p.Hi, y)
+        row = []
+        for x in range(p.X):
+            n_wo = _valid_count(p.Wo, p.sW, p.pW, p.dW, p.Wi, x)
+            row.append(float(n_sum * n_ho * n_wo))
+        expected.append(row)
+    return expected
+
+
+def wgrad_ramp_operands(p, torch_dtype=None, period: int = 16):
+    """``(X, dY)`` for :func:`wgrad_ramp_reference`'s pattern.
+
+    ``X`` is ``NHWC``, value ``(n % period) - (period-1)/2`` broadcast over
+    ``(Hi, Wi, C)``; ``dY`` is ``NHWK``, all ones. Shapes/layout match
+    ``wgrad_reference``'s inputs.
+    """
+    kw = {} if torch_dtype is None else {"dtype": torch_dtype}
+    n_vals = (torch.arange(p.N, dtype=torch.float32) % period) - (period - 1) / 2.0
+    X = (
+        n_vals.view(p.N, 1, 1, 1)
+        .expand(p.N, p.Hi, p.Wi, p.C)
+        .to(**kw)
+        .contiguous()
+    )
+    dY = torch.ones((p.N, p.Ho, p.Wo, p.K), **kw)
+    return X, dY
+
+
+def wgrad_ramp_reference_tensor(p, period: int = 16) -> torch.Tensor:
+    """Full ``(K, Y, X, Cg)`` reference for the sawtooth pattern.
+
+    Broadcasts :func:`wgrad_ramp_reference`'s per-tap closed form over every
+    ``(k, c)``, so it plugs directly into the standard peak-normalised verify
+    path (``_verify_kernel`` in ``benchmark_implicit_gemm_conv.py``) with no
+    changes to that path.
+    """
+    expected = wgrad_ramp_reference(p, period=period)
+    Cg = p.C // p.groups
+    out = torch.empty((p.K, p.Y, p.X, Cg), dtype=torch.float32)
+    for y in range(p.Y):
+        for x in range(p.X):
+            out[:, y, x, :] = expected[y][x]
+    return out
+
+
+def wgrad_ramp_check(
+    dW: torch.Tensor, p, period: int = 16, tol: float = 1e-2
+) -> tuple:
+    """Compare a ``KYXC`` wgrad output against :func:`wgrad_ramp_reference`.
+
+    Uses the same peak-normalised metric as the benchmark's verify path
+    (``max|out-ref| / max(|ref|, 1)``), computed per ``(y, x)`` tap over the
+    full ``(K, Cg)`` slice (cheap: ``dW`` is bounded by ``K*C*Y*X``,
+    independent of the overflowing ``N``).
+
+    Returns ``(passed, rel_err)``.
+    """
+    expected = wgrad_ramp_reference(p, period=period)
+    rel_err = 0.0
+    dW_f = dW.float()
+    for y in range(p.Y):
+        for x in range(p.X):
+            exp = expected[y][x]
+            diff = (dW_f[:, y, x, :] - exp).abs().max().item()
+            rel_err = max(rel_err, diff / max(abs(exp), 1.0))
+    return rel_err < tol, rel_err
+
+
 @_ieee
 def dgrad_reference(dY: torch.Tensor, W: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference input gradient for a convolution problem.
