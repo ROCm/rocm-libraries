@@ -164,7 +164,9 @@ def list_files_from_api(repo, pr):
         "--paginate",
         f"repos/{repo}/pulls/{pr}/files",
         "--jq",
-        ".[].filename",
+        # A renamed file counts at both paths: a TensileLite file moved into library/
+        # still runs the TensileLite tests, and a source file moved into docs/ still runs the job.
+        ".[] | .filename, (.previous_filename // empty)",
     ]
     log.info("Listing PR #%s's changed files: %s", pr, " ".join(command))
     result = subprocess.run(command, capture_output=True, text=True)
@@ -178,7 +180,8 @@ def list_files_from_api(repo, pr):
 
 def list_files_from_git(base):
     """Files changed on this branch since it left `base` (git diff base...HEAD)."""
-    command = ["git", "diff", "--name-only", f"{base}...HEAD"]
+    # --no-renames lists a rename as a delete plus an add, so both paths count (as above).
+    command = ["git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"]
     log.info("Listing changed files: %s", " ".join(command))
     result = subprocess.run(command, capture_output=True, text=True, check=True)
     return [line for line in result.stdout.splitlines() if line.strip()]

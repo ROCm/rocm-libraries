@@ -73,7 +73,7 @@ jobs:
       run_hipblaslt: ${{ steps.gate.outputs.run_hipblaslt }}
       run_tensilelite: ${{ steps.gate.outputs.run_tensilelite }}
     steps:
-      # Only the gate's script, its tests and its path rules: the gate runs no PR code.
+      # Only the gate's script, its tests and its path rules. The gate job runs no build and no GPU code.
       - name: Checkout the gate's script and path rules
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
