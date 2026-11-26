@@ -27,6 +27,7 @@ from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.device_array import DeviceArray
 from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_rr_mfma import (
     FwdRrMfmaSpec,
@@ -412,6 +413,198 @@ def test_aot_grid_jobs_round_trip():
     assert jobs
     for job in jobs[:: max(1, len(jobs) // 12)]:
         assert direct_job_for_identity(job.identity).identity == job.identity
+
+
+# ------------------------------------------------------------------ C++ engine
+
+
+def _rr_describe_specs():
+    """The rows in both dtypes, plus one refusal per validator branch."""
+    specs = [_rr_spec(row, dtype) for row in _RR_ROWS for dtype in ("bf16", "fp16")]
+    ok = FwdRrMfmaSpec(problem=_rr_problem())
+    for pkw in (
+        dict(groups=2),
+        dict(stride=2),
+        dict(KW=5),
+        dict(PAD=3),
+        dict(pad_w=-2),
+        dict(dtype="fp32"),
+        dict(cpg=100),
+        dict(kpg=96),
+        dict(cpg=192),
+        dict(N=0),
+        dict(H=1024, W=2048, cpg=1024, kpg=128),
+    ):
+        specs.append(replace(ok, problem=replace(ok.problem, **pkw)))
+    three_by_one = _rr_problem(KW=1, pad=1, pad_w=0)
+    for spec in (
+        replace(ok, kw16=1),
+        replace(ok, odd_c=True),
+        replace(ok, c_tail=True),
+        replace(ok, one_c=True),
+        replace(ok, grp=True),
+        replace(ok, unfold=True),
+        replace(ok, chunk=True),
+        replace(ok, wave_size=32),
+        FwdRrMfmaSpec(problem=three_by_one, c64=True, kw16=2),
+        FwdRrMfmaSpec(problem=replace(three_by_one, W=8)),
+        FwdRrMfmaSpec(problem=replace(ok.problem, cpg=72), one_c=True),
+        FwdRrMfmaSpec(problem=replace(ok.problem, cpg=64), one_c=True, odd_c=True),
+        FwdRrMfmaSpec(problem=replace(ok.problem, cpg=136), c_tail=True),
+        FwdRrMfmaSpec(problem=replace(ok.problem, cpg=128), c_tail=True),
+    ):
+        specs.append(spec)
+    return specs
+
+
+def test_rr_describe_matches_python():
+    """The C++ validator, kernel name, grid and workspace of the rr forward
+    agree with Python's, accepted and refused specs, on three architectures."""
+    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    from kernels.conv.engine_bridge import conv_direct_fwd_rr_mfma_spec_to_dict
+
+    for arch in ("gfx950", "gfx942", "gfx1250"):
+        for spec in _rr_describe_specs():
+            ok, why_c, name, grid, ws = eng.conv_direct_fwd_rr_mfma_describe(
+                conv_direct_fwd_rr_mfma_spec_to_dict(spec), arch
+            )
+            why = fwd_rr_mfma_reason(spec, arch)
+            assert ok == (why is None), (arch, spec, why, why_c)
+            if why is not None:
+                assert why_c == why, (arch, spec, why, why_c)
+            else:
+                assert tuple(grid) == spec.grid(), (arch, spec)
+                assert ws == spec.workspace_bytes(), (arch, spec)
+            assert name == spec.kernel_name()
+
+
+def test_rr_wfmt_describe_matches_python():
+    """The C++ weight-format helper names and sizes its launch like Python."""
+    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    from kernels.conv.engine_bridge import conv_direct_fwd_rr_wfmt_spec_to_dict
+
+    for dtype in ("bf16", "fp16"):
+        for kw16, fw, nwk, dg in ((4, 3, 2, False), (3, 1, 2, False), (2, 3, 4, True)):
+            spec = FwdRrWfmtSpec(
+                problem=_rr_problem(C=72, K=192, KW=fw, dtype=dtype),
+                kw16=kw16,
+                fw=fw,
+                nwk=nwk,
+                dg=dg,
+            )
+            name, grid = eng.conv_direct_fwd_rr_wfmt_describe(
+                conv_direct_fwd_rr_wfmt_spec_to_dict(spec), "gfx950"
+            )
+            assert name == spec.kernel_name()
+            assert tuple(grid) == spec.launch_geometry()[0]
+
+
+def test_tap1d_describe_matches_python():
+    """The C++ validator, kernel name, grid and LDS size of the tap-reuse
+    forward agree with Python's, accepted and refused specs."""
+    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    from kernels.conv.engine_bridge import conv_direct_fwd_tap1d_mfma_spec_to_dict
+
+    specs = [
+        _tap1d_spec(row, dtype) for row in _TAP1D_ROWS for dtype in ("bf16", "fp16")
+    ]
+    ok = FwdTap1dMfmaSpec(problem=_tap1d_problem())
+    for pkw in (
+        dict(groups=2),
+        dict(KH=3),
+        dict(PAD=1),
+        dict(stride=2),
+        dict(pad_w=3),
+        dict(dtype="fp32"),
+        dict(kpg=100),
+        dict(cpg=100),
+        dict(cpg=64),
+        dict(W=1, pad_w=0, KW=3),
+        dict(N=0),
+        dict(KW=11, dil_w=20, pad_w=0, W=400),
+    ):
+        specs.append(replace(ok, problem=replace(ok.problem, **pkw)))
+    for skw in (
+        dict(bk=96),
+        dict(nwv=6),
+        dict(one=True),
+        dict(seg=0),
+        dict(ck=16),
+        dict(wave_size=32),
+    ):
+        specs.append(replace(ok, **skw))
+    for arch in ("gfx950", "gfx942", "gfx1250"):
+        for spec in specs:
+            got, why_c, name, grid, lds = eng.conv_direct_fwd_tap1d_mfma_describe(
+                conv_direct_fwd_tap1d_mfma_spec_to_dict(spec), arch
+            )
+            why = fwd_tap1d_mfma_reason(spec, arch)
+            assert got == (why is None), (arch, spec, why, why_c)
+            if why is not None:
+                assert why_c == why, (arch, spec, why, why_c)
+            else:
+                assert tuple(grid) == spec.grid(), (arch, spec)
+                assert lds == spec.lds_bytes, (arch, spec)
+            assert name == spec.kernel_name()
+
+
+def test_backends_lower_identically():
+    """The engine bridge gives the same .ll on the Python and C++ backends
+    for one spec of each kernel (the parity emitters cover every knob)."""
+    import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    from kernels.conv.engine_bridge import (
+        lower_conv_direct_fwd_rr_mfma,
+        lower_conv_direct_fwd_rr_wfmt,
+        lower_conv_direct_fwd_tap1d_mfma,
+    )
+
+    cases = (
+        (lower_conv_direct_fwd_rr_mfma, _rr_spec(_RR_ROWS[0], "bf16")),
+        (
+            lower_conv_direct_fwd_rr_wfmt,
+            FwdRrWfmtSpec(problem=_rr_problem(C=72), kw16=3),
+        ),
+        (lower_conv_direct_fwd_tap1d_mfma, _tap1d_spec(_TAP1D_ROWS[2], "fp16")),
+    )
+    for lower, spec in cases:
+        py = lower(spec, arch="gfx950", backend="python")
+        cpp = lower(spec, arch="gfx950", backend="cpp")
+        assert py.backend == "python" and cpp.backend == "cpp"
+        assert py.llvm_text == cpp.llvm_text, spec
+
+
+def test_binding_rejects_bad_input():
+    """A missing, mistyped or partial problem raises in the binding."""
+    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    from kernels.conv.engine_bridge import (
+        conv_direct_fwd_rr_mfma_spec_to_dict,
+        conv_direct_fwd_tap1d_mfma_spec_to_dict,
+    )
+
+    for fam, good in (
+        (
+            "conv_direct_fwd_rr_mfma",
+            conv_direct_fwd_rr_mfma_spec_to_dict(FwdRrMfmaSpec(problem=_rr_problem())),
+        ),
+        (
+            "conv_direct_fwd_tap1d_mfma",
+            conv_direct_fwd_tap1d_mfma_spec_to_dict(
+                FwdTap1dMfmaSpec(problem=_tap1d_problem())
+            ),
+        ),
+    ):
+        partial = dict(good["problem"])
+        del partial["kpg"]
+        for problem in (None, "N2H13", partial, dict(good["problem"], dtype=None)):
+            sd = dict(good)
+            if problem is None:
+                del sd["problem"]
+            else:
+                sd["problem"] = problem
+            with pytest.raises(ValueError):
+                getattr(eng, f"{fam}_describe")(sd, "gfx950")
+            with pytest.raises(ValueError):
+                getattr(eng, f"{fam}_lower_llvm")(sd, arch="gfx950")
 
 
 # --------------------------------------------------------------------------- GPU

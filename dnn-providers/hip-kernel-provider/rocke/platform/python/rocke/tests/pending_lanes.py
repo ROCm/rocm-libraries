@@ -878,6 +878,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_direct_dgrad_pp_mfma.py",
         "library/tests/test_direct_fwd_flex_mfma.py",
         "library/tests/test_direct_fwd_pp_mfma.py",
+        "library/tests/test_direct_fwd_rr_tap1d.py",
         "library/tests/test_strided_kv_decode.py",
     ),
     *_waiting(
