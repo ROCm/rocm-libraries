@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -43,9 +44,10 @@ using hipdnn_data_sdk::utilities::RankingMetric;
 thread_local std::array<char, 1024> lastError{};
 
 // Set through SetLoggingCallback / SetLogLevel below. Last writer wins, which is fine
-// because every callback forwards to the one backend sink.
-hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
-hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
+// because every callback forwards to the one backend sink. Atomic because every handle
+// creation writes them while other threads may be logging.
+std::atomic<hipdnnCallback_t> g_loggingCallback{nullptr}; // NOLINT(readability-identifier-naming)
+std::atomic<hipdnnSeverity_t> g_logLevel{HIPDNN_SEV_INFO}; // NOLINT(readability-identifier-naming)
 
 #define PREDICTION_BUILTIN_LOG(severity, ...) \
     HIPDNN_BUILTIN_HEURISTIC_LOG(             \
@@ -249,13 +251,13 @@ hipdnnPluginStatus_t getType(hipdnnPluginType_t* type)
 
 hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t callback)
 {
-    g_loggingCallback = callback;
+    g_loggingCallback.store(callback, std::memory_order_relaxed);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
 hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t level)
 {
-    g_logLevel = level;
+    g_logLevel.store(level, std::memory_order_relaxed);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 

@@ -162,6 +162,86 @@ public:
 
         return {};
     }
+
+    /**
+     * @brief Logical equality: same operation semantics, ignoring the node name and
+     * tensor names and UIDs.
+     *
+     * Compares compute_data_type, custom_op_id and the opaque data payload (both define
+     * what the plugin computes), and the positional input and output tensors with
+     * TensorAttributes::logicallyEquals. Tensor order matters; a null entry equals only
+     * a null entry at the same position.
+     */
+    bool logicallyEquals(const CustomOpAttributes& other) const
+    {
+        if(compute_data_type != other.compute_data_type || custom_op_id != other.custom_op_id
+           || data != other.data)
+        {
+            return false;
+        }
+
+        const auto logical = [](const TensorAttributes& t1, const TensorAttributes& t2) {
+            return t1.logicallyEquals(t2);
+        };
+        return compareTensorVectors(inputs, other.inputs, logical)
+               && compareTensorVectors(outputs, other.outputs, logical);
+    }
+
+    /**
+     * @brief Strict equality: logical equality plus the node name and strict
+     * TensorAttributes equality for every positional tensor.
+     */
+    bool operator==(const CustomOpAttributes& other) const
+    {
+        if(name != other.name || compute_data_type != other.compute_data_type
+           || custom_op_id != other.custom_op_id || data != other.data)
+        {
+            return false;
+        }
+
+        const auto strict
+            = [](const TensorAttributes& t1, const TensorAttributes& t2) { return t1 == t2; };
+        return compareTensorVectors(inputs, other.inputs, strict)
+               && compareTensorVectors(outputs, other.outputs, strict);
+    }
+
+    bool operator!=(const CustomOpAttributes& other) const
+    {
+        return !(*this == other);
+    }
+
+private:
+    // True if v1 and v2 have the same length and, position by position, both entries are
+    // null or both are non-null and `equal` holds for the pointed-to tensors.
+    template <typename EqualT>
+    static bool compareTensorVectors(const std::vector<std::shared_ptr<TensorAttributes>>& v1,
+                                     const std::vector<std::shared_ptr<TensorAttributes>>& v2,
+                                     EqualT equal)
+    {
+        if(v1.size() != v2.size())
+        {
+            return false;
+        }
+
+        for(size_t i = 0; i < v1.size(); ++i)
+        {
+            if(!v1[i] || !v2[i])
+            {
+                if(v1[i] != v2[i])
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            if(!equal(*v1[i], *v2[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 };
 
 typedef CustomOpAttributes Custom_op_attributes; // NOLINT(readability-identifier-naming)

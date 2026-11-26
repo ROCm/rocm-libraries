@@ -27,7 +27,9 @@ public:
     ~FilesystemCheckerGuard() { miopen::SetFilesystemChecker(nullptr); }
 };
 
-TEST(CPU_FilesystemChecker_NONE, DefaultCheckerWorks)
+using CPU_FilesystemChecker_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_FilesystemChecker_NONE, DefaultCheckerWorks)
 {
     // The default checker should be available
     auto& checker = miopen::GetFilesystemChecker();
@@ -42,7 +44,7 @@ TEST(CPU_FilesystemChecker_NONE, DefaultCheckerWorks)
                   "IsNetworkedFilesystem must return bool");
 }
 
-TEST(CPU_FilesystemChecker_NONE, MockCheckerCanBeInjected)
+TEST_P(CPU_FilesystemChecker_NONE, MockCheckerCanBeInjected)
 {
     MockFilesystemChecker mock;
     miopen::fs::path test_path = "/some/test/path";
@@ -59,7 +61,7 @@ TEST(CPU_FilesystemChecker_NONE, MockCheckerCanBeInjected)
     EXPECT_TRUE(result);
 }
 
-TEST(CPU_FilesystemChecker_NONE, MockCheckerReturnsNonNetworked)
+TEST_P(CPU_FilesystemChecker_NONE, MockCheckerReturnsNonNetworked)
 {
     MockFilesystemChecker mock;
     miopen::fs::path test_path = "/another/test/path";
@@ -76,7 +78,7 @@ TEST(CPU_FilesystemChecker_NONE, MockCheckerReturnsNonNetworked)
     EXPECT_FALSE(result);
 }
 
-TEST(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
+TEST_P(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
 {
     {
         MockFilesystemChecker mock;
@@ -98,7 +100,7 @@ TEST(CPU_FilesystemChecker_NONE, DefaultCheckerRestoredAfterTest)
                   "IsNetworkedFilesystem must return bool");
 }
 
-TEST(CPU_FilesystemChecker_NONE, MultiplePathsCanBeChecked)
+TEST_P(CPU_FilesystemChecker_NONE, MultiplePathsCanBeChecked)
 {
     MockFilesystemChecker mock;
 
@@ -115,3 +117,5 @@ TEST(CPU_FilesystemChecker_NONE, MultiplePathsCanBeChecked)
     EXPECT_FALSE(checker.IsNetworkedFilesystem("/path2"));
     EXPECT_TRUE(checker.IsNetworkedFilesystem("/path3"));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_FilesystemChecker_NONE, testing::Values(0));

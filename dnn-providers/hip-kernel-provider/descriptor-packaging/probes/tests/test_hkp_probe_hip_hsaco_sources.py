@@ -43,7 +43,7 @@ def _source(symbol, signature=None, **extra):
 def _provenance(kind):
     """What the packer records for a packed `sources` UKD of `kind`: no effective_spec."""
     if kind == "hip":
-        return {"origin_kind": "hip", "hipcc_version": "v"}
+        return {"origin_kind": "hip", "hip_version": "v"}
     return {"origin_kind": "hsaco"}
 
 

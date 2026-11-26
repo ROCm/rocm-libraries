@@ -68,7 +68,7 @@ TEST_P(GPU_BNActivInfer_FP32, BnFwdInferActivationFused)
         fusePlanDesc, plan_params, bn_config, test_skipped);
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_BNActivInfer_FP32,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(Networkna1())));
@@ -80,7 +80,7 @@ TEST_P(GPU_BNActivInfer_FP16, DISABLED_BnFwdInferActivationFused)
         fusePlanDesc, plan_params, bn_config, test_skipped);
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_BNActivInfer_FP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(Networkna1())));

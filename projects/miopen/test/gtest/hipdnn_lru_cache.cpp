@@ -14,7 +14,9 @@ using Cache = miopen::wrapper::LruCache<int, int>;
 
 } // namespace
 
-TEST(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
+using CPU_HipdnnLruCache_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
 {
     Cache cache(3);
     for(int key = 0; key < 10; ++key)
@@ -28,7 +30,7 @@ TEST(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
     EXPECT_EQ(*cache.Find(9), 9);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, FindKeepsAnEntryFromBeingEvicted)
+TEST_P(CPU_HipdnnLruCache_NONE, FindKeepsAnEntryFromBeingEvicted)
 {
     Cache cache(2);
     cache.Insert(1, 10);
@@ -40,7 +42,7 @@ TEST(CPU_HipdnnLruCache_NONE, FindKeepsAnEntryFromBeingEvicted)
     EXPECT_NE(cache.Find(3), nullptr);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyReplacesItsValue)
+TEST_P(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyReplacesItsValue)
 {
     Cache cache(2);
     cache.Insert(1, 10);
@@ -50,7 +52,7 @@ TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyReplacesItsValue)
     EXPECT_EQ(*cache.Find(1), 11);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyKeepsItFromBeingEvicted)
+TEST_P(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyKeepsItFromBeingEvicted)
 {
     Cache cache(2);
     cache.Insert(1, 10);
@@ -62,7 +64,7 @@ TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyKeepsItFromBeingEvicted)
     EXPECT_NE(cache.Find(3), nullptr);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
+TEST_P(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
 {
     Cache cache(4);
     for(int key = 0; key < 4; ++key)
@@ -74,3 +76,5 @@ TEST(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
     EXPECT_NE(cache.Find(1), nullptr);
     EXPECT_NE(cache.Find(3), nullptr);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipdnnLruCache_NONE, testing::Values(0));

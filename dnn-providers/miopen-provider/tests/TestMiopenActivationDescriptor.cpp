@@ -8,6 +8,8 @@
 
 #include "MiopenActivationDescriptor.hpp"
 
+#include <limits>
+
 using namespace miopen_plugin;
 
 namespace
@@ -157,6 +159,29 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
     EXPECT_EQ(mode, miopenActivationCLAMP);
     EXPECT_DOUBLE_EQ(alpha, static_cast<double>(lowerClip));
     EXPECT_DOUBLE_EQ(beta, static_cast<double>(upperClip));
+}
+
+TEST(TestMiopenActivationDescriptor, CreatesClampFromLowerClipOnly)
+{
+    const float lowerClip = 0.5f;
+    auto builder = createPointwiseAttributesBuilder(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
+    const auto* attr
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+
+    const MiopenActivationDescriptor activDesc(*attr);
+
+    miopenActivationMode_t mode;
+    double alpha;
+    double beta;
+    double gamma;
+    EXPECT_EQ(miopenGetActivationDescriptor(
+                  activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
+              miopenStatusSuccess);
+    EXPECT_EQ(mode, miopenActivationCLAMP);
+    EXPECT_DOUBLE_EQ(alpha, static_cast<double>(lowerClip));
+    EXPECT_DOUBLE_EQ(beta, static_cast<double>(std::numeric_limits<float>::max()));
 }
 
 TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
