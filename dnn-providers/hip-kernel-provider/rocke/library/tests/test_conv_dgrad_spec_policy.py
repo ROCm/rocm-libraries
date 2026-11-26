@@ -548,6 +548,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "xh_dx_wmask",
         ):  # dgrad pp knobs, off
             del fields[name]
+        del fields["bias"]  # conv forward bias, off
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

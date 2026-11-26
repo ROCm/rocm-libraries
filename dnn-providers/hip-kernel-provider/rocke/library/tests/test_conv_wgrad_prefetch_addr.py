@@ -460,6 +460,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
             "xh_dx_wmask",
         ):  # dgrad x-halo and ping-pong knobs, off
             del fields[name]
+        del fields["bias"]  # conv forward bias, off
         for name in (
             "defer_mfma",
             "defer_mfma_per_write",
