@@ -487,6 +487,21 @@ def maybe_logical_leaf(inst):
 # clone sharing the wrapped logical node across unrolled bodies (§10.10 / §10.10.1).
 # It was held back one step only to validate the SCC/sgpr bridge + that deep-copy fix
 # in isolation; now re-added to flip the whole wrapIter increment chain to leaves.
+#
+# The globalWriteStore region (addStore, decorated with
+# logical_region("globalWriteStore"), subtile-guarded) is the [G] epilogue store
+# path: addStore -> chooseGlobalWrite emits the buffer-store opcodes below for the
+# D/E/Bias/TD/WS tensors. They are MUBUFStoreInstruction subclasses; rocisa
+# GlobalWriteInstruction has no schedCategory override, so it reports Other, and
+# schedCategoryForOpcode falls through to Other too -> no C++ classification entry
+# (the oracle matches). The converter already lowers MUBUFStoreInstruction (and a
+# leaf passes its logical node straight through), and the C++ epilogue grouping is
+# Module("GlobalWriteElements") name-based, so a store leaf needs no further seam.
+# The store's src is a ValuC-relative symbolic VGPR (e.g. "vgprValuC+-34" for nvf4),
+# resolved at .set lowering by the same resolveSymbolicOperands/parseEndpoint path
+# P3-8 put in place for acc->arch. No post-construction memToken on the main store
+# path (unlike ds_load), so eager flip is safe. The flat-store (GlobalStore*) path
+# (BufferStore=0) and the subtile paired-store emitters stay rocisa for now.
 _MIGRATED = {
     "SMovB32", "SMovB64", "SLShiftRightB32", "SLShiftLeftB32",
     "SMulI32", "SAddU32", "SAddCU32", "SSubI32", "SSubU32",
@@ -494,6 +509,8 @@ _MIGRATED = {
     "MFMAInstruction", "SMFMAInstruction", "MXMFMAInstruction",
     "SCmpEQU32", "SSubBU32", "SCMovB32", "SCmpLeI32", "SBitcmp1B32",
     "SAddU64",
+    "BufferStoreB8", "BufferStoreB16", "BufferStoreB32",
+    "BufferStoreB64", "BufferStoreB128", "BufferStoreD16HIB16",
 }
 _MIGRATE_ALL = False
 

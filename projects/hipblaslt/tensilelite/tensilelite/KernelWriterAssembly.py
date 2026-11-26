@@ -22748,6 +22748,7 @@ class KernelWriterAssembly(KernelWriter):
     return self.addVecGlobalLoad(dataType, kernel, biasVgpr, addr0, addr1, addrCalc.biasOffset[factorDim], gwvw, comment="Load Bias")
 
   ##############################################################################
+  @_logical_region_method("globalWriteStore")
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
                wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False,
                peerD: bool = False):
