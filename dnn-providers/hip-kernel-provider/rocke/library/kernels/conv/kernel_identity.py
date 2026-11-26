@@ -1598,6 +1598,10 @@ IDENTITY_CAPABILITY_FIELDS = (
     "split_hybrid",
     "xh_fast_a",
     "xh_dlds",
+    # Not read by identity_supports_problem, which answers the shape alone;
+    # KernelCache.supports_problem refuses a conv + bias binary, so the cache
+    # must not group one with its plain twin.
+    "bias",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

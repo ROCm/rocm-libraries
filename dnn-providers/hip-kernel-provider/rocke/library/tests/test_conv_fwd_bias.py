@@ -214,6 +214,70 @@ class TestFwdBiasSpec(unittest.TestCase):
         )
 
 
+class TestFwdBiasKernelCache(unittest.TestCase):
+    """A cached conv + bias binary (the opt-in ROCKE_AOT_FWD_BIAS axis) is
+    never offered for a cached problem: the problem carries no bias tensor, so
+    its Bias / Bias_bytes kernargs would be left unset."""
+
+    def test_the_cache_offers_the_plain_binary_only(self):
+        import tempfile
+        from pathlib import Path
+
+        from benchmarks.common.kernel_cache import KernelCache
+        from kernels.conv.kernel_identity import (
+            KernelIdentity,
+            current_llvm_flavor,
+            identity_capability_key,
+            identity_supports_problem,
+        )
+
+        plain = KernelIdentity(
+            arch="gfx942",
+            direction="fwd",
+            algorithm="implicit_gemm",
+            dtype_a="fp16",
+            dtype_b="fp16",
+            dtype_d="fp16",
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            wave_size=64,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=8,
+            llvm_flavor=current_llvm_flavor(),
+        )
+        biased = replace(plain, bias=True)
+        problem = _problem()
+        # The two are separate cache groups (the cache answers once per key).
+        self.assertNotEqual(
+            identity_capability_key(plain), identity_capability_key(biased)
+        )
+        with tempfile.TemporaryDirectory() as root:
+            cache = KernelCache(Path(root), "gfx942")
+            # The plain binary's answer is the shape predicate's, unchanged.
+            self.assertEqual(
+                cache.supports_problem(plain, problem),
+                identity_supports_problem(plain, problem),
+            )
+            self.assertTrue(cache.supports_problem(plain, problem)[0])
+            ok, why = cache.supports_problem(biased, problem)
+            self.assertFalse(ok)
+            self.assertIn("no bias tensor", why)
+            # The bias twin heads its own group even when cached first.
+            cache.put(biased, b"bias", {"kernel_name": "k_bias"})
+            cache.put(plain, b"plain", {"kernel_name": "k_plain"})
+            picked = [i for i, _, _ in cache.compatible(problem, direction="fwd")]
+            self.assertEqual(picked, [plain])
+
+
 class TestFwdBiasValidator(unittest.TestCase):
     def _refused(self, spec, arch, needle):
         from kernels.common.conv_implicit_gemm import is_valid_spec

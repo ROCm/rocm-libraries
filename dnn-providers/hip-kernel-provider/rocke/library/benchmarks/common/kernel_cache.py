@@ -427,7 +427,17 @@ class KernelCache:
         :func:`kernels.conv.kernel_identity.identity_supports_problem`;
         the grouped-convolution dispatcher admits its instances with the same
         rule, so the two never disagree on what a binary serves.
+
+        A conv + bias binary (``identity.bias``, built by the opt-in
+        ``ROCKE_AOT_FWD_BIAS`` axis) is never offered: the problems run over
+        the cache carry no bias tensor, and its trailing ``Bias`` /
+        ``Bias_bytes`` kernargs would be left unset.
         """
+        if identity.bias:
+            return False, (
+                "conv + bias binary: the problem carries no bias tensor for its "
+                "Bias / Bias_bytes kernargs"
+            )
         return identity_supports_problem(identity, problem)
 
     def _groups_for(self, direction: Optional[str]) -> list:
