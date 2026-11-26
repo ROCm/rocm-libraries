@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "e5b6c090-082b-471f-bd28-d87ac57dd4d5",
+  "name": "Gfx950ConvFwdBiasAot dispatch",
+  "dispatch_symbol": "hipkernel.gfx950_conv_fwd_bias_aot.dispatch"
+}

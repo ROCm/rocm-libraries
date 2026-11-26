@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "3e6b6e77-df4b-4023-bede-bce2c0036e5c",
+  "name": "kernel dtype and bias match the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.gfx950_conv_fwd_bias_aot.kernel_match"
+}

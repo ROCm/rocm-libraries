@@ -256,6 +256,10 @@ void resetGfx942AttentionUnified2DModuleCache();
 void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvFwdAotModuleCache();
 
+/// @see packs/Gfx950ConvFwdBiasNative.cpp (hipkernel:Gfx950ConvFwdBiasAot)
+void registerGfx950ConvFwdBiasAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvFwdBiasAotModuleCache();
+
 /// A preference between two engines that accept the same graph: when both are in a call's
 /// applicable list, @p preferred is listed ahead of @p other.
 struct EngineOrderRule

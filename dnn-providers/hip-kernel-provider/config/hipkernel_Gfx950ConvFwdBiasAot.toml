@@ -1,0 +1,11 @@
+# Integration test configuration for hipkernel:Gfx950ConvFwdBiasAot.
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# No skips or tolerance overrides: the bias bundles
+# (dnn-providers/integration-tests/integration-test-bundles/*/Gfx950ConvFwdBias/) use the
+# cross-provider reference executor's default conv tolerance. The kernel adds the bias to
+# the fp32 accumulator and rounds once; the reference keeps the virtual convolution
+# output in fp32 (intermediate_data_type float), so both round the same sum once.

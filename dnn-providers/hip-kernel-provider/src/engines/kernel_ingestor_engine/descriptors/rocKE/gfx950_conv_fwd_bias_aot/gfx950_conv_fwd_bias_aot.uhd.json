@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "30132974-a5a4-45de-8824-3d3f67311262",
+  "name": "Gfx950ConvFwdBiasAot selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx950_conv_fwd_bias_aot.score"
+  }
+}
