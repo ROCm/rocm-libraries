@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "a2e549a1-351b-4124-8eab-9543fd9c1d59",
+  "id": "a1332ef3-1a18-4777-91d6-0f4ddc5c9e7b",
   "name": "Generated UHD (tflops)",
   "adapter": "tree_data",
   "features_signature": [
@@ -121,6 +121,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "651025c73423cbd0a2712b363b4142d9e7eece9d1931e4fd3923867bce5b68db"
+    "hash": "89f6fe4350f8bc23d0b9ef421d2869f4dbf44a8ea7a9cd36e1a5a295a6a6e217"
   }
 }

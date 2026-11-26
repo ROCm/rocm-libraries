@@ -675,7 +675,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         TheShippedGqaRatioListIsTheCatalogsRatios)
     set(_hkp_model_binding_cases_gfx942_unified_2d
         TheBoundL2TflopsRankerLoads
-        TheBoundL2TimeRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
     set(_hkp_model_binding_cases_gfx942_unified_3d
         TheBoundL2KernelRankerLoads

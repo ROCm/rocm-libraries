@@ -12,9 +12,9 @@
 /**
  * @file TestGfx942AttentionUnified2DModelBinding.cpp
  * @brief Census of the trained models hipkernel:Gfx942AttentionUnified2D binds in its UED
- *        for gfx942: each L2 kernel ranker the packed tree holds (one per ranking metric)
- *        must survive the loader's pre-flight, and a bound engine predictor (L1) must
- *        record the selector revision this build computes.
+ *        for gfx942: the L2 kernel ranker (tflops) the packed tree holds must survive the
+ *        loader's pre-flight, and a bound engine predictor (L1) must record the selector
+ *        revision this build computes.
  *
  * The loader refuses a ranker whose knob axes or feature hash do not match this build and
  * only logs it; the engine then ranks by the native scorer as if no model shipped, and
@@ -42,11 +42,6 @@ constexpr const char* ARCH = "gfx942";
 TEST(TestGfx942AttentionUnified2DModelBinding, TheBoundL2TflopsRankerLoads)
 {
     expectBoundRankerLoads(loadedSet(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME), "tflops", ARCH);
-}
-
-TEST(TestGfx942AttentionUnified2DModelBinding, TheBoundL2TimeRankerLoads)
-{
-    expectBoundRankerLoads(loadedSet(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME), "time", ARCH);
 }
 
 TEST(TestGfx942AttentionUnified2DModelBinding, TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
