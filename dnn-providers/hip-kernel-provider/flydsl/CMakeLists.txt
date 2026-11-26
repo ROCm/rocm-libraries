@@ -235,17 +235,29 @@ if(_flydsl_product_root)
 
     # The two checks above stop the build on drift, so a check that stopped checking
     # would pass silently. These tests copy the content tree and one packed shard, break
-    # one thing at a time, and require each check to refuse it. Host-only and a couple of
-    # seconds, so they run in the quick tier (HKP_PACK_test_categories_external.yaml).
+    # one thing at a time, and require each check to refuse it. The pytest suite is two
+    # entries over disjoint marker sets, as hkp-pack's is
+    # (HKP_PACK_test_categories_external.yaml): `quick` holds only the basic device-free
+    # tests (no DVC content, no staged shard, no compile, each a couple of seconds at
+    # most), `not quick` holds the rest, including the content-backed ones.
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         list(GET _flydsl_archs 0 _flydsl_shard_arch)
+        add_test(NAME hip-kernel-provider-flydsl-drift-guards-quick
+                 COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+                         -m quick -v -p no:cacheprovider)
         add_test(NAME hip-kernel-provider-flydsl-drift-guards
                  COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                         -v -p no:cacheprovider)
-        # The quick tier's labels, set here too so they survive a tree where YAML
-        # categorization is off, as the census entries' do.
+                         -m "not quick" -v -p no:cacheprovider)
+        # Both entries carry the quick tier's labels, set here too so they survive a tree
+        # where YAML categorization is off, as the census entries' do.
+        set_tests_properties(hip-kernel-provider-flydsl-drift-guards-quick
+                             hip-kernel-provider-flydsl-drift-guards PROPERTIES
+            LABELS "unit_test;hip-kernel-provider;host")
+        # The quick entry needs no content and no shard, so its environment is only the
+        # bytecode guard.
+        set_tests_properties(hip-kernel-provider-flydsl-drift-guards-quick PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         set_tests_properties(hip-kernel-provider-flydsl-drift-guards PROPERTIES
-            LABELS "unit_test;hip-kernel-provider;host"
             ENVIRONMENT
                 "FLYDSL_PRODUCT_OUT_ROOT=${_flydsl_product_root};FLYDSL_SHARD_ARCH=${_flydsl_shard_arch};HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON=${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON};PYTHONDONTWRITEBYTECODE=1")
         # test_installed_models.py checks the generator against uhd_gen promote itself, which

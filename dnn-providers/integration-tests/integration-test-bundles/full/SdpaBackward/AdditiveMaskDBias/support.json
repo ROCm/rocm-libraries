@@ -1,4 +1,23 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "hf043x1_b2h2k2v2_128x128_d64_bfp16_none_bshd_biasm2to2_bias1x2x128x128io_dbias_told",
+          "hf045x1_b2h2k2v2_512x512_d64_bfp16_none_bshd_s1_biasm2to2_bias1x2x512x512io_dbias_tolu",
+          "hf046x2_b2h2k2v2_128x128_d64_bfp16_none_bshd_s1_biasm2to2_bias1x2x128x128io_dbias_tolu",
+          "hf229x1_b2h2k2v2_512x512_d128_bfp16_none_xcca670_tolu",
+          "hf230x2_b2h2k2v2_128x128_d128_bfp16_none_bshd_s1_biasm2to2_bias1x2x128x128io_dbias_tolu",
+          "hf269x1_b2h2k2v2_512x512_d256_bfp16_none_xcca670_tolu",
+          "hf270x2_b2h2k2v2_128x128_d256_bfp16_none_xc04c2a_tolu"
+        ],
+        "support": {
+          "gfx1201": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

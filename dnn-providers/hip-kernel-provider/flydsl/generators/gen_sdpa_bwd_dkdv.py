@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Compile the pinned SDPA backward dK/dV objects (gfx950, gfx11-generic, gfx942, gfx90a): the dK/dV kernel.
+"""Compile the pinned SDPA backward dK/dV objects (gfx950, gfx11-generic, gfx12-generic, gfx942, gfx90a): the dK/dV kernel.
 
     python -m generators.gen_sdpa_bwd_dkdv --arch gfx950 --out-dir <content root> --reference-dir <S1 reference dir>
 

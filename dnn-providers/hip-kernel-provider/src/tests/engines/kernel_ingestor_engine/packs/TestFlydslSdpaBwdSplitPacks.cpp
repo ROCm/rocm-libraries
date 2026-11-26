@@ -59,6 +59,12 @@
  *   three companions shared by dtype; the other dq rows (including the f32-bias rows built
  *   without the dBias store) carry the dQ and tail-zero kernels, the latter one of three
  *   companions shared by dtype.
+ * - gfx12-generic (every gfx12 member's shard): 42 prep (15, 15, 12), 312 dkdv (120, 120, 72) and
+ *   296 dq (112, 112, 72) rows: the gfx11 grammar on a wider ladder (16-bit 16..256 plus 320, 384,
+ *   448 and 512; fp32 16..256 plus 512; the tile list is the union of the dkdv and dq tiles, the
+ *   16-bit dq rows omitting 320 and 448). The 96 dq rows that serve a dB-storing bias carry the
+ *   same reduce and tail-zero `sources` as gfx11, with three reduce and three tail-zero
+ *   companions.
  *
  * - gfx90a (mixed: the 16-bit dtypes and fp32 have different ladders): 33 prep (12, 12, 9), 222
  *   dkdv (84, 84, 54) and 230 dq (88, 88, 54) kernels. The 16-bit ladder is 16..256 plus 512 and
@@ -69,7 +75,7 @@
  *   from the gfx11 kernel.
  * - gfx942: the gfx90a inventory, every dkdv row launched head-fastest.
  *
- * Two cases hold the gfx11, gfx90a and gfx942 shards to their verdict tables
+ * Two cases hold the gfx11, gfx12, gfx90a and gfx942 shards to their verdict tables
  * (flydsl/tests/data/sdpa_bwd_<arch>_verdicts.csv): every row's graph is run through graph_match
  * and every slot's kernel_match over the installed rows, and the served rows' slot catalogs are
  * checked for unique enrolled knob tuples. A gfx950 entry does not read a table.
@@ -211,6 +217,29 @@ const SplitContent GFX11_CONTENT{
     "fmha_bwd_tailzero_gfx11_kernel_0",
     "fmha_bwd_tailzero_gfx11_kernel_0"};
 
+// Row counts of the installed gfx12 content: the instances of each op's `manifest.json` per dtype, with dkdv's
+// dV-only rows (8 per 16-bit dtype, the `dvonly` launch of a dK-only row) not counted as for gfx11. The reduce and
+// tail-zero companions are the RDNA kernels' (the gfx11-named symbols), as the gfx12 tables share the gfx11 builder.
+const SplitContent GFX12_CONTENT{
+    {{{"prep", 42, 15, 15, 12}, {"dkdv", 312, 120, 120, 72}, {"dq", 296, 112, 112, 72}}},
+    {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 320, 384, 448, 512}, true, true},
+    {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512}, true, true},
+    {"bk"},
+    0,
+    {0},
+    {0},
+    96,
+    "fmha_bwd_dbias_reduce_gfx11_kernel_0",
+    "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
+    "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
+    3,
+    {"kvblocks_by_kheads_by_seqs"},
+    "gfx12-generic",
+    "sdpa_bwd_gfx12_verdicts.csv",
+    3,
+    "fmha_bwd_tailzero_gfx11_kernel_0",
+    "fmha_bwd_tailzero_gfx11_kernel_0"};
+
 // Row counts of the installed gfx90a content: the instances of each op's `manifest.json` per dtype, with
 // dkdv's dV-only rows (16, the `dvonly` launch of a dK-only row) not counted since they carry no descriptor row of
 // their own. The tail-zero companions of the 16-bit rows are the gfx11 kernel's, those of the fp32 rows the gfx950 one.
@@ -277,6 +306,11 @@ const SplitContent* contentOf(const std::string& arch)
     if(arch.rfind("gfx11", 0) == 0)
     {
         return &GFX11_CONTENT;
+    }
+    // Every gfx12 member is served by the one gfx12-generic content.
+    if(arch.rfind("gfx12", 0) == 0)
+    {
+        return &GFX12_CONTENT;
     }
     return nullptr;
 }
@@ -578,7 +612,8 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                         // Only a 16-bit bias with no f32 flag is staged; every row that cannot
                         // be (gfx11, f32 bias, fp32 query) is direct_only.
                         const bool stageable = dtype != "fp32" && integer("bias_f32") == 0
-                                               && arch().rfind("gfx11", 0) != 0;
+                                               && arch().rfind("gfx11", 0) != 0
+                                               && arch().rfind("gfx12", 0) != 0;
                         EXPECT_FALSE(resolved == "lds" && !stageable) << kernel.name;
                         EXPECT_FALSE(resolved == "direct" && !stageable) << kernel.name;
                         EXPECT_FALSE(!stageable && resolved != "direct_only") << kernel.name;
@@ -1174,7 +1209,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryVerdictRowIsServedOrDeclinedAsTheTableS
 {
     if(content().verdictContent == nullptr)
     {
-        // The tables are the gfx11-generic, gfx90a and gfx942 content's: this architecture's
+        // The tables are the gfx11-generic, gfx12-generic, gfx90a and gfx942 content's: this architecture's
         // shard is held to its own inventory by the cases above.
         SUCCEED();
         return;
@@ -1442,6 +1477,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelName
 {
     const std::string tableArch = arch() == "gfx950"              ? "gfx950"
                                   : arch().rfind("gfx11", 0) == 0 ? "gfx11-generic"
+                                  : arch().rfind("gfx12", 0) == 0 ? "gfx12-generic"
                                                                   : arch();
     const auto rows = loadProbeRows();
     const auto installed = installedKernels(loadedSet(ENGINE_NAME));
@@ -1733,9 +1769,9 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, TheCoverageConstantsAreTheHeadDimsTheShipped
 {
     const auto installed = installedKernels(loadedSet(ENGINE_NAME));
     std::set<int64_t> constants;
-    // gfx90a and gfx942 ship gfx11-style padded rows for these graphs, so they take the gfx11 bands.
-    const bool gfx11Bands
-        = arch().rfind("gfx11", 0) == 0 || arch() == "gfx90a" || arch() == "gfx942";
+    // gfx12, gfx90a and gfx942 ship gfx11-style padded rows for these graphs, so they take the gfx11 bands.
+    const bool gfx11Bands = arch().rfind("gfx11", 0) == 0 || arch().rfind("gfx12", 0) == 0
+                            || arch() == "gfx90a" || arch() == "gfx942";
     const auto addBands = [&](const auto& bands) {
         for(const auto& band : bands)
         {

@@ -481,8 +481,8 @@ while(_engines)
 endwhile()
 
 # The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
-# the product ships. Split ships gfx950, gfx90a, gfx942 and gfx11-generic content, which the pack
-# expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
+# the product ships. Split ships gfx950, gfx90a, gfx942, gfx11-generic and gfx12-generic content, which the pack
+# expands to every gfx11 and gfx12 member this build targets; merged ships gfx950 only. Gated and
 # routed per architecture exactly as the pinned attention targets above: the predicate is
 # the one the census uses, and the entry installs into that architecture's shard so a
 # package without the architecture carries no entry for an engine it no longer ships. The

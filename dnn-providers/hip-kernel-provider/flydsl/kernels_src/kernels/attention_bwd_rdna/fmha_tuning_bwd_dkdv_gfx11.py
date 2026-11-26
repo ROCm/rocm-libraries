@@ -66,6 +66,10 @@ GRID_ORDERS = ("kv_fastest", "head_fastest")
 # gfx12. `head_fastest` (head_k, kv_tile, batch) is the order gfx950 measured faster and AOTriton's on gfx942.
 DEFAULT_GRID_ORDER = {"gfx942": "head_fastest"}
 LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+# gfx12-generic only: the wide rungs for head dims 257..512. gfx11-generic stops at `LADDER`.
+GFX12_ARCH = "gfx12-generic"
+WIDE_RUNGS = (320, 384, 448, 512)
+GFX12_LADDER = LADDER + WIDE_RUNGS
 
 # (split_head_dim, contraction_shards, num_waves, block_q) per hd tile: the initial register-pressure policy, re-measured at
 # every gate. hd 64 is the schedule trial's winner (gfx1101: 0.86x of 16 waves; its 12 B causal-f16
@@ -82,6 +86,24 @@ POLICY = {
     192: (True, 2, 16, 16),
     224: (True, 2, 16, 16),
     256: (True, 2, 16, 16),
+}
+
+# gfx12-generic: rows measured on gfx1201 against AOTriton's gfx1201 split kernels (whole-sample J4 timing); one row serves the exact (padded=0) and the padded
+# keys of a rung. Tuples are (split_head_dim, contraction_shards, num_waves, block_q[, transposed_source]); the knobs that are not policy fields (`waves_per_eu`
+# 3 at 256 and 448, 2 at 320) are spelled in every key of the rung. A wide object spells `transposed_source=derived` (`tile` would not fit 64 KiB of LDS at 512).
+POLICY_GFX12 = {
+    **POLICY,
+    64: (False, 1, 4, 32, "derived"),
+    96: (False, 1, 8, 16),
+    128: (False, 1, 8, 16, "derived"),
+    160: (False, 1, 16, 16, "tile"),
+    192: (True, 1, 12, 16, "tile"),
+    224: (True, 1, 32, 16, "tile"),
+    256: (True, 1, 32, 48, "derived"),
+    320: (True, 1, 16, 32, "derived"),
+    384: (True, 1, 16, 64, "derived"),
+    448: (True, 2, 24, 48, "derived"),
+    512: (True, 2, 8, 64, "derived"),
 }
 
 # MFMA16 (wave64): a 16-column pack is 2 VGPRs and a 16-column f32 accumulator 4, so no rung to 256 needs the role split; 4 waves = 256 threads.
@@ -269,7 +291,11 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     }
     if unknown:
         raise ValueError(f"unknown dkdv knob(s) {sorted(unknown)}")
-    policy = POLICY_MFMA16 if arch in MFMA16_ARCHES else POLICY
+    policy = (
+        POLICY_MFMA16
+        if arch in MFMA16_ARCHES
+        else POLICY_GFX12 if arch == GFX12_ARCH else POLICY
+    )
     if tile not in policy:
         raise ValueError(f"no dK/dV policy for tile {tile}")
     p_split, p_shards, p_waves, p_bq, *p_tsrc = policy[tile]

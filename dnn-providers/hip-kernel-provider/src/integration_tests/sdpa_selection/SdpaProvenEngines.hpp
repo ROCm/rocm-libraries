@@ -199,7 +199,7 @@ inline std::vector<SelectionRow> selectionRows()
     }
     cases.push_back({"BwdBf16Hd128",
                      GraphKind::BACKWARD,
-                     {"gfx90a", "gfx942", "gfx950", "gfx1100"},
+                     {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"},
                      bwdServed,
                      bwdUnclaimed,
                      bwdNoSurvivorArchs});

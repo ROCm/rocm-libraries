@@ -17,8 +17,13 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdDeviceHarness.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
  * @file TestFlydslSdpaBwdPhiloxDevice.cpp
@@ -31,8 +36,11 @@
  * lengths and a key count that is no multiple of 4, a seed past 32 bits and an offset that
  * carries into the counter's high word. The dump is first checked against the host Philox
  * oracle, so a failing gradient says whether the forward's mask or the backward's counters
- * are off. The forward is the CDNA engine on gfx950 and the RDNA engine on gfx11; the backward
- * is the merged engine (gfx950) and the split engine.
+ * are off. The forward is the CDNA engine on gfx950, the RDNA engine on gfx11 and the aiw engine
+ * (AOTriton's FlyDSL gfx1201 kernel) on gfx12, whose RDNA prefill objects do not drop; the
+ * backward is the merged engine (gfx950) and the split engine. The host case at the end checks
+ * that aiw claims the padded and the packed forward graph on a gfx1201 device, so the gfx12
+ * chain has a forward to write the dump.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -75,6 +83,10 @@ std::optional<ForwardEngine> forwardEngineOfThisDevice()
     if(arch.rfind("gfx11", 0) == 0)
     {
         return ForwardEngine{"hipkernel:flydsl_sdpa_rdna", "sdpa_rdna"};
+    }
+    if(arch.rfind("gfx12", 0) == 0)
+    {
+        return ForwardEngine{"hipkernel:flydsl_sdpa_aiw", "sdpa_aiw"};
     }
     return std::nullopt;
 }
@@ -282,6 +294,71 @@ TEST_F(TestGpuFlydslSdpaBwdSplitRngDumpChainFp16, PaddedGradientsMatchTheForward
 TEST_F(TestGpuFlydslSdpaBwdSplitRngDumpChainFp16, PackedGradientsMatchTheForwardsDump)
 {
     expectGradientsMatchTheForwardsDump(bwd_device::SPLIT_ENGINE, true);
+}
+
+// ---------------------------------------------------------------------------
+// host: the gfx12 forward of the chain
+// ---------------------------------------------------------------------------
+
+/// The aiw engine's objects shipped for gfx1201, as its matchers read them, or none when the
+/// build loads no such shard.
+std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> loadedAiwObjectsForGfx1201()
+{
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    const auto* set = testing::findLoadedSet(testing::FLYDSL_SDPA_AIW.engineName);
+    if(set == nullptr)
+    {
+        return kernels;
+    }
+    for(const auto& pack : set->packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            auto definition = testing::definitionOf(pack, kernel);
+            if(std::find(definition.arch.begin(), definition.arch.end(), "gfx1201")
+               != definition.arch.end())
+            {
+                kernels.push_back(std::move(definition));
+            }
+        }
+    }
+    return kernels;
+}
+
+// gfx12's RDNA prefill objects do not drop, so the forward that writes the rng_dump the
+// backward is compared against is aiw's. It must claim the padded and the packed forward graph
+// of the chain on a gfx1201 device, with an object that ships the mask writer.
+TEST(TestFlydslSdpaBwdPhiloxForward, AiwClaimsThePaddedAndPackedDroppingGraphsOnGfx1201)
+{
+    const auto kernels = loadedAiwObjectsForGfx1201();
+    if(kernels.empty())
+    {
+        if(testing::flydslShipsAnywhere("sdpa_aiw") && testing::flydslShardStagedFor("gfx1201"))
+        {
+            ADD_FAILURE() << "this build ships sdpa_aiw but loaded no gfx1201 objects for it";
+            return;
+        }
+        GTEST_SKIP() << "this build stages no sdpa_aiw shard for gfx1201";
+    }
+    for(const bool packed : {false, true})
+    {
+        SCOPED_TRACE(packed ? "packed" : "padded");
+        const testing::GraphFixture fixture(testing::buildFlydslSdpaRdnaGraph(forwardSpec(packed)),
+                                            testing::devicePropertiesFor("gfx1201"));
+        const auto context = fixture.context();
+        const auto bound = testing::matchesGraph(testing::FLYDSL_SDPA_AIW, context);
+        ASSERT_TRUE(bound.has_value()) << "aiw's graph match declines the forward graph";
+        size_t serving = 0;
+        for(const auto& kernel : kernels)
+        {
+            if(testing::matchesKernel(testing::FLYDSL_SDPA_AIW, context, kernel, *bound))
+            {
+                EXPECT_TRUE(flydsl_sdpa::hasDropoutMaskWriter(kernel)) << kernel.name;
+                ++serving;
+            }
+        }
+        EXPECT_GE(serving, 1U) << "no gfx1201 aiw object serves the forward graph";
+    }
 }
 
 } // namespace

@@ -20,6 +20,8 @@ sys.path.insert(0, str(FLYDSL))
 from generators import _instances as instances  # noqa: E402
 from generators._sdpa_bwd_spec import GFX950, rung_below  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 GFX11 = instances.SDPA_BWD_GFX11_TARGET
 MAX_HEAD_DIM = 512
 TABLES = {

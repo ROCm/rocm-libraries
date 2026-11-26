@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -25,18 +26,20 @@
 /**
  * @file TestFlydslSdpaBwdParityGraphs.cpp
  * @brief The host half of the split backward engine's parity cases (FlydslSdpaBwdParityCases.hpp),
- *        a census over the gfx11, gfx90a or gfx942 shard the census entry names.
+ *        a census over the gfx11, gfx12, gfx90a or gfx942 shard the census entry names.
  *
- * On the architecture the entry names (HIPDNN_TEST_EXPECTED_ARCH, a gfx11 member, gfx90a or
- * gfx942) the split graph matcher binds every served graph and each slot has a shipped object
- * that admits it; each declined graph is declined with its rule's cause. The suite is
- * registered with hkp_register_census_tests() in src/tests/CMakeLists.txt over the gfx11,
+ * On the architecture the entry names (HIPDNN_TEST_EXPECTED_ARCH, a gfx11 or gfx12 member,
+ * gfx90a or gfx942) the split graph matcher binds every served graph and each slot has a shipped
+ * object that admits it; each declined graph is declined with its rule's cause. The suite is
+ * registered with hkp_register_census_tests() in src/tests/CMakeLists.txt over the gfx11, gfx12,
  * gfx90a and gfx942 architectures the split ops ship content for. The suite is compiled into
  * the census binary whatever GPU_TARGETS holds, because a family job without the entry's
  * targets can supply the binary the entry runs; it skips, with its reason, when the shard
  * holds no pack for the entry's family, which a census entry reports as a failure. A shard
- * that holds the family's packs but no object a graph needs fails that case. The device half, which launches the same cases, is
- * TestFlydslSdpaBwdParity.cpp.
+ * that holds the family's packs but no object a graph needs fails that case. The gfx12 wide
+ * head dim cases (gfx12WideParityCases()) are a suite of their own,
+ * TestFlydslSdpaBwdParityGraphsGfx12Wide, registered for the gfx12 members only. The device
+ * half, which launches the same cases, is TestFlydslSdpaBwdParity.cpp.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -77,14 +80,29 @@ std::array<std::vector<KernelDefinition>, 3> shippedKernels()
 }
 
 /// Whether @p arch is one the parity cases are held to: the gfx11 members share one verdict
-/// table; gfx90a and gfx942 have tables of their own.
+/// table, as do the gfx12 members; gfx90a and gfx942 have tables of their own.
 bool isParityArch(const std::string& arch)
 {
-    return arch.rfind("gfx11", 0) == 0 || arch == "gfx90a" || arch == "gfx942";
+    return arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0 || arch == "gfx90a"
+           || arch == "gfx942";
+}
+
+/// Whether @p arch belongs to the family of @p entryArch: any gfx11 member, any gfx12 member,
+/// or that exact architecture.
+bool sameParityFamily(const std::string& entryArch, const std::string& arch)
+{
+    for(const char* family : {"gfx11", "gfx12"})
+    {
+        if(entryArch.rfind(family, 0) == 0)
+        {
+            return arch.rfind(family, 0) == 0;
+        }
+    }
+    return arch == entryArch;
 }
 
 /// Whether the loaded split engine set holds a pack stamped for the architecture family of
-/// @p entryArch (any gfx11 member, or that exact architecture).
+/// @p entryArch (see sameParityFamily).
 bool shardHoldsContentFor(const std::string& entryArch)
 {
     const auto* set = findLoadedSet(SPLIT_ENGINE_NAME);
@@ -95,8 +113,7 @@ bool shardHoldsContentFor(const std::string& entryArch)
     return std::any_of(set->slots.begin(), set->slots.end(), [&](const auto& slot) {
         return std::any_of(slot.packs.begin(), slot.packs.end(), [&](const auto& pack) {
             return std::any_of(pack.arch.begin(), pack.arch.end(), [&](const std::string& arch) {
-                return entryArch.rfind("gfx11", 0) == 0 ? arch.rfind("gfx11", 0) == 0
-                                                        : arch == entryArch;
+                return sameParityFamily(entryArch, arch);
             });
         });
     });
@@ -112,8 +129,8 @@ protected:
             << "HIPDNN_TEST_EXPECTED_ARCH is unset, so this census has no expectation to check "
                "against; the architecture is supplied by the census entry.";
         ASSERT_TRUE(isParityArch(_arch))
-            << "the parity cases follow the gfx11, gfx90a and gfx942 verdict tables; " << _arch
-            << " is none of them";
+            << "the parity cases follow the gfx11, gfx12, gfx90a and gfx942 verdict tables; "
+            << _arch << " is none of them";
 
         if(!shardHoldsContentFor(_arch))
         {
@@ -131,10 +148,11 @@ private:
     std::string _arch;
 };
 
-TEST_P(TestFlydslSdpaBwdParityGraphs, IsServedOrDeclinedAsTheMatcherContractStates)
+/// @p parity checked against the loaded shard of @p arch: a served graph binds and every slot
+/// has an object that admits it; a declined one is declined with its rule's cause.
+void expectServedOrDeclined(const ParityCase& parity, const std::string& arch)
 {
-    const auto& parity = parityCases()[GetParam()];
-    const GraphFixture fixture(buildSdpaBwdGraph(parity.spec), devicePropertiesFor(arch()));
+    const GraphFixture fixture(buildSdpaBwdGraph(parity.spec), devicePropertiesFor(arch));
     const auto context = fixture.context();
     const auto bound = matchesGraph(splitSymbols(FlydslSdpaBwdSplitSlot::PREP), context);
 
@@ -157,7 +175,7 @@ TEST_P(TestFlydslSdpaBwdParityGraphs, IsServedOrDeclinedAsTheMatcherContractStat
     {
         const auto symbols = splitSymbols(SLOT_ORDER[index]);
         ASSERT_FALSE(shipped[index].empty())
-            << parity.name << ": the shard for " << arch() << " ships no "
+            << parity.name << ": the shard for " << arch << " ships no "
             << slotName(SLOT_ORDER[index]) << " object to match the graph against";
         const auto serving
             = std::count_if(shipped[index].begin(), shipped[index].end(), [&](const auto& kernel) {
@@ -165,10 +183,82 @@ TEST_P(TestFlydslSdpaBwdParityGraphs, IsServedOrDeclinedAsTheMatcherContractStat
               });
         EXPECT_GE(serving, 1) << parity.name << ": no shipped " << slotName(SLOT_ORDER[index])
                               << " object serves the graph";
+
+        // A pinned rung: the tile of the object with the highest descriptor priority (the split
+        // slots have no score symbol, so priority orders the candidates); a wide row serves every
+        // head dim above its floor, so membership alone does not say which rung serves.
+        const int64_t pinnedTile
+            = SLOT_ORDER[index] == FlydslSdpaBwdSplitSlot::DKDV
+                  ? parity.dkdvTile
+                  : (SLOT_ORDER[index] == FlydslSdpaBwdSplitSlot::DQ ? parity.dqTile : 0);
+        if(pinnedTile != 0)
+        {
+            std::optional<int64_t> best;
+            std::vector<int64_t> bestTiles;
+            for(const auto& kernel : shipped[index])
+            {
+                if(!matchesKernel(symbols, context, kernel, *bound))
+                {
+                    continue;
+                }
+                const auto score = kernel.priority;
+                if(!best.has_value() || score > *best)
+                {
+                    best = score;
+                    bestTiles.clear();
+                }
+                if(score == *best)
+                {
+                    bestTiles.push_back(intField(kernel, "head_dim"));
+                }
+            }
+            ASSERT_TRUE(best.has_value()) << parity.name;
+            for(const int64_t tile : bestTiles)
+            {
+                EXPECT_EQ(tile, pinnedTile)
+                    << parity.name << ": the top-ranked " << slotName(SLOT_ORDER[index])
+                    << " object is not the " << pinnedTile << " rung";
+            }
+        }
     }
 }
 
+TEST_P(TestFlydslSdpaBwdParityGraphs, IsServedOrDeclinedAsTheMatcherContractStates)
+{
+    expectServedOrDeclined(parityCases()[GetParam()], arch());
+}
+
 INSTANTIATE_TEST_SUITE_P(, TestFlydslSdpaBwdParityGraphs, parityIndices(), parityName);
+
+/// The head dims past 256 only the gfx12 catalog has rungs for (gfx12WideParityCases()): the
+/// suite skips on any other architecture, and its census registration is for the gfx12 members.
+class TestFlydslSdpaBwdParityGraphsGfx12Wide : public TestFlydslSdpaBwdParityGraphs
+{
+protected:
+    void SetUp() override
+    {
+        TestFlydslSdpaBwdParityGraphs::SetUp();
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        if(arch().rfind("gfx12", 0) != 0)
+        {
+            GTEST_SKIP() << "the wide head dim cases follow the gfx12 catalog; " << arch()
+                         << " is not a gfx12 architecture";
+        }
+    }
+};
+
+TEST_P(TestFlydslSdpaBwdParityGraphsGfx12Wide, IsServedOrDeclinedAsTheMatcherContractStates)
+{
+    expectServedOrDeclined(gfx12WideParityCases()[GetParam()], arch());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestFlydslSdpaBwdParityGraphsGfx12Wide,
+                         gfx12WideParityIndices(),
+                         gfx12WideParityName);
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

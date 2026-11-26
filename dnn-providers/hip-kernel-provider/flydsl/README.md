@@ -95,7 +95,7 @@ kernel objects on gfx11-generic and 461 on gfx12-generic (gfx11's prefill engine
 the 16-bit dropout objects and the pair tiers' bias objects; gfx12 serves those graphs on the
 aiw objects) -- plus, on gfx12-generic only, AOTriton's gfx1201 attention kernel as a fifth
 (256 more), and on both two helper ops, the RNG dump's keep-mask writer and the head-dim padding
-copy (one object each; 583 and 719 in all; SDPA backward adds 501 to gfx11-generic, below: 1,084),
+copy (one object each; 583 and 719 in all; SDPA backward adds 501 to gfx11-generic and 666 to gfx12-generic, below: 1,084 and 1,385),
 built once for each of two LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
@@ -206,7 +206,7 @@ launch -- and is verified on all three arches; the order in which it widens is i
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
 **SDPA backward** (**gfx950**: split and merged, 2,707 object files; **gfx942**, **gfx90a** and
-**gfx11-generic**: split only, 509 object files each): two engines over one graph
+**gfx11-generic**: split only, 509 object files each; **gfx12-generic**: split only, 674): two engines over one graph
 matcher (`FlydslSdpaBwdCommon.hpp`). `hipkernel:flydsl_sdpa_bwd_merged` is a single launch
 computing dK, dV, dQ and, on a bias graph, dBias; its plans are not serializable (no plan
 saving in its dispatch handler). `hipkernel:flydsl_sdpa_bwd_split` is
@@ -216,7 +216,7 @@ split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
 engine-level (it models the whole program); trained estimates install under
 `sdpa_bwd_split/heuristics/`, and the slots have no rankers. The dBias and dSink reduce kernels have no
 op of their own: on gfx950 they ride inside the objects that launch them (and in the fp32 combined bias rows of gfx942 and gfx90a); on
-gfx11-generic, gfx942 and gfx90a the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
+gfx11-generic, gfx12-generic, gfx942 and gfx90a the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
 tail-zero object (`sdpa_bwd_tailzero`, one per arch family and dtype) after the gradient launches: it
 zeroes the rows past `seq_len` of every dense gradient output, which the backward kernels leave unwritten.
 It is a companion of the dQ rows, shared with the merged rows (REGEN.md, *Companions*). bf16, f16 and f32 data;
@@ -405,7 +405,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 1,084/1,084 gfx11-generic, 719/719 gfx12-generic, 3,155/3,155 gfx950,
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 1,084/1,084 gfx11-generic, 1,385/1,385 gfx12-generic, 3,155/3,155 gfx950,
    │                                    958/958 gfx942, 966/966 gfx90a (SDPA backward rows that ship a pin: REGEN.md)
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree

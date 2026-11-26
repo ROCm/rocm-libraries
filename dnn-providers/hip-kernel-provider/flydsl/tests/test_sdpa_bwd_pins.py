@@ -30,6 +30,8 @@ from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
 from test_sdpa_bwd_compare import _pin_metadata  # noqa: E402,F401
 from test_sdpa_bwd_gate import MERGED, MERGED_CODE, _elf  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 
 DATA = FLYDSL / "tests" / "data"
 COMBINED = "merged,bf16,64,bias,bk,0,0,tail,0,1"

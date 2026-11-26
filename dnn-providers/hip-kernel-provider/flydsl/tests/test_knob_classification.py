@@ -30,6 +30,8 @@ DESCRIPTORS = FLYDSL.parent / "src/engines/kernel_ingestor_engine/descriptors/Fl
 sys.path.insert(0, str(FLYDSL))
 import gen_descriptors  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 UEDS = sorted(DESCRIPTORS.glob("*/*.ued.json"))
 
 

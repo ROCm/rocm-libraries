@@ -259,11 +259,13 @@ def test_full_tiles_are_unmasked_and_come_first(geom, max_len, stride):
             )
 
 
+@pytest.mark.quick
 def test_a_workgroup_past_the_sequence_visits_nothing():
     assert kernel_tiles(8, 8, WINDOW_TOPLEFT, 0, 4, 4, 2)[1] == 0
     assert visited(8, 8, WINDOW_TOPLEFT, 0, 4, 4, 2, 3) == []
 
 
+@pytest.mark.quick
 def test_top_left_causal_moves_the_diagonal_tile_last():
     """Square top-left causal, BM == BN: KV tile 1 of 4 visits Q tiles 2, 3 (full) and then 1 (the diagonal), per head."""
     assert visited(16, 16, WINDOW_TOPLEFT, WINDOW_TOPLEFT, 4, 4, 1, 1) == [

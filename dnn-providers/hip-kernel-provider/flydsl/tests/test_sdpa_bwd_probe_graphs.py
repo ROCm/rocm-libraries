@@ -20,6 +20,8 @@ sys.path.insert(0, str(FLYDSL / "tools"))
 sys.path.insert(0, str(FLYDSL))
 import sdpa_bwd_model as model  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 
 @pytest.fixture(scope="module")
 def rows() -> list[dict]:

@@ -23,6 +23,8 @@ import gen_descriptors as gd  # noqa: E402
 import sdpa_bwd_tables_from_sweep as tool  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 G11 = ";arch=gfx11-generic"
 ROWS = {
     "dkdv bf16 rne=1": f"dkdv,bf16,64,causal,bk,0,1,g1,0,1{G11};rne=1",

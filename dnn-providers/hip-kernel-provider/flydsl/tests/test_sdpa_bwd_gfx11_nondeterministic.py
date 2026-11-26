@@ -23,6 +23,8 @@ from generators import _sdpa_bwd_rdna_build as rdna  # noqa: E402
 from generators._codeobject import GeneratorError  # noqa: E402
 from generators._instances import instances_for  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 OP = "sdpa_bwd_prep"
 ARCH = "gfx11-generic"
 PIN, OTHER = b"the pinned object", b"another build of it"

@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Compile the SDPA backward tail-zero objects (gfx950, gfx11-generic, gfx942 and gfx90a): the kernel that zeroes the padded rows of dense gradients.
+"""Compile the SDPA backward tail-zero objects (gfx950, gfx11-generic, gfx12-generic, gfx942 and gfx90a): the kernel that zeroes the padded rows of dense gradients.
 
     python -m generators.gen_sdpa_bwd_tailzero --arch gfx950 --out-dir <scratch root>
 
@@ -9,16 +9,16 @@ One object per arch and dtype (``f16``, ``bf16``, ``fp32``), and one V-head obje
 (``tailzero_hv``: ``f16``, ``bf16``; there is no fp32 ``u2`` row): the kernel with a separate ``Hv`` (dV head count) after ``Hkv``, for
 graphs whose V has its own head count. The kernels are ``fmha_bwd_tailzero_gfx950`` and ``fmha_bwd_tailzero_gfx11``
 (``fmha_bwd_tailzero_hv_gfx950``, ``fmha_bwd_tailzero_hv_gfx11``) under ``kernels_src/kernels/attention_bwd_{cdna,rdna}/``: the kernel of an
-object is the one of its builder family (``_sdpa_bwd_spec.family``): gfx950 is all CDNA, gfx11-generic all RDNA, and gfx942 and gfx90a
+object is the one of its builder family (``_sdpa_bwd_spec.family``): gfx950 is all CDNA, gfx11-generic and gfx12-generic all RDNA, and gfx942 and gfx90a
 take the gfx11 kernel for the 16-bit objects and the gfx950 kernel for fp32 (``_kernel_arch``). The objects are
 companions of the dQ and merged rows (``companion_entries``: the dQ and merged builds write them into the dQ arch folder and list them
 under ``companions`` of the dQ manifest, role ``tailzero``; gfx942 and gfx90a: ``_sdpa_bwd_split_build``). They have no pin: this generator is
 their provenance, so each is built twice in fresh processes and the two builds must be byte-identical, its kernarg layout must be
-``PARAMS`` (``PARAMS_HV``) and, on every arch but gfx11-generic, the R-MIR scan of ``tools/sdpa_bwd_gate.py`` must not be red (the gfx11
+``PARAMS`` (``PARAMS_HV``) and, on every arch but the generic ones, the R-MIR scan of ``tools/sdpa_bwd_gate.py`` must not be red (the
 gates read the gfx950, gfx942 and gfx90a objects only). The resource row of such an object is recorded.
 
 The command line writes ``<out-dir>/sdpa_bwd_tailzero/<arch>/`` (objects, ``manifest.json``, ``SOURCE.md``) for inspection and for
-measuring them (gfx950 and gfx11-generic; gfx942 and gfx90a have no content of their own); it is not shipped content.
+measuring them (gfx950, gfx11-generic and gfx12-generic; gfx942 and gfx90a have no content of their own); it is not shipped content.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ from ._extract_hsaco import HsacoExtractionError, extract_bin_attr
 from ._instances import (
     SDPA_BWD_CDNA9_TARGETS,
     SDPA_BWD_GFX11_TARGET,
+    SDPA_BWD_GFX12_TARGET,
     SDPA_BWD_TAILZERO_DTYPES,
     SDPA_BWD_TAILZERO_TARGETS,
     SDPA_BWD_TAILZERO_THREADS,
@@ -59,7 +60,12 @@ OP = "sdpa_bwd_tailzero"
 ROLE = "tailzero"
 ROLE_HV = "tailzero_hv"
 HV_DTYPES = ("f16", "bf16")
-ARCHES = (SDPA_BWD_TARGET, SDPA_BWD_GFX11_TARGET, *SDPA_BWD_CDNA9_TARGETS)
+ARCHES = (
+    SDPA_BWD_TARGET,
+    SDPA_BWD_GFX11_TARGET,
+    SDPA_BWD_GFX12_TARGET,
+    *SDPA_BWD_CDNA9_TARGETS,
+)
 
 # The kernel's name in each kernel family's object (a one-kernel object: FlyDSL suffixes it ``_kernel_0``), keyed by the arch whose kernel
 # file it is (``_kernel_arch``).
@@ -122,8 +128,8 @@ def _kernel_arch(arch: str, dtype: str) -> str:
 
 
 def _gated(arch: str) -> bool:
-    """Whether the objects of @p arch go through the CDNA gates (R-MIR: every arch but gfx11-generic, the gate reads gfx950, gfx942 and gfx90a objects only)."""
-    return arch != SDPA_BWD_GFX11_TARGET
+    """Whether the objects of @p arch go through the CDNA gates (R-MIR: every arch but the generic ones, the gate reads gfx950, gfx942 and gfx90a objects only)."""
+    return arch not in (SDPA_BWD_GFX11_TARGET, SDPA_BWD_GFX12_TARGET)
 
 
 def symbol_of(arch: str, dtype: str, hv: bool = False) -> str:

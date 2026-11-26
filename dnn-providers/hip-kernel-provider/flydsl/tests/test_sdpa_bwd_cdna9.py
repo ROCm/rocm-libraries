@@ -29,6 +29,8 @@ from generators import _sdpa_bwd_cdna_build as cdna  # noqa: E402
 from generators import _sdpa_bwd_rdna_build as rdna  # noqa: E402
 from generators._sdpa_bwd_spec import GENERIC_KERNELS, Spec, to_spec  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 # One of each kind of row the arch holds: prep, dK/dV, dQ (plain, dB-storing bias) of both families, a wide 16-bit rung with a
 # spelled knob and the other grid order, the 512 half-head fp32 rung, and the standalone reduce companions of the 16-bit dtypes.
 KEYS = {

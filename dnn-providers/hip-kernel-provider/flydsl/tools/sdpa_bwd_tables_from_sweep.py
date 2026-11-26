@@ -118,6 +118,12 @@ ARCH_OUTPUTS = {
         GENERIC_TABLE_KNOBS,
         "sdpa_bwd_gfx11_reference.csv",
     ),
+    "gfx12-generic": ArchOutputs(
+        "SDPA_BWD_GFX12_TABLES",
+        GENERIC_KERNELS,
+        GENERIC_TABLE_KNOBS,
+        "sdpa_bwd_gfx12_reference.csv",
+    ),
     **{
         arch: ArchOutputs(
             f"SDPA_BWD_{arch.upper()}_TABLES",

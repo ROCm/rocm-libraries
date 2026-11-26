@@ -32,9 +32,9 @@
  * and refused when the engine is selected by id.
  *
  * The cases run on every device whose architecture has objects in the install: gfx950, and a
- * gfx11 device served by the gfx11-generic content. They skip on any other device and on an
- * install that staged no shard for the device (flydslShipsForThisDevice). On a device the
- * install ships them for, a missing object fails. The dropout reference draws from the
+ * gfx11 or gfx12 device served by the generic content of its family. They skip on any other
+ * device and on an install that staged no shard for the device (flydslShipsForThisDevice). On a
+ * device the install ships them for, a missing object fails. The dropout reference draws from the
  * 64-bit Philox stream on both architectures. The forward-parity cases are
  * TestFlydslSdpaBwdParity.cpp; the per-object suite is TestFlydslSdpaBwdObjectsPerObject.cpp.
  */
@@ -57,7 +57,8 @@ void skipUnlessLowestFiniteBiasArch()
     if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx90a", 0) != 0 && arch.rfind("gfx942", 0) != 0)
     {
         GTEST_SKIP() << "the bias edge-value cases run on a gfx950, a gfx90a or a gfx942 device; "
-                     << arch << " is covered by the gfx11 parity suite or ships no such engine";
+                     << arch
+                     << " is covered by the gfx11 and gfx12 parity suite or ships no such engine";
     }
 }
 
@@ -107,7 +108,7 @@ protected:
 /// A bias that masks whole rows at the lowest finite value of its dtype. The merged engine ships
 /// on gfx950 only, so these cases run there (FlydslSdpaBwdDevice::SetUp skips a device that ships
 /// none of MERGED_OPS); the split engine's cases below also run on gfx90a and gfx942, and the gfx11
-/// split kernels' cases are in the gfx11 parity suite (TestFlydslSdpaBwdParity.cpp).
+/// and gfx12 split kernels' cases are in the parity suite (TestFlydslSdpaBwdParity.cpp).
 class TestGpuFlydslSdpaBwdMergedLowestFiniteBias : public FlydslSdpaBwdDevice
 {
 protected:
@@ -328,7 +329,7 @@ BwdCase nonFiniteOPaddingCase(DataType dtype, int64_t headDim, BwdOPadFill fill)
 }
 
 /// Every key of every third row of a bias at the dtype's lowest finite value, on the shape of
-/// the gfx11 parity case of the same name.
+/// the gfx11 and gfx12 parity case of the same name.
 BwdCase lowestFiniteBiasCase(DataType dtype)
 {
     BwdCase c = biasCase(dtype);
