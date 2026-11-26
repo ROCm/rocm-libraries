@@ -812,7 +812,9 @@ def gate_toolchain_gap(arch: str) -> str | None:
 def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     """``compile_kernel(kernel, arch=arch, **kw)`` for a test that compiles.
 
-    A loaded compiler that does not accept a ``-mllvm`` option the kernel
+    A COMGR that does not load or cannot target ``arch`` first takes the
+    compiler-tool policy (``rocke.tests.comgr.require_comgr_target``). A
+    loaded compiler that does not accept a ``-mllvm`` option the kernel
     needs is handled by the shared compile-test policy
     (:func:`~._compiler_test_utils.skip_where_compiler_refuses_option`): the
     test skips, or fails under ``ROCKE_REQUIRE_COMPILER_TOOLS=1``. Any other
@@ -824,9 +826,11 @@ def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     import pytest
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import CompilerOptionNotAccepted
+    from rocke.tests.comgr import require_comgr_target
 
     from ._compiler_test_utils import skip_where_compiler_refuses_option
 
+    require_comgr_target(arch)
     with skip_where_compiler_refuses_option():
         try:
             return compile_kernel(kernel, arch=arch, **kw)
