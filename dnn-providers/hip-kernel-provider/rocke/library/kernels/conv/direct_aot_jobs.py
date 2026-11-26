@@ -177,6 +177,8 @@ DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
 DW_TILED_DGRAD_BLOCK_H = (1, 2, 3, 4, 7)
 DW_TILED_DGRAD_BLOCK_WAVES = (1,)
 DW_BLOCK_WAVES = (1, 2, 4)
+# Row tile of the spatial depthwise forward (0 = the whole image per block).
+DW_SPATIAL_BLOCK_H = (64,)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
 # the spec validator drops the tiles that overflow the register budget and the
@@ -254,6 +256,10 @@ DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
 # ... and its grouped form (cpg = kpg, the ResNeXt 3x3 layers).
 DW_WIN_FWD_G8_FILTERS = (3,)
 DW_WIN_FWD_GROUP_CH = (8, 16, 24, 32, 40, 48, 56, 64)
+# ... and the 4-channel groups (stride 1, block-diagonal form).
+DW_WIN_FWD_SUB_GROUP_CH = (4,)
+# The grouped dgrad on the same kernel caches the group sizes the layers use.
+DW_WIN_DGRAD_GROUP_CH = (8, 16, 32, 64)
 # Toeplitz WMMA depthwise forward (direct_dw_fwd_wmma, stride 1, wave32):
 # "same"-padded 3x3..7x7 plus "valid" 7x7 (a 9x9's register-resident
 # fragments overflow the budget). Tiles from 1 row (small maps, many blocks)
@@ -627,6 +633,9 @@ DGRAD_WMMA_DILATED_KNOBS = (
 # 7x7 fits LDS only below the 128-channel block its transposing weight reads
 # need.
 DGRAD_PP_MFMA_FILTERS = (3, 5)
+# Grouped cells (one group per block, per-group channels baked): the
+# reference workloads' 56-channel 3x3 groups.
+DGRAD_PP_MFMA_GROUPED_CHANNELS = (56,)
 WGRAD_MFMA_K = (32,)
 # Wave32 WMMA direct forward (direct_fwd_wmma): (waves_k, waves_p, tiles_k,
 # tiles_p, tile_w, tile_n, ck, stages, prefetch, split_barrier,
@@ -1090,6 +1099,8 @@ WGRAD_DW_MFMA_TILES = ((4, 1), (8, 1), (5, 2), (8, 3))
 WGRAD_DW_MFMA_RPC = (7, 14, 28)
 WGRAD_DW_MFMA_PREFETCH = (1, 2)
 WGRAD_DW_MFMA_BLOCKS = (1024, 2048)
+# Stride 2: the filters it caches.
+WGRAD_DW_MFMA_S2_FILTERS = (3, 5)
 # Grouped wgrad, 4 or 8 channels per group, on the batched 4x4x4 MFMA
 # (GroupedWgradMfmaSpec): (waves_q, wave_q4), rows per unit, staging
 # buffers, workgroups.
@@ -1589,16 +1600,33 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for k in DW_WIN_FWD_G8_FILTERS
             for c in DW_WIN_FWD_GROUP_CH
             for s in _STRIDES
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_SUB_GROUP_CH
         ),
     ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
-    # padding (it bounds its rows by p_Ho and its columns by p_Wo).
+    # padding (it bounds its rows by p_Ho and its columns by p_Wo). Its MFMA
+    # form also runs the grouped 3x3 dgrad (8..64 channels per group, stride 1
+    # and 2) and the depthwise stride-2 dgrad, both over the zero-upsampled dY.
     "direct_depthwise_dgrad_win": (
         "dgrad",
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
             for k in _DEPTHWISE_FILTERS
             for pad in _all_pads(k)
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_DGRAD_GROUP_CH
+            for s in (2, 1)
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=2, cpg=1, kpg=1)
+            for k in (3, 5, 7)
         ),
     ),
     # Large-filter stride-1 depthwise dgrad as a rotated-filter forward pass
@@ -1714,6 +1742,10 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         tuple(
             DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
             for k in DGRAD_PP_MFMA_FILTERS
+        )
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c)
+            for c in DGRAD_PP_MFMA_GROUPED_CHANNELS
         ),
     ),
     # Stem dgrad on wave32 WMMA: patch embeddings (stride == filter, no
@@ -1746,9 +1778,10 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     "direct_wgrad_dw": (
         "wgrad",
         tuple(
-            DirectCaps(KH=3, PAD=pad, stride=s, cpg=1, kpg=1)
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k in (3, 5, 7)  # 5x5 and 7x7 hold fewer channels per lane
             for s in _STRIDES
-            for pad in _col_pads(3)
+            for pad in _col_pads(k)
         ),
     ),
     # Small-C depthwise wgrad (stem layers): every depthwise filter; the
@@ -1769,6 +1802,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
             for k in _DEPTHWISE_FILTERS
             for pad in _col_pads(k)
+        )
+        # Stride 2 (four stride-1 phase sub-problems): "same" padding.
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=2, cpg=1, kpg=1)
+            for k in WGRAD_DW_MFMA_S2_FILTERS
         ),
     ),
     # Grouped wgrad with 4 or 8 channels per group (cpg = kpg baked, groups
@@ -1927,8 +1965,9 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     _FWD_PP_MFMA: (
         "fwd",
         tuple(
-            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=0, kpg=0)
             for k in FWD_PP_MFMA_FILTERS
+            for pad in (_same_pad(k), 0)  # "same" and valid padding
         ),
     ),
     # Flattened-pixel implicit-GEMM forward on wave64 MFMA (gfx950): C, K
@@ -2127,7 +2166,377 @@ def _dw_fwd_cpl_arch(arch: str) -> bool:
     return ArchTarget.from_gfx(arch).wave_size == 32
 
 
+# Knob sets the AOT grid builds beyond the base grids of the windowed depthwise
+# families (dgrad, forward), the depthwise wgrad and the MFMA depthwise wgrad,
+# as label knob strings (name=value-...), and per layer cell
+# "<dtype>-f<KH>x<KW>-p<PAD>x<PAD_W>-s<stride>-c<cpg>" the indices of the ones it
+# is offered. They are the points a wider search found to win a layer: the
+# Toeplitz MFMA forms (row tiles, wave counts, folded images, dense weights by
+# LDS-DMA, XCD tile order, swizzled staging) and the wgrad lane / row-chunk
+# tilings. Cells a family gained (grouped and stride-2 dgrad, 4-channel
+# groups, stride-2 and 5x5 / 7x7 depthwise wgrad) carry their kept sets only;
+# the others keep their base grid whole.
+DW_DGRAD_WIN_KEPT = (
+    "block_h=10-block_waves=16-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=12-block_waves=4-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=12-block_waves=4-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=12-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=12-block_waves=8-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=14-block_waves=4-dense=true-dma=true-lds_swz=true-mfma=true-prefetch_rows=2-w_fold=1-wdma=true",
+    "block_h=14-block_waves=4-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=14-block_waves=4-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=14-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=14-block_waves=8-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=14-block_waves=8-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=16-block_waves=12-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=16-block_waves=16-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=2-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=4-dense=true-dma=true-lds_swz=true-mfma=true-prefetch_rows=2-w_fold=1-wdma=true",
+    "block_h=16-block_waves=4-dense=true-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=4-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=4-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=16-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=8-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=16-block_waves=8-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=25-block_waves=4-dense=true-dma=true-lds_swz=true-mfma=true-prefetch_rows=2-w_fold=1-wdma=true",
+    "block_h=25-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=32-block_waves=4-dense=true-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=32-block_waves=8-dense=true-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=32-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=32-block_waves=8-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=32-block_waves=8-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=4-block_waves=4-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=4-block_waves=4-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=4-block_waves=4-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=4-block_waves=8-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=7-block_waves=2-dense=true-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=7-block_waves=2-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=7-block_waves=4-dense=true-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=7-block_waves=4-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=7-block_waves=4-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=7-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=7-block_waves=8-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=8-block_waves=2-dense=true-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=8-block_waves=2-dense=true-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=8-block_waves=4-dense=true-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=8-block_waves=4-mfma=true-prefetch_rows=2-w_fold=1",
+    "block_h=8-block_waves=4-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=8-block_waves=4-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=8-block_waves=8-mfma=true-prefetch_rows=2-w_fold=2",
+    "block_h=8-block_waves=8-mfma=true-prefetch_rows=2-w_fold=4",
+    "block_h=9-block_waves=8-mfma=true-prefetch_rows=2-w_fold=1",
+)
+DW_DGRAD_WIN_CELL_KEPT = {
+    "bf16-f3x3-p1x1-s1x1-c1": (
+        "1 2 3 4 6 7 8 9 10 11 12 13 16 17 18 19 20 25 26 27 28 "
+        "29 30 31 33 35 36 37 38 42 43 44 45 46"
+    ),
+    "bf16-f3x3-p1x1-s1x1-c8": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 22 28 29 30 31 33 "
+        "35 36 37 38 42 43 44 45 46 47"
+    ),
+    "bf16-f3x3-p1x1-s1x1-c16": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 22 28 29 30 31 33 "
+        "35 36 37 38 42 43 44 45 46 47"
+    ),
+    "bf16-f3x3-p1x1-s1x1-c32": (
+        "1 2 3 4 6 7 8 9 10 15 16 17 18 19 20 21 22 28 29 30 31 "
+        "32 34 35 36 37 38 39 40 41 42 43 44 45 46 47"
+    ),
+    "bf16-f3x3-p1x1-s1x1-c64": "3 4 8 9 10 18 19 20 31 37 38 45 46 47",
+    "bf16-f3x3-p1x1-s2x2-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 42 43 44 " "45 46"
+    ),
+    "bf16-f3x3-p1x1-s2x2-c8": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 25 26 27 28 29 30 " "31 42 43 44 45 46"
+    ),
+    "bf16-f3x3-p1x1-s2x2-c16": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 25 26 27 28 29 30 " "31 42 43 44 45 46"
+    ),
+    "bf16-f3x3-p1x1-s2x2-c32": (
+        "1 2 3 4 6 7 8 9 10 15 16 17 18 19 20 23 24 25 26 27 28 "
+        "29 30 31 39 40 41 42 43 44 45 46"
+    ),
+    "bf16-f3x3-p1x1-s2x2-c64": "3 4 8 9 10 18 19 20 31 45 46",
+    "bf16-f5x5-p2x2-s1x1-c1": "11 12 13 25 26 27 33",
+    "bf16-f5x5-p2x2-s2x2-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 42 43 44 " "45 46"
+    ),
+    "bf16-f7x7-p0x0-s1x1-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 35 36 37 " "38 42 43 44 45 46"
+    ),
+    "bf16-f7x7-p3x3-s2x2-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 42 43 44 " "45 46"
+    ),
+    "fp16-f3x3-p1x1-s1x1-c1": (
+        "1 2 3 4 6 7 8 9 10 11 12 13 16 17 18 19 20 25 26 27 28 "
+        "29 30 31 33 35 36 37 38 42 43 44 45 46"
+    ),
+    "fp16-f3x3-p1x1-s1x1-c8": (
+        "0 1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 22 28 29 30 31 33 "
+        "35 36 37 38 42 43 44 45 46 47"
+    ),
+    "fp16-f3x3-p1x1-s1x1-c16": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 22 28 29 30 31 33 "
+        "35 36 37 38 42 43 44 45 46 47"
+    ),
+    "fp16-f3x3-p1x1-s1x1-c32": (
+        "1 2 3 4 5 6 7 8 9 10 14 15 16 17 18 19 20 21 22 28 29 30 "
+        "31 32 34 35 36 37 38 39 40 41 42 43 44 45 46 47"
+    ),
+    "fp16-f3x3-p1x1-s1x1-c64": "3 4 8 9 10 18 19 20 31 37 38 45 46 47",
+    "fp16-f3x3-p1x1-s2x2-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 42 43 44 " "45 46"
+    ),
+    "fp16-f3x3-p1x1-s2x2-c8": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 25 26 27 28 29 30 " "31 42 43 44 45 46"
+    ),
+    "fp16-f3x3-p1x1-s2x2-c16": (
+        "1 2 3 4 6 7 8 9 10 13 16 17 18 19 20 25 26 27 28 29 30 " "31 42 43 44 45 46"
+    ),
+    "fp16-f3x3-p1x1-s2x2-c32": (
+        "1 2 3 4 6 7 8 9 10 15 16 17 18 19 20 23 24 25 26 27 28 "
+        "29 30 31 39 40 41 42 43 44 45 46"
+    ),
+    "fp16-f3x3-p1x1-s2x2-c64": "3 4 8 9 10 18 19 20 31 45 46",
+    "fp16-f5x5-p2x2-s1x1-c1": "11 12 13 25 26 27 33",
+    "fp16-f5x5-p2x2-s2x2-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 42 43 44 " "45 46"
+    ),
+    "fp16-f7x7-p0x0-s1x1-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 35 36 37 " "38 42 43 44 45 46"
+    ),
+    "fp16-f7x7-p3x3-s2x2-c1": (
+        "1 2 3 4 6 7 8 9 10 16 17 18 19 20 28 29 30 31 42 43 44 " "45 46"
+    ),
+}
+DW_WIN_FWD_KEPT = (
+    "block_h=12-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=12-block_waves=8-prefetch_rows=2-w_fold=2",
+    "block_h=13-block_waves=3-prefetch_rows=2-w_fold=2",
+    "block_h=13-block_waves=8-prefetch_rows=2-w_fold=1",
+    "block_h=14-block_waves=12-prefetch_rows=2-w_fold=4",
+    "block_h=14-block_waves=16-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=14-block_waves=4-dense=true-dma=true-lds_swz=true-prefetch_rows=2-w_fold=1-wdma=true",
+    "block_h=14-block_waves=4-dense=true-prefetch_rows=2-w_fold=1",
+    "block_h=14-block_waves=8-dense=true-prefetch_rows=2-w_fold=2",
+    "block_h=14-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=14-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=2-xcd_tiles=true",
+    "block_h=14-block_waves=8-lds_swz=true-prefetch_rows=3-w_fold=1-xcd_tiles=true",
+    "block_h=14-block_waves=8-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=12-prefetch_rows=2-w_fold=2",
+    "block_h=16-block_waves=16-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=4-dense=true-dma=true-lds_swz=true-prefetch_rows=2-w_fold=1-wdma=true",
+    "block_h=16-block_waves=4-dense=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=4-lds_swz=true-prefetch_rows=2-w_fold=2-xcd_tiles=true",
+    "block_h=16-block_waves=4-prefetch_rows=2-w_fold=4",
+    "block_h=16-block_waves=8-dense=true-prefetch_rows=2-w_fold=1",
+    "block_h=16-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=16-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=2-xcd_tiles=true",
+    "block_h=16-block_waves=8-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=24-block_waves=16-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=24-block_waves=16-prefetch_rows=2-w_fold=1",
+    "block_h=25-block_waves=4-dense=true-dma=true-lds_swz=true-prefetch_rows=2-w_fold=1-wdma=true",
+    "block_h=25-block_waves=8-prefetch_rows=2-w_fold=1",
+    "block_h=28-block_waves=12-prefetch_rows=2-w_fold=1",
+    "block_h=28-block_waves=16-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=28-block_waves=4-lds_swz=true-prefetch_rows=2-w_fold=2-xcd_tiles=true",
+    "block_h=28-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=28-block_waves=8-prefetch_rows=2-w_fold=1",
+    "block_h=30-block_waves=16-prefetch_rows=2-w_fold=1",
+    "block_h=30-block_waves=8-prefetch_rows=2-w_fold=1",
+    "block_h=32-block_waves=16-prefetch_rows=2-w_fold=1",
+    "block_h=4-block_waves=2-dense=true-prefetch_rows=2-w_fold=1",
+    "block_h=4-block_waves=2-dense=true-prefetch_rows=2-w_fold=2",
+    "block_h=4-block_waves=2-dense=true-prefetch_rows=2-w_fold=4",
+    "block_h=4-block_waves=2-prefetch_rows=2-w_fold=1",
+    "block_h=56-block_waves=4-lds_swz=true-prefetch_rows=2-w_fold=2-xcd_tiles=true",
+    "block_h=7-block_waves=2-dense=true-prefetch_rows=2-w_fold=2",
+    "block_h=8-block_waves=2-dense=true-prefetch_rows=2-w_fold=1",
+    "block_h=8-block_waves=2-dense=true-prefetch_rows=2-w_fold=2",
+    "block_h=8-block_waves=8-dense=true-prefetch_rows=2-w_fold=2",
+    "block_h=8-block_waves=8-lds_swz=true-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=8-block_waves=8-lds_swz=true-prefetch_rows=3-w_fold=1-xcd_tiles=true",
+    "block_h=8-block_waves=8-prefetch_rows=2-w_fold=1-xcd_tiles=true",
+    "block_h=8-block_waves=8-prefetch_rows=3-w_fold=1",
+    "block_h=9-block_waves=3-prefetch_rows=2-w_fold=4",
+)
+DW_WIN_FWD_CELL_KEPT = {
+    "bf16-f3x3-p1x1-s1x1-c1": "4 13 14 20 24 27 29 31 32 33 34 38 47",
+    "bf16-f3x3-p1x1-s1x1-c4": "1 3 12 18 26 38",
+    "bf16-f3x3-p1x1-s1x1-c8": "3 26",
+    "bf16-f3x3-p1x1-s1x1-c16": "3 26",
+    "bf16-f3x3-p1x1-s1x1-c24": "2 48",
+    "bf16-f3x3-p1x1-s1x1-c32": "3 7 8 16 19 25 26 35 36 37 40 41 42 43",
+    "bf16-f3x3-p1x1-s1x1-c64": "3",
+    "bf16-f3x3-p1x1-s2x2-c1": "4 5 13 14 24 27 28 31 32 33 34 38 47",
+    "bf16-f3x3-p1x1-s2x2-c32": "7 8 16 19 35 36 37 41 42 43",
+    "bf16-f5x5-p2x2-s1x1-c1": "4 13 14 24 27 28 30 31 32 33 34 38 47",
+    "bf16-f5x5-p2x2-s2x2-c1": "4 11 13 14 24 27 31 32 33 34 38 47",
+    "fp16-f3x3-p1x1-s1x1-c1": ("0 4 9 10 13 14 17 20 21 23 24 27 31 32 33 34 38 39 47"),
+    "fp16-f3x3-p1x1-s1x1-c4": "1 3 12 18 26 38",
+    "fp16-f3x3-p1x1-s1x1-c8": "3 26 46",
+    "fp16-f3x3-p1x1-s1x1-c16": "3 26",
+    "fp16-f3x3-p1x1-s1x1-c24": "2 48",
+    "fp16-f3x3-p1x1-s1x1-c32": "3 6 7 8 15 16 19 25 26 35 36 37 40 41 42 43",
+    "fp16-f3x3-p1x1-s1x1-c64": "3",
+    "fp16-f3x3-p1x1-s2x2-c1": "4 5 13 14 20 24 27 28 31 32 33 34 38 45 47",
+    "fp16-f3x3-p1x1-s2x2-c8": "44",
+    "fp16-f3x3-p1x1-s2x2-c16": "22",
+    "fp16-f3x3-p1x1-s2x2-c32": "7 8 16 19 35 36 37 41 42 43",
+    "fp16-f5x5-p2x2-s1x1-c1": "4 10 13 14 24 27 28 30 31 32 33 34 38 47",
+    "fp16-f5x5-p2x2-s2x2-c1": "4 13 14 24 27 31 32 33 34 38 47",
+}
+WGRAD_DW_MFMA_KEPT = (
+    "adir=true-prefetch=2-q_tiles=8-rows_per_chunk=32-swz=true-target_blocks=4096-unfold_n=1-xcd_pair=true",
+    "prefetch=1-q_tiles=4-rows_per_chunk=8-swz=true-target_blocks=1024-unfold_n=1",
+    "prefetch=1-q_tiles=8-rows_per_chunk=32-swz=true-target_blocks=2048-unfold_n=1-xcd_pair=true",
+    "prefetch=1-q_tiles=8-rows_per_chunk=32-target_blocks=2048-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=16-target_blocks=4096-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=28-swz=true-target_blocks=1024-unfold_n=1-xcd_pair=true",
+    "prefetch=2-q_tiles=4-rows_per_chunk=28-swz=true-target_blocks=2048-unfold_n=1-xcd_pair=true",
+    "prefetch=2-q_tiles=4-rows_per_chunk=32-target_blocks=256-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=4-target_blocks=2048-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=4-target_blocks=4096-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=56-target_blocks=4096-unfold_n=1-xcd_pair=true",
+    "prefetch=2-q_tiles=4-rows_per_chunk=6-target_blocks=1024-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=6-target_blocks=2048-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=8-target_blocks=1024-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=8-target_blocks=256-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=8-target_blocks=4096-unfold_n=1",
+    "prefetch=2-q_tiles=4-rows_per_chunk=8-target_blocks=512-unfold_n=1",
+    "prefetch=2-q_tiles=8-rows_per_chunk=16-target_blocks=2048-unfold_n=1",
+    "prefetch=2-q_tiles=8-rows_per_chunk=16-target_blocks=4096-unfold_n=1",
+    "prefetch=2-q_tiles=8-rows_per_chunk=64-target_blocks=2048-unfold_n=1",
+    "prefetch=2-q_tiles=8-rows_per_chunk=8-target_blocks=2048-unfold_n=1",
+    "prefetch=2-q_tiles=8-rows_per_chunk=8-target_blocks=256-unfold_n=1",
+    "prefetch=2-q_tiles=8-rows_per_chunk=8-target_blocks=512-unfold_n=1",
+)
+WGRAD_DW_MFMA_CELL_KEPT = {
+    "bf16-f11x11-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f11x11-p5x5-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f3x3-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f3x3-p1x1-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f3x3-p1x1-s2x2-c1": "7 13 14 16 21 22",
+    "bf16-f5x5-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f5x5-p2x2-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f5x5-p2x2-s2x2-c1": "7 13 14 16 21 22",
+    "bf16-f7x7-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f7x7-p3x3-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f9x9-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "bf16-f9x9-p4x4-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f11x11-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f11x11-p5x5-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f3x3-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f3x3-p1x1-s1x1-c1": "0 2 3 4 5 6 8 9 11 12 13 15 16 17 18 19 20 22",
+    "fp16-f3x3-p1x1-s2x2-c1": "7 13 14 16 21 22",
+    "fp16-f5x5-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f5x5-p2x2-s1x1-c1": "3 4 10 13 15 16 17 18 20 22",
+    "fp16-f5x5-p2x2-s2x2-c1": "1 7 13 14 16 21 22",
+    "fp16-f7x7-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f7x7-p3x3-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f9x9-p0x0-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+    "fp16-f9x9-p4x4-s1x1-c1": "3 4 13 15 16 17 18 20 22",
+}
+WGRAD_DW_KEPT = (
+    "lane_ch=2-lanes_c=16-lanes_w=8-prefetch=2-rows_per_seg=16-target_blocks=1024",
+    "lane_ch=2-lanes_c=16-lanes_w=8-prefetch=2-rows_per_seg=32-target_blocks=1024",
+    "lane_ch=2-lanes_c=8-lanes_w=32-prefetch=2-rows_per_seg=16-target_blocks=1024",
+    "lane_ch=2-lanes_c=8-lanes_w=32-prefetch=2-rows_per_seg=16-target_blocks=2048",
+    "lane_ch=2-lanes_c=8-lanes_w=32-prefetch=2-rows_per_seg=64-target_blocks=1024",
+    "lane_ch=4-lanes_c=16-lanes_w=16-prefetch=1-rows_per_seg=64-target_blocks=512-xcd_pair=true",
+    "lane_ch=4-lanes_c=16-lanes_w=16-prefetch=2-rows_per_seg=16-target_blocks=2048",
+    "lane_ch=4-lanes_c=16-lanes_w=16-prefetch=2-rows_per_seg=8-target_blocks=2048",
+    "lane_ch=4-lanes_c=16-lanes_w=8-prefetch=2-rows_per_seg=32-target_blocks=512-xcd_pair=true",
+    "lane_ch=4-lanes_c=16-lanes_w=8-prefetch=2-rows_per_seg=64-target_blocks=1024",
+)
+WGRAD_DW_CELL_KEPT = {
+    "bf16-f3x3-p0x0-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f3x3-p0x0-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f3x3-p1x1-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f3x3-p1x1-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f5x5-p0x0-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f5x5-p0x0-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f5x5-p2x2-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f5x5-p2x2-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "bf16-f7x7-p0x0-s1x1-c1": "0 1 2 3 4",
+    "bf16-f7x7-p0x0-s2x2-c1": "0 1 2 3 4",
+    "bf16-f7x7-p3x3-s1x1-c1": "0 1 2 3 4",
+    "bf16-f7x7-p3x3-s2x2-c1": "0 1 2 3 4",
+    "fp16-f3x3-p0x0-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f3x3-p0x0-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f3x3-p1x1-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f3x3-p1x1-s2x2-c1": "0 1 2 3 4 5 6 7 8 9",
+    "fp16-f5x5-p0x0-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f5x5-p0x0-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f5x5-p2x2-s1x1-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f5x5-p2x2-s2x2-c1": "0 1 2 3 4 6 7 9",
+    "fp16-f7x7-p0x0-s1x1-c1": "0 1 2 3 4",
+    "fp16-f7x7-p0x0-s2x2-c1": "0 1 2 3 4",
+    "fp16-f7x7-p3x3-s1x1-c1": "0 1 2 3 4",
+    "fp16-f7x7-p3x3-s2x2-c1": "0 1 2 3 4",
+}
+_DW_KEPT = {
+    "direct_depthwise_dgrad_win": (DW_DGRAD_WIN_KEPT, DW_DGRAD_WIN_CELL_KEPT),
+    _DW_WIN_FWD: (DW_WIN_FWD_KEPT, DW_WIN_FWD_CELL_KEPT),
+    "direct_wgrad_dw_mfma": (WGRAD_DW_MFMA_KEPT, WGRAD_DW_MFMA_CELL_KEPT),
+    "direct_wgrad_dw": (WGRAD_DW_KEPT, WGRAD_DW_CELL_KEPT),
+}
+
+
+def _dw_cell_added(variant: str, caps: Optional[DirectCaps]) -> bool:
+    """Whether ``caps`` is a cell the kept sets added (no base grid)."""
+    if caps is None:
+        return False
+    if variant == "direct_depthwise_dgrad_win":
+        return caps.cpg > 1 or caps.stride == 2
+    if variant == _DW_WIN_FWD:
+        return caps.cpg == DW_WIN_FWD_SUB_GROUP_CH[0]
+    if variant == "direct_wgrad_dw_mfma":
+        return caps.stride == 2
+    return variant == "direct_wgrad_dw" and caps.KH != 3
+
+
+def _dw_kept_knobs(
+    variant: str, dtype: str, caps: Optional[DirectCaps]
+) -> Iterator[dict]:
+    """The knob sets ``_DW_KEPT`` offers this layer cell (every cell: ``None``)."""
+    knob_strs, cells = _DW_KEPT[variant]
+    if caps is None:
+        ids = " ".join(v for k, v in cells.items() if k.startswith(dtype))
+        ids = sorted(set(ids.split()), key=int)
+    else:
+        key = f"{dtype}-f{caps.KH}x{caps.KW}-p{caps.PAD}x{caps.PAD_W}"
+        ids = cells.get(f"{key}-s{caps.stride}x{caps.stride}-c{caps.cpg}", "").split()
+    for i in ids:
+        yield {
+            k: {"true": True, "false": False}.get(v, v) if not v.isdigit() else int(v)
+            for k, v in (part.split("=") for part in knob_strs[int(i)].split("-"))
+        }
+
+
 def _knob_grid(
+    variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
+) -> Iterator[dict]:
+    if variant not in _DW_KEPT:
+        yield from _knob_grid_base(variant, arch, dtype, caps)
+        return
+    if arch != "gfx950":  # the kept sets are wave64 MFMA / gfx950 points
+        if not _dw_cell_added(variant, caps):
+            yield from _knob_grid_base(variant, arch, dtype, caps)
+        return
+    seen = set()
+    if not _dw_cell_added(variant, caps):
+        for knobs in _knob_grid_base(variant, arch, dtype, caps):
+            seen.add(frozenset(knobs.items()))
+            yield knobs
+    for knobs in _dw_kept_knobs(variant, dtype, caps):
+        if frozenset(knobs.items()) not in seen:
+            seen.add(frozenset(knobs.items()))
+            yield knobs
+
+
+def _knob_grid_base(
     variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
 ) -> Iterator[dict]:
     if variant == "direct_nongrouped":
@@ -2170,6 +2579,10 @@ def _knob_grid(
     elif variant == "direct_depthwise_spatial":
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
+        # Row-tiled form: one block per tile of block_h output rows.
+        if arch == "gfx950":
+            for bh in DW_SPATIAL_BLOCK_H:
+                yield dict(block_waves=1, block_h=bh)
     elif variant == "direct_depthwise_tiled":
         for bw, bh, waves, unroll in itertools.product(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
@@ -2218,7 +2631,7 @@ def _knob_grid(
         # depthwise wave counts that are whole multiples of the group.
         waves_grid = DW_WIN_MFMA_WAVES
         if caps is not None and caps.cpg > 1:
-            per_group = caps.cpg // 8
+            per_group = max(1, caps.cpg // 8)
             waves_grid = tuple(
                 w
                 for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
@@ -2329,9 +2742,12 @@ def _knob_grid(
     elif variant == _DGRAD_PP_MFMA:
         if arch != "gfx950":
             return  # 16-byte LDS DMA and transposing LDS reads: gfx950 only
-        from kernels.common.conv_direct_dgrad_pp_mfma import BLOCK_K
+        from kernels.common.conv_direct_dgrad_pp_mfma import (
+            BLOCK_K,
+            GROUPED_BLOCK_K,
+        )
 
-        for bk in BLOCK_K:
+        for bk in GROUPED_BLOCK_K if caps is not None and caps.cpg > 0 else BLOCK_K:
             yield dict(block_k=bk)
     elif variant == _DGRAD_WMMA:
         from rocke.core.arch import ArchTarget
@@ -2622,6 +3038,8 @@ def _knob_grid(
         from kernels.common.conv_direct_fwd_pp_mfma import BLOCK_K
 
         for bk in BLOCK_K:
+            if caps is not None and caps.PAD == 0 and bk != 64:
+                continue  # valid padding: block_k 64 only
             yield dict(block_k=bk)
     elif variant == _FWD_SMALLC_MFMA:
         from rocke.core.arch import ArchTarget
@@ -3424,6 +3842,13 @@ def _caps_jobs(
         "direct_wgrad_dw_mfma",
     )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
+    # The kept knob sets are curated: the cache-scope policy of the base grid
+    # does not apply to them.
+    dw_kept = (
+        {frozenset(k.items()) for k in _dw_kept_knobs(variant, dtype, caps)}
+        if variant in _DW_KEPT and arch == "gfx950"
+        else set()
+    )
     for knobs in _knob_grid(variant, arch, dtype, caps):
         n_raw += 1
         if knob_probe:
@@ -3432,8 +3857,10 @@ def _caps_jobs(
             continue
         if variant in _MFMA_DGRAD and _mfma_knobs_reason(probe, knobs, arch):
             continue
-        if variant == "direct_depthwise_dgrad_win" and _dw_win_policy_reason(
-            caps, knobs, arch
+        if (
+            variant == "direct_depthwise_dgrad_win"
+            and frozenset(knobs.items()) not in dw_kept
+            and _dw_win_policy_reason(caps, knobs, arch)
         ):
             continue
         if variant == "direct_grouped_dgrad_fused" and _dgrad_fused_policy_reason(

@@ -84,9 +84,11 @@ def _problem(**kw) -> DirectConvProblem:
 # 1x7 with column padding).
 # The flattened-pixel MFMA forward (gfx950) indexes its im2col by output pixel
 # and takes any padding, stride and dilation.
+# The ping-pong MFMA forward also takes valid padding.
 _PADDING_GENERIC_FWD = {
     "direct_depthwise_col",
     "direct_fwd_flex_mfma",
+    "direct_fwd_pp_mfma",
     "direct_fwd_smallc_mfma",
     "direct_fwd_smallk_mfma",
 }
@@ -439,23 +441,26 @@ def test_windowed_depthwise_dgrad_serves_stride_1(cache, KH, PAD):
             )
 
 
-def test_windowed_depthwise_dgrad_is_stride_1_only(cache):
+def test_windowed_depthwise_dgrad_is_stride_1_except_on_the_mfma_form(cache):
+    """Only the MFMA form (the zero-upsampled dY) runs a strided dgrad."""
     problem = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2, stride=2)
     plans, _ = dks.direct_plans(cache, problem, "dgrad", _ARCH)
-    assert plans and not _win(plans)
+    assert plans and _win(plans)
+    assert all(json.loads(p.identity.knobs).get("mfma") for p in _win(plans))
 
 
 def test_windowed_depthwise_dgrad_cached_scope(jobs):
     """The cache holds the knob image of the tile policy, not a product: dot2
     exactly where it pairs taps, channel pairs only for 3x3, the MFMA form
-    only for "same"-padded 5x5..9x9, and every tile within the unroll budget."""
+    only for "same"-padded 3x3..9x9 and the valid-padded 7x7, and every tile
+    within the unroll budget."""
     win = [j for j in jobs if j.identity.algorithm == _WIN]
     assert win
     mfma = [j for j in win if j.spec_kwargs.get("mfma")]
     valu = [j for j in win if not j.spec_kwargs.get("mfma")]
     assert {(j.identity.filter_h, j.identity.pad_h) for j in mfma} == {
-        (k, (k - 1) // 2) for k in dks.DW_WIN_MFMA_FILTERS
-    }
+        (k, (k - 1) // 2) for k in (3, *dks.DW_WIN_MFMA_FILTERS)
+    } | {(7, 0)}
     for j in valu:
         kw, knobs = j.identity.filter_w, j.spec_kwargs
         assert knobs["dot2"] == (kw >= 5)
@@ -529,10 +534,16 @@ def test_windowed_depthwise_dgrad_wmma_cached_scope(jobs):
             job.identity.wave_size,
         )
         assert spec.wave_size == 32, job.identity.label()
-    mfma = [
-        j for j in jobs if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
-    ]
-    assert {j.spec_kwargs["block_h"] for j in mfma} == set(DW_WIN_MFMA_BLOCK_H)
+    from kernels.conv.direct_aot_jobs import _knob_grid_base
+
+    # The gfx950 base grid keeps its own row tiles (its kept sets add to them).
+    base = {
+        k["block_h"]
+        for caps in dks.DIRECT_CAPABILITIES[_WIN][1]
+        for k in _knob_grid_base(_WIN, _ARCH, "bf16", caps)
+        if k.get("mfma")
+    }
+    assert base == set(DW_WIN_MFMA_BLOCK_H)
 
 
 def _windowed_cell_jobs(arch: str, KH: int, PAD: int):
@@ -1323,12 +1334,14 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
     plans, _ = dks.direct_plans(cache, _problem(), "dgrad", _ARCH)
     # cpg = kpg = 16 has the fixed-channel MFMA entries and also the
     # runtime-channel ones (one K-atom, one M-tile), and the single-kernel
-    # fused-weight generic dgrad.
+    # fused-weight generic dgrad, and the windowed MFMA form (a grouped dgrad
+    # on the native filter).
     assert _variants(plans) == {
         "direct_grouped_dgrad",
         "direct_grouped_dgrad_mfma",
         "direct_dgrad_mfma_rtc",
         _FUSED,
+        _WIN,
     }
     for plan in plans:
         if plan.identity.algorithm not in (

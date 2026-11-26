@@ -85,9 +85,15 @@ _SAMPLE_PER_K_LOOP = 3
 def _packaged(identity: KernelIdentity) -> bool:
     """Whether the packaged launch models ``identity``'s features: every forward
     implicit-GEMM identity of the sweep and every direct one but the split-C fold,
-    which ships as the second launch of a split-C instance."""
+    which ships as the second launch of a split-C instance, and the identities
+    whose knobs no instance field carries."""
     if identity.is_direct:
-        return identity.algorithm in AOT_DIRECT_ALGORITHMS
+        if identity.algorithm not in AOT_DIRECT_ALGORITHMS:
+            return False
+        try:
+            aot_direct_instance_fields(identity)
+        except ValueError:
+            return False
     return True
 
 
@@ -763,7 +769,7 @@ _DIRECT_COUNTS = {
     # 3058 unsplit and 1816 split-C kernels.
     "direct_nongrouped": 4874,
     "direct_grouped_halo": 2850,
-    "direct_depthwise_win": 759,
+    "direct_depthwise_win": 818,
 }
 #: Forward direct identities per dtype the packaged launch refuses as an instance: the
 #: split-C fold (the second launch of each split-C instance), and the four gfx950
@@ -773,8 +779,18 @@ _REFUSED_DIRECT_COUNTS = {
     "direct_split_reduce": 4,
     "direct_fwd_smallc_mfma": 222,
     "direct_fwd_smallk_mfma": 44,
-    "direct_fwd_pp_mfma": 3,
+    "direct_fwd_pp_mfma": 4,
     "direct_fwd_flex_mfma": 102,
+}
+#: Forward direct identities per (dtype, algorithm) of a packaged algorithm whose knobs
+#: no instance field carries (the row-tiled spatial form, the windowed form's LDS
+#: swizzle / XCD tile order / LDS-DMA weights / dense forms): refused with the
+#: knobs' own reason.
+_UNCARRIED_KNOB_COUNTS = {
+    ("fp16", "direct_depthwise_spatial"): 12,
+    ("bf16", "direct_depthwise_spatial"): 12,
+    ("fp16", "direct_depthwise_win"): 42,
+    ("bf16", "direct_depthwise_win"): 29,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -804,12 +820,17 @@ def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
         assert spec is None, job.identity.label()
         if key == "direct_split_reduce":
             assert reason == AOT_REFUSED_SPLIT_REDUCE
+        elif key in AOT_DIRECT_ALGORITHMS:
+            assert reason.startswith("knobs ")
         else:
             assert reason.startswith(f"direct algorithm {key!r} has no packaged launch")
     assert refused == {
-        (dtype, algorithm): count
-        for dtype in ("fp16", "bf16")
-        for algorithm, count in _REFUSED_DIRECT_COUNTS.items()
+        **{
+            (dtype, algorithm): count
+            for dtype in ("fp16", "bf16")
+            for algorithm, count in _REFUSED_DIRECT_COUNTS.items()
+        },
+        **_UNCARRIED_KNOB_COUNTS,
     }
 
 

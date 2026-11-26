@@ -178,7 +178,8 @@ def test_reasons():
         return dgrad_pp_mfma_reason(replace(ok, problem=replace(ok.problem, **kw)))
 
     assert "stride" in why(stride=2)
-    assert "groups" in why(groups=2)
+    # grouped: one group per block, block_k 64 only
+    assert "block_k must be 64" in why(groups=2)
     assert why(dil_h=2) == "dilation must be 1"
     assert why(dil_w=2) == "dilation must be 1"
     assert "multiple of 8" in why(cpg=12)
@@ -305,10 +306,10 @@ def test_aot_grid():
                 spec = make_direct_spec(_VARIANT, probe, knobs)
                 if validate_direct_spec(_VARIANT, spec, "gfx950")[0]:
                     built.add((caps.KH, knobs["block_k"], dtype))
-    # 5x5 at block_k 256 does not fit LDS.
+    # 5x5 at block_k 256 does not fit LDS; the grouped 3x3 runs block_k 64.
     assert built == {
         (kh, bk, dt)
-        for kh, bk in ((3, 128), (3, 256), (5, 128))
+        for kh, bk in ((3, 64), (3, 128), (3, 256), (5, 128))
         for dt in ("bf16", "fp16")
     }
 
