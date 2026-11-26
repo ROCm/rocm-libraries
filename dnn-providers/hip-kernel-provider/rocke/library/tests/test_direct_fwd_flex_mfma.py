@@ -33,7 +33,7 @@ from kernels.common.conv_direct_fwd_flex_mfma import (
     fwd_flex_mfma_reason,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.conv.direct_aot_jobs import FWD_FLEX_KNOBS, FWD_FLEX_LAYERS
+from kernels.conv.direct_aot_jobs import FWD_FLEX_KEPT, FWD_FLEX_LAYERS, _flex_knobs
 
 from ._direct_conv_numeric import direct_fwd_reference, launch_direct_kernel, poisoned
 
@@ -94,7 +94,7 @@ def test_arch_gate_is_capability_based():
 def test_reasons():
     ok = FwdFlexMfmaSpec(problem=_problem())
     assert fwd_flex_mfma_reason(ok) is None
-    for bk in (128, 256):
+    for bk in (64, 128, 192, 256):
         assert fwd_flex_mfma_reason(replace(ok, bk=bk)) is None
     for sc in (1, 2, 3):
         # C=192, C/64=3: split_c in [1, 3] must pass
@@ -129,8 +129,8 @@ def test_reasons():
     assert why(cpg=0) == "cpg must be >= 1 (got 0)"
     assert why(kpg=0) == "kpg must be >= 1 (got 0)"
     assert why(N=0) == "N must be >= 1 (got 0)"
-    # bk must be 128 or 256
-    assert "bk must be 128 or 256" in fwd_flex_mfma_reason(replace(ok, bk=64))
+    # bk must be 64, 128, 192 or 256
+    assert "bk must be 64, 128, 192 or 256" in fwd_flex_mfma_reason(replace(ok, bk=96))
     # pad_w: flex supports per-axis padding; only pad_w < -1 is refused
     assert (
         fwd_flex_mfma_reason(replace(ok, problem=replace(ok.problem, pad_w=0))) is None
@@ -153,14 +153,14 @@ def test_reasons():
     wave64 = "fwd_flex_mfma is a wave64 MFMA kernel"
     assert fwd_flex_mfma_reason(ok, arch="gfx1250") == wave64
     assert fwd_flex_mfma_reason(replace(ok, wave_size=32)) == wave64
-    # tap count limit: KH * KW > 32
+    # tap count limit: a 6x6 filter's DMA offset table does not fit in LDS
     bigfilter = replace(
         ok,
         problem=replace(
             ok.problem, KH=6, KW=6, PAD=0, pad_w=0, stride=1, dil_h=1, dil_w=1
         ),
     )
-    assert "32 taps" in fwd_flex_mfma_reason(bigfilter)
+    assert fwd_flex_mfma_reason(bigfilter) == "LDS 172032 B > 163840"
     # workspace slab size limit when split_c > 1: each slab is N*Ho*Wo*K*4 bytes;
     # input/output/weights OK but one slab > I32_MAX.
     # K=128, KH=KW=1, PAD=0, stride=1 -> Ho=H, Wo=W;
@@ -184,8 +184,8 @@ def test_reasons():
         "workspace exceeds 2147483647 B, the i32 byte-count kernarg"
     )
     # build raises when spec is invalid
-    with pytest.raises(ValueError, match="bk must be 128 or 256"):
-        build_fwd_flex_mfma(replace(ok, bk=64))
+    with pytest.raises(ValueError, match="bk must be 64, 128, 192 or 256"):
+        build_fwd_flex_mfma(replace(ok, bk=96))
 
 
 def test_multi_round_cases_overflow_the_persistent_grid():
@@ -266,23 +266,21 @@ def test_aot_grid():
         assert not list(_knob_grid(_VARIANT, "gfx942", "bf16", caps))
         assert not list(_knob_grid(_VARIANT, "gfx1250", "bf16", caps))
 
-    # All 6 knobs (bk, split_c) are valid for every caps entry on gfx950
+    # Every kept knob set the grid offers a cell is valid on its probe
     built = set()
     for caps in caps_list:
         for dtype in ("bf16", "fp16"):
-            probe = probe_problem(caps, dtype, _VARIANT)
             for knobs in _knob_grid(_VARIANT, "gfx950", dtype, caps):
+                probe = probe_problem(caps, dtype, _VARIANT, knobs)
                 spec = make_direct_spec(_VARIANT, probe, knobs)
                 ok, why = validate_direct_spec(_VARIANT, spec, "gfx950")
                 assert ok, (caps, knobs, why)
-                built.add(
-                    (caps.KH, caps.kw or caps.KH, knobs["bk"], knobs["split_c"], dtype)
-                )
+                built.add((knobs["bk"], knobs.get("split_c", 1)))
 
-    # Every (bk, split_c) combination from FWD_FLEX_KNOBS must appear
-    knob_pairs = {(bk, sc) for bk, sc in FWD_FLEX_KNOBS}
-    built_pairs = {(bk, sc) for _, _, bk, sc, _ in built}
-    assert built_pairs == knob_pairs, (built_pairs, knob_pairs)
+    # Every (bk, split_c) combination of FWD_FLEX_KEPT must appear
+    kept = [_flex_knobs(k) for k in FWD_FLEX_KEPT]
+    knob_pairs = {(k["bk"], k.get("split_c", 1)) for k in kept}
+    assert built == knob_pairs, (built, knob_pairs)
 
     # Each split_c > 1 kernel brings its split-C fold job into the AOT cell.
     import json
@@ -296,7 +294,12 @@ def test_aot_grid():
         for _, job in jobs
         if job.identity.algorithm == DIRECT_SPLIT_REDUCE
     }
-    assert folds == {sc for _, sc in FWD_FLEX_KNOBS if sc > 1}
+    degrees = {
+        json.loads(job.identity.knobs).get("split_c", 1)
+        for _, job in jobs
+        if job.identity.algorithm == _VARIANT
+    }
+    assert folds == {sc for sc in degrees if sc > 1}
 
 
 def test_variant_wiring():
@@ -383,7 +386,7 @@ def test_engines_agree_on_specs():
         (dict(kpg=0), {}),
         (dict(N=0), {}),
         (dict(H=1024, W=2048, cpg=768, kpg=768), {}),
-        ({}, dict(bk=64)),
+        ({}, dict(bk=96)),
         ({}, dict(split_c=4)),  # C=192, C/64=3, split_c=4 > 3
         ({}, dict(wave_size=32)),
     ):

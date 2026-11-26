@@ -12,6 +12,7 @@
  *
  * Config index table: see the Python emitter (must stay in sync).
  */
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,7 +126,7 @@ static int make_cfg(int idx, rocke_fwd_flex_mfma_spec_t* s, const char** arch)
         set_geom(&s->problem, 3, 3, 24, -1, 1, 24, 24);
         s->split_c = 8;
         return 0;
-    case 11: /* rejected by both engines: bk 192 */
+    case 11: /* bf16, 3x3 s1 pad 1, bk 192 */
         s->problem = make_problem("bf16");
         s->bk = 192;
         return 0;
@@ -145,9 +146,290 @@ static int make_cfg(int idx, rocke_fwd_flex_mfma_spec_t* s, const char** arch)
         s->problem = make_problem("bf16");
         s->split_c = 16;
         return 0;
-    case 16: /* rejected by both engines: 7x7 (more than 32 taps) */
+    case 16: /* rejected by both engines: 7x7 (the offset table's LDS) */
         s->problem = make_problem("bf16");
         set_geom(&s->problem, 7, 7, 3, -1, 1, 1, 1);
+        return 0;
+    case 17: /* fp16, bk 64 */
+        s->problem = make_problem("fp16");
+        s->bk = 64;
+        return 0;
+    case 18: /* bf16, s2, bk 192, split_c 2 */
+        s->problem = make_problem("bf16");
+        s->problem.stride = 2;
+        s->bk = 192;
+        s->split_c = 2;
+        return 0;
+    case 19: /* fp16, bx 128, bk 128 */
+        s->problem = make_problem("fp16");
+        s->bx = 128;
+        s->bk = 128;
+        return 0;
+    case 20: /* bf16, bx 128, bk 256, split_c 2 */
+        s->problem = make_problem("bf16");
+        s->bx = 128;
+        s->split_c = 2;
+        return 0;
+    case 21: /* fp16, cs 4 */
+        s->problem = make_problem("fp16");
+        s->bx = 128;
+        s->bk = 128;
+        s->cs = 4;
+        return 0;
+    case 22: /* bf16, cs 4, wt, xcd, split_c 2 */
+        s->problem = make_problem("bf16");
+        s->bx = 128;
+        s->bk = 128;
+        s->cs = 4;
+        s->wt = true;
+        s->xcd = 1;
+        s->split_c = 2;
+        return 0;
+    case 23: /* fp16, cs 4, xcd, kmaj, s2 */
+        s->problem = make_problem("fp16");
+        s->problem.stride = 2;
+        s->bx = 128;
+        s->bk = 128;
+        s->cs = 4;
+        s->xcd = 1;
+        s->kmaj = true;
+        return 0;
+    case 24: /* bf16, cs 2 */
+        s->problem = make_problem("bf16");
+        s->bx = 128;
+        s->cs = 2;
+        return 0;
+    case 25: /* fp16, cs 2, wt, xcd, kmaj, split_c 2 */
+        s->problem = make_problem("fp16");
+        s->bx = 128;
+        s->cs = 2;
+        s->wt = true;
+        s->xcd = 1;
+        s->kmaj = true;
+        s->split_c = 2;
+        return 0;
+    case 26: /* bf16, wt, bk 256 */
+        s->problem = make_problem("bf16");
+        s->wt = true;
+        return 0;
+    case 27: /* fp16, wt, bk 192, split_c 3 */
+        s->problem = make_problem("fp16");
+        s->bk = 192;
+        s->wt = true;
+        s->split_c = 3;
+        return 0;
+    case 28: /* bf16, wt, bx 128, bk 128 */
+        s->problem = make_problem("bf16");
+        s->bx = 128;
+        s->bk = 128;
+        s->wt = true;
+        return 0;
+    case 29: /* fp16, wt, xt8, c_tail (C=200), bk 256 */
+        s->problem = make_problem("fp16");
+        s->problem.cpg = 200;
+        s->wt = true;
+        s->xt8 = true;
+        s->c_tail = true;
+        return 0;
+    case 30: /* bf16, wt, xt8, sw, xcd, bk 256 */
+        s->problem = make_problem("bf16");
+        s->wt = true;
+        s->xt8 = true;
+        s->sw = true;
+        s->xcd = 1;
+        return 0;
+    case 31: /* fp16, xcd, bk 256, split_c 2 */
+        s->problem = make_problem("fp16");
+        s->xcd = 1;
+        s->split_c = 2;
+        return 0;
+    case 32: /* bf16, xcd 2, sw, kmaj, bk 128 */
+        s->problem = make_problem("bf16");
+        s->bk = 128;
+        s->xcd = 2;
+        s->sw = true;
+        s->kmaj = true;
+        return 0;
+    case 33: /* fp16, xcd 3, sw, bk 256 */
+        s->problem = make_problem("fp16");
+        s->xcd = 3;
+        s->sw = true;
+        return 0;
+    case 34: /* bf16, xcd, kmaj, bk 256 */
+        s->problem = make_problem("bf16");
+        s->xcd = 1;
+        s->kmaj = true;
+        return 0;
+    case 35: /* fp16, c_tail (C=200), bk 256 */
+        s->problem = make_problem("fp16");
+        s->problem.cpg = 200;
+        s->c_tail = true;
+        return 0;
+    case 36: /* bf16, c_tail (C=200), sw, xcd, bk 128 */
+        s->problem = make_problem("bf16");
+        s->problem.cpg = 200;
+        s->bk = 128;
+        s->c_tail = true;
+        s->sw = true;
+        s->xcd = 1;
+        return 0;
+    case 37: /* fp16, flat (C=200), bk 128 */
+        s->problem = make_problem("fp16");
+        s->problem.cpg = 200;
+        s->bk = 128;
+        s->flat = true;
+        return 0;
+    case 38: /* bf16, flat (C=200), bk 192, split_c 4 */
+        s->problem = make_problem("bf16");
+        s->problem.cpg = 200;
+        s->bk = 192;
+        s->flat = true;
+        s->split_c = 4;
+        return 0;
+    case 39: /* fp16, k_tail (K=27), bk 64 */
+        s->problem = make_problem("fp16");
+        s->problem.kpg = 27;
+        s->bk = 64;
+        s->k_tail = true;
+        return 0;
+    case 40: /* bf16, k_tail (K=36), bk 64, split_c 2 */
+        s->problem = make_problem("bf16");
+        s->problem.kpg = 36;
+        s->bk = 64;
+        s->k_tail = true;
+        s->split_c = 2;
+        return 0;
+    case 41: /* fp16, sw, bk 128 */
+        s->problem = make_problem("fp16");
+        s->bk = 128;
+        s->sw = true;
+        return 0;
+    case 42: /* bf16, sw, bk 256, split_c 2 */
+        s->problem = make_problem("bf16");
+        s->sw = true;
+        s->split_c = 2;
+        return 0;
+    case 43: /* fp16, grp (4 groups of 64 / 64), bk 64 */
+        s->problem = make_problem("fp16");
+        s->problem.groups = 4;
+        s->problem.cpg = 64;
+        s->problem.kpg = 64;
+        s->bk = 64;
+        s->grp = true;
+        return 0;
+    case 44: /* bf16, grp (2 groups of 128 / 256), sw, wt, bx 128, bk 256 */
+        s->problem = make_problem("bf16");
+        s->problem.groups = 2;
+        s->problem.cpg = 128;
+        s->problem.kpg = 256;
+        s->bx = 128;
+        s->grp = true;
+        s->sw = true;
+        s->wt = true;
+        return 0;
+    case 45: /* fp16, grp (2 groups of 56 / 64), c_tail, bk 64 */
+        s->problem = make_problem("fp16");
+        s->problem.groups = 2;
+        s->problem.cpg = 56;
+        s->problem.kpg = 64;
+        s->bk = 64;
+        s->grp = true;
+        s->c_tail = true;
+        return 0;
+    case 46: /* bf16, ds dgrad 3x3 s2, wt, bx 128, bk 128 */
+        s->problem = make_problem("bf16");
+        s->problem.stride = 2;
+        s->problem.cpg = 256;
+        s->problem.kpg = 128;
+        s->bx = 128;
+        s->bk = 128;
+        s->wt = true;
+        s->ds = true;
+        return 0;
+    case 47: /* fp16, ds dgrad 1x16 s8 pad 0x4 (H=1), h1, wt, bk 128 */
+        s->problem = make_problem("fp16");
+        set_geom(&s->problem, 1, 16, 0, 4, 8, 1, 1);
+        s->problem.H = 1;
+        s->problem.W = 64;
+        s->problem.cpg = 128;
+        s->problem.kpg = 128;
+        s->bk = 128;
+        s->wt = true;
+        s->ds = true;
+        s->h1 = true;
+        return 0;
+    case 48: /* bf16, ds dgrad 1x1 s2, zf, wt, bk 192 */
+        s->problem = make_problem("bf16");
+        set_geom(&s->problem, 1, 1, 0, -1, 2, 1, 1);
+        s->problem.cpg = 256;
+        s->problem.kpg = 128;
+        s->bk = 192;
+        s->wt = true;
+        s->ds = true;
+        s->zf = true;
+        return 0;
+    case 49: /* fp16, ds dgrad 1x1 s2, zf, zl 8, wt, bx 128, bk 256 */
+        s->problem = make_problem("fp16");
+        set_geom(&s->problem, 1, 1, 0, -1, 2, 1, 1);
+        s->problem.cpg = 256;
+        s->problem.kpg = 128;
+        s->bx = 128;
+        s->wt = true;
+        s->ds = true;
+        s->zf = true;
+        s->zl = 8;
+        return 0;
+    case 50: /* bf16, ds dgrad 1x1 s2 (K=264), zf, zl 8, c_tail, wt, bx 128, bk 256 */
+        s->problem = make_problem("bf16");
+        set_geom(&s->problem, 1, 1, 0, -1, 2, 1, 1);
+        s->problem.cpg = 256;
+        s->problem.kpg = 264;
+        s->bx = 128;
+        s->wt = true;
+        s->ds = true;
+        s->zf = true;
+        s->zl = 8;
+        s->c_tail = true;
+        return 0;
+    case 51: /* fp16, s2, bk 128, split_c 6 */
+        s->problem = make_problem("fp16");
+        s->problem.stride = 2;
+        s->bk = 128;
+        s->split_c = 6;
+        return 0;
+    case 52: /* bf16, C=1024, bk 256, split_c 16 */
+        s->problem = make_problem("bf16");
+        s->problem.cpg = 1024;
+        s->split_c = 16;
+        return 0;
+    case 53: /* fp16, ds dgrad 3x3 s2, bk 256, split_c 2 (the transposed filter) */
+        s->problem = make_problem("fp16");
+        s->problem.stride = 2;
+        s->problem.cpg = 256;
+        s->problem.kpg = 128;
+        s->ds = true;
+        s->split_c = 2;
+        return 0;
+    case 54: /* rejected by both engines: cs 2 on a 2x2 filter (4 taps) */
+        s->problem = make_problem("bf16");
+        set_geom(&s->problem, 2, 2, 0, -1, 1, 1, 1);
+        s->bx = 128;
+        s->cs = 2;
+        return 0;
+    case 55: /* rejected by both engines: zf without wt */
+        s->problem = make_problem("bf16");
+        set_geom(&s->problem, 1, 1, 0, -1, 2, 1, 1);
+        s->ds = true;
+        s->zf = true;
+        return 0;
+    case 56: /* rejected by both engines: xt8 with bx 128 */
+        s->problem = make_problem("bf16");
+        s->bx = 128;
+        s->xt8 = true;
+        return 0;
+    case 57: /* rejected by both engines: grp on a dense problem */
+        s->problem = make_problem("bf16");
+        s->grp = true;
         return 0;
     default:
         return -1;
