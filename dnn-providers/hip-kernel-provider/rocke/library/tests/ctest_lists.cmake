@@ -700,10 +700,10 @@ else()
 endif()
 
 # The C++/Python engine parity checks of library kernels: the gfx950 tiled-2D
-# selector, and the LLVM IR of the attention, MLA prefill and GDN/KDA decode
-# kernels. They run the C++ engine through its Python modules (rocke_engine),
-# which a provider build installs beside the rocke package when the build's
-# Python has pybind11; without them every case skips, and
+# selector, the gfx950 dense builder binding and its input refusals, and the
+# LLVM IR of the attention, MLA prefill and GDN/KDA decode kernels. They use
+# the C++ engine's Python modules, installed beside the rocke package when
+# the build's Python has pybind11. Without the modules their binding cases skip;
 # rocke_engine_modules_check says why. The selector's full grid (its exhaustive
 # items) runs in the comprehensive entry below. The GDN/KDA decode case takes
 # about 20 s on one host core (it lowers 341 kernels at four LLVM flavors with
@@ -713,6 +713,7 @@ endif()
 # every case would skip.
 set(_ROCKE_LIBRARY_ENGINE_PARITY_TEST_RELPATHS
     "tests/library/tests/test_selector_cpp_parity.py"
+    "tests/library/tests/test_attention_dense_gfx950_binding.py"
     "tests/library/tests/test_attention_ir_cpp_parity.py"
     "tests/library/tests/test_gdn_decode_ir_cpp_parity.py")
 set(_ROCKE_LIBRARY_ENGINE_PARITY_TESTS "")

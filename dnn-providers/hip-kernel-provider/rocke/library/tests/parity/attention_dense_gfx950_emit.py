@@ -129,6 +129,10 @@ _CONFIGS = (
     dict(_PAGED, head_size=64, sliding_window=0),  # 74: D64 paged, plain causal
     dict(nonpersist_decode="hq_minor_swz"),  # 75: ordinary grid
     dict(persist_decode="hq_minor_swz", **_PERSIST),  # 76: persistent grid
+    dict(kv_segments=2, kv_storage_dtype="fp8e4m3"),  # 77: split FP8 KV
+    dict(kv_storage_dtype="fp8e4m3", emit_lse=True),  # 78: FP8 KV and LSE
+    dict(seqlen_q=500, seqlen_kv=500, ragged=True, use_sinks=True),  # 79
+    dict(seqlen_q=500, seqlen_kv=500, ragged=True, emit_lse=True, **_PERSIST),  # 80
 )
 
 

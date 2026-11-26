@@ -981,39 +981,6 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             recorded = run_diff.GoldenStore.load(golden).section(run_diff.LL, "llvm20")
             self.assertEqual(recorded, {"kept": {"0": "new"}, "left_out": {"0": "x"}})
 
-    def test_excluding_a_family_does_not_hide_a_missing_emitter(self):
-        with TemporaryDirectory() as d:
-            golden = Path(d) / "golden.json"
-            store = run_diff.GoldenStore()
-            store.record(
-                run_diff.LL,
-                "llvm20",
-                {"kept": {"0": "a"}, "in_standard": {"0": "b"}, "gone": {"0": "c"}},
-            )
-            store.save(golden)
-            argv = [
-                "run_diff.py",
-                "--python-only",
-                "--check-golden",
-                "--flavor",
-                "llvm20",
-                "--exclude",
-                "in_standard",
-                "--golden-file",
-                str(golden),
-            ]
-            families = [(name, Path(d)) for name in ("kept", "in_standard")]
-            with (
-                mock.patch.object(sys, "argv", argv),
-                mock.patch.object(run_diff, "find_families", return_value=families),
-                mock.patch.object(
-                    run_diff,
-                    "python_reference_families",
-                    return_value={"llvm20": ({"kept": {"0": "a"}}, [])},
-                ),
-            ):
-                self.assertEqual(run_diff.main(), 1)
-
 
 class TestLibraryArchiveGuard(unittest.TestCase):
     """A library emitter needs librocke_library.a; without it every library

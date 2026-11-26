@@ -391,6 +391,10 @@ persistent kernel from the same spec, without Python. Its returned kernel is
 arena-owned: free the supplied builder after use, even on refusal. The
 optional `rocke_library_engine` exposes `gfx950_attention_dense_serialize_ir`,
 `gfx950_attention_dense_lower_llvm` and `gfx950_attention_dense_verify`.
+The library test `test_attention_dense_gfx950_binding.py` compares all three
+calls with Python on the indexed specs and checks strict input refusals. It
+runs in `rocke_library_engine_parity_pytest` when the module is installed;
+the independent C-emitter check below does not need the module.
 
 The library's `attention_dense_gfx950_emit.{py,c}` pair feeds the same indexed
 inputs to the two independent builders. Run from `platform/`:

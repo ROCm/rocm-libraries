@@ -1284,6 +1284,7 @@ PENDING: tuple[PendingTest, ...] = (
         "to build it",
         "rocKE library; issue: none filed yet",
         "2027-01-31",
+        "library/tests/test_attention_dense_gfx950_binding.py",
         "library/tests/test_dgrad_stem_wmma.py",
         "library/tests/test_direct_dgrad_wmma.py",
         "library/tests/test_direct_dw_fwd_wmma.py",

@@ -130,6 +130,10 @@ static int make_spec(long idx, rocke_gfx950_attention_dense_spec_t* s)
         ROW(74, PAGED; b->head_size = 64; b->sliding_window = 0);
         ROW(75, b->nonpersist_decode = "hq_minor_swz");
         ROW(76, PERSIST(256); b->persist_decode = "hq_minor_swz");
+        ROW(77, s->kv_segments = 2; s->kv_storage_dtype = "fp8e4m3");
+        ROW(78, s->kv_storage_dtype = "fp8e4m3"; s->emit_lse = true);
+        ROW(79, LENGTHS(500, 500); b->ragged = true; b->use_sinks = true);
+        ROW(80, PERSIST(256); LENGTHS(500, 500); b->ragged = true; s->emit_lse = true);
     default:
         return -1;
     }

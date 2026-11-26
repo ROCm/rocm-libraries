@@ -163,6 +163,23 @@ class TestGoldenRoutingGates(GoldenGateTree):
         self.assertEqual(code, 1)
         self.assertIn("GOLDEN MISMATCH", out)
 
+    def test_excluding_one_family_does_not_hide_a_missing_emitter(self):
+        (self.lib_parity / "in_standard_emit.py").touch()
+        self.current["in_standard"] = {"0": "new"}
+        self.bless(self.golden, {"plat": self.current["plat"]})
+        blessed = {"libfam": self.current["libfam"], "in_standard": {"0": "old"}}
+        self.bless(self.lib_golden, blessed)
+        args = ("--check-golden", "--exclude", "in_standard")
+        code, out = self.main(*args)
+        self.assertEqual(code, 0, out)
+
+        # A different family's emitter disappeared, but its golden still exists.
+        self.bless(self.lib_golden, {**blessed, "gone": {"0": "c"}})
+        code, out = self.main(*args)
+        self.assertEqual(code, 1, out)
+        self.assertIn("gone[0]", out)
+        self.assertNotIn("in_standard[0]", out)
+
     def test_a_mismatch_prints_the_rerecord_command_for_its_families(self):
         self.bless(self.golden, {"plat": {"0": "p0"}})
         self.bless(self.lib_golden, {"libfam": {"0": "old"}})
