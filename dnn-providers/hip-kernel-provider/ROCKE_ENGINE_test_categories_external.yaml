@@ -152,17 +152,6 @@ test_categories:
       - "rocke_f64_lowering"
       - "rocke_flavor_datalayout_ssot"
       - "rocke_moe_fused_mega_spec_guards"
-      # Registered only in the build tree: they read engine sources the
-      # installed test artifact does not carry (see
-      # rocke/platform/tests/cmake/CoreTests.cmake).
-      - "rocke_arch_table_engine_parity"
-      - "rocke_gemm_spec_dict_binding_parity"
-      # Registered only in the build tree: they run from this source tree, which
-      # the installed test artifact does not carry (see
-      # rocke/platform/tests/cmake/CoreTests.cmake).
-      # Not registered on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
-      - "rocke_pending_lanes_check"
-      - "rocke_coalesced_loader_async_refusals"
       - "rocke_python_import_smoke"
       # Skips, with the build's reason, where the build made no engine modules.
       - "rocke_engine_modules_check"
@@ -335,6 +324,17 @@ test_categories:
       - "rocke_compliance_pytest"
       - "rocke_no_torch_check"
       - "rocke_toolchain_pins_check"
+      # Registered only in the build tree: they read engine sources the
+      # installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_arch_table_engine_parity"
+      - "rocke_gemm_spec_dict_binding_parity"
+      # Registered only in the build tree: they run from this source tree, which
+      # the installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      # Not registered on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_pending_lanes_check"
+      - "rocke_coalesced_loader_async_refusals"
       # Lists every split entry to project each shard: seconds, not quick.
       - "rocke_entry_time_check"
       # Golden byte stability and the HIP emitter pair: each splits across the
