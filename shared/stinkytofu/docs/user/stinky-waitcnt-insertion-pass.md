@@ -388,8 +388,9 @@ Per instruction, `required[c]` starts at `kUnused` and is tightened to the min w
 
 1. **RAW from SSA** — walk `getSources()` as above; gated by `rawNeedsWait[c](*inst)`.
 2. **Anti-deps (DS)** — `scanDsAntiDeps` for LDS writers (`tensor_load_to_lds`, `ds_write`) and barriers with `MemTokenData` token overlap against per-pred DS queues; same-pipeline pairs (`ds_write` vs `ds_read`) skipped.
-3. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor loads lacking `MemTokenData`.
-4. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
+3. **Anti-deps (tensor store)** — `scanTensorAntiDeps` for LDS writers and barriers with `MemTokenData` against per-pred tensor queues: an in-flight `tensor_store_from_lds` that is untagged or whose token overlaps is drained. The queue index counts loads and stores alike, since both complete in order on TENSORcnt.
+4. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor ops lacking `MemTokenData`.
+5. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
 
 ### Anti-dependencies (WAR-on-LDS and barrier ordering)
 
