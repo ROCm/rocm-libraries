@@ -221,6 +221,11 @@ def test_a_view_describes_part_of_an_array_and_stays_inside_it():
         whole.view((2, 6), (6, 1), offset=13)
     with pytest.raises(ValueError, match=r"expected one non-negative stride"):
         whole.view((2,), (-1,))
+    # A negative extent would reach backwards past the origin unchecked.
+    with pytest.raises(
+        ValueError, match=r"shape=\(-2, 3\), expected a non-negative extent per axis"
+    ):
+        whole.view((-2, 3), (6, 1), offset=7)
 
 
 def test_dense_layouts_are_one_block_of_one_row():
