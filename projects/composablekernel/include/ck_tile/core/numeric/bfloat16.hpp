@@ -321,7 +321,7 @@ constexpr uint16_t double_to_bf16_rtn_raw(double d)
     if(bf16_exp > 0) // Normal bf16 result
     {
         // Round double mantissa (52 bits) to bf16 mantissa (7 bits), RTN.
-        // Bits 51:45 → kept; bit 44 → guard; bits 43:0 → sticky.
+        // Bits 51:45 -> kept; bit 44 -> guard; bits 43:0 -> sticky.
         uint64_t mant7  = d_mant >> 45;
         uint64_t guard  = (d_mant >> 44) & 1ULL;
         uint64_t sticky = d_mant & ((1ULL << 44) - 1);
@@ -360,7 +360,7 @@ constexpr uint16_t double_to_bf16_rtn_cnan_raw(double d)
     uint64_t bits   = bit_cast<uint64_t>(d);
     uint64_t d_exp  = (bits >> 52) & 0x7FFULL;
     uint64_t d_mant = bits & 0x000FFFFFFFFFFFFFULL;
-    if(d_exp == 0x7FF && d_mant != 0) // NaN → canonical quiet NaN
+    if(d_exp == 0x7FF && d_mant != 0) // NaN -> canonical quiet NaN
     {
         uint64_t sign = (bits >> 48) & 0x8000ULL;
         return static_cast<uint16_t>(sign | 0x7FFFu);
