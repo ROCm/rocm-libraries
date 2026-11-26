@@ -32,6 +32,24 @@ from typing import List, Optional
 def ResourceOverflowException(Exception):
   pass
 
+def tmpGprStart(pool: RegisterPool, num: int, alignment: Optional[int]=None) -> int:
+  """Index allocTmpGpr(pool, num, alignment) would return, without changing the pool."""
+  if alignment is None:
+    alignment = 1 if num == 1 else 2
+  free = [reg.status == RegisterPool.Status.Available for reg in pool.getPool()]
+  size = len(free)
+  # first aligned free run inside the pool
+  for i in range(0, size - num + 1, alignment):
+    if all(free[i:i+num]):
+      return i
+  # otherwise the pool grows from its trailing free run
+  start = size
+  for i in range(size - 1, 0, -1):
+    if not free[i]:
+      break
+    start = i
+  return ((start + alignment - 1) // alignment) * alignment
+
 @contextmanager
 def allocTmpGpr(pool: RegisterPool, num: int, upperLimit: int, alignment: Optional[int]=None, tag: Optional[str]=None, overflowListener=None):
   """
