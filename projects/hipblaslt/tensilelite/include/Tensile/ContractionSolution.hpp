@@ -1015,8 +1015,10 @@ namespace TensileLite
                             PersistentLaunchSettings const&   launch,
                             size_t                   resolvedGlobalAccumulation) const;
 
-        // calculateInternalArgs() packs StaggerU into internalArg0 bits [23:16]; the kernel
-        // decodes the same bits in tensilelite/tensilelite/KernelWriterAssembly.py.
+        // calculateInternalArgs() shifts the stagger group (StaggerU in bits [7:0], the stride
+        // shift in [12:8], the mapping in [15:13]) into internalArg0 bits [31:16], so StaggerU is
+        // internalArg0 bits [23:16]. The kernel decodes the same bits in
+        // tensilelite/tensilelite/KernelWriterAssembly.py.
         static constexpr uint32_t kInternalArg0StaggerUShift = 16;
         static constexpr uint32_t kInternalArg0StaggerUMask  = 0xFF;
 

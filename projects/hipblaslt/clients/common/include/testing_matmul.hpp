@@ -7285,7 +7285,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         void*        flags   = dUniformFlags->buf();
         const size_t elem    = realDataTypeSize(To);
         // uniform_check_inject flips one bit of the last element of line 0 of the first D, in
-        // batch 0, for the compare only.
+        // batch 0, for the compare only. It needs that line to have more than one element (M > 1
+        // for the row direction, N > 1 for the column one), else the flipped element is the
+        // reference.
         auto flipInjected = [&]() -> hipError_t {
             const int64_t  row = ucCols ? 0 : M[0] - 1, col = ucCols ? N[0] - 1 : 0;
             unsigned char* p

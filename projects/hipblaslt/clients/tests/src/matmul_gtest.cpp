@@ -637,9 +637,10 @@ namespace
     }
 
     // The whole uniform_check path on real kernels: with uniform summation order off, some
-    // gfx950 solution for bf16 1000 x 1000 x 7777 sums rows in different orders, so the check
-    // must fail at least one solution, and with the order off no failure counts as a failed check.
-    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolution)
+    // gfx950 solution for bf16 1000 x 1000 x 7777 sums rows, or columns, in different orders, so
+    // the check in direction must fail at least one solution, and with the order off no failure
+    // counts as a failed check.
+    void expectUsoOffFailsSomeSolution(hipblaslt_uniform_check direction)
     {
         int             device = 0;
         hipDeviceProp_t props;
@@ -663,7 +664,7 @@ namespace
         arg.beta                                            = 0;
         arg.initialization                                  = hipblaslt_initialization::hpl;
         arg.uniform_summation_order                         = 0;
-        arg.uniform_check                                   = hipblaslt_uniform_check::row;
+        arg.uniform_check                                   = direction;
         arg.algo_method                                     = 1;
         arg.requested_solution_num                          = -1;
         arg.unit_check                                      = 0;
@@ -676,18 +677,31 @@ namespace
                 &results);
             testing_matmul(arg);
         }
+        const char* expected = direction == hipblaslt_uniform_check::column
+                                   ? "uniform_check column failed"
+                                   : "uniform_check row failed";
+
         int uniformFailures = 0;
         for(int i = 0; i < results.size(); i++)
         {
             const auto& r = results.GetTestPartResult(i);
-            if(r.failed()
-               && std::string(r.message()).find("uniform_check row failed") != std::string::npos)
+            if(r.failed() && std::string(r.message()).find(expected) != std::string::npos)
                 uniformFailures++;
             else
                 ADD_FAILURE() << r.message();
         }
         EXPECT_GT(uniformFailures, 0);
         EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolution)
+    {
+        expectUsoOffFailsSomeSolution(hipblaslt_uniform_check::row);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolutionColumn)
+    {
+        expectUsoOffFailsSomeSolution(hipblaslt_uniform_check::column);
     }
 
     // Runs an f32 m x n x 64 uniform_check case whose D has a single line in direction, so nothing
