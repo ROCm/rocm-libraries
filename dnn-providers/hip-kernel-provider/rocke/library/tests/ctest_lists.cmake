@@ -247,6 +247,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_bias_gfx942.py"
     "tests/library/tests/test_attention_dense_bias_gfx950.py"
     "tests/library/tests/test_attention_dense_decode.py"
+    "tests/library/tests/test_attention_dense_bottom_right.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
     "tests/library/tests/test_attention_dense_paged_i64.py"
