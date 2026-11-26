@@ -106,7 +106,7 @@ def test_contiguous_a_preserves_explicit_custom_symbol(solution, naming, custom,
 
 def test_mapping_interface(solution, snapshot):
     summary = {
-        "len": len(solution),
+        "len_matches_keys": len(solution) == len(solution.keys()),
         "iter_matches_keys": sorted(iter(solution)) == sorted(solution.keys()),
         "keys_is_list": isinstance(solution.keys(), list),
         "getitem_kernel_language": solution["KernelLanguage"],

@@ -74,7 +74,7 @@ def test_problem_type_placeholder_str(problem_type, snapshot):
 
 def test_problem_type_predicates(problem_type, snapshot):
     preds = problem_type.predicates(includeBatch=True, includeOperation=True, includeType=True)
-    assert {"count": len(preds), "tags": sorted({p.tag for p in preds})} == snapshot
+    assert {"tags": sorted(p.tag for p in preds)} == snapshot
 
 
 # --- SizeMapping / InternalArgsSupport / Solution ---------------------------
@@ -102,7 +102,7 @@ def test_internal_args_support_does_not_duplicate_alpha_capability(solution_stat
 
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):
     preds = C.ProblemPredicate.CompoundPredicates(solution_state, problem_type)
-    assert {"count": len(preds), "tags": sorted({p.tag for p in preds})} == snapshot
+    assert {"tags": sorted(p.tag for p in preds)} == snapshot
 
 
 def _gl2_saddr_predicates(problem_type, solution_state, **overrides):

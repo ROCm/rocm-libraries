@@ -90,7 +90,6 @@ def solution_summary():
     def _summarize(sol):
         return {
             "name": str(sol),
-            "num_keys": len(sol),
             "keys": sorted(sol.keys()),
             "problem_type": str(sol["ProblemType"]),
             "stable": {f: _render(sol[f]) for f in _STABLE_FIELDS if f in sol},
