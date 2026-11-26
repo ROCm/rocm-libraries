@@ -7,7 +7,7 @@
 // Contract under test: a graph carrying a runtime pass-by-value scalar raises
 // the required engine-plugin API floor to K_PASS_BY_VALUE_MIN_API_VERSION
 // ("1.2.0"). With only the legacy fake test_GoodPlugin loaded, which reports
-// K_OVERRIDE_EXECUTE_MIN_API_VERSION ("1.1.0"), every engine is filtered out,
+// K_TEST_GOOD_PLUGIN_API_VERSION ("1.1.0"), every engine is filtered out,
 // so no execution plan can be created; a plugin reporting "1.2.0" clears the
 // floor and serves the same graph; and with both loaded the filter admits
 // exactly the 1.2.0 engine. The same graph built with an ordinary
@@ -30,6 +30,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <test_plugins/TestGoodPluginApiVersion.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -130,11 +131,11 @@ protected:
         return {graph, epsilon};
     }
 
-    // test_GoodPlugin reports K_OVERRIDE_EXECUTE_MIN_API_VERSION. The negative
-    // cases rely on that version staying below the pass-by-value floor.
-    static void assertLegacyPluginBelowPassByValueFloor()
+    // test_GoodPlugin reports K_TEST_GOOD_PLUGIN_API_VERSION. The negative cases
+    // rely on that version staying below the pass-by-value floor.
+    static void assertGoodPluginApiVersionBelowPassByValueFloor()
     {
-        ASSERT_LT(Version{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION},
+        ASSERT_LT(Version{hipdnn_tests::plugin_constants::K_TEST_GOOD_PLUGIN_API_VERSION},
                   Version{hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION})
             << "test_GoodPlugin must report an API version below "
                "K_PASS_BY_VALUE_MIN_API_VERSION to act as the legacy plugin";
@@ -151,7 +152,7 @@ protected:
 // dispatching to an engine that cannot honor the host-supplied scalar.
 TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarYieldsNoApplicableEngine)
 {
-    ASSERT_NO_FATAL_FAILURE(assertLegacyPluginBelowPassByValueFloor());
+    ASSERT_NO_FATAL_FAILURE(assertGoodPluginApiVersionBelowPassByValueFloor());
     loadPlugins({hipdnn_tests::plugin_constants::testGoodPluginPath()});
 
     auto [graph, epsilon] = buildRMSNormGraph(EpsilonKind::RUNTIME_PASS_BY_VALUE);
@@ -242,7 +243,7 @@ TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarServedByPassByValuePlug
 // graph keeps BOTH. Proves the filter keys on the runtime flag, not op support.
 TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarFiltersToCompatiblePluginOnly)
 {
-    ASSERT_NO_FATAL_FAILURE(assertLegacyPluginBelowPassByValueFloor());
+    ASSERT_NO_FATAL_FAILURE(assertGoodPluginApiVersionBelowPassByValueFloor());
     loadPlugins({hipdnn_tests::plugin_constants::testGoodPluginPath(),
                  hipdnn_tests::plugin_constants::testPassByValuePluginPath()});
 
