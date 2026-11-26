@@ -26,11 +26,11 @@ GetPoolingWorkgroupLimit2dTestCases(bool control_and_large_nc)
         miopenPoolingMode_t mode;
         int wsidx;
     };
-    const std::vector<Config> all_configs = {{miopenPoolingMax, 0},
-                                             {miopenPoolingMax, 1},
-                                             {miopenPoolingAverage, 0},
-                                             {miopenPoolingAverageInclusive, 0}};
-    const std::vector<Config> few_configs = {{miopenPoolingMax, 0}, {miopenPoolingAverage, 0}};
+    const std::vector<Config> all_configs    = {{miopenPoolingMax, 0},
+                                                {miopenPoolingMax, 1},
+                                                {miopenPoolingAverage, 0},
+                                                {miopenPoolingAverageInclusive, 0}};
+    const std::vector<Config> few_configs    = {{miopenPoolingMax, 0}, {miopenPoolingAverage, 0}};
     const std::vector<Config> average_config = {{miopenPoolingAverage, 0}};
 
     struct Problem
