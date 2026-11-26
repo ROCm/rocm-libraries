@@ -25,7 +25,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" -v -rs ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT})\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;gpu;quick\"\n"
+       "  LABELS \"ckc;python;gpu;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
@@ -558,7 +558,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;host;quick\"\n"
+       "  LABELS \"ckc;python;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 

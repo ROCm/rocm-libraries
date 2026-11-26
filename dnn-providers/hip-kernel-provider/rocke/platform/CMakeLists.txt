@@ -834,11 +834,12 @@ if(ROCKE_INSTALL_TESTS)
     # without this entry, losing them turns thousands of installed tests into
     # skips and the run stays green. It skips (exit 77) with the marker's
     # reasons when the build made neither. Not a pytest entry, so it runs whole
-    # on every CI shard; it costs about a second.
+    # on every CI shard; it costs about a second. With the import smoke it is
+    # the quick tier's packaging check (TESTING.md, section 5.0.3).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_engine_modules_check python -m rocke.tests.engine_modules \"${ROCKE_TEST_CTEST_REL}tests/rocke_engine_modules.json\")\n"
            "set_tests_properties(rocke_engine_modules_check PROPERTIES\n"
-           "  LABELS \"ckc;python;host;standard\"\n"
+           "  LABELS \"ckc;python;host;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
@@ -861,7 +862,7 @@ if(ROCKE_INSTALL_TESTS)
              "optimization_barrier_emit.py\" --count 17 "
              "--rocke-shard-from-gtest-env)\n"
              "set_tests_properties(rocke_optimization_barrier_hip_pair "
-             "PROPERTIES LABELS \"ckc;python;host;quick\"\n"
+             "PROPERTIES LABELS \"ckc;python;host;standard\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
@@ -872,7 +873,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\" --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;standard\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
            "${_rocke_barrier_parity_entries}")
 
     # Would every entry of this registration fit its CI shard budget? Run
@@ -941,11 +942,11 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor all --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     # The installed tests compare the C++ HIP lowering with the Python one
     # through rocke_ir_lower_cli, as the wheel has no rocke_engine binding:
@@ -1237,7 +1238,7 @@ if(ROCKE_INSTALL_TESTS)
              "add_test(rocke_${_operation}_reference_unit_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
-             "  LABELS \"ckc;python;${_operation};host;quick\"\n"
+             "  LABELS \"ckc;python;${_operation};host;standard\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -1253,7 +1254,7 @@ if(ROCKE_INSTALL_TESTS)
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT})\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
-               "  LABELS \"ckc;python;${_operation};gpu;quick\"\n"
+               "  LABELS \"ckc;python;${_operation};gpu;standard\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
                "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
