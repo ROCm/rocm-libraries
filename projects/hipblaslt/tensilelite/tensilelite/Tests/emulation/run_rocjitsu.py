@@ -12,20 +12,19 @@ TEST_CATEGORY=rocjitsu-quick. This script:
 - splits the CPUs it may use (affinity, capped by a cgroup CPU quota) between
   pytest-xdist workers and each worker's emulator threads, with no more workers
   than the memory (cgroup limit, else physical) holds, and passes the worker
-  count, per-test timeout and stall-dump time to pytest_runner.py / the
-  rocjitsu_pytest plugin through the environment;
+  count and per-test timeout to pytest_runner.py / the rocjitsu_pytest plugin
+  through the environment;
 - runs ``rocjitsu --config ... -- <command>`` (in-process simulation) as a
   child subreaper with a suite timeout, so timed-out tests' clients never
   outlive the job step;
-- fails a run that finished no passing test, and prints the result summary and
-  any stall dumps (the CI job uploads no files); with GITHUB_STEP_SUMMARY set,
-  also lists the failed, timed-out and unfinished tests in the job summary.
+- prints the counts and the tests that never finished (pytest itself reports
+  the failures), and fails a run that passed no test or did not finish.
 
 Environment: THEROCK_BIN_DIR (its parent is the ROCm install; else ROCM_PATH,
 else this install tree),
 AMDGPU_TARGETS / AMDGPU_FAMILIES, optional ROCJITSU_REPORT_DIR,
-ROCJITSU_SUITE_TIMEOUT / ROCJITSU_SUITE_GRACE (seconds), PYTEST_TEST_TIMEOUT,
-PYTEST_NUM_WORKERS, SHARD_INDEX / TOTAL_SHARDS, GITHUB_STEP_SUMMARY.
+ROCJITSU_SUITE_TIMEOUT (seconds), PYTEST_TEST_TIMEOUT, PYTEST_NUM_WORKERS,
+SHARD_INDEX / TOTAL_SHARDS.
 """
 
 import contextlib
@@ -49,14 +48,23 @@ TARGETS = {
 }
 FAMILY_TARGETS = {"gfx94": "gfx942", "gfx950": "gfx950", "gfx125": "gfx1250"}
 
+# The split validated on the full gfx1250 set: 16 pytest-xdist workers, each
+# client emulating with 6 threads, on a 96-core host (285 configs, 0 failures,
+# 2026-11-19). More threads per client do not help much: one emulated client
+# kept about 16 cores busy whether it was given 32 or 128 (2026-11-25).
 MAX_WORKERS = 16
 THREADS_PER_WORKER = 6
-# 16 workers peaked at 151 GB on a 96-core host, about 9.4 GiB each.
+# 16 workers peaked at 151 GB on a 96-core host, about 9.4 GB each.
 MEMORY_PER_WORKER = 10 * 2**30
 # Leaves time inside a 150-minute job step to reap, summarize and exit.
 DEFAULT_SUITE_TIMEOUT = 140 * 60
+# Per test: rocjitsu-quick leaves out configs over 2 h (rocjitsu_slow, pytest.ini).
 DEFAULT_TEST_TIMEOUT = 2 * 60 * 60
-STALL_LEAD = 300
+# After the suite timeout's SIGINT, time for pytest to stop its xdist workers
+# before the clients are killed.
+SUITE_GRACE = 30
+# From <linux/prctl.h>.
+PR_SET_CHILD_SUBREAPER = 36
 
 
 def rocm_root(env):
@@ -174,7 +182,6 @@ def emulation_setup(env, cores, report_dir, memory=None):
         PYTEST_NUM_WORKERS=env.get("PYTEST_NUM_WORKERS") or str(workers),
         PYTEST_TEST_TIMEOUT=str(test_timeout),
         ROCJITSU_REPORT_DIR=str(report_dir),
-        ROCJITSU_STALL_DUMP_AFTER=str(max(1, test_timeout - STALL_LEAD)),
         # Private dir for rocjitsu's per-process files (it reaps stale ones).
         ROCJITSU_RUNTIME_DIR=tempfile.mkdtemp(prefix="rocjitsu-"),
     )
@@ -201,6 +208,7 @@ def emulation_setup(env, cores, report_dir, memory=None):
 def reap_descendants():
     """Kill and reap only children owned/adopted by this supervisor."""
     children_file = Path(f"/proc/self/task/{os.getpid()}/children")
+    # SIGKILLed processes exit within milliseconds; 10 s covers a busy host.
     deadline = time.monotonic() + 10
     while True:
         children = [int(pid) for pid in children_file.read_text().split()]
@@ -227,7 +235,7 @@ def supervise(command, env, timeout, grace):
         raise RuntimeError("rocjitsu emulation runs require Linux")
     # PR_SET_CHILD_SUBREAPER applies only to this process and needs no privilege.
     libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(36, 1, 0, 0, 0) != 0:
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
         raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
 
     def interrupt(signum, frame):
@@ -235,7 +243,6 @@ def supervise(command, env, timeout, grace):
 
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, interrupt)
-    start = time.monotonic()
     timed_out = False
     proc = subprocess.Popen(command, env=env, start_new_session=True)
     try:
@@ -244,7 +251,7 @@ def supervise(command, env, timeout, grace):
         except (subprocess.TimeoutExpired, InterruptedError) as error:
             timed_out = isinstance(error, subprocess.TimeoutExpired)
             status = 124 if timed_out else 128 + error.args[0]
-            # Give pytest time to stop workers and write its normal JUnit file.
+            # Give pytest time to stop its xdist workers before the clients are killed.
             for signum in (signal.SIGTERM, signal.SIGINT):
                 signal.signal(signum, signal.SIG_IGN)
             with contextlib.suppress(ProcessLookupError):
@@ -262,81 +269,34 @@ def supervise(command, env, timeout, grace):
     return dict(
         exit_code=status if status >= 0 else 128 - status,
         timed_out=timed_out,
-        wall_seconds=time.monotonic() - start,
     )
 
 
-def not_passed(progress):
-    """{"failed" | "timed out" | "incomplete": [node ids]} from progress.json."""
-    groups = {"failed": [], "timed out": [], "incomplete": []}
-    for nodeid, test in progress.get("tests", {}).items():
-        if test["outcome"] == "failed":
-            detail = str(test["phases"].get("call", {}).get("detail"))
-            # pytest-timeout ends its failure message with this.
-            groups["timed out" if "from pytest-timeout" in detail else "failed"].append(nodeid)
-        elif test["outcome"] == "incomplete":
-            groups["incomplete"].append(nodeid)
-    return groups
+def summarize(report_dir, result):
+    """Return the run's exit code, failing a run that passed nothing or did not finish.
 
-
-def step_summary(title, progress, result, groups):
-    """Markdown for the CI job summary: counts, then every test that did not pass."""
-    status = "passed" if result["exit_code"] == 0 else "failed"
-    lines = [
-        f"### {title}: {status}",
-        "",
-        "| selected | passed | failed | timed out | skipped | incomplete | minutes |",
-        "|---|---|---|---|---|---|---|",
-        "| {} | {} | {} | {} | {} | {} | {:.0f} |".format(
-            progress.get("selected", 0),
-            progress.get("passed", 0),
-            len(groups["failed"]),
-            len(groups["timed out"]),
-            progress.get("skipped", 0),
-            len(groups["incomplete"]),
-            result.get("wall_seconds", 0) / 60,
-        ),
-    ]
-    if result.get("error"):
-        lines += ["", f"Error: {result['error']}"]
-    for name, nodeids in groups.items():
-        if nodeids:
-            lines += ["", f"{name.capitalize()}:", *(f"- `{nodeid}`" for nodeid in nodeids)]
-    return "\n".join(lines) + "\n"
-
-
-def summarize(report_dir, result, title="rocjitsu", summary_path=None):
-    """Fail runs that passed nothing; print the summary and any stall dumps.
-
-    With summary_path (the job's GITHUB_STEP_SUMMARY), also append the counts
-    and the tests that failed, timed out or never finished.
+    pytest reports failures and timeouts itself; this adds the counts and the
+    tests that started but never finished, e.g. when the suite timeout stops
+    the run.
     """
     progress_path = report_dir / "progress.json"
     progress = json.loads(progress_path.read_text()) if progress_path.exists() else {}
-    result["complete"] = bool(progress.get("selected")) and (
+    complete = bool(progress.get("selected")) and (
         progress.get("selected") == progress.get("finished") and not result["timed_out"]
     )
-    if result["exit_code"] == 0 and (
-        not result["complete"] or progress.get("passed", 0) == 0
-    ):
-        result["exit_code"] = 1
-        result["error"] = "pytest did not complete any passing emulation tests"
-    (report_dir / "execution.json").write_text(json.dumps(result, indent=2) + "\n")
     counts = {key: value for key, value in progress.items() if key != "tests"}
     print(f"rocjitsu pytest results: {counts}", flush=True)
-    groups = not_passed(progress)
-    for name, nodeids in groups.items():
-        for nodeid in nodeids:
-            print(f"  {name}: {nodeid}", flush=True)
-    for stall in sorted((report_dir / "stalls").glob("*.txt")):
-        print(f"--- stall dump {stall.name} ---\n{stall.read_text()}", flush=True)
-    print(f"rocjitsu pytest execution: {result}", flush=True)
-    if summary_path:
-        try:
-            with open(summary_path, "a") as summary:
-                summary.write(step_summary(title, progress, result, groups))
-        except OSError as error:
-            print(f"rocjitsu: could not write the job summary: {error}", flush=True)
+    for nodeid, test in progress.get("tests", {}).items():
+        if test["outcome"] == "incomplete":
+            print(f"  incomplete: {nodeid}", flush=True)
+    if result["exit_code"] == 0 and not progress.get("passed"):
+        result["exit_code"] = 1
+        result["error"] = "pytest passed no emulation test"
+    elif result["exit_code"] == 0 and not complete:
+        result["exit_code"] = 1
+        result["error"] = "the pytest run did not finish every selected test"
+    if result.get("error"):
+        print(f"rocjitsu: {result['error']}", flush=True)
     return result["exit_code"]
 
 
@@ -349,8 +309,7 @@ def main(argv=None, env=None):
     report_dir = Path(env.get("ROCJITSU_REPORT_DIR") or "rocjitsu-report").resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
     # A reused report directory must never turn an interrupted run into a pass.
-    for name in ("progress.json", "execution.json"):
-        (report_dir / name).unlink(missing_ok=True)
+    (report_dir / "progress.json").unlink(missing_ok=True)
     cores = len(os.sched_getaffinity(0))
     quota_cpus, memory = cgroup_limits()
     if quota_cpus:
@@ -360,14 +319,10 @@ def main(argv=None, env=None):
     prefix, run_env = emulation_setup(env, cores, report_dir, memory)
     timeout = float(env.get("ROCJITSU_SUITE_TIMEOUT") or DEFAULT_SUITE_TIMEOUT)
     try:
-        grace = float(env.get("ROCJITSU_SUITE_GRACE") or 30)
-        result = supervise([*prefix, *command], run_env, timeout, grace)
+        result = supervise([*prefix, *command], run_env, timeout, SUITE_GRACE)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         result = dict(exit_code=1, timed_out=False, error=str(error))
-    title = "rocjitsu {} shard {}/{}".format(
-        emulated_target(env), env.get("SHARD_INDEX", 1), env.get("TOTAL_SHARDS", 1)
-    )
-    return summarize(report_dir, result, title, env.get("GITHUB_STEP_SUMMARY"))
+    return summarize(report_dir, result)
 
 
 if __name__ == "__main__":
