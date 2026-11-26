@@ -332,7 +332,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         code = self._getKernelSource(kernel)
       errcode = 0
-    except RuntimeError as e:
+    except (RuntimeError, AssertionError) as e:
       printWarning(f"Failed to generate assembly source code for {kernel}: {e}")
       code = ""
       errcode = -2
