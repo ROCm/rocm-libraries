@@ -613,9 +613,11 @@ class StreamK(TileProcessingStrategy):
         whose StreamK range starts mid-tile has to start from the same scale or
         it reads a K position 16x too close to the tile.
 
-        Only the subtile global read walks blocks this way.  The classic swizzle
-        path steps one row per K window, so scaling its start would move the
-        workgroup off its own range.
+        Only the subtile global read walks blocks this way.  The classic (DTV)
+        swizzle path steps one row per K window, so scaling its start would move
+        the workgroup off its own range.  Swizzled-TDM needs no scaling here
+        either: its StreamKLocalStart * GlobalReadIncs K offset is applied to the
+        TDM descriptor address, and GlobalReadIncs already carries the MI factor.
         """
         if tc not in ("A", "B"):
             return 1
@@ -1205,8 +1207,20 @@ class StreamK(TileProcessingStrategy):
         writer.releasePersistentConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=skSplitSrd.getLabelName(), comment="branch if split == 1"))
         # Parallel reduction: adjust output buffer address to per split buffer
-        with writer.allocTmpSgpr(4, alignment=1, tag="computeStoreSrdStartCommon_tmpSgprInfo") as tmpSgprInfo:
-            if tmpSgprInfo.idx % 2 == 0:
+        # One aligned pair and two single registers. When one block of 4 misses the SGPR limit
+        # while free slots remain lower in the pool, each takes its own slot.
+        if writer.tmpSgprFits(4, alignment=1):
+            tmpSgprCtx = writer.allocTmpSgpr(4, alignment=1, tag="computeStoreSrdStartCommon_tmpSgprInfo")
+        else:
+            tmpSgprCtx = writer.allocTmpSgprList(nums=[2, 1, 1], tag="computeStoreSrdStartCommon_tmpSgprInfo")
+        with tmpSgprCtx as tmpSgprInfo:
+            if isinstance(tmpSgprInfo, list):
+                tmpSgprX2  = tmpSgprInfo[0].idx
+                tmpSgpr0   = tmpSgprInfo[0].idx
+                tmpSgpr1   = tmpSgprInfo[0].idx+1
+                tmpSgpr2   = tmpSgprInfo[1].idx
+                tmpSgpr3   = tmpSgprInfo[2].idx
+            elif tmpSgprInfo.idx % 2 == 0:
                 tmpSgprX2  = tmpSgprInfo.idx+0
                 tmpSgpr0   = tmpSgprInfo.idx+0
                 tmpSgpr1   = tmpSgprInfo.idx+1

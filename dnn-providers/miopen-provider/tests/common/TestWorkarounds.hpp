@@ -36,7 +36,7 @@
 //
 // To remove after the fix: delete the issue-6979 helpers and their call sites when that issue is
 // resolved. `git grep WORKAROUND_ISSUE_6979` finds them all. The production `Workarounds.hpp` is
-// removed independently: it holds issues 5409 and 16024.
+// removed independently: it holds issues 5409, 16024 and 16803.
 //
 // `<hipdnn_frontend.hpp>` is header-only, so this header has no linkage
 // dependency on the provider's compiled object files — it remains usable from

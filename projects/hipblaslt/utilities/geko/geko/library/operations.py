@@ -20,7 +20,7 @@ Functions:
         Load all YAML libraries in a folder into a collection.
     merge_solutions(input_dir) -> LibraryCollection
         Merge optimized solutions from multiple build directories into single libraries.
-    extract_solutions(df, match_table_path, hipblaslt_path=None, fill_perf=False) -> LibraryCollection
+    extract_solutions(df, match_table_path, hipblaslt_path=None) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
         Same-name libraries with different default solutions are merged with
         TensileMergeLibrary when hipblaslt_path is given.
@@ -152,7 +152,8 @@ def merge_solutions(
         LibraryCollection: LibraryCollection with all merged solutions.
 
     Raises:
-        ValueError: If no valid YAML library logic files found.
+        ValueError: If no valid YAML library logic files found or if there is a library type mismatch.
+        NotImplementedError: If there is a default solution mismatch for a library.
 
     Note:
         For duplicate problem sizes, keeps the solution with highest performance.
@@ -179,11 +180,15 @@ def merge_solutions(
     libs: dict[str, Library] = {}
     for lib in sorted(parallel_for(load_library, lib_paths), key=lambda k: k.name):
         if lib.name not in libs:
-            for size in lib.sizes:
+            for size in lib.sizes or []:
                 if trim_size:
                     size[0] = size[0][:4]
             libs[lib.name] = lib
             continue
+
+        if libs[lib.name].type != lib.type:
+            raise ValueError(f"Library type mismatch for library '{lib.name}': "
+                             f"'{libs[lib.name].type}' != '{lib.type}'.")
 
         if libs[lib.name].default_solution != lib.default_solution:
             raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
@@ -192,7 +197,7 @@ def merge_solutions(
         base_sols = libs[lib.name].solutions
         base_sizes = libs[lib.name].sizes
         for i, sol in enumerate(lib.solutions):
-            sizes = [sz for sz in lib.sizes if sz[1][0] == i]
+            sizes = [sz for sz in lib.sizes or [] if sz[1][0] == i]
             sol = copy.deepcopy(sol)
             _sanitize_solution(sol)
             sol["SolutionIndex"] = len(base_sols)
@@ -213,7 +218,7 @@ def merge_solutions(
         if epilogues and _library_supports_epilogues(lib):
             lib.add_epilogues()
         merged.append(lib)
-        logger.info(f"Processed {len(lib.solutions)} solutions and {len(lib.sizes)} sizes for '{lib.name}'")
+        logger.info(f"Processed {len(lib.solutions)} solutions and {len(lib.sizes or [])} sizes for '{lib.name}'")
 
     return merged
 
@@ -295,7 +300,6 @@ def extract_solutions(
     df: pd.DataFrame,
     match_table_path: str | Path,
     hipblaslt_path: str | Path | None = None,
-    fill_perf: bool = False,
 ) -> LibraryCollection:
     """Extract solutions by solution index from a DataFrame.
 
@@ -309,8 +313,6 @@ def extract_solutions(
             checkout. When provided, libraries with the same filename but
             different default solutions are merged with TensileMergeLibrary.
             Defaults to None.
-        fill_perf (bool, optional): Whether to fill performance data for the extracted solutions.
-            Defaults to False.
 
     Returns:
         LibraryCollection: LibraryCollection with all extracted solutions.
@@ -350,7 +352,7 @@ def extract_solutions(
             if kidx not in mapping:
                 mapping[kidx] = []
             mapping[kidx].append(
-                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"]), row.get("hipblaslt-Gflops", 0.0)]
+                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])]
             )
 
         lib.order = [2, 3, 0, 1]
@@ -362,7 +364,7 @@ def extract_solutions(
         for kidx, sizes in mapping.items():
             sol = copy.deepcopy(lib.solutions[kidx])
             sol["SolutionIndex"] = len(new_sols)
-            sizes = [[size[:4], [sol["SolutionIndex"], size[4] if fill_perf else 0.0]] for size in sizes]
+            sizes = [[size, [sol["SolutionIndex"], 0.0]] for size in sizes]
             new_sols.append(sol)
             new_sizes.extend(sizes)
         logger.debug(
@@ -756,6 +758,7 @@ def prune_library(
     Note:
         - If clustering is not enabled, only one GPU will be used.
         - Will re-use benchmark results if they exist.
+        - Benchmarks use the adaptive "fast" timing profile with cache flushing.
     """
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():

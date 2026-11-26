@@ -131,7 +131,7 @@ These variables control heuristics, benchmarking, and the on-disk cache.
 ``HIPDNN_HEUR_POLICY_ORDER``
 ----------------------------
 
-A comma-separated list of heuristic policies, by name (for example ``SelectionHeuristic::Config``) or by integer policy ID. When set, it takes priority over the policy order set on the heuristic descriptor.
+A comma-separated list of heuristic policies, by name (for example ``SelectionHeuristic::Config``) or by integer policy ID. When set, it takes priority over the policy order set on the heuristic descriptor and over the list the descriptor's heuristic mode selects.
 
 ``HIPDNN_HEUR_CONFIG_PATH``
 ---------------------------
@@ -141,7 +141,7 @@ Path to a JSON engine override configuration file. The ``Config`` heuristic poli
 ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER``
 -------------------------------------
 
-A comma-separated list of engine names or IDs, as printed by ``hipdnn_list_engines``. When set, the built-in static ordering policy considers only the engines named here, in the order written. Every other engine is dropped from the candidate list. Entries that are not candidates are ignored. If no listed engine is a candidate, the policy declines and the next policy runs.
+A comma-separated list of engine names or IDs, as printed by ``hipdnn_list_engines``. When set, the built-in static ordering policy considers only the engines named here, in the order written. Every other engine is dropped from the candidate list. Entries that are not candidates are ignored. If multiple entries identify the same engine, only the first entry is used. If no listed engine is a candidate, the policy declines and the next policy runs.
 
 ``HIPDNN_FORCE_BENCHMARKING``
 -----------------------------

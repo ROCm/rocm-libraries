@@ -33,7 +33,9 @@ bool isNodeActivFwd(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttribu
     }
 
     // MIOpen batchnorm fusion supports standard ReLU, clipped ReLU (upper clip only) and CLAMP
-    // (lower + upper clip), but not Leaky ReLU (non-zero relu_lower_clip_slope).
+    // (lower + upper clip), but not Leaky ReLU (non-zero relu_lower_clip_slope). A non-zero lower
+    // clip without an upper clip is declined by checkBatchnormFwdActivationModeSupported (issue
+    // 16803).
     return !miopen_utils::hasLeakyReluSlope(attr);
 }
 

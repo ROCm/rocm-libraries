@@ -85,10 +85,17 @@ segment is sanitized (any character other than `[A-Za-z0-9_]` becomes `_`):
 The tier directory is therefore always the suite prefix (`quick_*`, `standard_*`,
 …), which the tier YAML files match on. If two bundles sanitize to the same full
 name, registration aborts with `Bundle name collision` and names both paths.
-Keep every bundle under a tier directory. If a graph is directly in the data
-root, discovery aborts: the binary exits 1 with `Bundle content must live in a
-sub-folder of the data root, not at the root itself`. A graph under any other
-top-level folder registers under the name of that folder and matches no tier.
+A run does not parse the `sweep.json` of a folder that its `--gtest_filter` cannot
+select. Thus a malformed `sweep.json` in that folder can stay undetected in that
+run. A name collision among tests that the filter cannot select can also stay
+undetected, when at least one side is in such a folder. A run that can select the
+folder aborts, and so does an unfiltered run. A run with
+`--write-support-claims` and `hipdnn_golden_data_tests` parse every folder, so
+they also abort.
+Keep every bundle under a tier directory. A graph directly in the data root
+registers under the name of the data root folder, and a sweep at the data root
+registers under suite `_`. A graph under any other top-level folder registers
+under the name of that folder. None of these suites match a tier filter.
 
 Discovery requires no other folder schema. The
 `{tier}/{Op}/{Layout}/{DataType}/{Name}` convention below is a convention that
@@ -885,8 +892,8 @@ Rules:
   this rule. The run treats a missing sidecar as "no claims", and
   `verify_support_claims.py` checks the sidecars that exist, not the missing
   ones. Older bundles break the rule: most SDPA single-graph bundles and a few
-  sweeps (`BlockScaleDequantizeMatmul/Default`, `Reduction/Default`,
-  `Pointwise/Binary` and `Pointwise/Activation`, in every tier that has them) have none.
+  sweeps (`BlockScaleDequantizeMatmul/Default`, `Pointwise/Binary` and
+  `Pointwise/Activation`, in every tier that has them) have none.
 - Sidecars are **machine-written** by `--write-support-claims`. The form is
   stricter than valid JSON: sorted keys, 2-space indent, one array element per
   line, trailing newline, LF line endings, sorted platforms and case ids, and
@@ -930,7 +937,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa_bwd.toml` |
+| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa.toml`, `config/hipkernel_flydsl_sdpa_bwd.toml` |
 
 ```toml
 [meta]
@@ -1072,7 +1079,7 @@ execution_settings:
 | Format | Parsed / checked by | When it fails |
 |---|---|---|
 | Graph `.json` | `IntegrationTestBundle.hpp` | Case dropped from registration with an `ERROR` log line; the run stays green with one test fewer |
-| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph. A sweep `version` other than 1 or 2 registers a **failing** test for each case of the sweep. A case that breaks an [`absent_tensors`](#optional-tensors--absent_tensors) rule registers a **failing** test; an expansion error in such a case is dropped like any other |
+| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration in a run that parses that sweep; a filtered run that cannot select the folder only counts its cases ([details](#discovery-and-test-names)). A bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph. A sweep `version` other than 1 or 2 registers a **failing** test for each case of the sweep. A case that breaks an [`absent_tensors`](#optional-tensors--absent_tensors) rule registers a **failing** test; an expansion error in such a case is dropped like any other |
 | `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key, an unknown or malformed [fill spec](#input-fill-specs), an [`aliases`](#tensors-that-share-memory--aliases), [`start_offsets`](#tensors-that-start-past-an-aligned-address--start_offsets) or [`live_rows`](#outputs-with-rows-past-a-live-length--live_rows) entry that the metadata or the graph rejects, a version-2 feature in version-1 metadata) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
 | `expected_rejection` bundle or case | `BundleMetadata.hpp` at load; the harness at run time; `reference-data-scripts/verify_golden_bundles.py`; `scripts/verify_support_claims.py` | `enforcement_level` and the oracle fields do not apply (it overrides them). Golden data next to it is a load error (`BundleMetadataError`) and a verifier error. A support claim that names it fails the C++ test and is a verifier error. A bundle that does not load is a red `FailedLoad` test, not a dropped case. [Details](#expected-rejection-bundles) |
 | `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for new bundles (not for an expected-rejection bundle), but not enforced: a missing sidecar means "no claims" at run time and is not reported by the verifier. A sidecar that does not parse, and a broken claim, fail that bundle's test |

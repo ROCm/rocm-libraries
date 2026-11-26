@@ -87,6 +87,13 @@ specified.
 
 Callback functions are only supported for transforms that do not use planar format for input or output.
 
+.. note::
+
+   Setting callbacks does not relax the input buffer guarantees described in
+   :ref:`resultplacement`, which continue to hold. Those guarantees cover rocFFT's own writes
+   only, though: a callback handed the address of an input buffer in ``callback_data`` can modify
+   that buffer.
+
 Compiling functions to SPIR-V for JIT callbacks
 -----------------------------------------------
 

@@ -38,6 +38,7 @@ add_executable(
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
+    IntegrationGlobalObjectsDestroyedAtExit.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationGraphKnobSettingsDescriptorLowering.cpp
     IntegrationGraphKnobsDescriptorLifting.cpp
@@ -88,6 +89,7 @@ add_executable(
     # only built when the shim is enabled.
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimUmbrella.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimHandle.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimGlobalObjectDestroyedAtExit.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8Builders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8FindPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderEngines.cpp>
@@ -184,7 +186,7 @@ endfunction()
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_tests)
 
 clang_tidy_check(hipdnn_public_frontend_tests)
-add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR} GTEST_CATEGORIES)
 
 add_executable(
     hipdnn_public_frontend_dynamic_load_tests
