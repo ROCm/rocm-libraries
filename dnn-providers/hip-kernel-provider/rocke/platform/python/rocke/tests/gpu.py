@@ -24,7 +24,6 @@ import os
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import pytest
 
 from rocke.core.ir import KernelDef
@@ -32,6 +31,8 @@ from rocke.tests.ir_validity import arbiter_verdict, skip_without_verdict
 from rocke.tests.lanes import arch_skip_reason
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from rocke.helpers.compile import KernelArtifact
 
 __all__ = [
@@ -45,16 +46,18 @@ __all__ = [
     "supported_device_arch",
 ]
 
-# Host array dtype -> rocke signature dtype name.
+# Host array dtype name -> rocke signature dtype name. Keyed by name so this
+# module imports without numpy: every pytest root loads it at session start
+# (rocke.tests.quarantine), and a numpy-free session must start.
 _SIGNATURE_DTYPE = {
-    np.float64: "f64",
-    np.float32: "f32",
-    np.float16: "f16",
-    np.int64: "i64",
-    np.int32: "i32",
-    np.int16: "i16",
-    np.int8: "i8",
-    np.uint8: "u8",
+    "float64": "f64",
+    "float32": "f32",
+    "float16": "f16",
+    "int64": "i64",
+    "int32": "i32",
+    "int16": "i16",
+    "int8": "i8",
+    "uint8": "u8",
 }
 
 
@@ -161,7 +164,7 @@ def run_on_device(
 
     artifact = compile_kernel(kernel, arch=arch)
     signature = [
-        sig_param(name, _SIGNATURE_DTYPE[host.dtype.type])
+        sig_param(name, _SIGNATURE_DTYPE[host.dtype.name])
         for name, host in buffers.items()
     ]
     launch_with_buffers(
