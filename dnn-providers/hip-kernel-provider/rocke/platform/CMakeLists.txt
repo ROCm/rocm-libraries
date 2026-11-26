@@ -239,9 +239,13 @@ set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
 # of them. Provider mode co-locates them with the installed tests
 # (bin/<subdir>), whose CTest entries put that directory on PYTHONPATH and
 # whose files TheRock's test artifact captures (paired with a matching include
-# in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**; the
-# modules, as .so files, are claimed by the artifact's lib component). A
-# standalone install keeps the site-packages layout.
+# in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**). The
+# modules and the shared engine are .so files, which TheRock's lib component
+# claims wherever they are (its default patterns match every *.so and *.so.*,
+# and it comes first in the component chain), so until that manifest excludes
+# them from lib and includes them in test, they ship in the provider's lib
+# artifact rather than with the tests. A standalone install keeps the
+# site-packages layout.
 if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_PYTHON_PACKAGE_INSTALL_DIR "${ROCKE_TEST_INSTALL_DIR}")
 else()
@@ -394,7 +398,9 @@ if(ROCKE_BUILD_SHARED_ENGINE)
   # A provider build installs it beside the rocke package, where
   # rocke.core.native_engine finds it, as the engine's Python modules do, and
   # only with its tests: there it is test content, and lib/ would make it a
-  # public library of the ROCm install. A standalone install keeps lib/.
+  # public library of the ROCm install (TheRock's lib component still claims
+  # it, as it does every .so; see ROCKE_PYTHON_PACKAGE_INSTALL_DIR). A
+  # standalone install keeps lib/.
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
     if(ROCKE_INSTALL_TESTS)
       set(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE ON)
