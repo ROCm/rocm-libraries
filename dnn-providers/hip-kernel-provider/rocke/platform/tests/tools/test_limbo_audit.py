@@ -291,6 +291,31 @@ def test_left_out():
     }
 
 
+def test_a_case_no_lane_collected_is_in_limbo_beside_a_case_that_ran(tmp_path):
+    """A lane that runs one case of a parametrized test by its node id never
+    collects the others; the universe still holds them, and a real case is
+    never taken for the placeholder of an empty parameter set."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            UNREGISTERED_FILE: """
+import pytest
+
+@pytest.mark.parametrize("shape", ["small", "large"])
+def test_shape(shape):
+    pass
+""",
+        },
+    )
+    universe = _run_lane(tree, tmp_path / "universe", "none", "--collect-only")
+    small_only = _run_lane(
+        tree, tmp_path / "gfx942", "gfx942", f"{UNREGISTERED_FILE}::test_shape[small]"
+    )
+    assert _audit(tree, {"gfx942": small_only}, universe) == {
+        (UNREGISTERED_FILE, "test_shape[large]"): {}
+    }
+
+
 def test_a_test_whose_process_ended_first_is_in_limbo_as_not_run(tmp_path):
     """A test the lane's process was to run but ended before (a per-test time
     limit's os._exit) is not run, with the reason that says so."""
