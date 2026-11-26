@@ -75,14 +75,14 @@ struct TransformConvBwdWeightToGemmV2
         const IndexType gemm_n_padded)
     {
         const auto to_long = [](const std::array<IndexType, NDimSpatial>& a) {
-            std::array<long_index_t, NDimSpatial> r{};
+            Array<long_index_t, NDimSpatial> r{};
             for(index_t d = 0; d < NDimSpatial; ++d)
-                r[d] = a[d];
+                r(d) = a[d];
             return r;
         };
-        std::array<long_index_t, NDimSpatial> spatial_stride{};
+        Array<long_index_t, NDimSpatial> spatial_stride{};
         for(index_t d = 0; d < NDimSpatial; ++d)
-            spatial_stride[d] = input_strides[3 + d];
+            spatial_stride(d) = input_strides[3 + d];
         return IsConvInputTransformRangeSupported<NDimSpatial>(N,
                                                                C,
                                                                to_long(input_spatial_lengths),

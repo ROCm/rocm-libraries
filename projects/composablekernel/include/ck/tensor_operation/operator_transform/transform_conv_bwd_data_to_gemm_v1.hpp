@@ -182,7 +182,7 @@ struct TransformConvBwdDataToGemm_v1
 
             // M = N * TildeSlice is at most GemmMPerBlock - 1 below m_padded
             const long_index_t tilde_slice_min =
-                std::max<long_index_t>(1, (m_padded - GemmMPerBlock + N_) / N_);
+                math::max(long_index_t{1}, (m_padded - GemmMPerBlock + N_) / N_);
             const long_index_t n_max = (m_padded - 1) / tilde_slice_min;
 
             long_index_t bound = n_max * abs_value(NStrideTensorA_);
@@ -190,7 +190,7 @@ struct TransformConvBwdDataToGemm_v1
             // the range of the coordinates (from the smallest to the largest, the kernels move a
             // coordinate by the difference of two of them), times the stride
             bound +=
-                (HTilde_ + 2 * poison + std::max<long_index_t>(-min_ho, 0)) * abs_value(HoStride_);
+                (HTilde_ + 2 * poison + math::max(-min_ho, long_index_t{0})) * abs_value(HoStride_);
             bound += (WTilde_ + max_xdot * ratio_w) * abs_value(WoStride_);
             return bound <= (long_index_t{1} << 31) - 1;
         }

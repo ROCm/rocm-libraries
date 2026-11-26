@@ -1655,22 +1655,22 @@ bool CheckConvInputRangeLimit(const ForwardConvCase<NDim>& cfg,
     const int64_t m_padded = (M + 63) / 64 * 64;
     const int64_t k_padded = (K + 63) / 64 * 64;
 
-    std::array<long_index_t, NDim> spatial_stride{};
+    Array<long_index_t, NDim> spatial_stride{};
     long_index_t acc = 1;
     for(index_t i = 0; i < NDim; ++i)
     {
         const index_t d   = first_dim_innermost ? i : NDim - 1 - i;
-        spatial_stride[d] = acc;
+        spatial_stride(d) = acc;
         acc *= cfg.In[d];
     }
     const long_index_t c_stride = acc;
     const long_index_t n_stride = acc * cfg.C;
 
     const auto to_long = [](const std::array<index_t, NDim>& a) {
-        std::array<long_index_t, NDim> r{};
+        Array<long_index_t, NDim> r{};
         for(index_t d = 0; d < NDim; ++d)
         {
-            r[d] = a[d];
+            r(d) = a[d];
         }
         return r;
     };
@@ -2836,12 +2836,12 @@ std::pair<bool, bool> FwdTransformHostCheck(const ForwardConvCase<NDim>& cfg,
     // G N C spatial... input (channel-first packed), G K C filter... weight, G N K spatial...
     // output (any packed layout: the host check does not read them)
     std::array<index_t, NDim + 3> a_len{}, a_str{}, b_len{}, b_str{}, c_len{}, c_str{};
-    std::array<long_index_t, NDim> spatial_stride{};
+    Array<long_index_t, NDim> spatial_stride{};
     int64_t acc = 1;
     for(index_t i = 0; i < NDim; ++i)
     {
         const index_t d   = first_dim_innermost ? i : NDim - 1 - i;
-        spatial_stride[d] = acc;
+        spatial_stride(d) = acc;
         a_str[3 + d]      = static_cast<index_t>(acc);
         acc *= cfg.In[d];
     }
@@ -2880,10 +2880,10 @@ std::pair<bool, bool> FwdTransformHostCheck(const ForwardConvCase<NDim>& cfg,
                               cfg.PadRight};
 
     const auto to_long = [](const std::array<index_t, NDim>& a) {
-        std::array<long_index_t, NDim> r{};
+        Array<long_index_t, NDim> r{};
         for(index_t d = 0; d < NDim; ++d)
         {
-            r[d] = a[d];
+            r(d) = a[d];
         }
         return r;
     };
@@ -3032,13 +3032,13 @@ TEST(TensorDescriptorFunctorsIntegration, BackwardWeightHostCheckMatchesDescript
                 prod_filter *= c.Filter[d];
             }
             std::array<index_t, NDim + 3> in_strides{};
-            std::array<long_index_t, NDim> spatial_stride{};
+            Array<long_index_t, NDim> spatial_stride{};
             int64_t acc = 1;
             for(index_t i = 0; i < NDim; ++i)
             {
                 const index_t d   = first ? i : NDim - 1 - i;
                 in_strides[3 + d] = static_cast<index_t>(acc);
-                spatial_stride[d] = acc;
+                spatial_stride(d) = acc;
                 acc *= c.In[d];
             }
             EXPECT_LE(acc * c.C * c.N, limit);
@@ -3049,10 +3049,10 @@ TEST(TensorDescriptorFunctorsIntegration, BackwardWeightHostCheckMatchesDescript
             const int64_t gemm_k_pad = round_up(c.N * prod_out, 16 * c.BatchK);
             const int64_t gemm_n_pad = round_up(c.C * prod_filter, 32);
             const auto to_long       = [](const std::array<index_t, NDim>& a) {
-                std::array<long_index_t, NDim> r{};
+                Array<long_index_t, NDim> r{};
                 for(index_t d = 0; d < NDim; ++d)
                 {
-                    r[d] = a[d];
+                    r(d) = a[d];
                 }
                 return r;
             };

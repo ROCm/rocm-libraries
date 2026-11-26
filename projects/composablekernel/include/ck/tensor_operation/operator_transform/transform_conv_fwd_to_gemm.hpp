@@ -118,7 +118,7 @@ struct TransformConvFwdToGemm
     __host__ bool IsCustomTransformPaddingRangeSupported(index_t m_padded, index_t k_padded) const
     {
         const auto arr = [](auto... v) {
-            return std::array<long_index_t, sizeof...(v)>{static_cast<long_index_t>(v)...};
+            return Array<long_index_t, sizeof...(v)>{{static_cast<long_index_t>(v)...}};
         };
         if constexpr(NDimSpatial == 1)
             return IsConvInputTransformRangeSupported<1>(N_,

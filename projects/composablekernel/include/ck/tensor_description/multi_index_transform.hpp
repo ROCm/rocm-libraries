@@ -1644,22 +1644,22 @@ __host__ constexpr bool IsConvPaddingPoisonRangeSupported(long_index_t first_spa
 // channels). Only the first spatial dimension is poisoned, the other dimensions only enter the
 // offset.
 template <index_t NDim>
-__host__ bool
-IsConvInputTransformRangeSupported(long_index_t N,
-                                   long_index_t C,
-                                   const std::array<long_index_t, NDim>& in_length,
-                                   const std::array<long_index_t, NDim>& filter,
-                                   const std::array<long_index_t, NDim>& out_length,
-                                   const std::array<long_index_t, NDim>& stride,
-                                   const std::array<long_index_t, NDim>& dilation,
-                                   const std::array<long_index_t, NDim>& left_pad,
-                                   long_index_t m_padded,
-                                   long_index_t k_padded,
-                                   long_index_t n_stride,
-                                   const std::array<long_index_t, NDim>& spatial_stride,
-                                   long_index_t c_stride)
+__host__ bool IsConvInputTransformRangeSupported(long_index_t N,
+                                                 long_index_t C,
+                                                 const Array<long_index_t, NDim>& in_length,
+                                                 const Array<long_index_t, NDim>& filter,
+                                                 const Array<long_index_t, NDim>& out_length,
+                                                 const Array<long_index_t, NDim>& stride,
+                                                 const Array<long_index_t, NDim>& dilation,
+                                                 const Array<long_index_t, NDim>& left_pad,
+                                                 long_index_t m_padded,
+                                                 long_index_t k_padded,
+                                                 long_index_t n_stride,
+                                                 const Array<long_index_t, NDim>& spatial_stride,
+                                                 long_index_t c_stride)
 {
-    const auto abs_value = [](long_index_t x) { return x < 0 ? -x : x; };
+    const auto abs_value    = [](long_index_t x) { return x < 0 ? -x : x; };
+    const long_index_t zero = 0;
 
     // prod_out = Ho * Wo * ... (the number of GEMM rows per batch), filter_rest = the divisor of k
     // that separates the filter index of the first dimension: C * F1 * F2 * ...
@@ -1697,8 +1697,8 @@ IsConvInputTransformRangeSupported(long_index_t N,
     {
         const long_index_t max_d =
             (out_length[d] - 1) * stride[d] + (filter[d] - 1) * dilation[d] - left_pad[d];
-        others += (std::max<long_index_t>(max_d, 0) + std::max<long_index_t>(left_pad[d], 0)) *
-                  abs_value(spatial_stride[d]);
+        others +=
+            (math::max(max_d, zero) + math::max(left_pad[d], zero)) * abs_value(spatial_stride[d]);
     }
 
     // Case 1: real rows (m < M, so the batch n <= N - 1) with a padding column (k >= K). The first
@@ -1706,7 +1706,7 @@ IsConvInputTransformRangeSupported(long_index_t N,
     // column's). The range of the first coordinate is from -left_pad to max0 + poison.
     const long_index_t case_columns =
         (N - 1) * abs_value(n_stride) +
-        (std::max<long_index_t>(max0 + poison, 0) + std::max<long_index_t>(left_pad[0], 0)) *
+        (math::max(max0 + poison, zero) + math::max(left_pad[0], zero)) *
             abs_value(spatial_stride[0]) +
         others;
 
@@ -1720,18 +1720,18 @@ IsConvInputTransformRangeSupported(long_index_t N,
     if(padding_rows > 0)
     {
         const long_index_t n_max  = (m_padded - 1) / prod_out;
-        const long_index_t o0_max = std::min(out_length[0] - 1, (padding_rows - 1) / out_rest);
+        const long_index_t o0_max = math::min(out_length[0] - 1, (padding_rows - 1) / out_rest);
         const long_index_t coord0 =
             o0_max * stride[0] + f0_max * dilation[0] - left_pad[0] + 2 * poison;
         case_rows = n_max * abs_value(n_stride) +
-                    (std::max<long_index_t>(coord0, 0) + std::max<long_index_t>(left_pad[0], 0)) *
+                    (math::max(coord0, zero) + math::max(left_pad[0], zero)) *
                         abs_value(spatial_stride[0]) +
                     others;
     }
     // The other combinations are not larger than these two: a real row with a real column has a
     // coordinate inside the tensor or at most as far out as the padding of the convolution, which
     // is covered by max0 without a poison.
-    return std::max(case_columns, case_rows) <= (long_index_t{1} << 31) - 1;
+    return math::max(case_columns, case_rows) <= (long_index_t{1} << 31) - 1;
 }
 
 /**
@@ -2014,8 +2014,10 @@ struct ConvBwdDataImplicitGemmOutTransform
         LowerIndex idx_low;
         CalculateLowerIndex(idx_low, idx_up);
 
-        return amd_wave_ballot(static_cast<uint32_t>(idx_low[I1]) < static_cast<uint32_t>(Ho_)) &
-               amd_wave_ballot(static_cast<uint32_t>(idx_low[I2]) < static_cast<uint32_t>(Wo_));
+        lane_mask_t mask = ~lane_mask_t{0};
+        mask &= amd_wave_ballot(static_cast<uint32_t>(idx_low[I1]) < static_cast<uint32_t>(Ho_));
+        mask &= amd_wave_ballot(static_cast<uint32_t>(idx_low[I2]) < static_cast<uint32_t>(Wo_));
+        return mask;
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }
@@ -2266,8 +2268,9 @@ struct ConvFwdDataImplicitGemmInTransform
         return valid;
     }
 
-    // PROTOTYPE: one ballot per spatial dimension keeps each term a single compare so it is
-    // lowered to a v_cmp writing an SGPR lane mask .
+    // Lane mask version of the validity check (wave32 or wave64): one ballot per spatial dimension
+    // so that each ballot argument is a single compare, which is lowered to a v_cmp writing an SGPR
+    // lane mask. Must be called by all the lanes of the wave.
     static constexpr bool HasValidLaneMask = true;
 
     template <typename UpIdx>
