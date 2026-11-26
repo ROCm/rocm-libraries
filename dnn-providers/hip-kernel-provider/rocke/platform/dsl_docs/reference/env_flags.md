@@ -21,6 +21,8 @@ For setup and the most common flags in context, see
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
 | `ROCKE_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
 | `ROCKE_USE_SUDO` | `1` (unset) | Benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
+| `ROCKE_COMGR_LIB` | path to a COMGR library file (unset) | Load exactly this COMGR instead of resolving one (torch's copy, then ROCm installs). On Linux, if a different COMGR is already the only one mapped into the process, rocke refuses rather than load a second one. Set it together with `ROCKE_HIP_LIB`. |
+| `ROCKE_HIP_LIB` | path to a HIP runtime library file (unset) | Load exactly this HIP runtime instead of resolving one. Point it at the same runtime as `ROCKE_COMGR_LIB`: a HIP from one install next to a COMGR from another splits the process across two runtimes. |
 
 ## GEMM dispatch
 
@@ -63,6 +65,7 @@ For setup and the most common flags in context, see
 | `ROCKE_DOCKER_IMAGE` / `ROCKE_DOCKER_EXTRA_FLAGS` | Container image and extra flags for containerized runs. |
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
+| `ROCKE_VENV_ROOT` | Where `tools/setup_dev_env.py` keeps its CI-matched venvs (default `~/rocke-venvs`). The base venv is large; point this at shared storage with room when the home quota is small, and at a short path on Windows without long-path support. |
 
 ## External compiler runtime
 

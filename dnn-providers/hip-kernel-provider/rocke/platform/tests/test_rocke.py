@@ -7903,6 +7903,93 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             paths = rc._candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
             self.assertNotIn(os.path.join(core_lib, "libamdhip64.so.7"), paths)
 
+    def test_torch_runtime_libs_match_what_rocke_resolves(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # A pinning tool asks torch_runtime_libs() which files to pin. With a
+        # bare .so beside the SONAME, rocke resolves the bare file; pinning the
+        # SONAME instead made the pin and rocke's own choice disagree.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            open(os.path.join(core_lib, "libamd_comgr.so"), "w").close()
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+                root_libdirs=[],
+            )
+            libs = rc.torch_runtime_libs()
+            self.assertEqual(
+                libs,
+                {
+                    "amdhip64": os.path.join(core_lib, "libamdhip64.so.7"),
+                    "amd_comgr": os.path.join(core_lib, "libamd_comgr.so"),
+                },
+            )
+            for stem, env_var, sonames in (
+                ("amdhip64", "ROCKE_HIP_LIB", ["7"]),
+                ("amd_comgr", "ROCKE_COMGR_LIB", ["3"]),
+            ):
+                first = rc._candidate_lib_paths(stem, env_var, sonames)[0]
+                self.assertEqual(libs[stem], first)
+
+    def test_torch_runtime_libs_empty_without_torch(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.runtime_coexistence import torch_runtime_libs
+
+        with mock.patch.dict(sys.modules):
+            sys.modules.pop("torch", None)
+            self.assertEqual(torch_runtime_libs(), {})
+            self.assertNotIn("torch", sys.modules)
+
+    def test_torch_runtime_libs_on_windows_use_the_sdk_dlls(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # Windows TheRock torch keeps HIP and COMGR in _rocm_sdk_core/bin with
+        # versioned names, not in torch/lib. Pinned here so the Windows lookup
+        # cannot silently drop out of torch_runtime_libs() on a merge.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, _, torch_stub = self._fake_torch_site(tmp)
+            core_bin = os.path.join(site, "_rocm_sdk_core", "bin")
+            os.makedirs(core_bin)
+            for name in ("amdhip64_7.dll", "amd_comgr.dll"):
+                open(os.path.join(core_bin, name), "w").close()
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": types.ModuleType("rocm_sdk")},
+            )
+            stack.enter_context(mock.patch.object(rc, "_IS_WINDOWS", True))
+            libs = rc.torch_runtime_libs()
+            self.assertEqual(
+                libs,
+                {
+                    "amdhip64": os.path.join(core_bin, "amdhip64_7.dll"),
+                    "amd_comgr": os.path.join(core_bin, "amd_comgr.dll"),
+                },
+            )
+            for stem, env_var, sonames in (
+                ("amdhip64", "ROCKE_HIP_LIB", ["7"]),
+                ("amd_comgr", "ROCKE_COMGR_LIB", ["3"]),
+            ):
+                first = rc._candidate_lib_paths(stem, env_var, sonames)[0]
+                self.assertEqual(libs[stem], first)
+
     def test_torch_lib_prefers_the_copy_already_mapped(self):
         import os
         import sys
