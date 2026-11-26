@@ -17,7 +17,7 @@ from unittest.mock import Mock
 import pytest
 from rocke.core import native_engine
 from rocke.portable_ir.src import online
-from rocke.tests import item_time_limit
+from rocke.tests import item_time_limit, require_gpu
 from rocke.tests.ci_shard import ACTIVATION_FLAG
 from rocke.tests.ctest_listing import (
     GPU_RESOURCE_LOCK,
@@ -433,8 +433,10 @@ def test_every_gpu_pytest_entry_limits_each_test(
     itself at most half the entry's CTest TIMEOUT, pytest-timeout's thread
     method, the one that interrupts a stall inside a HIP or COMGR call, and the
     rocke.tests.item_time_limit plugin, so only a measured time raises one
-    test's limit. Each takes the rocke_gpu resource lock, so a parallel ctest
-    never runs two of them on the one GPU at once."""
+    test's limit. Each loads rocke.tests.require_gpu, so an entry that finds
+    no GPU fails rather than skipping every test. Each takes the
+    rocke_gpu resource lock, so a parallel ctest never runs two of them on the
+    one GPU at once."""
     _, ctest_dir = configure_installed_ctest(
         tmp_path,
         f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
@@ -464,6 +466,7 @@ def test_every_gpu_pytest_entry_limits_each_test(
             if argument == "-p"
         ]
         assert item_time_limit.PLUGIN_NAME in plugins, (name, plugins)
+        assert require_gpu.PLUGIN_NAME in plugins, (name, plugins)
         assert limit <= float(entry_property(test, "TIMEOUT")) / 2, name
         assert entry_property(test, "RESOURCE_LOCK") == [GPU_RESOURCE_LOCK], name
 

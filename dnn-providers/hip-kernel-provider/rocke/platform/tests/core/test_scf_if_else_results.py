@@ -825,17 +825,6 @@ def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_scf_if(
 # --------------------------------------------------------------------------
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run(blob, kernel_name, x):
     """Launch one workgroup of ``LANES`` lanes; return Y, Z and W."""
     from rocke.runtime.hip_module import Runtime
@@ -872,9 +861,9 @@ def _run(blob, kernel_name, x):
 @pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_lanes_take_both_branches(route):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     kernel = _branch_kernel(f"if_else_gpu_{route}")
     if route == "llvm":
         from rocke.helpers.compile import compile_kernel

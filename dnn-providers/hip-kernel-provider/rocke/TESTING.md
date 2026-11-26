@@ -1275,7 +1275,9 @@ entry point with no test marked; its docstring says what it does not see. A GPU 
 or to its own lower `--timeout`. A test slower than half of that declares its
 slowest measured CI time with `@pytest.mark.rocke_measured_seconds(seconds)`,
 which raises that test's limit alone to twice the time
-(`rocke.tests.item_time_limit`).
+(`rocke.tests.item_time_limit`). Every GPU pytest entry also loads
+`rocke.tests.require_gpu`, which fails a run that finds no GPU (its docstring
+says why).
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).

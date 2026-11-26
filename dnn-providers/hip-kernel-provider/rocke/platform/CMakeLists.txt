@@ -425,11 +425,11 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
 # above the entry's limit is a usage error. An entry with no per-test limit of
 # its own puts _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT at the end of its
 # command; one with a lower limit adds only _ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY,
-# the plugin and the method. Every GPU entry also takes the CTest resource lock
-# _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a parallel ctest -j never runs two of
-# them at once on the one GPU.
+# the plugins and the method. The policy also loads rocke.tests.require_gpu
+# (its docstring says why). Every GPU entry also takes the CTest resource lock _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a
+# parallel ctest -j never runs two of them at once on the one GPU.
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY
-    "-p rocke.tests.item_time_limit --timeout-method=thread")
+    "-p rocke.tests.item_time_limit -p rocke.tests.require_gpu --timeout-method=thread")
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT
     "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY}")
 set(_ROCKE_INSTALLED_GPU_RESOURCE_LOCK "rocke_gpu")

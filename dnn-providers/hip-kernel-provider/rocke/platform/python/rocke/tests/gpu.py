@@ -13,7 +13,9 @@ toolchain, not a kernel defect.
 A CI lane that must run a test on a given arch sets ``ROCKE_REQUIRE_<ARCH>=1`` (for
 example ``ROCKE_REQUIRE_GFX942=1``). A test that names that arch then fails instead of
 skipping when the current GPU is a different arch or there is no GPU, so a lane that
-lost its GPU does not pass with no coverage.
+lost its GPU does not pass with no coverage. That is per test and per arch; that a GPU
+entry finds any GPU at all is checked once for the whole entry by the
+``rocke.tests.require_gpu`` plugin.
 """
 
 from __future__ import annotations
