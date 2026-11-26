@@ -276,7 +276,7 @@ def _noCodeForScalarLoadedTensor(emit):
   def wrapper(self, kernel, *args, **kwargs):
     module = emit(self, kernel, *args, **kwargs)
     tP = next((a for a in reversed(args) if isinstance(a, dict) and "tensorChar" in a), None)
-    if tP is not None and self.isScalarLoaded(kernel, tP):
+    if tP is not None and ScalarLoadB.isScalarLoaded(kernel, tP):
       return Module("%s (ScalarLoadB)" % emit.__name__)
     return module
   return wrapper
@@ -948,11 +948,6 @@ class KernelWriterAssembly(KernelWriter):
     if self.tdmWaveIdxReadAfterPrologue(kernel):
       return True
     return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
-
-  ########################################
-  def isScalarLoaded(self, kernel, tP) -> bool:
-    """ScalarLoadB: tensor B is read with scalar loads into SGPRs, not through VGPRs/LDS."""
-    return bool(kernel.get("ScalarLoadB")) and tP["tensorChar"] == "B"
 
   def strideRef(self, tc, dim):
     """
@@ -14933,7 +14928,7 @@ class KernelWriterAssembly(KernelWriter):
     problemType = self.states.kernel["ProblemType"]
     numWaves: int = kernel["NumWaves"]
     imod = StructuredModule("globalReadDo%s_%u"%(tc,mode))
-    if not self.do["GlobalRead%s"%tP["tensorChar"]] or self.isScalarLoaded(kernel, tP):
+    if not self.do["GlobalRead%s"%tP["tensorChar"]] or ScalarLoadB.isScalarLoaded(kernel, tP):
       return imod
 
     loopIdx = self.states.unrollIdx # TODO - does this handle multiple summation indices?
@@ -16220,7 +16215,7 @@ class KernelWriterAssembly(KernelWriter):
     ti = rocIsa.getInstance()
     tc = tP["tensorChar"]
     imod = Module()
-    if self.isScalarLoaded(kernel, tP):
+    if ScalarLoadB.isScalarLoaded(kernel, tP):
       return imod
     isBpeInputLarger = True if tP["bpeGR"] > tP["bpe"] else False
 
@@ -16990,7 +16985,7 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP["tensorChar"]
     if (not self.do["LocalRead%s" % tc]) or ((tc in ("A", "MXSA", "B", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadInc (Empty)")
-    if self.isScalarLoaded(kernel, tP):
+    if ScalarLoadB.isScalarLoaded(kernel, tP):
       return Module("localReadInc (Empty)")
 
     if tP.get("isSwizzledTDM"):
@@ -17251,7 +17246,7 @@ class KernelWriterAssembly(KernelWriter):
       pack = Module("pack%s_I%s" % (tP["tensorChar"], iui))
       return imod, pack
 
-    if self.isScalarLoaded(kernel, tP):
+    if ScalarLoadB.isScalarLoaded(kernel, tP):
       tc = tP["tensorChar"]
       return Module("LocalReadDo%s_I%s" % (tc, iui)), Module("pack%s_I%s" % (tc, iui)), Module("packPre%s_I%s" % (tc, iui))
 

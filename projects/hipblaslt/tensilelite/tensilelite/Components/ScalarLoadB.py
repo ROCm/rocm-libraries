@@ -26,6 +26,11 @@ from rocisa.instruction import FlatLoadB32, SAddU32, SAddCU32, SCBranchSCC1, SCm
 _SLOAD = {1: SLoadB32, 2: SLoadB64, 4: SLoadB128, 8: SLoadB256, 16: SLoadB512}
 
 
+def isScalarLoaded(kernel, tP) -> bool:
+    """Tensor B is read with scalar loads into SGPRs, not through VGPRs/LDS."""
+    return bool(kernel.get("ScalarLoadB")) and tP["tensorChar"] == "B"
+
+
 def scalarLoadBChunk(state):
     """Summation iterations fetched together by ScalarLoadB (0 if disabled).
 
