@@ -134,7 +134,7 @@ vocabulary:
 launch_surface:
   - name: instance_contract
     python_source: builders/common/convolution_forward.py:supports_gfx950_conv_fwd_aot
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:aotInstance
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotCommon.cpp:aotInstance
     kmd_fields: [dtype, layout, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, vector_size_a, vector_size_b, vector_size_c, unroll_k, async_dma, async_chunk_a, async_chunk_b, grouped]
     guard: aotInstance admits only a kpack kernel with NHWC layout, wave64, an mem/compv3/compv4/basic pipeline, a default or cshuffle epilogue, positive tile/warp/vector fields, nonnegative async chunks and 0/1 flags; any missing or malformed field refuses the kernel.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
@@ -146,7 +146,7 @@ launch_surface:
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
   - name: direct_instance_contract
     python_source: builders/common/convolution_forward.py:supports_gfx950_conv_fwd_aot
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:aotInstance
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotCommon.cpp:aotInstance
     kmd_fields: [kernel_family, direct_variant, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, block_w, block_waves]
     guard: aotInstance reads kernel_family first. A direct instance must hold the direct identity's placeholders (0 tuning, vector, flag and chunk fields; "direct" pipeline and epilogue) and a std or spatial variant; an implicit-GEMM instance must leave every direct field at its KMD default. Unknown families or variants and missing fields refuse the kernel.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
@@ -170,7 +170,7 @@ launch_surface:
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
   - name: workspace
     python_source: builders/common/convolution_forward.py:build_gfx950_conv_fwd_aot
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:workspaceBytes
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotCommon.cpp:workspaceBytes
     kmd_fields: [pipeline, split_c]
     guard: The forward instances use static LDS only and prepare requests zero dynamic shared memory. Only a split-C non-grouped instance (split_c > 1, its own pack and dispatch, hipkernel.gfx950_conv_fwd_aot.split_c_dispatch) needs scratch, the fp32 [split_c, N, Ho, Wo, K] partial sums its conv pass writes and its direct_split_reduce launch folds (splitWorkspaceBytes, DirectNongroupedConvSpec.workspace_bytes); workspaceBytes returns zero for every other instance.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp

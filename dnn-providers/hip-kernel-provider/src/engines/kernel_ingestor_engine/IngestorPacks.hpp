@@ -251,7 +251,8 @@ void registerGfx942AttentionUnified2DSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx942AttentionUnified2DModuleCache();
 
-/// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
+/// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot), on the code it shares with
+/// hipkernel:Gfx950ConvFwdBiasAot in packs/Gfx950ConvFwdAotCommon.cpp
 void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvFwdAotModuleCache();
 

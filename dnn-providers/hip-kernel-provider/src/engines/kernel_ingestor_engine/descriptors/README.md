@@ -15,7 +15,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx942_attention_dense/` | `hipkernel:Gfx942AttentionDense` | `packs/Gfx942AttentionDenseNative.cpp` (shares `packs/AttentionDenseNative.cpp` with gfx950) |
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
-| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
+| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` (on `packs/Gfx950ConvFwdAotCommon.cpp`) |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 
