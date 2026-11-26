@@ -810,7 +810,7 @@ TEST_F(TestGraphDescriptor, BinaryDeserializeRejectsConvBwdStrideInconsistentWit
 {
     // dy [4,4,4,4], w [4,4,1,1], dx [4,4,4,4], no padding: any width stride above 3
     // implies a dy width of 1, so dy width 4 is inconsistent.
-    auto base = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    const auto base = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     auto graphT = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
     ASSERT_NE(graphT, nullptr);
     graphT->nodes.at(0)->attributes.AsConvolutionBwdAttributes()->stride[1] = 1048577;
@@ -818,7 +818,7 @@ TEST_F(TestGraphDescriptor, BinaryDeserializeRejectsConvBwdStrideInconsistentWit
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graphT.get()));
 
     hipdnnBackendDescriptor_t rawDesc = nullptr;
-    auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
+    const auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
         &rawDesc, builder.GetBufferPointer(), builder.GetSize());
     const ScopedBackendDescriptor desc(rawDesc);
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);

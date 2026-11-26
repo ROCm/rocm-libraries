@@ -2465,7 +2465,7 @@ public:
         const auto& strides = preparedSdpa.strides();
         const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
         const int32_t zero = 0;
-        auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
+        auto const& kernel = preparedSdpa.kernelForStream(handle.getStream());
         // The attention sink, when one is bound; otherwise O stands in and sink_on is
         // SINK_OFF. sink_on names the sink's dtype (vendored-kernel modifications 36, 41).
         const bool hasSink = binding.sink != NO_SINK;

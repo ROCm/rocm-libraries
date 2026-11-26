@@ -359,7 +359,7 @@ std::string formOf(const KernelDefinition& kernel)
                 form += *text;
             }
         }
-        form += ";";
+        form += ';';
     }
     form += "reduce=" + stringField(kernel, "reduce_symbol");
     const auto companion = kernel.sources.find(REDUCE_LAUNCH_NAME);

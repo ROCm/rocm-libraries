@@ -1286,7 +1286,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
 
 TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoRejectsNegativeRequestedCount)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedWithKnobs();
 
     const hipdnnBackendFlatbufferData_t sentinel{reinterpret_cast<const void*>(0x1), 7};

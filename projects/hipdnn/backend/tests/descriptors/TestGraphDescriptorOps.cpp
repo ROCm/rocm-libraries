@@ -419,7 +419,8 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     // (32 + 2 + 4 - 3) / 2 + 1 = 18 and (32 + 3 + 5 - 3) / 2 + 1 = 19.
     const std::vector<int64_t> customYDims = {1, 64, 18, 19};
     const std::vector<int64_t> customYStrides = {21888, 342, 19, 1};
-    auto customYDesc = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, customYDims, customYStrides);
+    const auto customYDesc
+        = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, customYDims, customYStrides);
     HipdnnBackendDescriptor* y = customYDesc.get();
 
     convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,

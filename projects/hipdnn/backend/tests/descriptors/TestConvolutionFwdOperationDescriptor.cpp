@@ -133,15 +133,15 @@ void finalizeFpropWithShape(const std::vector<int64_t>& xDims,
 {
     using hipdnn_data_sdk::utilities::generateStrides;
 
-    auto xTensor = createFinalizedTensor(K_FPROP_TENSOR_X_UID, xDims, generateStrides(xDims));
-    auto wTensor = createFinalizedTensor(K_FPROP_TENSOR_W_UID, wDims, generateStrides(wDims));
-    auto yTensor = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, yDims, generateStrides(yDims));
+    const auto xTensor = createFinalizedTensor(K_FPROP_TENSOR_X_UID, xDims, generateStrides(xDims));
+    const auto wTensor = createFinalizedTensor(K_FPROP_TENSOR_W_UID, wDims, generateStrides(wDims));
+    const auto yTensor = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, yDims, generateStrides(yDims));
     HipdnnBackendDescriptor* xPtr = xTensor.get();
     HipdnnBackendDescriptor* wPtr = wTensor.get();
     HipdnnBackendDescriptor* yPtr = yTensor.get();
 
     auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,

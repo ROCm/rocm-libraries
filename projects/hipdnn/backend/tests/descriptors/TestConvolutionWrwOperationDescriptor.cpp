@@ -132,15 +132,17 @@ void finalizeWgradWithShape(const std::vector<int64_t>& xDims,
 {
     using hipdnn_data_sdk::utilities::generateStrides;
 
-    auto xTensor = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, xDims, generateStrides(xDims));
-    auto dwTensor = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, dwDims, generateStrides(dwDims));
-    auto dyTensor = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, dyDims, generateStrides(dyDims));
+    const auto xTensor = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, xDims, generateStrides(xDims));
+    const auto dwTensor
+        = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, dwDims, generateStrides(dwDims));
+    const auto dyTensor
+        = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, dyDims, generateStrides(dyDims));
     HipdnnBackendDescriptor* xPtr = xTensor.get();
     HipdnnBackendDescriptor* dwPtr = dwTensor.get();
     HipdnnBackendDescriptor* dyPtr = dyTensor.get();
 
     auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,

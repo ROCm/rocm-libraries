@@ -242,7 +242,7 @@ TEST_F(IntegrationBackendUserLoggingApis, RejectsRemovingUnregisteredCallback)
     int unregisteredHandle = 0;
     takeLastErrorString(); // Clear an error left by an earlier call on this thread
 
-    auto status
+    const auto status
         = hipdnnSetUserLogCallback_ext(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
                                        HIPDNN_SEV_OFF,
                                        HIPDNN_LOG_CALLBACK_SYNC,

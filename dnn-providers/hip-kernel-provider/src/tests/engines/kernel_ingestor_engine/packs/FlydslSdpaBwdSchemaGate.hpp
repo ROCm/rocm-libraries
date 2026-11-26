@@ -277,7 +277,7 @@ inline std::vector<std::string> failures(const hipdnn_plugin_sdk::ingestor::Desc
     GatedEngine engine(set, arch);
     for(const auto& c : cases())
     {
-        auto recorder
+        auto const recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         const bool served = engine.applicable(c.spec, c.stamp);
         if(served != c.served)
@@ -310,7 +310,7 @@ inline std::optional<std::string>
     GatedEngine engine(set, arch, hipdnn_data_sdk::utilities::Version{std::string("1.2.0")});
     const auto spec = raggedSpec({"k"}, 1);
     {
-        auto recorder
+        auto const recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         const bool served = engine.applicable(spec, stampOf(1, 3));
         if(served || !recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))
@@ -319,7 +319,7 @@ inline std::optional<std::string>
                    + " a graph stamped 1.3.0 without the plan builder's schema gate declining it";
         }
     }
-    auto recorder
+    auto const recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const bool listed = engine.providerApplicable(spec, stampOf(1, 3));
     if(listed || !recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))

@@ -84,22 +84,23 @@ public:
         graph::Graph graphObj;
         graphObj.set_name("MoeGroupedMatmulTest");
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
         const std::vector<int64_t> tokenDims = {1, tc.tokenRows, tc.hiddenK};
-        auto tokenAttr = std::make_shared<graph::TensorAttributes>(
+        const auto tokenAttr = std::make_shared<graph::TensorAttributes>(
             graph::makeTensorAttributes("token", dataType, tokenDims, generateStrides(tokenDims)));
 
         const std::vector<int64_t> weightDims = {tc.experts, tc.hiddenK, tc.weightN};
-        auto weightAttr = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
-            "weight", dataType, weightDims, generateStrides(weightDims)));
+        const auto weightAttr
+            = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
+                "weight", dataType, weightDims, generateStrides(weightDims)));
 
         const int64_t groupCount = tc.batch * tc.experts;
         const std::vector<int64_t> offsetDims = {groupCount, 1, 1};
-        auto firstTokenOffsetAttr = std::make_shared<graph::TensorAttributes>(
+        const auto firstTokenOffsetAttr = std::make_shared<graph::TensorAttributes>(
             graph::makeTensorAttributes("first_token_offset",
                                         hipdnn_frontend::DataType::INT32,
                                         offsetDims,
@@ -131,17 +132,17 @@ public:
         moeAttrs.set_mode(tc.mode);
         moeAttrs.set_top_k(tc.topK);
 
-        auto outputAttr = graphObj.moe_grouped_matmul(
+        const auto outputAttr = graphObj.moe_grouped_matmul(
             tokenAttr, weightAttr, firstTokenOffsetAttr, tokenIndexAttr, tokenKsAttr, moeAttrs);
         outputAttr->set_output(true);
 
-        auto validateResult = graphObj.validate();
+        const auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
         {
             throw std::runtime_error("Failed to validate graph: " + validateResult.get_message());
         }
 
-        auto buildResult = graphObj.build_operation_graph(handle);
+        const auto buildResult = graphObj.build_operation_graph(handle);
         if(buildResult.is_bad())
         {
             throw std::runtime_error("Failed to build operation graph: "

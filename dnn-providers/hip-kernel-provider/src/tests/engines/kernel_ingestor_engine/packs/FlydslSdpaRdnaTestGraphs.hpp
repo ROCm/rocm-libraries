@@ -1562,9 +1562,9 @@ inline flatbuffers::FlatBufferBuilder buildFlydslSdpaRdnaGraph(const SdpaGraphSp
                                                    data_objects::NodeAttributes::SdpaAttributes,
                                                    attributes.Union()));
 
-    auto name = builder.CreateString("flydsl_sdpa_rdna");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    auto const name = builder.CreateString("flydsl_sdpa_rdna");
+    auto const tensorsVector = builder.CreateVector(tensors);
+    auto const nodesVector = builder.CreateVector(nodes);
 
     data_objects::GraphBuilder graphBuilder(builder);
     graphBuilder.add_name(name);

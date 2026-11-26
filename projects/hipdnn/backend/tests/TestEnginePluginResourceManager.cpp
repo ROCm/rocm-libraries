@@ -4135,7 +4135,7 @@ TEST(TestEnginePluginResourceManager, FindEngineIdByNameIsUnambiguousWithAHexade
 
 TEST(TestEnginePluginResourceManager, ResolveEngineNameReplacesADecimalDeclaredName)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const ScopedBackendWarningCapture capture;
 

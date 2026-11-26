@@ -166,6 +166,7 @@ const std::vector<int64_t> HEAD_DIMS_FLOAT{64};
 
 // The sweep fixture of one engine and dtype: the engine's device fixture with a dummy parameter.
 #define FLYDSL_SDPA_BWD_REMOVED_KEYS_SWEEP_SUITE(SUITE, BASE)                                  \
+    /* NOLINTNEXTLINE(bugprone-macro-parentheses) class and base names, not expressions */     \
     class SUITE : public BASE, public ::testing::WithParamInterface<int>                       \
     {                                                                                          \
     };                                                                                         \

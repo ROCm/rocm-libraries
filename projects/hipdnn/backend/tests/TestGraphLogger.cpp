@@ -227,7 +227,7 @@ TEST_F(TestGraphLogger, NonUtf8GraphNameStillBuilds)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    auto bundle = test_utilities::createDefaultConvOp(HIPDNN_DATA_FLOAT);
+    const auto bundle = test_utilities::createDefaultConvOp(HIPDNN_DATA_FLOAT);
 
     GraphDescriptor descriptor;
     const std::array<HipdnnBackendDescriptor*, 1> ops = {bundle.convOp.get()};
@@ -277,7 +277,7 @@ TEST_F(TestGraphLogger, FinalizeSucceedsWhenGraphLoggingThrows)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", "graphs");
     hipdnn_backend::logging::loggerShutdown();
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const test_utilities::ScopedBackendWarningCapture capture;
 

@@ -159,17 +159,18 @@ void finalizeDgrad(DgradShape shape)
         shape.postPadding.assign(shape.stride.size(), 0);
     }
 
-    auto dyTensor
+    const auto dyTensor
         = createFinalizedTensor(K_DGRAD_TENSOR_DY_UID, shape.dy, generateStrides(shape.dy));
-    auto wTensor = createFinalizedTensor(K_DGRAD_TENSOR_W_UID, shape.w, generateStrides(shape.w));
-    auto dxTensor
+    const auto wTensor
+        = createFinalizedTensor(K_DGRAD_TENSOR_W_UID, shape.w, generateStrides(shape.w));
+    const auto dxTensor
         = createFinalizedTensor(K_DGRAD_TENSOR_DX_UID, shape.dx, generateStrides(shape.dx));
     HipdnnBackendDescriptor* dyPtr = dyTensor.get();
     HipdnnBackendDescriptor* wPtr = wTensor.get();
     HipdnnBackendDescriptor* dxPtr = dxTensor.get();
 
     auto wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,

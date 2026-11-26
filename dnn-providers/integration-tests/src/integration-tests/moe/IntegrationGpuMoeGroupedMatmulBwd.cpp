@@ -67,21 +67,22 @@ public:
         graph::Graph graphObj;
         graphObj.set_name("MoeGroupedMatmulBwdTest");
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
+        const auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
         const std::vector<int64_t> doutputDims = {1, tc.tokenRows, tc.outputN};
-        auto doutputAttr = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
-            "doutput", dataType, doutputDims, generateStrides(doutputDims)));
+        const auto doutputAttr
+            = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
+                "doutput", dataType, doutputDims, generateStrides(doutputDims)));
 
         const std::vector<int64_t> tokenDims = {1, tc.tokenRows, tc.hiddenK};
-        auto tokenAttr = std::make_shared<graph::TensorAttributes>(
+        const auto tokenAttr = std::make_shared<graph::TensorAttributes>(
             graph::makeTensorAttributes("token", dataType, tokenDims, generateStrides(tokenDims)));
 
         const std::vector<int64_t> offsetDims = {tc.experts, 1, 1};
-        auto firstTokenOffsetAttr = std::make_shared<graph::TensorAttributes>(
+        const auto firstTokenOffsetAttr = std::make_shared<graph::TensorAttributes>(
             graph::makeTensorAttributes("first_token_offset",
                                         hipdnn_frontend::DataType::INT32,
                                         offsetDims,
@@ -91,7 +92,7 @@ public:
         moeAttrs.set_name("MoeGroupedMatmulBwd_integration");
         moeAttrs.set_compute_data_type(graphObj.get_compute_data_type());
 
-        auto dweightAttr = graphObj.moe_grouped_matmul_bwd(
+        const auto dweightAttr = graphObj.moe_grouped_matmul_bwd(
             doutputAttr, tokenAttr, firstTokenOffsetAttr, moeAttrs);
         dweightAttr->set_output(true);
 
@@ -99,13 +100,13 @@ public:
         // [experts, K, N] with column-major strides; the harness reads both back off the
         // attribute after validate() to size and lay out the output buffer.
 
-        auto validateResult = graphObj.validate();
+        const auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
         {
             throw std::runtime_error("Failed to validate graph: " + validateResult.get_message());
         }
 
-        auto buildResult = graphObj.build_operation_graph(handle);
+        const auto buildResult = graphObj.build_operation_graph(handle);
         if(buildResult.is_bad())
         {
             throw std::runtime_error("Failed to build operation graph: "
