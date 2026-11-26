@@ -868,7 +868,7 @@ class TestFwdPrefetchGlobalRegsNumerics(unittest.TestCase):
         ok, why = _run_one(
             GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_global_regs=True, **kw
         )
-        _assert_case_ran(self, ok, why)
+        assert_case_ran(self, ok, why)
 
     def test_pipelines(self):
         for pipeline in _MFMA_PIPELINES:
