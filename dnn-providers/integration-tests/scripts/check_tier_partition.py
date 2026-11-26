@@ -7,7 +7,9 @@ The tier YAMLs (test_categories*.yaml) build one --gtest_filter per tier from na
 patterns. A test that no tier selects never runs in any CTest suite, and a test that two
 tiers select runs twice. Neither shows up as a failure, so this check lists the binary's
 tests (--gtest_list_tests) and applies the YAML's patterns to them with GTest's own
-matching rules (':'-free patterns, '*' and '?' wildcards, case-sensitive).
+matching rules (':'-free patterns, '*' wildcard, case-sensitive). It also applies the shared
+parser's pattern rule (alphanumerics, '*', '.', '-', '_' and '/' only), so a pattern the
+parser would reject, such as one with '?', fails here too.
 
 It also checks that every test_patterns entry of the tiers named by --require-match
 selects at least one test, which catches a renamed test or suite that an opt-in list
@@ -27,8 +29,13 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
+
+# The tier YAMLs are validated by the shared parser at configure time; reuse its pattern rule.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared" / "ctest"))
+from parse_test_categories import validate_gtest_pattern  # noqa: E402
 
 TIERS = ("quick", "standard", "comprehensive", "full")
 
@@ -62,8 +69,8 @@ def list_tests(exe):
 
 
 def matches(pattern, name):
-    # GTest wildcards are '*' and '?'; '[' and ']' are literal characters in a filter.
-    return fnmatch.fnmatchcase(name, pattern.replace("[", "[[]"))
+    # '*' is the only wildcard the shared parser lets a pattern use; '?' and '[' stay literal.
+    return fnmatch.fnmatchcase(name, pattern.replace("[", "[[]").replace("?", "[?]"))
 
 
 def selects(category, name):
@@ -119,7 +126,16 @@ def check(yaml_path, exe, require_match, no_device_skips=()):
             f"{exe} listed no tests. On Windows the ROCm runtime directory must be on PATH."
         )
 
+    # The same pattern rules as the shared parser that builds the CTest filters, so a pattern it
+    # would reject at configure time (for example one with '?') fails here too.
     errors = []
+    for category_name, category in categories.items():
+        for key in ("test_patterns", "exclude"):
+            for pattern in category.get(key, []) or []:
+                problem = validate_gtest_pattern(pattern)
+                if problem:
+                    errors.append(f"{category_name} {key}: {problem}")
+
     for name in names:
         chosen = [t for t, c in tiers.items() if selects(c, name)]
         if len(chosen) != 1:

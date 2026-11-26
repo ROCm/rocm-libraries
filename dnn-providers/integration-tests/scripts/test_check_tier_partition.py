@@ -86,11 +86,21 @@ def test_no_listed_tests_fails(run):
         run([])
 
 
-def test_question_mark_and_bracket_follow_gtest_rules():
-    assert ctp.matches("Suite?.Test", "Suite1.Test")
-    assert not ctp.matches("Suite?.Test", "Suite12.Test")
+def test_only_the_star_is_a_wildcard():
+    assert ctp.matches("Suite*.Test", "Suite12.Test")
+    assert not ctp.matches("Suite?.Test", "Suite1.Test")
+    assert ctp.matches("Suite?.Test", "Suite?.Test")
     assert ctp.matches("Suite.Test[0]", "Suite.Test[0]")
     assert not ctp.matches("Suite.Test[0]", "Suite.Test0")
+
+
+@pytest.mark.parametrize("pattern", ["Suite?.Test", "Suite.Test[0]", "A:B", "A B"])
+def test_pattern_the_shared_parser_rejects_fails(run, pattern):
+    yaml_text = YAML.replace(
+        'test_patterns: ["Full*"]', f'test_patterns: ["Full*", "{pattern}"]'
+    )
+    with pytest.raises(SystemExit, match="Invalid gtest pattern"):
+        run(TESTS, yaml_text)
 
 
 def test_gtest_filter_is_positive_minus_negative():
