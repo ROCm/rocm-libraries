@@ -150,11 +150,16 @@ extern "C" {
  *     rocke_img2col_conv_problem_* functions are removed (the conv
  *     rocke_conv_problem_* ones replace them), and the tensor_view descriptor
  *     type and its functions are renamed rocke_tv_tensor_descriptor*. The
- *     standalone fused-MoE orchestrator header and its functions
- *     (rocke_fused_moe_forward_*, rocke_fused_moe_host_preshuffle_b,
- *     rocke_fused_moe_build_per_expert_problems, rocke_fmoe_dtype_*) are
- *     removed; it redefined rocke_fmoe_forward_spec_t and
- *     rocke_grouped_gemm_problem_t with other layouts. */
+ *     standalone fused-MoE orchestrator header is removed, and with it
+ *     rocke_fused_moe_forward_t and rocke_fused_moe_forward_init, _forward,
+ *     _static, _dynamic and _workspace_specs; rocke_fused_moe_host_preshuffle_b
+ *     and rocke_fused_moe_build_per_expert_problems; rocke_fmoe_dtype_t and
+ *     rocke_fmoe_dtype_elem_bytes and _to_universal; and rocke_ws_dtype_t and
+ *     rocke_ws_spec_t. It redefined rocke_fmoe_forward_spec_t and
+ *     rocke_grouped_gemm_problem_t with other layouts; the fused-MoE instance's
+ *     own entries in rocke/instance_fused_moe_e2e.h
+ *     (rocke_build_fused_moe_forward, rocke_fused_moe_forward_free and
+ *     rocke_fused_moe_forward_lower_to_llvm) stay. */
 #define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
