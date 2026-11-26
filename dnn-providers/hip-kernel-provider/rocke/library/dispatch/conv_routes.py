@@ -535,6 +535,9 @@ def winograd_steps(plan, problem, direction: str) -> tuple:
     hz, h = sel._relayout_halos(problem, direction)
     Di, Hi, Wi, C, K = sel._winograd_problem(problem, direction)
     spec = cw.WinogradYxSpec(Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, **plan.spec_dict)
+    if spec.bias:
+        # a route serves a plain conv request: it has no bias tensor to bind
+        raise ValueError("winograd route: the spec adds a conv bias, routes carry none")
     src = (Di - 2 * hz, Hi - 2 * h, Wi - 2 * h, C)
     halo = h if hz == h else (hz, h, h)
     odt = "f16" if spec.op_dtype == "f16" else "bf16"

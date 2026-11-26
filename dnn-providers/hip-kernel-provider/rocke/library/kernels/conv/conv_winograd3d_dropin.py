@@ -13,6 +13,10 @@
 2. the main kernel (``build_winograd_yx``), writing Y / dX as NDHWC bf16;
 3. with split-K (``ksplit``), the ordered f32 reduction (``build_ks_reduce``).
 
+A FWD plan whose spec sets ``bias`` adds a per-output-channel bias (a contiguous bf16
+vector of K, the ``bias=`` argument of the call) in f32 before the output rounding: in the
+main kernel's epilogue, or in the split-K reduction (the partials stay raw).
+
 A plan whose spec reads NDHWC directly (``xin="ndhwc"``: the zero halo by predication
 (``xpad`` / ``xpad_z``), the prescale in-kernel (``bps=3``)) skips the relayout: its only
 auxiliary launch is the weight transform. The fill's 16-byte lane loads then touch one
@@ -59,6 +63,8 @@ class Winograd3dDropin:
             raise ValueError(f"needs a yx drop-in plan, got {plan.kind} / {plan.mode}")
         if direction != plan.direction:
             raise ValueError(f"plan is for {plan.direction}, not {direction}")
+        if plan.spec_dict.get("bias") and direction != "fwd":
+            raise ValueError("drop-in: the conv bias is a forward (FWD) epilogue")
         self.direction = direction
         hz, h = sel._relayout_halos(problem, direction)
         Di, Hi, Wi, C, K = sel._winograd_problem(problem, direction)
@@ -147,7 +153,13 @@ class Winograd3dDropin:
         )
         km = cw.build_winograd_yx(spec)
         names = [p.name for p in km.params]
-        want = ["X", "U", "Y"] + (["E"] if self.bps in (1, 2) else [])
+        self.bias = spec.bias
+        main_bias = spec.bias and spec.ksplit == 1
+        want = (
+            ["X", "U", "Y"]
+            + (["E"] if self.bps in (1, 2) else [])
+            + (["Bias", "Bias_bytes"] if main_bias else [])
+        )
         if names != want:
             raise ValueError(f"drop-in: main kernel arguments {names}, not {want}")
         self.ks = spec.ksplit
@@ -159,6 +171,8 @@ class Winograd3dDropin:
         )
         if self.bps in (1, 2):
             sgm = sgm.ptr("E", "i32")
+        if main_bias:
+            sgm = sgm.ptr("Bias", "bf16").scalar("Bias_bytes", "i32")
         self._main = KernelLauncher(
             hsaco=compile_kernel(km, arch=arch).hsaco,
             kernel_name=km.name,
@@ -170,11 +184,14 @@ class Winograd3dDropin:
         self.kernel_names = [ka.name, km.name]
         nel = spec.Do * spec.Ho * spec.Wo * K
         if self.ks > 1:
-            kr = cw.build_ks_reduce(cw.KsReduceSpec(nel, self.ks))
+            kr = cw.build_ks_reduce(cw.KsReduceSpec(nel, self.ks, K, bias=spec.bias))
+            sgr = SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16")
+            if spec.bias:
+                sgr = sgr.ptr("Bias", "bf16").scalar("Bias_bytes", "i32")
             self._red = KernelLauncher(
                 hsaco=compile_kernel(kr, arch=arch).hsaco,
                 kernel_name=kr.name,
-                signature=SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build(),
+                signature=sgr.build(),
             )
             self._cred = LaunchConfig(grid=cw.ks_reduce_grid(nel), block=(256, 1, 1))
             self.kernel_names.append(kr.name)
@@ -200,18 +217,26 @@ class Winograd3dDropin:
             else None
         )
 
-    def __call__(self, x, w, y: Optional[object] = None):
+    def __call__(self, x, w, y: Optional[object] = None, bias: Optional[object] = None):
         """x: [D, H, W, C] (or [1, D, H, W, C]) bf16 -- X for FWD, dY for BWD-data; w: the
         forward filter [K, 3, 3, 3, C] bf16 (both directions); y: optional output
-        [Do, Ho, Wo, K] bf16 (Y / dX), allocated when None. Returns y."""
+        [Do, Ho, Wo, K] bf16 (Y / dX), allocated when None; bias: the [K] bf16 bias of a
+        plan built with it (and only then). Returns y."""
         import torch
 
         # the kernels' buffer ranges come from the problem, not from the tensors: refuse
         # any tensor that is not exactly the one they address (shape, dtype, layout,
         # the workspaces' device)
         x = x.reshape(self.src) if x.dim() == 5 else x
-        for nm, t, shape in (("x", x, self.src), ("w", w, self.wshape)) + (
-            (("y", y, self.out),) if y is not None else ()
+        if (bias is not None) != self.bias:
+            raise ValueError(
+                "bias: the plan "
+                + ("adds a bias, pass it" if self.bias else "has no bias epilogue")
+            )
+        for nm, t, shape in (
+            (("x", x, self.src), ("w", w, self.wshape))
+            + ((("y", y, self.out),) if y is not None else ())
+            + ((("bias", bias, self.out[3:]),) if bias is not None else ())
         ):
             if (
                 tuple(t.shape) != shape
@@ -234,9 +259,10 @@ class Winograd3dDropin:
                 {"X": x, "X8": self.X8, "W": w, "U": self.U, **ea}, config=self._caux
             )
         xin = x if self.ndhwc else self.X8
+        eb = {"Bias": bias, "Bias_bytes": bias.nbytes} if bias is not None else {}
         if self.ks > 1:
             self._main({"X": xin, "U": self.U, "Y": self.P, **ea}, config=self._cmain)
-            self._red({"P": self.P, "Y": y}, config=self._cred)
+            self._red({"P": self.P, "Y": y, **eb}, config=self._cred)
         else:
-            self._main({"X": xin, "U": self.U, "Y": y, **ea}, config=self._cmain)
+            self._main({"X": xin, "U": self.U, "Y": y, **ea, **eb}, config=self._cmain)
         return y
