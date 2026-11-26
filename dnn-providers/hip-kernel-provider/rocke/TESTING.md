@@ -1618,12 +1618,12 @@ one first. It holds three kinds of record:
 | `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | 90 days | as `PendingTest` |
 | `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>` of a test function (not a class); a name without parameters covers all of them, or, with `params`, those whose parameter ids include each of them (one record for one defect across several cases). May name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; no two entries may cover one test, so one entry names every arch and compiler it fails on; at most `QUARANTINE_CAP` (10) at once | 30 days | as `PendingTest`; its test stays held out until the record is re-decided |
 
-Every pending entry takes its lane, issue and expiry from a lane ticket
-(`LaneTicket`, listed in `LANE_TICKETS`): the issue that tracks one lane's
-entries and the one date, set to when the lane's capability is expected, by
-which all of them are re-decided. The check refuses an entry whose issue is no
-lane ticket's, or that names one's issue with another lane or date. The
-measured budgets share one issue and one date the same way.
+Every pending entry holds a lane ticket (`LaneTicket`, listed in
+`LANE_TICKETS`) and takes its lane, issue and expiry from it: the issue that
+tracks one lane's entries and the one date, set to when the lane's capability
+is expected, by which all of them are re-decided. The check refuses an entry
+whose ticket `LANE_TICKETS` does not list. The measured budgets share one issue
+and one date the same way.
 
 A record whose expiry is further away than its longest window is refused when
 the registry loads. Reaching the date means re-deciding the record: fix the
@@ -1693,8 +1693,8 @@ works per file. It fails when:
   stale (its test gone, a whole-file record's file assigned to a CI entry, or a
   case record's file assigned to none);
 - a record's team is not a CODEOWNERS team of its test;
-- a pending entry's issue is no lane ticket's, or it names a lane ticket's issue
-  with another lane or expiry, or a lane ticket is missing from `LANE_TICKETS`;
+- a pending entry's lane ticket is missing from `LANE_TICKETS`, or two listed
+  tickets share an issue;
 - a test file calls an arch helper with arches no pull-request runner has (a
   literal, or a module-level name bound to one) and has no `RUNNER_HARDWARE`
   or whole-file record;

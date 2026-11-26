@@ -253,15 +253,17 @@ def _days_from_today(days: int) -> str:
 
 
 def _pending(path: str, lane: Lane, **overrides: object) -> PendingTest:
-    """A pending entry with a valid team, issue and expiry, overridden by
-    ``overrides``."""
+    """A pending entry with a valid team, reason and lane ticket (its issue and
+    expiry), overridden by ``overrides``."""
     fields = {
         "reason": "why",
         "team": TEAMS[0],
         "issue": "AICK-1234",
         "expires": _days_from_today(30),
     }
-    return PendingTest(path, lane, **{**fields, **overrides})
+    fields.update(overrides)
+    ticket = LaneTicket(fields.pop("issue"), lane, fields.pop("expires"))
+    return ticket.waiting(path, **fields)
 
 
 def test_audit_finds_files_in_limbo_and_stale_entries():
@@ -441,43 +443,35 @@ def test_a_pending_test_needs_its_recorded_reason_team_and_issue():
 def lane_ticket_breaches(
     pending: Iterable[PendingTest], tickets: Iterable[LaneTicket]
 ) -> list[str]:
-    """The lane tickets listed twice, the entries whose issue is no lane
-    ticket's, and the entries that name a lane ticket's issue with another lane
-    or expiry: every entry takes all three from its lane ticket, so each lane
-    of an issue has one date."""
+    """The lane tickets listed twice, or two of them for one issue, and the
+    entries whose ticket is not listed: an entry's lane, issue and expiry are
+    its ticket's, so a listed ticket gives each lane of an issue one date."""
     tickets = list(tickets)
-    pending = list(pending)
     issues = [ticket.issue for ticket in tickets]
     breaches = [
         f"lane ticket listed twice: {issue}"
         for issue in sorted({issue for issue in issues if issues.count(issue) > 1})
     ]
-    ticket_of = {ticket.issue: ticket for ticket in tickets}
-    breaches += [
-        f"{entry.path}{'::' + entry.node if entry.node else ''} names "
-        f"{entry.issue}, which is no lane ticket's issue: add a LaneTicket to "
-        "LANE_TICKETS and write the entry with LaneTicket.waiting"
-        for entry in pending
-        if entry.issue not in ticket_of
-    ]
-    breaches += [
-        f"{entry.path}{'::' + entry.node if entry.node else ''} names lane ticket "
-        f"{entry.issue} with lane {entry.lane.name} and expiry {entry.expires}, "
-        f"expected {ticket.lane.name} and {ticket.expires}: write it with "
-        "LaneTicket.waiting"
-        for entry in pending
-        if (ticket := ticket_of.get(entry.issue)) is not None
-        and (entry.lane, entry.expires) != (ticket.lane, ticket.expires)
-    ]
+    breaches += sorted(
+        {
+            f"{entry.path}{'::' + entry.node if entry.node else ''} waits on "
+            f"{entry.issue} ({entry.lane.name}, {entry.expires}), a "
+            "ticket LANE_TICKETS does not list: add it there"
+            for entry in pending
+            if entry.ticket not in tickets
+        }
+    )
     return breaches
 
 
 def test_a_lane_ticket_gives_its_records_its_lane_issue_and_expiry():
     """A lane ticket's entries take its lane, issue and expiry; a ticket needs
-    a tracked issue, a listed lane and an expiry within the pending window."""
+    a tracked issue, a listed lane and an expiry within the pending window, and
+    an entry needs a ticket."""
     ticket = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(30))
     entry = ticket.waiting("library/tests/test_x.py", "why", TEAMS[0], node="test_y")
-    assert (entry.lane, entry.issue, entry.expires, entry.node) == (
+    assert (entry.ticket, entry.lane, entry.issue, entry.expires, entry.node) == (
+        ticket,
         RUNNER_HARDWARE,
         "AICK-1",
         ticket.expires,
@@ -492,52 +486,35 @@ def test_a_lane_ticket_gives_its_records_its_lane_issue_and_expiry():
         LaneTicket("AICK-1", Lane("unlisted", "why"), _days_from_today(30))
     with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
         LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(PENDING_MAX_DAYS + 1))
+    with pytest.raises(TypeError, match="expected a LaneTicket"):
+        PendingTest("library/tests/test_x.py", RUNNER_HARDWARE, "why", TEAMS[0])
 
 
-def test_a_record_that_names_a_lane_ticket_takes_its_lane_and_expiry():
-    """An entry whose issue is no lane ticket's, or that names a lane ticket's
-    issue with another lane or date, is a breach, so each lane of an issue
-    keeps one date; a ticket is listed once."""
-    ticket = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(30))
+def test_an_entry_whose_ticket_is_not_listed_is_a_breach():
+    """An entry's ticket must be listed in LANE_TICKETS, once per issue, so
+    each lane of an issue keeps one date."""
+    listed = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(30))
     path = "library/tests/test_x.py"
-    assert lane_ticket_breaches([ticket.waiting(path, "why", TEAMS[0])], [ticket]) == []
-    other_date = _pending(
-        path, RUNNER_HARDWARE, issue="AICK-1", expires=_days_from_today(20)
-    )
-    other_lane = _pending(path, TICKET, issue="AICK-1", expires=ticket.expires)
-    other_issue = _pending(path, TICKET, issue="AICK-2")
-    assert lane_ticket_breaches([other_date, other_lane, other_issue], [ticket]) == [
+    assert lane_ticket_breaches([listed.waiting(path, "why", TEAMS[0])], [listed]) == []
+    unlisted = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(20))
+    assert lane_ticket_breaches(
+        [unlisted.waiting(path, "why", TEAMS[0])], [listed]
+    ) == [
         (
-            f"{path} names AICK-2, which is no lane ticket's issue: add a "
-            "LaneTicket to LANE_TICKETS and write the entry with LaneTicket.waiting"
-        ),
-        (
-            f"{path} names lane ticket AICK-1 with lane runner-hardware and expiry "
-            f"{other_date.expires}, expected runner-hardware and {ticket.expires}: "
-            "write it with LaneTicket.waiting"
-        ),
-        (
-            f"{path} names lane ticket AICK-1 with lane ticket and expiry "
-            f"{ticket.expires}, expected runner-hardware and {ticket.expires}: "
-            "write it with LaneTicket.waiting"
-        ),
+            f"{path} waits on AICK-1 (runner-hardware, {unlisted.expires}), a "
+            "ticket LANE_TICKETS does not list: add it there"
+        )
     ]
-    assert lane_ticket_breaches([], [ticket, ticket]) == [
+    assert lane_ticket_breaches([], [listed, unlisted]) == [
         "lane ticket listed twice: AICK-1"
     ]
 
 
-def test_every_record_of_a_lane_ticket_takes_its_lane_and_expiry():
-    """The registry's entries agree with its lane tickets, and every lane
-    ticket it defines is listed in LANE_TICKETS, which the check reads."""
+def test_every_entry_waits_on_a_listed_lane_ticket():
+    """Every pending entry's ticket is listed in LANE_TICKETS, once per
+    issue."""
     breaches = lane_ticket_breaches(PENDING, LANE_TICKETS)
     assert not breaches, breaches
-    unlisted = sorted(
-        ticket.issue
-        for ticket in vars(pending_lanes).values()
-        if isinstance(ticket, LaneTicket) and ticket not in LANE_TICKETS
-    )
-    assert not unlisted, f"lane tickets missing from LANE_TICKETS: {unlisted}"
 
 
 def test_a_record_expires_within_its_maximum_window(monkeypatch):
@@ -1554,7 +1531,7 @@ def test_a_case_that_needs_runner_hardware_has_a_record():
     ]
     assert not unrecorded, (
         "cases that need a GPU no pull-request runner has, with no record: add a "
-        "PendingTest(<file>, RUNNER_HARDWARE, ...) to rocke.tests.pending_lanes: "
+        "record waiting on a RUNNER_HARDWARE lane ticket to rocke.tests.pending_lanes: "
         f"{unrecorded}"
     )
 

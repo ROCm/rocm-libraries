@@ -179,17 +179,8 @@ def utc_today() -> datetime.date:
     return datetime.datetime.now(datetime.timezone.utc).date()
 
 
-def _require_recorded(
-    kind: str,
-    subject: str,
-    reason: str,
-    team: str,
-    issue: str,
-    expires: str,
-    max_days: int,
-) -> None:
-    """Fail unless the reason is plain text, the team one of ``TEAMS``, the
-    issue a tracked one, and expires an ISO date at most ``max_days`` away."""
+def _require_reason_and_team(kind: str, subject: str, reason: str, team: str) -> None:
+    """Fail unless the reason is plain text and the team one of ``TEAMS``."""
     if not reason.strip():
         raise ValueError(
             f"{kind} failed - {subject}, reason is empty, expected the recorded text"
@@ -203,6 +194,20 @@ def _require_recorded(
             f"{kind} failed - {subject}, team={team!r}, expected one of {TEAMS}, "
             "the GitHub team that owns the test"
         )
+
+
+def _require_recorded(
+    kind: str,
+    subject: str,
+    reason: str,
+    team: str,
+    issue: str,
+    expires: str,
+    max_days: int,
+) -> None:
+    """Fail unless the reason is plain text, the team one of ``TEAMS``, the
+    issue a tracked one, and expires an ISO date at most ``max_days`` away."""
+    _require_reason_and_team(kind, subject, reason, team)
     _require_issue(kind, subject, issue)
     _require_expiry(kind, subject, expires, max_days)
 
@@ -235,9 +240,49 @@ def _require_expiry(kind: str, subject: str, expires: str, max_days: int) -> Non
 
 
 @dataclass(frozen=True)
+class LaneTicket:
+    """The issue that tracks the pending entries waiting for one lane, and the
+    one date by which they are all re-decided: when the lane's capability is
+    expected, at most ``PENDING_MAX_DAYS`` away.
+
+    Each pending entry holds its lane ticket and takes its lane, issue and
+    expiry from it (:meth:`waiting`), so the lane has one date, not one per
+    entry. ``LANE_TICKETS`` lists every lane ticket, and the registry check
+    refuses an entry whose ticket it does not list.
+    """
+
+    issue: str
+    lane: Lane
+    expires: str
+
+    def __post_init__(self) -> None:
+        subject = f"issue={self.issue!r}"
+        _require_issue("LaneTicket", subject, self.issue)
+        if self.lane not in LANES:
+            raise ValueError(
+                f"LaneTicket failed - {subject}, lane={self.lane.name!r}, expected "
+                "one of rocke.tests.lanes.LANES"
+            )
+        _require_expiry("LaneTicket", subject, self.expires, PENDING_MAX_DAYS)
+
+    def waiting(
+        self,
+        path: str,
+        reason: str,
+        team: str,
+        *,
+        node: str = "",
+        whole_file: bool = False,
+    ) -> PendingTest:
+        """The entry of ``path`` (or its test ``node``) waiting on this
+        ticket."""
+        return PendingTest(path, self, reason, team, node=node, whole_file=whole_file)
+
+
+@dataclass(frozen=True)
 class PendingTest:
-    """One test file, or one test of it, waiting for a lane, with its recorded
-    reason.
+    """One test file, or one test of it, waiting on a lane ticket, with its
+    recorded reason; its lane, issue and expiry are its ticket's.
 
     ``whole_file`` says the file is assigned to no CI entry: the entry covers
     each of its cases, and is the file's only entry. Otherwise the file is
@@ -251,35 +296,39 @@ class PendingTest:
     """
 
     path: str
-    lane: Lane
+    ticket: LaneTicket
     reason: str
     team: str
-    issue: str
-    expires: str
     node: str = ""
     whole_file: bool = False
 
     def __post_init__(self) -> None:
         _require_test_path("PendingTest", self.path)
-        if self.lane not in LANES:
-            raise ValueError(
-                f"PendingTest failed - path={self.path!r}, lane={self.lane.name!r}, "
-                "expected one of rocke.tests.lanes.LANES"
+        if not isinstance(self.ticket, LaneTicket):
+            raise TypeError(
+                f"PendingTest failed - path={self.path!r}, ticket={self.ticket!r}, "
+                "expected a LaneTicket"
             )
         if self.node and self.whole_file:
             raise ValueError(
                 f"PendingTest failed - path={self.path!r}, node={self.node!r}, "
                 "whole_file=True, expected one test or the whole file"
             )
-        _require_recorded(
-            "PendingTest",
-            f"path={self.path!r}",
-            self.reason,
-            self.team,
-            self.issue,
-            self.expires,
-            PENDING_MAX_DAYS,
+        _require_reason_and_team(
+            "PendingTest", f"path={self.path!r}", self.reason, self.team
         )
+
+    @property
+    def lane(self) -> Lane:
+        return self.ticket.lane
+
+    @property
+    def issue(self) -> str:
+        return self.ticket.issue
+
+    @property
+    def expires(self) -> str:
+        return self.ticket.expires
 
     def covers(
         self,
@@ -309,56 +358,6 @@ class PendingTest:
     @property
     def expiry_date(self) -> datetime.date:
         return datetime.date.fromisoformat(self.expires)
-
-
-@dataclass(frozen=True)
-class LaneTicket:
-    """The issue that tracks the records waiting for one lane, and the one
-    date by which they are all re-decided: when the lane's capability is
-    expected, at most ``PENDING_MAX_DAYS`` away.
-
-    Its pending entries take their lane, issue and expiry from it
-    (:meth:`waiting`), so the lane has one date, not one per entry;
-    ``LANE_TICKETS`` lists every lane ticket, and the registry check refuses a
-    pending entry whose issue is no lane ticket's, or that names one's issue
-    with another lane or date.
-    """
-
-    issue: str
-    lane: Lane
-    expires: str
-
-    def __post_init__(self) -> None:
-        subject = f"issue={self.issue!r}"
-        _require_issue("LaneTicket", subject, self.issue)
-        if self.lane not in LANES:
-            raise ValueError(
-                f"LaneTicket failed - {subject}, lane={self.lane.name!r}, expected "
-                "one of rocke.tests.lanes.LANES"
-            )
-        _require_expiry("LaneTicket", subject, self.expires, PENDING_MAX_DAYS)
-
-    def waiting(
-        self,
-        path: str,
-        reason: str,
-        team: str,
-        *,
-        node: str = "",
-        whole_file: bool = False,
-    ) -> PendingTest:
-        """The record of ``path`` (or its test ``node``) waiting for this
-        ticket's lane, with its issue and expiry."""
-        return PendingTest(
-            path,
-            self.lane,
-            reason,
-            team,
-            self.issue,
-            self.expires,
-            node=node,
-            whole_file=whole_file,
-        )
 
 
 # An llvm-project commit: at least 12 of its lowercase hex digits.
@@ -674,7 +673,8 @@ _RUNTIME_TORCH_INTEROP = LaneTicket("AICK-3409", TICKET, "2027-01-08")
 # The device cases that need a gfx950 GPU.
 _GFX950_RUNNERS = LaneTicket("AICK-3411", RUNNER_HARDWARE, "2027-02-09")
 # The device cases that need another GPU no CI stage has: gfx1250, gfx1151,
-# gfx1200, gfx1201, gfx90a, or a second GPU.
+# gfx1200, gfx1201, gfx90a, or a second GPU; also the files whose cases need
+# gfx950 and one of those, re-decided when the last of their GPUs lands.
 _OTHER_RUNNERS = LaneTicket("AICK-3469", RUNNER_HARDWARE, "2027-02-16")
 # The cases that need what CI's build or test step lacks: the C++ engine's
 # Python modules or shared library, the LLVM tools, optional packages.
