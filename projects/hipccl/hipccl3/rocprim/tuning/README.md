@@ -79,6 +79,9 @@ The baseline results are primbench CSV files named `benchmark_rocprim_<benchmark
 ./confgen/generate.py --input ./output --existing ../rocprim/include/rocprim/device/detail/config/ --output ./tmp --benchmark-dir ../build/benchmark
 ```
 
+The benchmarks run from `--benchmark-dir` only run the cases the tuner measured, at the size it used.
+primbench options such as `--seed`, `--min-gpu-temp` or `--max-warming-secs` are passed on to them; see `./confgen/generate.py --help-primbench`.
+
 With `--no-compare-to-base`, and for algorithms whose tuned cases don't match any baseline case, the configs are compared to the baselines measured by the tuner (`--tune-baseline`) instead.
 
 ## Migrating from old tuning infrastructure

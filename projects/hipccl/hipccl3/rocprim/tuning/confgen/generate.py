@@ -34,6 +34,41 @@ BENCHMARK_NAMES = {
     ],
 }
 
+# primbench options passed to the baseline benchmarks, with their types and help texts
+# (see the settings in primbench.hpp). --size, --filter, --csv-out and --json-out are
+# set by this script.
+PRIMBENCH_OPTIONS = {
+    "hot": (bool, "Skip clearing the GPU cache between batch iterations."),
+    "seed": (int, "Seed used for input generation."),
+    "min-gpu-ms-per-batch": (
+        float,
+        "Minimum duration of a batch in milliseconds (GPU time).",
+    ),
+    "min-secs": (float, "Minimum total benchmark duration in seconds (wall time)."),
+    "noise-timeout-secs": (
+        float,
+        "Maximum total benchmark duration in seconds before timing out a noisy run "
+        "(wall time).",
+    ),
+    "batch-window-size": (
+        int,
+        "Number of batch times used in the noise window to decide early stopping.",
+    ),
+    "noise-tolerance-percent": (
+        float,
+        "Noise tolerance of batch times in percent, used to decide early stopping.",
+    ),
+    "min-gpu-temp": (int, "Minimum GPU temperature in °C."),
+    "max-gpu-temp": (int, "Maximum GPU temperature in °C."),
+    "max-warming-secs": (float, "Maximum seconds allowed for GPU warming."),
+    "max-cooling-secs": (float, "Maximum seconds allowed for GPU cooling."),
+    "stream-blocking-timeout-secs": (
+        float,
+        "Maximum stream blocking duration in seconds before timing out.",
+    ),
+    "skip-tests": (bool, "Skip running correctness tests."),
+}
+
 
 def round_up(value, alignment):
     """Rounds value up to a multiple of alignment."""
@@ -342,6 +377,51 @@ def read_baseline_csv(path: pathlib.Path) -> dict[str, float]:
         }
 
 
+def add_primbench_options(parser: argparse.ArgumentParser, hidden: bool) -> None:
+    """Adds the primbench options of PRIMBENCH_OPTIONS to a parser, hidden from its
+    --help if 'hidden' (they're listed by --help-primbench instead)."""
+    for option, (option_type, option_help) in PRIMBENCH_OPTIONS.items():
+        option_help = argparse.SUPPRESS if hidden else option_help
+        if option_type is bool:
+            parser.add_argument(
+                f"--{option}", action="store_true", default=None, help=option_help
+            )
+        else:
+            parser.add_argument(f"--{option}", type=option_type, help=option_help)
+
+
+class PrimbenchHelpAction(argparse.Action):
+    """Prints the primbench options passed to the baseline benchmarks, and exits."""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        primbench_parser = argparse.ArgumentParser(
+            prog=parser.prog,
+            usage=f"{parser.prog} [primbench options]",
+            description="primbench options, passed to the baseline benchmarks run from "
+            "--benchmark-dir. The input size and the cases are taken from the tuner's "
+            "results.",
+            add_help=False,
+        )
+        add_primbench_options(primbench_parser, hidden=False)
+        primbench_parser.print_help()
+        parser.exit()
+
+
+def get_primbench_args(args: argparse.Namespace) -> list[str]:
+    """Returns the primbench options that were set on the command line."""
+    primbench_args = []
+    for option in PRIMBENCH_OPTIONS:
+        value = getattr(args, option.replace("-", "_"))
+        if value is True:
+            primbench_args.append(f"--{option}")
+        elif value is not None and value is not False:
+            primbench_args += [f"--{option}", str(value)]
+    return primbench_args
+
+
 def run_baseline_benchmark(
     benchmark_dir: pathlib.Path,
     benchmark: str,
@@ -349,6 +429,7 @@ def run_baseline_benchmark(
     names: set[str],
     sizes: set[int],
     csv_path: pathlib.Path,
+    primbench_args: list[str],
 ) -> bool:
     """Runs the cases of a rocPRIM benchmark that the tuner measured, and writes the
     results to csv_path. The benchmark must be built from the baseline sources."""
@@ -371,6 +452,7 @@ def run_baseline_benchmark(
     case_filter = "^(" + "|".join(escape(n) for n in sorted(names)) + ")$"
     if names and len(case_filter) < 100_000:
         args += ["--filter", case_filter]
+    args += primbench_args
 
     log.info(f"Running baseline benchmark {executable.name} for {arch}")
     try:
@@ -385,6 +467,7 @@ def load_baselines(
     cases: dict[tuple[str, str], dict[str, ty.Any]],
     baseline_dir: pathlib.Path,
     benchmark_dir: pathlib.Path | None,
+    primbench_args: list[str],
 ) -> dict[tuple[str, str], dict[str, float]]:
     """Returns the baseline results (bytes per second by case name) of each
     (benchmark, arch) in 'cases', read from primbench CSV files named
@@ -402,6 +485,7 @@ def load_baselines(
                 needed["names"],
                 needed["sizes"],
                 csv_path,
+                primbench_args,
             )
         if csv_path.exists():
             baselines[(benchmark, arch)] = read_baseline_csv(csv_path)
@@ -586,6 +670,13 @@ def main():
         help="Directory with the rocPRIM benchmark executables, built from the baseline "
         "sources. Needed if --baseline-path is not set, unless --no-compare-to-base.",
     )
+    cli.add_argument(
+        "--help-primbench",
+        action=PrimbenchHelpAction,
+        help="Show the primbench options passed to the baseline benchmarks run from "
+        "--benchmark-dir, and exit.",
+    )
+    add_primbench_options(cli, hidden=True)
 
     args = cli.parse_args()
 
@@ -626,9 +717,14 @@ def main():
     # Load the baseline results of the benchmarks that measure the tuned algorithms.
     baselines = {}
     compare_to_base = not args.no_compare_to_base
+    primbench_args = get_primbench_args(args)
     if not compare_to_base and (args.baseline_path or args.benchmark_dir):
         log.warning(
             "--baseline-path and --benchmark-dir are ignored with --no-compare-to-base"
+        )
+    if primbench_args and (not compare_to_base or args.baseline_path):
+        log.warning(
+            "primbench options are only used for the benchmarks run from --benchmark-dir"
         )
     if compare_to_base:
         if args.baseline_path:
@@ -661,7 +757,7 @@ def main():
                 if path is not None:
                     needed["names"] |= set(read_case_results(path))
                     needed["sizes"].add(int(re.search(r"_size(\d+)", path.name)[1]))
-        baselines = load_baselines(cases, baseline_dir, benchmark_dir)
+        baselines = load_baselines(cases, baseline_dir, benchmark_dir, primbench_args)
 
     algs: dict[str, dict[frozenset, dict[frozenset, dict[str, ty.Any]]]] = {}
     for file_path in file_paths:
