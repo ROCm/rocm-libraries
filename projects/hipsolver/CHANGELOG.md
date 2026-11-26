@@ -27,17 +27,17 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 
 * Added functions:
   * gelsBatched
-    * hipsolverXXgelsBatched_bufferSize
-    * hipsolverXXgelsBatched
+    * hipsolverSgelsBatched_bufferSize, hipsolverDgelsBatched_bufferSize, hipsolverCgelsBatched_bufferSize, hipsolverZgelsBatched_bufferSize
+    * hipsolverSgelsBatched, hipsolverDgelsBatched, hipsolverCgelsBatched, hipsolverZgelsBatched
   * geqrfBatched
     * hipsolverSgeqrfBatched_bufferSize, hipsolverDgeqrfBatched_bufferSize, hipsolverCgeqrfBatched_bufferSize, hipsolverZgeqrfBatched_bufferSize
     * hipsolverSgeqrfBatched, hipsolverDgeqrfBatched, hipsolverCgeqrfBatched, hipsolverZgeqrfBatched
   * getrfBatched
-    * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, and hipsolverZgetrfBatched_bufferSize
-    * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, and hipsolverZgetrfBatched
+    * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, hipsolverZgetrfBatched_bufferSize
+    * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, hipsolverZgetrfBatched
   * getriBatched
-    * hipsolverXgetriBatched_bufferSize
-    * hipsolverXgetriBatched
+    * hipsolverSgetriBatched_bufferSize, hipsolverDgetriBatched_bufferSize, hipsolverCgetriBatched_bufferSize, hipsolverZgetriBatched_bufferSize
+    * hipsolverSgetriBatched, hipsolverDgetriBatched, hipsolverCgetriBatched, hipsolverZgetriBatched
   * getrsBatched
     * hipsolverSgetrsBatched_bufferSize, hipsolverDgetrsBatched_bufferSize, hipsolverCgetrsBatched_bufferSize, hipsolverZgetrsBatched_bufferSize
     * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
