@@ -58,9 +58,9 @@ def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
     parser.addoption("--prebuilt-client")
-    parser.addoption("--client-lock-scope", choices=("gpu", "worker"), default="gpu",
-        help="Serialize clients per physical GPU (default), or per worker when "
-             "each client process owns an independent emulator instance.")
+    parser.addoption("--client-lock-scope", choices=("gpu", "worker"), default=None,
+        help="Serialize clients per physical GPU (gpu) or per worker (worker, "
+             "emulators only). Default: worker under an emulator, else gpu.")
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
@@ -162,23 +162,18 @@ def worker_gpu_id(worker_id):
 def worker_lock_path(tmp_path_factory, worker_id, worker_gpu_id, pytestconfig):
     if not worker_id:
         return None
+    from client_lock import client_lock_path
 
-    # Independent emulator instances do not contend for a physical GPU.
-    if (os.environ.get("HSA_MODEL_MEMFILE")
-            or pytestconfig.getoption("--client-lock-scope") == "worker"):
-        return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
-
-    # On real hardware, workers only avoid GPU contention when
-    # assign_gpu_to_worker() gave them *distinct* physical GPUs. If the
-    # worker count exceeds the number of visible GPUs (e.g. a single GPU
-    # pinned via ROCR_VISIBLE_DEVICES), multiple workers wrap around onto
-    # the same physical device. Key the lock by GPU id rather than worker
-    # id so those workers still serialize their client subprocesses
-    # instead of racing unsynchronized on the same GPU.
-    if worker_gpu_id is not None:
-        return tmp_path_factory.getbasetemp().parent / f"client_execution_gpu{worker_gpu_id}.lock"
-
-    return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+    # On real hardware, workers avoid GPU contention only when
+    # assign_gpu_to_worker() gave them distinct GPUs; with more workers than
+    # GPUs (e.g. one GPU pinned via ROCR_VISIBLE_DEVICES) several workers share
+    # one, so the lock is keyed by GPU id.
+    return client_lock_path(
+        tmp_path_factory.getbasetemp().parent,
+        worker_id,
+        worker_gpu_id,
+        pytestconfig.getoption("--client-lock-scope"),
+    )
 
 @pytest.fixture(scope="session", autouse=True)
 def assign_gpu_to_worker(worker_id, worker_gpu_id):

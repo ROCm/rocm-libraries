@@ -51,12 +51,14 @@ defined in exactly one place (the build/run modules) rather than duplicated
 here.
 """
 
+import atexit
 import contextlib
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import warnings
 
 import py
 import pytest
@@ -64,6 +66,36 @@ import pytest
 from artifact_helpers import artifact_name_for_config
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Process groups of helpers still running, so a worker stopped by SIGTERM (a
+# cancelled CI job, for example) or a normal interpreter exit kills their
+# clients too. POSIX only: on Windows start_new_session is ignored and only the
+# helper itself can be killed. Nothing runs on SIGKILL or os._exit (which
+# pytest-timeout's thread method uses); there the job's own cleanup has to reap
+# the clients, as the rocjitsu launcher does as a child subreaper.
+_live_helper_groups: set[int] = set()
+
+
+def _kill_live_helper_groups() -> None:
+    for group in list(_live_helper_groups):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(group, signal.SIGKILL)
+    _live_helper_groups.clear()
+
+
+def _kill_helpers_then_terminate(signum, frame) -> None:
+    _kill_live_helper_groups()
+    signal.signal(signum, _previous_sigterm_handler)
+    os.kill(os.getpid(), signum)
+
+
+_previous_sigterm_handler = signal.SIG_DFL
+if os.name == "posix":
+    atexit.register(_kill_live_helper_groups)
+    # Only the main thread may install signal handlers; xdist workers import
+    # this module there.
+    with contextlib.suppress(ValueError):
+        _previous_sigterm_handler = signal.signal(signal.SIGTERM, _kill_helpers_then_terminate)
 
 
 def _call_helper_in_subprocess(
@@ -86,25 +118,42 @@ def _call_helper_in_subprocess(
         f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-    # Own process group so a timeout interrupt can reap the child tree, not orphan it.
+    # Own process group (POSIX) so a timeout interrupt can reap the helper's
+    # whole child tree, not orphan it.
     proc = subprocess.Popen(
         [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
         env=env,
         start_new_session=True,
     )
+    if os.name == "posix":
+        _live_helper_groups.add(proc.pid)
+    returncode = None
     try:
         returncode = proc.wait()
     finally:
         # The helper may exit before its client. Own the whole group until
         # the phase finishes, including normal exit and interruption races.
         if os.name == "posix":
+            if returncode == 0 and _group_has_members(proc.pid):
+                # A client that outlives a successful helper is a helper bug;
+                # say so before killing it rather than hiding the leak.
+                warnings.warn(f"{config}: a client outlived its helper and was killed")
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
+            _live_helper_groups.discard(proc.pid)
         elif proc.poll() is None:
             proc.kill()
         proc.wait()
     if returncode != 0:
         raise subprocess.CalledProcessError(returncode, proc.args)
+
+
+def _group_has_members(group: int) -> bool:
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
