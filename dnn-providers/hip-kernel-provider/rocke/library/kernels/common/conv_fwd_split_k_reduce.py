@@ -15,9 +15,9 @@ two-stage split): Stage 1 keeps storing raw partial sums and this kernel adds
 ``bias[k]`` (``k = idx % K``, the output channel of the packed ``[M][K]``
 element) to the folded fp32 sum before the cast, so the bias is added exactly
 once with one rounding. The variant takes ``K`` and the ``Bias`` /
-``Bias_bytes`` pair (conv_abi ``conv_bias_arg_names``) after ``ks_count``, and
-needs ``vec`` to divide ``K`` (:func:`fwd_split_k_reduce_vec` of ``K``): a
-thread's ``vec`` elements are then consecutive channels of one row.
+``Bias_bytes`` pair (conv_abi ``conv_bias_arg_names``) after ``ks_count``.
+Each of a thread's ``vec`` elements takes its own channel, so any ``vec``
+that divides the element count serves any ``K``.
 
 The degree is a kernarg, so one binary per (``dtype_d``, ``vec``) serves every
 split. Each thread owns ``vec`` consecutive output elements: one vector load per
@@ -148,17 +148,17 @@ def build_conv_fwd_split_k_reduce(
                 b.scf_yield(*[b.fadd(a, p) for a, p in zip(accs, parts)])
             total = list(loop.results)
         if spec.bias:
-            # idx's channel; vec | K keeps the thread's vec in one row.
+            # Each element's own channel: a thread's vec elements cross a row
+            # end when vec does not divide K (K is a kernarg).
             rsrc = conv_bias_rsrc(b, p_bias, p_bias_bytes)
             c0 = b.const_i32(0)
-            k0 = b.mod(idx, p_K)
             total = [
                 b.fadd(
                     t,
                     load_conv_bias_f32(
                         b,
                         rsrc,
-                        k0 if i == 0 else b.add(k0, b.const_i32(i)),
+                        b.mod(idx if i == 0 else b.add(idx, b.const_i32(i)), p_K),
                         io_ir_type(spec.dtype_d),
                         c0,
                     ),
@@ -198,8 +198,7 @@ def fwd_split_k_reduce_signature(spec: FwdSplitKReduceSpec) -> list:
 
 
 def fwd_split_k_reduce_vec(elems: int) -> int:
-    """The widest ``vec`` that divides ``elems`` (pass ``K`` for a ``bias``
-    spec: a ``vec`` dividing K divides every ``M * K``)."""
+    """The widest ``vec`` that divides ``elems``."""
     return next(v for v in (4, 2, 1) if elems % v == 0)
 
 

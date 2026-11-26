@@ -264,18 +264,19 @@ rocke_kernel_def_t* rocke_build_conv_fwd_split_k_reduce(rocke_ir_builder_t* b,
     }
     if(spec->bias)
     {
-        /* idx's channel; vec | K keeps the thread's vec in one row. */
+        /* Each element's own channel: a thread's vec elements cross a row end
+         * when vec does not divide K (K is a kernarg). */
         rocke_value_t* rsrc = rocke_conv_bias_rsrc(b, p_bias, p_bias_bytes);
         rocke_value_t* c0 = rocke_b_const_i32(b, 0);
-        rocke_value_t* k0 = rocke_b_mod(b, idx, p_K);
         for(int i = 0; i < vec; ++i)
         {
-            rocke_value_t* k = k0;
+            rocke_value_t* e = idx;
             if(i != 0)
             {
                 rocke_value_t* c_i = rocke_b_const_i32(b, i);
-                k = rocke_b_add(b, k0, c_i);
+                e = rocke_b_add(b, idx, c_i);
             }
+            rocke_value_t* k = rocke_b_mod(b, e, p_K);
             rocke_value_t* bv
                 = rocke_conv_bias_load_f32(b, rsrc, k, rocke_b_io_ir_type(b, dtype_d), c0);
             total[i] = rocke_b_fadd(b, total[i], bv);

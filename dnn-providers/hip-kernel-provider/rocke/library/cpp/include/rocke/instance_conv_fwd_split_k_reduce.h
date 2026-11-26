@@ -27,7 +27,8 @@
  *
  * bias (the conv + bias forward on the two-stage split): the folded fp32 sum
  * of element idx gets bias[idx % K] before the cast, so the bias is added
- * exactly once with one rounding; vec must divide K.
+ * exactly once with one rounding. Each of a thread's vec elements takes its
+ * own channel, so any vec dividing the element count serves any K.
  *
  * Grid: (ceil(elems / (vec * block_size)), 1, 1); block (block_size, 1, 1).
  */

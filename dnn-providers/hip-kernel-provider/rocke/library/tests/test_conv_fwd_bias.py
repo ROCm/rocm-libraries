@@ -1009,7 +1009,7 @@ def _run_split(spec, degree, *, full_tiles=None, launches=2):
         elif stage == "reduce":
             elems = M * p.K
             rspec = FwdSplitKReduceSpec(
-                dtype_d=dt, vec=fwd_split_k_reduce_vec(p.K), degree=degree, bias=True
+                dtype_d=dt, vec=fwd_split_k_reduce_vec(elems), degree=degree, bias=True
             )
             rart = compile_kernel(build_conv_fwd_split_k_reduce(rspec), arch=arch)
             fold = (
@@ -1081,7 +1081,8 @@ class TestFwdBiasSplitKGpu(unittest.TestCase):
                 self.assertGreater(no_bias, 3 * tol)
 
     def test_two_stage(self):
-        # Stage 2 adds bias[idx % K]; K = 40 (vec 4 over 10 channel quads).
+        # Stage 2 adds bias[idx % K] per element, with vec from the element
+        # count as the benchmark plans it; K = 40 (vec 4 over channel quads).
         for dtype in ("fp16", "bf16"):
             for epi in ("cshuffle", "default"):
                 with self.subTest(dtype=dtype, epilogue=epi):
@@ -1089,7 +1090,8 @@ class TestFwdBiasSplitKGpu(unittest.TestCase):
                         _spec(_problem(), dtype=dtype, epilogue=epi, split_k=2),
                         (2, 3, 5),
                     )
-        # Grouped: the packed [M][G*kpg] row; K = 2 * 21 (Stage 2 vec 2).
+        # Grouped: the packed [M][G*kpg] row; K = 2 * 21 = 42 with vec 4
+        # (M * K = 126 * 42): a thread's four elements cross a row end.
         self._check(
             _spec(_problem(groups=2, K=42, C=32), dtype="bf16", split_k=2), (2, 4)
         )
