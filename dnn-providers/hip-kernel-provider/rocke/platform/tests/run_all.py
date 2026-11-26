@@ -301,6 +301,17 @@ def _built_test_program(build_root: Path, config: str, name: str) -> Path | None
     )
 
 
+def _recorded_program(build_root: Path, config: str, target: str) -> Path | None:
+    """The program ``target`` as the configure of ``build_root`` recorded it
+    (rocke_record_program_path in platform/CMakeLists.txt): its path, whatever
+    the build mode named it and wherever it put it, or None when the configure
+    recorded none."""
+    record = _built_file(build_root, config, (f"{target}.path",))
+    if record is None:
+        return None
+    return Path(record.read_text(encoding="utf-8").strip())
+
+
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     """Build the configured suite and supply its native artifacts to pytest."""
     env = dict(os.environ)
@@ -344,7 +355,7 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     # rocke_hip_lowering_parity CTests supply the same variable.
     from rocke.tests.engines import IR_LOWER_CLI_ENV
 
-    ir_lower_cli = env.get(IR_LOWER_CLI_ENV) or _built_test_program(
+    ir_lower_cli = env.get(IR_LOWER_CLI_ENV) or _recorded_program(
         build_root, config, "rocke_ir_lower_cli"
     )
     _export_native_executable(

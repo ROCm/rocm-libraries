@@ -302,7 +302,9 @@ if(BUILD_TESTING)
   # HIP source. The HIP source identity gate runs the C++ lowering through it,
   # via ROCKE_IR_LOWER_CLI, where the rocke_engine binding is not built, as in
   # the installed test tree. It is installed beside the tests but kept out of
-  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test.
+  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test. Not
+  # being a test, CTest cannot name its path to tests/run_all.py, so the build
+  # records it (rocke_record_program_path).
   add_executable(rocke_ir_lower_cli core/ir_lower_cli.cpp)
   target_link_libraries(rocke_ir_lower_cli PRIVATE rocke_core)
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
@@ -310,6 +312,7 @@ if(BUILD_TESTING)
                         PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_ir_lower_cli
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  rocke_record_program_path(rocke_ir_lower_cli)
 
   # The engine entry rocke_ir_lower_cli and the binding share, called with and
   # without its optional message buffer. Not built on Windows: the Windows CI

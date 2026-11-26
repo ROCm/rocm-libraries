@@ -638,6 +638,14 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             target = f"{provider_subdir}_{target}_test"
         return f"../{target}{executable_suffix}"
 
+    # tests/run_all.py runs the both-engine HIP checks with the rocke_ir_lower_cli
+    # the configure recorded (rocke_record_program_path), under the name this
+    # mode gives it, inside the build tree.
+    recorded_cli = Path((build / "rocke_ir_lower_cli.path").read_text().strip())
+    expected_name = native_artifact("rocke_ir_lower_cli").removeprefix("../")
+    assert recorded_cli.name == expected_name
+    assert build.resolve() in recorded_cli.resolve().parents
+
     # The replay CLI and the provenance manifest install in
     # <tests>/portable_ir and are named beside the installed rocke package
     # (rocke.assets.beside_package): the package's directory is the

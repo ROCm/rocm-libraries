@@ -156,6 +156,25 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
+# Record where `target`, a program the build makes, lands: its path is written to
+# <target>.path at the top of the build tree, under the configuration's
+# directory in a multi-config build, as tests/run_all.py looks for it. The name
+# and directory vary with the mode (the provider renames C++ test programs and
+# puts them in bin/), so the runner reads the configured path instead of
+# guessing it. The top is CMAKE_BINARY_DIR, the directory holding CMakeCache.txt,
+# which is the --build-root run_all expects in every mode: the platform or rocke
+# tree configured alone, and the hip-kernel-provider build that adds rocke as a
+# subdirectory (there CMAKE_CURRENT_BINARY_DIR is <build-root>/rocke/platform).
+function(rocke_record_program_path target)
+  get_property(_rocke_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+  if(_rocke_multi_config)
+    set(_rocke_path_file "${CMAKE_BINARY_DIR}/$<CONFIG>/${target}.path")
+  else()
+    set(_rocke_path_file "${CMAKE_BINARY_DIR}/${target}.path")
+  endif()
+  file(GENERATE OUTPUT "${_rocke_path_file}" CONTENT "$<TARGET_FILE:${target}>\n")
+endfunction()
+
 # Every installed rocKE pytest entry except the explicit gates starts its
 # command with this text. The rocke.tests.ctest_shard plugin and its flag make
 # the entry run only the CI shard's share of its tests. The gates stop on a
