@@ -540,24 +540,32 @@ def test_every_record_of_a_lane_ticket_takes_its_lane_and_expiry():
     assert not unlisted, f"lane tickets missing from LANE_TICKETS: {unlisted}"
 
 
-def test_a_record_expires_within_its_maximum_window():
+def test_a_record_expires_within_its_maximum_window(monkeypatch):
     """A pending entry or measured budget expires at most PENDING_MAX_DAYS
     days away, a quarantine at most QUARANTINE_MAX_DAYS: a record is re-decided
     in that window, not set once and forgotten. A past date is a valid
-    record, which the expiry check then reports."""
+    record, which the expiry check then reports. Today is read once and held
+    for the records' checks too, so a run across midnight (UTC) does not move
+    the window between the dates and the checks."""
+    today = utc_today()
+    monkeypatch.setattr(pending_lanes, "utc_today", lambda: today)
+
+    def days_away(days: int) -> str:
+        return (today + datetime.timedelta(days=days)).isoformat()
+
     path = "library/tests/test_x.py"
-    assert _pending(path, TICKET, expires=_days_from_today(PENDING_MAX_DAYS))
+    assert _pending(path, TICKET, expires=days_away(PENDING_MAX_DAYS))
     assert _pending(path, TICKET, expires="2026-01-01")
     with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
-        _pending(path, TICKET, expires=_days_from_today(PENDING_MAX_DAYS + 1))
+        _pending(path, TICKET, expires=days_away(PENDING_MAX_DAYS + 1))
     test_id = f"{path}::test_y"
-    assert _quarantined(test_id, expires=_days_from_today(QUARANTINE_MAX_DAYS))
+    assert _quarantined(test_id, expires=days_away(QUARANTINE_MAX_DAYS))
     with pytest.raises(
         ValueError, match=f"expected at most {QUARANTINE_MAX_DAYS} days"
     ):
-        _quarantined(test_id, expires=_days_from_today(QUARANTINE_MAX_DAYS + 1))
+        _quarantined(test_id, expires=days_away(QUARANTINE_MAX_DAYS + 1))
     with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
-        _measured_budget(expires=_days_from_today(PENDING_MAX_DAYS + 1))
+        _measured_budget(expires=days_away(PENDING_MAX_DAYS + 1))
 
 
 def test_install_rules_map_installed_paths_back_to_the_source(tmp_path):
@@ -611,14 +619,18 @@ def change_base() -> str | None:
     """The commit this change is checked against: where it forks from
     ``ROCKE_CHANGE_BASE``, else from the ``--from-ref`` of the pre-commit run
     (``PRE_COMMIT_FROM_REF``; in CI, the tip of the pull request's base
-    branch), else from origin/develop; None when none resolves. The fork
+    branch); None when neither is set or the base does not resolve. The fork
     point, so that the base's own newer edits are not counted as this
-    change's; a base with no fork point with HEAD (a tree) is taken as is."""
-    base = (
-        os.environ.get("ROCKE_CHANGE_BASE")
-        or os.environ.get("PRE_COMMIT_FROM_REF")
-        or "origin/develop"
-    )
+    change's; a base with no fork point with HEAD (a tree) is taken as is.
+
+    No base is guessed: a run that names none (the CTest entry, develop's own
+    CI, a plain local run) has no change, so an expired record only warns
+    there. A guessed one, such as a stale local origin/develop, would count
+    other changes' edits as this change's and fail a run that touched
+    nothing."""
+    base = os.environ.get("ROCKE_CHANGE_BASE") or os.environ.get("PRE_COMMIT_FROM_REF")
+    if not base:
+        return None
     return _git("merge-base", base, "HEAD") or (
         base if _git("rev-parse", "--verify", "--quiet", base) else None
     )
@@ -841,6 +853,15 @@ def test_the_change_base_is_the_fork_point_of_the_first_base_given(monkeypatch):
     assert change_base() == tree
     monkeypatch.setenv("ROCKE_CHANGE_BASE", "no-such-ref-for-this-test")
     assert change_base() is None
+
+
+def test_a_run_that_names_no_base_has_no_change(monkeypatch):
+    """With neither ROCKE_CHANGE_BASE nor PRE_COMMIT_FROM_REF set, no base is
+    guessed (not origin/develop), so an expired record only warns."""
+    monkeypatch.delenv("ROCKE_CHANGE_BASE", raising=False)
+    monkeypatch.delenv("PRE_COMMIT_FROM_REF", raising=False)
+    assert change_base() is None
+    assert current_change() is None
 
 
 def fail_or_report_expired(

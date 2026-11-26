@@ -1700,8 +1700,8 @@ works per file. It fails when:
   runner, without the lane helpers, or any string that reads as a lane
   declaration;
 - an expired record this change touches (the hook's diff base is
-  `ROCKE_CHANGE_BASE`, else pre-commit's `--from-ref`, else the merge base with
-  origin/develop).
+  `ROCKE_CHANGE_BASE`, else pre-commit's `--from-ref`; a run that names neither,
+  such as the CTest entry, has no change, and its expired records only warn).
 
 [`tools/limbo_audit.py`](tools/limbo_audit.py) works per case, from the run
 records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
