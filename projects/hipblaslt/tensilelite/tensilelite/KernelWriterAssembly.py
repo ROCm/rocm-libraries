@@ -885,7 +885,7 @@ class KernelWriterAssembly(KernelWriter):
       valid = True
       if width < blockWidth:
         valid = False
-      
+
       if ((width / blockWidth) != floor(width / blockWidth)):
         valid = False
 
@@ -1591,7 +1591,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmALdsSplitIncs", 1))
       module.add(self.defineSgpr("tdmBGlobalSplitIncs", 1))
       module.add(self.defineSgpr("tdmBLdsSplitIncs", 1))
-        
+
     if kernel["enableTDMMetadata"]:
       module.add(self.defineSgpr("tdmMetadataGroup0", 4, 4))
       module.add(self.defineSgpr("tdmMetadataGroup1", 8, 4))
@@ -2237,7 +2237,7 @@ class KernelWriterAssembly(KernelWriter):
       macroAndSetImplClassic()
     else:
       macroAndSetVgprImplSubtile()
-      
+
     ########################################
     # SGPR Macros
     ########################################
@@ -2365,7 +2365,7 @@ class KernelWriterAssembly(KernelWriter):
       srdUpperValue = SrdUpperValue(self.states.version)
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
       module.add(ValueSet("Srd127_96", srdUpperValue.getValue(), format=1))
-    
+
     if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
       module.addComment0("MT offset for 64b address (=MT0*MT1*bpeC)")
       reductionOffset = int(kernel["MacroTile0"]*kernel["MacroTile1"]*self.states.bpeCinternal)
@@ -2962,7 +2962,7 @@ class KernelWriterAssembly(KernelWriter):
                 sgprIdx: int = tmpSgprRes.idx
                 module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressC", 2)))
                 module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
-            else:            
+            else:
               module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
 
         module.add(endCheckLabel)
@@ -2986,7 +2986,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressA", 2)))
             module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
             module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressB", 2)))
-            module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))          
+            module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
         else:
           module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr("AddressA",2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
           module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
@@ -3167,7 +3167,7 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.mxsa.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPA["MX"]))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPA["MX"], False, True))
-      
+
     if self.states.b.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPB))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPB, False, True))
@@ -3645,7 +3645,7 @@ class KernelWriterAssembly(KernelWriter):
         commonArgs.add(self.argLoader.loadKernArg("WGM", "KernArgAddress", 8, dword=1))
         commonArgs.addComment1("Load num of WGs")
         commonArgs.add(self.argLoader.loadKernArg(tmpSgprNumWorkGroups, "KernArgAddress", 12, dword=1))
-        
+
         ########################################
         # load ws/ user args
         hbmArgs = Module("load HBM arguments")
@@ -3678,9 +3678,9 @@ class KernelWriterAssembly(KernelWriter):
         labelLoadEnd = Label("LoadArgsEnd", comment="")
         # Routing General Batched GEMM to Strided Batched GEMM path
         Bypass_ArgType3_to_ArgType0_Instance1 = Label("Bypass_ArgType3_to_ArgType0_Instance1", comment="")
-        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3")) 
-        moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance1.getLabelName()))     
-        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))      
+        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3"))
+        moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance1.getLabelName()))
+        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
         moduleArgs.add(SCBranchSCC0(labelName=labelHBM.getLabelName()))
         moduleArgs.add(Bypass_ArgType3_to_ArgType0_Instance1)
         moduleArgs.add(SAddU32(dst=sgpr("KernArgAddress"), src0=sgpr("KernArgAddress"), src1=hex(self.states.userArgsInfo.commonArgsSize), comment="Shift common args"))
@@ -3733,7 +3733,7 @@ class KernelWriterAssembly(KernelWriter):
         moduleArgs.add(SMovB32(dst=sgpr(sgprPackedArgs), src=sgpr(preloadSgprStartIdx+1), comment="Preload internal args"))
         # Routing the General Batched GEMM to Strided Batched GEMM path
         Bypass_ArgType3_to_ArgType0_Instance2 = Label("Bypass_ArgType3_to_ArgType0_Instance2", comment="")
-        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3")) 
+        moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(3), comment="Is kernel argType == 3"))
         moduleArgs.add(SCBranchSCC1(labelName=Bypass_ArgType3_to_ArgType0_Instance2.getLabelName()))
         moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
         preloadLabelHBM = Label("Preload_HBMArgs", comment="")
@@ -3953,7 +3953,7 @@ class KernelWriterAssembly(KernelWriter):
       def waitForArgsToLoad():
         # numSgprPreload spans the common args header, argLoader offsets start past it.
         preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
-        pendingBytes = self.argLoader.getOffset() - preloadedArgs * self.states.bpr        
+        pendingBytes = self.argLoader.getOffset() - preloadedArgs * self.states.bpr
         if kernel["ProblemType"]["GroupedGemm"]:
           # ArgType 1 and 2 reload the found gemm's args after the gemm search.
           moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for grouped gemm kern args"))
@@ -3996,7 +3996,7 @@ class KernelWriterAssembly(KernelWriter):
                                                      divisor=kernel["MacroTile1"], tmpSgprRes=tmpSgprRes, doRemainder=1))
         # If remainder > 0, increment NumWorkGroups1 (ceiling division)
         moduleWg.add(SCmpGtU32(src0=sgpr(rReg), src1=0, comment="Check if remainder > 0"))
-        moduleWg.add(SAddCU32(dst=sgpr("NumWorkGroups1"), src0=sgpr("NumWorkGroups1"), src1=0, comment="Increment if remainder > 0"))                                                     
+        moduleWg.add(SAddCU32(dst=sgpr("NumWorkGroups1"), src0=sgpr("NumWorkGroups1"), src1=0, comment="Increment if remainder > 0"))
         self.sgprPool.checkIn(tmpSgpr)
         self.sgprPool.checkIn(rReg)
 
@@ -4059,7 +4059,7 @@ class KernelWriterAssembly(KernelWriter):
       # General Batched GEMM Routed to Strided Batched GEMM path
       ArgType3_Routed_To_ArgType0 = Label(label="ArgType3_Routed_To_ArgType0", comment="")
       module.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=3))
-      module.add(SCBranchSCC1(labelName=ArgType3_Routed_To_ArgType0.getLabelName()))      
+      module.add(SCBranchSCC1(labelName=ArgType3_Routed_To_ArgType0.getLabelName()))
       module.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=0))
       self.sgprPool.checkIn(sgprArgType)
       sgprArgType = None # Cannot be used after this point
@@ -6088,7 +6088,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
           else:
             module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
-          moduleLoadGeneralBatch.add(SMulI32(dst=sgpr(stmp+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute Offset into Pointer Array"))             
+          moduleLoadGeneralBatch.add(SMulI32(dst=sgpr(stmp+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute Offset into Pointer Array"))
           if not wroteTileStart:
             moduleLoadStridedBatch.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(stride), sgpr("WorkGroup2"), comment="Stride*WG"))
             wroteTileStart = True
@@ -6098,7 +6098,7 @@ class KernelWriterAssembly(KernelWriter):
             moduleLoadStridedBatch.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(stmp+1), comment="accum wg term to tilestart"))
           wg+=1
     moduleLoadGeneralBatch.add(SCmpEQU32(src0=sgpr("SizesSum"), src1=hex(0), comment="Don't dereference Pointer array if SizesSum == 0"))
-    moduleLoadGeneralBatch.add(SCBranchSCC1(labelName=stridedBatchedGemmLoad_End.getLabelName()))          
+    moduleLoadGeneralBatch.add(SCBranchSCC1(labelName=stridedBatchedGemmLoad_End.getLabelName()))
     moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
@@ -6119,7 +6119,7 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.groOffsetInMacroTile and ((tc == "A" and not kernel["enableTDMA"]) or (tc == "B" and not kernel["enableTDMB"])):
       prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
       moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-      moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))                     
+      moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))
 
     # Add the tile start to the SRD
     if wroteTileStart:
@@ -6128,13 +6128,13 @@ class KernelWriterAssembly(KernelWriter):
       moduleLoadStridedBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Address%s+1"%tc), src1=sgpr(tileStart+1), comment="SRD base = Address+ tileStart1"))
       moduleLoadGeneralBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
       moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr(tileStart+0), src1=sgpr("Srd%s+0"%tc), comment="SRD base = Address+ tileStart0"))
-      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))      
+      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))
     else:
-      moduleLoadStridedBatch.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))         
+      moduleLoadStridedBatch.add(SMovB64(dst=sgpr("Srd%s"%tc, 2), src=sgpr("Address%s"%tc, 2), comment="init SRD base address"))
     moduleLoadGeneralBatch.add(SBranch(labelName = stridedBatchedGemmLoad_End.getLabelName()))
-    moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)                     
+    moduleLoadGeneralBatch.add(stridedBatchedGemmLoad)
 
-    module.add(moduleLoadGeneralBatch) # Logic for General Batched GEMM comes first 
+    module.add(moduleLoadGeneralBatch) # Logic for General Batched GEMM comes first
     module.add(moduleLoadStridedBatch) # Logic for Strided Batched GEMM comes second
     module.add(stridedBatchedGemmLoad_End)
 
@@ -11334,7 +11334,7 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.b.startVgprLocalReadAddr > self.states.lastVgprForReads:
         vsize = self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr - vbegin
       if self.states.m.startVgprLocalReadAddr > self.states.lastVgprForReads:
-        vsize = self.states.m.startVgprLocalReadAddr + self.states.m.numVgprLocalReadAddr - vbegin        
+        vsize = self.states.m.startVgprLocalReadAddr + self.states.m.numVgprLocalReadAddr - vbegin
       self.vgprPool.add(vbegin, vsize, "endSummation")
       module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
                         (vbegin, vbegin+vsize))
@@ -14839,7 +14839,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
                                 tensor=self.tdmLoadModifiers(kernel, tc)))
-      return imod 
+      return imod
 
     if tc == "B" and kernel["enableTDMB"]:
       # A shared A/B descriptor issues through A; an independently owned B set
@@ -15491,7 +15491,7 @@ class KernelWriterAssembly(KernelWriter):
           src0Val = getSrc0Val(tc)
           numLwa = self.states.m.numVgprLocalWriteAddr
           localWriteSwapXOR(tc, src0Val, numLwa)
-              
+
     return module
 
   ##############################################################################
@@ -15645,7 +15645,7 @@ class KernelWriterAssembly(KernelWriter):
         src0=(i * self.states.regCaps["maxLDSConstOffset"]), \
         src1=vgpr("LocalWriteAddr%s"%tc), \
         comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024)))
-            
+
     return module
 
   ##############################################################################
@@ -18522,7 +18522,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCBranchSCC0(labelName=RegularSrdInitialization.getLabelName()))
       # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
       # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be initialized to workspace pointer (AddressC/D)
-      # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)      
+      # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)
       if isPersistentDataParallel(kernel):
         # DP-only: reduction is always forced to the tree path (AddressFlags != 0
         # invariant), so initializeSrdAddressFlagsCheck always branches to the
@@ -18534,7 +18534,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(processingComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
       else:
         module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="General Batched GEMM, Srd initialized to 0"))
-    module.add(RegularSrdInitialization)      
+    module.add(RegularSrdInitialization)
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
     module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
     module.add(GeneralBatchedGemmSrdInitiation)
@@ -19430,7 +19430,7 @@ class KernelWriterAssembly(KernelWriter):
           isBetaLongBranch = True
         with self.allocTmpSgpr(3 if isBetaLongBranch else 1, tag="checkBetaBranchExceeds_tmpSgprInfo") as tmpSgprInfo:
           module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, writeLabels[1][globalWriteMode]["Label"], isBetaLongBranch, posNeg=1))
-    
+
     return module
 
   ##############################################################################
@@ -20249,7 +20249,8 @@ class KernelWriterAssembly(KernelWriter):
     (keeps the copy small). Beta alone is not worth a copy: the beta==0 tree is already it.
     """
     pt = kernel["ProblemType"]
-    if not kernel["CompactLoopStore"] or not (gsuLimit > 1 or gsuBackup == 1):
+    if not kernel["CompactLoopStore"] or not (gsuLimit > 1 or gsuBackup == 1 or gsuBackup == 0):
+    # if not kernel["CompactLoopStore"] or not (gsuLimit > 1 or gsuBackup == 1):
       return None
     if kernel.get("UseSubtileImpl") or self.states.subtileFusedFullTileStore:
       return None
@@ -26872,7 +26873,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(self.resetTDMDescriptorForTail(kernel, tPB, wOfstSgprId))
       mod.add(tdmResetTailLblEnd)
     return mod
-  
+
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     comp = GL2PrefetchLoad.find(self)
     for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
@@ -26894,7 +26895,7 @@ class KernelWriterAssembly(KernelWriter):
       stateObj.startVgprGL2PrefetchAddr = vgprIdx
       vgprIdx += tP["gl2nl"] * numAddrVgpr
     return vgprIdx
-  
+
   def gl2PrefetchTpList(self, kernel, tPA, tPB):
     """The tensors the GL2 prefetch warms L2 for.
 
@@ -26928,7 +26929,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setIncrement(self, kernel, tp))
         mod.add(comp.calculateStartAddr(self, kernel, tp, gsuIterSgpr))
     return mod
-  
+
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Issue Load")
     mod.addComment("GL2 Prefetch Issue Load")
@@ -26936,7 +26937,7 @@ class KernelWriterAssembly(KernelWriter):
     for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
       mod.add(comp.issueLoad(self, kernel, tp))
     return mod
-  
+
   def gl2PrefetchClearIncrement(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Clear Increment")
     comp = GL2PrefetchLoad.find(self)
@@ -26951,7 +26952,7 @@ class KernelWriterAssembly(KernelWriter):
     for tp in self.gl2PrefetchTpList(kernel, tPA, tPB):
       mod.add(comp.incrementAddr(self, kernel, tp))
     return mod
-  
+
   def gl2PrefetchSkipPGR(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Skip PGR")
     mod.addComment("GL2 Prefetch Skip PGR")
