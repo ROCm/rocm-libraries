@@ -1554,13 +1554,6 @@ PENDING: tuple[PendingTest, ...] = (
         "test_runtime_head_dims_serve_every_width_in_a_bucket",
         "test_runtime_head_dims_unequal_widths",
     ),
-    _SCHEDULED_TIERS.waiting(
-        "library/tests/test_attention_builds.py",
-        "it checks the budgets the file's other tests exercised, so it skips in a "
-        "CI shard that builds none of them; triage gives it a shard with them",
-        _LIBRARY,
-        node="test_every_declared_budget_was_exercised",
-    ),
 )
 
 

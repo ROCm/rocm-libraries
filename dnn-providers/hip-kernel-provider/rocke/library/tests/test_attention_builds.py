@@ -26,13 +26,16 @@ from __future__ import annotations
 import importlib
 import itertools
 import unittest
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 import pytest
 
 from rocke import lower_kernel_to_llvm
+from rocke.core.ir import KernelDef
 from rocke.tests.comgr import loaded_compiler_build
 from rocke.tests.compiler_tools import require_hsaco_tools, require_tools_or_skip
-from rocke.tests.lanes import TICKET, import_or_skip_until, skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
     measured_scratch_allowance,
@@ -121,8 +124,10 @@ def _compile_or_skip(kernel, *, arch: str):
 # AGPR, LDS and workgroup limiters are still PROVISIONAL pending rocprofv3
 # calibration on real hardware, so treat it as a floor, not an exact oracle. The
 # key is the exact kernel name, so if the shipped geometry changes (and with it the
-# name) the floor evaporates; ``test_every_declared_budget_was_exercised`` turns
-# that into a red test.
+# name) the floor evaporates; ``test_every_declared_budget_names_a_budget_case``
+# turns that into a red test. A floor or measured allowance must therefore name a
+# kernel of ``_BUDGET_CASE_SETS``: a kernel only another test of this file
+# checks needs a budget case first.
 _MIN_WAVES_PER_SIMD = {
     # gfx950 dense persistent prefill (runtime shape, so no hq/kv/sq/sk tokens): the
     # 512-thread (8-wave) workgroup pins VGPR at the 256 ceiling independent of
@@ -139,13 +144,6 @@ _MIN_WAVES_PER_SIMD = {
     "rocke_attention_dense_d128_hq16_kv4_bn32_fp16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": 2,
     "rocke_attention_dense_d128_hq16_kv4_bn32_bf16_bm128_sq1024_sk1024_causal_swa256_pgd16_nb128_lazyrs_gfx942_b1_wpe2_wskip": 2,
 }
-
-# Every kernel_name ``_assert_resources_fit`` is handed, so a floor or measured
-# allowance whose key no longer matches any built kernel (name drift from a
-# re-tuned selector) becomes a red test rather than a silently-orphaned entry --
-# see ``test_every_declared_budget_was_exercised``. Without it a renamed kernel
-# would just stop being floored.
-_SEEN_KERNEL_NAMES: set = set()
 
 # This file's path in rocke.tests.pending_lanes.MEASURED_BUDGETS.
 _MEASURED_BUDGETS_PATH = "library/tests/test_attention_builds.py"
@@ -193,8 +191,6 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
             require_tools_or_skip(f"HSACO introspection tool unavailable: {e}")
 
     name = kernel_name or "kernel"
-    if kernel_name:
-        _SEEN_KERNEL_NAMES.add(kernel_name)
     lds = res.lds_bytes
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
@@ -398,6 +394,254 @@ _TILED_2D_BUDGET_GEOMETRIES = [
         dict(head_size=256, num_query_heads=16, num_kv_heads=2, dtype="bf16"),
     ),
 ]
+
+
+@dataclass(frozen=True)
+class _BudgetCase:
+    """One kernel a budget test compiles and holds to ``_assert_resources_fit``:
+    the subtest parameters it reports under, the arch it targets, and how to
+    build it. Building is cheap (no compile), so the declared-budget check
+    builds every case to learn the kernel names without compiling any."""
+
+    params: dict[str, object]
+    arch: str
+    build: Callable[[], KernelDef]
+
+
+def _tiled_2d_budget_cases() -> list[_BudgetCase]:
+    """The shipped 2D-tiled geometries (``_TILED_2D_BUDGET_GEOMETRIES``), each
+    spec chosen by the real selector with the resolved arch pinned."""
+    import kernels.common.attention_unified as unified_attention
+    from kernels import build_unified_attention_2d_tiled
+
+    def build(arch, problem_kwargs):
+        with _patch_resolved_arch(arch):
+            problem = _budget_problem(**problem_kwargs)
+            spec = unified_attention._tiled_spec_from_problem(problem, arch)
+            return build_unified_attention_2d_tiled(spec, arch=arch)
+
+    return [
+        _BudgetCase(
+            dict(geometry=label, arch=arch),
+            arch,
+            lambda arch=arch, problem_kwargs=problem_kwargs: build(
+                arch, problem_kwargs
+            ),
+        )
+        for label, arch, problem_kwargs in _TILED_2D_BUDGET_GEOMETRIES
+    ]
+
+
+def _gfx950_dense_prefill_budget_cases() -> list[_BudgetCase]:
+    """The gfx950 dense prefill: default, persistent, and the LSE variants."""
+    from kernels import AttentionDenseSpec, build_attention_dense
+    from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+    base = AttentionDenseSpec(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+    lse_base = Gfx950AttentionDenseSpec(
+        batch=base.batch,
+        seqlen_q=base.seqlen_q,
+        seqlen_kv=base.seqlen_kv,
+        num_query_heads=base.num_query_heads,
+        num_kv_heads=base.num_kv_heads,
+        head_size=base.head_size,
+        causal=base.causal,
+        dtype=base.dtype,
+        emit_lse=True,
+    )
+    return [
+        _BudgetCase(
+            dict(variant=label),
+            "gfx950",
+            lambda spec=spec: build_attention_dense(spec, arch="gfx950"),
+        )
+        for label, spec in (
+            ("default", base),
+            ("persistent", replace(base, persistent=True)),
+            ("lse_default", lse_base),
+            ("lse_persistent", replace(lse_base, persistent=True)),
+            ("lse_wide", replace(lse_base, persistent=True, wide_lds_dma=True)),
+        )
+    ]
+
+
+def _gfx942_dispatched_dense_budget_cases() -> list[_BudgetCase]:
+    """The gfx942 dense prefill specs the dispatch factory ships: D64 / D128 x
+    fp16 / bf16, with and without LSE."""
+    from dispatch.attention import AttentionRequest, attention_tuning_spec
+    from kernels.gfx942.attention_dense import build_attention_dense
+
+    def build(head_size, dtype, emit_lse):
+        request = AttentionRequest(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=4096,
+            seqlen_k=4096,
+            hdim_q=head_size,
+            hdim_v=head_size,
+            arch="gfx942",
+            mask_type=1,
+            dtype=dtype,
+            emit_lse=emit_lse,
+        )
+        spec = attention_tuning_spec(request, "gfx942_dense").kernel_spec
+        return build_attention_dense(spec, arch="gfx942")
+
+    return [
+        _BudgetCase(
+            dict(head_size=head_size, dtype=dtype, emit_lse=emit_lse),
+            "gfx942",
+            lambda args=(head_size, dtype, emit_lse): build(*args),
+        )
+        for head_size, dtype, emit_lse in itertools.product(
+            (64, 128), ("fp16", "bf16"), (False, True)
+        )
+    ]
+
+
+def _dense_paged_prefill_budget_cases() -> list[_BudgetCase]:
+    """The paged dense prefill (fp16/bf16 D128 sliding window, single
+    sequence) on gfx942 and gfx950."""
+
+    def build(arch, dtype):
+        dense_module = importlib.import_module(f"kernels.{arch}.attention_dense")
+        spec = dense_arch_spec_class(dense_module)(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype=dtype,
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=512,
+        )
+        assert "pgd16" in spec.kernel_name(), spec.kernel_name()
+        return dense_module.build_attention_dense(spec, arch=arch)
+
+    return [
+        _BudgetCase(
+            dict(arch=arch, dtype=dtype),
+            arch,
+            lambda arch=arch, dtype=dtype: build(arch, dtype),
+        )
+        for arch in ("gfx942", "gfx950")
+        for dtype in ("fp16", "bf16")
+    ]
+
+
+def _dense_paged_smaller_tile_budget_cases() -> list[_BudgetCase]:
+    """Paged K/V on the smaller dense tiles, each at its page limit. Each spec
+    must be one the arch's dense predicate admits."""
+    shape = dict(
+        batch=1,
+        seqlen_q=1024,
+        seqlen_kv=1024,
+        num_query_heads=16,
+        num_kv_heads=4,
+        causal=True,
+        paged=True,
+        num_kv_blocks=128,
+    )
+    tiles = [
+        (
+            "gfx942",
+            dict(head_size=128, block_m=128, block_size=16),
+            ("fp16", "bf16"),
+        ),
+        (
+            "gfx942",
+            dict(
+                head_size=128,
+                block_m=128,
+                block_n=32,
+                sliding_window=256,
+                window_wave_skip=True,
+                block_size=16,
+            ),
+            ("fp16", "bf16"),
+        ),
+        (
+            "gfx942",
+            dict(head_size=64, block_m=64, sliding_window=256, block_size=32),
+            ("bf16",),
+        ),
+        (
+            "gfx950",
+            dict(head_size=128, block_m=128, sliding_window=256, block_size=16),
+            ("fp16", "bf16"),
+        ),
+        (
+            "gfx950",
+            dict(head_size=64, block_m=128, sliding_window=256, block_size=16),
+            ("fp16",),
+        ),
+    ]
+
+    def spec_of(arch, tile, dtype):
+        dense_module = importlib.import_module(f"kernels.{arch}.attention_dense")
+        fields = dict(shape, dtype=dtype, **tile)
+        if arch == "gfx942":
+            fields["waves_per_eu"] = dense_module._tuned_waves_per_eu(
+                fields["head_size"], dtype
+            )
+        return dense_module, dense_arch_spec_class(dense_module)(**fields)
+
+    def build(arch, tile, dtype):
+        dense_module, spec = spec_of(arch, tile, dtype)
+        admitted, why = dense_module.supports_attention_dense(spec, arch=arch)
+        assert admitted, f"{spec.kernel_name()} on {arch}: {why}"
+        return dense_module.build_attention_dense(spec, arch=arch)
+
+    return [
+        _BudgetCase(
+            dict(
+                arch=arch, dtype=dtype, name=spec_of(arch, tile, dtype)[1].kernel_name()
+            ),
+            arch,
+            lambda arch=arch, tile=tile, dtype=dtype: build(arch, tile, dtype),
+        )
+        for arch, tile, dtypes in tiles
+        for dtype in dtypes
+    ]
+
+
+# Every set of budget cases. A floor or measured allowance must name a kernel
+# one of them builds: see ``test_every_declared_budget_names_a_budget_case``.
+_BUDGET_CASE_SETS = (
+    _tiled_2d_budget_cases,
+    _gfx950_dense_prefill_budget_cases,
+    _gfx942_dispatched_dense_budget_cases,
+    _dense_paged_prefill_budget_cases,
+    _dense_paged_smaller_tile_budget_cases,
+)
+
+
+def _check_budget_cases(test_case: unittest.TestCase, cases: list[_BudgetCase]) -> None:
+    """Compile each of ``cases`` through comgr, one subtest each, and hold its
+    code object to ``_assert_resources_fit``. Every case analyzes a code object:
+    without the tools, the test skips as a whole."""
+    require_hsaco_tools()
+    for case in cases:
+        with test_case.subTest(**case.params):
+            kernel = case.build()
+            art = _compile_or_skip(kernel, arch=case.arch)
+            test_case.assertGreater(art.hsaco_bytes, 0)
+            _assert_resources_fit(art, arch=case.arch, kernel_name=kernel.name)
 
 
 # ---------------------------------------------------------------------
@@ -1432,20 +1676,7 @@ class TestAttentionHelpers(unittest.TestCase):
         No torch, no GPU launch -- comgr targets each arch via its triple, so
         this runs on any comgr/LLVM host regardless of the box's own GPU.
         """
-        import kernels.common.attention_unified as au
-        from kernels import build_unified_attention_2d_tiled
-
-        # Every case analyzes a code object: without the tools, skip as a whole.
-        require_hsaco_tools()
-        for label, arch, problem_kwargs in _TILED_2D_BUDGET_GEOMETRIES:
-            with self.subTest(geometry=label, arch=arch):
-                with _patch_resolved_arch(arch):
-                    problem = _budget_problem(**problem_kwargs)
-                    spec = au._tiled_spec_from_problem(problem, arch)
-                    k = build_unified_attention_2d_tiled(spec, arch=arch)
-                    art = _compile_or_skip(k, arch=arch)
-                    self.assertGreater(art.hsaco_bytes, 0)
-                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+        _check_budget_cases(self, _tiled_2d_budget_cases())
 
     def test_gfx950_dense_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the gfx950 dense flash-attn
@@ -1457,46 +1688,7 @@ class TestAttentionHelpers(unittest.TestCase):
         Covers default, persistent, and LSE-enabled wide-load variants.
         gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
-        from dataclasses import replace
-
-        from kernels import AttentionDenseSpec, build_attention_dense
-        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
-
-        # Every case analyzes a code object: without the tools, skip as a whole.
-        require_hsaco_tools()
-        base = AttentionDenseSpec(
-            batch=1,
-            seqlen_q=2048,
-            seqlen_kv=2048,
-            num_query_heads=32,
-            num_kv_heads=8,
-            head_size=128,
-            causal=True,
-            dtype="bf16",
-        )
-        lse_base = Gfx950AttentionDenseSpec(
-            batch=base.batch,
-            seqlen_q=base.seqlen_q,
-            seqlen_kv=base.seqlen_kv,
-            num_query_heads=base.num_query_heads,
-            num_kv_heads=base.num_kv_heads,
-            head_size=base.head_size,
-            causal=base.causal,
-            dtype=base.dtype,
-            emit_lse=True,
-        )
-        for label, spec in (
-            ("default", base),
-            ("persistent", replace(base, persistent=True)),
-            ("lse_default", lse_base),
-            ("lse_persistent", replace(lse_base, persistent=True)),
-            ("lse_wide", replace(lse_base, persistent=True, wide_lds_dma=True)),
-        ):
-            with self.subTest(variant=label):
-                k = build_attention_dense(spec, arch="gfx950")
-                art = _compile_or_skip(k, arch="gfx950")
-                self.assertGreater(art.hsaco_bytes, 0)
-                _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+        _check_budget_cases(self, _gfx950_dense_prefill_budget_cases())
 
     def test_gfx942_dispatched_dense_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the gfx942 dense prefill kernels
@@ -1509,33 +1701,7 @@ class TestAttentionHelpers(unittest.TestCase):
         fail the compile, it spills to scratch, which ``_assert_resources_fit``
         refuses. Torch-free; comgr targets gfx942 via its triple.
         """
-        from dispatch.attention import AttentionRequest, attention_tuning_spec
-        from kernels.gfx942.attention_dense import build_attention_dense
-
-        # Every case analyzes a code object: without the tools, skip as a whole.
-        require_hsaco_tools()
-        for head_size, dtype, emit_lse in itertools.product(
-            (64, 128), ("fp16", "bf16"), (False, True)
-        ):
-            with self.subTest(head_size=head_size, dtype=dtype, emit_lse=emit_lse):
-                request = AttentionRequest(
-                    batch=1,
-                    nhead_q=32,
-                    nhead_k=8,
-                    seqlen_q=4096,
-                    seqlen_k=4096,
-                    hdim_q=head_size,
-                    hdim_v=head_size,
-                    arch="gfx942",
-                    mask_type=1,
-                    dtype=dtype,
-                    emit_lse=emit_lse,
-                )
-                spec = attention_tuning_spec(request, "gfx942_dense").kernel_spec
-                k = build_attention_dense(spec, arch="gfx942")
-                art = _compile_or_skip(k, arch="gfx942")
-                self.assertGreater(art.hsaco_bytes, 0)
-                _assert_resources_fit(art, arch="gfx942", kernel_name=k.name)
+        _check_budget_cases(self, _gfx942_dispatched_dense_budget_cases())
 
     def test_gfx950_dense_paged_spec_admission(self):
         """Paged spec fields + validation: accept the fp16/bf16 D64/D128 causal
@@ -1961,100 +2127,12 @@ class TestAttentionHelpers(unittest.TestCase):
         """comgr build + resource-budget net for the PAGED dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
         budget test; the block_tables indirection adds a load but must still fit."""
-        # Every case analyzes a code object: without the tools, skip as a whole.
-        require_hsaco_tools()
-        for arch in ("gfx942", "gfx950"):
-            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            AttentionDenseSpec = dense_arch_spec_class(ad)
-            build_attention_dense = ad.build_attention_dense
-            with self.subTest(arch=arch):
-                for dt in ("fp16", "bf16"):
-                    spec = AttentionDenseSpec(
-                        batch=1,
-                        seqlen_q=8192,
-                        seqlen_kv=8192,
-                        num_query_heads=32,
-                        num_kv_heads=8,
-                        head_size=128,
-                        causal=True,
-                        dtype=dt,
-                        sliding_window=4096,
-                        block_n=64,
-                        paged=True,
-                        block_size=16,
-                        num_kv_blocks=512,
-                    )
-                    with self.subTest(dtype=dt):
-                        self.assertIn("pgd16", spec.kernel_name())
-                        k = build_attention_dense(spec, arch=arch)
-                        art = _compile_or_skip(k, arch=arch)
-                        self.assertGreater(art.hsaco_bytes, 0)
-                        _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+        _check_budget_cases(self, _dense_paged_prefill_budget_cases())
 
     def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
         """comgr build + resource-budget net for paged K/V on the smaller dense
         tiles, at each tile's page limit."""
-        # Every case analyzes a code object: without the tools, skip as a whole.
-        require_hsaco_tools()
-        shape = dict(
-            batch=1,
-            seqlen_q=1024,
-            seqlen_kv=1024,
-            num_query_heads=16,
-            num_kv_heads=4,
-            causal=True,
-            paged=True,
-            num_kv_blocks=128,
-        )
-        g942 = importlib.import_module("kernels.gfx942.attention_dense")
-        cases = [
-            (
-                "gfx942",
-                dict(head_size=128, block_m=128, block_size=16),
-                ("fp16", "bf16"),
-            ),
-            (
-                "gfx942",
-                dict(
-                    head_size=128,
-                    block_m=128,
-                    block_n=32,
-                    sliding_window=256,
-                    window_wave_skip=True,
-                    block_size=16,
-                ),
-                ("fp16", "bf16"),
-            ),
-            (
-                "gfx942",
-                dict(head_size=64, block_m=64, sliding_window=256, block_size=32),
-                ("bf16",),
-            ),
-            (
-                "gfx950",
-                dict(head_size=128, block_m=128, sliding_window=256, block_size=16),
-                ("fp16", "bf16"),
-            ),
-            (
-                "gfx950",
-                dict(head_size=64, block_m=128, sliding_window=256, block_size=16),
-                ("fp16",),
-            ),
-        ]
-        for arch, tile, dtypes in cases:
-            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
-            Spec = dense_arch_spec_class(ad)
-            for dt in dtypes:
-                kw = dict(shape, dtype=dt, **tile)
-                if arch == "gfx942":
-                    kw["waves_per_eu"] = g942._tuned_waves_per_eu(kw["head_size"], dt)
-                spec = Spec(**kw)
-                with self.subTest(arch=arch, dtype=dt, name=spec.kernel_name()):
-                    ok, why = ad.supports_attention_dense(spec, arch=arch)
-                    self.assertTrue(ok, why)
-                    k = ad.build_attention_dense(spec, arch=arch)
-                    art = _compile_or_skip(k, arch=arch)
-                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+        _check_budget_cases(self, _dense_paged_smaller_tile_budget_cases())
 
     def test_gfx950_dense_sinks_required_when_enabled(self):
         """spec.use_sinks=True requires sinks parameter (not None)."""
@@ -6471,25 +6549,22 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         self.assertFalse(hasattr(mod, "_time_rocke_call_loop"))
 
 
-# Module-level so it collects/runs after the class-based budget tests above.
-def test_every_declared_budget_was_exercised():
-    """A budget key that matches no built kernel (name drift from a re-tuned
-    selector -- these names carry tokens like wpe2 / persist256 / ksring that get
-    re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
-    test: every ``_MIN_WAVES_PER_SIMD`` key and every kernel this file has a
-    measured scratch allowance for must have been handed to
-    ``_assert_resources_fit`` by some test in this run.
-
-    Skips under a partial selection (``pytest -k``) that builds none of the
-    budgeted kernels, so the check is meaningful on a full-file / CI run without
-    false-failing an unrelated targeted run."""
-    if not _SEEN_KERNEL_NAMES:
-        skip_until(TICKET, reason="no budgeted kernels built in this selection")
-    measured = measured_budget_kernels(_MEASURED_BUDGETS_PATH)
-    orphaned = (set(_MIN_WAVES_PER_SIMD) | measured) - _SEEN_KERNEL_NAMES
+def test_every_declared_budget_names_a_budget_case():
+    """A budget key that matches no kernel a budget test builds (name drift from a
+    re-tuned selector -- these names carry tokens like wpe2 / persist256 / ksring
+    that get re-tuned) would silently drop that kernel's occupancy floor or spill
+    allowance. Every ``_MIN_WAVES_PER_SIMD`` key and every kernel this file has a
+    measured scratch allowance for must be the name of a kernel some budget case
+    (``_BUDGET_CASE_SETS``) builds. The cases are built, not compiled, so the
+    check needs no compiler and holds in any selection of this file's tests."""
+    built = {case.build().name for cases in _BUDGET_CASE_SETS for case in cases()}
+    declared = set(_MIN_WAVES_PER_SIMD) | measured_budget_kernels(
+        _MEASURED_BUDGETS_PATH
+    )
+    orphaned = declared - built
     assert (
         not orphaned
-    ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
+    ), f"budget declared for kernels no budget case builds: {sorted(orphaned)}"
 
 
 if __name__ == "__main__":
