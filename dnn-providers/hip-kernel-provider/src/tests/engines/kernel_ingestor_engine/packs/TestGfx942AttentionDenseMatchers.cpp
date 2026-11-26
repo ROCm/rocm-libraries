@@ -386,19 +386,6 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesALeftBoundOfZero)
     EXPECT_FALSE(matchGraph(windowGraph(0)).has_value());
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
-{
-    // A ragged offset tensor packs the sequences back to back; the kernel indexes every
-    // operand as dense (B, S, H, D).
-    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
-    {
-        SCOPED_TRACE(uid);
-        auto spec = baseGraph();
-        spec.raggedUid = uid;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
-}
-
 // A window that leaves the last query rows no key is served without a stats output: the
 // kernel zeroes those rows. A graph that binds stats is declined (see
 // KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats; windowLeavesRowsWithoutKeys says why).
@@ -428,43 +415,21 @@ TEST(TestGfx942AttentionDenseGraphMatch, ServesAWindowThatLeavesQueryRowsNoKeyWi
     }
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksADanglingStatsUidMaskTensorAndVarlen)
-{
-    auto sinks = baseGraph();
-    sinks.sinkTokenUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(sinks).has_value());
-
-    auto stats = baseGraph();
-    stats.statsUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(stats).has_value());
-
-    // This arch serves a bias, so the mask uid is declined for naming no tensor of the graph
-    // (the bias reader's own decline), not for an unserved mask ("is not supported").
-    auto attnMask = baseGraph();
-    attnMask.attnMaskUid = EXTRA_UID;
-    const auto danglingMask = loggedDecline(attnMask);
-    EXPECT_EQ(danglingMask.cause, "attn_mask");
-    EXPECT_NE(danglingMask.detail.find("tensor in the graph"), std::string::npos)
-        << danglingMask.detail;
-
-    auto varlen = baseGraph();
-    varlen.seqLenQUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(varlen).has_value());
-
-    // Cumulative lengths, on each side alone. padding_mask stays false, so only the
-    // cu_seq_len decline can reject these.
-    auto cuQ = baseGraph();
-    cuQ.cuSeqLenQUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(cuQ).has_value());
-
-    auto cuKv = baseGraph();
-    cuKv.cuSeqLenKvUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(cuKv).has_value());
-}
-
 // =============================================================================
 // graph_match: the stats (LSE) output
 // =============================================================================
+
+/// This arch serves stats, so a stats uid naming no tensor of the graph is declined for
+/// the dangling uid. gfx950 declines every stats output outright, so the rule only has
+/// meaning here. The features this case used to assert alongside it (sinks, a dangling
+/// attn_mask uid, varlen and cu_seq_len on each side) are shared rules, and now live in
+/// TestAttentionDenseMatchers.cpp where they run on both arches.
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAStatsUidNamingNoTensor)
+{
+    auto stats = baseGraph();
+    stats.statsUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(stats).has_value());
+}
 
 // The FlyDSL rule: a stats uid is served unless generate_stats is explicitly false, since
 // both references write the LSE whenever the uid is set; generate_stats true without a uid
