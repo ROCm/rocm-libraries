@@ -134,9 +134,9 @@ namespace TensileLite
         return m_value & 0x400000;
     }
 
-    bool Debug::forceUniformSummationOrderOn() const
+    bool Debug::bypassUniformSummationOrderRefusals() const
     {
-        return m_forceUSOOn;
+        return m_usoBypassRefusals;
     }
 
     bool Debug::naivePropertySearch() const
@@ -298,18 +298,18 @@ namespace TensileLite
         if(tensile_disable_staggerU)
             m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
 
-        if(const char* forceUSO = std::getenv("HIPBLASLT_FORCE_USO_ON"))
+        if(const char* bypass = std::getenv("HIPBLASLT_USO_BYPASS_REFUSALS"))
         {
-            std::string v(forceUSO);
+            std::string v(bypass);
             std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
                 return static_cast<char>(std::tolower(c));
             });
-            m_forceUSOOn = v == "1" || v == "on" || v == "true";
-            if(m_forceUSOOn)
+            m_usoBypassRefusals = v == "1" || v == "on" || v == "true";
+            if(m_usoBypassRefusals)
                 std::fprintf(stderr,
-                             "hipBLASLt warning: HIPBLASLT_FORCE_USO_ON is set: with uniform "
-                             "summation order on, kernels it would refuse are selected and "
-                             "launched anyway, and the guarantee no longer holds\n");
+                             "hipBLASLt warning: HIPBLASLT_USO_BYPASS_REFUSALS is set: when "
+                             "uniform summation order is on, kernels it refuses are still "
+                             "selected and launched, and the guarantee no longer holds\n");
         }
     }
 

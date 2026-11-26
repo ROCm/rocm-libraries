@@ -6634,11 +6634,11 @@ namespace TensileLite
             ++tally.distinct;
         }
 
-        // HIPBLASLT_FORCE_USO_ON: names, once per kernel and clause, each refusal it bypasses.
+        // HIPBLASLT_USO_BYPASS_REFUSALS: names each bypassed refusal once per kernel and clause.
         // token may be null (an untagged refusal).
-        void reportForcedUniformSummationOrder(std::string const& kernel,
-                                               char const*        token,
-                                               std::string_view   where)
+        void reportBypassedUniformSummationOrderRefusal(std::string const& kernel,
+                                                        char const*        token,
+                                                        std::string_view   where)
         {
             const std::string_view tag = token != nullptr ? token : "Untagged";
             std::string            key;
@@ -6649,8 +6649,8 @@ namespace TensileLite
             std::lock_guard<std::mutex>  lock(mutex);
             if(!reported.insert(std::move(key)).second)
                 return;
-            std::cerr << "hipBLASLt warning: HIPBLASLT_FORCE_USO_ON bypassed the uniform "
-                         "summation order "
+            std::cerr << "hipBLASLt warning: HIPBLASLT_USO_BYPASS_REFUSALS bypassed the "
+                         "uniform summation order "
                       << where << " refusal " << tag << " for kernel " << kernel
                       << " (the first refusal found; later checks were not evaluated)" << std::endl;
         }
@@ -6838,18 +6838,19 @@ namespace TensileLite
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
             problem, hardware, launch, resolvedGA, gsu, nullptr, false, &obstacleToken);
 
-        // A refusal HIPBLASLT_FORCE_USO_ON bypasses is tallied as admitted.
-        const bool forced = !obstacle.empty() && Debug::Instance().forceUniformSummationOrderOn();
+        // A refusal HIPBLASLT_USO_BYPASS_REFUSALS bypasses is tallied as admitted.
+        const bool bypassed
+            = !obstacle.empty() && Debug::Instance().bypassUniformSummationOrderRefusals();
         if(Debug::Instance().printNoSolutionUniformSummationOrder())
         {
             ++uniformSummationOrderTally().examined;
-            if(!obstacle.empty() && !forced)
+            if(!obstacle.empty() && !bypassed)
                 uniformSummationOrderTallyRecord(obstacleToken);
         }
 
-        if(forced)
+        if(bypassed)
         {
-            reportForcedUniformSummationOrder(kernelName, obstacleToken, "selection");
+            reportBypassedUniformSummationOrderRefusal(kernelName, obstacleToken, "selection");
             return true;
         }
 
@@ -7142,9 +7143,9 @@ namespace TensileLite
                                                                        synchronizer,
                                                                        true,
                                                                        &obstacleToken);
-        if(!reason.empty() && Debug::Instance().forceUniformSummationOrderOn())
+        if(!reason.empty() && Debug::Instance().bypassUniformSummationOrderRefusals())
         {
-            reportForcedUniformSummationOrder(kernelName, obstacleToken, "launch");
+            reportBypassedUniformSummationOrderRefusal(kernelName, obstacleToken, "launch");
             return;
         }
         if(!reason.empty())

@@ -92,10 +92,10 @@ namespace TensileLite
         // on 0x200000 above.
         bool printNoSolutionUniformSummationOrder() const;
 
-        // Debug override from HIPBLASLT_FORCE_USO_ON (1, on or true): when the uniform
+        // Debug override from HIPBLASLT_USO_BYPASS_REFUSALS (1, on or true): when the uniform
         // summation order is on, its selection filter and launch gate admit every kernel
         // instead of refusing one. The USO launch arguments are unchanged.
-        bool forceUniformSummationOrderOn() const;
+        bool bypassUniformSummationOrderRefusals() const;
 
         bool naivePropertySearch() const;
 
@@ -181,7 +181,7 @@ namespace TensileLite
         bool        m_meshbasedLib        = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
-        bool        m_forceUSOOn          = false;
+        bool        m_usoBypassRefusals   = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
 
