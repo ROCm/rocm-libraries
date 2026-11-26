@@ -27,18 +27,19 @@ DATA_PAD_BYTES = 16
 BANK_CYCLE_BYTES = 256
 MXS_BLOCK_BYTES = 256
 MXS_PAD_BYTES = 16
-REGION_ALIGN_BITS = 2048
 SEGMENT_BYTES = 1 << 16
+TDM_PAD_PERIOD_MIN = 8
 TDM_PAD_PERIOD_MAX = 1024
 TDM_PAD_MAX_BYTES = 128 * 4
 LDS_PAD_STEP_BYTES = 8
 I32_SPAN = 1 << 31
 LDS_CAPACITY_BYTES = 327680
 VGPRS = 1024
-CHUNK_BYTES = 16
 LANE_GROUPS = 2
 
 MX_DTYPES = ("fp4", "fp8", "bf8")
+#: Bits per K value of an A or B type (the policy's GetElemBits); "fp6" is pk_fp6x16_t.
+DTYPE_BITS = {"fp4": 4, "fp6": 6, "fp8": 8, "bf8": 8}
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 
 #: The tuning knobs and their defaults: the cluster and the policy's template parameters
@@ -107,6 +108,14 @@ def _pow2_ceil(v: int) -> int:
 
 def _is_pow2(v: int) -> bool:
     return v > 0 and (v & (v - 1)) == 0
+
+
+def _is_pad_period(block_bytes: int) -> bool:
+    """Whether the TDM pads every block_bytes itself (the policy's IsPadPeriod): a power of two
+    of 8..1024 B. A data load with another padded block runs in iterate mode."""
+    return TDM_PAD_PERIOD_MIN <= block_bytes <= TDM_PAD_PERIOD_MAX and _is_pow2(
+        block_bytes
+    )
 
 
 @dataclass(frozen=True)
@@ -229,23 +238,39 @@ class MxTdmScheduledSpec:
 
     @staticmethod
     def dtype_bits(t: str) -> int:
-        return 4 if t == "fp4" else 8
+        return DTYPE_BITS[t]
 
     @property
     def elem_bits(self) -> int:
         return self.dtype_bits(self.a_dtype)
 
-    @property
-    def k_per_byte(self) -> int:
-        return 8 // self.elem_bits
+    def k_bytes(self, k: int) -> int:
+        """Bytes of k K values of an A or B row (the policy's GetKBytes): 6-bit elements take
+        3 bytes per 4 values."""
+        return k // 4 * 3 if self.elem_bits == 6 else k // (8 // self.elem_bits)
 
     @property
     def step_bytes(self) -> int:
-        return ATOM_K // self.k_per_byte
+        return self.k_bytes(ATOM_K)
+
+    @property
+    def chunk_bytes(self) -> int:
+        """Bytes of a lane's K chunk of a row and K step (the policy's GetChunkBytes)."""
+        return 24 if self.elem_bits == 6 else 16
 
     @property
     def chunks_per_lane(self) -> int:
-        return self.step_bytes // (LANE_GROUPS * CHUNK_BYTES)
+        return self.step_bytes // (LANE_GROUPS * self.chunk_bytes)
+
+    @property
+    def reads_per_fragment(self) -> int:
+        """ds_loads per lane of a row fragment of a K step (the policy's GetReadsPerFragment)."""
+        return self.chunks_per_lane
+
+    @property
+    def region_align(self) -> int:
+        """The alignment of the LDS regions, in bytes (the policy's GetRegionAlign)."""
+        return 256 if self.elem_bits == 8 else 512
 
     @property
     def wave_repeat_m(self) -> int:
@@ -283,7 +308,7 @@ class MxTdmScheduledSpec:
 
     @property
     def packed_k(self) -> int:
-        return self.K // self.k_per_byte
+        return self.k_bytes(self.K)
 
     @property
     def wide_a(self) -> bool:
@@ -320,7 +345,7 @@ class MxTdmScheduledSpec:
         return (
             self.a_scale_reads
             + self.b_scale_reads
-            + self.chunks_per_lane
+            + self.reads_per_fragment
             * (self.a_rows * self.wave_repeat_m + self.wave_repeat_n)
         )
 
@@ -335,7 +360,7 @@ class MxTdmScheduledSpec:
 
     # LDS layout.
     def derived_pads(self) -> Dict[str, Pad]:
-        k_bytes = self.tile_k // self.k_per_byte
+        k_bytes = self.k_bytes(self.tile_k)
 
         def data_block(repeat: int) -> int:
             block = _round_up(k_bytes, BANK_CYCLE_BYTES)
@@ -406,12 +431,12 @@ class MxTdmScheduledSpec:
     def lds_layout(self) -> LdsLayout:
         """The LDS layout of a spec whose tile, types and wave group are valid."""
         pads = self.derived_pads()
-        row_bytes = self.tile_k // self.k_per_byte
+        row_bytes = self.k_bytes(self.tile_k)
         steps = self.k_steps
         a_rows, b_rows = self.tile_m // 2, self.tile_n // 2
 
         def data_component(rows: int, pad: Pad) -> Tuple[int, int, int]:
-            if pad.on and pad.block_bytes > TDM_PAD_PERIOD_MAX:
+            if pad.on and not _is_pad_period(pad.block_bytes):
                 iterate_rows = pad.block_bytes // row_bytes
                 stride = pad.block_bytes + pad.pad_bytes
                 return _ceil_div(rows, iterate_rows) * stride, iterate_rows, stride
@@ -434,7 +459,7 @@ class MxTdmScheduledSpec:
 
         a_bytes, a_it_rows, a_it_stride = data_component(a_rows, pads["a"])
         b_bytes, b_it_rows, b_it_stride = data_component(b_rows, pads["b"])
-        align = REGION_ALIGN_BITS // self.elem_bits
+        align = self.region_align
         b_scale_region = _round_up(scale_region(b_rows, pads["b_scale"]), align)
         a_scale_region = _round_up(scale_region(a_rows, pads["a_scale"]), align)
         b_end = _round_up(2 * b_bytes, align)
@@ -516,13 +541,15 @@ class MxTdmScheduledSpec:
             return "ok"
         if pad.pad_bytes % LDS_PAD_STEP_BYTES or pad.pad_bytes > TDM_PAD_MAX_BYTES:
             return "lds_pad"
+        # A block that is not a pad period needs iterate mode: data only (row_bytes 0 for the
+        # scales), at least one row, whole rows per block and whole blocks per component.
         block = pad.block_bytes
-        if block <= TDM_PAD_PERIOD_MAX:
-            if block < 8 or not _is_pow2(block):
-                return "lds_pad"
-        elif row_bytes == 0:
-            return "lds_pad"
-        elif block % row_bytes or rows % (block // row_bytes):
+        if not _is_pad_period(block) and (
+            row_bytes == 0
+            or block < row_bytes
+            or block % row_bytes
+            or rows % (block // row_bytes)
+        ):
             return "lds_pad"
         if block % chunk:
             return "lds_pad"
@@ -585,7 +612,7 @@ class MxTdmScheduledSpec:
         if check_shape and (gx % cx or gy % cy):
             return "cluster_grid"
         pads = self.derived_pads()
-        row_bytes = self.tile_k // self.k_per_byte
+        row_bytes = self.k_bytes(self.tile_k)
         checks = (
             (pads["a"], self.tile_m // 2, 16, True),
             (pads["b"], self.tile_n // 2, 16, True),
@@ -599,7 +626,7 @@ class MxTdmScheduledSpec:
             if (
                 data
                 and pad.on
-                and pad.block_bytes <= TDM_PAD_PERIOD_MAX
+                and _is_pad_period(pad.block_bytes)
                 and (pad.block_bytes % row_bytes)
             ):
                 return "lds_pad"

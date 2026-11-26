@@ -47,9 +47,10 @@ using ProblemOf = ck_tile::MxGemmTdmScheduledProblem<
     Traits>;
 
 /// The LDS layout of a Problem and policy that build and run M x N x K: the B and A bases and
-/// component strides, the B and A scale bases, the buffer stride and the LDS size.
+/// component strides, the B and A scale bases, the buffer stride and the LDS size; then A's and
+/// B's iterate-mode rows and stride (0 for a load the TDM pads itself).
 template <typename P, typename Policy>
-void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[8])
+void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[12])
 {
     EXPECT_EQ((Policy::template Validate<P>()), nullptr);
     const char* why = PipelineOf<P, Policy>::GetUnsupportedReason(M, N, K);
@@ -58,27 +59,32 @@ void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[8])
     constexpr auto b       = Policy::template GetLdsOperand<P, false>();
     constexpr auto a_scale = Policy::template GetLdsOperand<P, true, true>();
     constexpr auto b_scale = Policy::template GetLdsOperand<P, false, true>();
-    const index_t got[8]   = {b.base,
+    const index_t got[12]  = {b.base,
                               b.stride,
                               a.base,
                               a.stride,
                               b_scale.base,
                               a_scale.base,
                               Policy::template GetLdsBufferStride<P>(),
-                              Policy::template GetSmemSize<P>()};
-    for(int i = 0; i < 8; ++i)
+                              Policy::template GetSmemSize<P>(),
+                              a.iterate_rows,
+                              a.iterate_stride,
+                              b.iterate_rows,
+                              b.iterate_stride};
+    for(int i = 0; i < 12; ++i)
         EXPECT_EQ(got[i], want[i]) << "field " << i;
 }
 
-// The LDS layouts of the tuned FP4 instances and FP8 variants of 256x16 and 128x128 tiles, each
-// valid for its problem. An operand is two components (one per wave pair) of tile / 2 rows of
-// tile_k / k_per_byte bytes, padded 16 B per pad block; a scale region is 2 x rows x K steps x 4 B.
-// The scale regions, and B's two components when not interleaved, are rounded up to 2048 bits of
-// elements (512 B for FP4, 256 B for 8-bit). The second buffer starts at the buffer stride, the
-// power of two above the buffer when both fit in the 320 KiB of LDS; the LDS size is the stride
-// plus the buffer.
+// The LDS layouts of the tuned FP4 instances, FP8 variants of 256x16 and 128x128 tiles and a BF8
+// variant of 256x16, each valid for its problem. An operand is two components (one per wave pair)
+// of tile / 2 rows of GetKBytes(tile_k) bytes, padded 16 B per pad block; a scale region is 2 x
+// rows x K steps x 4 B. The scale regions, and B's two components when not interleaved, are rounded
+// up to the region alignment (512 B for FP4, 256 B for 8-bit). The second buffer starts at the
+// buffer stride, the power of two above the buffer when both fit in the 320 KiB of LDS; the LDS
+// size is the stride plus the buffer.
 TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
 {
+    using ck_tile::bf8_t;
     using ck_tile::fp8_t;
     using ck_tile::pk_fp4_t;
     using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
@@ -92,7 +98,10 @@ TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
         // 141312 B buffer and a 256 KiB stride exceed the LDS: stride 141312, LDS 2 x 141312.
         SCOPED_TRACE("fp4 256x256x512");
         check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 256, 512, 2, 2, 32>, Default>(
-            4096, 4096, 65536, {0, 99584, 33024, 33280, 132608, 137216, 141312, 282624});
+            4096,
+            4096,
+            65536,
+            {0, 99584, 33024, 33280, 132608, 137216, 141312, 282624, 0, 0, 8, 2064});
     }
     {
         // Not interleaved: B (8 rows of 256 B, 16 B per 256: 2176) twice, rounded to 4608; the B
@@ -100,7 +109,7 @@ TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
         // 33280) at 9216. Buffer 75776, stride 131072: LDS 131072 + 75776.
         SCOPED_TRACE("fp4 256x16x512");
         check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 16, 512, 4, 1, 16, 1, 4>, NoSplitNoInterleave>(
-            65536, 16, 65536, {0, 2176, 9216, 33280, 4608, 5120, 131072, 206848});
+            65536, 16, 65536, {0, 2176, 9216, 33280, 4608, 5120, 131072, 206848, 0, 0, 0, 0});
     }
     {
         // As fp4 256x16x512 with 2 K steps and 256 B rounding: B twice (4352), the B scales (128 B,
@@ -109,7 +118,15 @@ TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
         using WideA = ck_tile::MxTdmScheduledGemmTraits<false, false, true>;
         check_layout<ProblemOf<fp8_t, fp8_t, 256, 16, 256, 4, 1, 16, 1, 4, WideA>,
                      NoSplitNoInterleave>(
-            65536, 16, 65536, {0, 2176, 6656, 33280, 4352, 4608, 131072, 204288});
+            65536, 16, 65536, {0, 2176, 6656, 33280, 4352, 4608, 131072, 204288, 0, 0, 0, 0});
+    }
+    {
+        // BF8 takes FP8's layout: 8-bit rows and 256 B region alignment.
+        SCOPED_TRACE("bf8 256x16x256");
+        using WideA = ck_tile::MxTdmScheduledGemmTraits<false, false, true>;
+        check_layout<ProblemOf<bf8_t, fp8_t, 256, 16, 256, 4, 1, 16, 1, 4, WideA>,
+                     NoSplitNoInterleave>(
+            65536, 16, 65536, {0, 2176, 6656, 33280, 4352, 4608, 131072, 204288, 0, 0, 0, 0});
     }
     {
         // 64 rows of 256 B, 16 B per 1 KiB: 16640 per component. B0 and A0 share the first
@@ -117,33 +134,45 @@ TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
         // (1024 B each). Buffer 100864, stride 131072: LDS 131072 + 100864.
         SCOPED_TRACE("fp8 128x128x256");
         check_layout<ProblemOf<fp8_t, fp8_t, 128, 128, 256, 2, 2, 16>, NoSplit>(
-            2048, 2048, 65536, {0, 65536, 16640, 65536, 98816, 99840, 131072, 231936});
+            2048, 2048, 65536, {0, 65536, 16640, 65536, 98816, 99840, 131072, 231936, 0, 0, 0, 0});
     }
 }
 
-// Lane group g reads chunk j of a row's K step at g * 16 + chunk_offset(j): (0, 32) for FP4 and
-// (0, 32, 64, 96) for the 8-bit types, which tile the K step.
+// Lane group g reads chunk j of a row's K step at g * chunk_bytes + offsets[j], one ds_load per
+// chunk; the chunks of both lane groups cover every byte of the K step exactly once.
 template <typename P>
-void check_lane_chunks()
+void check_lane_chunks(index_t step_bytes, index_t chunk_bytes, const std::vector<index_t>& offsets)
 {
-    using Policy = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using Policy         = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    const index_t chunks = static_cast<index_t>(offsets.size());
+    EXPECT_EQ(Policy::GetStepBytes<P>(), step_bytes);
+    EXPECT_EQ(Policy::GetChunkBytes<P>(), chunk_bytes);
+    EXPECT_EQ(Policy::GetChunksPerLane<P>(), chunks);
+    EXPECT_EQ(Policy::GetReadsPerFragment<P>(), chunks);
     std::vector<index_t> bytes;
-    for(index_t g = 0; g < Policy::kLaneGroups; ++g)
-        for(index_t j = 0; j < Policy::GetChunksPerLane<P>(); ++j)
-            for(index_t b = 0; b < Policy::kChunkBytes; ++b)
-                bytes.push_back(g * Policy::kChunkBytes + Policy::GetChunkOffset<P>(j) + b);
+    for(index_t j = 0; j < chunks; ++j)
+    {
+        EXPECT_EQ(Policy::GetChunkOffset<P>(j), offsets[j]) << "chunk " << j;
+        for(index_t g = 0; g < Policy::kLaneGroups; ++g)
+            for(index_t b = 0; b < chunk_bytes; ++b)
+                bytes.push_back(g * chunk_bytes + offsets[j] + b);
+    }
     std::sort(bytes.begin(), bytes.end());
-    ASSERT_EQ(static_cast<index_t>(bytes.size()), Policy::GetStepBytes<P>());
-    for(index_t i = 0; i < Policy::GetStepBytes<P>(); ++i)
+    ASSERT_EQ(static_cast<index_t>(bytes.size()), step_bytes);
+    for(index_t i = 0; i < step_bytes; ++i)
         EXPECT_EQ(bytes[i], i);
-    EXPECT_EQ(Policy::GetChunkOffset<P>(1), 32);
 }
 
+// 16-byte chunks: FP4's 64-byte K step in 2 chunks per lane at (0, 32), the 8-bit types'
+// 128-byte K step in 4 at (0, 32, 64, 96).
 TEST(MxGemmTdmScheduledHost, LaneChunksTileTheKStep)
 {
-    check_lane_chunks<ProblemOf<ck_tile::pk_fp4_t, ck_tile::fp8_t, 256, 256, 512, 2, 2, 32>>();
-    check_lane_chunks<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>>();
-    check_lane_chunks<ProblemOf<ck_tile::bf8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>>();
+    check_lane_chunks<ProblemOf<ck_tile::pk_fp4_t, ck_tile::fp8_t, 256, 256, 512, 2, 2, 32>>(
+        64, 16, {0, 32});
+    check_lane_chunks<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>>(
+        128, 16, {0, 32, 64, 96});
+    check_lane_chunks<ProblemOf<ck_tile::bf8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>>(
+        128, 16, {0, 32, 64, 96});
 }
 
 // The cluster multicast masks hold exactly the workgroups sharing the coordinate, with bit
@@ -207,6 +236,36 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     EXPECT_EQ((PipelineOf<Problem128x16x512, Pf0Lp0>::GetKernelName()),
               "mx_gemm_tdm_scheduled_mxfp4_t128x16x512_c1x4_fp16_wg4x1_pf0_lp0_hplrnone_mma16");
     EXPECT_EQ(Pf0Lp0::GetTuningName<Problem128x16x512>(), "_c1x4_pf0_lp0_hplrnone");
+}
+
+// Bytes of K values of an A or B row: K / 2 for FP4 and K for the 8-bit types, at 0, a K step,
+// a K tail (2048 + 160) and 2^28. MxTdmScheduledSelectTraits sizes the rows the same way on the
+// host: at M = N = 1024, A and B pass 2^31 bytes above K = 2^22 for FP4 and above K = 2^21 for
+// the 8-bit types.
+TEST(MxGemmTdmScheduledHost, RowBytesOfKValues)
+{
+    using ck_tile::long_index_t;
+    using Policy = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using Fp4    = Problem256x256x512;
+    using Fp8    = ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>;
+    using Bf8    = ProblemOf<ck_tile::bf8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>;
+    for(const index_t k : {index_t{0}, index_t{128}, index_t{2048 + 160}, index_t{1} << 28})
+    {
+        EXPECT_EQ(Policy::GetKBytes<Fp4>(k), k / 2) << k;
+        EXPECT_EQ(Policy::GetKBytes<Fp8>(k), k) << k;
+        EXPECT_EQ(Policy::GetKBytes<Bf8>(k), k) << k;
+    }
+    const auto wide = [](auto problem, long_index_t K) {
+        const auto t = ck_tile::MxTdmScheduledSelectTraits<decltype(problem)>(1024, 1024, K);
+        EXPECT_EQ(t.wide_a, t.wide_b) << K;
+        return t.wide_a;
+    };
+    EXPECT_FALSE(wide(Fp4{}, long_index_t{1} << 22));
+    EXPECT_TRUE(wide(Fp4{}, (long_index_t{1} << 22) + 512));
+    EXPECT_FALSE(wide(Fp8{}, long_index_t{1} << 21));
+    EXPECT_TRUE(wide(Fp8{}, (long_index_t{1} << 21) + 256));
+    EXPECT_FALSE(wide(Bf8{}, long_index_t{1} << 21));
+    EXPECT_TRUE(wide(Bf8{}, (long_index_t{1} << 21) + 256));
 }
 
 // A's iterate-mode load steps 16 rows of K bytes per block: 2^32 bytes at K = 2^28, past 32 bits.

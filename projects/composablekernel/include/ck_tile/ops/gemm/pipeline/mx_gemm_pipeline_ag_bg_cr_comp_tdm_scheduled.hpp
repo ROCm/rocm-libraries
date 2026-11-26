@@ -149,6 +149,24 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static_assert(Scheduler == GemmPipelineScheduler::Intrawave,
                   "comp_tdm_scheduled is one explicitly scheduled intrawave loop: "
                   "Problem::Scheduler must be GemmPipelineScheduler::Intrawave");
+    // Protects the byte counts written into TDM words: tensorDim0 (packed_k - k_byte, patched by
+    // Issue and PrepareIssue) and the iterate-mode global increment (set by DataDescriptor). The
+    // TDM counts A and B in its unit (TDMElementTraits), which must then be one byte.
+    static_assert(TDMElementTraits<remove_cvref_t<ADataType>>::unit_bytes == 1 &&
+                      TDMElementTraits<remove_cvref_t<BDataType>>::unit_bytes == 1,
+                  "comp_tdm_scheduled: the TDM unit of A and B must be one byte");
+    // Protects the agreement of the two byte counts of K values: GetKBytes (K offsets and
+    // tensorDim0) takes elem_bits bits per K value, ViewBytes (row strides) sizeof(DataType) bytes
+    // per PackedSize K values. They count the same bytes per K value, and so agree on whole
+    // elements, only when sizeof(DataType) is exactly PackedSize values of elem_bits bits.
+    static_assert(mx_tdm_scheduled::elem_bits<remove_cvref_t<ADataType>>() *
+                              numeric_traits<remove_cvref_t<ADataType>>::PackedSize ==
+                          8 * static_cast<index_t>(sizeof(ADataType)) &&
+                      mx_tdm_scheduled::elem_bits<remove_cvref_t<BDataType>>() *
+                              numeric_traits<remove_cvref_t<BDataType>>::PackedSize ==
+                          8 * static_cast<index_t>(sizeof(BDataType)),
+                  "comp_tdm_scheduled: sizeof(ADataType) and sizeof(BDataType) must be exactly "
+                  "PackedSize K values of elem_bits bits each");
 
     static constexpr index_t kBlockSize     = Problem::kBlockSize;
     static constexpr index_t BlockSize      = Problem::kBlockSize;
@@ -202,7 +220,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kRn               = Policy::template GetWaveRepeatN<Problem>();
     static constexpr index_t kKSteps           = Policy::template GetKSteps<Problem>();
     static constexpr index_t kAtomM            = BlockGemmShape::WarpTile::at(number<0>{});
-    static constexpr index_t kKPerByte         = Policy::template GetKPerByte<Problem>();
     static constexpr bool kPrefetchLdsRead     = Policy::template GetPrefetchLdsRead<Problem>();
     static constexpr bool kSplitBLdsRead       = Policy::template GetSplitBLdsRead<Problem>();
     static constexpr index_t kHalf             = kRn / 2;
@@ -230,7 +247,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr bool kSplitCluster = kHasCluster && !kSourceOrder;
     /// A K step's ds_loads (unclamped): kReadsA with LocalPrefetchA (scales and A), kReadsBFrag
     /// per B fragment.
-    static constexpr index_t kReadsBFrag = Policy::template GetChunksPerLane<Problem>();
+    static constexpr index_t kReadsBFrag = Policy::template GetReadsPerFragment<Problem>();
     static constexpr index_t kReadsA =
         (kRm < 8 ? 1 : kRm / 4) + (kRn < 8 ? 1 : kRn / 4) + kReadsBFrag * (kAtomM / 16) * kRm;
     /// Half B's reads before its first half's WMMAs, and the s_wait_dscnt of a refill after them.
@@ -416,7 +433,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               block_m(a_dram_.get_window_origin()[number<0>{}]),
               block_n(b_dram_.get_window_origin()[number<0>{}]),
               smem(smem_),
-              packed_k(integer_divide_nonnegative<kKPerByte>(K)),
+              packed_k(Policy::template GetKBytes<Problem>(K)),
               // The last K step may be partial (its scales zero-padded): in the K tail, or in a
               // partial last tile the loop runs.
               k_atoms(integer_divide_nonnegative<Policy::kAtomK>(K + Policy::kAtomK - 1)),
@@ -472,6 +489,17 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 return a_dram;
             else
                 return b_dram;
+        }
+
+        /// Bytes of `offset`, an offset of a DRAM view of DataType, as the TDM descriptor converts
+        /// it (tile_window::make_tdm_groups): the view counts K values, PackedSize per element of
+        /// sizeof(DataType) bytes.
+        template <typename DataType>
+        CK_TILE_DEVICE static index_t ViewBytes(index_t offset)
+        {
+            constexpr index_t packed = numeric_traits<remove_cvref_t<DataType>>::PackedSize;
+            return integer_divide_nonnegative<packed>(offset) *
+                   static_cast<index_t>(sizeof(DataType));
         }
 
         /// Component `component` of A's or B's tile as a TDM load window: a sub-window of the
@@ -600,7 +628,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     const index_t held      = max(min(rows_left, L.rows), 1);
                     iterations = integer_divide_nonnegative<tile_rows>(held + tile_rows - 1);
                 }
-                const index_t row_bytes = integer_divide_nonnegative<kKPerByte>(
+                using DataType          = typename remove_cvref_t<decltype(dram_window)>::DataType;
+                const index_t row_bytes = ViewBytes<DataType>(
                     view.get_tensor_descriptor().calculate_offset(make_multi_index(1, 0)));
                 config.iterate_enable = true;
                 config.iter_config    = {GetIterateGlobalIncrement<IsA>(row_bytes),
@@ -640,7 +669,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         /// This wave's data and scale loads of the tile at k0 into buffer parity.
         CK_TILE_DEVICE void Issue(index_t k0, index_t parity) const
         {
-            const index_t k_byte      = integer_divide_nonnegative<kKPerByte>(k0);
+            const index_t k_byte      = Policy::template GetKBytes<Problem>(k0);
             const index_t remaining_k = packed_k - k_byte;
             PipelineImplBase::template GlobalPrefetchTDM<0>(
                 data,
@@ -665,7 +694,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         };
         CK_TILE_DEVICE Refill PrepareIssue(index_t k0, index_t parity) const
         {
-            const index_t k_byte     = integer_divide_nonnegative<kKPerByte>(k0);
+            const index_t k_byte     = Policy::template GetKBytes<Problem>(k0);
             const index_t k_step     = integer_divide_nonnegative<Policy::kAtomK>(k0);
             const uint32_t lds_shift = static_cast<uint32_t>(BufferBase(parity));
             Refill r{data, scale};
@@ -692,7 +721,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE index_t DramRowBytes() const
         {
-            return integer_divide_nonnegative<kKPerByte>(
+            return ViewBytes<typename DramWindowType<IsA>::DataType>(
                 DramWindow<IsA>().get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
                     make_multi_index(1, 0)));
         }
@@ -713,7 +742,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             {
                 constexpr index_t line = Policy::kGl2LineBytes;
                 k_ahead                = k_ahead < K ? k_ahead : K - kTileK;
-                const index_t k_byte   = integer_divide_nonnegative<kKPerByte>(k_ahead);
+                const index_t k_byte   = Policy::template GetKBytes<Problem>(k_ahead);
                 constexpr index_t data_lines =
                     kLdsRowBytes / line == 0 && AheadParity == 0 ? 1 : kLdsRowBytes / line;
                 const index_t cluster_m0 = kHasCluster ? block_m - cluster_wy * kTileM : block_m;

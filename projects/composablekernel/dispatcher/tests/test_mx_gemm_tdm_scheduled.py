@@ -188,6 +188,165 @@ class TestParity(unittest.TestCase):
         self.assertEqual(tuple(code for _, code in cases), sched.REASONS)
 
 
+class TestLdsLayout(unittest.TestCase):
+    """The Python half of the host test's LdsLayoutOfTheTunedInstances, LaneChunksTileTheKStep and
+    RowBytesOfKValues (test_mx_gemm_tdm_scheduled_host.cpp), and the policy's pad rule."""
+
+    def test_tuned_instances(self):
+        # The C++ test's instances and problems, each valid for its problem. Its layout fields:
+        # B and A bases and component strides, B and A scale bases, buffer stride, LDS size,
+        # then A's and B's iterate-mode rows and stride (0 for a load the TDM pads itself). Then
+        # the K step's bytes, chunk bytes, chunks per lane and LDS reads per K step, and whether A
+        # needs WideA (no row needs WideB).
+        no_split = {"split_b_lds_read": False}
+        no_split_no_interleave = {**no_split, "interleave_lds_regions": False}
+        c1x4 = {**no_split_no_interleave, "cluster_dim": (1, 4)}
+        t256x16 = {**TILE, "tile_n": 16, "warp_m": 4, "warp_n": 1, "warp_tile_m": 16}
+        t128x128 = {
+            **TILE,
+            "tile_m": 128,
+            "tile_n": 128,
+            "tile_k": 256,
+            "warp_tile_m": 16,
+        }
+        mab = (65536, 16, 65536)
+        fp8_256x16 = (0, 2176, 6656, 33280, 4352, 4608, 131072, 204288, 0, 0, 0, 0)
+        for name, tile, tuning, a_dtype, mnk, layout, step, wide_a in (
+            (
+                "fp4 256x256x512",
+                TILE,
+                {},
+                "fp4",
+                (4096, 4096, 65536),
+                (0, 99584, 33024, 33280, 132608, 137216, 141312, 282624, 0, 0, 8, 2064),
+                (64, 16, 2, 35),
+                False,
+            ),
+            (
+                "fp4 256x16x512",
+                t256x16,
+                c1x4,
+                "fp4",
+                mab,
+                (0, 2176, 9216, 33280, 4608, 5120, 131072, 206848, 0, 0, 0, 0),
+                (64, 16, 2, 12),
+                False,
+            ),
+            (
+                "fp8 256x16x256",
+                {**t256x16, "tile_k": 256},
+                c1x4,
+                "fp8",
+                mab,
+                fp8_256x16,
+                (128, 16, 4, 22),
+                True,
+            ),
+            (
+                "bf8 256x16x256",
+                {**t256x16, "tile_k": 256},
+                c1x4,
+                "bf8",
+                mab,
+                fp8_256x16,
+                (128, 16, 4, 22),
+                True,
+            ),
+            (
+                "fp8 128x128x256",
+                t128x128,
+                no_split,
+                "fp8",
+                (2048, 2048, 65536),
+                (0, 65536, 16640, 65536, 98816, 99840, 131072, 231936, 0, 0, 0, 0),
+                (128, 16, 4, 34),
+                False,
+            ),
+        ):
+            with self.subTest(name=name):
+                M, N, K = mnk
+                spec = sched.spec_from_tile(
+                    tile, tuning, a_dtype=a_dtype, M=M, N=N, K=K
+                )
+                self.assertEqual(spec.validate(check_shape=True), "ok")
+                lay = spec.lds_layout()
+                got = (
+                    lay.b.base,
+                    lay.b.stride,
+                    lay.a.base,
+                    lay.a.stride,
+                    lay.b_scale.base,
+                    lay.a_scale.base,
+                    lay.buffer_stride,
+                    lay.lds_bytes,
+                    lay.a.iterate_rows,
+                    lay.a.iterate_stride,
+                    lay.b.iterate_rows,
+                    lay.b.iterate_stride,
+                )
+                self.assertEqual(got, layout)
+                self.assertEqual(
+                    (
+                        spec.step_bytes,
+                        spec.chunk_bytes,
+                        spec.chunks_per_lane,
+                        spec.reads_per_step,
+                    ),
+                    step,
+                )
+                self.assertEqual(spec.reads_per_fragment, spec.chunks_per_lane)
+                self.assertEqual((spec.wide_a, spec.wide_b), (wide_a, False))
+
+    def test_wide_operands(self):
+        # At M = N = 1024, A and B pass 2^31 bytes above K = 2^22 for FP4 (K / 2 bytes per row)
+        # and above K = 2^21 for the 8-bit types, as in MxTdmScheduledSelectTraits.
+        fp8 = {**TILE, "tile_m": 128, "tile_n": 128, "tile_k": 256, "warp_tile_m": 16}
+        for tile, a_dtype, k_max in (
+            (TILE, "fp4", 1 << 22),
+            (fp8, "fp8", 1 << 21),
+            (fp8, "bf8", 1 << 21),
+        ):
+            for K, wide in ((k_max, False), (k_max + tile["tile_k"], True)):
+                with self.subTest(a_dtype=a_dtype, K=K):
+                    spec = sched.spec_from_tile(
+                        tile, {}, a_dtype=a_dtype, M=1024, N=1024, K=K
+                    )
+                    self.assertEqual((spec.wide_a, spec.wide_b), (wide, wide))
+
+    def test_pad_rule(self):
+        # A pad period is a power of two of 8..1024 B, which the TDM pads itself. Any other
+        # padded block runs in iterate mode: data only (row bytes 0 for the scales), one or more
+        # whole rows per block, whole blocks per component; a zero block is rejected. Every
+        # block is whole 16 B chunks.
+        for block, period in (
+            (0, False),
+            (4, False),
+            (8, True),
+            (12, False),
+            (768, False),
+            (1024, True),
+            (2048, False),
+        ):
+            with self.subTest(block=block):
+                self.assertEqual(sched._is_pad_period(block), period)
+        pad, reason = sched.Pad, sched.MxTdmScheduledSpec._pad_reason
+        for block, row_bytes, rows, want in (
+            (0, 256, 128, "lds_pad"),
+            (4, 256, 128, "lds_pad"),
+            (768, 256, 6, "ok"),
+            (768, 256, 7, "lds_pad"),
+            (768, 384, 32, "ok"),
+            (768, 768, 4, "ok"),
+            (768, 512, 64, "lds_pad"),
+            (1024, 256, 128, "ok"),
+            (256, 0, 64, "ok"),
+            (2048, 0, 64, "lds_pad"),
+            (8, 0, 64, "lds_pad"),
+        ):
+            with self.subTest(block=block, row_bytes=row_bytes, rows=rows):
+                self.assertEqual(reason(pad(16, block), row_bytes, rows, 16), want)
+
+
 class TestValidationUtils(unittest.TestCase):
     def test_registered_for_gfx1250_only(self):
         self.assertIn("comp_tdm_scheduled", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx1250"])
