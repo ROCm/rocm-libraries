@@ -67,6 +67,20 @@ The tuner records the GPU it ran on (detected from the device name, like rocPRIM
 By default, unknown targets keep what the existing header uses (`--default-tuning keep`), or the algorithm's default config (`*_config_params_base`) without `--existing`.
 Pass `--default-tuning base` to use the default config, or `--default-tuning fastest` to make unknown targets use the tuned configs of the lowest tuned architecture instead.
 
+By default, each tuned config is compared case by case to baseline benchmark results, using the per-case results the tuner saved in `<output>/cases/`.
+A tuned config is only used if the geometric mean of its speedups is above `1 + --baseline-margin` and no case is slower than `1 - --baseline-margin` (default 0.05); otherwise the config the library used when tuning is kept.
+The baseline results are primbench CSV files named `benchmark_rocprim_<benchmark>_<arch>.csv`:
+
+```shell
+# Use existing baseline results, e.g. from .gitlab/run_benchmarks.py --csv-out-dir
+./confgen/generate.py --input ./output --existing ../rocprim/include/rocprim/device/detail/config/ --output ./tmp --baseline-path ./baseline/csv
+
+# Or run the benchmarks, built from the baseline sources; the results go to ./tmp/baseline-bench/csv
+./confgen/generate.py --input ./output --existing ../rocprim/include/rocprim/device/detail/config/ --output ./tmp --benchmark-dir ../build/benchmark
+```
+
+With `--no-compare-to-base`, and for algorithms whose tuned cases don't match any baseline case, the configs are compared to the baselines measured by the tuner (`--tune-baseline`) instead.
+
 ## Migrating from old tuning infrastructure
 
 First ensure the already existing configs have config annotations. For example:

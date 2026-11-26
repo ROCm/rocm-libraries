@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import datetime
 import glob
 import json
 import logging
+import math
 import os
 import pathlib
 import re
+import subprocess
 
 import typing_extensions as ty
 import jinja2
@@ -16,6 +19,20 @@ log = logging.getLogger("confgen.generate")
 
 # Used when no block_sort config is found for a block_merge type.
 MERGE_SORT_DEFAULT_SORTED_TILE = 1024
+
+# Benchmarks whose name differs from the tuned algorithm (see benchmark/CMakeLists.txt).
+BENCHMARK_NAMES = {
+    "device_adjacent_difference_inplace": ["device_adjacent_difference"],
+    "device_lower_bound": ["device_binary_search"],
+    "device_upper_bound": ["device_binary_search"],
+    "device_run_length_encode_non_trivial": [
+        "device_run_length_encode_non_trivial_runs"
+    ],
+    "device_segmented_radix_sort": [
+        "device_segmented_radix_sort_keys",
+        "device_segmented_radix_sort_pairs",
+    ],
+}
 
 
 def round_up(value, alignment):
@@ -204,12 +221,13 @@ def resolve_shadowed_configs(targets, new_type_hashes):
 def keep_baseline_if_close(
     data: dict[str, ty.Any],
     candidates: list[dict[str, ty.Any]],
-    winner: dict[str, ty.Any],
+    winner: dict[str, ty.Any] | None,
     margin: float,
-) -> dict[str, ty.Any]:
+) -> dict[str, ty.Any] | None:
     """Returns the fastest baseline entry (the configs the library used on this arch
     when tuning, recorded by the tuner) unless the tuned winner is more than 'margin'
-    faster than it. Times are in ms/GiB, so lower is better."""
+    faster than it. Times are in ms/GiB, so lower is better. Without a winner, returns
+    the fastest baseline entry, or None if the tuner recorded none."""
     keys = data.get("tune_params_keys", [])
     best_name = None
     best = None
@@ -219,8 +237,8 @@ def keep_baseline_if_close(
                 if best is None or c["time"] < best["time"]:
                     best_name = name
                     best = c
-    if best is None:
-        return winner
+    if best is None or winner is None:
+        return best if winner is None else winner
 
     speedup = best["time"] / winner["time"] - 1
     if speedup > margin:
@@ -258,6 +276,217 @@ def get_sorted_tile(
         )
         return MERGE_SORT_DEFAULT_SORTED_TILE
     return int(config["block_size_x"]) * int(config["ipt"])
+
+
+def get_benchmark_names(alg: str) -> list[str]:
+    """Returns the rocPRIM benchmarks that measure a tuned algorithm."""
+    if alg in BENCHMARK_NAMES:
+        return BENCHMARK_NAMES[alg]
+    for family in ("device_partition", "device_select"):
+        if alg.startswith(family):
+            return [family]
+    return [alg]
+
+
+def strip_cfg(name: str) -> str:
+    """Removes the 'cfg' entry from a primbench benchmark name, so the results of a
+    tuned config match the baseline results of the same case."""
+    start = name.find("cfg: ")
+    if start < 0:
+        return name
+    end = start + len("cfg: ")
+    if name.startswith("{", end):
+        depth = 0
+        for end in range(end, len(name)):
+            depth += {"{": 1, "}": -1}.get(name[end], 0)
+            if depth == 0:
+                break
+        end += 1
+    else:
+        end = name.find(",", end)
+        end = len(name) if end < 0 else end
+    # Also remove the separator next to the entry.
+    if name.startswith(", ", end):
+        end += 2
+    elif name[:start].endswith(", "):
+        start -= 2
+    return name[:start] + name[end:]
+
+
+def get_case_results_path(
+    file_path: str, data: dict[str, ty.Any], entry: dict[str, ty.Any]
+) -> pathlib.Path | None:
+    """Returns the per-case primbench results of a tuned config, written by the tuner
+    to <output>/cases/<cache name>/<name>=<value>_..._size<bytes>.json."""
+    cache_path = pathlib.Path(file_path)
+    case_dir = cache_path.parent / "cases" / cache_path.name.removesuffix("_cache.json")
+    prefix = "_".join(f"{k}={entry.get(k)}" for k in data.get("tune_params_keys", []))
+    paths = glob.glob(f"{glob.escape(str(case_dir / prefix))}_size*.json")
+    return pathlib.Path(paths[0]) if len(paths) == 1 else None
+
+
+def read_case_results(path: pathlib.Path) -> dict[str, float]:
+    """Returns the bytes per second of each case in a primbench JSON output."""
+    with open(path, "r") as f:
+        specializations = json.load(f).get("specializations", [])
+    return {strip_cfg(s["name"]): s["bytes_per_second"] for s in specializations}
+
+
+def read_baseline_csv(path: pathlib.Path) -> dict[str, float]:
+    """Returns the bytes per second of each case in a primbench CSV output."""
+    with open(path, "r", newline="") as f:
+        return {
+            strip_cfg(row["name"]): float(row["bytes_per_second"])
+            for row in csv.DictReader(f)
+            if row.get("noise_timeout", "0") in ("0", "false")
+        }
+
+
+def run_baseline_benchmark(
+    benchmark_dir: pathlib.Path,
+    benchmark: str,
+    arch: str,
+    names: set[str],
+    sizes: set[int],
+    csv_path: pathlib.Path,
+) -> bool:
+    """Runs the cases of a rocPRIM benchmark that the tuner measured, and writes the
+    results to csv_path. The benchmark must be built from the baseline sources."""
+    executable = benchmark_dir / f"benchmark_rocprim_{benchmark}"
+    if not executable.exists():
+        log.warning(f"Could not find benchmark executable: {executable}")
+        return False
+
+    json_path = csv_path.parent.parent / "json" / f"{csv_path.stem}.json"
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    args = [str(executable), "--csv-out", str(csv_path), "--json-out", str(json_path)]
+    # Run the cases at the size the tuner used.
+    if len(sizes) == 1:
+        args += ["--size", str(next(iter(sizes)))]
+    elif sizes:
+        log.warning(f"{benchmark}: the tuner used several sizes {sorted(sizes)}")
+    # Only run the cases the tuner measured. Long filters are left out, since a single
+    # argument is limited to 128 KiB on Linux.
+    escape = lambda n: re.sub(r"([\\^$.|?*+()\[\]{}])", r"\\\1", n)
+    case_filter = "^(" + "|".join(escape(n) for n in sorted(names)) + ")$"
+    if names and len(case_filter) < 100_000:
+        args += ["--filter", case_filter]
+
+    log.info(f"Running baseline benchmark {executable.name} for {arch}")
+    try:
+        subprocess.check_call(args)
+    except (OSError, subprocess.CalledProcessError) as error:
+        log.warning(f"Could not run {executable}: {error}")
+        return False
+    return csv_path.exists()
+
+
+def load_baselines(
+    cases: dict[tuple[str, str], dict[str, ty.Any]],
+    baseline_dir: pathlib.Path,
+    benchmark_dir: pathlib.Path | None,
+) -> dict[tuple[str, str], dict[str, float]]:
+    """Returns the baseline results (bytes per second by case name) of each
+    (benchmark, arch) in 'cases', read from primbench CSV files named
+    benchmark_rocprim_<benchmark>_<arch>.csv in baseline_dir. Missing files are created
+    by running the benchmarks from benchmark_dir, if it's set."""
+    baselines = {}
+    for (benchmark, arch), needed in cases.items():
+        csv_path = baseline_dir / f"benchmark_rocprim_{benchmark}_{arch}.csv"
+        if not csv_path.exists() and benchmark_dir is not None:
+            baseline_dir.mkdir(parents=True, exist_ok=True)
+            run_baseline_benchmark(
+                benchmark_dir,
+                benchmark,
+                arch,
+                needed["names"],
+                needed["sizes"],
+                csv_path,
+            )
+        if csv_path.exists():
+            baselines[(benchmark, arch)] = read_baseline_csv(csv_path)
+        else:
+            log.warning(f"No baseline results for {benchmark} on {arch}: {csv_path}")
+    return baselines
+
+
+def compare_to_baseline(
+    file_path: str,
+    data: dict[str, ty.Any],
+    candidates: list[dict[str, ty.Any]],
+    baseline: dict[str, float],
+    margin: float,
+) -> tuple[bool, dict[str, ty.Any] | None]:
+    """Compares each candidate to the baseline results, case by case, using the
+    per-case results the tuner saved. A candidate is eligible if the geometric mean of
+    its speedups is above 1 + margin and none of its cases is slower than 1 - margin;
+    the eligible candidate with the highest geometric mean wins.
+
+    Returns (False, None) if no case could be compared, otherwise (True, winner), where
+    winner is None if no candidate is eligible."""
+
+    def speedups(c: dict[str, ty.Any]) -> tuple[list[float], int]:
+        path = get_case_results_path(file_path, data, c)
+        if path is None:
+            return [], 0
+        results = read_case_results(path)
+        return [
+            results[name] / baseline[name]
+            for name in results
+            if name in baseline and baseline[name] > 0
+        ], len(results)
+
+    def geomean(values: list[float]) -> float:
+        return math.exp(sum(math.log(v) for v in values) / len(values))
+
+    best = None
+    best_score = 0.0
+    compared = 0
+    for c in candidates:
+        values, total = speedups(c)
+        if not values:
+            continue
+        compared += 1
+        score = geomean(values)
+        if score > 1 + margin and min(values) >= 1 - margin and score > best_score:
+            best = c
+            best_score = score
+            best_cases = (len(values), total, min(values))
+
+    if compared == 0:
+        return False, None
+
+    # The tuner also measured the configs the library used (see --tune-baseline). If
+    # its results differ from the baseline results for the same config, the two were
+    # measured differently (build, session, commit) and the comparison is unreliable.
+    keys = data.get("tune_params_keys", [])
+    for name, recorded in data.get("baselines", {}).items():
+        entry = next(
+            (
+                c
+                for c in candidates
+                if all(str(c.get(k)) == str(recorded["config"].get(k)) for k in keys)
+            ),
+            None,
+        )
+        values = speedups(entry)[0] if entry else []
+        if values and abs(geomean(values) - 1) > margin:
+            log.warning(
+                f"The tuner measured the {name} config {geomean(values) - 1:+.1%} "
+                f"faster than the baseline results, check that both come from the same "
+                f"sources and build: {file_path}"
+            )
+    if best is None:
+        log.info(
+            f"No config is faster than the baseline on every case ({compared} compared)"
+        )
+    else:
+        matched, total, worst = best_cases
+        log.info(
+            f"Tuned config is {best_score - 1:.1%} faster than the baseline "
+            f"(worst case {worst - 1:+.1%}, {matched} of {total} cases compared)"
+        )
+    return True, best
 
 
 def derive_gen(arch: str) -> str:
@@ -336,7 +565,26 @@ def main():
         default=0.05,
         help="Keep the config the library used on the tuned arch (current or "
         "fallback, whichever is faster) unless the tuned config is faster by more "
-        "than this fraction (default: 0.05).",
+        "than this fraction (default: 0.05). When comparing to baseline benchmark "
+        "results, a tuned config is also rejected if any case is slower than the "
+        "baseline by more than this.",
+    )
+    cli.add_argument(
+        "--no-compare-to-base",
+        action="store_true",
+        help="Don't compare the tuned configs case by case to baseline benchmark "
+        "results, only to the baselines measured by the tuner (--tune-baseline).",
+    )
+    cli.add_argument(
+        "--baseline-path",
+        help="Directory with primbench CSV results of the baseline, named "
+        "benchmark_rocprim_<benchmark>_<arch>.csv. If not set, the benchmarks are run "
+        "from --benchmark-dir and their results stored in <output>/baseline-bench/csv.",
+    )
+    cli.add_argument(
+        "--benchmark-dir",
+        help="Directory with the rocPRIM benchmark executables, built from the baseline "
+        "sources. Needed if --baseline-path is not set, unless --no-compare-to-base.",
     )
 
     args = cli.parse_args()
@@ -374,6 +622,46 @@ def main():
             config_parser.parse_lines(header.splitlines()),
             config_parser.parse_fallback_target(header),
         )
+
+    # Load the baseline results of the benchmarks that measure the tuned algorithms.
+    baselines = {}
+    compare_to_base = not args.no_compare_to_base
+    if not compare_to_base and (args.baseline_path or args.benchmark_dir):
+        log.warning(
+            "--baseline-path and --benchmark-dir are ignored with --no-compare-to-base"
+        )
+    if compare_to_base:
+        if args.baseline_path:
+            baseline_dir = pathlib.Path(args.baseline_path)
+            benchmark_dir = None
+        elif args.benchmark_dir:
+            baseline_dir = pathlib.Path(args.output) / "baseline-bench" / "csv"
+            benchmark_dir = pathlib.Path(args.benchmark_dir)
+        else:
+            log.error(
+                "Comparing to a baseline needs --baseline-path or --benchmark-dir. "
+                "Pass --no-compare-to-base to skip the comparison."
+            )
+            quit(1)
+
+        # Collect the cases and sizes the tuner measured for each benchmark.
+        cases: dict[tuple[str, str], dict[str, ty.Any]] = {}
+        for file_path in file_paths:
+            try:
+                with open(file_path, "r") as f:
+                    data = json.load(f)
+            except json.decoder.JSONDecodeError:
+                continue
+            entry = next((c for c in data["cache"].values() if "time" in c), None)
+            path = get_case_results_path(file_path, data, entry) if entry else None
+            for benchmark in get_benchmark_names(data["algo_name"]):
+                needed = cases.setdefault(
+                    (benchmark, data["arch_name"]), {"names": set(), "sizes": set()}
+                )
+                if path is not None:
+                    needed["names"] |= set(read_case_results(path))
+                    needed["sizes"].add(int(re.search(r"_size(\d+)", path.name)[1]))
+        baselines = load_baselines(cases, baseline_dir, benchmark_dir)
 
     algs: dict[str, dict[frozenset, dict[frozenset, dict[str, ty.Any]]]] = {}
     for file_path in file_paths:
@@ -430,11 +718,32 @@ def main():
                 log.warning(f"No valid configs left, skipping: {file_path}")
                 continue
 
-            # Find best config
-            config_data = min(data_filter, key=lambda c: c["time"])
-            config_data = keep_baseline_if_close(
-                data, data_filter, config_data, args.baseline_margin
-            )
+            # Find best config: compared to the baseline benchmark results if possible,
+            # otherwise to the baselines measured by the tuner
+            compared = False
+            if compare_to_base:
+                baseline = {}
+                for benchmark in get_benchmark_names(data["algo_name"]):
+                    baseline |= baselines.get((benchmark, data["arch_name"]), {})
+                compared, config_data = compare_to_baseline(
+                    file_path, data, data_filter, baseline, args.baseline_margin
+                )
+                if compared and config_data is None:
+                    # No tuned config beats the baseline, keep the config it used.
+                    config_data = keep_baseline_if_close(
+                        data, data_filter, None, math.inf
+                    )
+                    if config_data is None:
+                        log.warning(
+                            f"No tuned config beats the baseline and the tuner recorded "
+                            f"no baseline config, so no config is generated: {file_path}"
+                        )
+                        continue
+            if not compared:
+                config_data = min(data_filter, key=lambda c: c["time"])
+                config_data = keep_baseline_if_close(
+                    data, data_filter, config_data, args.baseline_margin
+                )
             # Drop unrelated entries
             config_ignored_names = [
                 "time",
@@ -489,7 +798,9 @@ def main():
             with open(config_file, "r") as file:
                 header = file.read()
                 existing_data = config_parser.parse_lines(header.splitlines())
-                existing_fallback[alg_name] = config_parser.parse_fallback_target(header)
+                existing_fallback[alg_name] = config_parser.parse_fallback_target(
+                    header
+                )
                 merged_targets = {
                     target_hash: dict(make_config(entry) for entry in target)
                     for target_hash, target in existing_data.items()
