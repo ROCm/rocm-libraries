@@ -32,9 +32,9 @@
 
 ## 1. Summary
 
-hipDNN gets one cache, owned by the backend and offered as a service, the way logging is. The backend stores opaque values under opaque keys, in namespaces that belong to its consumers: autotuning, graph-level heuristics, and each engine plugin (kernel benchmarking results, kernel tuning, JIT-compiled code objects). Plugins reach the service through a callback set and never open cache files themselves. A user can replace the default store with their own.
+hipDNN gets one cache, owned by the backend and offered as a service, the way logging is. The backend stores opaque values under opaque keys, in namespaces that belong to its consumers: autotuning, graph-level heuristics, and each engine plugin (kernel benchmarking results, kernel tuning, JIT-compiled code objects). Plugins reach the service through a callback set and never open cache files themselves.
 
-The default store has three tiers: an in-process memo, a node-local writable tier, and a shared tier that is read-only at runtime and filled by an explicit publish or pre-warm step. Every tier below the in-process memo is a store behind one interface with a written contract (§8.3, §8.4): whole-entry reads, safe concurrent writes, no locks held between calls, read-only operation, never fatal. The core frames and verifies every entry itself, so the storage technology can change without touching consumers, plugins or the public API.
+The cache has three tiers: an in-process memo, a node-local writable tier, and a shared tier that is read-only at runtime and filled by an explicit publish or pre-warm step. Every tier below the in-process memo is a store behind one interface with a written contract (§8.3, §8.4): whole-entry reads, safe concurrent writes, no locks held between calls, read-only operation, never fatal. The core frames and verifies every entry itself, so the storage technology can change without touching consumers, plugins or the public API. hipDNN can add more stores later, such as a database or site store, without changing consumers or the plugin callback set (R3).
 
 The storage technology is not chosen yet (OQ-1). The current candidate stores one immutable file per entry, written with an atomic rename and read without `mmap` (§8.8). It takes no file locks on shared storage, which is what would let the cache work on network and distributed filesystems, where MIOpen's and comgr's caches either fail or turn themselves off (§9, Appendix B).
 
@@ -95,8 +95,8 @@ The requirements come from ALMIOPEN-1870. Each has a check.
 | ID | Requirement | Check |
 |---|---|---|
 | R1 | One key-value cache service in the backend, used by every consumer in §5 | Each consumer stores and restores through the service; no consumer opens a cache file |
-| R2 | Plugins use the service through a callback set and do not choose paths, open files or evict | Grep of plugins and plugin_sdk finds no cache file I/O; a plugin works unchanged with a replaced store |
-| R3 | A user can replace the default store | A test store receives every get and put |
+| R2 | Plugins use the service through a callback set and do not choose paths, open files or evict | Grep of plugins and plugin_sdk finds no cache file I/O; plugin tests pass unchanged with the in-memory reference store and with the default store |
+| R3 | hipDNN can add stores later, such as a database or site store, without changing consumers or the plugin callback set and without breaking changes to the public API | A test store that reports `persistent` and `shared_read_safe` is added as an extra L2 source; an entry held only in that store is a hit for each consumer, including plugins through the callback set, with no change to consumer code or to the callback struct |
 | R4 | Per-consumer key schemes, with shared key builders | Each consumer's key is specified (§7.3) and covered by key-completeness tests (§16) |
 | R5 | Versioned: entries from an incompatible build are never used | Changing any versioned key component is a miss |
 | R6 | Device specific without being ordinal specific (§7.2) | Same SKU at a different ordinal hits; a different SKU or target ID misses |
@@ -109,7 +109,7 @@ The requirements come from ALMIOPEN-1870. Each has a check.
 | R13 | Each known MIOpen, comgr and cuDNN cache failure mode is covered or explicitly out of scope | §14 |
 | R14 | Invalidation documented per consumer | §7.3 |
 | R15 | Results can be shared across jobs and nodes and shipped pre-filled | Publish and pre-warm tests (§8.6) |
-| R16 | The storage technology can be replaced without changing consumers, plugins, the plugin ABI or the public API | Contract suite and core tests pass against at least two store implementations, one of them the in-memory reference store |
+| R16 | The default store's technology (OQ-1) can be replaced without changing consumers, plugins, the plugin ABI or the public API | Contract suite and core tests pass against at least two store implementations, one of them the in-memory reference store |
 
 ## 5. Consumers and data classes
 
@@ -153,7 +153,6 @@ flowchart LR
         HEUR["heuristic policies"]
         CORE["core KV service<br/>namespaces, tiers,<br/>size limits"]
         STORE["default store<br/>L1 node-local<br/>L2 shared read-only"]
-        HOOK["user override store<br/>(replaces default)"]
     end
     KEYS["key builders (data_sdk / plugin_sdk)<br/>GraphContentKey, topology,<br/>DeviceKey, target ID"]
     AT --> API
@@ -163,18 +162,17 @@ flowchart LR
     CB --> CORE
     HEUR --> CORE
     CORE --> STORE
-    CORE -.-> HOOK
     PL --> KEYS
     BE --> KEYS
 ```
 
 Not yet built.
 
-- **Backend.** Owns the service: configuration, entry framing, tiers, the default store and the override hook. It is the only component that the frontend, the heuristic policies and every plugin all reach.
+- **Backend.** Owns the service: configuration, entry framing, tiers and the built-in stores. It is the only component that the frontend, the heuristic policies and every plugin all reach.
 - **Frontend.** Never touches cache files. It forwards autotune results and the cuDNN `KernelCache` object to the backend, as autotune already does today.
 - **Plugins.** Receive a cache callback set from the backend, the same way they receive the logging callback (`hipdnnPluginSetLoggingCallback`, `plugin_sdk/.../PluginApi.h:146`). A plugin that does not export the setter does not use the cache. A backend that does not provide callbacks leaves plugin caching off; neither case is an error.
-- **Stores.** Every tier below the in-process memo is a store behind one interface (§8.3). The default store and a user override store are interchangeable implementations of it.
-- **data_sdk / plugin_sdk.** Shared code only: key builders, entry framing, the store interface. No global state. `CacheRoot.hpp` stays as the root resolver for file-based stores; `LineStore.hpp` is retired with its consumers (§13).
+- **Stores.** Every tier below the in-process memo is a store behind one interface (§8.3). The default store and any other built-in store (OQ-16) implement it; the core places each store only in the tiers its capabilities allow (§8.5, §9.2).
+- **data_sdk / plugin_sdk.** Shared code only: key builders and entry framing. No global state. The store interface stays inside the backend (§8.3). `CacheRoot.hpp` stays as the root resolver for file-based stores; `LineStore.hpp` is retired with its consumers (§13).
 
 ## 7. Keys
 
@@ -241,7 +239,7 @@ The storage technology is not chosen yet (OQ-1). This section separates what the
 | Store interface (§8.3) and contract (§8.4) | Operations, capability flags, required behaviour | No |
 | Store implementations | How bytes are kept: files, a database, a remote service | Yes; only this layer |
 
-L1, each L2 source, and a user override store (§11.3) are all instances of the store interface. A store never sees full keys and never interprets values.
+L1 and each L2 source are instances of the store interface. A store never sees full keys and never interprets values.
 
 ### 8.2 Entry framing
 
@@ -272,7 +270,7 @@ If a consumer needs a file path, for example to load a code object, it writes th
 | `shared_read_safe` | Safe to read while processes on other nodes write the same medium |
 | `shared_write_safe` | Safe for processes on different nodes to write concurrently |
 
-Whether the interface is internal C++ only or a C ABI shared with the override store is OQ-16.
+The interface is internal C++ in the backend, so every store is built as part of hipDNN. Adding a store (R3) needs a hipDNN release but changes neither the public API, the SDKs nor the plugin ABI.
 
 ### 8.4 Store contract
 
@@ -312,7 +310,7 @@ A lookup moves one tier to the right on each miss. The dotted path is the explic
 | L1 | One writable store, normally node-local | `writable`, `persistent` | The core asks the store to `prune` when usage passes the cap; pinned entries kept within a reserved budget |
 | L2 | One or more read-only stores: shared directory, shipped package, site store | `persistent`, `shared_read_safe` | None at runtime; an admin tool prunes it |
 
-On an L2 hit the core copies the entry into L1 with `put`. L0 allows one compile per key at a time in the process. A user override store (§11.3) replaces L1 and L2 together.
+On an L2 hit the core copies the entry into L1 with `put`. L0 allows one compile per key at a time in the process.
 
 ### 8.6 Publish and pre-warm
 
@@ -349,7 +347,7 @@ Other candidates for OQ-1, not yet evaluated against the contract:
 |---|---|
 | SQLite | Relies on filesystem locking for cross-process safety. WAL mode does not work over a network filesystem ([SQLite documentation](https://www.sqlite.org/wal.html)), and MIOpen's SQLite cache failed on NFS and Lustre (Appendix B). At most a node-local L1 store. |
 | Single-file embedded key-value store | Not evaluated. Must meet C1–C8, Windows support and the dependency rules in R11. |
-| Remote or site store | Fits as a read-only L2 store or as a user override store (§11.3). |
+| Remote or site store | Not a default-store candidate; a possible second built-in store (OQ-16) as a read-only L2 source. As L1 or as a publish destination it is writable and must meet C7, so a site store that evicts entries itself and reports no usage or `prune` can only be a read-only L2 source. |
 
 ## 9. Shared and distributed filesystems
 
@@ -430,13 +428,9 @@ Without dynamic shapes, cuDNN's default cache still caches some operations whose
 | API to set the root and limits (ALMIOPEN-2465) | New; handle attribute or process-wide call is OQ-12 |
 | `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` | Exists; becomes a per-namespace switch |
 | Publish, pre-warm and prune tool | New |
-| Choice of built-in store, if more than one ships | New; OQ-17 |
+| Store for L1 and for each L2 source, if more than one built-in store ships | New; OQ-16 |
 
-### 11.3 Override store
-
-The user registers a store that implements the store interface (§8.3) and meets the contract (§8.4), with a version field. It receives namespace, digest and framed bytes; framing and verification stay in the core. When registered it replaces L1 and L2; L0 stays.
-
-### 11.4 Plugin callback set
+### 11.3 Plugin callback set
 
 `hipdnnPluginSetCacheCallbacks(const hipdnnPluginCacheCallbacks_t*)`, exported by a plugin that wants the cache. The struct carries a version, a context pointer, and `get`, `put` and `remove` that take a namespace suffix, key bytes, value bytes and flags. The backend prefixes the plugin's name to the namespace, so plugins cannot collide. Buffer ownership for `get` follows the plugin SDK's existing size-query pattern. The exact ABI is OQ-13.
 
@@ -513,7 +507,7 @@ Old `autotune-rankings/` and `ingestor-winners/` directories are not migrated; t
 
 ### 16.1 Store contract suite
 
-Runs against every store implementation: the in-memory reference store, the chosen default store, and each OQ-1 candidate, on each medium the store claims (local disk, NFS, Lustre, Windows, and at least four nodes for `shared_write_safe`).
+Runs against every store implementation: the in-memory reference store, the chosen default store, each OQ-1 candidate and every other built-in store (OQ-16), on each medium the store claims (local disk, NFS, Lustre, Windows, and at least four nodes for `shared_write_safe`).
 
 - **C1:** readers during repeated replacement of the same key see whole values or misses.
 - **C2:** many processes, and many nodes where claimed, writing the same keys; one written value remains and no writer sees an error.
@@ -528,7 +522,7 @@ Runs against every store implementation: the in-memory reference store, the chos
 
 - **Framing:** round trip; truncation; bit flips; wrong format version, key or checksum; a forced digest collision. Every case is a miss, and the entry is removed from a writable store.
 - **Key completeness:** for each namespace, changing each key component one at a time is a miss, and changing only the ordinal (same SKU) is a hit.
-- **Tiers:** an L2 hit is promoted to L1; an override store replaces L1 and L2; publishing twice changes nothing.
+- **Tiers:** an L2 hit is promoted to L1; an entry held only in an extra L2 source is a hit, with no change to consumers or the callback set (R3); publishing twice changes nothing.
 - **Fault injection:** a test store that fails each operation in turn; each failure degrades to a miss and logs once.
 - **Eviction:** cap respected; pinned budget respected.
 - **Verification mode:** CI runs every namespace with verification on (§12); any difference between a cached and a recomputed value fails the run.
@@ -561,10 +555,9 @@ Tests specific to the chosen implementation. For the file store: replacement wit
 | OQ-13 | Exact plugin callback ABI and buffer ownership | Follow the logging callback and the SDK's size-query pattern |
 | OQ-14 | Trust model: who may write L1, L2 and published packages, and which ownership and permission checks run before code objects are loaded | Writing to the cache is equivalent to running code in every reader (JAX documentation). llama.cpp's world-shared `/tmp` default shows the risk of a shared default directory. |
 | OQ-15 | Relationship to RFC 0023's code-object cache requirement (I4) | RFC 0023 is a draft; one design should serve both |
-| OQ-16 | Is the store interface internal C++ only, or a C ABI shared with the user override store? | A C ABI lets stores be built out of tree; it also freezes the interface |
-| OQ-17 | Does hipDNN ship more than one built-in store, and if so how is one chosen? | For example the file store for L1 and L2 plus a site store for L2 |
-| OQ-18 | May one key hold several variants? | The cuDNN-compatible kernel cache may need several entries for one topology key; PyTorch Inductor stores several guarded candidates per key |
-| OQ-19 | Does a code-object lookup in L2 match target IDs by specificity? | kpack serves a plain `gfx942` build to a `gfx942:sramecc+:xnack-` agent, trying the most specific match first |
+| OQ-16 | Does hipDNN ship more than one built-in store, and if so how is the store for L1 and for each L2 source chosen? | For example the file store for L1 and L2 plus a site store for L2; the L2 control (OQ-11) would then name sources that are not directories |
+| OQ-17 | May one key hold several variants? | The cuDNN-compatible kernel cache may need several entries for one topology key; PyTorch Inductor stores several guarded candidates per key |
+| OQ-18 | Does a code-object lookup in L2 match target IDs by specificity? | kpack serves a plain `gfx942` build to a `gfx942:sramecc+:xnack-` agent, trying the most specific match first |
 
 ## Appendix A: Measurements
 
