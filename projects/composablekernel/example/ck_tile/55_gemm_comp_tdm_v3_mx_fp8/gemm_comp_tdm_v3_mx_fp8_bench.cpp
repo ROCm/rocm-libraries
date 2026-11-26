@@ -1036,6 +1036,23 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
                 return run<Instance<64, 128, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
             if(t == "64x64x256" && cl == "1x1")
                 return run<Instance<64, 64, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            // small shapes (e.g. 256 x 2048 x 2048): more workgroups, a shorter K tile, a cluster
+            if(t == "64x64x256" && cl == "2x2")
+                return run<Instance<64, 64, 256, 2, 2, TdmEpi, CDataType, 16, 2, 2>>(arg, name);
+            if(t == "128x64x256" && cl == "1x1")
+                return run<Instance<128, 64, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+#if !defined(CK_EX55_RA)
+            // (not with the read-ahead loop: its LDS scale reads need whole groups of four scale
+            // words per lane, i.e. two M and N iterations and two K atoms)
+            if(t == "64x64x128" && cl == "1x1")
+                return run<Instance<64, 64, 128, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "64x32x256" && cl == "1x1")
+                return run<Instance<64, 32, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "32x64x256" && cl == "1x1")
+                return run<Instance<32, 64, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+            if(t == "32x32x256" && cl == "1x1")
+                return run<Instance<32, 32, 256, 2, 2, TdmEpi, CDataType, 16>>(arg, name);
+#endif
         }
 #endif
         if(arg.get_str("tile") == "256x256x256" && arg.get_str("warps") == "2x2" &&

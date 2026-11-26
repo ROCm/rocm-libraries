@@ -1,0 +1,168 @@
+{
+  "_comment": "MX 256x2048x2048: tiles around the 64x64 best (2x2 waves, warp tile 16) in the current loop (cur) and the read-ahead loop (ra_pf4, where the iteration counts are even): 64x64 at clusters 1x1 / 2x2, 64x64 with a 128-deep K tile, 128x64, 64x128, 64x32, 32x64, 32x32. Fixed-cost check: the current loop's 64x64 also at K = 256 and 1024 (the intercept of time against K is the per-launch cost no tile removes).",
+  "default_defines": [
+    "-DCK_EX55_BF16_TDM_ONLY",
+    "-DCK_TILE_GFX125_FP8_K1PERLANE=16",
+    "-DCK_EX55_MX_SCALE_WIDE=1",
+    "-DCK_EX55_A_ROW_PREFETCH=1",
+    "-DCK_EX55_FOCUS",
+    "-DCK_EX55_SMALL2X2"
+  ],
+  "variants": [
+    {
+      "name": "cur",
+      "defines": []
+    },
+    {
+      "name": "ra_pf4",
+      "defines": [
+        "-DCK_EX55_FOCUS_MIN",
+        "-DCK_EX55_RA=1",
+        "-DCK_EX55_MX_SCALE_LDS=1",
+        "-DCK_EX55_RA_CB=2",
+        "-DCK_EX55_RA_BLOCKB=0",
+        "-DCK_EX55_RA_SPLITA=1",
+        "-DCK_EX55_RA_PACK=1",
+        "-DCK_EX55_RA_LATEAT=8",
+        "-DCK_EX55_RA_GL2=4"
+      ]
+    }
+  ],
+  "arms": [
+    {
+      "tile": "64x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ],
+        [
+          256,
+          2048,
+          256
+        ],
+        [
+          256,
+          2048,
+          1024
+        ]
+      ]
+    },
+    {
+      "tile": "64x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "2x2",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "64x64x128",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "128x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "64x128x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "64x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x64x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "tile": "32x32x256",
+      "warps": "2x2",
+      "wt": 16,
+      "cluster": "1x1",
+      "shapes": [
+        [
+          256,
+          2048,
+          2048
+        ]
+      ]
+    }
+  ],
+  "shapes": [
+    [
+      256,
+      2048,
+      2048
+    ],
+    [
+      256,
+      2048,
+      1024
+    ],
+    [
+      256,
+      2048,
+      256
+    ]
+  ],
+  "c_dtype": "bf16",
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
