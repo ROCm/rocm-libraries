@@ -256,13 +256,12 @@ def resolve_shadowed_configs(targets, new_type_hashes):
 def keep_baseline_if_close(
     data: dict[str, ty.Any],
     candidates: list[dict[str, ty.Any]],
-    winner: dict[str, ty.Any] | None,
+    winner: dict[str, ty.Any],
     margin: float,
-) -> dict[str, ty.Any] | None:
+) -> dict[str, ty.Any]:
     """Returns the fastest baseline entry (the configs the library used on this arch
     when tuning, recorded by the tuner) unless the tuned winner is more than 'margin'
-    faster than it. Times are in ms/GiB, so lower is better. Without a winner, returns
-    the fastest baseline entry, or None if the tuner recorded none."""
+    faster than it. Times are in ms/GiB, so lower is better."""
     keys = data.get("tune_params_keys", [])
     best_name = None
     best = None
@@ -272,8 +271,8 @@ def keep_baseline_if_close(
                 if best is None or c["time"] < best["time"]:
                     best_name = name
                     best = c
-    if best is None or winner is None:
-        return best if winner is None else winner
+    if best is None:
+        return winner
 
     speedup = best["time"] / winner["time"] - 1
     if speedup > margin:
@@ -283,6 +282,25 @@ def keep_baseline_if_close(
         f"Keeping the {best_name} config: the tuned config is only {speedup:.1%} faster"
     )
     return best
+
+
+def find_current_entry(
+    data: dict[str, ty.Any], candidates: list[dict[str, ty.Any]]
+) -> dict[str, ty.Any] | None:
+    """Returns the entry of the config the library uses on the tuned arch (the
+    "current" baseline recorded by the tuner), which the baseline benchmarks measure."""
+    current = data.get("baselines", {}).get("current")
+    if current is None:
+        return None
+    keys = data.get("tune_params_keys", [])
+    return next(
+        (
+            c
+            for c in candidates
+            if all(str(c.get(k)) == str(current["config"].get(k)) for k in keys)
+        ),
+        None,
+    )
 
 
 def get_radix_merge_sort_tile(key_size: int, value_size: int) -> int:
@@ -496,7 +514,8 @@ def load_baselines(
     baselines = {}
     for (benchmark, arch), needed in cases.items():
         csv_path = baseline_dir / f"benchmark_rocprim_{benchmark}_{arch}.csv"
-        if not csv_path.exists() and benchmark_dir is not None:
+        empty = not csv_path.exists() or not read_baseline_csv(csv_path)
+        if empty and benchmark_dir is not None:
             baseline_dir.mkdir(parents=True, exist_ok=True)
             run_baseline_benchmark(
                 benchmark_dir,
@@ -560,26 +579,17 @@ def compare_to_baseline(
     if compared == 0:
         return False, None
 
-    # The tuner also measured the configs the library used (see --tune-baseline). If
-    # its results differ from the baseline results for the same config, the two were
+    # The tuner also measured the config the baseline benchmarks ran (see
+    # --tune-baseline). If its results differ from the baseline results, the two were
     # measured differently (build, session, commit) and the comparison is unreliable.
-    keys = data.get("tune_params_keys", [])
-    for name, recorded in data.get("baselines", {}).items():
-        entry = next(
-            (
-                c
-                for c in candidates
-                if all(str(c.get(k)) == str(recorded["config"].get(k)) for k in keys)
-            ),
-            None,
+    current = find_current_entry(data, candidates)
+    values = speedups(current)[0] if current else []
+    if values and abs(geomean(values) - 1) > margin:
+        log.warning(
+            f"The tuner measured the current config {geomean(values) - 1:+.1%} "
+            f"faster than the baseline results, check that both come from the same "
+            f"sources and build: {file_path}"
         )
-        values = speedups(entry)[0] if entry else []
-        if values and abs(geomean(values) - 1) > margin:
-            log.warning(
-                f"The tuner measured the {name} config {geomean(values) - 1:+.1%} "
-                f"faster than the baseline results, check that both come from the same "
-                f"sources and build: {file_path}"
-            )
     if best is None:
         log.info(
             f"No config is faster than the baseline on every case ({compared} compared)"
@@ -845,14 +855,12 @@ def main():
                     file_path, data, data_filter, baseline, args.baseline_margin
                 )
                 if compared and config_data is None:
-                    # No tuned config beats the baseline, keep the config it used.
-                    config_data = keep_baseline_if_close(
-                        data, data_filter, None, math.inf
-                    )
+                    # No tuned config beats the baseline, keep the config it measured.
+                    config_data = find_current_entry(data, data_filter)
                     if config_data is None:
                         log.warning(
                             f"No tuned config beats the baseline and the tuner recorded "
-                            f"no baseline config, so no config is generated: {file_path}"
+                            f"no current config, so no config is generated: {file_path}"
                         )
                         continue
             if not compared:
