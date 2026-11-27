@@ -31,6 +31,9 @@ jobs:
   linux:
     name: Linux
     runs-on: ${{ inputs.linux_runner }}
+    # Green runs take 7-10 min; a hung job is stopped here instead of holding a
+    # runner for GitHub's 360-minute default.
+    timeout-minutes: 30
     container:
       image: ${{ inputs.docker_image }}
     steps:
@@ -65,7 +68,10 @@ jobs:
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
+          set -euo pipefail
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-          # At most 8 workers.
-          workers=$(nproc); [ "$workers" -gt 8 ] && workers=8
+          # At most 8 workers, as in TheRock's `quick` tier: each worker repeats collection,
+          # so more workers stop paying for themselves (timings in test_categories.yaml).
+          workers=$(nproc)
+          if [ "$workers" -gt 8 ]; then workers=8; fi
           tox -e unit-host -- -n "$workers" --dist=worksteal tensilelite/Tests/unit

@@ -27,6 +27,9 @@ jobs:
   linux:
     name: Linux
     runs-on: ${{ inputs.linux_runner }}
+    # Green runs take about 5 min; a hung job is stopped here instead of holding a
+    # runner for GitHub's 360-minute default.
+    timeout-minutes: 30
     container:
       image: ${{ inputs.docker_image }}
     # The same mirror, versions and pins as TheRock's third-party/msgpack-cxx and
@@ -43,7 +46,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          submodules: recursive
           sparse-checkout: |
             .github
             projects/hipblaslt
@@ -67,15 +69,16 @@ jobs:
       - name: Provide msgpack-cxx and GTest
         run: |
           set -euo pipefail
-          D="$RUNNER_TEMP/deps"
-          mkdir -p "$D"
+          deps_dir="$RUNNER_TEMP/deps"
+          mkdir -p "$deps_dir"
           # Pinned by checksum: a changed or tampered tarball fails here, not mid-build.
           # The mirror first; the upstream release asset (same checksum) if it's unreachable.
           fetch() {  # file name, sha256, upstream URL
-            curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$D/$1" "$DEPS_MIRROR/$1" \
-              || curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$D/$1" "$3"
-            echo "$2  $D/$1" | sha256sum -c -
-            tar xzf "$D/$1" -C "$RUNNER_TEMP"
+            curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 \
+              -o "$deps_dir/$1" "$DEPS_MIRROR/$1" \
+              || curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$deps_dir/$1" "$3"
+            echo "$2  $deps_dir/$1" | sha256sum -c -
+            tar xzf "$deps_dir/$1" -C "$RUNNER_TEMP"
           }
           fetch msgpack-cxx-7.0.0.tar.gz "$MSGPACK_SHA256" \
             https://github.com/msgpack/msgpack-c/releases/download/cpp-7.0.0/msgpack-cxx-7.0.0.tar.gz
@@ -103,6 +106,7 @@ jobs:
         env:
           CMAKE_GENERATOR: Ninja
         run: |
+          set -euo pipefail
           export CMAKE_PREFIX_PATH="/usr/local${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
           cmake --preset tensilelite -S ../ -B build \
             -DGPU_TARGETS=gfx942 \
@@ -126,5 +130,6 @@ jobs:
           # Lets SKIP_IF_NO_DEVICE() skip the device tests here; elsewhere they fail without a GPU.
           TENSILE_SKIP_IF_NO_DEVICE: "1"
         run: |
+          set -euo pipefail
           # --no-tests=error fails an empty discovery.
           ctest --test-dir build/tensilelite/tests --output-on-failure --no-tests=error

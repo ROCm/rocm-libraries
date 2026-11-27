@@ -78,6 +78,8 @@ COMPONENTS = {
         "projects/hipblaslt/cmake/**",
         "projects/hipblaslt/clients/common/**",
         "projects/hipblaslt/library/include/**",
+        # CMakeLists.txt includes library/experimental/features.cmake at configure time.
+        "projects/hipblaslt/library/experimental/**",
         ".github/scripts/check_component_inputs.py",
         ".github/workflows/component-ci-tensilelite-gtest.yml",
     ],

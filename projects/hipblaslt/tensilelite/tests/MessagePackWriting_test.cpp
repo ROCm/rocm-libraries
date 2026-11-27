@@ -659,11 +659,7 @@ TEST(MessagePackWritingTest, FixtureRoundTripSelectsTheSameSolutions)
     SKIP_IF_NO_DEVICE();
     auto lib = loadKernelsLite();
     if(lib == nullptr)
-    {
-        if(!HasFailure())
-            GTEST_SKIP() << "KernelsLite.dat did not load";
-        return;
-    }
+        return; // loadKernelsLite() has recorded the failure
     auto reloaded = roundTrip(*lib);
     ASSERT_NE(reloaded, nullptr);
 

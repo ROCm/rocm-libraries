@@ -716,8 +716,8 @@ the base `[testenv]` dependency list, and TheRock's installed-artifact lane inst
 [`requirements-test.txt`](requirements-test.txt)
 ([PR #11396](https://github.com/ROCm/rocm-libraries/pull/11396),
 [TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Four of those lanes gate, so a stale
-golden fails a required check. The CPU-only GitHub Actions lane is fast enough that it is usually
-where a stale golden surfaces first.
+golden fails a required check. The CPU-only GitHub Actions lanes (TensileLite unit and TensileLite
+coverage) are fast enough that they are usually where a stale golden surfaces first.
 
 The installed-artifact lane used to skip the snapshot tests, because it had no syrupy. The suite's
 `conftest.py` still detects a missing plugin and skips those tests cleanly rather than erroring the
