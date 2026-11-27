@@ -576,7 +576,15 @@ rocblaslt_status getKernelFromAlgo(rocblaslt_handle                   handle,
     auto             kernelType       = genKernelType(prob);
 
     auto solutionIndexParameters = indexToParameters(solutionIndex);
-    auto existingKernel          = rocroller_handle->cache.getKernel(
+
+    // rocRoller's StreamK implementation is not USO compliant.
+    if(solutionIndexParameters.streamK && prob.uniform_summation_order != 0)
+    {
+        log_info(__func__, "Stream-K solution under uniform summation order: ", solutionIndex);
+        return rocblaslt_status_invalid_value;
+    }
+
+    auto existingKernel = rocroller_handle->cache.getKernel(
         kernelType, solutionIndexParameters, ProblemDims{prob.m, prob.n, prob.k});
     if(existingKernel)
     {

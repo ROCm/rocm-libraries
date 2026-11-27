@@ -104,8 +104,10 @@ template<class Benchmark,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int BinSize = BlockSize>
-class block_histogram_benchmark : public primbench::benchmark_interface
+struct block_histogram_benchmark : public primbench::benchmark_interface
 {
+    block_histogram_benchmark(int entropy_reduction) : m_entropy_reduction(entropy_reduction) {}
+
     primbench::json meta() const override
     {
         return primbench::json{}
@@ -114,7 +116,8 @@ class block_histogram_benchmark : public primbench::benchmark_interface
             .add("lvl", "block")
             .add("data_type", primbench::name<T>())
             .add("block_size", BlockSize)
-            .add("items_per_thread", ItemsPerThread);
+            .add("items_per_thread", ItemsPerThread)
+            .add("entropy", benchmark_utils::get_entropy_percents(m_entropy_reduction));
 
         //  BinSize is always equal to BlockSize
         // .add("bin_size", BinSize);
@@ -132,7 +135,8 @@ class block_histogram_benchmark : public primbench::benchmark_interface
         const auto bin_size = BinSize * ((input_items + items_per_block - 1) / items_per_block);
 
         // Allocate and fill memory
-        std::vector<T> input(items, 0.0f);
+        std::vector<T> input
+            = benchmark_utils::generate_histogram_input<T>(items, m_entropy_reduction, 0, bin_size);
         T*             d_input;
         T*             d_output;
         HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
@@ -159,25 +163,35 @@ class block_histogram_benchmark : public primbench::benchmark_interface
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
     }
+
+private:
+    int m_entropy_reduction;
 };
 
 #define CREATE_BENCHMARK(T, BS, IPT) \
-    executor.queue<block_histogram_benchmark<Benchmark, T, BS, IPT>>()
+    executor.queue<block_histogram_benchmark<Benchmark, T, BS, IPT>>(entropy_reduction);
 
-#define BENCHMARK_TYPE(type, block)                                         \
-    CREATE_BENCHMARK(type, block, 1), CREATE_BENCHMARK(type, block, 2),     \
-        CREATE_BENCHMARK(type, block, 3), CREATE_BENCHMARK(type, block, 4), \
-        CREATE_BENCHMARK(type, block, 8), CREATE_BENCHMARK(type, block, 16)
+#define BENCHMARK_TYPE(type, block)  \
+    CREATE_BENCHMARK(type, block, 1) \
+    CREATE_BENCHMARK(type, block, 2) \
+    CREATE_BENCHMARK(type, block, 3) \
+    CREATE_BENCHMARK(type, block, 4) \
+    CREATE_BENCHMARK(type, block, 8) \
+    CREATE_BENCHMARK(type, block, 16)
 
 template<class Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int, 256);
-    BENCHMARK_TYPE(int, 320);
-    BENCHMARK_TYPE(int, 512);
+    const int entropy_reductions[] = {0, 2, 4, 6};
+    for(int entropy_reduction : entropy_reductions)
+    {
+        BENCHMARK_TYPE(int, 256)
+        BENCHMARK_TYPE(int, 320)
+        BENCHMARK_TYPE(int, 512)
 
-    BENCHMARK_TYPE(unsigned long long, 256);
-    BENCHMARK_TYPE(unsigned long long, 320);
+        BENCHMARK_TYPE(unsigned long long, 256)
+        BENCHMARK_TYPE(unsigned long long, 320)
+    }
 }
 
 int main(int argc, char* argv[])

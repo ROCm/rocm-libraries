@@ -28,6 +28,7 @@
 
 #include "efficiency_monitor.hpp"
 #include "hipblaslt_arguments.hpp"
+#include "uniform_check.hpp"
 #include <fstream>
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <string>
@@ -179,7 +180,8 @@ public:
                   double                      rtol    = ArgumentLogging::NA_value,
                   double                      max_ulp = 0.0,
                   double                      avg_ulp = 0.0,
-                  const hipblaslt_bench::TimingResult& timing = {})
+                  const hipblaslt_bench::TimingResult& timing = {},
+                  const UniformCheckResult&            uniform = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -336,6 +338,15 @@ public:
             file << "    " << name_list_str << delim << "gcnArchName" << delim << "CUs"
                  << std::endl;
             file << value_list_str << delim << archName << delim << cuNum << std::endl;
+        }
+
+        // After the tuning-file write, so tuning files keep their columns.
+        if(uniform.status != UniformCheckResult::Status::off)
+        {
+            const bool col = arg.uniform_check == hipblaslt_uniform_check::column;
+            print(col ? "col_uniform" : "row_uniform", uniform.status_name());
+            print(col ? "col_uniform_bad_rows" : "row_uniform_bad_cols", uniform.bad);
+            print(col ? "col_uniform_first_col" : "row_uniform_first_row", uniform.first);
         }
 
         str << name_list << "\n" << value_list << std::endl;

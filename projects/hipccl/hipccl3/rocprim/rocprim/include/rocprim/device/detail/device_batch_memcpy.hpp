@@ -266,9 +266,29 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void vectorized_copy_bytes(const void
             } data;
 
             ROCPRIM_UNROLL
-            for(uint32_t i = 0; i < 5; ++i)
+            for(uint32_t i = 0; i < 4; ++i)
             {
                 data.bytes[i] = aligned_in_ptr[i];
+            }
+
+            // The fifth word is only partially needed and, for the last vector, may extend past
+            // the end of the input buffer. Only read the bytes that are inside the buffer.
+            const uint8_t* last_word = reinterpret_cast<const uint8_t*>(aligned_in_ptr + 4);
+            if(last_word + sizeof(uint32_t) <= src + num_bytes)
+            {
+                data.bytes[4] = aligned_in_ptr[4];
+            }
+            else
+            {
+                uint32_t word = 0;
+                for(uint32_t i = 0; i < sizeof(uint32_t); ++i)
+                {
+                    if(last_word + i < src + num_bytes)
+                    {
+                        word |= static_cast<uint32_t>(last_word[i]) << (i * 8);
+                    }
+                }
+                data.bytes[4] = word;
             }
 
             // Reads are offset to our cache aligned writes so we need to shift bytes over.

@@ -54,10 +54,36 @@
 // MiopenUnaryActivationChecks.cpp remain the guards for ActivFwdSolver0.
 // `git grep WORKAROUND_ISSUE_16024` finds them all.
 // ----------------------------------------------------------------------------
+// ROCm/rocm-libraries#16803 — MIOpen caches the invoker of a fused batchnorm
+// (forward training, inference and backward) under a network config that holds
+// the activation mode but not the activation parameters, and the cached invoker
+// reads those parameters from the problem it was built with. A later graph with
+// the same shapes, data types and activation mode but different clip values
+// therefore runs with the first graph's clips and returns wrong results with no
+// error. The provider cannot make the parameters part of the key, so it declines
+// the case it enabled for batchnorm fusion in #16513: a ReLU with a non-zero
+// `relu_lower_clip`, no `relu_upper_clip` and no leaky slope, which maps to CLAMP
+// with the float maximum as its upper bound. A ReLU with both clips, with only an
+// upper clip or with no clip is unchanged, and so are the unary activation and the
+// convolution + (bias) + activation paths, which pass their parameters with each
+// call.
+//
+// REJECT_IF_WORKAROUND_ISSUE_16803(activationAttributes) takes the flatbuffer
+// PointwiseAttributes of the fused ReLU. It declines by throwing a
+// HipdnnPluginException, so it must only be invoked from the batchnorm
+// activation-mode check, whose callers turn an exception into "not applicable".
+// It runs after the leaky-ReLU check.
+//
+// To remove after the 16803 fix: delete the REJECT_IF_WORKAROUND_ISSUE_16803
+// call site and this block, and restore the "AcceptsReluLowerClipOnly" cases of
+// the batchnorm activation-mode tests. `git grep WORKAROUND_ISSUE_16803` finds
+// them all.
+// ----------------------------------------------------------------------------
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <cstdint>
@@ -107,4 +133,19 @@
                 "(issue 16024)");                                                            \
             return false;                                                                    \
         }                                                                                    \
+    } while(0)
+
+#define REJECT_IF_WORKAROUND_ISSUE_16803(activationAttributes)                              \
+    do                                                                                      \
+    {                                                                                       \
+        const auto& issue_16803_attrs = (activationAttributes);                             \
+        if(!issue_16803_attrs.relu_upper_clip().has_value()                                 \
+           && issue_16803_attrs.relu_lower_clip().has_value()                               \
+           && *issue_16803_attrs.relu_lower_clip() != 0.f)                                  \
+        {                                                                                   \
+            throw ::hipdnn_plugin_sdk::HipdnnPluginException(                               \
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,                                             \
+                "Batchnorm fused ReLU with a non-zero lower_clip and no upper_clip is not " \
+                "supported (issue 16803).");                                                \
+        }                                                                                   \
     } while(0)

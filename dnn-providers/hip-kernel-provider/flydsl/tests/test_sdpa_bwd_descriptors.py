@@ -150,10 +150,14 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
         *(n.replace(sibling, merged) for n in documents[Path(sibling)]),
         "flydsl_sdpa_bwd_merged_reduce.udd.json",
     }
+    # `numerical_notes` is excluded from the ued key set: merged is a claimed
+    # DETERMINISTIC_OP and the sibling is not, so only merged's ued authors the key.
+    # Per-engine presence is pinned by test_only_proven_engines_declare_numerical_notes
+    # in test_knob_classification.py.
     for suffix in ("ued", "uhd"):
-        assert set(_doc(documents, merged, suffix)) == set(
+        assert set(_doc(documents, merged, suffix)) - {"numerical_notes"} == set(
             _doc(documents, sibling, suffix)
-        )
+        ) - {"numerical_notes"}
 
     uhd = _doc(documents, merged, "uhd")
     assert uhd["adapter"] == "native"

@@ -354,7 +354,8 @@ TEST(GirActionData, SerializerRoundTripsStableId) {
 
     const auto* parsed = inst->getModifier<GirActionData>();
     ASSERT_NE(parsed, nullptr);
-    EXPECT_EQ(parsed->actionId, 17u);
+    // The text on both sides is the producer's numbering; the field holds the internal id.
+    EXPECT_EQ(parsed->actionId, girInternalActionId(17u));
 }
 
 // The contract parser rejects a malformed record, so the modifier reader must too: a defaulted

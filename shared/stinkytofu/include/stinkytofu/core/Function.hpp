@@ -23,6 +23,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -52,9 +54,13 @@ class STINKYTOFU_EXPORT Function {
     GemmTileConfig gemmConfig;
     std::unordered_map<std::string, uint64_t> metadata_;
     std::unordered_map<std::string, std::string> stringMetadata_;
-    std::unordered_map<std::string, std::pair<const void*, std::shared_ptr<const void>>>
+    std::unordered_map<std::string, std::pair<const char*, std::shared_ptr<const void>>>
         structMetadata_;
     bool isCallable = false;
+    /// Called just before an IR node is freed by BasicBlock::eraseIR, with (node, next, prev).
+    /// Lets an owner holding raw node pointers (StinkyAsmModule's instruction-group endpoints)
+    /// move them off the dying node instead of being left with a dangling pointer.
+    std::function<void(IRBase*, IRBase*, IRBase*)> onEraseIR_;
 
    public:
     explicit Function(const std::string& name = "");
@@ -176,12 +182,24 @@ class STINKYTOFU_EXPORT Function {
         return it->second;
     }
 
-    /// A unique address per T, standing in for a type id: the build is -fno-rtti, so typeid is
-    /// unavailable and a pass's `static char ID` is the established substitute.
+    /// A stable identity per T, standing in for a type id: the build is -fno-rtti, so typeid is
+    /// unavailable and the enclosing signature names T exactly.
+    ///
+    /// Compared by TEXT, never by address.  A function-local static has a different address in an
+    /// executable than in libstinkytofu.so -- an executable does not export its dynamic symbols --
+    /// so an address tag made every lookup across that boundary answer nullptr for metadata that
+    /// was present.  The text is identical wherever the template is instantiated.
     template <class T>
-    static const void* structTypeTag() {
-        static const char tag = 0;
-        return &tag;
+    static const char* structTypeTag() {
+#if defined(_MSC_VER)
+        return __FUNCSIG__;
+#else
+        return __PRETTY_FUNCTION__;
+#endif
+    }
+
+    static bool sameStructType(const char* a, const char* b) {
+        return a == b || std::strcmp(a, b) == 0;
     }
 
     /// Structured metadata: a producer hands over the object it already built instead of a text
@@ -195,7 +213,8 @@ class STINKYTOFU_EXPORT Function {
     template <class T>
     const T* getStructMetaData(const std::string& key) const {
         auto it = structMetadata_.find(key);
-        if (it == structMetadata_.end() || it->second.first != structTypeTag<T>()) return nullptr;
+        if (it == structMetadata_.end() || !sameStructType(it->second.first, structTypeTag<T>()))
+            return nullptr;
         return static_cast<const T*>(it->second.second.get());
     }
 
@@ -238,6 +257,13 @@ class STINKYTOFU_EXPORT Function {
     /// Drop instruction/block SSA metadata and arena values. Physical operands
     /// are left unchanged.
     void clearAttachedSSA();
+
+    void setEraseObserver(std::function<void(IRBase*, IRBase*, IRBase*)> observer) {
+        onEraseIR_ = std::move(observer);
+    }
+    const std::function<void(IRBase*, IRBase*, IRBase*)>& eraseObserver() const {
+        return onEraseIR_;
+    }
 
     void dump(std::ostream& out) const;
 
