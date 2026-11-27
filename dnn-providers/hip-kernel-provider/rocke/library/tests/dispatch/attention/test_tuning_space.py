@@ -1102,7 +1102,11 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(sliding_window=512),
             )
         )
-        missing = _dense_swept_fields("gfx942") - changed
+        # qk_lookahead needs KDB, VPF, the diagonal split, lds_row_pad 0 and
+        # block_m 256 together, more than the one prerequisite a production
+        # point pairs, so like the KDB + VPF combination it is reachable only
+        # through an explicit knob pin or the full space (and its own candidate).
+        missing = _dense_swept_fields("gfx942") - changed - {"qk_lookahead"}
         self.assertFalse(missing, sorted(missing))
 
     def test_bf16_cfvst_kdb_vpf_sweep_and_explicit_selection(self):
@@ -1196,6 +1200,56 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 # Record the id as the fingerprint stood before the field existed.
                 with mock.patch.object(
                     dense_rules, "_dense_defaults", defaults_without_v_reg_prefetch
+                ):
+                    old = gfx942_dense._make_gfx942_attention_dense_candidate()
+                    pin = replace(
+                        req,
+                        algorithm=old.algorithm,
+                        spec_id="gfx942_dense",
+                        tuning_knobs=knobs,
+                    )
+                    stored = old.select_spec(pin)
+                fresh = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+                self.assertNotEqual(stored.config_key, fresh.config_key)
+                self.assertEqual(stored.kernel_spec, fresh.kernel_spec)
+                pin = replace(
+                    pin, tuning_id=stored.tuning_id, tuning_knobs=stored.knobs
+                )
+                ok, why = current.admits(pin)
+                self.assertFalse(ok)
+                self.assertIn("defaults they are relative to", why)
+                self.assertIn(stored.tuning_id, why)
+                self.assertIn(fresh.tuning_id, why)
+
+    def test_ids_recorded_before_qk_lookahead_are_refused(self):
+        """The tuning-id migration. Adding the defaulted qk_lookahead field
+        (default False) adds one entry to the gfx942 dense defaults fingerprint,
+        so every gfx942_dense config_key changes. An id recorded before the field
+        existed is refused, never silently rebuilt, and its knobs re-canonicalize
+        to the current id."""
+        from dispatch.attention import dense_rules, gfx942_dense
+
+        req = _gfx942_request(dtype="bf16", seqlen_q=4096, seqlen_k=4096)
+        current = gfx942_dense._make_gfx942_attention_dense_candidate()
+        shipped = current.select_spec(
+            replace(req, algorithm=current.algorithm, spec_id="gfx942_dense")
+        )
+        self.assertFalse(shipped.kernel_spec.qk_lookahead)
+
+        real_defaults = dense_rules._dense_defaults
+
+        def defaults_without_qk_lookahead(base, recorded):
+            return tuple(
+                (name, value)
+                for name, value in real_defaults(base, recorded)
+                if name != "qk_lookahead"
+            )
+
+        for knobs in ({}, {"pv_priority": 2}):
+            with self.subTest(knobs=knobs):
+                # Record the id as the fingerprint stood before the field existed.
+                with mock.patch.object(
+                    dense_rules, "_dense_defaults", defaults_without_qk_lookahead
                 ):
                     old = gfx942_dense._make_gfx942_attention_dense_candidate()
                     pin = replace(
@@ -1348,6 +1402,54 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         self.assertEqual(replay.kernel_spec, spec)
         self.assertEqual(replay.tuning_id, selected.tuning_id)
         self.assertEqual(replay.kernel_name(), name)
+
+    def test_qk_lookahead_explicit_pin_replays(self):
+        """qk_lookahead is reachable as a knob pin on gfx942_dense: the flag, its
+        prerequisites and the xcd_local decode it runs on. The pin replays, the
+        shipped default leaves it off, and a pin missing the decode is refused."""
+        req = _gfx942_request(
+            dtype="bf16",
+            hdim_q=128,
+            hdim_v=128,
+            seqlen_q=4096,
+            seqlen_k=4096,
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+        )
+        knobs = {
+            "qk_lookahead": True,
+            "block_m": 256,
+            "lds_num_buffers": 2,
+            "v_reg_prefetch": True,
+            "causal_diag_split": True,
+            "lds_row_pad": 0,
+            "persist_decode": "xcd_local",
+        }
+        selected = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+        spec = selected.kernel_spec
+        self.assertTrue(spec.qk_lookahead)
+        self.assertTrue(spec.persistent)
+        self.assertEqual(spec.resolved_persist_decode, "xcd_local")
+        ok, why = supports_gfx942(spec, arch="gfx942")
+        self.assertTrue(ok, why)
+        name = selected.kernel_name()
+        for marker in ("_qkla", "xcdlb"):
+            self.assertIn(marker, name)
+        replay = tuning_spec_with_knobs(req, "gfx942_dense", dict(selected.knobs))
+        self.assertEqual(replay.kernel_spec, spec)
+        self.assertEqual(replay.tuning_id, selected.tuning_id)
+        self.assertEqual(replay.kernel_name(), name)
+        # The shipped default is unchanged.
+        self.assertFalse(
+            tuning_spec_with_knobs(req, "gfx942_dense", {}).kernel_spec.qk_lookahead
+        )
+        # Without the xcd_local decode, or without its prerequisites, it is refused.
+        no_decode = {k: v for k, v in knobs.items() if k != "persist_decode"}
+        for bad in (no_decode, {"qk_lookahead": True}):
+            with self.subTest(knobs=sorted(bad)):
+                with self.assertRaisesRegex(ValueError, "NOT_YET_IMPLEMENTED"):
+                    tuning_spec_with_knobs(req, "gfx942_dense", bad)
 
     def test_pipeline_axis_values_remain_declared(self):
         """Both independent pipeline levers and their prerequisite remain tunable."""

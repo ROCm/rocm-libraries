@@ -67,8 +67,10 @@ def _dtype_bytes(dtype: str) -> int:
 VALU = 0x002  # vector ALU (v_add, v_mul, v_cvt, ...)
 SALU = 0x004  # scalar ALU
 MFMA = 0x008  # matrix-fused multiply-add
+VMEM = 0x010  # any VMEM instruction (reads and writes)
 VMEM_READ = 0x020  # global / buffer load
 VMEM_WRITE = 0x040
+DS = 0x080  # any LDS instruction (reads, writes and ds_bpermute)
 DS_READ = 0x100  # LDS load
 DS_WRITE = 0x200  # LDS store
 TRANS = 0x400  # transcendentals (v_exp_f32, v_log_f32, v_rcp_f32, ...)

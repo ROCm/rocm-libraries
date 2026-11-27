@@ -689,7 +689,9 @@ def fastdiv_kernargs(spec, arch: str) -> dict[str, int]:
         return {}
     from rocke.helpers.magic_division import calculate_magic_numbers
 
-    bound = PERSIST_DECODES[spec.resolved_persist_decode].fastdiv_dividend_bound(spec)
+    bound = spec.persist_decode_registry()[
+        spec.resolved_persist_decode
+    ].fastdiv_dividend_bound(spec)
     if bound >= FASTDIV_DIVIDEND_LIMIT:
         raise ValueError(
             f"{arch} attention_dense: persistent decode dividend bound {bound} "

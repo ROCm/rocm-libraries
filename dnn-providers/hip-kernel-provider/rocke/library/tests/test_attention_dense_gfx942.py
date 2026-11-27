@@ -341,6 +341,7 @@ _PRIVATE_PERTURBATIONS = {
     "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
     "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
+    "qk_lookahead": (False, True),  # on only in the *_qkla base's scope
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -424,6 +425,24 @@ _INJECTIVITY_BASES = {
         seqlen_kv=4096,
         num_query_heads=32,
     ),
+    # qk_lookahead on, in its scope (persistent BF16 D128 KDB + VPF + diag split, K
+    # row pad 0) on its xcd_local decode (num_persistent 304, Hq 32).
+    "persistent_d128_bf16_qkla": dict(
+        qk_lookahead=True,
+        persist_decode="xcd_local",
+        head_size=128,
+        dtype="bf16",
+        use_cfvst=True,
+        lds_num_buffers=2,
+        v_reg_prefetch=True,
+        causal_diag_split=True,
+        lds_row_pad=0,
+        persistent=True,
+        num_persistent=304,
+        seqlen_q=4096,
+        seqlen_kv=4096,
+        num_query_heads=32,
+    ),
     "paged_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
@@ -448,10 +467,12 @@ _PERSIST_DECODES = sorted(
 
 def _decode_kw(decode: str) -> dict:
     """Pin ``decode``; hq_minor_swz also needs num_persistent divisible by the XCD
-    count (the base's 228 is not)."""
+    count (the base's 228 is not), and xcd_local its fixed 304-CTA, Hq 32 layout."""
     kw = dict(persist_decode=decode)
     if decode == "hq_minor_swz":
         kw["num_persistent"] = 224
+    if decode == "xcd_local":
+        kw.update(num_persistent=304, num_query_heads=32, num_kv_heads=8)
     return kw
 
 
@@ -718,15 +739,21 @@ def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     head counts is the gfx950 control
     (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`), so the
     single-body assertion here is not vacuous. hq_minor_swz needs Hq divisible by
-    the XCD count, so it skips the configs that are not."""
-    configs = [
-        (hq, hkv)
-        for hq, hkv in _HEAD_CONFIGS
-        if decode != "hq_minor_swz" or hq % 8 == 0
-    ]
-    assert len(configs) >= 3
+    the XCD count, so it skips the configs that are not; xcd_local serves Hq 32
+    with Hkv 8 or 16 only."""
+    if decode == "xcd_local":
+        configs = [(32, 8), (32, 16)]
+    else:
+        configs = [
+            (hq, hkv)
+            for hq, hkv in _HEAD_CONFIGS
+            if decode != "hq_minor_swz" or hq % 8 == 0
+        ]
+        assert len(configs) >= 3
     specs = [
-        _persistent_spec(num_query_heads=hq, num_kv_heads=hkv, **_decode_kw(decode))
+        _persistent_spec(
+            **{**_decode_kw(decode), "num_query_heads": hq, "num_kv_heads": hkv}
+        )
         for hq, hkv in configs
     ]
     for s in specs:
@@ -744,7 +771,11 @@ def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     pairs = [
         tuple(v for k, v in a.items() if k.endswith(("_magic", "_shift"))) for a in args
     ]
-    assert len(set(pairs)) == len(specs)
+    if decode == "xcd_local":
+        # Its one divisor is nqb, which the head config does not move.
+        assert len({a["num_kv_heads"] for a in args}) == len(specs)
+    else:
+        assert len(set(pairs)) == len(specs)
 
 
 def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
@@ -1293,6 +1324,18 @@ def test_cfvst_kdb_vpf_knobs_reject_non_exact_types(overrides, expected_message)
     assert str(exc_info.value) == expected_message
 
 
+@pytest.mark.parametrize("value", ["false", 1, None], ids=["str", "int", "none"])
+def test_qk_lookahead_rejects_non_exact_types(value):
+    """bool("false") is True, so a truthy qk_lookahead must raise, not build the
+    lookahead kernel."""
+    with pytest.raises(ValueError) as exc_info:
+        _spec(qk_lookahead=value)
+    assert type(exc_info.value) is ValueError
+    assert str(exc_info.value) == (
+        f"qk_lookahead must be a bool, got {type(value).__name__}"
+    )
+
+
 def test_cfvst_kdb_vpf_rejects_over_budget_lds():
     """Two K slots and one transposed V slot exceed 64 KiB with a wide K row pad.
 
@@ -1515,6 +1558,149 @@ def test_cfvst_pipeline_loop_keeps_lds_handoff_barriers(
         assert first_guard < drain < final_publish, names
 
 
+def _qkla_spec(**overrides):
+    """A legal qk_lookahead spec on the xcd_local decode, with ``overrides``."""
+    return _spec(
+        **{
+            "qk_lookahead": True,
+            "persist_decode": "xcd_local",
+            "num_query_heads": 32,
+            **_QKLA_SCOPE,
+            **overrides,
+        }
+    )
+
+
+_QKLA_SCOPE_MESSAGE = (
+    "NOT_YET_IMPLEMENTED: qk_lookahead needs the KDB/VPF configuration "
+    "(lds_num_buffers=2, v_reg_prefetch) plus block_m 256, "
+    "causal_diag_split, lds_row_pad=0 and the V swizzle, and no LSE, "
+    "paging, KV segments, iglp or PV priority/fence"
+)
+
+
+# Modes the KDB/VPF gate refuses first (window, sinks, non-causal, bottom-right,
+# block_n, dtype) are covered by test_cfvst_kdb_vpf_rejects_unsupported_modes;
+# paged is refused by the persistent builder. These reach the qk_lookahead checks.
+@pytest.mark.parametrize(
+    "overrides,expected_message",
+    [
+        ({"emit_lse": True}, _QKLA_SCOPE_MESSAGE),
+        ({"kv_segments": 2}, _QKLA_SCOPE_MESSAGE),
+        ({"iglp": True}, _QKLA_SCOPE_MESSAGE),
+        ({"pv_priority": 1}, _QKLA_SCOPE_MESSAGE),
+        ({"pv_sched_fence_mask": 0}, _QKLA_SCOPE_MESSAGE),
+        ({"block_m": 128}, _QKLA_SCOPE_MESSAGE),
+        ({"lds_num_buffers": 1}, _QKLA_SCOPE_MESSAGE),
+        ({"v_reg_prefetch": False}, _QKLA_SCOPE_MESSAGE),
+        ({"causal_diag_split": False}, _QKLA_SCOPE_MESSAGE),
+        ({"lds_row_pad": 4}, _QKLA_SCOPE_MESSAGE),
+        ({"use_v_swizzle": False}, _QKLA_SCOPE_MESSAGE),
+        (
+            {"persist_decode": "qb_major"},
+            (
+                "NOT_YET_IMPLEMENTED: qk_lookahead runs only on the xcd_local "
+                "persistent decode, got persist_decode='qb_major'"
+            ),
+        ),
+        (
+            {"o_store_width": 2},
+            (
+                "o_store_width=2 is rejected with qk_lookahead: it stores O "
+                "through LDS and does not read o_store_width"
+            ),
+        ),
+    ],
+    ids=[
+        "lse",
+        "kv_segments",
+        "iglp",
+        "pv_priority",
+        "pv_fence",
+        "block_m128",
+        "no_kdb",
+        "no_vpf",
+        "no_diag_split",
+        "row_pad4",
+        "no_swizzle",
+        "qb_major",
+        "o_store_width2",
+    ],
+)
+def test_qk_lookahead_rejects_unsupported_modes(overrides, expected_message):
+    assert supports_attention_dense(_qkla_spec(), arch="gfx942")[0]
+    ok, reason = supports_attention_dense(_qkla_spec(**overrides), arch="gfx942")
+    assert not ok
+    assert reason == expected_message
+    with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
+        build_attention_dense(_qkla_spec(**overrides), arch="gfx942")
+
+
+_XCD_LOCAL_SPEC = {
+    "persistent": True,
+    "num_persistent": 304,
+    "persist_decode": "xcd_local",
+    "num_query_heads": 32,
+    "num_kv_heads": 8,
+}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"chiplet_num_xcds": 4},
+        {"num_persistent": 64},
+        {"num_query_heads": 64},
+        {"num_kv_heads": 4},
+    ],
+    ids=["xcds4", "np64", "hq64", "hkv4"],
+)
+def test_xcd_local_rejects_each_unsupported_layout(overrides):
+    """Each xcd_local layout clause rejects a spec on its own, and the message
+    reports the values received."""
+    _spec(**_XCD_LOCAL_SPEC)  # the supported layout is accepted
+    kw = {**_XCD_LOCAL_SPEC, **overrides}
+    expected = (
+        "xcd_local needs chiplet_num_xcds 8, num_persistent 304, num_query_heads 32 "
+        "and num_kv_heads 8 or 16, got "
+        f"chiplet_num_xcds {kw.get('chiplet_num_xcds', 8)}, "
+        f"num_persistent {kw['num_persistent']}, "
+        f"num_query_heads {kw['num_query_heads']}, "
+        f"num_kv_heads {kw['num_kv_heads']}"
+    )
+    with pytest.raises(ValueError) as err:
+        _spec(**kw)
+    assert str(err.value) == expected
+
+
+def test_qk_lookahead_tile_loops_keep_one_lds_handoff_barrier():
+    """Both diagonal-split tile loops (masked and unmasked) end each tile with a
+    VMEM drain and one LDS barrier before the next tile reuses the slots.
+
+    This examines emitted builder operations; the numeric tests cover the races a
+    correct-looking barrier sequence cannot rule out.
+    """
+    kernel = build_attention_dense(_qkla_spec(), arch="gfx942")
+
+    def walk(op):
+        yield op
+        for region in getattr(op, "regions", ()):
+            for child in region.ops:
+                yield from walk(child)
+
+    loops = [
+        op
+        for root in kernel.body.ops
+        for op in walk(root)
+        if op.name == "scf.for" and op.attrs.get("elide_trailing_barrier") is False
+    ]
+    assert len(loops) == 2
+    for loop in loops:
+        names = [op.name for op in loop.regions[0].ops]
+        assert names[-3:] == ["tile.s_waitcnt", "tile.sync_lds_only", "scf.yield"]
+        assert names.count("tile.sync_lds_only") == 1, names
+
+
 @pytest.mark.parametrize(
     "request_changes,knobs",
     [
@@ -1716,6 +1902,17 @@ _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse
 # Rows must be CONSTRUCTIBLE: a value the dataclass validator rejects in
 # ``__post_init__`` (e.g. waves_per_eu=0) raises before supports() is ever called, so
 # it belongs in a direct-construction test, not in this grid.
+# The qk_lookahead scope on the _spec() base.
+_QKLA_SCOPE = dict(
+    persistent=True,
+    num_persistent=304,
+    use_cfvst=True,
+    lds_num_buffers=2,
+    v_reg_prefetch=True,
+    causal_diag_split=True,
+    lds_row_pad=0,
+)
+
 _CONTRACT_GRID = [
     dict(),
     dict(dtype="fp16"),
@@ -1805,6 +2002,29 @@ _CONTRACT_GRID = [
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
+    # --- private: qk_lookahead (persistent BF16 D128 KDB + VPF + dsplit) ---
+    dict(qk_lookahead=False),  # accepted: the default
+    dict(qk_lookahead=True, **_QKLA_SCOPE),  # REJECTED: not on the xcd_local decode
+    dict(qk_lookahead=True),  # REJECTED: default grid, no KDB / VPF
+    dict(qk_lookahead=True, **{**_QKLA_SCOPE, "lds_row_pad": 4}),  # REJECTED: pad
+    dict(qk_lookahead=True, **{**_QKLA_SCOPE, "causal_diag_split": False}),  # REJECTED
+    dict(qk_lookahead=True, dtype="fp16", **_QKLA_SCOPE),  # REJECTED: bf16 only
+    # qk_lookahead with the xcd_local decode (its own check raises at construction).
+    dict(
+        qk_lookahead=True,
+        persist_decode="xcd_local",
+        **_QKLA_SCOPE,
+        num_query_heads=32,
+    ),  # ACCEPTED
+    dict(
+        qk_lookahead=True,
+        persist_decode="xcd_local",
+        **_QKLA_SCOPE,
+        num_query_heads=32,
+        o_store_width=2,
+    ),  # REJECTED: o_store_width is not read under qk_lookahead
+    # xcd_local without qk_lookahead: a plain persist_decode value.
+    dict(persist_decode="xcd_local", **_QKLA_SCOPE, num_query_heads=32),  # ACCEPTED
 ]
 
 
@@ -2572,6 +2792,7 @@ _CODEGEN_KNOB_DEFAULTS = {
     "pv_priority": 0,
     "pv_sched_fence_mask": None,
     "causal_diag_split": False,
+    "qk_lookahead": False,
 }
 _CODEGEN_KNOB_TOKENS = (
     "_kdb1",
@@ -2582,6 +2803,7 @@ _CODEGEN_KNOB_TOKENS = (
     "_prio",
     "_fence",
     "_dsplit",
+    "_qkla",
 )
 
 
@@ -2739,10 +2961,13 @@ def test_persistent_builds_for_both_decodes(dtype, d, decode):
     work-decode order. The decode is a build-time (Python) branch, so each must emit;
     GPU numeric correctness (the decode bijection) is verified in the live cohort."""
     spec = _spec(
-        head_size=d,
-        dtype=dtype,
-        persistent=True,
-        **{"num_persistent": 228, **_decode_kw(decode)},
+        **{
+            "head_size": d,
+            "dtype": dtype,
+            "persistent": True,
+            "num_persistent": 228,
+            **_decode_kw(decode),
+        }
     )
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
@@ -2791,6 +3016,7 @@ _EXPECTED_FASTDIV_DIVISORS = {
     "hkv_major": ("batch", "gqa", "nqb"),
     "hq_minor_swz": ("nqb", "num_query_heads", "gqa"),
     "qb_major": ("batch", "num_query_heads", "gqa"),
+    "xcd_local": ("nqb",),
 }
 
 
@@ -2819,13 +3045,16 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     from rocke.helpers.magic_division import calculate_magic_numbers
 
     nqb = 14 if decode == "hq_minor_swz" else 13
+    hq = 32 if decode == "xcd_local" else 40  # xcd_local serves Hq 32 only
     spec = _persistent_spec(
-        batch=3,
-        seqlen_q=nqb * _BLOCK_M,
-        seqlen_kv=4096,
-        num_query_heads=40,
-        num_kv_heads=8,
-        **_decode_kw(decode),
+        **{
+            **_decode_kw(decode),
+            "batch": 3,
+            "seqlen_q": nqb * _BLOCK_M,
+            "seqlen_kv": 4096,
+            "num_query_heads": hq,
+            "num_kv_heads": 8,
+        }
     )
     assert supports_attention_dense(spec, arch="gfx942")[0]
     divisors = _EXPECTED_FASTDIV_DIVISORS[decode]
@@ -2842,7 +3071,7 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
 
     args = attention_dense_runtime_args(spec)
     assert tuple(args) == spec.runtime_kernarg_fields
-    value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": nqb}
+    value = {"batch": 3, "num_query_heads": hq, "gqa": hq // 8, "nqb": nqb}
     for d in divisors:
         magic, shift = calculate_magic_numbers(value[d])
         assert -(1 << 31) <= args[f"{d}_magic"] < (1 << 31), "magic must fit an i32"
@@ -3000,3 +3229,68 @@ def test_run_attention_dense_torch_rejects_cu_seqlens():
             scale=0.1,
             cu_seqlens_q=[0, 128],
         )
+
+
+def _pacer(n_chunks, units):
+    """A _DeadlinePacer over ``units`` = [(name, cost, dead, deps_by_name)] whose
+    emit functions log their names."""
+    from kernels.gfx942.attention_dense import _DeadlinePacer
+
+    log, ids = [], {}
+    pacer = _DeadlinePacer(n_chunks)
+    for name, cost, dead, deps in units:
+        ids[name] = pacer.add(
+            cost, dead, [ids[d] for d in deps], lambda n=name: log.append(n)
+        )
+    return pacer, log
+
+
+def test_deadline_pacer_fills_each_chunk_earliest_deadline_first():
+    """Two chunks share 16 cycles: 8 each, the earlier deadline first."""
+    pacer, log = _pacer(
+        2,
+        [
+            ("late", 4, 1, []),
+            ("early", 4, 0, []),
+            ("mid", 4, 1, []),
+            ("last", 4, 1, []),
+        ],
+    )
+    assert pacer.fill(0) == [
+        1,
+        0,
+    ]  # early (dead 0), then late (dead 1, lower id than mid)
+    assert pacer.fill(1) == [2, 3]
+    assert log == ["early", "late", "mid", "last"]
+
+
+def test_deadline_pacer_places_units_at_their_deadline_past_the_budget():
+    """A unit at its deadline goes in even past the chunk's share (20 / 4 = 5
+    cycles here); a later unit then waits."""
+    pacer, log = _pacer(4, [("later", 4, 3, []), ("due", 16, 0, [])])
+    assert pacer.fill(0) == [1]
+    assert pacer.fill(1) == [0]
+    assert log == ["due", "later"]
+
+
+def test_deadline_pacer_waits_for_dependencies_in_an_earlier_chunk():
+    """A unit whose dependency was placed in this chunk waits for the next one."""
+    pacer, log = _pacer(3, [("sub", 4, 2, []), ("exp", 4, 2, ["sub"])])
+    assert pacer.fill(0) == [0]
+    assert pacer.fill(1) == [1]
+    assert log == ["sub", "exp"]
+
+
+def test_deadline_pacer_takes_at_least_one_unit_per_chunk():
+    """A chunk with a ready unit never stays empty, even past its share."""
+    pacer, _ = _pacer(4, [("only", 40, 3, [])])
+    assert pacer.fill(0) == [0]
+
+
+def test_deadline_pacer_drains_leftovers_in_dependency_order():
+    """Units no chunk took are emitted after the last chunk, dependencies first."""
+    pacer, log = _pacer(1, [("a", 4, 0, []), ("b", 4, 0, ["a"]), ("c", 4, 0, ["b"])])
+    pacer.fill(0)
+    assert log == ["a"]
+    pacer.drain("test units")
+    assert log == ["a", "b", "c"]

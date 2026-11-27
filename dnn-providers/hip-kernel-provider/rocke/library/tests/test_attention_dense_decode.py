@@ -322,6 +322,7 @@ def _gfx942_persist(*args, **kw):
 _PERSIST_LAUNCHES = (
     (32, 8, 1, 512),
     (32, 8, 2, 2048),
+    (32, 16, 3, 1280),
     (40, 8, 1, 768),
     (64, 64, 1, 1024),
     (16, 4, 3, 1280),
@@ -377,12 +378,14 @@ def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
 def _check_runtime_persist_decode(spec_cls, runtime_args, name, causal, window, il):
     if il and name != "qb_major":
         pytest.skip("interleave applies to qb_major only")
-    decode = PERSIST_DECODES[name]
+    decode = spec_cls.persist_decode_registry()[name]
+    # xcd_local is laid out for 8 XCDs x 38 CTAs.
+    np_ = 304 if name == "xcd_local" else 256
     built = None
     for Hq, Hkv, B, S in _PERSIST_LAUNCHES:
         try:
             launched = _persist(
-                spec_cls, Hq, Hkv, B, S, name, causal, window, interleave=il
+                spec_cls, Hq, Hkv, B, S, name, causal, window, np_, interleave=il
             )
         except ValueError:
             continue  # not legal for this launch (e.g. hq_minor_swz, odd NQB)

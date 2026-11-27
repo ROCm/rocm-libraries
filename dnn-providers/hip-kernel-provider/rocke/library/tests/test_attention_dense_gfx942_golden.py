@@ -19,6 +19,9 @@ gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128
 K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
 (``v_reg_prefetch=True``) knobs are pinned individually and together on supported
 persistent grids (including LSE); no shipped default reaches the new pipeline paths.
+The opt-in ``qk_lookahead`` body is pinned on the gfx942-only ``xcd_local`` decode (the
+only one it runs on) at both kv head counts that decode serves, and ``xcd_local`` is
+also pinned on the default body.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -422,7 +425,36 @@ def _cases():
             num_persistent=304,
             persist_decode="bt_hkv_minor",
         ),
+        # --- Opt-in QK lookahead (qk_lookahead) on the gfx942-only xcd_local decode
+        #     (NP 304, Hq 32, Hkv 8 or 16), and xcd_local on the default body. ---
+        **{
+            f"attention_dense_gfx942/persist_xcdlocal_qkla_d128_bf16_hkv{hkv}": (
+                mk_gfx942(**_QKLA, num_query_heads=32, num_kv_heads=hkv)
+            )
+            for hkv in (8, 16)
+        },
+        "attention_dense_gfx942/persist_xcdlocal_d128_bf16_causal": mk_gfx942(
+            persistent=True,
+            num_persistent=304,
+            persist_decode="xcd_local",
+            num_query_heads=32,
+            num_kv_heads=8,
+        ),
     }
+
+
+# The qk_lookahead scope on the golden base, on its xcd_local decode.
+_QKLA = dict(
+    qk_lookahead=True,
+    block_m=256,
+    lds_num_buffers=2,
+    v_reg_prefetch=True,
+    causal_diag_split=True,
+    lds_row_pad=0,
+    persistent=True,
+    num_persistent=304,
+    persist_decode="xcd_local",
+)
 
 
 def _sha_for(build, flavor):
@@ -490,6 +522,9 @@ def test_pipeline_golden_entries_cover_each_independent_mode_and_llvm_flavor():
         "attention_dense_gfx942/persist_bthkvmin_kdbvpf_pad4_dsplit",
         "attention_dense_gfx942/persist_bthkvmin_kdb_dsplit_d128_bf16",
         "attention_dense_gfx942/persist_bthkvmin_vpf_dsplit_d128_bf16",
+        "attention_dense_gfx942/persist_xcdlocal_qkla_d128_bf16_hkv8",
+        "attention_dense_gfx942/persist_xcdlocal_qkla_d128_bf16_hkv16",
+        "attention_dense_gfx942/persist_xcdlocal_d128_bf16_causal",
     }
     assert required <= expected, sorted(required - expected)
     assert set(doc["flavors"]) == set(GOLDEN_PROFILE_FLAVORS)
