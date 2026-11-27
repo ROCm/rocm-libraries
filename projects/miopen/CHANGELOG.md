@@ -149,6 +149,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the
   gfx950 `direct_wgrad` kernel when built with clang 23. See
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
+* [Conv] Added `ConvDirectDepthwiseFwd2DDilated`, a forward 2D depthwise convolution solver for
+  dilated filters on RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It runs the
+  `ConvDirectDepthwiseFwd2D` kernel with each lane walking outputs a dilation step apart, so the
+  outputs share their input rows and columns, and takes any dilation up to a 7x7 filter, including
+  the 3x3 separable ASPP convolutions of DeepLabV3+ (dilation 6, 12, 18) that ran on the naive
+  solver. Both solvers stay applicable and Find picks between them.
 
 ### Changed
 * [Conv] The gfx942/gfx950 two-tower config-selection heuristic now ranks a shipped precomputed
@@ -162,6 +168,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
   support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
   improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
+* [Conv] `ConvDirectDepthwiseFwd2D` now also takes undilated filters up to 9x9 (horizontal stride
+  up to 4) and 1xK filters up to a dilated width of 31, such as the k = 31 depthwise conv1d of
+  Conformer blocks. These shapes previously ran on the naive or the grouped CK solver.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
