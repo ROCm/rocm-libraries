@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "728ee4ab-bbf3-40c8-a3b2-f20d35e6722c",
+  "name": "BatchnormBackward selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.batchnorm_backward.score"
+  }
+}

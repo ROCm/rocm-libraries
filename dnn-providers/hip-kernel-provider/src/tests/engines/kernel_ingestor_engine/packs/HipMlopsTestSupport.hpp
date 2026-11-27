@@ -3,13 +3,16 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -18,9 +21,14 @@
 #include <hip/hip_runtime_api.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
 #include "core/Container.hpp"
@@ -31,8 +39,8 @@
 /**
  * @file HipMlopsTestSupport.hpp
  * @brief What the HIP MLOps family tests share (ALMIOPEN-3066): the engines' names, their
- *        graph matches, device buffers, and a run of a graph through the provider as a plan
- *        build and execute would.
+ *        graph matches, their knobs and the ranking behind them, device buffers, and a run of
+ *        a graph through the provider as a plan build and execute would, knobs pinned or not.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::hip_mlops
 {
@@ -148,6 +156,252 @@ inline std::optional<std::string>
     return value == nullptr ? std::nullopt : std::make_optional(*value);
 }
 
+// ---------------------------------------------------------------------------
+// Knobs: one kernel per performance configuration
+// ---------------------------------------------------------------------------
+
+/// A knob's name and the value pinned, or a kernel's value, for each knob of an engine.
+using KnobSettings = std::vector<std::pair<std::string, int64_t>>;
+
+/// The symbol @p engine registers as `<its namespace>.<suffix>`, e.g. its kernel_match.
+inline std::string engineSymbol(const MlopsEngine& engine, std::string_view suffix)
+{
+    const std::string graphMatcher(engine.graphMatcher);
+    return graphMatcher.substr(0, graphMatcher.rfind('.') + 1) + std::string(suffix);
+}
+
+/// The knobs @p engine's UED lists.
+inline std::vector<std::string> engineKnobs(const MlopsEngine& engine)
+{
+    return loadedSet(engine.name).engine.knobs;
+}
+
+/// @p engine's kernels as its matchers read them, once each (the packer copies a pack per
+/// arch, each copy with the authored kernel ids).
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
+    loadedKernels(const MlopsEngine& engine)
+{
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> seen;
+    for(const auto& pack : loadedSet(engine.name).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            if(!seen.insert(kernel.id).second)
+            {
+                continue;
+            }
+            hipdnn_plugin_sdk::ingestor::KernelDefinition definition;
+            definition.kernelId = kernel.id;
+            definition.packId = pack.id;
+            definition.dispatchId = pack.dispatchId;
+            definition.source = kernel.source;
+            definition.metadata = kernel.metadata;
+            definition.priority = kernel.priority;
+            definition.arch = kernel.arch.empty() ? pack.arch : kernel.arch;
+            definition.originDirectory = kernel.originDirectory;
+            definition.name = kernel.name;
+            definition.treeRoot = kernel.treeRoot;
+            kernels.push_back(std::move(definition));
+        }
+    }
+    return kernels;
+}
+
+/// @p kernel's value of each of @p knobs, in that order.
+inline KnobSettings knobTuple(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                              const std::vector<std::string>& knobs)
+{
+    KnobSettings tuple;
+    tuple.reserve(knobs.size());
+    for(const auto& knob : knobs)
+    {
+        tuple.emplace_back(knob, kernel.getIntMetadata(knob));
+    }
+    return tuple;
+}
+
+/// The kernels of @p engine its kernel matcher admits for @p builder's graph on a device of
+/// @p properties, best first by its scorer: the catalog its plans and knobs are drawn from,
+/// in its order. Empty when the graph match declines. Expects every score distinct, so the
+/// order is the scorer's alone.
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
+    rankedKernels(const MlopsEngine& engine,
+                  flatbuffers::FlatBufferBuilder builder,
+                  hipdnn_plugin_sdk::ingestor::DeviceProperties properties = testDeviceProperties())
+{
+    using namespace hipdnn_plugin_sdk::ingestor;
+    registerNativeIngestorSymbols();
+    const GraphFixture fixture(std::move(builder), std::move(properties));
+    const auto context = fixture.context();
+    const auto bound = GraphMatchRegistry::resolve(std::string(engine.graphMatcher))(context);
+    if(!bound.has_value())
+    {
+        return {};
+    }
+
+    const auto kernelMatcher = KernelMatcherRegistry::resolve(engineSymbol(engine, "kernel_match"));
+    const auto scorer = ScoreRegistry::resolve(engineSymbol(engine, "score"));
+    std::vector<std::pair<double, KernelDefinition>> scored;
+    for(auto& kernel : loadedKernels(engine))
+    {
+        if(kernelMatcher(context, *bound, kernel))
+        {
+            const double score = scorer(context, *bound, kernel);
+            scored.emplace_back(score, std::move(kernel));
+        }
+    }
+    std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first > rhs.first;
+    });
+
+    std::vector<KernelDefinition> ranked;
+    for(size_t i = 0; i < scored.size(); ++i)
+    {
+        if(i > 0)
+        {
+            EXPECT_NE(scored[i - 1].first, scored[i].first)
+                << scored[i - 1].second.name << " and " << scored[i].second.name << " tie";
+        }
+        ranked.push_back(std::move(scored[i].second));
+    }
+    return ranked;
+}
+
+/// The distinct values of integer field @p knob across @p ranked, best first: the values the
+/// engine advertises for the knob, its default first.
+inline std::vector<int64_t>
+    knobValues(const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& ranked,
+               const std::string& knob)
+{
+    std::vector<int64_t> values;
+    for(const auto& kernel : ranked)
+    {
+        const auto value = kernel.getIntMetadata(knob);
+        if(std::find(values.begin(), values.end(), value) == values.end())
+        {
+            values.push_back(value);
+        }
+    }
+    return values;
+}
+
+/// The knob tuple of the kernel a plan pinning @p pins builds: the best ranked of @p ranked
+/// carrying every pinned value, or nullopt when none does.
+inline std::optional<KnobSettings>
+    pinnedTuple(const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& ranked,
+                const std::vector<std::string>& knobs,
+                const KnobSettings& pins)
+{
+    for(const auto& kernel : ranked)
+    {
+        if(std::all_of(pins.begin(), pins.end(), [&kernel](const auto& pin) {
+               return kernel.getIntMetadata(pin.first) == pin.second;
+           }))
+        {
+            return knobTuple(kernel, knobs);
+        }
+    }
+    return std::nullopt;
+}
+
+/// @p ranked holds no two kernels with one knob tuple, so a tuple addresses one kernel.
+inline void
+    expectUniqueTuples(const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& ranked,
+                       const std::vector<std::string>& knobs)
+{
+    std::set<KnobSettings> tuples;
+    for(const auto& kernel : ranked)
+    {
+        EXPECT_TRUE(tuples.insert(knobTuple(kernel, knobs)).second)
+            << kernel.name << " shares its knob tuple";
+    }
+}
+
+/// An engine configuration of @p engineId pinning @p knobs.
+class PinnedEngineConfig
+{
+public:
+    PinnedEngineConfig(int64_t engineId, const KnobSettings& knobs)
+        : _wrapper(build(_builder, engineId, knobs))
+    {
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& get() const
+    {
+        return _wrapper;
+    }
+
+private:
+    static hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+        build(flatbuffers::FlatBufferBuilder& builder, int64_t engineId, const KnobSettings& knobs)
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        std::vector<flatbuffers::Offset<KnobSetting>> settings;
+        settings.reserve(knobs.size());
+        for(const auto& [name, value] : knobs)
+        {
+            settings.push_back(CreateKnobSettingDirect(builder,
+                                                       name.c_str(),
+                                                       KnobValue::IntValue,
+                                                       CreateIntValue(builder, value).Union()));
+        }
+        builder.Finish(CreateEngineConfig(builder, engineId, builder.CreateVector(settings)));
+        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+    }
+
+    flatbuffers::FlatBufferBuilder _builder;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper _wrapper;
+};
+
+/// What @p engine advertises for @p builder's graph through the provider: each knob's name,
+/// default and valid values, in its order.
+struct AdvertisedKnob
+{
+    std::string name;
+    int64_t defaultValue;
+    std::vector<int64_t> validValues;
+};
+
+inline std::vector<AdvertisedKnob> advertisedKnobs(const MlopsEngine& engine,
+                                                   const flatbuffers::FlatBufferBuilder& builder)
+{
+    core::Container container;
+    Handle handle;
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    hipdnnPluginConstData_t details{};
+    container.getEngineManager().getEngineDetails(
+        handle,
+        graph,
+        hipdnn_data_sdk::utilities::engineNameToId(std::string(engine.name)),
+        details);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
+                                                                                     details.size);
+    std::vector<AdvertisedKnob> knobs;
+    for(const auto& name : engineKnobs(engine))
+    {
+        const auto& knob = wrapper.getKnobByName(name);
+        const auto* valid = knob.constraintAs<hipdnn_flatbuffers_sdk::data_objects::IntConstraint>()
+                                .valid_values();
+        knobs.push_back(
+            {name,
+             knob.defaultValueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value(),
+             valid == nullptr ? std::vector<int64_t>{}
+                              : std::vector<int64_t>(valid->begin(), valid->end())});
+    }
+    return knobs;
+}
+
+/// The kernels of @p engine admitted for @p builder's graph on this device, best first, as
+/// the provider's engine ranks them: the configurations a device test can pin.
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
+    rankedKernelsOnThisDevice(const MlopsEngine& engine, flatbuffers::FlatBufferBuilder builder)
+{
+    return rankedKernels(engine, std::move(builder), currentDeviceProperties());
+}
+
 inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
 {
     std::vector<int64_t> strides(dims.size(), 1);
@@ -155,6 +409,21 @@ inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
     {
         strides[i - 1] = strides[i] * dims[i];
     }
+    return strides;
+}
+
+/// The packed channel-last strides of @p dims, given as N, C, then the spatial dimensions:
+/// NLC, NHWC or NDHWC.
+inline std::vector<int64_t> channelLastStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    int64_t stride = dims[1];
+    for(size_t i = dims.size(); i-- > 2;)
+    {
+        strides[i] = stride;
+        stride *= dims[i];
+    }
+    strides[0] = stride;
     return strides;
 }
 
@@ -231,11 +500,13 @@ struct EngineRun
 };
 
 /// Builds @p engine's plan for @p builder's graph through the provider, as a plan build
-/// would, and executes it on @p buffers with a workspace of the plan's size.
+/// would, with @p knobs pinned (none: the engine's own choice), and executes it on @p buffers
+/// with a workspace of the plan's size.
 inline void executeThroughTheEngine(const MlopsEngine& engine,
                                     const flatbuffers::FlatBufferBuilder& builder,
                                     const std::vector<hipdnnPluginDeviceBuffer_t>& buffers,
-                                    EngineRun* run = nullptr)
+                                    EngineRun* run = nullptr,
+                                    const KnobSettings& knobs = {})
 {
     const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(std::string(engine.name));
     core::Container container;
@@ -247,9 +518,15 @@ inline void executeThroughTheEngine(const MlopsEngine& engine,
     const auto applicable = engineManager.getApplicableEngineIds(handle, graph);
     ASSERT_THAT(applicable, ::testing::Contains(engineId));
 
-    hipdnn_test_sdk::utilities::MockEngineConfig engineConfig;
-    EXPECT_CALL(engineConfig, isValid()).WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(engineConfig, engineId()).WillRepeatedly(::testing::Return(engineId));
+    hipdnn_test_sdk::utilities::MockEngineConfig unpinned;
+    EXPECT_CALL(unpinned, isValid()).WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(unpinned, engineId()).WillRepeatedly(::testing::Return(engineId));
+    const PinnedEngineConfig pinned(engineId, knobs);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig
+        = knobs.empty()
+              ? static_cast<const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&>(
+                    unpinned)
+              : pinned.get();
 
     EngineRun sizes;
     ASSERT_NO_THROW(sizes.maxWorkspaceBytes

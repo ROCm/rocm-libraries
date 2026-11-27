@@ -6,6 +6,21 @@
     {
       "name": "operation",
       "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 1024
+    },
+    {
+      "name": "vector_size",
+      "type": "int",
+      "default_value": 1
     }
   ]
 }

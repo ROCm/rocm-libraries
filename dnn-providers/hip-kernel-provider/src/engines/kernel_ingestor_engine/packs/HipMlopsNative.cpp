@@ -88,6 +88,11 @@
  * input). The hand-written engine's engine-level checks (ragged and misaligned tensors) run
  * first, here as there.
  *
+ * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
+ * performance configuration their build takes (`variant`, `block_size`, `vector_size`), so a
+ * caller can pin one. Unpinned, each engine's scorer ranks the configuration the hand-written
+ * engine's heuristics choose first, and the plan is the hand-written engine's.
+ *
  * Deliberate difference: a graph with override shapes is declined by every family. Each
  * bakes its shapes into the compiled program; the hand-written Resample builders were the
  * only ones without this guard.
@@ -115,6 +120,13 @@ constexpr std::string_view BATCHNORM_INFERENCE = "BATCHNORM_INFERENCE";
 constexpr std::string_view BATCHNORM_INFERENCE_VARIANCE = "BATCHNORM_INFERENCE_VARIANCE";
 constexpr std::string_view BATCHNORM_TRAINING = "BATCHNORM_TRAINING";
 constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
+
+// The knobs: the kernels' integer metadata naming the performance configuration each builds.
+// Batchnorm training and backward: BatchnormSpatialConfig's variant, groupSize and
+// vectorSize.
+constexpr std::string_view VARIANT_FIELD = "variant";
+constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
+constexpr std::string_view VECTOR_SIZE_FIELD = "vector_size";
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -480,6 +492,167 @@ bool kernelMatches(const MatchContext& /*context*/,
                    const KernelDefinition& kernel)
 {
     return boundOperation(bound) == kernel.getStringMetadata(std::string(OPERATION_FIELD));
+}
+
+// ---------------------------------------------------------------------------
+// Performance configurations: one kernel each
+// ---------------------------------------------------------------------------
+//
+// An engine with knobs ships one kernel per performance configuration of its build, told
+// apart by the integer metadata its UED lists as knobs. Its kernel matcher admits the kernels
+// whose configuration can run the graph, and its scorer ranks the configuration the
+// hand-written engine's heuristics choose first, so an unpinned plan builds what
+// HIP_MLOPS_ENGINE builds. A pinned knob narrows the catalog; the best ranked kernel left is
+// built.
+
+/// The score that ranks @p config first when it is @p heuristic, the configuration the
+/// hand-written engine's heuristics choose, and every other configuration below it in the
+/// order of @p order, so no two of an engine's kernels tie; 0 for one @p order omits.
+template <typename Config, size_t N>
+double heuristicFirstScore(const Config& config,
+                           const Config& heuristic,
+                           const std::array<Config, N>& order)
+{
+    if(config == heuristic)
+    {
+        return static_cast<double>(N + 1);
+    }
+    return static_cast<double>(order.end() - std::find(order.begin(), order.end(), config));
+}
+
+/// The batchnorm training params of the graph, alone or followed by an activation.
+batchnorm::BatchnormFwdTrainingParams trainingParams(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    const auto& attributes
+        = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormAttributes>();
+    // A fused graph's activation follows the batchnorm.
+    return graph.nodeCount() == 2
+               ? batchnorm::BatchnormFwdTrainingParams(
+                     attributes,
+                     graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                     tensorMap)
+               : batchnorm::BatchnormFwdTrainingParams(attributes, tensorMap);
+}
+
+/// The batchnorm backward params of the graph, alone or after an inference and an
+/// activation's backward.
+batchnorm::BatchnormBwdParams backwardParams(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    // A fused graph is the inference, the activation's backward, then the backward.
+    const bool fused = graph.nodeCount() == 3;
+    const auto& backward = graph.getNodeWrapper(fused ? 2 : 0)
+                               .attributesAs<data_objects::BatchnormBackwardAttributes>();
+    return fused ? batchnorm::BatchnormBwdParams(
+                       backward,
+                       graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                       graph.getNodeWrapper(0)
+                           .attributesAs<data_objects::BatchnormInferenceAttributes>(),
+                       tensorMap)
+                 : batchnorm::BatchnormBwdParams(backward, tensorMap);
+}
+
+/// The batchnorm training or backward configuration @p kernel builds: its `variant`,
+/// `block_size` (the workgroup of variants 0, 1 and 3, 0 for variant 2) and `vector_size`.
+batchnorm::BatchnormSpatialConfig spatialConfigOf(const KernelDefinition& kernel)
+{
+    return {static_cast<int>(kernel.getIntMetadata(std::string(VARIANT_FIELD))),
+            static_cast<size_t>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD))),
+            static_cast<size_t>(kernel.getIntMetadata(std::string(VECTOR_SIZE_FIELD)))};
+}
+
+/// The order the batchnorm training and backward scorers rank the configurations the launch
+/// heuristics did not choose: variant 1, which runs any layout and spatial size, then spatial
+/// multiple from the widest vector, then variants 3 and 0; the wider workgroup first.
+constexpr std::array<batchnorm::BatchnormSpatialConfig, 9> SPATIAL_CONFIG_ORDER = {{{1, 1024, 1},
+                                                                                    {1, 256, 1},
+                                                                                    {2, 0, 4},
+                                                                                    {2, 0, 2},
+                                                                                    {2, 0, 1},
+                                                                                    {3, 1024, 1},
+                                                                                    {3, 256, 1},
+                                                                                    {0, 1024, 1},
+                                                                                    {0, 256, 1}}};
+
+/// Kernel-scoped, batchnorm training: the operation, and a configuration that can run the
+/// graph on this device, or the one the launch heuristics choose. That one is admitted even
+/// where isBatchnormFwdTrainingConfigApplicable() refuses it (variant 0 beyond its workgroup,
+/// a fallback the heuristics keep), so the engine builds what HIP_MLOPS_ENGINE builds.
+bool batchnormTrainingKernelMatches(const MatchContext& context,
+                                    const BoundTokens& bound,
+                                    const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        const auto params = trainingParams(context);
+        const auto config = spatialConfigOf(kernel);
+        const int multiProcessorCount = context.deviceProperties.multiProcessorCount;
+        return batchnorm::isBatchnormFwdTrainingConfigApplicable(
+                   params, multiProcessorCount, config)
+               || config
+                      == batchnorm::defaultBatchnormFwdTrainingConfig(params, multiProcessorCount);
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:BatchnormTraining declines kernel " << kernel.name << ": "
+                                                                              << error.what());
+        return false;
+    }
+}
+
+/// The launch heuristics' configuration first, then SPATIAL_CONFIG_ORDER.
+double batchnormTrainingScore(const MatchContext& context,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& kernel)
+{
+    const auto params = trainingParams(context);
+    return heuristicFirstScore(spatialConfigOf(kernel),
+                               batchnorm::defaultBatchnormFwdTrainingConfig(
+                                   params, context.deviceProperties.multiProcessorCount),
+                               SPATIAL_CONFIG_ORDER);
+}
+
+/// Kernel-scoped, batchnorm backward: the operation, and a configuration that can run the
+/// graph, or the one the launch heuristics choose (as for training).
+bool batchnormBackwardKernelMatches(const MatchContext& context,
+                                    const BoundTokens& bound,
+                                    const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        const auto params = backwardParams(context);
+        const auto config = spatialConfigOf(kernel);
+        return batchnorm::isBatchnormBwdConfigApplicable(params, config)
+               || config == batchnorm::defaultBatchnormBwdConfig(params);
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:BatchnormBackward declines kernel " << kernel.name << ": "
+                                                                              << error.what());
+        return false;
+    }
+}
+
+/// The launch heuristics' configuration first, then SPATIAL_CONFIG_ORDER.
+double batchnormBackwardScore(const MatchContext& context,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& kernel)
+{
+    const auto params = backwardParams(context);
+    return heuristicFirstScore(spatialConfigOf(kernel),
+                               batchnorm::defaultBatchnormBwdConfig(params),
+                               SPATIAL_CONFIG_ORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -1649,36 +1822,29 @@ class BatchnormTrainingDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the configuration @p kernel names: its launches follow the variant.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
     {
         const auto& graph = context.graph;
-        const auto& tensorMap = graph.getTensorMap();
         const auto& attributes
             = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormAttributes>();
-        // A fused graph's activation follows the batchnorm.
-        const auto params
-            = graph.nodeCount() == 2
-                  ? batchnorm::BatchnormFwdTrainingParams(
-                        attributes,
-                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
-                        tensorMap)
-                  : batchnorm::BatchnormFwdTrainingParams(attributes, tensorMap);
+        const auto params = trainingParams(context);
         const auto& properties = context.deviceProperties;
-        const auto build = batchnorm::buildBatchnormFwdTrainingKernel(
-            params,
-            properties.gcnArchName,
-            properties.multiProcessorCount,
-            properties.warpSize,
-            batchnorm::defaultBatchnormFwdTrainingConfig(params, properties.multiProcessorCount));
+        const auto build
+            = batchnorm::buildBatchnormFwdTrainingKernel(params,
+                                                         properties.gcnArchName,
+                                                         properties.multiProcessorCount,
+                                                         properties.warpSize,
+                                                         spatialConfigOf(kernel));
 
         return std::make_unique<PreparedBatchnormTraining>(
             compileBatchnormLaunches(_compiler, _loader, context, kernel, build),
             build.variant,
             params,
             attributes,
-            tensorMap);
+            graph.getTensorMap());
     }
 };
 
@@ -1687,28 +1853,14 @@ class BatchnormBackwardDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the configuration @p kernel names: its launches follow the variant.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
     {
-        const auto& graph = context.graph;
-        const auto& tensorMap = graph.getTensorMap();
-        // A fused graph is the inference, the activation's backward, then the backward.
-        const bool fused = graph.nodeCount() == 3;
-        const auto& backward = graph.getNodeWrapper(fused ? 2 : 0)
-                                   .attributesAs<data_objects::BatchnormBackwardAttributes>();
-        const auto params
-            = fused ? batchnorm::BatchnormBwdParams(
-                          backward,
-                          graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
-                          graph.getNodeWrapper(0)
-                              .attributesAs<data_objects::BatchnormInferenceAttributes>(),
-                          tensorMap)
-                    : batchnorm::BatchnormBwdParams(backward, tensorMap);
-        const auto build
-            = batchnorm::buildBatchnormBwdKernel(params,
-                                                 context.deviceProperties.gcnArchName,
-                                                 batchnorm::defaultBatchnormBwdConfig(params));
+        const auto params = backwardParams(context);
+        const auto build = batchnorm::buildBatchnormBwdKernel(
+            params, context.deviceProperties.gcnArchName, spatialConfigOf(kernel));
 
         return std::make_unique<PreparedBatchnormBackward>(
             compileBatchnormLaunches(_compiler, _loader, context, kernel, build),
@@ -1810,7 +1962,8 @@ void registerHipMlopsBatchnormInferenceSymbols(SymbolScope<Handle>& scope)
 void registerHipMlopsBatchnormTrainingSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.batchnorm_training.graph_match", &batchnormTrainingGraphMatches);
-    scope.add("hipkernel.batchnorm_training.kernel_match", &kernelMatches);
+    scope.add("hipkernel.batchnorm_training.kernel_match", &batchnormTrainingKernelMatches);
+    scope.add("hipkernel.batchnorm_training.score", &batchnormTrainingScore);
     scope.add("hipkernel.batchnorm_training.dispatch",
               &dispatchHandler<BatchnormTrainingDispatchHandler>());
 }
@@ -1818,7 +1971,8 @@ void registerHipMlopsBatchnormTrainingSymbols(SymbolScope<Handle>& scope)
 void registerHipMlopsBatchnormBackwardSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.batchnorm_backward.graph_match", &batchnormBackwardGraphMatches);
-    scope.add("hipkernel.batchnorm_backward.kernel_match", &kernelMatches);
+    scope.add("hipkernel.batchnorm_backward.kernel_match", &batchnormBackwardKernelMatches);
+    scope.add("hipkernel.batchnorm_backward.score", &batchnormBackwardScore);
     scope.add("hipkernel.batchnorm_backward.dispatch",
               &dispatchHandler<BatchnormBackwardDispatchHandler>());
 }

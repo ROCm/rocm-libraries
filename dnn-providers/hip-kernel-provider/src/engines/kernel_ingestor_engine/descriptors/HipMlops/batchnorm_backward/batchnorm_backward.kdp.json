@@ -16,7 +16,10 @@
           "kmd_id": "8bf081ad-f2b6-43a9-b6bd-b26a5f2960dd",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "variant",
+            "block_size",
+            "vector_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -27,15 +30,154 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "37aacaac-7a7e-41d1-8ee5-055e2dc778a0",
-      "name": "hip_mlops.batchnorm_backward",
+      "id": "147eae9b-1128-4d5f-baa5-b9857feebecf",
+      "name": "hip_mlops.batchnorm_backward.variant0_block256",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/BatchNormBwdSpatial.cpp",
         "entry_point": "BatchNormBwdSpatial"
       },
       "metadata": {
-        "operation": "BATCHNORM_BACKWARD"
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 0,
+        "block_size": 256,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ff28bc4b-e19c-480a-9b0d-69363b815503",
+      "name": "hip_mlops.batchnorm_backward.variant0_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 0,
+        "block_size": 1024,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a58a7517-00c4-4654-8b8b-9c6ff87a4c77",
+      "name": "hip_mlops.batchnorm_backward.variant1_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 1,
+        "block_size": 256,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "37aacaac-7a7e-41d1-8ee5-055e2dc778a0",
+      "name": "hip_mlops.batchnorm_backward.variant1_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 1,
+        "block_size": 1024,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9445a9ab-c417-4fc6-826d-c9f5c0e0a4e5",
+      "name": "hip_mlops.batchnorm_backward.variant3_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 3,
+        "block_size": 256,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cafb324a-6ec6-40eb-8d3e-d5dadcec3d5b",
+      "name": "hip_mlops.batchnorm_backward.variant3_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 3,
+        "block_size": 1024,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c833612b-ae87-44c6-82e3-bbd381013ce3",
+      "name": "hip_mlops.batchnorm_backward.variant2_vector1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 2,
+        "block_size": 0,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c5368f65-e1ad-410c-9c3f-3c77b83be143",
+      "name": "hip_mlops.batchnorm_backward.variant2_vector2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 2,
+        "block_size": 0,
+        "vector_size": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d037d2f0-f65b-44b2-a6a3-61572e0c2059",
+      "name": "hip_mlops.batchnorm_backward.variant2_vector4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD",
+        "variant": 2,
+        "block_size": 0,
+        "vector_size": 4
       },
       "priority": 0
     }

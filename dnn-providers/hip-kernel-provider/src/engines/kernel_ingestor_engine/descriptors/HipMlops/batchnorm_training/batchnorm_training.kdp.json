@@ -16,7 +16,10 @@
           "kmd_id": "6db512a4-c20d-40b0-abeb-5828ac2b3e06",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "variant",
+            "block_size",
+            "vector_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -27,15 +30,154 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "a7bdc7f4-e1d5-4d78-8b43-4cbcd5d79118",
-      "name": "hip_mlops.batchnorm_training",
+      "id": "a9a3b08f-4574-4dbd-aa5e-89d8aa5bec3b",
+      "name": "hip_mlops.batchnorm_training.variant0_block256",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
         "entry_point": "BatchNormFwdTrainSpatial"
       },
       "metadata": {
-        "operation": "BATCHNORM_TRAINING"
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 0,
+        "block_size": 256,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f62d831e-5928-4ca4-aae0-4a1fa69af6c5",
+      "name": "hip_mlops.batchnorm_training.variant0_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 0,
+        "block_size": 1024,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "066da546-963f-465f-8c63-2ff2f15415a3",
+      "name": "hip_mlops.batchnorm_training.variant1_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 1,
+        "block_size": 256,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a7bdc7f4-e1d5-4d78-8b43-4cbcd5d79118",
+      "name": "hip_mlops.batchnorm_training.variant1_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 1,
+        "block_size": 1024,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "815dbe08-730f-4663-afba-b531e0d45f91",
+      "name": "hip_mlops.batchnorm_training.variant3_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 3,
+        "block_size": 256,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2bdc193f-97d3-484e-8abf-59deee8ec7d2",
+      "name": "hip_mlops.batchnorm_training.variant3_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 3,
+        "block_size": 1024,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ee4641db-aa95-408b-8ece-b9eacade7682",
+      "name": "hip_mlops.batchnorm_training.variant2_vector1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 2,
+        "block_size": 0,
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5ed71226-eb54-4175-9bc1-33d96cc28bc7",
+      "name": "hip_mlops.batchnorm_training.variant2_vector2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 2,
+        "block_size": 0,
+        "vector_size": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6e0f752b-d693-421b-b138-b33c64c8a0d3",
+      "name": "hip_mlops.batchnorm_training.variant2_vector4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING",
+        "variant": 2,
+        "block_size": 0,
+        "vector_size": 4
       },
       "priority": 0
     }

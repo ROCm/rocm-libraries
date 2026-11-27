@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "ef2c566e-a650-4372-b4d4-c34e9e77a2c7",
+  "name": "BatchnormTraining selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.batchnorm_training.score"
+  }
+}

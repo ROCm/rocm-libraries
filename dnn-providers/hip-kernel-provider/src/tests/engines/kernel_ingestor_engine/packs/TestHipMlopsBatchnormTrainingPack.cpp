@@ -7,6 +7,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <optional>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -30,6 +34,11 @@
  *        saved and running statistics, alone or followed by a ReLU) and the backward (with
  *        saved statistics or recomputing them) as a CPU reference does. The three-node
  *        backward fusion is covered by its integration bundles.
+ *
+ *        Each engine ships a kernel per performance configuration (ALMIOPEN-3066), addressed
+ *        by the knobs `variant`, `block_size` and `vector_size`: the knobs offer what can run
+ *        the graph, the launch heuristics' choice ranks first, and every configuration, pinned
+ *        through the knobs, computes as the reference does.
  */
 namespace
 {
@@ -73,6 +82,8 @@ struct BatchnormGraph
     bool backward = false;
     // N, C, then the spatial dimensions.
     std::vector<int64_t> dims = {2, 6, 5, 7};
+    // x, y and their gradients channel-last (NLC, NHWC, NDHWC) rather than channel-first.
+    bool channelLast = false;
     // Training: the saved mean and inverse variance outputs. Backward: those inputs.
     bool withSaved = true;
     // Training only: previous and next running statistics and the momentum.
@@ -102,7 +113,8 @@ std::vector<int64_t> channelDims(const BatchnormGraph& spec)
 flatbuffers::FlatBufferBuilder buildBatchnormGraph(const BatchnormGraph& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
-    const auto ioStrides = packedStrides(spec.dims);
+    const auto ioStrides
+        = spec.channelLast ? channelLastStrides(spec.dims) : packedStrides(spec.dims);
     const auto perChannelDims = channelDims(spec);
     const auto perChannelStrides = packedStrides(perChannelDims);
     const bool isFused = fused(spec);
@@ -354,6 +366,218 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<RefusalCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
+// Knobs: one kernel per configuration
+// ---------------------------------------------------------------------------
+
+const std::vector<std::string> KNOBS = {"variant", "block_size", "vector_size"};
+
+/// A configuration as its kernel's knob tuple: variant, block_size, vector_size.
+KnobSettings config(int64_t variant, int64_t blockSize, int64_t vectorSize)
+{
+    return {{"variant", variant}, {"block_size", blockSize}, {"vector_size", vectorSize}};
+}
+
+/// The configurations each engine ships: variants 0, 1 and 3 with 256 or 1024 threads, and
+/// variant 2 (no workgroup size of its own) with vector size 1, 2 or 4.
+std::set<KnobSettings> allConfigs()
+{
+    std::set<KnobSettings> configs;
+    for(const int64_t variant : {0, 1, 3})
+    {
+        for(const int64_t blockSize : {256, 1024})
+        {
+            configs.insert(config(variant, blockSize, 1));
+        }
+    }
+    for(const int64_t vectorSize : {1, 2, 4})
+    {
+        configs.insert(config(2, 0, vectorSize));
+    }
+    return configs;
+}
+
+auto ranked(const BatchnormGraph& spec)
+{
+    return rankedKernels(engineFor(spec), buildBatchnormGraph(spec));
+}
+
+/// The knob tuple of the kernel @p spec's unpinned plan builds.
+std::optional<KnobSettings> unpinned(const BatchnormGraph& spec)
+{
+    return pinnedTuple(ranked(spec), KNOBS, {});
+}
+
+TEST(TestHipMlopsBatchnormTrainingKnobs, EachEngineShipsAKernelPerConfiguration)
+{
+    for(const auto* engine : {&BATCHNORM_TRAINING_ENGINE, &BATCHNORM_BACKWARD_ENGINE})
+    {
+        SCOPED_TRACE(std::string(engine->name));
+        EXPECT_EQ(engineKnobs(*engine), KNOBS);
+
+        const auto kernels = loadedKernels(*engine);
+        std::set<KnobSettings> tuples;
+        for(const auto& kernel : kernels)
+        {
+            EXPECT_TRUE(tuples.insert(knobTuple(kernel, KNOBS)).second) << kernel.name;
+            // One program for every configuration, compiled with its own options.
+            EXPECT_EQ(kernel.source.entryPoint,
+                      engine == &BATCHNORM_TRAINING_ENGINE ? "BatchNormFwdTrainSpatial"
+                                                           : "BatchNormBwdSpatial");
+        }
+        EXPECT_EQ(kernels.size(), 9U);
+        EXPECT_EQ(tuples, allConfigs());
+    }
+}
+
+/// Expects each knob to offer @p values, @p defaults first: what the kernels admitted for
+/// @p spec's graph carry, the best ranked kernel's value first.
+void expectKnobs(const BatchnormGraph& spec,
+                 const std::map<std::string, std::vector<int64_t>>& values,
+                 const KnobSettings& defaults)
+{
+    const auto kernels = ranked(spec);
+    ASSERT_FALSE(kernels.empty());
+    expectUniqueTuples(kernels, KNOBS);
+    for(const auto& [knob, defaultValue] : defaults)
+    {
+        SCOPED_TRACE(knob);
+        const auto offered = knobValues(kernels, knob);
+        ASSERT_FALSE(offered.empty());
+        EXPECT_EQ(offered.front(), defaultValue);
+        EXPECT_THAT(offered, ::testing::UnorderedElementsAreArray(values.at(knob)));
+    }
+}
+
+TEST(TestHipMlopsBatchnormTrainingKnobs, KnobsOfferTheConfigurationsThatRunTheGraph)
+{
+    for(const bool backward : {false, true})
+    {
+        for(const bool withSaved : {true, false})
+        {
+            SCOPED_TRACE(backward ? "backward" : "training");
+            SCOPED_TRACE(withSaved ? "with saved statistics" : "without saved statistics");
+            // NCHW with 35 spatial positions: variants 0, 1 and 3 with either workgroup, and
+            // variant 2 only unvectorized; variant 0 of 256 threads is the heuristics' choice.
+            BatchnormGraph nchw;
+            nchw.backward = backward;
+            nchw.withSaved = withSaved;
+            expectKnobs(
+                nchw,
+                {{"variant", {0, 1, 2, 3}}, {"block_size", {0, 256, 1024}}, {"vector_size", {1}}},
+                config(0, 256, 1));
+
+            // NHWC with 8 channels: no variant 0 or 3, variant 2 with every vector size, and
+            // spatial multiple by 4 is the heuristics' choice.
+            BatchnormGraph nhwc = nchw;
+            nhwc.dims = {2, 8, 4, 4};
+            nhwc.channelLast = true;
+            expectKnobs(
+                nhwc,
+                {{"variant", {1, 2}}, {"block_size", {0, 256, 1024}}, {"vector_size", {1, 2, 4}}},
+                config(2, 0, 4));
+        }
+    }
+}
+
+struct DefaultCase
+{
+    const char* name;
+    BatchnormGraph spec;
+    KnobSettings expected;
+};
+
+BatchnormGraph
+    shape(bool backward, std::vector<int64_t> dims, bool channelLast = false, bool withSaved = true)
+{
+    BatchnormGraph spec;
+    spec.backward = backward;
+    spec.dims = std::move(dims);
+    spec.channelLast = channelLast;
+    spec.withSaved = withSaved;
+    spec.withRunning = !backward;
+    return spec;
+}
+
+class TestHipMlopsBatchnormTrainingDefault : public ::testing::TestWithParam<DefaultCase>
+{
+};
+
+// Unpinned, the engine builds what the hand-written engine's launch heuristics choose
+// (TestDefaultSpatialConfig's branches that an fp32 graph reaches).
+TEST_P(TestHipMlopsBatchnormTrainingDefault, TheHeuristicsChoiceRanksFirst)
+{
+    EXPECT_EQ(unpinned(GetParam().spec), GetParam().expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestHipMlopsBatchnormTrainingDefault,
+    ::testing::Values(
+        // Forward, NCHW, spatial single
+        DefaultCase{"FwdVariant0Small", shape(false, {2, 6, 5, 7}), config(0, 256, 1)},
+        DefaultCase{"FwdVariant0Spatial256", shape(false, {2, 2, 16, 16}), config(0, 1024, 1)},
+        DefaultCase{"FwdVariant3", shape(false, {2, 2, 20, 30}), config(3, 1024, 1)},
+        DefaultCase{"FwdVariant1LargeSpatial", shape(false, {2, 3, 40, 40}), config(1, 1024, 1)},
+        // Variant 0 beyond its workgroup: refused by the predicate, kept as the heuristics'
+        // choice.
+        DefaultCase{
+            "FwdVariant0LargeSpatial", shape(false, {2, 2, 4096, 4096}), config(0, 1024, 1)},
+        // Forward, NCHW, spatial multiple keeps the smallest applicable vector size
+        DefaultCase{"FwdNchwMultiple", shape(false, {3, 2, 24, 24}), config(2, 0, 1)},
+        // Channel last tries spatial multiple by 4, then by 1
+        DefaultCase{"FwdNhwcMultipleVector4", shape(false, {2, 8, 4, 4}, true), config(2, 0, 4)},
+        DefaultCase{"FwdNhwcMultipleVector1", shape(false, {2, 3, 4, 4}, true), config(2, 0, 1)},
+        // Backward, NCHW, spatial single
+        DefaultCase{"BwdVariant0Small", shape(true, {2, 6, 5, 7}), config(0, 256, 1)},
+        DefaultCase{"BwdVariant0Spatial256", shape(true, {2, 2, 16, 16}), config(0, 1024, 1)},
+        DefaultCase{
+            "BwdVariant3SmallSpatialLargeBatch", shape(true, {128, 2, 10, 20}), config(3, 256, 1)},
+        DefaultCase{
+            "BwdVariant3MidSpatialSmallBatch", shape(true, {2, 2, 20, 30}), config(3, 1024, 1)},
+        DefaultCase{
+            "BwdVariant1MidSpatialLargeBatch", shape(true, {32, 2, 20, 30}), config(1, 1024, 1)},
+        DefaultCase{"BwdVariant1LargeSpatial", shape(true, {2, 3, 40, 40}), config(1, 1024, 1)},
+        // Backward, NCHW, spatial multiple once a channel holds 32M values
+        DefaultCase{
+            "BwdNchwMultiple", shape(true, {64, 2, 1024, 1024}, false, false), config(2, 0, 1)},
+        // Backward, channel last
+        DefaultCase{"BwdNhwcMultipleVector4", shape(true, {2, 8, 4, 4}, true), config(2, 0, 4)},
+        DefaultCase{"BwdNhwcMultipleVector4Recomputing",
+                    shape(true, {2, 8, 4, 4}, true, false),
+                    config(2, 0, 4)}),
+    [](const ::testing::TestParamInfo<DefaultCase>& info) { return info.param.name; });
+
+TEST(TestHipMlopsBatchnormTrainingKnobs, PinningAKnobValueBuildsTheBestRankedConfigurationWithIt)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "training");
+        const auto nchw = ranked(shape(backward, {2, 6, 5, 7}));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"variant", 0}}), config(0, 256, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"variant", 1}}), config(1, 1024, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"variant", 2}}), config(2, 0, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"variant", 3}}), config(3, 1024, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"block_size", 0}}), config(2, 0, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"block_size", 256}}), config(0, 256, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"block_size", 1024}}), config(1, 1024, 1));
+        EXPECT_EQ(pinnedTuple(nchw, KNOBS, {{"variant", 3}, {"block_size", 256}}),
+                  config(3, 256, 1));
+        // 35 spatial positions do not vectorize.
+        EXPECT_FALSE(pinnedTuple(nchw, KNOBS, {{"vector_size", 2}}).has_value());
+
+        const auto nhwc = ranked(shape(backward, {2, 8, 4, 4}, true));
+        EXPECT_EQ(pinnedTuple(nhwc, KNOBS, {{"vector_size", 1}}), config(1, 1024, 1));
+        EXPECT_EQ(pinnedTuple(nhwc, KNOBS, {{"vector_size", 2}}), config(2, 0, 2));
+        EXPECT_EQ(pinnedTuple(nhwc, KNOBS, {{"vector_size", 4}}), config(2, 0, 4));
+        EXPECT_EQ(pinnedTuple(nhwc, KNOBS, {{"variant", 1}}), config(1, 1024, 1));
+        EXPECT_EQ(pinnedTuple(nhwc, KNOBS, {{"block_size", 256}}), config(1, 256, 1));
+        // Variants 0 and 3 index channel-first tensors.
+        EXPECT_FALSE(pinnedTuple(nhwc, KNOBS, {{"variant", 0}}).has_value());
+        EXPECT_FALSE(pinnedTuple(nhwc, KNOBS, {{"variant", 3}}).has_value());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Numerics through the engine
 // ---------------------------------------------------------------------------
 
@@ -370,10 +594,11 @@ struct Layout
     size_t batches;
     size_t channels;
     size_t spatial;
+    bool channelLast;
 
     size_t at(size_t n, size_t c, size_t i) const
     {
-        return (n * channels + c) * spatial + i;
+        return channelLast ? (n * spatial + i) * channels + c : (n * channels + c) * spatial + i;
     }
 };
 
@@ -381,7 +606,7 @@ Layout layoutOf(const BatchnormGraph& spec)
 {
     const auto batches = static_cast<size_t>(spec.dims[0]);
     const auto channels = static_cast<size_t>(spec.dims[1]);
-    return {batches, channels, elementCount(spec.dims) / (batches * channels)};
+    return {batches, channels, elementCount(spec.dims) / (batches * channels), spec.channelLast};
 }
 
 Statistics statisticsOf(const Layout& layout, const std::vector<float>& x)
@@ -478,7 +703,8 @@ Inputs inputsFor(const BatchnormGraph& spec)
     return {layout, std::move(x), std::move(scale), std::move(bias)};
 }
 
-void checkTraining(const BatchnormGraph& spec)
+/// Runs @p spec's training through its engine, with @p knobs pinned, against the reference.
+void checkTraining(const BatchnormGraph& spec, const KnobSettings& knobs = {})
 {
     const auto in = inputsFor(spec);
     const auto& layout = in.layout;
@@ -553,7 +779,7 @@ void checkTraining(const BatchnormGraph& spec)
 
     EngineRun run;
     ASSERT_NO_FATAL_FAILURE(
-        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run));
+        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run, knobs));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 
@@ -570,7 +796,8 @@ void checkTraining(const BatchnormGraph& spec)
     }
 }
 
-void checkBackward(const BatchnormGraph& spec)
+/// Runs @p spec's backward through its engine, with @p knobs pinned, against the reference.
+void checkBackward(const BatchnormGraph& spec, const KnobSettings& knobs = {})
 {
     const auto in = inputsFor(spec);
     const auto& layout = in.layout;
@@ -642,7 +869,7 @@ void checkBackward(const BatchnormGraph& spec)
 
     EngineRun run;
     ASSERT_NO_FATAL_FAILURE(
-        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run));
+        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run, knobs));
     EXPECT_EQ(run.workspaceBytes, 0U);
 
     expectNear(dxBuffer.read(), dx, "dx", 1e-3f);
@@ -694,6 +921,105 @@ TEST(TestHipMlopsBatchnormTrainingDevice, BackwardMatchesTheReference)
         spec.withRunning = false;
         checkBackward(spec);
     }
+}
+
+TEST(TestHipMlopsBatchnormTrainingDevice, TheProviderAdvertisesTheRankedKnobs)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const bool backward : {false, true})
+    {
+        for(const bool channelLast : {false, true})
+        {
+            SCOPED_TRACE(backward ? "backward" : "training");
+            SCOPED_TRACE(channelLast ? "NHWC" : "NCHW");
+            const auto spec = shape(backward,
+                                    channelLast ? std::vector<int64_t>{2, 8, 4, 4}
+                                                : std::vector<int64_t>{2, 6, 5, 7},
+                                    channelLast);
+            const auto kernels
+                = rankedKernelsOnThisDevice(engineFor(spec), buildBatchnormGraph(spec));
+            const auto knobs = advertisedKnobs(engineFor(spec), buildBatchnormGraph(spec));
+            ASSERT_EQ(knobs.size(), KNOBS.size());
+            for(const auto& knob : knobs)
+            {
+                SCOPED_TRACE(knob.name);
+                const auto expected = knobValues(kernels, knob.name);
+                ASSERT_FALSE(expected.empty());
+                EXPECT_EQ(knob.defaultValue, expected.front());
+                EXPECT_THAT(knob.validValues, ::testing::UnorderedElementsAreArray(expected));
+            }
+        }
+    }
+}
+
+/// Every knob value, and so every configuration, the device sweeps below must pin at least once.
+const std::map<std::string, std::set<int64_t>> EVERY_KNOB_VALUE
+    = {{"variant", {0, 1, 2, 3}}, {"block_size", {0, 256, 1024}}, {"vector_size", {1, 2, 4}}};
+
+/// Pins each configuration @p spec's engine admits on this device in turn and runs @p check
+/// with it, adding the values pinned to @p exercised.
+template <typename Check>
+void sweepConfigurations(const BatchnormGraph& spec,
+                         Check check,
+                         std::map<std::string, std::set<int64_t>>& exercised)
+{
+    for(const auto& kernel : rankedKernelsOnThisDevice(engineFor(spec), buildBatchnormGraph(spec)))
+    {
+        SCOPED_TRACE(kernel.name);
+        const auto pins = knobTuple(kernel, KNOBS);
+        check(spec, pins);
+        for(const auto& [knob, value] : pins)
+        {
+            exercised[knob].insert(value);
+        }
+    }
+}
+
+TEST(TestHipMlopsBatchnormTrainingDevice, EveryTrainingConfigurationMatchesTheReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // NCHW reaches variants 0, 1 and 3 and unvectorized variant 2; NHWC every vector size.
+    std::map<std::string, std::set<int64_t>> exercised;
+    for(const bool channelLast : {false, true})
+    {
+        SCOPED_TRACE(channelLast ? "NHWC" : "NCHW");
+        sweepConfigurations(
+            shape(false,
+                  channelLast ? std::vector<int64_t>{2, 8, 4, 4} : std::vector<int64_t>{2, 6, 5, 7},
+                  channelLast),
+            [](const BatchnormGraph& spec, const KnobSettings& pins) { checkTraining(spec, pins); },
+            exercised);
+    }
+    EXPECT_EQ(exercised, EVERY_KNOB_VALUE);
+}
+
+TEST(TestHipMlopsBatchnormTrainingDevice, EveryBackwardConfigurationMatchesTheReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Variant 2 launches three kernels with saved statistics and five recomputing them.
+    std::map<std::string, std::set<int64_t>> exercised;
+    for(const bool withSaved : {true, false})
+    {
+        for(const bool channelLast : {false, true})
+        {
+            SCOPED_TRACE(withSaved ? "with saved statistics" : "recomputing statistics");
+            SCOPED_TRACE(channelLast ? "NHWC" : "NCHW");
+            sweepConfigurations(
+                shape(true,
+                      channelLast ? std::vector<int64_t>{2, 8, 4, 4}
+                                  : std::vector<int64_t>{2, 6, 5, 7},
+                      channelLast,
+                      withSaved),
+                [](const BatchnormGraph& spec, const KnobSettings& pins) {
+                    checkBackward(spec, pins);
+                },
+                exercised);
+        }
+    }
+    EXPECT_EQ(exercised, EVERY_KNOB_VALUE);
 }
 
 } // namespace

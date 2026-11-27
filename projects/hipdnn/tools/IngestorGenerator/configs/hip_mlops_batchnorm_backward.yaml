@@ -9,11 +9,24 @@ engine:
   name: hipkernel:BatchnormBackward
   sdk_version: "1.4.0"
   behavior_notes: [runtime_compilation, supports_graph_capture]
-  heuristic: none
+  # Each performance configuration is a kernel of its own, addressed by these knobs. The
+  # native scorer ranks the configuration the launch heuristics choose first.
+  knobs: [variant, block_size, vector_size]
+  heuristic: native
 
+# The knob fields default to BatchnormSpatialConfig's own defaults.
 kmd_fields:
   - name: operation
     type: string
+  - name: variant
+    type: int
+    default_value: 1
+  - name: block_size
+    type: int
+    default_value: 1024
+  - name: vector_size
+    type: int
+    default_value: 1
 
 graph_match:
   shape: shared_shape
@@ -27,20 +40,114 @@ authored_subpath: descriptors/HipMlops/batchnorm_backward
 packs:
   # Batchnorm backward, alone or fused after an inference and an activation's backward: one
   # launch, or for the multi-workgroup variant up to five, all from one program.
+  # One kernel per configuration the build takes: variants 0, 1 and 3 (one workgroup per
+  # channel) with 256 or 1024 threads, and variant 2 (spatial multiple) with vector size 1,
+  # 2 or 4.
   - name: batchnorm_backward
     kernels:
-      - name: hip_mlops.batchnorm_backward
+      - name: hip_mlops.batchnorm_backward.variant0_block256
         kernel_source:
           kind: embedded_source
           source_file: kernels/BatchNormBwdSpatial.cpp
           entry_point: BatchNormBwdSpatial
         metadata:
           operation: BATCHNORM_BACKWARD
+          variant: 0
+          block_size: 256
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant0_block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 0
+          block_size: 1024
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant1_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 1
+          block_size: 256
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant1_block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 1
+          block_size: 1024
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant3_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 3
+          block_size: 256
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant3_block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 3
+          block_size: 1024
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant2_vector1
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 2
+          block_size: 0
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant2_vector2
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 2
+          block_size: 0
+          vector_size: 2
+        priority: 0
+      - name: hip_mlops.batchnorm_backward.variant2_vector4
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+          variant: 2
+          block_size: 0
+          vector_size: 4
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, variant, block_size, vector_size]
   bindings: {}
   vocabulary: {}
