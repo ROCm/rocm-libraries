@@ -253,6 +253,23 @@ namespace
         return A;
     }
 
+    // Entries (i, i) and (i, i + 1): a node conflicts with i - 1 only through the transpose
+    template <typename T>
+    Csr<T> upper_bidiagonal(int n = 12)
+    {
+        Csr<T> A(n);
+        for(int i = 0; i < n; ++i)
+        {
+            A.add(i, static_cast<T>(10));
+            if(i + 1 < n)
+            {
+                A.add(i + 1, static_cast<T>(-1));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
     template <typename T>
     Csr<T> lower(const Csr<T>& A, bool diagonal)
     {
@@ -2017,48 +2034,35 @@ TEST_P(local_matrix_formats, multi_coloring_gives_independent_color_classes)
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
-        const Csr<T> ref = pentadiagonal<T>();
+        const std::vector<std::tuple<std::string, Csr<T>, int>> cases
+            = {{"pentadiagonal", pentadiagonal<T>(), 3},
+               {"upper bidiagonal", upper_bidiagonal<T>(), 2}};
 
-        auto             A           = make(ref);
-        int              num_colors  = 0;
-        int*             size_colors = nullptr;
-        LocalVector<int> perm;
-        if(backend() == Backend::Accelerator)
+        for(const auto& [name, ref, min_colors] : cases)
         {
-            perm.MoveToAccelerator();
-        }
-        A->MultiColoring(num_colors, &size_colors, &perm);
-        EXPECT_EQ(backend_of(perm), backend_name(backend()));
-        ASSERT_NE(size_colors, nullptr);
-        EXPECT_GE(num_colors, 3);
+            SCOPED_TRACE(name);
 
-        std::vector<int> offset(num_colors + 1, 0);
-        for(int c = 0; c < num_colors; ++c)
-        {
-            offset[c + 1] = offset[c] + size_colors[c];
-        }
-        rocalution::free_host(&size_colors);
-        EXPECT_EQ(offset[num_colors], ref.n);
-
-        const std::vector<int> p = values_of(perm);
-        expect_permutation(p, ref.n);
-        auto color = [&](int i) {
-            return static_cast<int>(std::upper_bound(offset.begin(), offset.end(), p[i])
-                                    - offset.begin())
-                   - 1;
-        };
-        for(int i = 0; i < ref.n; ++i)
-        {
-            for(PtrType k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
+            auto             A           = make(ref);
+            int              num_colors  = 0;
+            int*             size_colors = nullptr;
+            LocalVector<int> perm;
+            if(backend() == Backend::Accelerator)
             {
-                if(ref.col[k] != i)
-                {
-                    EXPECT_NE(color(i), color(ref.col[k]))
-                        << "nodes " << i << " and " << ref.col[k];
-                }
+                perm.MoveToAccelerator();
             }
+            A->MultiColoring(num_colors, &size_colors, &perm);
+            EXPECT_EQ(backend_of(perm), backend_name(backend()));
+            ASSERT_NE(size_colors, nullptr);
+            EXPECT_GE(num_colors, min_colors);
+
+            std::vector<int> sizes(size_colors, size_colors + num_colors);
+            rocalution::free_host(&size_colors);
+
+            const std::vector<int> p = values_of(perm);
+            expect_permutation(p, ref.n);
+            expect_valid_coloring(ref, num_colors, sizes, p);
+            expect_kept(*A, ref);
         }
-        expect_kept(*A, ref);
     });
 }
 

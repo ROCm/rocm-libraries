@@ -33,6 +33,10 @@ def runTestCommand (platform, project, gfilter, boolean hmmTests = true)
     if (hmmTests && platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = """
+                            HSA_XNACK=0 ./rocalution-unit-test --gtest_output=xml:test_detail_unit_hmm_xnack_off.xml --gtest_color=yes
+                            HSA_XNACK=1 ./rocalution-unit-test --gtest_output=xml:test_detail_unit_hmm_xnack_on.xml --gtest_color=yes
+                            HSA_XNACK=0 ./rocalution-unit-test-lifecycle --gtest_output=xml:test_detail_lifecycle_hmm_xnack_off.xml --gtest_color=yes
+                            HSA_XNACK=1 ./rocalution-unit-test-lifecycle --gtest_output=xml:test_detail_lifecycle_hmm_xnack_on.xml --gtest_color=yes
                             HSA_XNACK=0 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocalution-test --gtest_output=xml:test_detail_hmm_xnack_off.xml --gtest_color=yes --gtest_filter=**
                             HSA_XNACK=1 GTEST_LISTENER=NO_PASS_LINE_IN_LOG  ./rocalution-test --gtest_output=xml:test_detail_hmm_xnack_on.xml --gtest_color=yes --gtest_filter=**
                          """

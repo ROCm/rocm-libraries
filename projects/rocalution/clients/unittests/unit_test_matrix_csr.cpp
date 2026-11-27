@@ -1100,6 +1100,35 @@ TYPED_TEST(matrix_csr, multi_coloring)
     expect_valid_coloring(ref, num_colors, sizes, p);
 }
 
+// Row i holds only (i, (i + 1) % n). Without a diagonal, the search for a free color
+// needs every entry of the row and the column, and the odd cycle needs three colors.
+TYPED_TEST(matrix_csr, multi_coloring_of_a_matrix_without_a_diagonal)
+{
+    using T     = typename TypeParam::value_type;
+    const int n = 11;
+    Csr<T>    ref(n);
+    for(int i = 0; i < n; ++i)
+    {
+        ref.add((i + 1) % n, static_cast<T>(1));
+        ref.end_row();
+    }
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+
+    int  num_colors  = 0;
+    int* size_colors = nullptr;
+    auto perm        = make_vector(TypeParam::backend, std::vector<int>());
+    ASSERT_TRUE(A->MultiColoring(num_colors, &size_colors, perm.get()));
+
+    std::vector<int> sizes(size_colors, size_colors + num_colors);
+    rocalution::free_host(&size_colors);
+
+    std::vector<int> p = values_of(*perm);
+    ASSERT_TRUE(is_permutation(p));
+    EXPECT_EQ(num_colors, 3);
+    expect_valid_coloring(ref, num_colors, sizes, p);
+}
+
 // The host gives a row and column without entries the first color
 TYPED_TEST(matrix_csr, multi_coloring_of_a_matrix_with_an_isolated_row)
 {
