@@ -1244,7 +1244,7 @@ void chunk_rr(fww_ctx& c, V kc, std::vector<V>& accs)
 }
 
 /* _epilogue(accs): stage the Y tile in LDS, one TDM store per image. */
-void epilogue(fww_ctx& c, const V* accs)
+void epilogue(fww_ctx& c, V const* accs)
 {
     rocke_ir_builder_t* b = c.b;
     const rocke_dconv_params_t* params = &c.params;
@@ -1325,7 +1325,7 @@ void epilogue(fww_ctx& c, const V* accs)
 }
 
 /* _epilogue_wave(accs): per-wave staging and TDM store. */
-void epilogue_wave(fww_ctx& c, const V* accs)
+void epilogue_wave(fww_ctx& c, V const* accs)
 {
     rocke_ir_builder_t* b = c.b;
     const rocke_dconv_params_t* params = &c.params;
