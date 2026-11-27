@@ -101,7 +101,7 @@ from .contract import (
     ParameterContract,
     parameter_contract,
 )
-from .hip_module import Runtime
+from .hip_module import Event, Runtime
 from .packing import SCALAR_ARG_FORMATS, compile_packer
 from .torch_interop import resolve_stream
 
@@ -658,8 +658,14 @@ class KernelLauncher:
         values: Mapping[str, Any],
         *,
         config: LaunchConfig,
+        events: Optional[Tuple[Optional[Event], Optional[Event]]] = None,
     ) -> Callable[[], None]:
         """Pack ``values`` once; return a zero-argument asynchronous launch.
+
+        ``events`` records a ``(start, stop)`` pair on the launch's own
+        dispatch packet; see :func:`rocke.runtime.time_launches_ext`.
+        Either side may be ``None`` to time a multi-kernel sequence (start
+        on the first launch, stop on the last).
 
         The callable enqueues the kernel with exactly these arguments on
         ``config``'s stream and returns -- no packing, no stream lookup,
@@ -681,6 +687,7 @@ class KernelLauncher:
             shared_bytes=config.shared_bytes,
             stream=resolve_stream(config.stream),
             cluster=cluster,
+            events=events,
         )
         keep = tuple(values.values())
 

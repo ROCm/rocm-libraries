@@ -32,6 +32,8 @@ typedef struct
     const char* dtype;
     bool save_mean_invstd;
     bool dynamic;
+    bool fast_reduce;
+    bool cheap_reduce;
 } ln_cfg_t;
 
 /* MUST match CONFIGS in layernorm2d_emit.py (index for index). */
@@ -83,6 +85,15 @@ static const ln_cfg_t CONFIGS[] = {
     /* 35..36 dynamic (AOT-generic) variant */
     {4096, 256, 4, "f16", false, true},
     {2048, 128, 4, "bf16", true, true},
+    /* 37..38 fast_reduce (wave-shuffle Welford): one static, one dynamic */
+    {4096, 256, 4, "f16", false, false, true},
+    {4096, 256, 4, "f16", false, true, true},
+    /* 39..40 cheap_reduce (MIOpen-style naive E[X^2]-E[X]^2): one static, one dynamic */
+    {4096, 256, 4, "f16", false, false, false, true},
+    {4096, 256, 4, "f16", false, true, false, true},
+    /* 41..42 fast_reduce + cheap_reduce (wave-prologue (sum, sum_sq) fold) */
+    {4096, 256, 4, "f16", false, false, true, true},
+    {4096, 256, 4, "bf16", true, true, true, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))
@@ -98,6 +109,8 @@ static int make_spec(int idx, rocke_layernorm2d_spec_t* spec)
     spec->dtype = CONFIGS[idx].dtype;
     spec->save_mean_invstd = CONFIGS[idx].save_mean_invstd;
     spec->dynamic = CONFIGS[idx].dynamic;
+    spec->fast_reduce = CONFIGS[idx].fast_reduce;
+    spec->cheap_reduce = CONFIGS[idx].cheap_reduce;
     return 0;
 }
 

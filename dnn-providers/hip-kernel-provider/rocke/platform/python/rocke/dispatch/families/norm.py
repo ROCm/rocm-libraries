@@ -49,6 +49,7 @@ from typing import Sequence, Tuple
 
 from ...core.arch import ArchTarget, arches_with_own_facts
 from ...instances.common import layernorm2d as _ln
+from ...instances.common import layernorm2d_bwd as _lnb
 from ...instances.common import rmsnorm2d as _rms
 from ..core import (
     Capability,
@@ -69,6 +70,27 @@ NORM_ABI_VERSION = "hipkg-norm2d/v1"
 _BLOCK_SIZES = (1024, 512, 256, 128, 64)
 _VECS = (8, 4, 2)
 _KINDS = ("rmsnorm", "layernorm")
+
+# ``fast_reduce`` candidate axis (layernorm only -- rmsnorm has no such spec
+# field): False (default, the original flat block_size-wide LDS Welford
+# tree) and True (wave-shuffle-first Welford merge, fewer barriers; see
+# ``instances/common/layernorm2d.py``'s ``welford_block_reduce_stable_wave_prologue``
+# usage). ``False`` is always the highest-priority value (see
+# ``_build_registry``/``_build_dynamic_candidates``) -- a default-OFF lever,
+# exposed the same way ``dispatch/families/batchnorm.py``'s ``_FAST_REDUCE``
+# is, for AOT-sweep measurement; never auto-selected in production over the
+# ``False`` candidate unless a caller pins its ``spec_id`` explicitly.
+_FAST_REDUCE = (False, True)
+
+# ``cheap_reduce`` candidate axis (layernorm only, same shape as
+# ``_FAST_REDUCE``): False (default, numerically-stable Welford) and True
+# (MIOpen-style naive ``E[X^2] - E[X]^2`` two-pass reduction -- see
+# ``LayerNorm2DSpec``'s docstring for the stability trade-off). Mutually
+# exclusive with ``fast_reduce`` (``is_valid_spec`` rejects both set); the
+# candidate loop below skips that combination rather than registering an
+# always-invalid candidate. ``False`` is always the highest-priority value,
+# same default-OFF-lever contract as ``_FAST_REDUCE``.
+_CHEAP_REDUCE = (False, True)
 
 # Static selection priority: lower wins. Vec dominates (wider vector loads
 # consistently measured faster or tied); within a vec tier, block_size is
@@ -141,8 +163,16 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _make_spec(req: NormRequest, *, block_size: int, vec: int):
-    """Build the instance spec for one (kind, block_size, vec) candidate."""
+def _make_spec(
+    req: NormRequest, *, block_size: int, vec: int,
+    fast_reduce: bool = False, cheap_reduce: bool = False,
+):
+    """Build the instance spec for one (kind, block_size, vec) candidate.
+
+    ``fast_reduce``/``cheap_reduce`` only apply to ``layernorm``
+    (``RMSNorm2DSpec`` has no such fields); callers must not pass them for
+    ``kind="rmsnorm"``.
+    """
     dtype = _norm_dtype(req.dtype)
     wave = ArchTarget.from_gfx(req.arch).wave_size
     if req.kind.lower() == "rmsnorm":
@@ -159,6 +189,8 @@ def _make_spec(req: NormRequest, *, block_size: int, vec: int):
         vec=vec,
         dtype=dtype,
         wave_size=wave,
+        fast_reduce=fast_reduce,
+        cheap_reduce=cheap_reduce,
     )
 
 
@@ -169,9 +201,12 @@ def _is_valid(req: NormRequest, spec) -> Tuple[bool, str]:
 
 
 def _make_candidate(
-    *, kind: str, block_size: int, vec: int, priority: int
+    *, kind: str, block_size: int, vec: int, priority: int,
+    fast_reduce: bool = False, cheap_reduce: bool = False,
 ) -> KernelCandidate:
-    spec_id = f"{kind}_b{block_size}_v{vec}"
+    fr_suffix = "_fr" if fast_reduce else ""
+    cr_suffix = "_cr" if cheap_reduce else ""
+    spec_id = f"{kind}_b{block_size}_v{vec}{fr_suffix}{cr_suffix}"
     name = f"norm2d_{spec_id}"
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -184,7 +219,10 @@ def _make_candidate(
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
-        spec = _make_spec(req, block_size=block_size, vec=vec)
+        spec = _make_spec(
+            req, block_size=block_size, vec=vec,
+            fast_reduce=fast_reduce, cheap_reduce=cheap_reduce,
+        )
         return _is_valid(req, spec)
 
     def select(req: OperatorRequest):
@@ -192,7 +230,10 @@ def _make_candidate(
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, NormRequest)
-        return _make_spec(req, block_size=block_size, vec=vec)
+        return _make_spec(
+            req, block_size=block_size, vec=vec,
+            fast_reduce=fast_reduce, cheap_reduce=cheap_reduce,
+        )
 
     candidate = KernelCandidate(
         name=name,
@@ -247,9 +288,32 @@ def _build_registry() -> CandidateRegistry:
         for v in _VECS:
             prio = _candidate_priority(block_size=bs, vec=v)
             for kind in _KINDS:
-                cands.append(
-                    _make_candidate(kind=kind, block_size=bs, vec=v, priority=prio)
-                )
+                if kind == "layernorm":
+                    # fast_reduce / cheap_reduce are layernorm-only,
+                    # default-OFF levers (see their docstrings): (False,
+                    # False) keeps exactly the pre-existing
+                    # priority/behavior, every other combination is
+                    # appended at strictly lower priority so it never wins
+                    # "auto", but is still reachable by the AOT sweep
+                    # (registered_norm_combos/sweep_space) and by a caller
+                    # pinning its spec_id. fast_reduce=True and
+                    # cheap_reduce=True together selects the wave-prologue
+                    # pair reduction (block_lds_reduce_pair_with_wave_prologue,
+                    # see LayerNorm2DSpec's docstring) -- valid since that
+                    # helper now exists, so every combination is registered.
+                    for fr_rank, fr in enumerate(_FAST_REDUCE):
+                        for cr_rank, cr in enumerate(_CHEAP_REDUCE):
+                            cands.append(
+                                _make_candidate(
+                                    kind=kind, block_size=bs, vec=v,
+                                    priority=prio + fr_rank * 10000 + cr_rank * 20000,
+                                    fast_reduce=fr, cheap_reduce=cr,
+                                )
+                            )
+                else:
+                    cands.append(
+                        _make_candidate(kind=kind, block_size=bs, vec=v, priority=prio)
+                    )
     reg.extend(cands)
     return reg
 
@@ -326,8 +390,13 @@ def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
 ENABLE_DYNAMIC_NORM_DISPATCH = False
 
 
-def _make_dynamic_candidate(*, block_size: int, vec: int, priority: int) -> KernelCandidate:
-    spec_id = f"layernorm_dyn_b{block_size}_v{vec}"
+def _make_dynamic_candidate(
+    *, block_size: int, vec: int, priority: int,
+    fast_reduce: bool = False, cheap_reduce: bool = False,
+) -> KernelCandidate:
+    fr_suffix = "_fr" if fast_reduce else ""
+    cr_suffix = "_cr" if cheap_reduce else ""
+    spec_id = f"layernorm_dyn_b{block_size}_v{vec}{fr_suffix}{cr_suffix}"
     name = f"norm2d_{spec_id}"
 
     def _placeholder_spec(req: NormRequest) -> _ln.LayerNorm2DSpec:
@@ -345,6 +414,8 @@ def _make_dynamic_candidate(*, block_size: int, vec: int, priority: int) -> Kern
             dtype=dtype,
             wave_size=wave,
             dynamic=True,
+            fast_reduce=fast_reduce,
+            cheap_reduce=cheap_reduce,
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -392,7 +463,15 @@ def _build_dynamic_candidates() -> Tuple[KernelCandidate, ...]:
     for bs in _BLOCK_SIZES:
         for v in _VECS:
             prio = _candidate_priority(block_size=bs, vec=v)
-            cands.append(_make_dynamic_candidate(block_size=bs, vec=v, priority=prio))
+            for fr_rank, fr in enumerate(_FAST_REDUCE):
+                for cr_rank, cr in enumerate(_CHEAP_REDUCE):
+                    cands.append(
+                        _make_dynamic_candidate(
+                            block_size=bs, vec=v,
+                            priority=prio + fr_rank * 10000 + cr_rank * 20000,
+                            fast_reduce=fr, cheap_reduce=cr,
+                        )
+                    )
     return tuple(cands)
 
 
@@ -420,6 +499,130 @@ def dynamic_norm_candidates_for(req: NormRequest) -> Tuple[KernelCandidate, ...]
     if _request_errors(req):
         return ()
     return tuple(c for c in _DYNAMIC_NORM_CANDIDATES if c.admits(req)[0])
+
+
+# ===================================================================== #
+# LayerNorm2D backward (AOT-generic) candidates
+# ===================================================================== #
+#
+# instances/common/layernorm2d_bwd.py is three shape-free kernels (``dx``,
+# ``dwdb``, ``dwdb_reduce``) that together make one MIOpen-style backward
+# (``MIOpenDriver layernorm* -F 0``). Each part is tuned independently --
+# the parts run back to back and share no on-chip state -- so each gets its
+# own candidate list over its own knobs, keyed by ``LayerNorm2DBwdSpec.part``.
+# Like the forward's dynamic candidates these are opt-in (never selected by
+# dispatch_norm) and live outside NORM_REGISTRY; the AOT sweep queries them
+# directly through dynamic_norm_bwd_candidates().
+#
+# ``dwdb`` / ``dwdb_reduce`` vector-access ``vec`` columns, so they admit a
+# request only when ``cols % vec == 0``; ``dx`` has a masked tail and admits
+# any ``cols``. ``grid`` reports the ``P == 1`` (no workspace) launch; the
+# host picks the runtime row-split ``P`` (see
+# layernorm2d_bwd.default_row_splits) and launches ``dwdb`` on
+# ``(grid_x, P, 1)`` plus ``dwdb_reduce`` when ``P > 1``.
+
+_BWD_UNROLLS = _lnb.UNROLLS
+
+
+def _make_bwd_candidate(
+    *, part: str, block_size: int, vec: int, priority: int,
+    fast_reduce: bool = False, unroll: int = 4,
+) -> KernelCandidate:
+    u_suffix = f"_u{unroll}" if part != "dx" else ""
+    fr_suffix = "_fr" if fast_reduce else ""
+    spec_id = f"layernorm_bwd_{part}_b{block_size}_v{vec}{u_suffix}{fr_suffix}"
+    name = f"norm2d_{spec_id}"
+
+    def _spec(req: NormRequest) -> _lnb.LayerNorm2DBwdSpec:
+        return _lnb.LayerNorm2DBwdSpec(
+            part=part,
+            block_size=block_size,
+            vec=vec,
+            dtype=_norm_dtype(req.dtype),
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+            fast_reduce=fast_reduce,
+            unroll=unroll,
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, NormRequest)
+        if req.kind.lower() != "layernorm":
+            return False, f"candidate kind 'layernorm' != request kind {req.kind!r}"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        if part != "dx" and int(req.cols) % vec != 0:
+            return False, f"{part} needs cols % vec == 0 (cols={req.cols}, vec={vec})"
+        return _lnb.is_valid_spec(_spec(req), arch=req.arch)
+
+    def select(req: OperatorRequest) -> _lnb.LayerNorm2DBwdSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, NormRequest)
+        return _spec(req)
+
+    def grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
+        assert isinstance(req, NormRequest)
+        return _lnb.layernorm2d_bwd_grid(spec, rows=int(req.rows), cols=int(req.cols))
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="layernorm_bwd",
+        spec_id=spec_id,
+        abi_version=NORM_ABI_VERSION,
+        priority=priority,
+        capability=Capability(arches=_NORM_ARCHES, dtypes=("f16", "bf16")),
+        _supports=support,
+        select_spec=select,
+        signature=lambda spec: _lnb.layernorm2d_bwd_signature(spec),
+        grid=grid,
+        block=lambda spec: (int(spec.block_size), 1, 1),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=lambda spec, _arch: _lnb.build_layernorm2d_bwd(spec),
+        opt_in=True,
+    )
+    return candidate
+
+
+def _build_bwd_candidates() -> Tuple[KernelCandidate, ...]:
+    cands = []
+    for bs in _BLOCK_SIZES:
+        for v in _VECS:
+            prio = _candidate_priority(block_size=bs, vec=v)
+            for fr_rank, fr in enumerate(_FAST_REDUCE):
+                cands.append(
+                    _make_bwd_candidate(
+                        part="dx", block_size=bs, vec=v,
+                        priority=prio + fr_rank * 10000, fast_reduce=fr,
+                    )
+                )
+            for part in ("dwdb", "dwdb_reduce"):
+                for u_rank, u in enumerate(_BWD_UNROLLS):
+                    cands.append(
+                        _make_bwd_candidate(
+                            part=part, block_size=bs, vec=v,
+                            priority=prio + u_rank * 10000, unroll=u,
+                        )
+                    )
+    return tuple(cands)
+
+
+_DYNAMIC_NORM_BWD_CANDIDATES = _build_bwd_candidates()
+
+
+def dynamic_norm_bwd_candidates(part: str | None = None) -> Tuple[KernelCandidate, ...]:
+    """Every LayerNorm2D backward candidate (optionally only one ``part``),
+    unfiltered by any request."""
+    if part is None:
+        return _DYNAMIC_NORM_BWD_CANDIDATES
+    return tuple(
+        c for c in _DYNAMIC_NORM_BWD_CANDIDATES if c.spec_id.startswith(f"layernorm_bwd_{part}_b")
+    )
 
 
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:

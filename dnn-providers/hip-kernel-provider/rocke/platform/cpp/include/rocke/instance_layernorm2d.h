@@ -61,6 +61,8 @@ typedef struct rocke_layernorm2d_spec
     bool save_mean_invstd; /* default false                     */
     int wave_size; /* default 64                        */
     bool dynamic; /* default false; AOT-generic variant */
+    bool fast_reduce; /* default false; wave-shuffle Welford */
+    bool cheap_reduce; /* default false; MIOpen-style naive E[X^2]-E[X]^2 */
     const char* name; /* default "rocke_layernorm2d_fwd"  */
 } rocke_layernorm2d_spec_t;
 

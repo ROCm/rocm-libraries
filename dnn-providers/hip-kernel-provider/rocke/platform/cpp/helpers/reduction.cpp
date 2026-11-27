@@ -458,6 +458,90 @@ rocke_value_t* rocke_block_lds_reduce_with_wave_prologue(rocke_ir_builder_t* b,
     return rocke_red_tree_reduce_scalars(b, combine, parts, num_warps);
 }
 
+/* --------------------------- block_lds_reduce_pair_with_wave_prologue */
+
+int rocke_block_lds_reduce_pair_with_wave_prologue(rocke_ir_builder_t* b,
+                                                   rocke_value_t* val_a,
+                                                   rocke_value_t* val_c,
+                                                   rocke_value_t* lds_a,
+                                                   rocke_value_t* lds_c,
+                                                   rocke_value_t* tid,
+                                                   int block_size,
+                                                   rocke_reduce_combine_t combine_a,
+                                                   rocke_reduce_combine_t combine_c,
+                                                   int wave_size,
+                                                   rocke_value_t** out_a,
+                                                   rocke_value_t** out_c)
+{
+    rocke_value_t* warp_a;
+    rocke_value_t* warp_c;
+    int num_warps;
+    rocke_value_t* c_wave;
+    rocke_value_t* lane;
+    rocke_value_t* warp;
+    rocke_value_t** parts_a;
+    rocke_value_t** parts_c;
+    int w;
+
+    if(!rocke_red_is_f32(val_a) || !rocke_red_is_f32(val_c))
+    {
+        rocke_red_set_err(
+            b, ROCKE_ERR_VALUE, "block_lds_reduce_pair_with_wave_prologue expects f32 inputs");
+        return 0;
+    }
+
+    warp_a = rocke_red_warp_xor_reduce(b, val_a, combine_a, wave_size);
+    warp_c = rocke_red_warp_xor_reduce(b, val_c, combine_c, wave_size);
+
+    num_warps = block_size / wave_size;
+    if(num_warps == 1)
+    {
+        *out_a = warp_a;
+        *out_c = warp_c;
+        return 1;
+    }
+
+    c_wave = rocke_b_const_i32(b, wave_size);
+    lane = rocke_b_mod(b, tid, c_wave);
+    warp = rocke_b_div(b, tid, c_wave);
+    {
+        rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, lane, rocke_b_const_i32(b, 0)));
+        rocke_b_region_enter(b, iff.then_region);
+        {
+            rocke_value_t* idx[1];
+            idx[0] = warp;
+            rocke_b_smem_store_vN_f32(b, lds_a, idx, 1, warp_a, 1);
+            rocke_b_smem_store_vN_f32(b, lds_c, idx, 1, warp_c, 1);
+        }
+        rocke_b_region_leave(b);
+    }
+    rocke_b_sync(b);
+
+    parts_a = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)num_warps * sizeof(*parts_a));
+    parts_c = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)num_warps * sizeof(*parts_c));
+    if(parts_a == NULL || parts_c == NULL)
+    {
+        rocke_red_set_err(b, ROCKE_ERR_OOM, "pair wave prologue parts alloc failed");
+        return 0;
+    }
+    /* Python interleaves the two channels' loads per warp:
+     *   parts_a.append(... smem_load(lds_a, const_i32(w)) ...)
+     *   parts_c.append(... smem_load(lds_c, const_i32(w)) ...)
+     * each with a FRESH const_i32(w). */
+    for(w = 0; w < num_warps; ++w)
+    {
+        rocke_value_t* idx_a[1];
+        rocke_value_t* idx_c[1];
+        idx_a[0] = rocke_b_const_i32(b, w);
+        parts_a[w] = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_a, idx_a, 1, 1), 0);
+        idx_c[0] = rocke_b_const_i32(b, w);
+        parts_c[w] = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_c, idx_c, 1, 1), 0);
+    }
+    *out_a = rocke_red_tree_reduce_scalars(b, combine_a, parts_a, num_warps);
+    *out_c = rocke_red_tree_reduce_scalars(b, combine_c, parts_c, num_warps);
+    return 1;
+}
+
 /* ----------------------------------------------------- welford_block_reduce */
 
 int rocke_welford_block_reduce(rocke_ir_builder_t* b,
@@ -490,6 +574,54 @@ int rocke_welford_block_reduce(rocke_ir_builder_t* b,
                                     ROCKE_REDUCE_SUM,
                                     &total_sum,
                                     &total_sumsq))
+    {
+        return 0;
+    }
+
+    n_total = (double)((double)count_val * (double)block_size);
+    inv_n = rocke_b_const_f32(b, 1.0 / n_total);
+    mean = rocke_b_fmul(b, total_sum, inv_n);
+    sq_mean = rocke_b_fmul(b, total_sumsq, inv_n);
+    var = rocke_b_fsub(b, sq_mean, rocke_b_fmul(b, mean, mean));
+    *out_mean = mean;
+    *out_var = var;
+    return 1;
+}
+
+/* --------------------------------------- welford_block_reduce_wave_prologue */
+
+int rocke_welford_block_reduce_wave_prologue(rocke_ir_builder_t* b,
+                                             rocke_value_t* sum_val,
+                                             rocke_value_t* sum_sq_val,
+                                             int count_val,
+                                             rocke_value_t* lds_sum,
+                                             rocke_value_t* lds_sumsq,
+                                             rocke_value_t* tid,
+                                             int block_size,
+                                             int wave_size,
+                                             rocke_value_t** out_mean,
+                                             rocke_value_t** out_var)
+{
+    rocke_value_t* total_sum = NULL;
+    rocke_value_t* total_sumsq = NULL;
+    double n_total;
+    rocke_value_t* inv_n;
+    rocke_value_t* mean;
+    rocke_value_t* sq_mean;
+    rocke_value_t* var;
+
+    if(!rocke_block_lds_reduce_pair_with_wave_prologue(b,
+                                                       sum_val,
+                                                       sum_sq_val,
+                                                       lds_sum,
+                                                       lds_sumsq,
+                                                       tid,
+                                                       block_size,
+                                                       ROCKE_REDUCE_SUM,
+                                                       ROCKE_REDUCE_SUM,
+                                                       wave_size,
+                                                       &total_sum,
+                                                       &total_sumsq))
     {
         return 0;
     }

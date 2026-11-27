@@ -46,6 +46,8 @@ rocke_layernorm2d_spec_t rocke_layernorm2d_spec_default(void)
     s.save_mean_invstd = false;
     s.wave_size = 64;
     s.dynamic = false;
+    s.fast_reduce = false;
+    s.cheap_reduce = false;
     s.name = "rocke_layernorm2d_fwd";
     return s;
 }
@@ -61,7 +63,8 @@ int rocke_layernorm2d_elems_per_thread(const rocke_layernorm2d_spec_t* spec)
 
 /* LayerNorm2DSpec.kernel_name():
  *   kernel_name_join(self.name, self.dtype, f"N{n_per_block}", f"b{block_size}",
- *                    f"v{vec}", flags={"smv": save_mean_invstd}) */
+ *                    f"v{vec}", flags={"smv": save_mean_invstd, "dyn": dynamic,
+ *                    "fr": fast_reduce, "cr": cheap_reduce}) */
 rocke_status_t
     rocke_layernorm2d_kernel_name(const rocke_layernorm2d_spec_t* spec, char* out, size_t out_cap)
 {
@@ -69,8 +72,8 @@ rocke_status_t
     char part_b[32];
     char part_v[32];
     const char* parts[4];
-    const char* flag_names[2];
-    int flag_on[2];
+    const char* flag_names[4];
+    int flag_on[4];
 
     if(spec == NULL || out == NULL)
     {
@@ -90,8 +93,12 @@ rocke_status_t
     flag_on[0] = spec->save_mean_invstd ? 1 : 0;
     flag_names[1] = "dyn";
     flag_on[1] = spec->dynamic ? 1 : 0;
+    flag_names[2] = "fr";
+    flag_on[2] = spec->fast_reduce ? 1 : 0;
+    flag_names[3] = "cr";
+    flag_on[3] = spec->cheap_reduce ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 2, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 4, out, out_cap, NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -190,6 +197,12 @@ bool rocke_layernorm2d_is_valid_spec(const rocke_layernorm2d_spec_t* spec,
     if(spec->block_size > max_thr)
     {
         ln_set_reason(reason, reason_cap, "block_size > max_threads_per_block");
+        return false;
+    }
+
+    if(spec->fast_reduce && spec->block_size % spec->wave_size != 0)
+    {
+        ln_set_reason(reason, reason_cap, "fast_reduce requires block_size divisible by wave_size");
         return false;
     }
 
@@ -547,15 +560,66 @@ static rocke_kernel_def_t* rocke_build_layernorm2d_dynamic(rocke_ir_builder_t* b
         tail_count_p = rocke_b_fadd(b, tail_count_p, valid_f);
     }
 
-    main_per_thread = rocke_b_div(b, main_elems, rocke_b_const_i32(b, BS));
-    count_p = rocke_b_fadd(b, rocke_b_sitofp_f32(b, main_per_thread), tail_count_p);
-    mean_p = rocke_b_fmul(b, sum_p, rocke_b_fdiv(b, rocke_b_const_f32(b, 1.0), count_p));
-    m2_p = rocke_b_fsub(b, sumsq_p, rocke_b_fmul(b, mean_p, sum_p));
-
     mean = NULL;
     var = NULL;
-    rocke_welford_block_reduce_stable(
-        b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid, BS, &mean, &var);
+    if(spec->cheap_reduce)
+    {
+        /* MIOpen-style cheap reduction (see LayerNorm2DSpec's docstring):
+         * masked tail elements already contribute exactly 0 to
+         * sum_p/sumsq_p, so a plain commutative sum across all BS threads
+         * totals exactly cols real elements -- dividing by the runtime
+         * cols kernarg directly needs no per-thread count reduction (no
+         * lds_count, no is_empty guard) at all, unlike the Welford paths
+         * below. */
+        rocke_value_t* total_sum = NULL;
+        rocke_value_t* total_sumsq = NULL;
+        if(spec->fast_reduce)
+        {
+            rocke_block_lds_reduce_pair_with_wave_prologue(b, sum_p, sumsq_p, lds_mean, lds_m2,
+                                                           tid, BS, ROCKE_REDUCE_SUM,
+                                                           ROCKE_REDUCE_SUM, spec->wave_size,
+                                                           &total_sum, &total_sumsq);
+        }
+        else
+        {
+            rocke_block_lds_reduce_pair(b, sum_p, sumsq_p, lds_mean, lds_m2, tid, BS,
+                                         ROCKE_REDUCE_SUM, ROCKE_REDUCE_SUM,
+                                         &total_sum, &total_sumsq);
+        }
+        rocke_value_t* one_f32 = rocke_b_const_f32(b, 1.0);
+        rocke_value_t* cols_f32 = rocke_b_sitofp_f32(b, cols);
+        rocke_value_t* inv_cols = rocke_b_fdiv(b, one_f32, cols_f32);
+        mean = rocke_b_fmul(b, total_sum, inv_cols);
+        rocke_value_t* sq_mean = rocke_b_fmul(b, total_sumsq, inv_cols);
+        var = rocke_b_fsub(b, sq_mean, rocke_b_fmul(b, mean, mean));
+    }
+    else
+    {
+        main_per_thread = rocke_b_div(b, main_elems, rocke_b_const_i32(b, BS));
+        count_p = rocke_b_fadd(b, rocke_b_sitofp_f32(b, main_per_thread), tail_count_p);
+        /* A thread can own zero elements when cols < BS (row shorter than the
+         * block); guard the reciprocal so it reports a finite empty partial
+         * (mean=0, M2=0) instead of 1/0 -> inf -> 0*inf -> NaN, which would
+         * otherwise poison the whole block's welford merge. */
+        rocke_value_t* is_empty_p = rocke_b_fcmp(b, "oeq", count_p, rocke_b_const_f32(b, 0.0));
+        rocke_value_t* zero_recip = rocke_b_const_f32(b, 0.0);
+        rocke_value_t* recip_p = rocke_b_fdiv(b, rocke_b_const_f32(b, 1.0), count_p);
+        rocke_value_t* inv_count_p = rocke_b_select(b, is_empty_p, zero_recip, recip_p);
+        mean_p = rocke_b_fmul(b, sum_p, inv_count_p);
+        m2_p = rocke_b_fsub(b, sumsq_p, rocke_b_fmul(b, mean_p, sum_p));
+
+        if(spec->fast_reduce)
+        {
+            rocke_welford_block_reduce_stable_wave_prologue(
+                b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid, BS, spec->wave_size,
+                &mean, &var);
+        }
+        else
+        {
+            rocke_welford_block_reduce_stable(
+                b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid, BS, &mean, &var);
+        }
+    }
     inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));
 
     if(spec->save_mean_invstd)
@@ -800,30 +864,67 @@ rocke_kernel_def_t* rocke_build_layernorm2d(rocke_ir_builder_t* b,
                                        !two_pass); /* cache */
 
     /* --- per-thread Welford triple from sum_p / sumsq_p --- */
-    /* count_p = float(elems); inv_count_p = b.const_f32(1.0 / count_p) */
-    count_p = (double)elems;
-    inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
-    /* mean_p = b.fmul(sum_p, inv_count_p) */
-    mean_p = rocke_b_fmul(b, p1.sum_p, inv_count_p);
-    /* m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p)) */
-    m2_p = rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
-
-    /* mean, var = welford_block_reduce_stable(b, mean_p, m2_p,
-     *     b.const_f32(count_p), lds_mean, lds_m2, lds_count, tid,
-     *     block_size=BS) */
     mean = NULL;
     var = NULL;
-    rocke_welford_block_reduce_stable(b,
-                                      mean_p,
-                                      m2_p,
-                                      rocke_b_const_f32(b, count_p),
-                                      lds_mean,
-                                      lds_m2,
-                                      lds_count,
-                                      tid,
-                                      BS,
-                                      &mean,
-                                      &var);
+    if(spec->cheap_reduce)
+    {
+        /* MIOpen-style cheap reduction: mean, var = welford_block_reduce(b,
+         *     sum_p, sumsq_p, elems, lds_mean, lds_m2, tid, block_size=BS) */
+        if(spec->fast_reduce)
+        {
+            rocke_welford_block_reduce_wave_prologue(b, p1.sum_p, p1.sumsq_p, elems, lds_mean,
+                                                     lds_m2, tid, BS, spec->wave_size, &mean,
+                                                     &var);
+        }
+        else
+        {
+            rocke_welford_block_reduce(
+                b, p1.sum_p, p1.sumsq_p, elems, lds_mean, lds_m2, tid, BS, &mean, &var);
+        }
+    }
+    else
+    {
+        /* count_p = float(elems); inv_count_p = b.const_f32(1.0 / count_p) */
+        count_p = (double)elems;
+        inv_count_p = rocke_b_const_f32(b, 1.0 / count_p);
+        /* mean_p = b.fmul(sum_p, inv_count_p) */
+        mean_p = rocke_b_fmul(b, p1.sum_p, inv_count_p);
+        /* m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p)) */
+        m2_p = rocke_b_fsub(b, p1.sumsq_p, rocke_b_fmul(b, mean_p, p1.sum_p));
+
+        /* mean, var = welford_block_reduce_stable(b, mean_p, m2_p,
+         *     b.const_f32(count_p), lds_mean, lds_m2, lds_count, tid,
+         *     block_size=BS) */
+        if(spec->fast_reduce)
+        {
+            rocke_welford_block_reduce_stable_wave_prologue(b,
+                                                            mean_p,
+                                                            m2_p,
+                                                            rocke_b_const_f32(b, count_p),
+                                                            lds_mean,
+                                                            lds_m2,
+                                                            lds_count,
+                                                            tid,
+                                                            BS,
+                                                            spec->wave_size,
+                                                            &mean,
+                                                            &var);
+        }
+        else
+        {
+            rocke_welford_block_reduce_stable(b,
+                                              mean_p,
+                                              m2_p,
+                                              rocke_b_const_f32(b, count_p),
+                                              lds_mean,
+                                              lds_m2,
+                                              lds_count,
+                                              tid,
+                                              BS,
+                                              &mean,
+                                              &var);
+        }
+    }
 
     /* inv_std = b.rsqrt(b.fadd(var, eps)) */
     inv_std = rocke_b_rsqrt(b, rocke_b_fadd(b, var, eps));

@@ -46,9 +46,14 @@ from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type, load_scalar_as_f32, store_scalar_from_f32
 from ...helpers.reduction import (
     REGISTER_TILE_MAX_ELEMS_PER_THREAD,
+    block_lds_reduce_pair,
+    block_lds_reduce_pair_with_wave_prologue,
     row_norm_needs_two_pass,
     tree_reduce,
+    welford_block_reduce,
     welford_block_reduce_stable,
+    welford_block_reduce_stable_wave_prologue,
+    welford_block_reduce_wave_prologue,
 )
 from ...helpers.spec import (
     IOSpecRule,
@@ -90,6 +95,26 @@ class LayerNorm2DSpec:
     it against requests with ``cols <= n_per_block``; the kernel itself has
     no way to check that at runtime. See :func:`build_layernorm2d`'s
     dynamic branch.
+
+    ``cheap_reduce=True`` (default ``False``) swaps the numerically-stable
+    Welford ``(mean, M2, count)`` block merge for the naive
+    ``var = E[X^2] - E[X]^2`` two-pass form (:func:`rocke.helpers.reduction.welford_block_reduce`),
+    matching MIOpen's own ``MIOpenLayerNorm.cpp`` reduction shape (plain
+    ``sum``/``sum_sq`` LDS-tree fold, 2 fp32 adds/step instead of a full
+    Welford pairwise combine). This trades away the catastrophic-cancellation
+    safety the module docstring calls out (``|mean| >> sigma`` activations)
+    for a much cheaper per-barrier-step payload -- an opt-in lever,
+    never the default. Validate against a reference before trusting it for
+    any specific workload's value range.
+
+    ``cheap_reduce=True`` combined with ``fast_reduce=True`` additionally
+    swaps the ``(sum, sum_sq)`` block merge's barriered LDS tree for
+    :func:`rocke.helpers.reduction.block_lds_reduce_pair_with_wave_prologue`
+    (wave-XOR-first, one cross-warp barrier instead of ``log2(block_size)``):
+    the smallest row shapes are launch/sync-bound (the per-sample staged
+    timing floor is dominated by the kernel's barrier count, not its
+    arithmetic), so this trims the critical path between the launch's start
+    and stop events rather than any FLOP count.
     """
 
     n_per_block: int
@@ -99,6 +124,8 @@ class LayerNorm2DSpec:
     save_mean_invstd: bool = False
     wave_size: int = 64
     dynamic: bool = False
+    fast_reduce: bool = False
+    cheap_reduce: bool = False
     name: str = "rocke_layernorm2d_fwd"
 
     @property
@@ -112,7 +139,12 @@ class LayerNorm2DSpec:
             f"N{self.n_per_block}",
             f"b{self.block_size}",
             f"v{self.vec}",
-            flags={"smv": self.save_mean_invstd, "dyn": self.dynamic},
+            flags={
+                "smv": self.save_mean_invstd,
+                "dyn": self.dynamic,
+                "fr": self.fast_reduce,
+                "cr": self.cheap_reduce,
+            },
         )
 
 
@@ -180,6 +212,13 @@ def is_valid_spec(spec: LayerNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
             f"block_size {spec.block_size} > max_threads_per_block "
             f"{target.max_threads_per_block} on {arch}"
         )
+
+    if spec.fast_reduce and spec.block_size % spec.wave_size != 0:
+        return False, (
+            f"fast_reduce requires block_size {spec.block_size} divisible by "
+            f"wave_size {spec.wave_size}"
+        )
+
 
     # Three f32 Welford reduction buffers (mean + M2 + count),
     # ``block_size`` words each.
@@ -323,22 +362,58 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     # unlike the previous ``var = E[X^2] - E[X]^2`` block form. The helper
     # returns the biased (population) variance ``M2_total / count_total``,
     # exactly the statistic the old form computed but accurately.
-    count_p = float(spec.elems_per_thread)
-    inv_count_p = b.const_f32(1.0 / count_p)
-    mean_p = b.fmul(sum_p, inv_count_p)
-    m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
+    if spec.cheap_reduce:
+        # MIOpen-style cheap reduction: plain (sum, sum_sq) fused-barrier
+        # fold (see welford_block_reduce_stable's docstring, cheap_reduce
+        # flag note), ``var = E[X^2] - E[X]^2`` computed once after the
+        # tree instead of a per-step Welford merge -- opt-in, less
+        # numerically stable, see LayerNorm2DSpec's docstring.
+        reduce_fn = (
+            welford_block_reduce_wave_prologue if spec.fast_reduce else welford_block_reduce
+        )
+        kwargs = {"wave_size": spec.wave_size} if spec.fast_reduce else {}
+        mean, var = reduce_fn(
+            b,
+            sum_p,
+            sumsq_p,
+            spec.elems_per_thread,
+            lds_mean,
+            lds_m2,
+            tid,
+            block_size=BS,
+            **kwargs,
+        )
+    else:
+        count_p = float(spec.elems_per_thread)
+        inv_count_p = b.const_f32(1.0 / count_p)
+        mean_p = b.fmul(sum_p, inv_count_p)
+        m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
 
-    mean, var = welford_block_reduce_stable(
-        b,
-        mean_p,
-        m2_p,
-        b.const_f32(count_p),
-        lds_mean,
-        lds_m2,
-        lds_count,
-        tid,
-        block_size=BS,
-    )
+        if spec.fast_reduce:
+            mean, var = welford_block_reduce_stable_wave_prologue(
+                b,
+                mean_p,
+                m2_p,
+                b.const_f32(count_p),
+                lds_mean,
+                lds_m2,
+                lds_count,
+                tid,
+                block_size=BS,
+                wave_size=spec.wave_size,
+            )
+        else:
+            mean, var = welford_block_reduce_stable(
+                b,
+                mean_p,
+                m2_p,
+                b.const_f32(count_p),
+                lds_mean,
+                lds_m2,
+                lds_count,
+                tid,
+                block_size=BS,
+            )
     inv_std = b.rsqrt(b.fadd(var, eps))
 
     if spec.save_mean_invstd:
@@ -485,15 +560,50 @@ def _build_layernorm2d_dynamic(spec: LayerNorm2DSpec) -> KernelDef:
     # threads' share, matching the ``main_elems_per_row`` naming in
     # build_batchnorm2d's compile-time tail); dividing by BS gives back
     # THIS thread's own main-loop count (the Welford count is per-thread).
-    main_per_thread = b.div(main_elems, b.const_i32(BS))
-    count_p = b.fadd(b.sitofp_f32(main_per_thread), tail_count_p)
-    inv_count_p = b.fdiv(b.const_f32(1.0), count_p)
-    mean_p = b.fmul(sum_p, inv_count_p)
-    m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
+    if spec.cheap_reduce:
+        # MIOpen-style cheap reduction (see LayerNorm2DSpec's docstring):
+        # masked tail elements already contribute exactly 0 to sum_p/sumsq_p,
+        # so a plain commutative sum across all BS threads totals exactly
+        # ``cols`` real elements -- dividing by the runtime ``cols`` kernarg
+        # directly needs no per-thread count reduction (no lds_count, no
+        # is_empty guard) at all, unlike the Welford paths below.
+        pair_reduce_fn = (
+            block_lds_reduce_pair_with_wave_prologue if spec.fast_reduce else block_lds_reduce_pair
+        )
+        pair_kwargs = {"wave_size": spec.wave_size} if spec.fast_reduce else {}
+        total_sum, total_sumsq = pair_reduce_fn(
+            b, sum_p, sumsq_p, lds_mean, lds_m2, tid, block_size=BS,
+            combine_a="sum", combine_c="sum", **pair_kwargs,
+        )
+        one_f32 = b.const_f32(1.0)
+        cols_f32 = b.sitofp_f32(cols)
+        inv_cols = b.fdiv(one_f32, cols_f32)
+        mean = b.fmul(total_sum, inv_cols)
+        sq_mean = b.fmul(total_sumsq, inv_cols)
+        var = b.fsub(sq_mean, b.fmul(mean, mean))
+    else:
+        main_per_thread = b.div(main_elems, b.const_i32(BS))
+        count_p = b.fadd(b.sitofp_f32(main_per_thread), tail_count_p)
+        # A thread can own zero elements when ``cols < BS`` (row shorter than
+        # the block); guard the reciprocal so it reports a finite empty
+        # partial (mean=0, M2=0) instead of 1/0 -> inf -> 0*inf -> NaN, which
+        # would otherwise poison the whole block's welford merge.
+        is_empty_p = b.fcmp("oeq", count_p, b.const_f32(0.0))
+        zero_recip = b.const_f32(0.0)
+        recip_p = b.fdiv(b.const_f32(1.0), count_p)
+        inv_count_p = b.select(is_empty_p, zero_recip, recip_p)
+        mean_p = b.fmul(sum_p, inv_count_p)
+        m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
 
-    mean, var = welford_block_reduce_stable(
-        b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid, block_size=BS
-    )
+        if spec.fast_reduce:
+            mean, var = welford_block_reduce_stable_wave_prologue(
+                b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid,
+                block_size=BS, wave_size=spec.wave_size,
+            )
+        else:
+            mean, var = welford_block_reduce_stable(
+                b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid, block_size=BS
+            )
     inv_std = b.rsqrt(b.fadd(var, eps))
 
     if spec.save_mean_invstd:
