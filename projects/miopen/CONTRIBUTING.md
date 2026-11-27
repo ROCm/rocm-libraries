@@ -85,6 +85,8 @@ The author of a PR is responsible for:
  * Writing tests to ensure code coverage
  * Report on the impact to performance
 
+For user-facing changes, add a [changelog fragment](changelog.d/README.md) rather than editing `CHANGELOG.md`.
+
 ## Responsibility of the Reviewer
 Each reviewer is responsible for verifying that the changes are
 clearly written in keeping with the coding styles of the library,

@@ -97,6 +97,12 @@ def resolve_sparse_checkout_cones(changed_files: list[str]) -> list[str]:
             DIRS.add(directory[0])
         elif len(directory) >= 3:
             DIRS.add(directory[0] + "/" + directory[1])
+        if (
+            len(directory) >= 4
+            and directory[0] == "projects"
+            and directory[2] == "changelog.d"
+        ):
+            DIRS.add(".github/scripts")
 
     return sorted(DIRS)
 

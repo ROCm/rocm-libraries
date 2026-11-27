@@ -32,7 +32,7 @@ Review CMake targets, options, install rules, dependency manifests, test registr
 - **CI files.** Workflow changes keep required checks, do not weaken triggers or skip suites, and pin actions and refs
   (`component-ci-miopen.yml` pins its container image and the rocjitsu ref). A new `.github/skip-ci-config.toml` pattern
   matches no path that is built or installed.
-- **Version.** `projects/miopen/CMakeLists.txt` `rocm_setup_version` and `CHANGELOG.md` change when the contract does; the
+- **Version.** `projects/miopen/CMakeLists.txt` `rocm_setup_version` follows version policy; user-facing changes get a `changelog.d/` fragment. The
   public ABI baselines under `projects/miopen/test/public_abi/` change only with an intended API change (`API`).
 
 Read the full CMake file for each change, not just the hunk: ordering and scope matter.

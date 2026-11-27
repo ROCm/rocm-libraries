@@ -70,6 +70,7 @@ common = [
     ".github/workflows/auto-retry-failed.yml",
     ".github/workflows/clang-tidy.yml",
     ".github/workflows/close-stale-prs.yml",
+    ".github/workflows/changelog-fragments.yml",
     ".github/workflows/codeql.yml",
     ".github/workflows/component-ci*.yml",
     ".github/workflows/docs-pr-preview*.yml",

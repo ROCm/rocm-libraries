@@ -335,6 +335,20 @@ repos:
         files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|check_plugin_reentry|test_check_plugin_reentry|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
+      - id: changelog-fragments
+        name: Validate opted-in changelog fragments
+        entry: python .github/scripts/changelog_fragments.py --validate
+        language: python
+        files: ^projects/[^/]+/changelog\.d/
+        types: []
+
+      - id: changelog-fragments-tests
+        name: Changelog assembler self-tests
+        entry: python .github/scripts/test_changelog_fragments.py
+        language: python
+        files: ^\.github/scripts/(test_)?changelog_fragments\.py$
+        pass_filenames: false
+
       - id: kpack-pin-sync
         name: rocm_kpack pin is consistent (hipDNN)
         # The pin is the kpack-ref output of .github/actions/ci-env/action.yml.

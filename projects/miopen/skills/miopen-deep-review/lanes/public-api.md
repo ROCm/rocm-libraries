@@ -36,7 +36,7 @@ source behind unchanged signatures are API changes.
    readable (old records parse or are ignored cleanly, never misapplied) or updates every shipped database it affects and says so;
    check the code that reads the record, not only the writer.
 6. New environment variables users are expected to set are documented in `projects/miopen/docs/reference/env_variables.rst`;
-   a changed default is described in the PR and in `projects/miopen/CHANGELOG.md`.
+   a changed default is described in the PR and in a fragment under `projects/miopen/changelog.d/`.
 7. Contract table. For each public parameter the changed code reaches (arguments such as scale factors and attributes, returned
    sizes, status codes), write one row: what the header and docs say; what the industry-standard library for the same operation
    documents (the reference implementation the API is meant to match: read its documentation, cite the page, and say when only

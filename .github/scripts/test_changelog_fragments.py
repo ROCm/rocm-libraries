@@ -1,0 +1,131 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+import subprocess
+import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+
+import changelog_fragments as fragments
+
+
+class ChangelogFragmentsTest(unittest.TestCase):
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.pending = self.root / "changelog.d"
+        self.pending.mkdir()
+        self.readme = self.pending / "README.md"
+        self.readme.write_text("Instructions\n", encoding="utf-8")
+        self.changelog = self.root / "CHANGELOG.md"
+        self.history = "## MIOpen 3.0\n\n### Resolved Issues\n* Shipped fix.\n"
+        self.active = "# Changelog\n\n## (Unreleased) MIOpen 4.0\n\n### Resolved issues\n* Existing fix.\n\n"
+        self.changelog.write_text(self.active + self.history, encoding="utf-8")
+
+    def run_cli(self, *args):
+        return subprocess.run(
+            [
+                sys.executable,
+                fragments.__file__,
+                "--project",
+                str(self.root),
+                *map(str, args),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    def entry(self, name, text):
+        path = self.pending / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_fold_orders_entries_and_preserves_released_history(self):
+        second = self.entry("10-b.resolved.md", "* Second fix.\n  More detail.\n")
+        first = self.entry("9-a.resolved.md", "* First fix.\n")
+        unnumbered = self.entry("alpha.resolved.md", "* Unnumbered fix.\n")
+        added = self.entry("33.added.md", "* New feature.\n")
+        deprecated = self.entry("44.deprecated.md", "* Deprecated an option.\n")
+        self.assertNotEqual(self.run_cli("--check-empty").returncode, 0)
+        result = self.run_cli("--fold")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = (
+            self.active.rstrip()
+            + "\n* First fix.\n* Second fix.\n  More detail.\n* Unnumbered fix.\n\n"
+            + "### Added\n* New feature.\n\n### Deprecated\n* Deprecated an option.\n\n"
+            + self.history
+        )
+        self.assertEqual(self.changelog.read_text(encoding="utf-8"), expected)
+        self.assertEqual(set(self.pending.iterdir()), {self.readme})
+        for path in (first, second, unnumbered, added, deprecated):
+            self.assertFalse(path.exists())
+        self.assertEqual(self.run_cli("--check-empty").returncode, 0)
+        self.assertEqual(self.run_cli("--fold").returncode, 0)
+        self.assertEqual(self.changelog.read_text(encoding="utf-8"), expected)
+
+    def test_invalid_fragment_prevents_any_consumption(self):
+        good = self.entry("11.added.md", "* A feature.\n")
+        bad = self.entry("22.resolved.md", "* A fix.\n## Another release\n")
+        result = self.run_cli("--fold")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(bad.name, result.stderr)
+        self.assertTrue(good.exists())
+        self.assertTrue(bad.exists())
+        self.assertEqual(
+            self.changelog.read_text(encoding="utf-8"), self.active + self.history
+        )
+
+    def test_refuses_to_write_into_a_shipped_release(self):
+        note = self.entry("11.added.md", "* A feature.\n")
+        self.changelog.write_text(self.history, encoding="utf-8")
+        result = self.run_cli("--fold")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("(Unreleased)", result.stderr)
+        self.assertTrue(note.exists())
+        self.assertEqual(self.changelog.read_text(encoding="utf-8"), self.history)
+
+    def test_rejects_duplicate_section_headings_that_differ_only_in_case(self):
+        changelog = (
+            self.active + "### Resolved Issues\n* Another fix.\n\n" + self.history
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate active section"):
+            fragments.assemble(changelog, {"Resolved Issues": ["* New fix."]})
+
+    def test_rejects_suffix_marker(self):
+        changelog = self.active.replace(
+            "(Unreleased) MIOpen 4.0", "MIOpen 4.0 (Unreleased)"
+        )
+        with self.assertRaisesRegex(ValueError, "must start with"):
+            fragments.assemble(changelog, {"Resolved Issues": ["* New fix."]})
+
+    def test_validation_rejects_symlink_and_bad_category(self):
+        bad = self.entry("11.fixed.md", "* A fix.\n")
+        link = self.pending / "22.resolved.md"
+        link.symlink_to(self.changelog)
+        for path in (bad, link):
+            with self.subTest(path=path):
+                result = self.run_cli("--validate", path)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(path.name, result.stderr)
+
+    def test_validation_only_applies_to_registered_projects(self):
+        paths = []
+        for name in ("example", "unregistered"):
+            directory = self.root / "projects" / name / "changelog.d"
+            directory.mkdir(parents=True)
+            path = directory / "bad.md"
+            path.write_text("invalid", encoding="utf-8")
+            paths.append(path)
+        with patch.object(fragments, "ROOT", self.root), patch.object(
+            fragments, "OPTED_IN_PROJECTS", ("example",)
+        ):
+            fragments.validate_files(paths[1:], None)
+            with self.assertRaisesRegex(ValueError, "example"):
+                fragments.validate_files(paths[:1], None)
+
+
+if __name__ == "__main__":
+    unittest.main()

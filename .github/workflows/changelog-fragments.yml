@@ -1,0 +1,109 @@
+name: Changelog fragments
+
+on:
+  schedule:
+    - cron: '23 14 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/changelog-fragments.yml'
+      - '.github/scripts/changelog_fragments.py'
+      - 'projects/*/CHANGELOG.md'
+      - 'projects/*/changelog.d/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: changelog-fragments
+  cancel-in-progress: false
+
+jobs:
+  projects:
+    # The write token is only available to the workflow on trusted develop.
+    if: github.repository == 'ROCm/rocm-libraries' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      names: ${{ steps.registry.outputs.names }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: develop
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Read registered projects
+        id: registry
+        run: |
+          names=$(python3 .github/scripts/changelog_fragments.py --list-projects)
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+
+  fold:
+    needs: projects
+    if: needs.projects.outputs.names != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.projects.outputs.names) }}
+    env:
+      PROJECT: ${{ matrix.project }}
+      BOT_BRANCH: bot/${{ matrix.project }}-changelog-fragments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # A push can invalidate an open fold, but only the weekly or manual run
+      # should open a new PR. Use the read-only token to check before checkout.
+      - name: Check for an open fold PR
+        id: refresh
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f base=develop -f head="$GITHUB_REPOSITORY_OWNER:$BOT_BRANCH" \
+            --jq 'length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
+        with:
+          ref: develop
+          filter: blob:none
+          sparse-checkout: |
+            .github/scripts
+            projects/${{ matrix.project }}/changelog.d
+          persist-credentials: false
+
+      - name: Fold merged fragments
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
+        run: python3 .github/scripts/changelog_fragments.py --project "projects/$PROJECT" --fold
+
+      - name: Create Libraries App token
+        id: app-token
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Reconcile the changelog PR
+        if: github.event_name != 'push' || steps.refresh.outputs.count != '0'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ${{ env.BOT_BRANCH }}
+          base: develop
+          add-paths: |
+            projects/${{ matrix.project }}/CHANGELOG.md
+            projects/${{ matrix.project }}/changelog.d
+          delete-branch: true
+          commit-message: 'docs(${{ matrix.project }}): fold changelog fragments'
+          title: 'docs(${{ matrix.project }}): fold changelog fragments'
+          body: |
+            Moves merged `${{ matrix.project }}` fragments into the unreleased changelog and removes the consumed files.
+
+            Before merging, check that the target heading is still the newest unreleased heading on `develop`
+            and that the consumed fragments still exist there unchanged. If either changed, refresh this PR first.
+            Do not push to this branch; use **Changelog fragments → Run workflow** to refresh it.
