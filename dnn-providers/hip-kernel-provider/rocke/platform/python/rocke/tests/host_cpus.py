@@ -8,7 +8,9 @@ a large host or a pod with a CPU quota may use far fewer CPUs, and a pool sized
 from the machine oversubscribes them by the same factor. :func:`available_cpus`
 takes the narrowest of the process's CPU affinity and every CPU quota of the
 cgroups it belongs to (v2 ``cpu.max``, v1 ``cpu.cfs_quota_us``), each nested
-cgroup included.
+cgroup included. A quota counts as the whole CPUs it grants, rounded down and
+never below one: the rule the descriptor packer's pool uses
+(``hkp_pack.pipeline._read_cpu_max``), so both pools agree under one quota.
 """
 
 from __future__ import annotations
@@ -104,6 +106,13 @@ def _mounted_dirs(membership: Path, mounts: list[tuple[Path, Path]]) -> list[Pat
     return directories
 
 
+def _whole_cpus(quota: int, period: int) -> int:
+    """The worker count a CPU quota of ``quota`` per ``period`` allows: its whole
+    CPUs, rounded down so a pool never oversubscribes the quota, and at least one
+    so a sub-CPU quota still runs."""
+    return max(1, quota // period)
+
+
 def available_cpus(
     cgroup_root: Path = Path("/sys/fs/cgroup"),
     proc_cgroup: Path = Path("/proc/self/cgroup"),
@@ -125,7 +134,7 @@ def available_cpus(
             if quota_s != "max":
                 quota, period = int(quota_s), int(period_s)
                 if quota > 0 and period > 0:
-                    counts.append(max(1, -(-quota // period)))
+                    counts.append(_whole_cpus(quota, period))
         except (OSError, ValueError):
             continue
     for directory in v1_dirs:
@@ -133,7 +142,7 @@ def available_cpus(
             quota = int((directory / "cpu.cfs_quota_us").read_text().strip())
             period = int((directory / "cpu.cfs_period_us").read_text().strip())
             if quota > 0 and period > 0:
-                counts.append(max(1, -(-quota // period)))
+                counts.append(_whole_cpus(quota, period))
         except (OSError, ValueError):
             continue
 

@@ -22,7 +22,7 @@ def test_available_cpus_honors_nested_v2_quota(tmp_path, monkeypatch):
     member.mkdir(parents=True)
     (tmp_path / "cpu.max").write_text("max 100000")
     (member.parent / "cpu.max").write_text("300000 100000")
-    (member / "cpu.max").write_text("150000 100000")
+    (member / "cpu.max").write_text("250000 100000")
     proc = tmp_path / "self.cgroup"
     proc.write_text("0::/team/job\n")
     mountinfo = tmp_path / "mountinfo"
@@ -57,11 +57,11 @@ def test_available_cpus_rebases_non_root_cgroup_mount(version, tmp_path, monkeyp
     member = mount / "team" / "job"
     member.mkdir(parents=True)
     if version == 2:
-        (member / "cpu.max").write_text("150000 100000")
+        (member / "cpu.max").write_text("250000 100000")
         cgroup_line = "0::/tenant.slice/team/job\n"
         mount_line = f"1 2 0:1 /tenant.slice {mount} rw - cgroup2 cgroup rw\n"
     else:
-        (member / "cpu.cfs_quota_us").write_text("150000")
+        (member / "cpu.cfs_quota_us").write_text("250000")
         (member / "cpu.cfs_period_us").write_text("100000")
         cgroup_line = "2:cpu,cpuacct:/tenant.slice/team/job\n"
         mount_line = (
@@ -108,6 +108,22 @@ def test_a_cpu_quota_caps_the_count(tmp_path, files):
     # "<= 1", not "== 1": affinity also feeds the minimum, so a quota can only
     # ever lower the answer.
     assert host_cpus.available_cpus(*_cgroup_root(tmp_path, files)) <= 1
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"cpu.max": "250000 100000"},
+        {"cpu/cpu.cfs_quota_us": "250000", "cpu/cpu.cfs_period_us": "100000"},
+    ],
+    ids=["v2", "v1"],
+)
+def test_a_fractional_quota_rounds_down(tmp_path, monkeypatch, files):
+    """Two and a half CPUs allow two workers, as in the descriptor packer's pool:
+    a third would oversubscribe the quota."""
+    monkeypatch.setattr(host_cpus.os, "sched_getaffinity", lambda _pid: set(range(8)))
+    monkeypatch.setattr(host_cpus.os, "cpu_count", lambda: 64)
+    assert host_cpus.available_cpus(*_cgroup_root(tmp_path, files)) == 2
 
 
 def test_a_fractional_quota_still_leaves_one_cpu(tmp_path):
