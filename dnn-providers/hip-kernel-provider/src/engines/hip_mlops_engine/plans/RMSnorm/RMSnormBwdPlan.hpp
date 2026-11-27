@@ -73,13 +73,20 @@ private:
 };
 
 /// The compile options and launches of the RMSNormBwd program for @p params on
-/// @p gcnArchName: RMSnormBwdData, then RMSnormBwdScaleBias. A fused activation's backward is
-/// compiled in; its alpha and beta are launch arguments.
+/// @p gcnArchName: RMSnormBwdData, then RMSnormBwdScaleBias, both in workgroups of @p config's
+/// size. A fused activation's backward is compiled in; its alpha and beta are launch
+/// arguments.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
 ///         that does not fit one launch.
 RMSnormKernelBuild buildRMSnormBwdKernel(const RMSnormBwdParams& params,
-                                         const std::string& gcnArchName);
+                                         const std::string& gcnArchName,
+                                         const RMSnormConfig& config);
+
+/// Whether the backward launches of @p config can run @p params: a supported workgroup
+/// (isLocalSizeSupported()) whose launches stay below the 2^32 threads HIP accepts.
+/// checkLaunchShapesFitThreadLimit() checks the default's.
+bool isRMSnormBwdConfigApplicable(const RMSnormBwdParams& params, const RMSnormConfig& config);
 
 class RMSnormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
@@ -92,9 +99,10 @@ public:
     RMSnormBwdPlan(RMSnormBwdPlan&&) = default;
     RMSnormBwdPlan& operator=(RMSnormBwdPlan&&) = delete;
 
-    // Every kernel launch of the plan for a problem of the given outer size, stride and inner size.
+    // Every kernel launch of the plan for a problem of the given outer size, stride and inner
+    // size, in workgroups of localSize threads.
     static std::vector<KernelLaunchShape>
-        launchShapes(int64_t outerSize, int64_t stride, int64_t innerSize);
+        launchShapes(int64_t outerSize, int64_t stride, int64_t innerSize, int64_t localSize);
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
@@ -106,8 +114,6 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    static constexpr int64_t LOCAL_SIZE = 256;
-
     RMSnormBwdParams _params;
 
     // Populated by compile()

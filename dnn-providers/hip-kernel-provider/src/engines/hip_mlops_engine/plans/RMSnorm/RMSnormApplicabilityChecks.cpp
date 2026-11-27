@@ -425,7 +425,8 @@ void checkLaunchShapesFitThreadLimit(
     const ProblemDescription problem(&findTensorAttributes(tensorMap, fwdAttr.x_tensor_uid()),
                                      &findTensorAttributes(tensorMap, fwdAttr.scale_tensor_uid()),
                                      Direction::FORWARD);
-    for(const auto& shape : RMSnormFwdPlan::launchShapes(problem.outerSize(), problem.stride()))
+    for(const auto& shape : RMSnormFwdPlan::launchShapes(
+            problem.outerSize(), problem.stride(), RMSnormConfig{}.localSize))
     {
         checkLaunchFitsThreadLimit(shape);
     }
@@ -440,8 +441,8 @@ void checkLaunchShapesFitThreadLimit(
     const ProblemDescription problem(&findTensorAttributes(tensorMap, bwdAttr.x_tensor_uid()),
                                      &findTensorAttributes(tensorMap, bwdAttr.scale_tensor_uid()),
                                      Direction::BACKWARD);
-    for(const auto& shape :
-        RMSnormBwdPlan::launchShapes(problem.outerSize(), problem.stride(), problem.innerSize()))
+    for(const auto& shape : RMSnormBwdPlan::launchShapes(
+            problem.outerSize(), problem.stride(), problem.innerSize(), RMSnormConfig{}.localSize))
     {
         checkLaunchFitsThreadLimit(shape);
     }

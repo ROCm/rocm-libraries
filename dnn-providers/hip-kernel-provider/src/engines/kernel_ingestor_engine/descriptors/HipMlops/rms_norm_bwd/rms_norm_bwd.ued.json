@@ -7,6 +7,12 @@
     "native": "hipkernel.rms_norm_bwd.graph_match"
   },
   "metadata": "e7b2eb24-cc09-4bcb-91c7-17c12b99a2f4",
+  "sort_kernel_catalog": {
+    "default": "597aa227-a9ac-475e-8f84-b9d439e41d6e"
+  },
+  "knobs": [
+    "local_size"
+  ],
   "behavior_notes": [
     "runtime_compilation",
     "supports_graph_capture"

@@ -7,6 +7,7 @@
 #include "compilation/KernelCompileOptions.hpp"
 #include "core/Utils.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -110,11 +111,27 @@ RMSnormBwdPlan::RMSnormBwdPlan(RMSnormBwdParams&& params)
 {
 }
 
-std::vector<KernelLaunchShape>
-    RMSnormBwdPlan::launchShapes(int64_t outerSize, int64_t stride, int64_t innerSize)
+std::vector<KernelLaunchShape> RMSnormBwdPlan::launchShapes(int64_t outerSize,
+                                                            int64_t stride,
+                                                            int64_t innerSize,
+                                                            int64_t localSize)
 {
-    return {{"RMSnormBwdData", outerSize * stride, LOCAL_SIZE},
-            {"RMSnormBwdScaleBias", (innerSize + LOCAL_SIZE - 1) / LOCAL_SIZE, LOCAL_SIZE}};
+    return {{"RMSnormBwdData", outerSize * stride, localSize},
+            {"RMSnormBwdScaleBias", (innerSize + localSize - 1) / localSize, localSize}};
+}
+
+bool isRMSnormBwdConfigApplicable(const RMSnormBwdParams& params, const RMSnormConfig& config)
+{
+    if(!isLocalSizeSupported(config.localSize))
+    {
+        return false;
+    }
+    const ProblemDescription problem(params.x(), params.scale(), Direction::BACKWARD);
+    const auto shapes = RMSnormBwdPlan::launchShapes(
+        problem.outerSize(), problem.stride(), problem.innerSize(), config.localSize);
+    return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
+        return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);
+    });
 }
 
 size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
@@ -124,7 +141,8 @@ size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) c
 }
 
 RMSnormKernelBuild buildRMSnormBwdKernel(const RMSnormBwdParams& params,
-                                         const std::string& gcnArchName)
+                                         const std::string& gcnArchName,
+                                         const RMSnormConfig& config)
 {
     // Extract dimensions from x tensor
     const auto* xDims = params.x()->dims();
@@ -140,7 +158,8 @@ RMSnormKernelBuild buildRMSnormBwdKernel(const RMSnormBwdParams& params,
     const int64_t stride = problem.stride();
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
-    const auto shapes = RMSnormBwdPlan::launchShapes(outerSize, stride, innerSize);
+    const auto shapes
+        = RMSnormBwdPlan::launchShapes(outerSize, stride, innerSize, config.localSize);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
@@ -194,7 +213,8 @@ RMSnormKernelBuild buildRMSnormBwdKernel(const RMSnormBwdParams& params,
 void RMSnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                              const hipDeviceProp_t& deviceProperties)
 {
-    const auto build = buildRMSnormBwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    const auto build = buildRMSnormBwdKernel(
+        _params, std::string(deviceProperties.gcnArchName), RMSnormConfig{});
 
     if(const auto& activation = _params.optActivation(); activation.has_value())
     {

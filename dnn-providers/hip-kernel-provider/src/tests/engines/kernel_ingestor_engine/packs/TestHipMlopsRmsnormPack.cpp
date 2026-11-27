@@ -8,6 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -31,6 +34,11 @@
  *        builders accept in their direction -- RMSnorm alone, and fused with a ReLU after the
  *        forward or before the backward, up to the same launch thread limit -- and compute all
  *        four as CPU references do.
+ *
+ *        Each ships a kernel per workgroup size (ALMIOPEN-3066), addressed by the knob
+ *        `local_size`: the hand-written plans' ranks first, a wider one whose launches reach
+ *        the thread limit is not admitted, and each, pinned through the knob, computes as the
+ *        reference does.
  */
 namespace
 {
@@ -461,6 +469,98 @@ TEST(TestHipMlopsRmsnormGraphMatch, BackwardDeclinesAnInnerSizeReachingTheThread
 }
 
 // ---------------------------------------------------------------------------
+// Knob: one kernel per workgroup size, in each direction
+// ---------------------------------------------------------------------------
+
+/// The workgroup sizes both directions ship a kernel for; the hand-written plans' is 256.
+const std::set<int64_t> LOCAL_SIZES = {256, 512, 1024};
+constexpr int64_t DEFAULT_LOCAL_SIZE = 256;
+
+const std::vector<std::string> KNOBS = {"local_size"};
+
+TEST(TestHipMlopsRmsnormKnob, EachDirectionShipsAKernelPerWorkgroupSize)
+{
+    for(const auto* engine : {&RMS_NORM_FWD_ENGINE, &RMS_NORM_BWD_ENGINE})
+    {
+        SCOPED_TRACE(std::string(engine->name));
+        EXPECT_EQ(engineKnobs(*engine), KNOBS);
+        std::set<int64_t> localSizes;
+        for(const auto& kernel : loadedKernels(*engine))
+        {
+            EXPECT_TRUE(localSizes.insert(kernel.getIntMetadata("local_size")).second)
+                << kernel.name;
+        }
+        EXPECT_EQ(localSizes, LOCAL_SIZES);
+    }
+}
+
+// Every workgroup runs these graphs, alone and fused; the hand-written plans' ranks first.
+TEST(TestHipMlopsRmsnormKnob, TheHandWrittenWorkgroupRanksFirst)
+{
+    for(const bool backward : {false, true})
+    {
+        for(const auto activation : {Activation::NONE, Activation::RELU})
+        {
+            SCOPED_TRACE(backward ? "backward" : "forward");
+            SCOPED_TRACE(activation == Activation::NONE ? "alone" : "fused");
+            RmsnormGraph spec;
+            spec.backward = backward;
+            spec.activation = activation;
+            const auto kernels = rankedKernels(engineFor(spec), buildRmsnormGraph(spec));
+            expectUniqueTuples(kernels, KNOBS);
+            const auto offered = knobValues(kernels, "local_size");
+            ASSERT_EQ(offered.size(), LOCAL_SIZES.size());
+            EXPECT_EQ(offered.front(), DEFAULT_LOCAL_SIZE);
+            EXPECT_EQ(std::set<int64_t>(offered.begin(), offered.end()), LOCAL_SIZES);
+        }
+    }
+}
+
+TEST(TestHipMlopsRmsnormKnob, PinningAWorkgroupBuildsIt)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        RmsnormGraph spec;
+        spec.backward = backward;
+        const auto kernels = rankedKernels(engineFor(spec), buildRmsnormGraph(spec));
+        for(const int64_t localSize : LOCAL_SIZES)
+        {
+            EXPECT_EQ(pinnedTuple(kernels, KNOBS, {{"local_size", localSize}}),
+                      (KnobSettings{{"local_size", localSize}}));
+        }
+    }
+}
+
+// A wider workgroup launches more threads. On the hand-written builders' boundary graphs above
+// (a block per row of 16777215 rows, and the backward's scale/bias kernel over one row of
+// 2^32 - 256), only the hand-written plans' workgroup stays below 2^32 threads, so it alone is
+// admitted.
+TEST(TestHipMlopsRmsnormKnob, AWorkgroupReachingTheThreadLimitIsNotAdmitted)
+{
+    namespace graphs = hipdnn_test_sdk::utilities;
+    const auto offered = [](const MlopsEngine& engine, flatbuffers::FlatBufferBuilder builder) {
+        return knobValues(rankedKernels(engine, std::move(builder)), "local_size");
+    };
+    const std::vector<int64_t> strides = {2, 1, 1, 1};
+    const std::vector<int64_t> dims = {16777215, 2, 1, 1};
+    EXPECT_THAT(offered(RMS_NORM_FWD_ENGINE, graphs::createValidRMSNormGraph(strides, dims)),
+                ::testing::ElementsAre(DEFAULT_LOCAL_SIZE));
+    EXPECT_THAT(
+        offered(RMS_NORM_FWD_ENGINE, graphs::createValidRMSNormActivationGraph(strides, dims)),
+        ::testing::ElementsAre(DEFAULT_LOCAL_SIZE));
+    EXPECT_THAT(offered(RMS_NORM_BWD_ENGINE, graphs::createValidRMSNormBwdGraph(strides, dims)),
+                ::testing::ElementsAre(DEFAULT_LOCAL_SIZE));
+    EXPECT_THAT(
+        offered(RMS_NORM_BWD_ENGINE, graphs::createValidRMSNormBwdActivationGraph(strides, dims)),
+        ::testing::ElementsAre(DEFAULT_LOCAL_SIZE));
+    EXPECT_THAT(
+        offered(RMS_NORM_BWD_ENGINE,
+                graphs::createValidRMSNormBwdGraph({4294967040, 256, 1, 1}, {1, 16777215, 256, 1})),
+        ::testing::ElementsAre(DEFAULT_LOCAL_SIZE));
+}
+
+// ---------------------------------------------------------------------------
 // Numerics through the engine
 // ---------------------------------------------------------------------------
 
@@ -627,7 +727,9 @@ Inputs inputsFor(const RmsnormGraph& spec)
             std::move(bias)};
 }
 
-void checkForward(const RmsnormGraph& spec)
+/// Runs the forward of @p spec through the engine, with @p knobs pinned, against the
+/// reference.
+void checkForward(const RmsnormGraph& spec, const KnobSettings& knobs = {})
 {
     const auto in = inputsFor(spec);
     const size_t count = in.x.size();
@@ -656,7 +758,7 @@ void checkForward(const RmsnormGraph& spec)
 
     EngineRun run;
     ASSERT_NO_FATAL_FAILURE(
-        executeThroughTheEngine(engineFor(spec), buildRmsnormGraph(spec), buffers, &run));
+        executeThroughTheEngine(engineFor(spec), buildRmsnormGraph(spec), buffers, &run, knobs));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 
@@ -667,7 +769,9 @@ void checkForward(const RmsnormGraph& spec)
     }
 }
 
-void checkBackward(const RmsnormGraph& spec)
+/// Runs the backward of @p spec through the engine, with @p knobs pinned, against the
+/// reference.
+void checkBackward(const RmsnormGraph& spec, const KnobSettings& knobs = {})
 {
     const auto in = inputsFor(spec);
     const size_t count = in.x.size();
@@ -706,7 +810,7 @@ void checkBackward(const RmsnormGraph& spec)
 
     EngineRun run;
     ASSERT_NO_FATAL_FAILURE(
-        executeThroughTheEngine(engineFor(spec), buildRmsnormGraph(spec), buffers, &run));
+        executeThroughTheEngine(engineFor(spec), buildRmsnormGraph(spec), buffers, &run, knobs));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 
@@ -757,6 +861,54 @@ TEST(TestHipMlopsRmsnormDevice, BackwardMatchesTheReference)
         spec.backward = true;
         spec.withBias = withBias;
         checkBackward(spec);
+    }
+}
+
+TEST(TestHipMlopsRmsnormDevice, TheProviderAdvertisesTheWorkgroupKnob)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        RmsnormGraph spec;
+        spec.backward = backward;
+        const auto knobs = advertisedKnobs(engineFor(spec), buildRmsnormGraph(spec));
+        ASSERT_EQ(knobs.size(), 1U);
+        EXPECT_EQ(knobs[0].name, "local_size");
+        EXPECT_EQ(knobs[0].defaultValue, DEFAULT_LOCAL_SIZE);
+        EXPECT_EQ(std::set<int64_t>(knobs[0].validValues.begin(), knobs[0].validValues.end()),
+                  LOCAL_SIZES);
+    }
+}
+
+TEST(TestHipMlopsRmsnormDevice, EachWorkgroupPinnedThroughTheKnobMatchesTheReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Rows of 800: wider than 256 and 512 lanes, narrower than 1024. Alone and fused.
+    for(const bool backward : {false, true})
+    {
+        for(const auto activation : {Activation::NONE, Activation::RELU})
+        {
+            for(const int64_t localSize : LOCAL_SIZES)
+            {
+                SCOPED_TRACE(backward ? "backward" : "forward");
+                SCOPED_TRACE(activation == Activation::NONE ? "alone" : "fused");
+                SCOPED_TRACE(localSize);
+                RmsnormGraph spec;
+                spec.backward = backward;
+                spec.activation = activation;
+                if(backward)
+                {
+                    checkBackward(spec, {{"local_size", localSize}});
+                }
+                else
+                {
+                    checkForward(spec, {{"local_size", localSize}});
+                }
+            }
+        }
     }
 }
 

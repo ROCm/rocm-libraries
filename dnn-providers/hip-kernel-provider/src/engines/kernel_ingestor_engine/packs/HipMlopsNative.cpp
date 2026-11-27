@@ -91,11 +91,11 @@
  * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
  * performance configuration their build takes (`variant`, `block_size`, `vector_size`),
  * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`),
- * hipkernel:LayernormFwd a kernel per workgroup size (`local_size`), and
- * hipkernel:LayernormBwd a kernel per scale/bias reduction and workgroup size (`parallel`,
- * `local_size`), so a caller can pin one. Unpinned, each engine's scorer ranks the
- * configuration the hand-written engine's heuristics choose first, and the plan is the
- * hand-written engine's.
+ * hipkernel:LayernormFwd, hipkernel:RmsNormFwd and hipkernel:RmsNormBwd a kernel per
+ * workgroup size (`local_size`), and hipkernel:LayernormBwd a kernel per scale/bias reduction
+ * and workgroup size (`parallel`, `local_size`), so a caller can pin one. Unpinned, each
+ * engine's scorer ranks the configuration the hand-written engine's heuristics choose first,
+ * and the plan is the hand-written engine's.
  *
  * Deliberate difference: a graph with override shapes is declined by every family. Each
  * bakes its shapes into the compiled program; the hand-written Resample builders were the
@@ -129,7 +129,7 @@ constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
 // Batchnorm training and backward: BatchnormSpatialConfig's variant, groupSize and
 // vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize. Layernorm forward:
 // LayernormFwdConfig's localSize. Layernorm backward: LayernormBwdConfig's parallel, 0 or 1,
-// and localSize.
+// and localSize. RMSnorm forward and backward: RMSnormConfig's localSize.
 constexpr std::string_view VARIANT_FIELD = "variant";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view VECTOR_SIZE_FIELD = "vector_size";
@@ -882,6 +882,103 @@ double layernormBwdScore(const MatchContext& context,
     return heuristicFirstScore(layernormBwdConfigOf(kernel), heuristic, order);
 }
 
+/// The RMSnorm forward params of the graph, alone or followed by an activation.
+rmsnorm::RMSnormFwdParams rmsnormFwdParams(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    const auto& attributes
+        = graph.getNodeWrapper(0).attributesAs<data_objects::RMSNormAttributes>();
+    // A fused graph's activation follows the RMSnorm.
+    return graph.nodeCount() == 2
+               ? rmsnorm::RMSnormFwdParams(
+                     attributes,
+                     graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                     tensorMap)
+               : rmsnorm::RMSnormFwdParams(attributes, tensorMap);
+}
+
+/// The RMSnorm backward params of the graph, alone or after an activation's backward.
+rmsnorm::RMSnormBwdParams rmsnormBwdParams(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    // A fused graph's activation backward precedes the RMSnorm backward.
+    const bool fused = graph.nodeCount() == 2;
+    const auto& attributes = graph.getNodeWrapper(fused ? 1 : 0)
+                                 .attributesAs<data_objects::RMSNormBackwardAttributes>();
+    return fused ? rmsnorm::RMSnormBwdParams(
+                       attributes,
+                       graph.getNodeWrapper(0).attributesAs<data_objects::PointwiseAttributes>(),
+                       tensorMap)
+                 : rmsnorm::RMSnormBwdParams(attributes, tensorMap);
+}
+
+/// The RMSnorm configuration @p kernel builds: its `local_size` workgroup.
+rmsnorm::RMSnormConfig rmsnormConfigOf(const KernelDefinition& kernel)
+{
+    return {kernel.getIntMetadata(std::string(LOCAL_SIZE_FIELD))};
+}
+
+/// The order the RMSnorm scorers rank the workgroups the hand-written plans do not use: the
+/// narrowest first.
+constexpr std::array<rmsnorm::RMSnormConfig, 3> RMSNORM_CONFIG_ORDER = {{{256}, {512}, {1024}}};
+
+/// Kernel-scoped, RMSnorm forward: the operation, and a workgroup whose launch fits
+/// (isRMSnormFwdConfigApplicable()). familyOf() has checked the default's launch only.
+bool rmsNormFwdKernelMatches(const MatchContext& context,
+                             const BoundTokens& bound,
+                             const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        return rmsnorm::isRMSnormFwdConfigApplicable(rmsnormFwdParams(context),
+                                                     rmsnormConfigOf(kernel));
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:RmsNormFwd declines kernel " << kernel.name << ": "
+                                                                       << error.what());
+        return false;
+    }
+}
+
+/// Kernel-scoped, RMSnorm backward: the operation, and a workgroup whose launches fit
+/// (isRMSnormBwdConfigApplicable()). familyOf() has checked the default's launches only.
+bool rmsNormBwdKernelMatches(const MatchContext& context,
+                             const BoundTokens& bound,
+                             const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        return rmsnorm::isRMSnormBwdConfigApplicable(rmsnormBwdParams(context),
+                                                     rmsnormConfigOf(kernel));
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:RmsNormBwd declines kernel " << kernel.name << ": "
+                                                                       << error.what());
+        return false;
+    }
+}
+
+/// Both RMSnorm engines: the hand-written plans' workgroup first, then RMSNORM_CONFIG_ORDER.
+double rmsNormScore(const MatchContext& /*context*/,
+                    const BoundTokens& /*bound*/,
+                    const KernelDefinition& kernel)
+{
+    return heuristicFirstScore(
+        rmsnormConfigOf(kernel), rmsnorm::RMSnormConfig{}, RMSNORM_CONFIG_ORDER);
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch: shared
 // ---------------------------------------------------------------------------
@@ -1465,6 +1562,7 @@ class RmsnormFwdDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the workgroup @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
@@ -1473,16 +1571,9 @@ public:
         const auto& tensorMap = graph.getTensorMap();
         const auto& attributes
             = graph.getNodeWrapper(0).attributesAs<data_objects::RMSNormAttributes>();
-        // A fused graph's ReLU follows the RMSnorm.
-        const auto params
-            = graph.nodeCount() == 2
-                  ? rmsnorm::RMSnormFwdParams(
-                        attributes,
-                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
-                        tensorMap)
-                  : rmsnorm::RMSnormFwdParams(attributes, tensorMap);
-        const auto build
-            = rmsnorm::buildRMSnormFwdKernel(params, context.deviceProperties.gcnArchName);
+        const auto params = rmsnormFwdParams(context);
+        const auto build = rmsnorm::buildRMSnormFwdKernel(
+            params, context.deviceProperties.gcnArchName, rmsnormConfigOf(kernel));
         auto codes = compileLaunches(_compiler, _loader, context, kernel, build);
 
         return std::make_unique<PreparedRmsnormFwd>(
@@ -1498,24 +1589,14 @@ class RmsnormBwdDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the workgroup @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
     {
-        const auto& graph = context.graph;
-        const auto& tensorMap = graph.getTensorMap();
-        // A fused graph's ReLU backward precedes the RMSnorm backward.
-        const bool fused = graph.nodeCount() == 2;
-        const auto& attributes = graph.getNodeWrapper(fused ? 1 : 0)
-                                     .attributesAs<data_objects::RMSNormBackwardAttributes>();
-        const auto params
-            = fused ? rmsnorm::RMSnormBwdParams(
-                          attributes,
-                          graph.getNodeWrapper(0).attributesAs<data_objects::PointwiseAttributes>(),
-                          tensorMap)
-                    : rmsnorm::RMSnormBwdParams(attributes, tensorMap);
-        const auto build
-            = rmsnorm::buildRMSnormBwdKernel(params, context.deviceProperties.gcnArchName);
+        const auto params = rmsnormBwdParams(context);
+        const auto build = rmsnorm::buildRMSnormBwdKernel(
+            params, context.deviceProperties.gcnArchName, rmsnormConfigOf(kernel));
 
         return std::make_unique<PreparedRmsnormBwd>(
             compileLaunches(_compiler, _loader, context, kernel, build), params);
@@ -2143,14 +2224,16 @@ void registerHipMlopsLayernormBwdSymbols(SymbolScope<Handle>& scope)
 void registerHipMlopsRmsNormFwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.rms_norm_fwd.graph_match", &rmsNormFwdGraphMatches);
-    scope.add("hipkernel.rms_norm_fwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.rms_norm_fwd.kernel_match", &rmsNormFwdKernelMatches);
+    scope.add("hipkernel.rms_norm_fwd.score", &rmsNormScore);
     scope.add("hipkernel.rms_norm_fwd.dispatch", &dispatchHandler<RmsnormFwdDispatchHandler>());
 }
 
 void registerHipMlopsRmsNormBwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.rms_norm_bwd.graph_match", &rmsNormBwdGraphMatches);
-    scope.add("hipkernel.rms_norm_bwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.rms_norm_bwd.kernel_match", &rmsNormBwdKernelMatches);
+    scope.add("hipkernel.rms_norm_bwd.score", &rmsNormScore);
     scope.add("hipkernel.rms_norm_bwd.dispatch", &dispatchHandler<RmsnormBwdDispatchHandler>());
 }
 

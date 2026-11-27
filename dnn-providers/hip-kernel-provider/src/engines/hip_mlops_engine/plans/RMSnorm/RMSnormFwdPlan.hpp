@@ -73,13 +73,19 @@ private:
 };
 
 /// The compile options and single launch of the RMSnormFwd kernel for @p params on
-/// @p gcnArchName. A fused activation is compiled in; its alpha and beta are launch
-/// arguments.
+/// @p gcnArchName, in workgroups of @p config's size. A fused activation is compiled in; its
+/// alpha and beta are launch arguments.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
 ///         that does not fit one launch.
 RMSnormKernelBuild buildRMSnormFwdKernel(const RMSnormFwdParams& params,
-                                         const std::string& gcnArchName);
+                                         const std::string& gcnArchName,
+                                         const RMSnormConfig& config);
+
+/// Whether the forward launch of @p config can run @p params: a supported workgroup
+/// (isLocalSizeSupported()) whose launch stays below the 2^32 threads HIP accepts.
+/// checkLaunchShapesFitThreadLimit() checks the default's.
+bool isRMSnormFwdConfigApplicable(const RMSnormFwdParams& params, const RMSnormConfig& config);
 
 class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
@@ -92,8 +98,10 @@ public:
     RMSnormFwdPlan(RMSnormFwdPlan&&) = default;
     RMSnormFwdPlan& operator=(RMSnormFwdPlan&&) = delete;
 
-    // Every kernel launch of the plan for a problem of the given outer size and stride.
-    static std::vector<KernelLaunchShape> launchShapes(int64_t outerSize, int64_t stride);
+    // Every kernel launch of the plan for a problem of the given outer size and stride, in
+    // workgroups of localSize threads.
+    static std::vector<KernelLaunchShape>
+        launchShapes(int64_t outerSize, int64_t stride, int64_t localSize);
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
@@ -105,8 +113,6 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    static constexpr int64_t LOCAL_SIZE = 256;
-
     RMSnormFwdParams _params;
 
     // Populated by compile()

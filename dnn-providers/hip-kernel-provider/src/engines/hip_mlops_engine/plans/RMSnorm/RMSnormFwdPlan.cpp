@@ -9,6 +9,7 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
 
+#include <algorithm>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -109,9 +110,24 @@ RMSnormFwdPlan::RMSnormFwdPlan(RMSnormFwdParams&& params)
 {
 }
 
-std::vector<KernelLaunchShape> RMSnormFwdPlan::launchShapes(int64_t outerSize, int64_t stride)
+std::vector<KernelLaunchShape>
+    RMSnormFwdPlan::launchShapes(int64_t outerSize, int64_t stride, int64_t localSize)
 {
-    return {{"RMSnormFwd", outerSize * stride, LOCAL_SIZE}};
+    return {{"RMSnormFwd", outerSize * stride, localSize}};
+}
+
+bool isRMSnormFwdConfigApplicable(const RMSnormFwdParams& params, const RMSnormConfig& config)
+{
+    if(!isLocalSizeSupported(config.localSize))
+    {
+        return false;
+    }
+    const ProblemDescription problem(params.x(), params.scale(), Direction::FORWARD);
+    const auto shapes
+        = RMSnormFwdPlan::launchShapes(problem.outerSize(), problem.stride(), config.localSize);
+    return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
+        return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);
+    });
 }
 
 size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
@@ -121,7 +137,8 @@ size_t RMSnormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) c
 }
 
 RMSnormKernelBuild buildRMSnormFwdKernel(const RMSnormFwdParams& params,
-                                         const std::string& gcnArchName)
+                                         const std::string& gcnArchName,
+                                         const RMSnormConfig& config)
 {
     // Extract dimensions from x tensor
     const auto* xDims = params.x()->dims();
@@ -136,7 +153,7 @@ RMSnormKernelBuild buildRMSnormFwdKernel(const RMSnormFwdParams& params,
     const int64_t stride = problem.stride();
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
-    const auto shapes = RMSnormFwdPlan::launchShapes(outerSize, stride);
+    const auto shapes = RMSnormFwdPlan::launchShapes(outerSize, stride, config.localSize);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
@@ -185,7 +202,8 @@ RMSnormKernelBuild buildRMSnormFwdKernel(const RMSnormFwdParams& params,
 void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                              const hipDeviceProp_t& deviceProperties)
 {
-    const auto build = buildRMSnormFwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    const auto build = buildRMSnormFwdKernel(
+        _params, std::string(deviceProperties.gcnArchName), RMSnormConfig{});
 
     if(_params.optActivation().has_value())
     {

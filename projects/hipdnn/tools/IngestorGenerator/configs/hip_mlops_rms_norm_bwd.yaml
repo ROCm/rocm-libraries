@@ -13,11 +13,18 @@ engine:
   # fixed order, so a (graph, configuration, device) gives the same bits every run:
   # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
   numerical_notes: []
-  heuristic: none
+  # Each workgroup size is a kernel of its own, addressed by this knob. The native scorer
+  # ranks the hand-written plan's first.
+  knobs: [local_size]
+  heuristic: native
 
+# local_size defaults to RMSnormConfig's own default, the hand-written plan's workgroup.
 kmd_fields:
   - name: operation
     type: string
+  - name: local_size
+    type: int
+    default_value: 256
 
 graph_match:
   shape: shared_shape
@@ -32,20 +39,41 @@ packs:
   # One program, two launches: RMSnormBwdData, then RMSnormBwdScaleBias by symbol. Also
   # serves the hand-written builder's two-node graph, an activation's backward fused before
   # the backward; the graph match tells it apart from the plain one.
+  # One kernel per workgroup size the build takes, of both launches: a power of two the
+  # data kernel's tree reduction halves, 256, 512 or 1024 threads.
   - name: rmsnorm_bwd
     kernels:
-      - name: hip_mlops.rmsnorm_bwd
+      - name: hip_mlops.rmsnorm_bwd.local256
         kernel_source:
           kind: embedded_source
           source_file: kernels/RMSNormBwd.cpp
           entry_point: RMSnormBwdData
         metadata:
           operation: RMSNORM_BWD
+          local_size: 256
+        priority: 0
+      - name: hip_mlops.rmsnorm_bwd.local512
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/RMSNormBwd.cpp
+          entry_point: RMSnormBwdData
+        metadata:
+          operation: RMSNORM_BWD
+          local_size: 512
+        priority: 0
+      - name: hip_mlops.rmsnorm_bwd.local1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/RMSNormBwd.cpp
+          entry_point: RMSnormBwdData
+        metadata:
+          operation: RMSNORM_BWD
+          local_size: 1024
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, local_size]
   bindings: {}
   vocabulary: {}

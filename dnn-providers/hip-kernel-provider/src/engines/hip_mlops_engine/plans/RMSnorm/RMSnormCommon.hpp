@@ -33,6 +33,31 @@ struct RMSnormKernelBuild
     std::vector<RMSnormLaunch> launches;
 };
 
+/// Whether @p localSize is a workgroup the RMSnorm kernels can run: their tree reductions
+/// halve it down to one lane, so a power of two, of at most 1024 threads.
+inline bool isLocalSizeSupported(int64_t localSize)
+{
+    return localSize >= 1 && localSize <= 1024 && (localSize & (localSize - 1)) == 0;
+}
+
+/// The performance choice of an RMSnorm plan: the workgroup of its launches, the forward's one
+/// and both of the backward's (HIP_PLUGIN_RMSNORM_LOCAL_SIZE). The default is the hand-written
+/// plans' configuration.
+struct RMSnormConfig
+{
+    int64_t localSize = 256;
+};
+
+inline bool operator==(const RMSnormConfig& lhs, const RMSnormConfig& rhs)
+{
+    return lhs.localSize == rhs.localSize;
+}
+
+inline bool operator!=(const RMSnormConfig& lhs, const RMSnormConfig& rhs)
+{
+    return !(lhs == rhs);
+}
+
 enum class Direction
 {
     FORWARD,

@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "597aa227-a9ac-475e-8f84-b9d439e41d6e",
+  "name": "RmsNormBwd selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.rms_norm_bwd.score"
+  }
+}

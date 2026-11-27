@@ -13,11 +13,18 @@ engine:
   # fixed order, so a (graph, configuration, device) gives the same bits every run:
   # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
   numerical_notes: []
-  heuristic: none
+  # Each workgroup size is a kernel of its own, addressed by this knob. The native scorer
+  # ranks the hand-written plan's first.
+  knobs: [local_size]
+  heuristic: native
 
+# local_size defaults to RMSnormConfig's own default, the hand-written plan's workgroup.
 kmd_fields:
   - name: operation
     type: string
+  - name: local_size
+    type: int
+    default_value: 256
 
 graph_match:
   shape: shared_shape
@@ -31,20 +38,41 @@ authored_subpath: descriptors/HipMlops/rms_norm_fwd
 packs:
   # Also serves the hand-written builder's two-node graph, an activation fused after the
   # forward; the graph match tells it apart from the plain one.
+  # One kernel per workgroup size the build takes: a power of two the kernel's tree
+  # reduction halves, 256, 512 or 1024 threads.
   - name: rmsnorm_fwd
     kernels:
-      - name: hip_mlops.rmsnorm_fwd
+      - name: hip_mlops.rmsnorm_fwd.local256
         kernel_source:
           kind: embedded_source
           source_file: kernels/RMSNormFwd.cpp
           entry_point: RMSnormFwd
         metadata:
           operation: RMSNORM_FWD
+          local_size: 256
+        priority: 0
+      - name: hip_mlops.rmsnorm_fwd.local512
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/RMSNormFwd.cpp
+          entry_point: RMSnormFwd
+        metadata:
+          operation: RMSNORM_FWD
+          local_size: 512
+        priority: 0
+      - name: hip_mlops.rmsnorm_fwd.local1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/RMSNormFwd.cpp
+          entry_point: RMSnormFwd
+        metadata:
+          operation: RMSNORM_FWD
+          local_size: 1024
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, local_size]
   bindings: {}
   vocabulary: {}

@@ -16,7 +16,8 @@
           "kmd_id": "48aebc14-a5e6-425f-8c38-55e431b794a7",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "local_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -28,14 +29,45 @@
     {
       "version": "1.0",
       "id": "a844e65d-ef7c-4a5d-8be4-d5553c437196",
-      "name": "hip_mlops.rmsnorm_fwd",
+      "name": "hip_mlops.rmsnorm_fwd.local256",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/RMSNormFwd.cpp",
         "entry_point": "RMSnormFwd"
       },
       "metadata": {
-        "operation": "RMSNORM_FWD"
+        "operation": "RMSNORM_FWD",
+        "local_size": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "61a5e23c-9a05-4d87-a73e-332195915ed6",
+      "name": "hip_mlops.rmsnorm_fwd.local512",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/RMSNormFwd.cpp",
+        "entry_point": "RMSnormFwd"
+      },
+      "metadata": {
+        "operation": "RMSNORM_FWD",
+        "local_size": 512
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "29d8f8a9-2fbb-487c-8c90-c4486681d717",
+      "name": "hip_mlops.rmsnorm_fwd.local1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/RMSNormFwd.cpp",
+        "entry_point": "RMSnormFwd"
+      },
+      "metadata": {
+        "operation": "RMSNORM_FWD",
+        "local_size": 1024
       },
       "priority": 0
     }

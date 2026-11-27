@@ -6,6 +6,11 @@
     {
       "name": "operation",
       "type": "string"
+    },
+    {
+      "name": "local_size",
+      "type": "int",
+      "default_value": 256
     }
   ]
 }

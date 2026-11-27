@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "37eb5dfc-9f6b-45ef-95aa-e2efce9b73ca",
+  "name": "RmsNormFwd selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.rms_norm_fwd.score"
+  }
+}
