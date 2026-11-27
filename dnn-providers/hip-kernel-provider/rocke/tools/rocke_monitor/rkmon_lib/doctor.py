@@ -1987,13 +1987,13 @@ def _split_found(r: dict, side: str = "") -> str:
 
 
 def gh_split_checks(cfg: dict, check=None) -> list[Check]:
-    """The GitHub read/write split, probed now on both sides (gh.probe: a comment with no body and a branch with no
-    name, each refused either way, so nothing is made; ghlogins.py): the read login (and the session's, when it is
-    another folder) must be refused both (403); the write login is judged by need (ghlogins.write_lacks): it must be
-    able to comment, and to push while something that is on turns auto-merge on or off, and one that may comment but
-    not push says what that leaves. A side with no login is never a PASS: the read side's and the session's reads, and
-    the write side's writes when something that is on writes, need one. In the container the write login is probed
-    through the broker, as the write user. `check`: ghlogins.check, for a test.
+    """The GitHub read/write split, probed now on both sides (gh.probe: a comment with no body and a branch on a commit
+    that does not exist, each refused either way, so nothing is made; ghlogins.py): the read login (and the session's,
+    when it is another folder) must be refused both (403); the write login is judged by need (ghlogins.write_lacks): it
+    must be able to comment, and to push while something that is on turns auto-merge on or off, and one that may
+    comment but not push says what that leaves. A side with no login is never a PASS: the read side's and the session's
+    reads, and the write side's writes when something that is on writes, need one. In the container the write login is
+    probed through the broker, as the write user. `check`: ghlogins.check, for a test.
     """
     from . import ghlogins
 

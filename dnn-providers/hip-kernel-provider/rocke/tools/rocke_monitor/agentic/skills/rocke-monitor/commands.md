@@ -174,11 +174,11 @@ session (their premises read git, their AFTER lines run commands), and only thei
 host both folders are one user's, and the split stands only because nothing else is pointed at the write one.
 
 `rk status`, `rk gh-logins` and every tick check the split with two writes GitHub refuses either way, so nothing is
-made: a comment with no body on `gh.probe_issue`, and a branch with no name. GitHub answers 422 when the login may make
-it and 403 when it may not; `<PACKAGE_DIR>/README.md`, "The GitHub CLI", says what each login must and must not be able
-to do. The check runs at most once an hour, or at once when a folder's login file changes, and its result is kept in
-`state/gh_logins.json`. A `!! GH_LOGIN` line stands while a login can do what it must not, or cannot do what is needed
-of it, and names the login, its folder, what is wrong and the fix: tell <user_login>.
+made: a comment with no body on `gh.probe_issue`, and a branch on a commit that does not exist. GitHub answers 422 when
+the login may make it and 403 when it may not; `<PACKAGE_DIR>/README.md`, "The GitHub CLI", says what each login must
+and must not be able to do. The check runs at most once an hour, or at once when a folder's login file changes, and its
+result is kept in `state/gh_logins.json`. A `!! GH_LOGIN` line stands while a login can do what it must not, or cannot
+do what is needed of it, and names the login, its folder, what is wrong and the fix: tell <user_login>.
 
 On a host whose gh login sits in gh's own folder, <user_login> makes the split once, between ticks, with
 `tools/gh_split_apply.py`: the write login moves to its own folder (`gh.write_config_dir`), and gh's own folder gets a

@@ -91,11 +91,11 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        computed again (git work), and the dashboard written with it. Whether it is configured right
                        and reaches everything: doctor
   gh-logins [--side read|write|session] [--json]   which GitHub login each side uses and whether the split is right,
-                       probed now (a comment with no body and a branch with no name, each refused either way: 422
-                       may, 403 may not; rkmon_lib/ghlogins.py): exit 1 when the read or the session login can write,
-                       or the write login cannot comment while something that is on writes to GitHub, or push while
-                       something that is on turns auto-merge on or off. --side: that side only (--json: its probe as
-                       JSON; the container's broker runs `--side write` as the write user)
+                       probed now (a comment with no body and a branch on a commit that does not exist, each refused
+                       either way: 422 may, 403 may not; rkmon_lib/ghlogins.py): exit 1 when the read or the session
+                       login can write, or the write login cannot comment while something that is on writes to GitHub,
+                       or push while something that is on turns auto-merge on or off. --side: that side only (--json:
+                       its probe as JSON; the container's broker runs `--side write` as the write user)
   pause | resume       pause the monitor and resume it: while paused (OFF) the tick decides nothing and starts nothing
                        new; running jobs finish (the Claude loop checks this every tick)
   stop [--drain [--timeout-minutes N]]   stop the running pieces now: the review driver, the work in flight (the
@@ -595,11 +595,11 @@ Setup and checks (they work before the configuration is complete):
                        integrations.claude_code's settings say); its row, PASS, WARN or FAIL with the fix, exit 4 on a
                        FAIL (docker/rkmon login claude runs it once the key is set)
   read-login           a GitHub token on stdin as the read login, never printed: logged in to a folder of its own
-                       first, where the probe asks whether it can write (a comment with no body and a branch with no
-                       name, each refused either way), then that folder's login takes the read login's folder's place,
-                       whole; one that can write or one GitHub does not take is refused, as is every token while
-                       repository.name names no public repository (the monitor watches public ones only): exit 4, and
-                       nothing changes (docker/rkmon login github_read runs it)
+                       first, where the probe asks whether it can write (a comment with no body and a branch on a
+                       commit that does not exist, each refused either way), then that folder's login takes the read
+                       login's folder's place, whole; one that can write or one GitHub does not take is refused, as is
+                       every token while repository.name names no public repository (the monitor watches public ones
+                       only): exit 4, and nothing changes (docker/rkmon login github_read runs it)
   host-key NAME [--json|--record]
                        the own keys of the host the secret NAME's ssh key is for (web_host_ssh_key: the web host;
                        gpu_ssh_key: the GPU login host), the only keys ssh trusts it by: as ssh-keyscan reads them
@@ -4253,7 +4253,7 @@ def _run_command(args, cfg: dict, store) -> int:
             return cmd_status(args, cfg, store)
         if (
             args.cmd == "gh-logins"
-        ):  # the probes only, a comment with no body and a branch with no name: GitHub refuses both, nothing is made
+        ):  # the probes only (gh.probe): GitHub refuses both, nothing is made
             if args.side and args.json:
                 print(ghlogins.side_json(cfg, args.side))
                 return 0

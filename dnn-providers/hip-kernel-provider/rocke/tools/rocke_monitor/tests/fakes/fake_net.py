@@ -11,9 +11,11 @@ here reaches the network.
   the base branch's head as the tick reads it (rkmon_lib/snapshot.py _BRANCH: develop's), and what gh's own login
   asks: the API's root (with no scopes header, as for a fine-grained token), /user and the viewer's login. Each call
   must carry a token the deployment logs in with, the read login's, or the write login's when CONFIG gives one: a
-  call with another token, or none, is answered 401, as GitHub answers a token it does not know. Every write with the
-  read login's token is refused as GitHub refuses a token that may only read (403), the login check's probes among
-  them (PROBES): a comment with an empty body and a branch with no name and no commit, which GitHub never makes. The
+  call with another token, or none, is answered 401, as GitHub answers a token it does not know. A branch whose
+  commit is not an id by its shape is refused for its shape (422, "Invalid request") whatever the token, as GitHub
+  checks a request's shape before it asks what the token may do (shape_refused). Every other write with the read
+  login's token is refused as GitHub refuses a token that may only read (403), the login check's probes among them
+  (PROBES): a comment with an empty body and a branch on a commit that does not exist, which GitHub never makes. The
   write login's probes are answered as GitHub answers a login that may write, which validates them and makes nothing
   (422); its comment on a pull request, as `gh pr comment` makes one, goes through: the pull request it looks up by
   its number, any number (its id and URL), then the comment, whose URL it answers. Any other write is refused (403).
@@ -83,9 +85,9 @@ VALIDATION_FAILED = {
     "documentation_url": "https://docs.github.com/rest",
     "status": "422",
 }
-# and to a branch with no name and no commit by a login that may push: it validates them, and makes nothing
-REF_VALIDATION_FAILED = {
-    "message": "Validation Failed",
+# and to a branch on a commit that does not exist by a login that may push: it looks the commit up, and makes nothing
+OBJECT_MISSING = {
+    "message": "Object does not exist",
     "documentation_url": "https://docs.github.com/rest",
     "status": "422",
 }
@@ -95,18 +97,23 @@ BAD_CREDENTIALS = {
     "documentation_url": "https://docs.github.com/rest",
     "status": "401",
 }
-# the login check's probes (rkmon_lib/gh.py probe), each by its path, the fields it leaves empty and the answer to a
-# login that may make it
+REFS = re.compile(r"repos/[\w.-]+/[\w.-]+/git/refs")  # a new branch's path
+# a commit's id, as GitHub checks the shape of a new branch's (its answer, shape_refused, names it); and the id no
+# object has
+COMMIT_ID, NULL_ID = "^([0-9a-f]{40}(?:[0-9a-f]{24})?)$", "0" * 40
+# the login check's probes (rkmon_lib/gh.py probe), each by its path, what its request holds and the answer to a login
+# that may make it: a comment with an empty body, and a branch on the id no object has
 PROBES = (
     (
         re.compile(r"repos/[\w.-]+/[\w.-]+/issues/\d+/comments"),
-        ("body",),
+        lambda body: body.get("body") == "",
         VALIDATION_FAILED,
     ),
     (
-        re.compile(r"repos/[\w.-]+/[\w.-]+/git/refs"),
-        ("ref", "sha"),
-        REF_VALIDATION_FAILED,
+        REFS,
+        lambda body: str(body.get("ref", "")).startswith("refs/heads/")
+        and body.get("sha") == NULL_ID,
+        OBJECT_MISSING,
     ),
 )
 GIT_PATH = re.compile(
@@ -123,10 +130,24 @@ def names(config: dict) -> list:
 def probe_answer(path: str, body: dict) -> dict | None:
     """The answer to a login that may make it, when a POST of BODY to api.github.com's PATH (without its leading
     slash) is one of the login check's probes (PROBES); None when it is none of them."""
-    for pattern, empty, answer in PROBES:
-        if pattern.fullmatch(path) and all(body.get(k) == "" for k in empty):
+    for pattern, holds, answer in PROBES:
+        if pattern.fullmatch(path) and holds(body):
             return answer
     return None
+
+
+def shape_refused(path: str, body: dict) -> dict | None:
+    """GitHub's answer to a POST of BODY to api.github.com's PATH (without its leading slash) that it refuses for its
+    shape, before it asks what the token may do: a new branch whose commit is not an id (COMMIT_ID). None for any
+    other."""
+    sha = str(body.get("sha", ""))
+    if not REFS.fullmatch(path) or re.fullmatch(COMMIT_ID, sha):
+        return None
+    return {
+        "message": f'Invalid request.\n\n"{sha}" does not match /{COMMIT_ID}/.',
+        "documentation_url": "https://docs.github.com/rest",
+        "status": "422",
+    }
 
 
 class Net(fake_servers.GitHub):
@@ -246,6 +267,11 @@ class Net(fake_servers.GitHub):
                 return
             if path == "graphql" and "mutation" not in query:
                 super().do_POST()
+                return
+            refused = shape_refused(path, self.body())
+            if refused is not None:
+                self.record(write=True, probe=False)
+                self.answer(422, refused)
                 return
             probed = probe_answer(path, self.body())
             self.record(write=True, probe=probed is not None)

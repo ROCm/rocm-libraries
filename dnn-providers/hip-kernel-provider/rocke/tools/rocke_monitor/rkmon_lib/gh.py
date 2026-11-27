@@ -20,9 +20,9 @@ gh write off. `_exec` is the one place that starts gh and `exec_read` the one th
 (tests/test_gh_split.py). In the container the gh they start is the GitHub request cap's counter (docker/rk_gh.py),
 which counts each call (rkmon_lib/gh_cap.py); both wait first while the cap leaves no room, and say so on standard error
 (gh_cap.wait_for_room), so that a time limit runs on gh's own time. `probe` tells the logins apart (ghlogins.py): two
-writes GitHub refuses either way, a comment with no body and a branch with no name, each answered 422 for a login that
-may make it and 403 for one that may not; a login that may make either can write. `login_with_token` logs a token in
-to a folder (`rk read-login`: ghlogins.set_read).
+writes GitHub refuses either way, a comment with no body and a branch on a commit that does not exist, each answered
+422 for a login that may make it and 403 for one that may not; a login that may make either can write.
+`login_with_token` logs a token in to a folder (`rk read-login`: ghlogins.set_read).
 """
 
 from __future__ import annotations
@@ -482,6 +482,15 @@ def logged_in_as(status: str) -> tuple[str, str]:
 
 
 _HTTP = re.compile(r"\(HTTP (\d{3})\)|\bHTTP (\d{3})\b")
+# GitHub's own words in gh's line for a call it refused ("gh: Object does not exist (HTTP 422)"), which the
+# probe's answer to a 422 keeps (_answer)
+_SAID = re.compile(r"gh: (.+?) \(HTTP \d{3}\)", re.S)
+# The probe's branch (probe), a well-formed request: GitHub answers a malformed one 422 before it asks what the token
+# may do. Its commit, all zeros, never exists, so nothing is made.
+PROBE_REF, PROBE_SHA = "refs/heads/rkmon-write-probe", "0" * 40
+# How GitHub's answer begins when it refuses a request for its shape, before it asks what the token may do: such a 422
+# says nothing of the login (_answer)
+SHAPE_REFUSED = "Invalid request"
 
 
 def probe_issue(cfg: dict) -> int:
@@ -492,16 +501,26 @@ def probe_issue(cfg: dict) -> int:
 
 
 def _answer(p: subprocess.CompletedProcess) -> tuple:
-    """(may, http, words): one of the probe's writes as gh answered it. `may`: True when GitHub would make it (422, or
-    made: never expected), False when it refuses it (403, or no login), None when that is not known.
+    """(may, http, words): one of the probe's writes as gh answered it, a 422 in GitHub's own words (_SAID). `may`:
+    True when GitHub would make it (422, or made: never expected), False when it refuses it (403, or no login), None
+    when that is not known (among them a 422 for the request's shape, SHAPE_REFUSED, which GitHub gives before it asks
+    what the token may do).
     """
     text = f"{p.stderr}\n{p.stdout}"
     m = _HTTP.search(text)
     http = int(m.group(1) or m.group(2)) if m else None
     if p.returncode == 0:
         return True, http, "accepted"
+    if http == 422 and SHAPE_REFUSED in text:
+        return (
+            None,
+            http,
+            "HTTP 422 for the request's shape: it says nothing of the login",
+        )
     if http == 422:
-        return True, http, "HTTP 422 (validation): allowed"
+        said = _SAID.search(p.stderr or "")
+        words = " ".join(said.group(1).split())[:80] if said else "validation"
+        return True, http, f"HTTP 422 ({words}): allowed"
     if http == 403:
         return False, http, "HTTP 403: refused"
     if (
@@ -517,8 +536,8 @@ def _answer(p: subprocess.CompletedProcess) -> tuple:
 
 def probe(folder: str, repo: str, issue: int, timeout: float = 60) -> dict:
     """The login in gh folder `folder` and whether it may write to `repo`. GitHub is asked for two writes it refuses
-    either way, so nothing is made: a comment with no body on `issue`, and a branch with no name and no commit. It
-    answers each with 422 (validation) when the login may make it, 403 when it may not.
+    either way, so nothing is made: a comment with no body on `issue`, and a branch (PROBE_REF) on a commit that does
+    not exist (PROBE_SHA). It answers each with 422 (validation) when the login may make it, 403 when it may not.
     {"dir", "login", "http": the comment's HTTP status, "can_comment", "can_push", "can_write": whether it may make
     either, each True | False | None (not known), "why", "held": whether the folder has a login (its HOSTS_FILE), None
     when this user cannot read it}. A folder that has none is not probed.
@@ -563,7 +582,16 @@ def probe(folder: str, repo: str, issue: int, timeout: float = 60) -> dict:
             timeout,
         )
         push = _exec(
-            ["api", "-X", "POST", f"repos/{repo}/git/refs", "-f", "ref=", "-f", "sha="],
+            [
+                "api",
+                "-X",
+                "POST",
+                f"repos/{repo}/git/refs",
+                "-f",
+                f"ref={PROBE_REF}",
+                "-f",
+                f"sha={PROBE_SHA}",
+            ],
             folder,
             timeout,
         )
@@ -835,7 +863,8 @@ CALLS = (
     (
         BOTH,
         "POST repos/{repo}/git/refs",
-        "the probe: a branch with no name, refused either way: 422 when the login may push, 403 when it may not",
+        "the probe: a branch on a commit that does not exist, refused either way: 422 when the login may push, "
+        "403 when it may not",
         (),
     ),
     (BOTH, "gh auth login", "a login, made (rkmon login)", ()),

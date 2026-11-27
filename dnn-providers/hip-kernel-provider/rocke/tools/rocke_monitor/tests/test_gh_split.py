@@ -217,7 +217,7 @@ class TestChokePoints(unittest.TestCase):
 # --- a fake gh --------------------------------------------------------------------------------------------------------
 
 FAKE_GH = r"""#!/usr/bin/env python3
-import json, os, sys
+import json, os, re, sys
 a = sys.argv[1:]
 d = os.environ.get("GH_CONFIG_DIR") or os.path.join(os.environ.get("XDG_CONFIG_HOME") or
                                                     os.path.join(os.environ["HOME"], ".config"), "gh")
@@ -235,10 +235,14 @@ if a[:3] == ["api", "-X", "POST"] and joined.endswith("-f body="):  # the login 
         print("gh: Resource not accessible by personal access token (HTTP 403)", file=sys.stderr)
     sys.exit(1)
 if a[:3] == ["api", "-X", "POST"] and "/git/refs" in joined:  # the login probe's push
-    if not os.path.exists(os.path.join(d, "NO_PUSH")) and (
+    sha = dict(v.split("=", 1) for f, v in zip(a, a[1:]) if f == "-f").get("sha", "")
+    commit_id = os.environ["FAKE_GH_COMMIT_ID"]  # GitHub's pattern for a commit's id (fake_net.COMMIT_ID)
+    if not re.fullmatch(commit_id, sha):  # GitHub checks a request's shape first
+        print(f'gh: Invalid request.\n\n"{sha}" does not match /{commit_id}/. (HTTP 422)', file=sys.stderr)
+    elif not os.path.exists(os.path.join(d, "NO_PUSH")) and (
             os.path.basename(d).startswith("write") or os.path.exists(os.path.join(d, "CAN_PUSH")) or (
             os.environ.get("FAKE_CAN_WRITE_DIR") == d)):
-        print("gh: Validation Failed (HTTP 422)", file=sys.stderr)
+        print("gh: Object does not exist (HTTP 422)", file=sys.stderr)
     else:
         print("gh: Resource not accessible by personal access token (HTTP 403)", file=sys.stderr)
     sys.exit(1)
@@ -289,6 +293,7 @@ class FakeGh(unittest.TestCase):
                     "PATH": f"{b}{os.pathsep}{os.environ['PATH']}",
                     "FAKE_GH_LOG": str(self.log),
                     "FAKE_GH_RULES": str(self.rules_file),
+                    "FAKE_GH_COMMIT_ID": fake_net.COMMIT_ID,
                     "GH_TOKEN": "must-not-reach-gh",
                     "GITHUB_TOKEN": "nor-this",
                     "GH_CONFIG_DIR": str(self.W),
@@ -713,6 +718,20 @@ class TestLogins(FakeGh):
         )
         self.assertEqual(len(self.calls()), 2 * n)
 
+    def test_a_result_of_another_probe_is_probed_again_at_once(self):
+        """A result kept from another probe (CACHE_PROBE), as an earlier package asked GitHub, is not reused: the
+        next tick probes again at once, whatever its age."""
+        ghlogins.status_lines(self.cfg, self.store)
+        n = len(self.calls())
+        kept = self.store.dir / ghlogins.CACHE_FILE
+        c = json.loads(kept.read_text())
+        self.assertEqual(c.pop("probe"), ghlogins.CACHE_PROBE)
+        kept.write_text(json.dumps(c))  # as an earlier package kept it
+        self.assertTrue(
+            ghlogins.tick_lines(self.cfg, self.store)[0].startswith("GH_LOGINS ")
+        )
+        self.assertEqual(len(self.calls()), 2 * n)
+
     def test_the_probe_result_is_written_whole_at_the_states_shared_mode(self):
         """The probe's result is written whole, at the state's shared mode whatever the umask, with nothing left
         beside it."""
@@ -802,7 +821,7 @@ class TestLogins(FakeGh):
             ),
         )
         c, _ = ghlogins.check(self.live, None)
-        why = "a comment: HTTP 422 (validation): allowed; a push: HTTP 403: refused"
+        why = "a comment: HTTP 422 (Validation Failed): allowed; a push: HTTP 403: refused"
         said = f"can comment but not push: {ghlogins.NO_PUSH}"
         self.assertEqual(c["sides"]["write"]["why"], why)
         self.assertIn(f"write write-login {said} ({self.W})", ghlogins.summary(c))
@@ -846,7 +865,7 @@ class TestLogins(FakeGh):
         cfg = dict(self.live, gh=dict(self.split, write_config_dir=str(p)))
         c, _ = ghlogins.check(cfg, None)
         self.assertIs(c["sides"]["write"]["can_write"], True)
-        why = "a comment: HTTP 403: refused; a push: HTTP 422 (validation): allowed"
+        why = "a comment: HTTP 403: refused; a push: HTTP 422 (Object does not exist): allowed"
         with mock.patch.dict(os.environ, {"RKMON_CONTAINER": "", "RKMON_WRAPPER": ""}):
             self.assertEqual(
                 ghlogins.alarms(cfg, c),
@@ -875,7 +894,7 @@ class TestLogins(FakeGh):
         """A note says a side the probe could not settle: the write side while an answer it is judged by
         (write_lacks) is not known, and not for one it is not judged by, nor for one GitHub refused (the alarm's).
         """
-        why = "a comment: HTTP 422 (validation): allowed; a push: timed out"
+        why = "a comment: HTTP 422 (Validation Failed): allowed; a push: timed out"
         c = {
             "sides": {
                 "read": {"can_write": False, "why": "HTTP 403: refused"},
@@ -966,8 +985,9 @@ class TestLogins(FakeGh):
 
     def test_a_read_login_that_may_push_can_write(self):
         """The probe asks GitHub for a push as well as a comment, each refused either way, so nothing is made (a branch
-        with no name and no commit, a comment with no body): a read login that may push but not comment can write, an
-        alarm as any other."""
+        on a commit that does not exist, a comment with no body): a read login that may push but not comment can write,
+        an alarm as any other. The branch's request is well-formed: GitHub refuses one that is not for its shape (422)
+        whatever the login, which the fake gh does too."""
         r, w = gh.probe(str(self.R), "o/r", 1), gh.probe(str(self.W), "o/r", 1)
         self.assertEqual(
             [(p["can_comment"], p["can_push"], p["can_write"]) for p in (r, w)],
@@ -981,15 +1001,13 @@ class TestLogins(FakeGh):
         )
         self.assertEqual(
             r["why"],
-            "a comment: HTTP 403: refused; a push: HTTP 422 (validation): allowed",
+            "a comment: HTTP 403: refused; a push: HTTP 422 (Object does not exist): allowed",
         )
         pushes = {
             tuple(c["argv"]) for c in self.calls() if "/git/refs" in " ".join(c["argv"])
         }
-        self.assertEqual(
-            pushes,
-            {("api", "-X", "POST", "repos/o/r/git/refs", "-f", "ref=", "-f", "sha=")},
-        )
+        branch = ("-f", f"ref={gh.PROBE_REF}", "-f", f"sha={gh.PROBE_SHA}")
+        self.assertEqual(pushes, {("api", "-X", "POST", "repos/o/r/git/refs", *branch)})
         alarms = [
             x for x in ghlogins.tick_lines(self.live, self.store) if x.startswith("!! ")
         ]
@@ -999,8 +1017,8 @@ class TestLogins(FakeGh):
 
     def test_the_image_test_s_stand_in_takes_the_probe_s_writes_as_probes(self):
         """The image test's stand-in GitHub (tests/fakes/fake_net.py) takes each write the probe asks for as one of the
-        login check's probes, which the deploy path counts as no write of the deployment's, and answers a login that
-        may make it as GitHub does (422)."""
+        login check's probes, which the deploy path counts as no write of the deployment's, refuses none for its shape,
+        and answers a login that may make it as GitHub does (422)."""
         gh.probe(str(self.R), "o/r", 1)
         writes = [c["argv"] for c in self.calls() if is_write(c["argv"])]
         self.assertEqual(len(writes), 2, writes)
@@ -1008,8 +1026,39 @@ class TestLogins(FakeGh):
             fields = dict(v.split("=", 1) for f, v in zip(argv, argv[1:]) if f == "-f")
             with self.subTest(path=argv[3]):
                 self.assertEqual(argv[:3], ["api", "-X", "POST"])
+                self.assertIsNone(fake_net.shape_refused(argv[3], fields), argv)
                 answer = fake_net.probe_answer(argv[3], fields)
                 self.assertEqual((answer or {}).get("status"), "422", argv)
+
+    def test_a_422_for_the_request_s_shape_says_nothing_of_the_login(self):
+        """GitHub refuses a request for its shape (422, gh.SHAPE_REFUSED) before it asks what the token may do: the
+        probe takes that answer as not known, never as a login that may make the write; any other 422 is one, in
+        GitHub's own words.
+        """
+        said = '"" does not match /^([0-9a-f]{40}(?:[0-9a-f]{24})?)$/.'
+        shape = subprocess.CompletedProcess(
+            [],
+            1,
+            stdout=json.dumps(
+                {"message": f"Invalid request.\n\n{said}", "status": "422"}
+            ),
+            stderr=f"gh: Invalid request.\n\n{said} (HTTP 422)\n",
+        )
+        self.assertEqual(
+            gh._answer(shape),
+            (
+                None,
+                422,
+                "HTTP 422 for the request's shape: it says nothing of the login",
+            ),
+        )
+        missing = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="gh: Object does not exist (HTTP 422)\n"
+        )
+        self.assertEqual(
+            gh._answer(missing),
+            (True, 422, "HTTP 422 (Object does not exist): allowed"),
+        )
 
     def test_rk_doctor_checks_both_sides(self):
         from rkmon_lib import doctor

@@ -496,8 +496,8 @@ PACKAGE_KEYS = {
     ),
     "gh.probe_issue": (
         "The issue or PR of <ROCKE_REPO> the logins' check comments on with an empty body, which GitHub refuses either "
-        "way (nothing is made): 422 when the login may comment, 403 when it may not. Its other probe, a branch with no "
-        "name, asks the same of a push and needs no issue. Default: 1."
+        "way (nothing is made): 422 when the login may comment, 403 when it may not. Its other probe, a branch on a "
+        "commit that does not exist, asks the same of a push and needs no issue. Default: 1."
     ),
     "retention.log_max_mb": (
         "The size past which each full tick moves an append-only state log (the journal, the .jsonl logs and web.log: "

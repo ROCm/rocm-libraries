@@ -4,8 +4,8 @@
 tick); and the read login set from a token, never one that can write (`rk read-login`: set_read, which `rkmon login
 github_read` runs; the Claude session may not run it, rkmon_lib/outward.py).
 
-Up to three folders are probed (gh.probe: a comment with no body and a branch with no name, each refused either way,
-so nothing is made; 422 for a login that may make it, 403 for one that may not):
+Up to three folders are probed (gh.probe: a comment with no body and a branch on a commit that does not exist, each
+refused either way, so nothing is made; 422 for a login that may make it, 403 for one that may not):
 - read: the read login (gh.login_dirs); it must make neither;
 - write: the write login, judged by need (`write_lacks`): it must be able to comment while something that is on writes
   to GitHub (secrets_registry.needed_by: nothing does while review automation and the merge queue are in prototype),
@@ -17,12 +17,12 @@ so nothing is made; 422 for a login that may make it, 403 for one that may not):
   with, which names the read login's folder whenever there is one (gh.settings); probed only when it is not the read
   folder, and it must not be able to write either.
 A probe runs at most once an hour (CACHE_MIN), or at once when a folder or its login file changes (a login made or
-rotated); the result is kept in state/gh_logins.json. A `!! GH_LOGIN` line stands while the cached result breaks the
-split, with its fix as the operator types it here (doctor.gh_login_fix). A folder with no login in it (gh.probe's
-`held`) is named "none". With no split, nothing is probed and it is said once, no alarm: a configuration that names no
-folders (gh's own folder for both), or one with no read login yet (gh.login_dirs "unsplit": the write login makes the
-reads and the writes until `rkmon login github_read` sets the read login). The result is written whole (whole_file), at
-the state's shared mode (worker/perms.py).
+rotated), or when the kept result is another probe's (CACHE_PROBE); the result is kept in state/gh_logins.json.
+A `!! GH_LOGIN` line stands while the cached result breaks the split, with its fix as the operator types it here
+(doctor.gh_login_fix). A folder with no login in it (gh.probe's `held`) is named "none". With no split, nothing is
+probed and it is said once, no alarm: a configuration that names no folders (gh's own folder for both), or one with no
+read login yet (gh.login_dirs "unsplit": the write login makes the reads and the writes until `rkmon login github_read`
+sets the read login). The result is written whole (whole_file), at the state's shared mode (worker/perms.py).
 """
 
 from __future__ import annotations
@@ -39,6 +39,9 @@ from .store import minutes_since, now
 
 CACHE_FILE = "gh_logins.json"
 CACHE_MIN = 60
+# What the probe asks GitHub for (gh.probe), kept with its result: one kept from another probe, an earlier
+# package's, is probed again at once (check)
+CACHE_PROBE = [gh.PROBE_REF, gh.PROBE_SHA]
 
 
 def folders(cfg: dict) -> dict:
@@ -102,7 +105,8 @@ def probe_side(cfg: dict, side: str, folder: str, run=subprocess.run) -> dict:
 
 def check(cfg: dict, store=None, force: bool = False) -> tuple[dict, bool]:
     """(the probe result, whether it was probed now): the cached one while it is under CACHE_MIN old, for the same
-    folders and the same login files (_stamps), unless `force`. `store` None: no cache (rk doctor).
+    folders, the same login files (_stamps) and the same probe (CACHE_PROBE), unless `force`. `store` None: no cache
+    (rk doctor).
     """
     f = folders(cfg)
     stamps = _stamps(f)
@@ -112,12 +116,14 @@ def check(cfg: dict, store=None, force: bool = False) -> tuple[dict, bool]:
         and not force
         and c.get("folders") == f
         and c.get("stamps") == stamps
+        and c.get("probe") == CACHE_PROBE
         and minutes_since(c.get("at") or "2000-01-01T00:00:00Z") < CACHE_MIN
     ):
         return c, False
     c = {
         "at": now(),
         "repo": cfg.get("repo"),
+        "probe": CACHE_PROBE,
         "folders": f,
         "unsplit": gh.login_dirs(cfg).get("unsplit", ""),
         "stamps": stamps,

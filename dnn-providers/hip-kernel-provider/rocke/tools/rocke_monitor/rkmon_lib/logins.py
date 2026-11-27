@@ -176,7 +176,11 @@ def _state(cfg: dict, entry, gh_sides: dict | None = None) -> tuple[str, str]:
             if can is False:
                 return "SET", f"{login} reads only"
             if can is True:
-                return "WRONG", f"{login or '?'} can write: log a read-only token in"
+                why = f" ({side['why']})" if side.get("why") else ""
+                return (
+                    "WRONG",
+                    f"{login or '?'} can write{why}: log a read-only token in",
+                )
         return (
             ("MISSING", "no login")
             if not login

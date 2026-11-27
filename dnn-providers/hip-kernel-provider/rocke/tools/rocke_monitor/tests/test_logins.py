@@ -131,7 +131,11 @@ class TestLogins(Base):
     def test_missing_and_wrong(self):
         r = self.rows(
             {
-                "read": {"login": "op-login", "can_write": True},
+                "read": {
+                    "login": "op-login",
+                    "can_write": True,
+                    "why": "a comment and a push: HTTP 422 (Validation Failed): allowed",
+                },
                 "write": {"login": None, "can_write": None},
             },
             {
@@ -145,7 +149,11 @@ class TestLogins(Base):
             },
         )
         self.assertEqual(r["github_read"]["state"], "WRONG")
-        self.assertIn("log a read-only token in", r["github_read"]["found"])
+        self.assertEqual(
+            r["github_read"]["found"],
+            "op-login can write (a comment and a push: HTTP 422 (Validation Failed): allowed): log a read-only "
+            "token in",
+        )
         self.assertEqual(
             (r["github_write"]["state"], r["github_write"]["needed_by"]),
             ("MISSING", ["review posting"]),
@@ -177,7 +185,7 @@ class TestLogins(Base):
         says what that leaves; WRONG once the merge queue would turn auto-merge on, and while the auto-merge guard
         acts, which turns it off, with auto-merge "disabled" too. One that may push but not comment is WRONG while
         anything writes."""
-        why = "a comment: HTTP 422 (validation): allowed; a push: HTTP 403: refused"
+        why = "a comment: HTTP 422 (Validation Failed): allowed; a push: HTTP 403: refused"
         sides = {
             "read": {"login": "reader", "can_write": False},
             "write": {

@@ -321,8 +321,8 @@ secret whose row names `--generate` is set from a file too, such as `./rkmon sec
 browser flow, and `--with-token` changes nothing for it. The token is logged in to a folder of its own first, where a
 probe asks GitHub whether it can write: it comments with no body on issue or pull request 1 of `<org>/<repo>`, the
 one the package's defaults name
-([docs/internal_settings.md, "Package defaults"](docs/internal_settings.md#package-defaults)), and makes a branch with
-no name, which GitHub refuses either way, so nothing is made. A token that can write is refused
+([docs/internal_settings.md, "Package defaults"](docs/internal_settings.md#package-defaults)), and asks for a branch
+on a commit that does not exist. GitHub refuses both either way, so nothing is made. A token that can write is refused
 (exit 4), with a `FAIL` row whose `fix:` line names the token to make, then the same command again. GitHub's 404 is
 refused the same way, but a new token does not cure it: either `repository.name` names no repository, so set it right
 in FILE, then run `./rkmon confirm` and `./rkmon apply`; or that issue is gone, so ask the package's maintainers to

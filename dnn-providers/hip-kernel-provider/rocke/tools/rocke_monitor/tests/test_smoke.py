@@ -81,6 +81,7 @@ from rkmon_lib import (  # noqa: E402
     deploy_tree,
     doctor,
     file_types,
+    gh,
     identity,
     one_time_move,
     registry,
@@ -1801,8 +1802,9 @@ class TestTheStandInsOpenPRs(unittest.TestCase):
 
 class TestTheStandInsWriteLogin(unittest.TestCase):
     """The stand-in GitHub's write login (tests/fakes/fake_net.py CONFIG github.write_token), as the stand-ins serve it
-    on api.github.com: the login check's probes (a comment with no body, a branch with no name) answered as GitHub
-    answers a login that may make them (422), the read login's refused (403), a token it does not know 401; a comment
+    on api.github.com: the login check's probes (a comment with no body, a branch on a commit that does not exist)
+    answered as GitHub answers a login that may make them (422), the read login's refused (403), a token it does not
+    know 401; a branch whose commit is not an id by its shape refused for its shape (422) whatever the login; a comment
     on a pull request as `gh pr comment` makes one (the pull request looked up by its number, then the comment)
     answered with the comment's URL, and logged as the write login's write; every other write refused (403). Each
     call logged with the token it carried, by its kind.
@@ -1850,18 +1852,37 @@ class TestTheStandInsWriteLogin(unittest.TestCase):
         return [tuple(json.loads(x).get(k) for k in keys) for x in lines]
 
     def test_the_login_checks_probe(self):
-        """Each of its writes: the comment with no body, and the push of a branch with no name and no commit."""
-        for path, empty, answer in (
+        """Each of its writes: the comment with no body, and the push of a branch on a commit that does not exist."""
+        branch = {"ref": gh.PROBE_REF, "sha": gh.PROBE_SHA}
+        for path, sent, answer in (
             (self.PROBE, {"body": ""}, fake_net.VALIDATION_FAILED),
-            (self.PUSH, {"ref": "", "sha": ""}, fake_net.REF_VALIDATION_FAILED),
+            (self.PUSH, branch, fake_net.OBJECT_MISSING),
         ):
             with self.subTest(path=path):
-                self.assertEqual(self.post(self.READ, path, empty)[0], 403)
-                self.assertEqual(self.post(self.WRITE, path, empty), (422, answer))
-                self.assertEqual(self.post("another", path, empty)[0], 401)
+                self.assertEqual(self.post(self.READ, path, sent)[0], 403)
+                self.assertEqual(self.post(self.WRITE, path, sent), (422, answer))
+                self.assertEqual(self.post("another", path, sent)[0], 401)
         self.assertEqual(
             self.logged("token", "status", "probe"),
             [("login", 403, True), ("write", 422, True), ("other", 401, None)] * 2,
+        )
+
+    def test_a_branch_of_the_wrong_shape_is_refused_for_its_shape_whatever_the_login(
+        self,
+    ):
+        """A branch whose commit is not an id by its shape (no name and no commit, or a commit too short): GitHub
+        refuses it for its shape (422, gh.SHAPE_REFUSED) before it asks what the token may do, so its answer says
+        nothing of the login; a token it does not know is still answered 401."""
+        for sent in ({"ref": "", "sha": ""}, {"ref": gh.PROBE_REF, "sha": "0"}):
+            with self.subTest(sent=sent):
+                for token in (self.READ, self.WRITE):
+                    status, said = self.post(token, self.PUSH, sent)
+                    self.assertEqual(status, 422)
+                    self.assertTrue(said["message"].startswith(gh.SHAPE_REFUSED), said)
+                self.assertEqual(self.post("another", self.PUSH, sent)[0], 401)
+        self.assertEqual(
+            self.logged("token", "status", "probe"),
+            [("login", 422, False), ("write", 422, False), ("other", 401, None)] * 2,
         )
 
     def test_a_comment_as_gh_pr_comment_makes_one(self):
@@ -1892,24 +1913,38 @@ class TestTheStandInsWriteLogin(unittest.TestCase):
         made = {"input": {"subjectId": f"{fake_net.PR_ID}7", "body": "a comment"}}
         other = {"input": {"subjectId": "I_an_issue", "body": "a comment"}}
         cases = {
-            "the read login's comment": (self.READ, "/graphql", self.COMMENT, made),
+            "the read login's comment": (
+                self.READ,
+                "/graphql",
+                {"query": self.COMMENT, "variables": made},
+            ),
             "a comment on no pull request": (
                 self.WRITE,
                 "/graphql",
-                self.COMMENT,
-                other,
+                {"query": self.COMMENT, "variables": other},
             ),
-            "a comment with a body, through REST": (self.WRITE, self.PROBE, "", {}),
+            "a comment with a body, through REST": (
+                self.WRITE,
+                self.PROBE,
+                {"body": "x"},
+            ),
+            "a branch on another commit": (
+                self.WRITE,
+                self.PUSH,
+                {"ref": gh.PROBE_REF, "sha": "1" * 40},
+            ),
+            "a tag on the id no object has": (
+                self.WRITE,
+                self.PUSH,
+                {"ref": "refs/tags/rkmon-write-probe", "sha": fake_net.NULL_ID},
+            ),
         }
-        for name, (token, path, query, variables) in cases.items():
+        for name, (token, path, body) in cases.items():
             with self.subTest(case=name):
-                body = (
-                    {"query": query, "variables": variables} if query else {"body": "x"}
-                )
                 self.assertEqual(self.post(token, path, body)[0], 403)
         self.assertEqual(
             self.logged("token", "write", "probe"),
-            [("login", True, False), ("write", True, False), ("write", True, False)],
+            [("login", True, False)] + [("write", True, False)] * 4,
         )
 
 

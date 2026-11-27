@@ -16,12 +16,12 @@ guarded writes look.
 Each login's folder is the one the monitor reads it from (the login_dirs of rkmon_lib/gh.py: `rk gh-logins` shows
 them); apply refuses while there is no read login (`rkmon login github_read` sets it), and a read login set later
 reaches gh's own folder by rollback, then apply. Folders end 700 and files 600. Each login is probed before and after
-(the probe of rkmon_lib/gh.py: a comment with no body and a branch with no name, each refused either way, so nothing is
-made): the write login must be able to comment, the read login to make neither. A check that fails before the move
-changes nothing (exit 2); one that fails after it puts the old layout back (exit 1). apply refuses while an rk command
-runs (--force skips that check). rollback removes the copy only when its probe says that it reads only (--no-probe: no
-probe, before or after). GH_SPLIT_REPO and GH_SPLIT_ISSUE name the probe's repo and issue (default: config repo and
-gh.probe_issue). In the container the split is the write user's and needs none of this.
+(the probe of rkmon_lib/gh.py: a comment with no body and a branch on a commit that does not exist, each refused either
+way, so nothing is made): the write login must be able to comment, the read login to make neither. A check that fails
+before the move changes nothing (exit 2); one that fails after it puts the old layout back (exit 1). apply refuses while
+an rk command runs (--force skips that check). rollback removes the copy only when its probe says that it reads only
+(--no-probe: no probe, before or after). GH_SPLIT_REPO and GH_SPLIT_ISSUE name the probe's repo and issue (default:
+config repo and gh.probe_issue). In the container the split is the write user's and needs none of this.
 """
 
 import argparse
