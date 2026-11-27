@@ -476,11 +476,16 @@ def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
     return False
   if state["KernelLanguage"] != "Assembly" or state["EnableMatrixInstruction"]:
     return no("assembly source (non-matrix-instruction) kernels only")
+  isa = tuple(state["ISA"])
+  if not (isa[0] == 11 or isa[:2] == (12, 0)):
+    return no("gfx11 and gfx120x only")
   isXF32 = "F32XdlMathOp" in pt and not pt["F32XdlMathOp"].isSingle()
   if not (pt["DataType"].isSingle() and pt["DataTypeB"].isSingle() and pt["ComputeDataType"].isSingle()) or isXF32:
     return no("f32 only")
   if pt["Sparse"] or pt["MXBlockA"] or pt["MXBlockB"] or pt["SwizzleTensorB"] or pt["NumIndicesSummation"] != 1:
     return no("unsupported problem type")
+  if pt["UseInitialStridesAB"] or pt["MirrorDimsB"]:
+    return no("B needs a unit leading stride and no mirrored dimensions")
   if state["SubGroup0"] % state["WavefrontSize"] != 0:
     return no("SubGroup0 (%u) must be a multiple of the wavefront size so B is uniform within a wave" % state["SubGroup0"])
   if not state["BufferLoad"] or state["LocalSplitU"] != 1 or state["InnerUnroll"] != 1:
@@ -495,6 +500,11 @@ def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
     return no("no DirectToVgpr/DirectToLds")
   if state["OptNoLoadLoop"]:
     return no("requires OptNoLoadLoop=0")
+  if state["SuppressNoLoadLoop"]:
+    return no("requires SuppressNoLoadLoop=0 (the last block must not fetch B past the summation range)")
+  if state["PrefetchGlobalRead"] == 2 and state["AssertSummationElementMultiple"] % (2 * state["DepthU"]) == 0:
+    # that loop close tests the runtime StaggerU, whose SGPR the ring reuses
+    return no("PrefetchGlobalRead=2 needs AssertSummationElementMultiple not a multiple of 2*DepthU")
   if not state["NoTailLoop"]:
     return no("no tail loop support: AssertSummationElementMultiple must be a multiple of DepthU")
   if state["AssertFree1ElementMultiple"] % state["MacroTile1"] != 0:
@@ -509,6 +519,8 @@ def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
     return no("ring depth must be a multiple of the load chunk")
   if depth < 2 * chunk:
     return no("the ring must hold at least two load chunks")
+  if depth * state["ThreadTile1"] > 32:
+    return no("ring of %u SGPRs (ScalarLoadB * ThreadTile1) exceeds the 32 left for it" % (depth * state["ThreadTile1"]))
   if state["ScalarLoadBPrefetch"]:
     cols = state["ThreadTile1"] // vwb if pt["TLUB"] else state["ThreadTile1"]
     if cols & (cols - 1) or cols > state["WavefrontSize"]:

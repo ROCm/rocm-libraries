@@ -180,11 +180,12 @@ def test_register_budget_keeps_eight_waves_per_simd():
         assert int(re.search(r"\.amdhsa_next_free_sgpr (\d+)", source).group(1)) <= 106, name
 
 
-def _config_with(tmp_path, **forks):
-    """One-problem config: the TN group with fork parameters replaced."""
+def _config_with(tmp_path, problem=None, **forks):
+    """One-problem config: the TN group with fork (and optionally problem type) parameters replaced."""
     config = yaml.safe_load(_CONFIG.read_text())
-    problem = config["BenchmarkProblems"][0]
-    params = problem[1]["ForkParameters"]
+    problem_entry = config["BenchmarkProblems"][0]
+    problem_entry[0].update(problem or {})
+    params = problem_entry[1]["ForkParameters"]
     base = {"ScalarLoadB": [4], "UseDualFMAC": [True], "PrefetchGlobalRead": [1]}
     for key, value in {**base, **forks}.items():
         for entry in params:
@@ -193,18 +194,19 @@ def _config_with(tmp_path, **forks):
                 break
         else:
             params.append({key: value})
-    config["BenchmarkProblems"] = [problem]
+    config["BenchmarkProblems"] = [problem_entry]
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(config))
     return path
 
 
-def _valid(path):
-    return [s for s in solutions_from_config(path, arch=_ARCH) if s["Valid"]]
+def _valid(path, arch=_ARCH):
+    return [s for s in solutions_from_config(path, arch=arch) if s["Valid"]]
 
 
-def test_baseline_config_is_accepted(tmp_path):
-    assert len(_valid(_config_with(tmp_path))) == 1
+@pytest.mark.parametrize("arch", _ARCHS)
+def test_baseline_config_is_accepted(tmp_path, arch):
+    assert len(_valid(_config_with(tmp_path), arch)) == 1
 
 
 @pytest.mark.parametrize("forks", [
@@ -215,7 +217,32 @@ def test_baseline_config_is_accepted(tmp_path):
     {"GlobalSplitU": [2]},                        # the summation range has to be contiguous
     {"OptNoLoadLoop": [1]},                       # its checks read the parked store arguments
     {"ScalarLoadB": [16]},                        # does not divide DepthU
+    {"ScalarLoadB": [8]},                         # 8 x ThreadTile1 8 = 64 ring SGPRs do not fit
     {"PrefetchLocalRead": [0]},
-], ids=lambda forks: next(iter(forks)))
+    {"SuppressNoLoadLoop": [True]},               # the last block would load B past the summation range
+    # loop close every second block reads the released StaggerU SGPR
+    {"PrefetchGlobalRead": [2], "AssertSummationElementMultiple": [16]},
+], ids=lambda forks: "-".join(forks))
 def test_unsupported_configs_are_rejected(tmp_path, forks):
     assert _valid(_config_with(tmp_path, **forks)) == []
+    # the same solution without ScalarLoadB is valid: the rejection is ScalarLoadB's
+    assert _valid(_config_with(tmp_path, **{**forks, "ScalarLoadB": [0]}))
+
+
+@pytest.mark.parametrize("problem", [
+    {"UseInitialStridesAB": True},                # the scalar stream assumes a unit stride of B
+    {"MirrorDimsB": [1]},                         # the scalar stream does not mirror
+], ids=lambda problem: next(iter(problem)))
+def test_unsupported_problem_types_are_rejected(tmp_path, problem):
+    assert _valid(_config_with(tmp_path, problem=problem)) == []
+    assert _valid(_config_with(tmp_path, problem=problem, ScalarLoadB=[0]))
+
+
+@pytest.mark.parametrize("arch,forks", [
+    ("gfx1250", {"UseDualFMAC": [False], "LdsPadA": [0]}),
+    ("gfx1030", {"UseDualFMAC": [False]}),
+    ("gfx90a", {"UseDualFMAC": [False], "WorkGroup": [[64, 8, 1]], "ThreadTile": [[8, 8]]}),  # wave64
+], ids=lambda x: x if isinstance(x, str) else "")
+def test_untested_targets_are_rejected(tmp_path, arch, forks):
+    assert _valid(_config_with(tmp_path, **forks), arch) == []
+    assert _valid(_config_with(tmp_path, **{**forks, "ScalarLoadB": [0]}), arch)
