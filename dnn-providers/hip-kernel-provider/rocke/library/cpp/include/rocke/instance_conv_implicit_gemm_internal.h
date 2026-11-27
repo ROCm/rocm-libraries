@@ -588,6 +588,18 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_ystep; /* dH * A_stride_hi */
     rocke_value_t* split_xstep; /* dW * A_stride_wi */
     rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
+
+    /* spec.patch: the width-folded patch GEMM's A/B addressing (see
+     * ImplicitGemmConvSpec.patch); patch_kgemm = Y * cpg, B's bound. */
+    bool patch;
+    rocke_value_t* patch_kgemm;
+
+    /* spec.dtl: the DMA-staged two-stage K loop of the patch GEMM. dtl_cpr =
+     * tile_k / 8 (16-byte chunks per tile row); dtl_mask = (min(cpr, 8) - 1)
+     * << 3, the column XOR mask of the fragment reads. */
+    bool dtl;
+    int dtl_cpr;
+    rocke_value_t* dtl_mask;
 } rocke_conv_build_ctx_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend
@@ -638,6 +650,23 @@ int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
  * (the merged B tile is 1/Gm dense and its diagonal mask is per-element, which
  * a vector load cannot express). */
 int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec);
+
+/* Python _fwd_prefetch_global_regs_conflict: true (reason filled) when
+ * spec->prefetch_global_regs cannot be honoured (async_dma, unroll_k, wavelet,
+ * or more than ROCKE_CTL_MAX_VECS_PER_THREAD loads per thread per operand). */
+/* Python is_fwd_patch_problem / _fwd_patch_conflict (ImplicitGemmConvSpec.patch). */
+bool rocke_conv_is_fwd_patch_problem(const rocke_conv_problem_t* p);
+bool rocke_conv_fwd_patch_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                 char* reason,
+                                 size_t reason_cap);
+/* Python _fwd_dtl_conflict: true (reason filled) when spec->dtl cannot be
+ * honoured. */
+bool rocke_conv_fwd_dtl_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                               char* reason,
+                               size_t reason_cap);
+bool rocke_conv_fwd_prefetch_global_regs_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                                char* reason,
+                                                size_t reason_cap);
 
 /* _emit_mfma(b, atom, a, bv, c): atom.emit MFMA dispatch. */
 rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
@@ -814,6 +843,34 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
 /* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync.
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
+
+/* prefetch_global_regs branch (forward and wgrad): the register-prefetch form
+ * of the single-buffer synchronous loop. Tile k+1's global reads are issued
+ * after the LDS-only barrier that publishes tile k and are carried in VGPRs
+ * into the next iteration. Mirrors Python emit_prefetch_global_regs_kloop
+ * (_conv_implicit_gemm_common.py), which both builders call. */
+void rocke_conv_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx);
+
+/* dtl branch (forward patch GEMM): two LDS stages filled by 16-byte
+ * DRAM->LDS DMAs, the loop unrolled 2x so each phase names its stage (wait,
+ * barrier, refill the other stage, MFMAs). Mirrors Python's
+ * ``elif spec.dtl:`` K-loop branch and emit_dtl_load. */
+void rocke_conv_emit_kloop_dtl(rocke_conv_build_ctx_t* ctx);
+
+/* dtl_col(row, col): the dtl fragment read's column, col ^ ((row << 3) &
+ * dtl_mask); col unchanged when spec.dtl is off. */
+rocke_value_t*
+    rocke_conv_dtl_col(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
+
+/* Python dma_lds_at: one 16-byte DRAM->LDS DMA per lane (inline asm
+ * "s_add_u32 m0, $3, <imm>; buffer_load_dwordx4 $0, $1, $2 offen lds") into
+ * LDS at the wave-uniform SGPR base plus imm. Shared with the dgrad dtl loop. */
+void rocke_conv_dma_lds_at(rocke_ir_builder_t* b,
+                           rocke_value_t* rsrc,
+                           rocke_value_t* base,
+                           int imm,
+                           rocke_value_t* voff,
+                           rocke_value_t* soff);
 
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces

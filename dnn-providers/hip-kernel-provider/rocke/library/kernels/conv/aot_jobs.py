@@ -47,7 +47,12 @@ Per direction, on top of that:
   the degree a kernarg swept at launch) on the small tiles, pipelines and
   widths of ``CACHE_FWD_SPLIT_K_*`` (on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*``
   subset), and its cluster form where the target launches workgroup clusters
-  and the flavor lowers them.
+  and the flavor lowers them. On gfx950 (fp16 / bf16) the register-prefetch
+  K loop (``prefetch_global_regs``) is built next to the plain loop of the
+  8 / 8 / 8 cshuffle mem / compv3 / compv4 kernels on the
+  ``CACHE_FWD_PREFETCH_GLOBAL_REGS_GEOMETRIES`` cover, and the 16-element LDS
+  K-row pad (``lds_k_pad`` = 16), alone and with that loop, on the
+  ``CACHE_FWD_WIDE_LDS_K_PAD*_GEOMETRIES`` covers.
 * **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
   take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
   carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
@@ -438,6 +443,31 @@ CACHE_DGRAD_PATCH_GEOMETRIES: frozenset = frozenset(
     )
     for pipe in pipes
 )
+# gfx950 (fp16 / bf16) implicit dgrad: the geometries that carry the variants
+# beyond T's plain kernels (register-prefetch loop, 16-element A row pad, XCD
+# grouped tile order, DMA-staged loop, patch split-K, tile_k 128), each with
+# (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile, pipeline). They are the
+# geometries whose twin won a corpus row; a patch one outside
+# CACHE_DGRAD_PATCH_GEOMETRIES is built at vector width 8 only, and the
+# tile_k 128 ones are added to the dgrad geometry walk by :func:`_geometries`.
+CACHE_DGRAD_VARIANT_ARCHS: frozenset = frozenset({"gfx950"})
+CACHE_DGRAD_VARIANT_DTYPES: Tuple[str, ...] = ("fp16", "bf16")
+CACHE_DGRAD_VARIANT_GEOMETRIES: frozenset = frozenset(
+    (
+        (32, 64, 128, 2, 2, 16, "mem"),
+        (64, 32, 128, 4, 2, 16, "mem"),
+        (64, 128, 64, 2, 2, 16, "compv4"),
+        (64, 128, 64, 4, 2, 16, "compv4"),
+        (128, 128, 64, 2, 2, 16, "mem"),
+        (128, 128, 64, 2, 2, 16, "compv4"),
+        (128, 128, 64, 2, 4, 32, "compv3"),
+        (128, 256, 64, 1, 4, 16, "compv4"),
+        (128, 256, 64, 2, 4, 16, "compv4"),
+        (128, 256, 64, 2, 8, 16, "mem"),
+        (128, 256, 128, 2, 8, 16, "compv3"),
+        (256, 256, 64, 4, 4, 16, "mem"),
+    )
+)
 # wgrad group merging (WgradConvSpec.group_merge): Gm depthwise groups share
 # one workgroup. The degree is baked in and the binary serves depthwise
 # problems only (groups divisible by Gm, Y*X*Gm within the tile). Mirrors
@@ -529,6 +559,148 @@ CACHE_FWD_SPLIT_K_CLUSTER_VEC = 8
 # flavor that lowers the cluster attribute and barrier.
 CACHE_FWD_SPLIT_K_ARCHS: Tuple[str, ...] = FWD_SPLIT_K_ARCHS
 CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS: Tuple[str, ...] = ("llvm23",)
+
+# ---- forward K-loop variants (gfx950) ---------------------------------------
+# Extra forward kernels built next to the plain synchronous loop of the
+# widest-vector (8 / 8 / 8) cshuffle kernels, each on its own cover of
+# (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile) geometries, for every
+# cached mem / compv3 / compv4 pipeline. Profiling the forward layers of the
+# reference corpora with the variant built on every such configuration, each
+# geometry of a cover carried the fastest kernel of at least one layer; the
+# rest never did.
+#
+# The register-prefetch K loop (ImplicitGemmConvSpec.prefetch_global_regs).
+CACHE_FWD_LOOP_VARIANT_ARCHS: Tuple[str, ...] = ("gfx950",)
+CACHE_FWD_LOOP_VARIANT_DTYPES: Tuple[str, ...] = ("fp16", "bf16")
+CACHE_FWD_LOOP_VARIANT_PIPELINES: Tuple[str, ...] = ("mem", "compv3", "compv4")
+CACHE_FWD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
+    Tuple[int, int, int, int, int, int], ...
+] = (
+    (16, 64, 64, 1, 2, 16),
+    (32, 32, 32, 2, 1, 16),
+    (32, 32, 64, 2, 2, 16),
+    (64, 32, 32, 1, 2, 16),
+    (64, 32, 32, 2, 1, 32),
+    (64, 32, 64, 2, 1, 32),
+    (64, 64, 16, 2, 1, 32),
+    (64, 64, 64, 2, 2, 32),
+    (64, 64, 64, 2, 4, 16),
+    (64, 64, 64, 4, 2, 16),
+    (64, 128, 64, 1, 4, 32),
+    (64, 128, 64, 2, 2, 32),
+    (64, 128, 64, 2, 4, 16),
+    (64, 128, 64, 2, 4, 32),
+    (64, 256, 64, 1, 4, 32),
+    (64, 256, 64, 1, 8, 32),
+    (128, 32, 32, 2, 1, 32),
+    (128, 64, 64, 4, 1, 32),
+    (128, 64, 64, 4, 2, 16),
+    (128, 64, 64, 4, 2, 32),
+    (128, 128, 16, 2, 2, 32),
+    (128, 128, 32, 4, 2, 32),
+    (128, 128, 64, 4, 2, 16),
+    (128, 128, 64, 4, 2, 32),
+    (128, 128, 64, 4, 4, 32),
+    (128, 256, 64, 2, 8, 32),
+    (128, 256, 64, 4, 4, 32),
+    (256, 64, 64, 4, 2, 32),
+    (256, 64, 64, 8, 1, 32),
+    (256, 128, 64, 4, 1, 32),
+    (256, 128, 64, 8, 2, 32),
+    (256, 256, 64, 4, 4, 32),
+    (256, 256, 64, 8, 2, 32),
+)
+
+# The 16-element LDS K-row pad (lds_k_pad = CACHE_FWD_WIDE_LDS_K_PAD) instead of
+# the default 8: on a tile_k = 64 row the default stride bank-conflicts on the
+# MFMA fragment reads. Alone, and together with the register-prefetch loop.
+CACHE_FWD_WIDE_LDS_K_PAD = 16
+
+# gfx950: the forward patch-embedding GEMM (ImplicitGemmConvSpec.patch,
+# tagged ``patch``) with the XCD-grouped tile order (chiplet_swizzle), plain
+# and register-prefetch loops, on these (tile_m, tile_n, tile_k, warp_m,
+# warp_n, warp_tile) geometries, mem / compv4 with the cshuffle epilogue,
+# vector widths 8, ungrouped: the cells that won a k == s forward row.
+CACHE_FWD_PATCH_GEOMETRIES: Tuple[Tuple[int, int, int, int, int, int], ...] = (
+    (16, 16, 64, 1, 1, 16),
+    (32, 32, 64, 2, 2, 16),
+    (32, 64, 64, 1, 4, 16),
+    (64, 64, 64, 2, 2, 32),
+    (64, 128, 64, 1, 4, 16),
+    (128, 128, 64, 2, 2, 16),
+    (128, 128, 64, 4, 4, 32),
+)
+CACHE_FWD_PATCH_PIPELINES: Tuple[str, ...] = ("mem", "compv4")
+# gfx950: patch geometries that also get the DMA-staged two-stage K loop
+# (ImplicitGemmConvSpec.dtl, mem pipeline only).
+CACHE_FWD_PATCH_DTL_GEOMETRIES: Tuple[Tuple[int, int, int, int, int, int], ...] = (
+    (32, 32, 64, 2, 2, 16),
+    (64, 64, 64, 2, 2, 32),
+    (64, 128, 64, 1, 4, 16),
+)
+CACHE_FWD_WIDE_LDS_K_PAD_GEOMETRIES: Tuple[Tuple[int, int, int, int, int, int], ...] = (
+    (32, 64, 64, 1, 4, 16),
+    (64, 64, 64, 2, 2, 16),
+    (64, 64, 64, 2, 4, 16),
+    (64, 64, 64, 4, 2, 16),
+    (64, 256, 64, 1, 8, 16),
+    (64, 256, 64, 2, 4, 16),
+    (128, 32, 64, 4, 1, 16),
+    (128, 64, 64, 2, 2, 16),
+    (128, 64, 64, 4, 1, 16),
+    (128, 64, 64, 4, 1, 32),
+    (128, 64, 64, 4, 2, 16),
+    (128, 128, 64, 1, 4, 16),
+    (128, 128, 64, 2, 2, 16),
+    (128, 128, 64, 2, 4, 16),
+    (128, 128, 64, 4, 2, 16),
+    (128, 256, 64, 1, 4, 16),
+    (128, 256, 64, 2, 2, 16),
+    (128, 256, 64, 2, 4, 16),
+    (256, 64, 64, 4, 1, 16),
+    (256, 64, 64, 8, 1, 16),
+    (256, 128, 64, 4, 2, 16),
+)
+CACHE_FWD_WIDE_LDS_K_PAD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
+    Tuple[int, int, int, int, int, int], ...
+] = (
+    (16, 16, 64, 1, 1, 16),
+    (32, 32, 64, 2, 2, 16),
+    (32, 64, 64, 2, 2, 16),
+    (64, 32, 64, 2, 2, 16),
+    (64, 32, 64, 4, 1, 16),
+    (64, 64, 64, 2, 2, 16),
+    (64, 64, 64, 2, 4, 16),
+    (64, 64, 64, 4, 1, 16),
+    (64, 64, 64, 4, 2, 16),
+    (64, 128, 64, 1, 4, 16),
+    (64, 128, 64, 2, 4, 16),
+    (64, 128, 64, 2, 4, 32),
+    (128, 64, 64, 2, 2, 16),
+    (128, 64, 64, 2, 4, 16),
+    (128, 64, 64, 4, 1, 16),
+    (128, 64, 64, 4, 2, 16),
+    (128, 64, 64, 4, 2, 32),
+    (128, 64, 64, 8, 1, 16),
+    (128, 128, 64, 1, 4, 16),
+    (128, 128, 64, 2, 2, 16),
+    (128, 128, 64, 2, 4, 16),
+    (128, 128, 64, 2, 8, 16),
+    (128, 128, 64, 4, 2, 16),
+    (128, 128, 64, 8, 2, 16),
+    (128, 256, 64, 2, 4, 16),
+    (128, 256, 64, 2, 8, 16),
+    (128, 256, 64, 4, 4, 16),
+    (256, 64, 64, 2, 1, 16),
+    (256, 64, 64, 4, 2, 16),
+    (256, 64, 64, 8, 1, 16),
+    (256, 128, 64, 4, 2, 16),
+    (256, 128, 64, 4, 4, 16),
+    (256, 128, 64, 8, 1, 16),
+    (256, 256, 64, 2, 4, 16),
+    (256, 256, 64, 2, 8, 16),
+    (256, 256, 64, 4, 4, 16),
+)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -715,6 +887,22 @@ def _geometries(
         if atom is None or tile_k % atom.k:
             continue
         yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom
+    if direction == "dgrad" and mma_family == "mma" and da == db:
+        # The tile_k 128 variant geometries (half the K-loop barriers on
+        # small-M strided / patch dgrads), outside the tile_k grid.
+        for key in sorted(CACHE_DGRAD_VARIANT_GEOMETRIES):
+            tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline = key
+            if tile_k == 128 and _is_variant_geometry(key, target.gfx, da):
+                atom = target.mma.select_largest_k(
+                    family=mma_family,
+                    a_dtype=da,
+                    b_dtype=db,
+                    c_dtype="fp32",
+                    m=wt,
+                    n=wt,
+                )
+                if atom is not None and tile_k % atom.k == 0:
+                    yield tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, "cshuffle", atom
     if direction == "wgrad" and mma_family == "wmma":
         atom = target.mma.select_largest_k(
             family=mma_family, a_dtype=da, b_dtype=db, c_dtype="fp32", m=16, n=16
@@ -976,18 +1164,41 @@ def _dgrad_halo_jobs_for(
     return out
 
 
-def _is_patch_geometry(geometry: tuple) -> bool:
+def _is_patch_geometry(geometry: tuple, arch: str = "", dtype: str = "") -> bool:
     """Is ``geometry`` (a :func:`_geometries` entry) one the patch dgrad builds?
 
-    MFMA only: the patch store is not implemented for WMMA.
+    MFMA only: the patch store is not implemented for WMMA. On gfx950
+    fp16 / bf16 the :data:`CACHE_DGRAD_VARIANT_GEOMETRIES` are patch
+    geometries too.
     """
     tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    key = (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline)
     return (
         atom.family == "mma"
         and epilogue == "cshuffle"
-        and (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline)
-        in CACHE_DGRAD_PATCH_GEOMETRIES
+        and (
+            key in CACHE_DGRAD_PATCH_GEOMETRIES
+            or _is_variant_geometry(key, arch, dtype)
+        )
     )
+
+
+def _is_variant_geometry(key: tuple, arch: str, dtype: str) -> bool:
+    """Whether the dgrad variants (see :data:`CACHE_DGRAD_VARIANT_GEOMETRIES`)
+    are built on ``key`` = ``(tile_m, ..., warp_tile, pipeline)``."""
+    return (
+        arch in CACHE_DGRAD_VARIANT_ARCHS
+        and dtype in CACHE_DGRAD_VARIANT_DTYPES
+        and tuple(key[:7]) in CACHE_DGRAD_VARIANT_GEOMETRIES
+    )
+
+
+def _patch_vecs(geometry: tuple) -> Tuple[int, ...]:
+    """B/D widths the patch dgrad builds on ``geometry``: every width on
+    :data:`CACHE_DGRAD_PATCH_GEOMETRIES`, 8 only on the variant additions."""
+    if tuple(geometry[:7]) in CACHE_DGRAD_PATCH_GEOMETRIES:
+        return tuple(_VECS)
+    return (8,)
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -1001,6 +1212,36 @@ def _job_flavor(llvm_flavor: Optional[str]) -> str:
     every worker records the same flavor the parent would.
     """
     return llvm_flavor if llvm_flavor is not None else current_llvm_flavor()
+
+
+def _fwd_loop_variants(
+    arch: str, dtype: str, geometry: tuple, pipeline: str, epilogue: str
+) -> Tuple[dict, ...]:
+    """The extra spec fields of the forward K-loop variants built next to a
+    plain-loop (8 / 8 / 8) kernel; empty off the gfx950 covers.
+
+    ``geometry`` is ``(tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile)``;
+    see :data:`CACHE_FWD_PREFETCH_GLOBAL_REGS_GEOMETRIES`. Shared by
+    :func:`_fwd_jobs` and :func:`count_jobs`.
+    """
+    if (
+        arch not in CACHE_FWD_LOOP_VARIANT_ARCHS
+        or dtype not in CACHE_FWD_LOOP_VARIANT_DTYPES
+        or pipeline not in CACHE_FWD_LOOP_VARIANT_PIPELINES
+        or epilogue != "cshuffle"
+    ):
+        return ()
+    geometry = tuple(geometry)
+    variants = []
+    if geometry in CACHE_FWD_PREFETCH_GLOBAL_REGS_GEOMETRIES:
+        variants.append(dict(prefetch_global_regs=True))
+    if geometry in CACHE_FWD_WIDE_LDS_K_PAD_GEOMETRIES:
+        variants.append(dict(lds_k_pad=CACHE_FWD_WIDE_LDS_K_PAD))
+    if geometry in CACHE_FWD_WIDE_LDS_K_PAD_PREFETCH_GLOBAL_REGS_GEOMETRIES:
+        variants.append(
+            dict(lds_k_pad=CACHE_FWD_WIDE_LDS_K_PAD, prefetch_global_regs=True)
+        )
+    return tuple(variants)
 
 
 def _fwd_jobs(
@@ -1063,23 +1304,46 @@ def _fwd_jobs(
                     unroll_k=unroll_k,
                     async_dma=async_dma,
                 )
-                yield BuildJob(
-                    identity=KernelIdentity(
-                        arch=arch,
+                cfgs = [cfg]
+                if (vec_ab, vec_c) == (8, 8) and not (unroll_k or async_dma):
+                    # The K-loop variants of the plain loop, next to it.
+                    cfgs += [
+                        dict(cfg, **extra)
+                        for extra in _fwd_loop_variants(
+                            arch,
+                            dtype,
+                            (tile_m, tile_n, tile_k, warp_m, warp_n, wt),
+                            pipeline,
+                            epilogue,
+                        )
+                    ]
+                for kc in cfgs:
+                    yield BuildJob(
+                        identity=KernelIdentity(
+                            arch=arch,
+                            direction="fwd",
+                            algorithm="implicit_gemm",
+                            llvm_flavor=flavor,
+                            dtype_a=da,
+                            dtype_b=db,
+                            dtype_d=dd,
+                            grouped=grouped,
+                            **_async_chunks(kc, (da, db, dd), caps, arch),
+                            **kc,
+                        ),
                         direction="fwd",
-                        algorithm="implicit_gemm",
-                        llvm_flavor=flavor,
-                        dtype_a=da,
-                        dtype_b=db,
-                        dtype_d=dd,
-                        grouped=grouped,
-                        **_async_chunks(cfg, (da, db, dd), caps, arch),
-                        **cfg,
-                    ),
-                    direction="fwd",
-                    spec_kwargs=cfg,
-                    caps=caps,
-                )
+                        spec_kwargs=kc,
+                        caps=caps,
+                    )
+        yield from _fwd_patch_jobs(
+            arch,
+            da,
+            db,
+            dd,
+            flavor,
+            wave_size,
+            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
+        )
         yield from _fwd_merged_jobs(
             arch,
             da,
@@ -1100,6 +1364,78 @@ def _fwd_jobs(
                 (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
                 cluster=_fwd_split_cluster_target(target, flavor),
             )
+
+
+def _fwd_patch_variants(arch: str, dtype: str, geometry: tuple) -> Tuple[dict, ...]:
+    """Spec fields of the forward patch kernels built on ``geometry`` (a
+    :func:`_geometries` entry); empty off :data:`CACHE_FWD_PATCH_GEOMETRIES`."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, _ = geometry
+    if (
+        arch not in CACHE_FWD_LOOP_VARIANT_ARCHS
+        or dtype not in CACHE_FWD_LOOP_VARIANT_DTYPES
+        or pipeline not in CACHE_FWD_PATCH_PIPELINES
+        or epilogue != "cshuffle"
+        or (tile_m, tile_n, tile_k, warp_m, warp_n, wt)
+        not in CACHE_FWD_PATCH_GEOMETRIES
+    ):
+        return ()
+    extra = ()
+    if (
+        pipeline == "mem"
+        and (tile_m, tile_n, tile_k, warp_m, warp_n, wt)
+        in CACHE_FWD_PATCH_DTL_GEOMETRIES
+    ):
+        extra = (dict(chiplet_swizzle=True, dtl=True),)
+    return (
+        dict(chiplet_swizzle=True),
+        dict(chiplet_swizzle=True, prefetch_global_regs=True),
+    ) + extra
+
+
+def _fwd_patch_jobs(
+    arch: str, da: str, db: str, dd: str, flavor: str, wave_size: int, geometry: tuple
+) -> Iterator[BuildJob]:
+    """The forward patch-embedding GEMMs (ImplicitGemmConvSpec.patch) of one
+    geometry; see :data:`CACHE_FWD_PATCH_GEOMETRIES`."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    caps = dict(grouped=False, patch=True)
+    for extra in _fwd_patch_variants(arch, da, geometry):
+        kc = dict(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            warp_tile_k=atom.k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            wave_size=wave_size,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=8,
+            unroll_k=False,
+            patch=True,
+            **{"async_dma": False, **extra},
+        )
+        yield BuildJob(
+            identity=KernelIdentity(
+                arch=arch,
+                direction="fwd",
+                algorithm="implicit_gemm",
+                llvm_flavor=flavor,
+                dtype_a=da,
+                dtype_b=db,
+                dtype_d=dd,
+                grouped=False,
+                **_async_chunks(kc, (da, db, dd), caps, arch),
+                **kc,
+            ),
+            direction="fwd",
+            spec_kwargs=kc,
+            caps=caps,
+        )
 
 
 def _fwd_split_target(arch: str) -> bool:
@@ -1746,7 +2082,118 @@ def _wgrad_prefetch_addr(arch: str, cfg: dict) -> bool:
     )
 
 
+#: On a :data:`CACHE_DGRAD_VARIANT_GEOMETRIES` geometry every uniform_k_decode
+#: dgrad job at B / D vector width 8 also gets its register-prefetch twin
+#: (DgradConvSpec.prefetch_global_regs, tagged ``pgr``).
+#: The one variant geometry whose unpatched (grouped included) kernels get
+#: twins too; the others take them on the patch GEMM only.
+CACHE_DGRAD_PLAIN_TWIN_GEOMETRIES: frozenset = frozenset(
+    ((128, 128, 64, 2, 4, 32, "compv3"),)
+)
+#: A (dY) row pads of the gfx950 dgrad twins: 16 = 160-byte rows for
+#: tile_k 64 (24 and 32 measured: as many bank conflicts as the default 8).
+CACHE_DGRAD_A_PADS = (16,)
+#: Patch dgrad geometries that also get a chiplet_swizzle twin
+#: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile, pipeline).
+CACHE_DGRAD_PATCH_CHIP_GEOMETRIES: frozenset = frozenset(
+    (
+        (32, 64, 128, 2, 2, 16, "mem"),
+        (64, 32, 128, 4, 2, 16, "mem"),
+        (64, 128, 64, 4, 2, 16, "compv4"),
+        (128, 128, 64, 2, 2, 16, "mem"),
+        (128, 128, 64, 2, 2, 16, "compv4"),
+        (128, 256, 64, 1, 4, 16, "compv4"),
+        (128, 256, 64, 2, 4, 16, "compv4"),
+    )
+)
+#: Patch dgrad geometries that also get the DMA-staged two-stage K loop
+#: (DgradConvSpec.dtl, XCD-grouped order, vector width 8).
+CACHE_DGRAD_PATCH_DTL_GEOMETRIES: frozenset = frozenset(
+    (
+        (32, 64, 128, 2, 2, 16, "mem"),
+        (128, 128, 64, 2, 2, 16, "mem"),
+    )
+)
+
+
 def _dgrad_jobs(
+    arch, dtype, wave_size, mma_family, target, max_sub_gemms, **kw
+) -> Iterator[BuildJob]:
+    from dataclasses import replace
+
+    for job in _dgrad_jobs_base(
+        arch, dtype, wave_size, mma_family, target, max_sub_gemms, **kw
+    ):
+        yield job
+        kw_ = job.spec_kwargs
+        geo = (
+            kw_["tile_m"],
+            kw_["tile_n"],
+            kw_["tile_k"],
+            kw_["warp_m"],
+            kw_["warp_n"],
+            kw_["warp_tile_m"],
+            kw_["pipeline"],
+        )
+        if not _is_variant_geometry(geo, arch, dtype) or not (
+            kw_.get("patch") or geo in CACHE_DGRAD_PLAIN_TWIN_GEOMETRIES
+        ):
+            continue
+        if (
+            kw_.get("patch")
+            and kw_.get("uniform_k_decode")
+            and kw_.get("lds_k_outer")
+            and kw_.get("vector_size_b") == 8
+            and kw_.get("split_k", 1) == 1
+            and not kw_.get("chiplet_swizzle")
+            and geo in CACHE_DGRAD_PATCH_DTL_GEOMETRIES
+        ):
+            # The DMA-staged two-stage K loop on the patch GEMM.
+            cfg = {
+                **kw_,
+                "uniform_k_decode": False,
+                "chiplet_swizzle": True,
+                "dtl": True,
+            }
+            yield replace(
+                job,
+                identity=replace(
+                    job.identity, uniform_k_decode=False, chiplet_swizzle=True, dtl=True
+                ),
+                spec_kwargs=cfg,
+            )
+        if (
+            kw_.get("uniform_k_decode")
+            and (
+                kw_.get("vector_size_a"),
+                kw_.get("vector_size_b"),
+                kw_.get("vector_size_c"),
+            )
+            == (8, 8, 8)
+            and not kw_.get("async_dma")
+            and kw_.get("pipeline") != "wavelet"
+        ):
+            cfg = {**kw_, "prefetch_global_regs": True}
+            yield replace(
+                job,
+                identity=replace(job.identity, prefetch_global_regs=True),
+                spec_kwargs=cfg,
+            )
+            if kw_.get("tile_k") in (64, 128) and kw_.get("lds_k_pad") is None:
+                # A 160-byte A row (pad 16) instead of 144 bytes (pad 8),
+                # which conflicts on gfx950's LDS banks.
+                for pgr, pad in itertools.product((False, True), CACHE_DGRAD_A_PADS):
+                    cfg = {**kw_, "prefetch_global_regs": pgr, "lds_k_pad": pad}
+                    yield replace(
+                        job,
+                        identity=replace(
+                            job.identity, prefetch_global_regs=pgr, lds_k_pad=pad
+                        ),
+                        spec_kwargs=cfg,
+                    )
+
+
+def _dgrad_jobs_base(
     arch,
     dtype,
     wave_size,
@@ -1784,7 +2231,14 @@ def _dgrad_jobs(
         # dgrad's B (W, KYXC) and D (dX) are both contiguous along cpg, so
         # they share one width; A (dY) runs along kpg. The default epilogue
         # stores scalar, so there D is 1 and B takes its own width.
-        for vec_a, vec_bc, caps in itertools.product(_VECS, _VECS, _dgrad_caps()):
+        plain = (
+            itertools.product(_VECS, _VECS, _dgrad_caps())
+            # The variant geometries outside the tile_k grid build the patch
+            # GEMM only.
+            if tile_k in _TILE_K
+            else ()
+        )
+        for vec_a, vec_bc, caps in plain:
             vec_c = 1 if epilogue == "default" else vec_bc
             # The JIT sweep's B-tile layout. Its predicate keys on the parity
             # of cpg, which is runtime here; the B load width stands in for
@@ -1965,11 +2419,15 @@ def _dgrad_jobs(
         # The patch-embedding GEMM (ungrouped, on the tilde record path) on its
         # geometries only, at every B/D width; A (dY) runs along K.
         if not _is_patch_geometry(
-            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom)
+            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
+            arch,
+            dtype,
         ):
             continue
         caps = dict(grouped=False, tilde=True, patch=True)
-        for vec_bc in _VECS:
+        for vec_bc in _patch_vecs(
+            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline)
+        ):
             cfg = dict(
                 tile_m=tile_m,
                 tile_n=tile_n,
@@ -2015,6 +2473,35 @@ def _dgrad_jobs(
                 spec_kwargs=cfg,
                 caps=caps,
             )
+            # The XCD-grouped tile order on the patch GEMM.
+            if (
+                _is_variant_geometry(
+                    (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline),
+                    arch,
+                    dtype,
+                )
+                and epilogue == "cshuffle"
+                and vec_bc == 8
+                and (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline)
+                in CACHE_DGRAD_PATCH_CHIP_GEOMETRIES
+            ):
+                chipcfg = {**cfg, "chiplet_swizzle": True}
+                yield BuildJob(
+                    identity=KernelIdentity(
+                        arch=arch,
+                        direction="dgrad",
+                        algorithm="implicit_gemm",
+                        llvm_flavor=flavor,
+                        dtype_a=da,
+                        dtype_b=db,
+                        dtype_d=dd,
+                        grouped=False,
+                        **chipcfg,
+                    ),
+                    direction="dgrad",
+                    spec_kwargs=chipcfg,
+                    caps=caps,
+                )
 
 
 def job_for_identity(identity: KernelIdentity) -> BuildJob:
@@ -2234,6 +2721,12 @@ def count_jobs(
                 continue
             if direction == "fwd":
                 total += vecs * len(_fwd_k_loops(pipeline)) * layouts
+                if 8 in _VECS:
+                    # The K-loop variants of the (8, 8, 8) plain-loop kernel.
+                    total += layouts * len(
+                        _fwd_loop_variants(target.gfx, dtype, geo[:6], pipeline, geo[7])
+                    )
+                total += len(_fwd_patch_variants(target.gfx, dtype, geo))
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
                 if fwd_split and _fwd_split_geometry(geo):
@@ -2269,6 +2762,22 @@ def count_jobs(
                     )
                 )
             elif direction == "dgrad":
+                if _is_variant_geometry(geo[:7], target.gfx, dtype):
+                    # The variants (twins, tile_k 128) are counted by walking
+                    # the geometry: the few of them make that cheap.
+                    total += sum(
+                        1
+                        for _ in _dgrad_jobs(
+                            target.gfx,
+                            dtype,
+                            wave_size,
+                            mma_family,
+                            target,
+                            CACHE_DGRAD_MAX_SUB_GEMMS,
+                            geometries=[geo],
+                        )
+                    )
+                    continue
                 total += vecs * sum(
                     len(_dgrad_tap_outer_variants(caps, wave_size, pipeline))
                     for caps in _dgrad_caps()
@@ -2291,8 +2800,8 @@ def count_jobs(
                         )
                         for caps in _dgrad_caps()
                     )
-                if _is_patch_geometry(geo):
-                    total += len(_VECS)
+                if _is_patch_geometry(geo, target.gfx, dtype):
+                    total += len(_patch_vecs(geo))
     return total
 
 
@@ -2361,6 +2870,9 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
 
     caps = caps or {}
     if caps.get("patch"):
+        if direction == "fwd":
+            # The forward patch GEMM runs the width-folded problem (X == 1).
+            return ConvProblem(N=1, Hi=16, Wi=8, C=128, K=64, Y=2, X=1, sH=2, sW=1)
         # The patch dgrad's record is the patch embedding's own.
         return ConvProblem(N=1, Hi=16, Wi=16, C=64, K=64, Y=2, X=2, sH=2, sW=2)
     groups = 2 if caps.get("grouped") else 1

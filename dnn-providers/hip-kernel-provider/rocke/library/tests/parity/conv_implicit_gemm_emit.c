@@ -800,6 +800,226 @@ static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     return 0;
 }
 
+/* The register-prefetch K loop (prefetch_global_regs) on gfx950, built on
+ * config 66 unsplit. Keep in lockstep with _pgr_spec() in
+ * conv_implicit_gemm_emit.py.
+ *   86: mem/cshuffle
+ *   87: compv3/cshuffle, 128x64x64 tile, 4x2 warps, 32x32x16 warp tile
+ *   88: compv4/cshuffle, 128x128x64 tile, bf16
+ *   89: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
+ *   90: basic/cshuffle, grouped (groups=2), 4-wide vectors
+ *   91: split_k=2 (the slice bounds of the loop)
+ *   92: depthwise group_merge=8, 64x64x64 tile, 32x32x16 warp tile, widths
+ *       derived (the merged B descriptor, scalar B loads)
+ *   93: async_dma: rejected by both engines
+ *   94: unroll_k: rejected by both engines
+ *   95: gfx1250 WMMA (config 41 unsplit): rejected by both engines
+ *   96: scalar A loads on a 256-row tile (64 loads per thread): rejected by
+ *       both engines
+ *   97: scalar A loads on a 128-row tile (32 loads per thread, the limit) */
+static int make_cfg_pgr(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    if(idx == 95)
+    {
+        if(make_cfg_split_k(41, spec, arch) != 0)
+            return -1;
+        spec->split_k = 1;
+        spec->prefetch_global_regs = true;
+        return 0;
+    }
+    if(make_cfg_split_k_mfma(66, spec, arch) != 0)
+        return -1;
+    spec->split_k = 1;
+    spec->prefetch_global_regs = true;
+    const bool wt32 = idx == 87 || idx == 92;
+    if(wt32)
+    {
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+    }
+    switch(idx)
+    {
+    case 86:
+        return 0;
+    case 87:
+        spec->problem = rocke_conv_problem_make(2, 12, 12, 128, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 64;
+        spec->warp_m = 4;
+        spec->warp_n = 2;
+        spec->pipeline = "compv3";
+        return 0;
+    case 88:
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->pipeline = "compv4";
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        return 0;
+    case 89:
+        spec->problem = rocke_conv_problem_make(1, 9, 9, 64, 40, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_k = 32;
+        spec->warp_n = 1;
+        spec->pipeline = "compv3";
+        spec->epilogue = "default";
+        spec->vector_size_c = 1;
+        return 0;
+    case 90:
+        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->pipeline = "basic";
+        spec->vector_size_a = 4;
+        spec->vector_size_b = 4;
+        spec->vector_size_c = 4;
+        return 0;
+    case 91:
+        spec->split_k = 2;
+        return 0;
+    case 92:
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->has_vector_size_a = false;
+        spec->vector_size_a = 0;
+        spec->has_vector_size_b = false;
+        spec->vector_size_b = 0;
+        spec->has_vector_size_c = false;
+        spec->vector_size_c = 0;
+        spec->group_merge = 8;
+        return 0;
+    case 93:
+        spec->async_dma = true;
+        return 0;
+    case 94:
+        spec->unroll_k = true;
+        return 0;
+    case 96:
+    case 97:
+        spec->tile_m = (idx == 96) ? 256 : 128;
+        spec->tile_n = 64;
+        spec->vector_size_a = 1;
+        spec->vector_size_b = 1;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* gfx950 forward knobs: the width-folded patch GEMM (patch), its DMA-staged
+ * two-stage K loop (dtl), the XCD-grouped tile order on it (chiplet_swizzle)
+ * and the 16-element LDS K-row pad (lds_k_pad=16). Keep in lockstep with
+ * _patch_dtl_spec() in conv_implicit_gemm_emit.py (which lists what each
+ * index covers). */
+static int make_cfg_patch_dtl(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->problem = rocke_conv_problem_make(1, 16, 8, 128, 64, 2, 1, 2, 1, 0, 0, 1, 1);
+    spec->tile_m = 32;
+    spec->tile_n = 32;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->patch = true;
+    *arch = "gfx950";
+
+    const bool bf16 = idx == 99 || idx == 101 || idx == 105;
+    if(bf16)
+    {
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+    }
+    if(idx == 99 || idx == 101)
+    {
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+    }
+    if(idx == 104 || idx == 105)
+    {
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->patch = false;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 16;
+    }
+    switch(idx)
+    {
+    case 98:
+        spec->chiplet_swizzle = true;
+        return 0;
+    case 99:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->pipeline = "compv4";
+        spec->chiplet_swizzle = true;
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 100:
+        spec->chiplet_swizzle = true;
+        spec->dtl = true;
+        return 0;
+    case 101:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->chiplet_swizzle = true;
+        spec->dtl = true;
+        return 0;
+    case 102:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->pipeline = "compv3";
+        return 0;
+    case 103:
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->dtl = true;
+        return 0;
+    case 104:
+        spec->tile_n = 64;
+        spec->warp_m = 1;
+        spec->warp_n = 4;
+        return 0;
+    case 105:
+        spec->tile_m = 16;
+        spec->tile_n = 16;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->pipeline = "compv3";
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 106:
+        spec->patch = false;
+        spec->dtl = true;
+        return 0;
+    case 107:
+        spec->dtl = true;
+        spec->prefetch_global_regs = true;
+        return 0;
+    case 108:
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -830,6 +1050,16 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 82 && idx <= 85)
     {
         if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 86 && idx <= 97)
+    {
+        if(make_cfg_pgr(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 98 && idx <= 108)
+    {
+        if(make_cfg_patch_dtl(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

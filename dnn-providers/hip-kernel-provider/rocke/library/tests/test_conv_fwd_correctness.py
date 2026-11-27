@@ -851,5 +851,54 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
         self._sweep(unroll_k=True)
 
 
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestFwdPrefetchGlobalRegsNumerics(unittest.TestCase):
+    """GPU numerics for ``prefetch_global_regs`` (the register-prefetch K loop).
+
+    The flag replaces the synchronous K loop of every MFMA pipeline that shares
+    it. Each iteration reads the next tile into registers, so the last one
+    reads a tile past the reduction, which must never reach D; most shapes
+    here also end on a partial K tile. Covers every pipeline and dtype with
+    both epilogues, the 16-half LDS pad, and the merged depthwise B descriptor.
+    """
+
+    def _run(self, shape, dtype, pipeline, epilogue, **kw):
+        if not _IS_MFMA:
+            self.skipTest(f"prefetch_global_regs is MFMA-only; running on {GPU_ARCH}")
+        ok, why = _run_one(
+            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_global_regs=True, **kw
+        )
+        assert_case_ran(self, ok, why)
+
+    def test_pipelines(self):
+        for pipeline in _MFMA_PIPELINES:
+            for dtype in _DTYPES:
+                for epilogue in _EPILOGUES:
+                    shapes = _SHAPES if pipeline == "mem" else _SHAPES[:3]
+                    for shape in shapes:
+                        with self.subTest(
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            epilogue=epilogue,
+                            shape=shape.id,
+                        ):
+                            self._run(shape, dtype, pipeline, epilogue)
+
+    def test_lds_k_pad_16(self):
+        for pipeline in ("mem", "compv3", "compv4"):
+            for dtype in _DTYPES:
+                for shape in _SHAPES[:3]:
+                    with self.subTest(pipeline=pipeline, dtype=dtype, shape=shape.id):
+                        self._run(shape, dtype, pipeline, "cshuffle", lds_k_pad=16)
+
+    def test_group_merge(self):
+        for shape in _DW_SHAPES:
+            for gm in (4, 8):
+                if shape.groups % gm:
+                    continue
+                with self.subTest(shape=shape.id, gm=gm):
+                    self._run(shape, _DTYPES[0], "mem", "cshuffle", group_merge=gm)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

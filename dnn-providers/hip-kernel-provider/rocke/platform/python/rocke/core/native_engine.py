@@ -80,7 +80,7 @@ __all__ = [
 #: ``cpp/include/rocke/abi.h``: ctypes argtypes are a hand-written mirror of the
 #: C signatures, and calling a library of another ABI through them is
 #: memory-unsafe rather than merely wrong, so a mismatch is refused at load.
-BINARY_ABI = 23
+BINARY_ABI = 24
 
 #: The environment variable naming the shared engine to load.
 SHARED_ENGINE_ENV = "ROCKE_ONLINE_LIB"

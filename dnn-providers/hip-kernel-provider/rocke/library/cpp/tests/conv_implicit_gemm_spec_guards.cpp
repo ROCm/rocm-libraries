@@ -5,13 +5,16 @@
  * around the gfx950 MFMA split-K forward: the split-K admission gate, the
  * NULL pipeline / epilogue refusals, the LDS budget that charges compv4 one
  * A/B tile, and the refusal of a split with fp32 output (TF32 on MFMA, plain
- * fp32 on gfx1250 WMMA, two-stage or cluster).
+ * fp32 on gfx1250 WMMA, two-stage or cluster); around the register-prefetch
+ * K loop (prefetch_global_regs): the K loops it does not rewrite, WMMA and the
+ * per-operand limit on carried loads; and around the patch GEMM (patch) and its
+ * DMA-staged K loop (dtl).
  *
  * CI checks the parity configs of conv_implicit_gemm_emit with the Python
  * engine only (the canonical golden), and the pybind tests that compare the
  * two engines skip where rocke_engine is not built, so without this test the
  * C++ verdicts on these specs run in no CI lane. It takes the specs from the
- * C parity emitter itself (configs 66..85), so the two cannot drift, and
+ * C parity emitter itself (configs 66..108), so the two cannot drift, and
  * checks that rocke_implicit_gemm_conv_is_valid_spec gives the verdict and
  * the reason text Python's is_valid_spec gives, that an accepted spec builds
  * and lowers, and that the builder refuses a rejected one.
@@ -137,6 +140,40 @@ int main()
         {84, k_fp32_split},
         /* 85: config 84 in the cluster form, which folds with the same cast */
         {85, "split-K forward folds through the cluster: dtype_d must be fp16 or bf16 (got fp32)"},
+        /* 86..97: the register-prefetch K loop (prefetch_global_regs) */
+        {86, nullptr},
+        {87, nullptr},
+        {88, nullptr},
+        {89, nullptr},
+        {90, nullptr},
+        {91, nullptr},
+        {92, nullptr},
+        {93,
+         "prefetch_global_regs is not supported with async_dma: the direct global->LDS "
+         "ping-pong has its own K loop"},
+        {94,
+         "prefetch_global_regs is not supported with unroll_k: the double-buffered K loop "
+         "has its own prefetch"},
+        {95, "WMMA conv does not support prefetch_global_regs on gfx1250"},
+        {96,
+         "prefetch_global_regs carries at most 32 global loads per thread per operand; the A "
+         "tile needs 64 (use a wider vector or a smaller tile)"},
+        {97, nullptr},
+        /* 98..108: the patch GEMM, its DMA-staged K loop (dtl), chiplet_swizzle on
+         * it and the 16-element LDS K-row pad */
+        {98, nullptr},
+        {99, nullptr},
+        {100, nullptr},
+        {101, nullptr},
+        {102, nullptr},
+        {103, nullptr},
+        {104, nullptr},
+        {105, nullptr},
+        {106, "dtl is built on the patch GEMM only"},
+        {107, "dtl has its own K loop (no async_dma / unroll_k / pgr)"},
+        {108,
+         "patch serves width-folded patch embeddings only (2-D, ungrouped, X == 1, no padding "
+         "or dilation, sH >= Y)"},
     };
     for(const Case& c : cases)
         run(c);

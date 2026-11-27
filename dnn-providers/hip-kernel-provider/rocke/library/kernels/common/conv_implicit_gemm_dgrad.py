@@ -413,7 +413,7 @@ def is_patch_problem(p: ConvProblem) -> bool:
 
 
 def patch_sub_gemms(
-    p: ConvProblem, tile_m: int, tile_n: int, tile_k: int = 32
+    p: ConvProblem, tile_m: int, tile_n: int, tile_k: int = 32, split_k: int = 1
 ) -> List[SubGemmParams]:
     """The one sub-GEMM record a ``patch`` kernel runs ``p`` with.
 
@@ -424,11 +424,16 @@ def patch_sub_gemms(
     are the filter's, so the K tail past ``K`` (``ydot`` = 1 when ``K`` is
     not a multiple of the K tile) lands on ``y = Y``, outside the filter,
     and reads no W row -- with a tap stride of 1 it would read row ``y = 1``.
+    As for :func:`enumerate_sub_gemms`, ``gemm_k_padded`` is ``K`` rounded up
+    to ``tile_k * split_k``: the kernel splits it into ``split_k`` slices of
+    whole K tiles (a slice wholly past ``K`` reads only the tail).
     """
     if not is_patch_problem(p):
         raise ValueError(f"{p} is not a patch embedding")
     v = ConvProblem(N=p.N, Hi=p.Ho, Wi=p.Wo, C=p.Y * p.X * p.C, K=p.K, Y=1, X=1)
-    (sg,) = enumerate_sub_gemms(v, compute_tilde(v), tile_m, tile_n, tile_k=tile_k)
+    (sg,) = enumerate_sub_gemms(
+        v, compute_tilde(v), tile_m, tile_n, tile_k=tile_k, split_k=split_k
+    )
     return [
         dc_replace(sg, b_y_stride=p.Y, b_x_stride=p.X, d_h_stride=p.sH, d_w_stride=p.sW)
     ]
@@ -819,6 +824,21 @@ class DgradConvSpec:
     #
     # Default False: strictly additive.
     patch: bool = False
+    # gfx950, patch only: the patch GEMM's K loop as two LDS stages filled
+    # by 16-byte DRAM->LDS DMAs (inline asm, so the explicit waits are the only
+    # ones), one barrier per K tile (wait for the tile, barrier, refill the
+    # other stage, MFMAs). A (dY, M-outer) is a packed tile whose 16-byte chunk
+    # c of row r sits at slot c ^ (r & 7); B (W, K-outer, read by the transpose
+    # reads) a packed tile whose chunk c of K row k sits at c ^ g(k), g chosen
+    # so the four K rows of one transpose read hit distinct banks. The swizzle
+    # moves to the global address on the load side. Tagged ``dtl``.
+    dtl: bool = False
+    # Register-prefetch form of the uniform_k_decode loop: tile k+1's
+    # global reads are issued into VGPRs right after tile k is published to
+    # LDS and stay in flight under tile k's MFMAs (LDS-only barriers), as
+    # ImplicitGemmConvSpec.prefetch_global_regs does for the forward. Default
+    # False: strictly additive.
+    prefetch_global_regs: bool = False
     # Stride-1 tap-outer K loop: the reduction runs as two nested loops,
     # filter tap (y, x) outer and output-channel chunk inner, instead of one
     # loop over k_dg = (y, x, k_out). Stride 1 and dilation 1 make tap (y, x)
@@ -903,6 +923,8 @@ class DgradConvSpec:
         """Row pad of the K-outer B tile (see dy_halo_kouter_pad)."""
         if self.dy_halo > 0 and self.dy_halo_kouter_pad > 0:
             return self.dy_halo_kouter_pad
+        if self.dtl:
+            return 0
         return _KOUTER_PAD
 
     @property
@@ -1034,7 +1056,11 @@ class DgradConvSpec:
         """Return the list of sub-GEMMs for the tilde decomposition."""
         if self.patch:
             return patch_sub_gemms(
-                self.problem, self.tile_m, self.tile_n, tile_k=self.tile_k
+                self.problem,
+                self.tile_m,
+                self.tile_n,
+                tile_k=self.tile_k,
+                split_k=max(1, self.split_k),
             )
         tilde = compute_tilde(self.problem)
         return enumerate_sub_gemms(
@@ -1108,6 +1134,9 @@ class DgradConvSpec:
                 # A different K-loop body; only tagged when set.
                 "ukd": self.uniform_k_decode,
                 "patch": self.patch,
+                "dtl": self.dtl,
+                "chip": self.chiplet_swizzle,
+                "pgr": self.prefetch_global_regs,
                 # The A row pad changes the LDS layout, so a non-default pad
                 # must reach the name or it collides with the default build.
                 f"kp{self.lds_k_pad}": self.lds_k_pad is not None
@@ -1237,6 +1266,12 @@ class DgradConvSpec:
         _patch_why = _patch_conflict(self)
         if _patch_why:
             raise ValueError(_patch_why)
+        _dtl_why = _dtl_conflict(self)
+        if _dtl_why:
+            raise ValueError(_dtl_why)
+        _pgr_why = _pgr_conflict(self)
+        if _pgr_why:
+            raise ValueError(_pgr_why)
         _tapk_why = _tap_outer_k_conflict(self)
         if _tapk_why:
             raise ValueError(_tapk_why)
@@ -1264,6 +1299,8 @@ class DgradConvSpec:
     def effective_lds_layout(self) -> LdsLayout:
         if self.lds_layout is not None:
             layout = self.lds_layout
+        elif self.dtl:
+            layout = LdsLayout.packed_async(self.tile_k)
         elif self.lds_k_pad is not None:
             layout = LdsLayout.padded_k(self.tile_k, self.lds_k_pad)
         elif self.async_dma:
@@ -1334,8 +1371,10 @@ def _patch_conflict(spec: "DgradConvSpec") -> str:
     """
     if not spec.patch:
         return ""
-    if spec.split_k != 1:
-        return "patch requires split_k == 1 (the atomic epilogue has no patch store)"
+    if spec.split_k != 1 and spec.epilogue != "cshuffle":
+        # The cshuffle split-K epilogue takes the tilde address function,
+        # patch columns included; the plain atomic epilogue does not.
+        return "patch with split_k > 1 needs the cshuffle epilogue"
     if spec.pipeline == "wavelet":
         return "patch is not supported with pipeline='wavelet'"
     if spec.problem.groups != 1:
@@ -1347,6 +1386,50 @@ def _patch_conflict(spec: "DgradConvSpec") -> str:
             "patch serves patch embeddings only (no padding or dilation, "
             "stride >= filter)"
         )
+    return ""
+
+
+def _dtl_conflict(spec: "DgradConvSpec") -> str:
+    """Why ``spec.dtl`` cannot be honoured, or ``""`` if it can."""
+    if not spec.dtl:
+        return ""
+    if not spec.patch or not spec.lds_k_outer:
+        return "dtl is built on the K-outer patch GEMM only"
+    if spec.split_k != 1 or spec.async_dma or spec.unroll_k:
+        return "dtl has its own K loop (no split-K / async_dma / unroll_k)"
+    if spec.prefetch_global_regs or spec.uniform_k_decode:
+        return "dtl has its own K loop (no pgr / ukd)"
+    if spec.tap_outer_k or spec.dy_halo or spec.pipeline == "wavelet":
+        return "dtl: no tap_outer_k / dy_halo / wavelet"
+    if spec.wave_size != 64 or spec.data.dtype_a not in ("fp16", "bf16"):
+        return "dtl: wave64, 16-bit operands"
+    if (spec.warp_tile_m, spec.warp_tile_k) not in ((16, 32), (32, 16)):
+        return "dtl needs MFMA fragments of one 16-byte chunk"
+    for rows, cols in ((spec.tile_m, spec.tile_k), (spec.tile_k, spec.tile_n)):
+        cpr = cols // 8
+        if cols % 8 or cpr & (cpr - 1) or (rows * cpr) % spec.block_size:
+            return "dtl: tiles must be whole passes of 16-byte chunks"
+    if spec.tile_n < 16:
+        return "dtl: tile_n >= 16"
+    return ""
+
+
+def _pgr_conflict(spec: "DgradConvSpec") -> str:
+    """Why ``spec.prefetch_global_regs`` cannot be honoured, or ``""`` if it can.
+
+    Only the uniform_k_decode loop has the register-prefetch form; the split-K,
+    tap-outer, dY-halo, async and wavelet loops keep their own schedules.
+    """
+    if not spec.prefetch_global_regs:
+        return ""
+    if not spec.uniform_k_decode:
+        return "prefetch_global_regs needs the uniform_k_decode loop"
+    if spec.async_dma or spec.unroll_k or spec.pipeline == "wavelet":
+        return (
+            "prefetch_global_regs is not supported with async_dma, unroll_k or wavelet"
+        )
+    if spec.tap_outer_k or spec.dy_halo:
+        return "prefetch_global_regs is not supported with tap_outer_k or dy_halo"
     return ""
 
 
@@ -1569,10 +1652,11 @@ def _dgrad_lds_charge(spec: DgradConvSpec) -> tuple[int, int, int]:
         if spec.lds_k_outer
         else _lds_layout.storage_shape(spec.tile_n)
     )
-    # dy_halo=2 double-buffers the B tile.
-    _b_copies = 2 if spec.dy_halo == 2 else 1
+    # dy_halo=2 double-buffers the B tile; dtl both tiles.
+    _b_copies = 2 if spec.dy_halo == 2 or spec.dtl else 1
+    _a_copies = 2 if spec.dtl else 1
     _ab_bytes = (
-        _a_shape[0] * _a_shape[1] + _b_copies * _b_shape[0] * _b_shape[1]
+        _a_copies * _a_shape[0] * _a_shape[1] + _b_copies * _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
@@ -1641,6 +1725,12 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _patch_why = _patch_conflict(spec)
     if _patch_why:
         return False, _patch_why
+    _pgr_why = _pgr_conflict(spec)
+    if _pgr_why:
+        return False, _pgr_why
+    _dtl_why = _dtl_conflict(spec)
+    if _dtl_why:
+        return False, _dtl_why
     _n_sub = len(spec.compute_sub_gemms())
     if _n_sub > spec.max_sub_gemms:
         return False, (
@@ -1741,7 +1831,7 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     for flag, label in (
         (spec.async_dma, "async_dma"),
         (spec.unroll_k, "unroll_k"),
-        (spec.chiplet_swizzle, "chiplet_swizzle"),
+        (spec.chiplet_swizzle and not spec.patch, "chiplet_swizzle"),
     ):
         if flag:
             return False, (
@@ -2321,6 +2411,21 @@ def _build_tilde_dgrad(
     warp_m_idx = grid.warp_m_idx
     warp_n_idx = grid.warp_n_idx
 
+    if spec.chiplet_swizzle:
+        # Patch dgrad (one record, block_start 0): XCD-grouped tile order, the
+        # forward knob's super-tile remap over the record's (m, n) tiles.
+        from rocke.helpers.grid import chiplet_aware_super_tile_dynamic
+
+        swz = chiplet_aware_super_tile_dynamic(
+            b,
+            local_flat,
+            num_pid_m=rec_num_m_tiles,
+            num_pid_n=rec_num_n_tiles,
+            wgm=spec.chiplet_wgm,
+            num_xcds=spec.chiplet_num_xcds,
+            chunk_size=spec.chiplet_chunk_size,
+        )
+        local_m_tile, local_n_tile = swz.row, swz.col
     block_m_off_v = b.mul(local_m_tile, b.const_i32(block_m))
     block_n_off_v = b.mul(local_n_tile, b.const_i32(block_n))
     grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
@@ -2407,6 +2512,12 @@ def _build_tilde_dgrad(
         if spec.dy_halo == 2
         else None
     )
+    # dtl: the second stage of both tiles.
+    if spec.dtl:
+        A_dtl2 = b.smem_alloc(
+            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
+        )
+        B_dtl2 = b.smem_alloc(ir_dtype_b, b_shape, name_hint="B_smem2")
 
     mfmas_m = spec.mfmas_per_warp_m
     mfmas_n = spec.mfmas_per_warp_n
@@ -2715,6 +2826,56 @@ def _build_tilde_dgrad(
             dtype=_smem_dtype if _smem_dtype is not None else F16,
         )
 
+    if spec.dtl:
+        if op.family != "mma" or a_per_lane != 8 or b_per_lane != 8:
+            raise ValueError("dtl needs MFMA fragments of one 16-byte chunk")
+        _dtl_cpr_a = block_k // 8
+        _dtl_cpr_b = block_n // 8
+        _dtl_mask_a = b.const_i32((min(_dtl_cpr_a, 8) - 1) << 3)
+        _dtl_lane_mod4 = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+        _dtl_grp16 = b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4))
+
+    def _dtl_g(k_row: Value) -> Value:
+        """dtl: the chunk XOR of K row ``k_row`` of the K-outer B tile. The
+        four rows one transpose read covers (16 lanes x 8 bytes) land on
+        distinct 32-byte bank groups of a 128-byte line."""
+        if _dtl_cpr_b >= 8:
+            return b.shl(b.land(k_row, b.const_i32(3)), b.const_i32(1))
+        if _dtl_cpr_b == 4:
+            return b.land(k_row, b.const_i32(2))
+        return c0
+
+    def _tr_frag_dtl(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
+        """The wave64 transpose-read fragment of ConvKOuterFragmentReader on
+        the dtl-swizzled K-outer tile (element col -> col ^ (g(row) << 3))."""
+        c_mn = b.const_i32(mn_atom)
+        col = b.add(
+            mn_base,
+            b.add(
+                b.mul(b.div(b.mod(lane, c_mn), b.const_i32(16)), b.const_i32(16)),
+                _dtl_lane_mod4,
+            ),
+        )
+        row0 = b.add(
+            k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(n)), _dtl_grp16)
+        )
+        parts = []
+        for r in range(n // 4):
+            row = b.add(row0, b.const_i32(4 * r))
+            pcol = b.xor(col, b.shl(_dtl_g(row), b.const_i32(3)))
+            parts.append(
+                b.ds_read_tr16_b64(
+                    smem,
+                    row,
+                    pcol,
+                    dtype=_smem_dtype if _smem_dtype is not None else F16,
+                )
+            )
+        out = parts[0]
+        for pt in parts[1:]:
+            out = b.vec_concat(out, pt)
+        return out
+
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
         a_sync_loader.load(
@@ -2819,7 +2980,14 @@ def _build_tilde_dgrad(
                         b,
                         A_src,
                         a_row,
-                        col_base,
+                        (
+                            b.xor(
+                                col_base,
+                                b.land(b.shl(a_row, b.const_i32(3)), _dtl_mask_a),
+                            )
+                            if spec.dtl
+                            else col_base
+                        ),
                         a_per_lane,
                         smem_dtype=_smem_dtype,
                         data=spec.data,
@@ -2829,7 +2997,7 @@ def _build_tilde_dgrad(
             for ni in range(mfmas_n):
                 if spec.lds_k_outer:
                     b_cols.append(
-                        _tr_frag(
+                        (_tr_frag_dtl if spec.dtl else _tr_frag)(
                             B_src,
                             b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n)),
                             b.const_i32(kk * spec.warp_tile_k),
@@ -3037,7 +3205,17 @@ def _build_tilde_dgrad(
         c_cs = c_dg_N if grouped else c_C
         b_step_y = b.mul(c_X, c_cs)
         b_step_k = b.mul(c_Y, b_step_y)
-        uk_hi = b.select(uk_ok, k_hi, k_lo)
+        # K % tile_k != 0 with a single filter tap (y_dot_slice == x_dot_slice
+        # == 1, e.g. 1x1): every full tile lies inside the tap, so the uniform
+        # loop runs on the floor((k_hi - k_lo) / tile_k) full tiles and the
+        # plain loop below peels the tail. Multi-tap problems keep the plain loop.
+        uk_single = b.land(b.cmp_eq(c_xs, c1), b.cmp_eq(rec_y_dot_slice, c1))
+        # A padded split-K slice may end past the real reduction (kpg); cap it
+        # there so no full tile reads the next group's channels.
+        uk_real_hi = b.select(b.cmp_lt(c_kd, k_hi), c_kd, k_hi)
+        uk_span = b.select(b.cmp_lt(k_lo, uk_real_hi), b.sub(uk_real_hi, k_lo), c0)
+        uk_n_full = b.mul(b.div(uk_span, c_block_k), c_block_k)
+        uk_hi = b.select(uk_ok, k_hi, b.select(uk_single, b.add(k_lo, uk_n_full), k_lo))
 
         uk_cap: List[Optional[Tuple[Value, ...]]] = [None]
 
@@ -3092,27 +3270,8 @@ def _build_tilde_dgrad(
             w_uk_fn = w_uk
 
         n_acc = len(accs)
-        uk_iter = list(accs) + [("uk_k", uk_k0), ("uk_x", uk_x0), ("uk_y", uk_y0)]
-        for_uk = b.scf_for_iter(k_lo, uk_hi, c_block_k, uk_iter, iv_name="k0")
-        with for_uk as (_k0, iter_vars):
-            ko, xd, yd = iter_vars[n_acc:]
-            uk_cap[0] = tile_uniforms(ko, xd, yd)
-            # Every global read of the tile before the first LDS write. With
-            # the address math this short there is nothing left to interleave
-            # with, and a read-then-write per chunk lets the register allocator
-            # recycle one staging register across all chunks, which serialises
-            # the reads on their full latency.
-            a_staged = a_sync_loader.load_global(
-                b, tid=tid, descriptor=dy_uk, rsrc=dy_rsrc
-            )
-            b_staged = b_sync_loader.load_global(
-                b, tid=tid, descriptor=w_uk_fn, rsrc=w_rsrc
-            )
-            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
-            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
-            b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
-            b.sync()
+
+        def next_tile(ko: Value, xd: Value, yd: Value) -> Tuple[Value, Value, Value]:
             # Next tile: k_out wraps into the next filter tap.
             nk = b.add(ko, c_block_k)
             wrap_k = b.cmp_ge(nk, c_kd)
@@ -3121,10 +3280,86 @@ def _build_tilde_dgrad(
             wrap_x = b.cmp_ge(nx, c_xs)
             nx = b.select(wrap_x, c0, nx)
             ny = b.add(yd, b.select(wrap_x, c1, c0))
-            b.scf_yield(*new_accs, nk, nx, ny)
-        uk_accs = list(for_uk.results)[:n_acc]
+            return nk, nx, ny
 
-        fb_lo = b.select(uk_ok, k_hi, k_lo)
+        uk_iter = list(accs) + [("uk_k", uk_k0), ("uk_x", uk_x0), ("uk_y", uk_y0)]
+        if spec.prefetch_global_regs:
+            # Register-prefetch form: the tile carried in VGPRs is written to
+            # LDS and published, then the next tile's reads are issued and stay
+            # in flight under this tile's MFMAs (LDS-only barriers). The reads
+            # issued by the last iteration are never stored.
+            def load_tile(ko: Value, xd: Value, yd: Value):
+                uk_cap[0] = tile_uniforms(ko, xd, yd)
+                a_st = a_sync_loader.load_global(
+                    b, tid=tid, descriptor=dy_uk, rsrc=dy_rsrc
+                )
+                b_st = b_sync_loader.load_global(
+                    b, tid=tid, descriptor=w_uk_fn, rsrc=w_rsrc
+                )
+                return a_st, b_st
+
+            a0, b0 = load_tile(uk_k0, uk_x0, uk_y0)
+            n_a = len(a0)
+            pgr_iter = (
+                uk_iter
+                + [(f"pgra{i}", v) for i, (_, _, v) in enumerate(a0)]
+                + [(f"pgrb{i}", v) for i, (_, _, v) in enumerate(b0)]
+            )
+            for_pg = b.scf_for_iter(k_lo, uk_hi, c_block_k, pgr_iter, iv_name="k0")
+            with for_pg as (_k0, iter_vars):
+                ko, xd, yd = iter_vars[n_acc : n_acc + 3]
+                av = iter_vars[n_acc + 3 : n_acc + 3 + n_a]
+                bv = iter_vars[n_acc + 3 + n_a :]
+                a_sync_loader.store_lds(
+                    b,
+                    smem_dst=A_smem,
+                    staged=[(r, c, v) for (r, c, _), v in zip(a0, av)],
+                )
+                b_sync_loader.store_lds(
+                    b,
+                    smem_dst=B_smem,
+                    staged=[(r, c, v) for (r, c, _), v in zip(b0, bv)],
+                )
+                b.sync_lds_only()
+                nk, nx, ny = next_tile(ko, xd, yd)
+                an, bn = load_tile(nk, nx, ny)
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+                b.sync_lds_only()
+                b.scf_yield(
+                    *new_accs,
+                    nk,
+                    nx,
+                    ny,
+                    *[v for _, _, v in an],
+                    *[v for _, _, v in bn],
+                )
+            uk_accs = list(for_pg.results)[:n_acc]
+        else:
+            for_uk = b.scf_for_iter(k_lo, uk_hi, c_block_k, uk_iter, iv_name="k0")
+            with for_uk as (_k0, iter_vars):
+                ko, xd, yd = iter_vars[n_acc:]
+                uk_cap[0] = tile_uniforms(ko, xd, yd)
+                # Every global read of the tile before the first LDS write. With
+                # the address math this short there is nothing left to interleave
+                # with, and a read-then-write per chunk lets the register allocator
+                # recycle one staging register across all chunks, which serialises
+                # the reads on their full latency.
+                a_staged = a_sync_loader.load_global(
+                    b, tid=tid, descriptor=dy_uk, rsrc=dy_rsrc
+                )
+                b_staged = b_sync_loader.load_global(
+                    b, tid=tid, descriptor=w_uk_fn, rsrc=w_rsrc
+                )
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+                b.sync()
+                nk, nx, ny = next_tile(ko, xd, yd)
+                b.scf_yield(*new_accs, nk, nx, ny)
+            uk_accs = list(for_uk.results)[:n_acc]
+
+        fb_lo = uk_hi
         fb_iter = [(f"fb_{name}", v) for (name, _), v in zip(accs, uk_accs)]
         for_fb = b.scf_for_iter(fb_lo, k_hi, c_block_k, fb_iter, iv_name="k1")
         with for_fb as (k1, iter_vars):
@@ -3440,8 +3675,171 @@ def _build_tilde_dgrad(
         )
         return b.kernel
 
+    def _emit_dtl_loop() -> List[Value]:
+        """The ``dtl`` K loop (patch GEMM, split_k 1). Returns the final
+        accumulators.
+
+        The patch record is the pointwise one: dY row m of the GEMM is at m*K,
+        W row k at k*N (N = Y*X*C, c_dg_N). Each lane's 16-byte chunks of a
+        K tile have a loop-invariant base offset and row predicate; a tile
+        adds a uniform K offset and the K bound. Two LDS stages, the loop
+        unrolled 2x so each phase names its stage: wait for the tile, one
+        barrier (it also retires the other stage's reads of the phase
+        before), refill the other stage, MFMAs on this one. An odd tile
+        count's extra tile is past K: zeros.
+        """
+        from kernels.common._conv_implicit_gemm_common import dma_lds_at
+        from rocke.core.ir import I64 as _I64
+
+        c_oob = b.const_i32((1 << 31) - 1)
+        c2 = b.const_i32(2)
+        # Per lane, per pass: (byte base, row predicate, k term) for A and B.
+        a_pass = []
+        for p_ in range(block_m * _dtl_cpr_a // threads):
+            chunk = b.add(tid, b.const_i32(p_ * threads))
+            row = b.div(chunk, b.const_i32(_dtl_cpr_a))
+            slot = b.mod(chunk, b.const_i32(_dtl_cpr_a))
+            col = b.shl(
+                b.xor(slot, b.land(row, b.const_i32(min(_dtl_cpr_a, 8) - 1))),
+                b.const_i32(3),
+            )
+            m = b.add(block_m_off_v, row)
+            base = b.mul(b.add(b.mul(m, c_K), col), c2)
+            a_pass.append((base, b.cmp_lt(m, rec_gemm_m), col))
+        b_pass = []
+        for p_ in range(block_k * _dtl_cpr_b // threads):
+            chunk = b.add(tid, b.const_i32(p_ * threads))
+            row = b.div(chunk, b.const_i32(_dtl_cpr_b))
+            slot = b.mod(chunk, b.const_i32(_dtl_cpr_b))
+            n = b.add(block_n_off_v, b.shl(b.xor(slot, _dtl_g(row)), b.const_i32(3)))
+            base = b.mul(b.add(b.mul(row, c_dg_N), n), c2)
+            b_pass.append((base, b.cmp_lt(n, c_dg_N), row))
+        c_kstep_b = b.mul(c_dg_N, c2)
+
+        def stage_base(dst: Value) -> Value:
+            wave_base = b.smem_ptr_add(
+                b.smem_addr_of(dst),
+                b.zext(b.mul(warp_id, b.const_i32(64 * 16)), _I64),
+            )
+            return b.readfirstlane(b.trunc(wave_base, I32))
+
+        def load(k0: Value, A_dst: Value, B_dst: Value) -> None:
+            k_left = b.sub(c_K, k0)
+            sa = stage_base(A_dst)
+            a_add = b.mul(k0, c2)
+            for p_, (base, ok, col) in enumerate(a_pass):
+                v = b.land(ok, b.cmp_lt(col, k_left))
+                dma_lds_at(
+                    b,
+                    dy_rsrc,
+                    sa,
+                    p_ * threads * 16,
+                    b.select(v, b.add(base, a_add), c_oob),
+                    c0,
+                )
+            sb = stage_base(B_dst)
+            b_add = b.mul(k0, c_kstep_b)
+            for p_, (base, ok, row) in enumerate(b_pass):
+                v = b.land(ok, b.cmp_lt(row, k_left))
+                dma_lds_at(
+                    b,
+                    w_rsrc,
+                    sb,
+                    p_ * threads * 16,
+                    b.select(v, b.add(base, b_add), c_oob),
+                    c0,
+                )
+
+        load(k_lo, A_smem, B_smem)
+        c_2bk = b.const_i32(2 * block_k)
+        for_op = b.scf_for_iter(k_lo, k_hi, c_2bk, accs, iv_name="k_dtl")
+        with for_op as (k0, iter_vars):
+            state = list(iter_vars)
+            for ph, (cur, nxt) in enumerate(
+                (
+                    ((A_smem, B_smem), (A_dtl2, B_dtl2)),
+                    ((A_dtl2, B_dtl2), (A_smem, B_smem)),
+                )
+            ):
+                k_cur = k0 if ph == 0 else b.add(k0, c_block_k)
+                b.s_waitcnt(vmcnt=0)
+                b.sync()
+                load(b.add(k_cur, c_block_k), nxt[0], nxt[1])
+                state = emit_mfma_phase(cur[0], cur[1], state)
+            b.scf_yield(*state)
+        b.s_waitcnt(vmcnt=0)
+        b.sync()
+        return list(for_op.results)
+
+    def _emit_dx_zero_fill() -> None:
+        """Zero the three odd (hi, wi) residues of this tile's dX pixels."""
+        vec = 8
+        nvec = block_n // vec
+        items = block_m * nvec
+        nthreads = spec.warp_m * spec.warp_n * spec.wave_size
+        c_vec = b.const_i32(vec)
+        c_nvec = b.const_i32(nvec)
+        c_items = b.const_i32(items)
+        zero4 = b.zero_vec(F16, 8)
+        c_oob = b.const_i32((1 << 31) - 1)
+        c_two = b.const_i32(2)
+        c_wic = b.mul(c_Wi, c_C)
+        for it in range(-(-items // nthreads)):
+            idx = b.add(tid, b.const_i32(it * nthreads))
+            m_loc = b.div(idx, c_nvec)
+            nv = b.sub(idx, b.mul(m_loc, c_nvec))
+            m_g = b.add(block_m_off_v, m_loc)
+            n_l = b.add(block_n_off_v, b.mul(nv, c_vec))
+            n_g = b.add(n_l, c_group_base) if c_group_base is not None else n_l
+            ok0 = b.land(
+                b.cmp_lt(idx, c_items),
+                b.land(b.cmp_lt(m_g, rec_gemm_m), b.cmp_lt(n_l, c_dg_N)),
+            )
+            n_val, m_rem = _magic_divmod(b, m_g, hw_div)
+            htl, wtl = _magic_divmod(b, m_rem, w_div)
+            hi = b.add(b.mul(htl, rec_d_h_stride), rec_d_h_offset)
+            wi = b.add(b.mul(wtl, rec_d_w_stride), rec_d_w_offset)
+            o = b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi)
+            base = b.add(b.mul(o, c_C), n_g)
+            for dh, dw in ((0, 1), (1, 0), (1, 1)):
+                ok = ok0
+                off = base
+                if dh:
+                    ok = b.land(ok, b.cmp_lt(b.add(hi, b.const_i32(1)), c_Hi))
+                    off = b.add(off, c_wic)
+                if dw:
+                    ok = b.land(ok, b.cmp_lt(b.add(wi, b.const_i32(1)), c_Wi))
+                    off = b.add(off, c_C)
+                byte_off = b.mul(off, c_two)
+                b.buffer_store_vN_f16(
+                    dx_rsrc, b.select(ok, byte_off, c_oob), c0, zero4, 4, cachepolicy=2
+                )
+
+    if (
+        spec.split_k == 1
+        and spec.pipeline != "wavelet"
+        and spec.data.dtype_d in ("fp16", "bf16")
+    ):
+        # Run-time form of dgrad_fuses_dx_zero_fill (uniform branch on kernargs).
+        _one = b.const_i32(1)
+        _two = b.const_i32(2)
+        _fill = b.land(
+            b.land(b.cmp_eq(c_Y, _one), b.cmp_eq(c_X, _one)),
+            b.land(
+                b.land(b.cmp_eq(rec_d_h_stride, _two), b.cmp_eq(rec_d_w_stride, _two)),
+                b.land(
+                    b.land(b.cmp_eq(rec_d_h_offset, c0), b.cmp_eq(rec_d_w_offset, c0)),
+                    b.cmp_eq(b.mod(c_dg_N, b.const_i32(8)), c0),
+                ),
+            ),
+        )
+        with b.scf_if(_fill):
+            _emit_dx_zero_fill()
+
     if spec.dy_halo:
         final_accs = _emit_dy_halo_loop()
+    elif spec.dtl:
+        final_accs = _emit_dtl_loop()
     elif spec.tap_outer_k:
         final_accs = _emit_tap_outer_loops()
     elif spec.uniform_k_decode:
@@ -3883,6 +4281,35 @@ def _emit_dgrad_cshuffle_epilogue(
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=bounds,
+    )
+
+
+def dgrad_fuses_dx_zero_fill(
+    problem, *, dtype_d: str, split_k: int = 1, pipeline: str = "mem"
+) -> bool:
+    """Whether the non-wavelet dgrad kernel itself stores the zero residues of dX.
+
+    A 1x1 filter at stride 2 (no padding, 16-bit dX, channels per group % 8 == 0)
+    writes only the even (hi, wi) pixels; the kernel zeroes the three odd
+    residues of its own tile (16-byte stores issued before the K loop), so the
+    product plan needs no separate memset of dX (``zero_dx``). The AOT kernel is
+    shape-generic: the kernel tests the same condition at run time (uniform
+    branch on kernargs) and the spec carries no field and no label token.
+    """
+    p = problem
+    return (
+        split_k == 1
+        and pipeline != "wavelet"
+        and dtype_d in ("fp16", "bf16")
+        and p.Y == 1
+        and p.X == 1
+        and p.sH == 2
+        and p.sW == 2
+        and p.pH == 0
+        and p.pW == 0
+        and p.dH == 1
+        and p.dW == 1
+        and (p.C // max(1, p.groups)) % 8 == 0
     )
 
 

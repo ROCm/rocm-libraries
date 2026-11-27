@@ -160,8 +160,12 @@ extern "C" {
  *     own entries in rocke/instance_fused_moe_e2e.h
  *     (rocke_build_fused_moe_forward, rocke_fused_moe_forward_free and
  *     rocke_fused_moe_forward_lower_to_llvm) stay. rocke_topk_softmax_spec_t lost
- *     cross_wave_argmax, which no lowering read, so its size changes. */
-#define ROCKE_ABI_VERSION 23
+ *     cross_wave_argmax, which no lowering read, so its size changes.
+ * 24: rocke_implicit_gemm_conv_spec_t gained prefetch_global_regs, patch and
+ *     dtl, and rocke_dgrad_conv_spec_t gained dtl and prefetch_global_regs:
+ *     the offsets of the earlier fields are unchanged, but an old caller
+ *     leaves the new ones unset. */
+#define ROCKE_ABI_VERSION 24
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

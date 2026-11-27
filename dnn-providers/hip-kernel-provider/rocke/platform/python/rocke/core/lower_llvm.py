@@ -75,6 +75,7 @@ from .ir import (
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
     _if_else_error,
+    _is_buffer_descriptor,
     _is_unsigned,
     _ldexp_op_error,
     _smem_store_vN_op_error,
@@ -5410,7 +5411,17 @@ class _Lowerer:
         # attr is accepted at the IR level (forward-compat) but is NOT
         # rendered as a flag here.
         flag_str = (" " + " ".join(flags)) if flags else ""
-        arglist = ", ".join(self._operand_with_type(v) for v in op.operands)
+        # A buffer descriptor is a ``<4 x i32>`` in the IR but the
+        # ``ptr addrspace(8)`` that make.buffer.rsrc returns in LLVM; the asm
+        # operand takes the type of its LLVM definition.
+        arglist = ", ".join(
+            (
+                f"ptr addrspace(8) {self._operand(v)}"
+                if _is_buffer_descriptor(v)
+                else self._operand_with_type(v)
+            )
+            for v in op.operands
+        )
         asm_expr = f'asm{flag_str} "{template}", "{constraints}"({arglist})'
         if len(op.results) > 1:
             # Multi-output asm: LLVM returns a literal struct; unpack each

@@ -104,8 +104,10 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     _tf32_mfma_reason,
     _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
+    PGR_MAX_STAGED_CHUNKS,
     emit_param_block,
     emit_direct_epilogue_wmma,
+    emit_prefetch_global_regs_kloop,
     emit_wavelet_kloop_dynamic,
     make_a_descriptor,
     make_a_descriptor_dynamic,
@@ -159,6 +161,119 @@ def _sync_load_vecs(spec: "ImplicitGemmConvSpec") -> Tuple[int, int]:
     load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
     load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
     return load_vec_a, load_vec_b
+
+
+def is_fwd_patch_problem(p: ConvProblem) -> bool:
+    """Can a ``patch`` forward kernel run ``p`` (the launched, width-folded problem)?
+
+    A patch embedding folded to a one-column filter: 2-D, ungrouped, no
+    padding or dilation, ``X == 1`` and ``sH >= Y``. Every tap of every output
+    pixel is then inside the image and a filter row is ``C`` contiguous input
+    elements. A pointwise problem (1x1, stride 1) has its own flat path.
+    """
+    return (
+        not p.is_3d
+        and p.groups == 1
+        and not p.is_pointwise
+        and p.X == 1
+        and p.pH == 0
+        and p.pW == 0
+        and p.dH == 1
+        and p.dW == 1
+        and p.sH >= p.Y
+    )
+
+
+def _fwd_patch_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why ``spec.patch`` cannot be honoured, or ``""`` if it can."""
+    if not spec.patch:
+        return ""
+    if spec.group_merge > 1:
+        return "patch serves ungrouped problems only (group_merge > 1)"
+    if spec.split_k > 1 or spec.split_k_cluster:
+        return "patch is not built with split-K"
+    if spec.pipeline == "wavelet":
+        return "patch is not supported with pipeline='wavelet'"
+    if not is_fwd_patch_problem(spec.problem):
+        return (
+            "patch serves width-folded patch embeddings only (2-D, ungrouped, "
+            "X == 1, no padding or dilation, sH >= Y)"
+        )
+    return ""
+
+
+def _fwd_dtl_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why ``spec.dtl`` cannot be honoured, or ``""`` if it can."""
+    if not spec.dtl:
+        return ""
+    if not spec.patch:
+        return "dtl is built on the patch GEMM only"
+    if spec.async_dma or spec.unroll_k or spec.prefetch_global_regs:
+        return "dtl has its own K loop (no async_dma / unroll_k / pgr)"
+    if spec.split_k > 1 or spec.pipeline == "wavelet" or spec.wave_size != 64:
+        return "dtl: no split-K, no wavelet, wave64 only"
+    if spec.data.dtype_a not in ("fp16", "bf16") or spec.lds_k_pad not in (None, 0):
+        return "dtl: 16-bit operands, packed LDS tiles"
+    if spec.lds_layout is not None:
+        return "dtl: the DMA writes packed rows, so an explicit lds_layout is refused"
+    if spec.problem.C % 8:
+        return (
+            "dtl: C must be divisible by 8 (a 16-byte chunk may not cross a filter row)"
+        )
+    cpr = spec.tile_k // 8
+    if spec.tile_k % 8 or cpr & (cpr - 1):
+        return "dtl: tile_k / 8 must be a power of two"
+    for rows in (spec.tile_m, spec.tile_n):
+        if (rows * cpr) % spec.block_size:
+            return "dtl: a tile must be whole passes of 16-byte chunks"
+    return ""
+
+
+def _fwd_prefetch_global_regs_conflict(spec: "ImplicitGemmConvSpec") -> str:
+    """Why ``spec.prefetch_global_regs`` cannot be honoured, or ``""`` if it can.
+
+    The flag rewrites the plain single-buffer synchronous K loop. The
+    async_dma ping-pong, the unroll_k double-buffered loop and the wavelet
+    load/math split are separate bodies that never reach it, so accepting the
+    flag there would only rename a kernel whose code it does not change.
+    Shared by ``validate`` and ``is_valid_spec`` so the hard and soft gates
+    cannot drift apart; the wgrad twin is
+    ``conv_implicit_gemm_wgrad._prefetch_global_regs_conflict``.
+    """
+    if not spec.prefetch_global_regs:
+        return ""
+    if spec.async_dma:
+        return (
+            "prefetch_global_regs is not supported with async_dma: the direct "
+            "global->LDS ping-pong has its own K loop"
+        )
+    if spec.unroll_k:
+        return (
+            "prefetch_global_regs is not supported with unroll_k: the double-buffered "
+            "K loop has its own prefetch"
+        )
+    if spec.pipeline == "wavelet":
+        return (
+            "prefetch_global_regs is not supported with pipeline='wavelet': the "
+            "load waves have their own K loop"
+        )
+    try:
+        vecs = _sync_load_vecs(spec)
+    except ValueError:
+        # No usable load width at all; is_valid_spec reports that itself.
+        return ""
+    threads = spec.block_size
+    for operand, rows, vec in zip("AB", (spec.tile_m, spec.tile_n), vecs):
+        if vec < 1:
+            continue
+        n = rows * spec.tile_k // (vec * threads)
+        if n > PGR_MAX_STAGED_CHUNKS:
+            return (
+                f"prefetch_global_regs carries at most {PGR_MAX_STAGED_CHUNKS} "
+                f"global loads per thread per operand; the {operand} tile "
+                f"needs {n} (use a wider vector or a smaller tile)"
+            )
+    return ""
 
 
 @dataclass(frozen=True)
@@ -355,6 +470,38 @@ class ImplicitGemmConvSpec:
     # tile's rows across the S slabs and stores them cast into D. No Stage 2
     # launch. Bakes the degree: the launch passes ks_count == S.
     split_k_cluster: int = 0
+    # Register prefetch in the single-buffer synchronous K loop of the
+    # mem / compv3 / compv4 / basic pipelines: tile k+1's global reads are
+    # issued right after the barrier that publishes tile k, stay in VGPRs
+    # under tile k's MFMAs, and are written to LDS at the top of the next
+    # iteration. Both barriers of that loop are LDS-only: a full barrier would
+    # also drain the outstanding global reads and serialise them with the
+    # MFMAs again. The read issued in the last iteration is never stored.
+    # async_dma, unroll_k and the wavelet pipeline have their own K loops and
+    # reject it, as does WMMA. The same loop as
+    # ``WgradConvSpec.prefetch_global_regs`` (both builders emit it through
+    # ``emit_prefetch_global_regs_kloop``); tagged ``pgr``.
+    #
+    # Default False: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    prefetch_global_regs: bool = False
+    # Patch embedding (stride >= filter, no padding or dilation, ungrouped),
+    # launched width-folded so the filter is one column (X == 1, see
+    # ``conv_implicit_gemm_dgrad.fold_width``): the GEMM's K is (y, c) with
+    # every filter row a contiguous run of C input elements, and W (KYXC) is a
+    # plain row-major [K, Y*C] matrix. A's k part is then one channel divide and
+    # no bounds test (every tap of a patch is inside the image), and B's
+    # offset is ``k_out * Y*C + k`` with no decode at all. Same kernargs as the
+    # plain kernel; tagged ``patch``. Default False: every existing config
+    # keeps its IR and name.
+    patch: bool = False
+    # gfx950, patch only: the patch GEMM's K loop as two LDS stages filled
+    # by 16-byte DRAM->LDS DMAs (inline asm, so the explicit waits are the only
+    # ones), one barrier per K tile (wait for the tile, barrier, refill the
+    # other stage, MFMAs) and an XOR-swizzled packed tile (16-byte chunk c of
+    # row r at slot c ^ (r & 7)): the swizzle moves to the global address on
+    # the load side, the fragment reads apply it. Tagged ``dtl``.
+    dtl: bool = False
 
     @property
     def block_size(self) -> int:
@@ -450,6 +597,10 @@ class ImplicitGemmConvSpec:
                 # that would otherwise share the plain kernel's name. Only
                 # tagged when set, so every other kernel keeps its name.
                 "unroll": self.unroll_k,
+                # A different K-loop body; only tagged when set.
+                "pgr": self.prefetch_global_regs,
+                "patch": self.patch,
+                "dtl": self.dtl,
                 # Gm changes the emitted body, so it must reach the symbol:
                 # without it two degrees collide on one name and the compile
                 # cache hands the second the first's binary.
@@ -495,6 +646,15 @@ class ImplicitGemmConvSpec:
         _tf32_why = _fwd_tf32_reason(self)
         if _tf32_why:
             raise ValueError(_tf32_why)
+        _pgr_why = _fwd_prefetch_global_regs_conflict(self)
+        if _pgr_why:
+            raise ValueError(_pgr_why)
+        _patch_why = _fwd_patch_conflict(self)
+        if _patch_why:
+            raise ValueError(_patch_why)
+        _dtl_why = _fwd_dtl_conflict(self)
+        if _dtl_why:
+            raise ValueError(_dtl_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -521,7 +681,7 @@ class ImplicitGemmConvSpec:
             layout = self.lds_layout
         elif self.lds_k_pad is not None:
             layout = LdsLayout.padded_k(self.tile_k, self.lds_k_pad)
-        elif self.async_dma:
+        elif self.async_dma or self.dtl:
             layout = LdsLayout.packed_async(self.tile_k)
         else:
             layout = LdsLayout.padded_k(self.tile_k, 8 if self.tile_k >= 16 else 0)
@@ -862,7 +1022,7 @@ def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, 
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
     # LDS the kernel never allocates.
-    _double = spec.async_dma or spec.unroll_k
+    _double = spec.async_dma or spec.unroll_k or spec.dtl
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     # The split-K binary stages its fp32 partial tile, whatever dtype_d is.
@@ -1038,6 +1198,15 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # into LDS with no VGPR staging, making the split impossible.
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
+    _pgr_why = _fwd_prefetch_global_regs_conflict(spec)
+    if _pgr_why:
+        return False, _pgr_why
+    _patch_why = _fwd_patch_conflict(spec)
+    if _patch_why:
+        return False, _patch_why
+    _dtl_why = _fwd_dtl_conflict(spec)
+    if _dtl_why:
+        return False, _dtl_why
 
     # WMMA (wave32) coverage: the 16x16x4 / 16x16x16 (gfx11/gfx12) or 16x16x32
     # (gfx1250) atom with the simple ``mem`` pipeline + ``default``/``cshuffle``
@@ -1067,6 +1236,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             (spec.async_dma, "async_dma"),
             (spec.unroll_k, "unroll_k"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
+            (spec.prefetch_global_regs, "prefetch_global_regs"),
         ):
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
@@ -1645,7 +1815,7 @@ def _build_implicit_gemm_conv_impl(
     # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
     # buffer-alternating K-loop, so allocating a second tile for it produced a
     # dead allocation that the LDS pool then stripped anyway.
-    double_buffer = spec.async_dma or spec.unroll_k
+    double_buffer = spec.async_dma or spec.unroll_k or spec.dtl
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1752,6 +1922,8 @@ def _build_implicit_gemm_conv_impl(
             if m_index_fn is not None
             else b_.add(block_m_off_v, row)
         )
+        if spec.patch:
+            return a_offset_patch(b_, m_val, k_val)
         if split_ab:
             return a_offset_split(b_, m_val, k_val)
         return A_desc.offset(b_, m=m_val, k=k_val, **_a_group_kw)
@@ -1806,6 +1978,11 @@ def _build_implicit_gemm_conv_impl(
             k_ok = b_.cmp_lt(n_val, _c_K_ir)
             c_ok = b_.cmp_lt(kg, _c_C_ir)
             return off, b_.land(k_ok, c_ok)
+        if spec.patch:
+            # W is a row-major [K, Y*C] matrix: no decode.
+            return b_.add(b_.mul(k_out, params["p_B_stride_k"]), kg), b_.cmp_lt(
+                kg, patch_kgemm
+            )
         if split_ab:
             return b_offset_split(b_, k_out, kg)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
@@ -1976,6 +2153,44 @@ def _build_implicit_gemm_conv_impl(
         off = b_.add(b_.add(b_.add(base, b_.mul(y, a_ystep)), b_.mul(x, a_xstep)), c)
         return off, ok
 
+    if spec.patch:
+        if not split_ab or grouped:
+            raise ValueError("patch needs the ungrouped 2-D split addressing path")
+        # The reduction depth Y*C (X == 1): B's bound, and A's through y < Y.
+        patch_kgemm = b.mul(p_Y, p_cpg)
+
+    def a_offset_patch(b_: IRBuilder, m_val: Value, k_val: Value):
+        # Row part as a_offset_split's (no padding: hi0 = ho*sH, wi0 = wo*sW).
+        q_wo, wo = magic_divmod(
+            b_,
+            m_val,
+            params["p_magic_m_Wo_mult"],
+            params["p_magic_m_Wo_shift"],
+            p_Wo,
+        )
+        n, ho = magic_divmod(
+            b_,
+            q_wo,
+            params["p_magic_m_Ho_mult"],
+            params["p_magic_m_Ho_shift"],
+            p_Ho,
+        )
+        base = b_.add(
+            b_.add(b_.mul(n, params["p_A_stride_n"]), b_.mul(b_.mul(ho, p_sH), s_hi)),
+            b_.mul(b_.mul(wo, p_sW), s_wi),
+        )
+        # k part: k = y*C + c, one divide; every tap is inside the image.
+        y, c = magic_divmod(
+            b_,
+            k_val,
+            params["p_magic_k_cpg_mult"],
+            params["p_magic_k_cpg_shift"],
+            p_cpg,
+            u24=True,
+        )
+        off = b_.add(b_.add(base, b_.mul(y, s_hi)), c)
+        return off, b_.cmp_lt(y, p_Y)
+
     def b_offset_split(b_: IRBuilder, k_out: Value, kg: Value):
         base = b_.mul(k_out, params["p_B_stride_k"])
         y, x, c = k_decode(b_, kg)
@@ -2125,6 +2340,54 @@ def _build_implicit_gemm_conv_impl(
                     flat += 1
         return new_accs
 
+    if spec.dtl:
+        if op.family == "wmma" or a_per_lane != 8 or b_per_lane != 8:
+            raise ValueError("dtl needs MFMA fragments of one 16-byte chunk")
+        if a_operand_override is not None or a_load_override is not None:
+            raise ValueError("dtl does not take A load / operand overrides")
+        _dtl_cpr = block_k // 8
+        _dtl_mask = b.const_i32((min(_dtl_cpr, 8) - 1) << 3)
+
+    def dtl_col(row: Value, col: Value) -> Value:
+        # dtl: chunk c of row r sits at slot c ^ (r & 7) (col is chunk-aligned)
+        if not spec.dtl:
+            return col
+        return b.xor(col, b.land(b.shl(row, b.const_i32(3)), _dtl_mask))
+
+    def emit_dtl_load(k_off: Value, A_dst: Value, B_dst: Value) -> None:
+        """dtl: one K tile of A and B as 16-byte DRAM->LDS DMAs; lane l of
+        wave w in pass p fills packed slot (p * threads + w * 64 + l), whose
+        row r and slot s take the global chunk s ^ (r & 7) of that row."""
+        from kernels.common._conv_implicit_gemm_common import dma_lds_at
+        from rocke.core.ir import I32 as _I32, I64 as _I64
+
+        k_off_capture[0] = k_off
+        c_oob = b.const_i32((1 << 31) - 1)
+        c_eb = b.const_i32(2)
+        c_cpr = b.const_i32(_dtl_cpr)
+        for dst, rows, desc, rsrc in (
+            (A_dst, block_m, a_descriptor, a_rsrc),
+            (B_dst, block_n, b_descriptor, b_rsrc),
+        ):
+            wave_base = b.smem_ptr_add(
+                b.smem_addr_of(dst),
+                b.zext(b.mul(warp_id, b.const_i32(64 * 16)), _I64),
+            )
+            sbase = b.readfirstlane(b.trunc(wave_base, _I32))
+            for p_ in range(rows * _dtl_cpr // threads):
+                chunk = b.add(tid, b.const_i32(p_ * threads))
+                row = b.div(chunk, c_cpr)
+                slot = b.mod(chunk, c_cpr)
+                col = b.shl(
+                    b.xor(slot, b.land(row, b.const_i32(min(_dtl_cpr, 8) - 1))),
+                    b.const_i32(3),
+                )
+                off, valid = desc(b, row, col)
+                voff = b.mul(off, c_eb)
+                if valid is not None:
+                    voff = b.select(valid, voff, c_oob)
+                dma_lds_at(b, rsrc, sbase, p_ * threads * 16, voff, c0)
+
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -2182,7 +2445,7 @@ def _build_implicit_gemm_conv_impl(
                             b,
                             A_src,
                             a_row,
-                            col_base,
+                            dtl_col(a_row, col_base),
                             a_per_lane,
                             smem_dtype=_smem_dtype,
                             data=spec.data,
@@ -2199,7 +2462,7 @@ def _build_implicit_gemm_conv_impl(
                         b,
                         B_src,
                         b_row,
-                        col_base,
+                        dtl_col(b_row, col_base),
                         b_per_lane,
                         smem_dtype=_smem_dtype,
                         data=spec.data,
@@ -2541,6 +2804,59 @@ def _build_implicit_gemm_conv_impl(
 
             b.scf_yield(*accs_b)
 
+        final_accs = for_op.results
+    elif spec.prefetch_global_regs:
+        # Register-prefetch form of the loop below
+        # (emit_prefetch_global_regs_kloop, shared with wgrad). validate() keeps
+        # async_dma, unroll_k and wavelet off this branch.
+        if a_load_override is not None:
+            raise ValueError(
+                "prefetch_global_regs does not support an A load override: the "
+                "override writes LDS itself instead of returning staged values"
+            )
+        final_accs = emit_prefetch_global_regs_kloop(
+            b,
+            tid=tid,
+            k_lo=split_k_lo if split else c0,
+            k_hi=split_k_hi if split else c_K_gemm,
+            c_block_k=c_block_k,
+            A_smem=A_smem,
+            B_smem=B_smem,
+            a_loader=a_sync_loader,
+            b_loader=b_sync_loader,
+            a_descriptor=a_descriptor,
+            b_descriptor=b_descriptor,
+            a_rsrc=a_rsrc,
+            b_rsrc=b_rsrc,
+            k_off_capture=k_off_capture,
+            accs=accs,
+            emit_mfma_phase=emit_mfma_phase,
+        )
+    elif spec.dtl:
+        # Two LDS stages, unrolled 2x so each phase names its stage: wait for
+        # the tile, one barrier (it also retires the other stage's reads of
+        # the phase before), refill the other stage, MFMAs on this one. An
+        # odd tile count's extra tile reads past K: zeros (descriptor bound).
+        emit_dtl_load(c0, A_smem, B_smem)
+        c_2bk = b.const_i32(2 * block_k)
+        for_op = b.scf_for_iter(c0, c_K_gemm, c_2bk, accs, iv_name="k_dtl")
+        with for_op as (k0, iter_vars):
+            state = list(iter_vars)
+            for ph, (cur, nxt) in enumerate(
+                (
+                    ((A_smem, B_smem), (A_smem2, B_smem2)),
+                    ((A_smem2, B_smem2), (A_smem, B_smem)),
+                )
+            ):
+                k_cur = k0 if ph == 0 else b.add(k0, c_block_k)
+                b.s_waitcnt(vmcnt=0)
+                b.sync()
+                emit_dtl_load(b.add(k_cur, c_block_k), nxt[0], nxt[1])
+                k_off_capture[0] = k_cur
+                state = emit_mfma_phase(cur[0], cur[1], state)
+            b.scf_yield(*state)
+        b.s_waitcnt(vmcnt=0)
+        b.sync()
         final_accs = for_op.results
     elif not spec.async_dma:
         # mem / compv3 / compv4 / basic: all use scf_for_iter — only bound changes to runtime.

@@ -321,6 +321,9 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+    s.prefetch_global_regs = false; /* default: the plain synchronous K loop */
+    s.patch = false; /* default: the generic (y, x, c) addressing */
+    s.dtl = false; /* default: the register-staged K loops */
 
     s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
@@ -387,6 +390,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     self.acc_epilogue.tag(),
      *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
      *            "unroll": self.unroll_k,
+     *            "pgr": self.prefetch_global_regs,
+     *            "patch": self.patch,
+     *            "dtl": self.dtl,
      *            f"gm{group_merge}": group_merge > 1,
      *            "splitk": split_k > 1,
      *            f"skc{split_k_cluster}": split_k_cluster > 0,
@@ -400,8 +406,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char gm_buf[24];
     char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[7];
-    int flag_on[7];
+    const char* flag_names[10];
+    int flag_on[10];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -443,26 +449,35 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* unroll_k: a different K-loop body under the same name otherwise. */
     flag_names[2] = "unroll";
     flag_on[2] = s->unroll_k ? 1 : 0;
+    /* prefetch_global_regs: a different K-loop body; only tagged when set. */
+    flag_names[3] = "pgr";
+    flag_on[3] = s->prefetch_global_regs ? 1 : 0;
+    /* patch: different A/B addressing; only tagged when set. */
+    flag_names[4] = "patch";
+    flag_on[4] = s->patch ? 1 : 0;
+    /* dtl: the DMA-staged K loop of the patch GEMM; only tagged when set. */
+    flag_names[5] = "dtl";
+    flag_on[5] = s->dtl ? 1 : 0;
     /* Gm changes the emitted body, so it must reach the symbol: without it two
      * degrees collide on one name and the compile cache hands the second the
      * first's binary. Off at group_merge 1, so the default name is unchanged. */
     snprintf(gm_buf, sizeof(gm_buf), "gm%d", s->group_merge);
-    flag_names[3] = gm_buf;
-    flag_on[3] = s->group_merge > 1 ? 1 : 0;
+    flag_names[6] = gm_buf;
+    flag_on[6] = s->group_merge > 1 ? 1 : 0;
     /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
      * so only the variant reaches the name. The cluster form bakes its degree. */
-    flag_names[4] = "splitk";
-    flag_on[4] = s->split_k > 1 ? 1 : 0;
+    flag_names[7] = "splitk";
+    flag_on[7] = s->split_k > 1 ? 1 : 0;
     snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
-    flag_names[5] = skc_buf;
-    flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
+    flag_names[8] = skc_buf;
+    flag_on[8] = s->split_k_cluster > 0 ? 1 : 0;
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
      * so every existing name is unchanged. */
-    flag_names[6] = "tf32";
-    flag_on[6] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    flag_names[9] = "tf32";
+    flag_on[9] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 7, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 10, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -999,9 +1014,10 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
         l.k_pad = s->lds_k_pad;
         l.requires_packed_async = false;
     }
-    else if(s->async_dma)
+    else if(s->async_dma || s->dtl)
     {
-        /* LdsLayout.packed_async(logical_cols=tile_k) -> k_pad=0 */
+        /* LdsLayout.packed_async(logical_cols=tile_k) -> k_pad=0 (async_dma,
+         * or dtl: its DMA writes whole packed 16-byte chunks) */
         l.logical_cols = s->tile_k;
         l.k_pad = 0;
         l.requires_packed_async = true;
@@ -1023,6 +1039,157 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
     *out = l;
     return true;
 }
+/* ===================================================================== *
+ *  _fwd_prefetch_global_regs_conflict(spec)
+ *
+ *  Why spec.prefetch_global_regs cannot be honoured. The flag rewrites the
+ *  plain single-buffer synchronous K loop; the async_dma ping-pong, the
+ *  unroll_k double-buffered loop and the wavelet load/math split are separate
+ *  bodies that never reach it. The loop carries every global load of the next
+ *  tile as a loop value, staged in ROCKE_CTL_MAX_VECS_PER_THREAD slots per
+ *  operand. Shared by validate and is_valid_spec, as in Python. Returns true
+ *  (and fills reason) on a conflict.
+ * ===================================================================== */
+/* Python is_fwd_patch_problem: a width-folded patch embedding (2-D,
+ * ungrouped, not pointwise, X == 1, no padding or dilation, sH >= Y). */
+bool rocke_conv_is_fwd_patch_problem(const rocke_conv_problem_t* p)
+{
+    return !p->is_3d && p->groups == 1 && !rocke_conv_problem_is_pointwise(p) && p->X == 1
+           && p->pH == 0 && p->pW == 0 && p->dH == 1 && p->dW == 1 && p->sH >= p->Y;
+}
+
+/* Python _fwd_patch_conflict: true (reason filled) when spec->patch cannot be
+ * honoured. */
+bool rocke_conv_fwd_patch_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                 char* reason,
+                                 size_t reason_cap)
+{
+    const char* why = NULL;
+    if(!s->patch)
+        return false;
+    if(s->group_merge > 1)
+        why = "patch serves ungrouped problems only (group_merge > 1)";
+    else if(s->split_k > 1 || s->split_k_cluster)
+        why = "patch is not built with split-K";
+    else if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+        why = "patch is not supported with pipeline='wavelet'";
+    else if(!rocke_conv_is_fwd_patch_problem(&s->problem))
+        why = "patch serves width-folded patch embeddings only (2-D, ungrouped, "
+              "X == 1, no padding or dilation, sH >= Y)";
+    if(why == NULL)
+        return false;
+    if(reason && reason_cap)
+        snprintf(reason, reason_cap, "%s", why);
+    return true;
+}
+
+/* Python _fwd_dtl_conflict: true (reason filled) when spec->dtl cannot be
+ * honoured. Reasons verbatim. */
+bool rocke_conv_fwd_dtl_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                               char* reason,
+                               size_t reason_cap)
+{
+    const char* why = NULL;
+    if(!s->dtl)
+        return false;
+    const bool wavelet = s->pipeline && strcmp(s->pipeline, "wavelet") == 0;
+    const bool b16
+        = s->dtype_a && (strcmp(s->dtype_a, "fp16") == 0 || strcmp(s->dtype_a, "bf16") == 0);
+    const int cpr = s->tile_k / 8;
+    if(!s->patch)
+        why = "dtl is built on the patch GEMM only";
+    else if(s->async_dma || s->unroll_k || s->prefetch_global_regs)
+        why = "dtl has its own K loop (no async_dma / unroll_k / pgr)";
+    else if(s->split_k > 1 || wavelet || s->wave_size != 64)
+        why = "dtl: no split-K, no wavelet, wave64 only";
+    else if(!b16 || (s->has_lds_k_pad && s->lds_k_pad != 0))
+        why = "dtl: 16-bit operands, packed LDS tiles";
+    else if(s->lds_layout != NULL)
+        why = "dtl: the DMA writes packed rows, so an explicit lds_layout is refused";
+    else if(s->problem.C % 8)
+        why = "dtl: C must be divisible by 8 (a 16-byte chunk may not cross a filter row)";
+    else if(s->tile_k % 8 || (cpr & (cpr - 1)))
+        why = "dtl: tile_k / 8 must be a power of two";
+    else
+    {
+        const int threads = rocke_implicit_gemm_conv_spec_block_size(s);
+        const int rows[2] = {s->tile_m, s->tile_n};
+        for(int i = 0; i < 2 && why == NULL; ++i)
+            if((rows[i] * cpr) % threads)
+                why = "dtl: a tile must be whole passes of 16-byte chunks";
+    }
+    if(why == NULL)
+        return false;
+    if(reason && reason_cap)
+        snprintf(reason, reason_cap, "%s", why);
+    return true;
+}
+
+bool rocke_conv_fwd_prefetch_global_regs_reason(const rocke_implicit_gemm_conv_spec_t* s,
+                                                char* reason,
+                                                size_t reason_cap)
+{
+    if(!s->prefetch_global_regs)
+        return false;
+    if(s->async_dma)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "prefetch_global_regs is not supported with async_dma: the direct "
+                     "global->LDS ping-pong has its own K loop");
+        return true;
+    }
+    if(s->unroll_k)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "prefetch_global_regs is not supported with unroll_k: the "
+                     "double-buffered K loop has its own prefetch");
+        return true;
+    }
+    if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "prefetch_global_regs is not supported with pipeline='wavelet': the "
+                     "load waves have their own K loop");
+        return true;
+    }
+    /* _sync_load_vecs(spec); no usable width at all -> is_valid_spec reports it. */
+    if(rocke_conv_default_load_vec(s) <= 0)
+        return false;
+    {
+        const int threads = rocke_implicit_gemm_conv_spec_block_size(s);
+        const int vecs[2]
+            = {s->has_vector_size_a ? s->vector_size_a : rocke_conv_default_load_vec(s),
+               s->has_vector_size_b ? s->vector_size_b : rocke_conv_default_load_vec_b(s)};
+        const int rows[2] = {s->tile_m, s->tile_n};
+        for(int i = 0; i < 2; ++i)
+        {
+            if(vecs[i] < 1 || threads < 1)
+                continue;
+            const int n = rows[i] * s->tile_k / (vecs[i] * threads);
+            if(n > ROCKE_CTL_MAX_VECS_PER_THREAD)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "prefetch_global_regs carries at most %d global loads per thread per "
+                             "operand; the %s tile needs %d (use a wider vector or a smaller "
+                             "tile)",
+                             ROCKE_CTL_MAX_VECS_PER_THREAD,
+                             i == 0 ? "A" : "B",
+                             n);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_t* s,
                                             char* reason,
                                             size_t reason_cap)
@@ -1083,6 +1250,21 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     }
     /* _tf32_why = _fwd_tf32_reason(self); if _tf32_why: raise ValueError(_tf32_why) */
     if(rocke_conv_fwd_tf32_reason(s, NULL, reason, reason_cap))
+    {
+        return false;
+    }
+    /* _pgr_why = _fwd_prefetch_global_regs_conflict(self) */
+    if(rocke_conv_fwd_prefetch_global_regs_reason(s, reason, reason_cap))
+    {
+        return false;
+    }
+    /* _patch_why = _fwd_patch_conflict(self) */
+    if(rocke_conv_fwd_patch_reason(s, reason, reason_cap))
+    {
+        return false;
+    }
+    /* _dtl_why = _fwd_dtl_conflict(self) */
+    if(rocke_conv_fwd_dtl_reason(s, reason, reason_cap))
     {
         return false;
     }
@@ -1277,7 +1459,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
      *   _a_shape = effective_lds_layout().storage_shape(tile_m) = (tile_m, row_stride)
      *   _b_shape = effective_lds_layout().storage_shape(tile_n) = (tile_n, row_stride)
      *   _ab_bytes = (a_rows*a_cols + b_rows*b_cols) * _ab_dtype_bytes
-     *   _double   = async_dma or unroll_k  (the builders' double_buffer; compv4
+     *   _double   = async_dma or unroll_k or dtl  (the builders' double_buffer; compv4
      *               alone runs the single-buffer loop and allocates one A/B tile)
      *   _ab_lds   = _ab_bytes * (2 if _double else 1)
      *   _c_lds    = tile_m * tile_n * _c_dtype_bytes  (if epilogue == "cshuffle")
@@ -1306,7 +1488,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
-        double_buf = (s->async_dma || s->unroll_k) ? 1 : 0;
+        double_buf = (s->async_dma || s->unroll_k || s->dtl) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
@@ -1336,6 +1518,22 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                             target->lds_capacity_bytes,
                             arch);
         }
+    }
+
+    /* _pgr_why = _fwd_prefetch_global_regs_conflict(spec), ahead of the WMMA gates. */
+    if(rocke_conv_fwd_prefetch_global_regs_reason(s, reason, reason_cap))
+    {
+        return false;
+    }
+    /* _patch_why = _fwd_patch_conflict(spec) */
+    if(rocke_conv_fwd_patch_reason(s, reason, reason_cap))
+    {
+        return false;
+    }
+    /* _dtl_why = _fwd_dtl_conflict(spec) */
+    if(rocke_conv_fwd_dtl_reason(s, reason, reason_cap))
+    {
+        return false;
     }
 
     /* WMMA (RDNA wave32) narrow-subset gates. */
@@ -1398,6 +1596,11 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         {
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "WMMA conv does not support chiplet_swizzle on %s", arch);
+        }
+        if(s->prefetch_global_regs)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "WMMA conv does not support prefetch_global_regs on %s", arch);
         }
         /* grouped conv IS supported on WMMA: the grid-per-group index +
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */

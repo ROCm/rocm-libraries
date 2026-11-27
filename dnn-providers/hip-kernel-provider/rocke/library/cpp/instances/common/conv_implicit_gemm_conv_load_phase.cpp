@@ -48,6 +48,10 @@ static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
                                           rocke_value_t* k_out,
                                           rocke_value_t* kg,
                                           rocke_value_t** out_valid);
+static rocke_value_t* conv_a_offset_patch(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid);
 
 /* ===================================================================== *
  *  _choose_load_vec -- pick the widest fp16 load vector width.
@@ -343,6 +347,8 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     else
         m_val = rocke_b_add(b, ctx->block_m_off_v, row);
 
+    if(ctx->patch)
+        return conv_a_offset_patch(ctx, m_val, k_val, out_valid);
     if(ctx->split_ab)
         return conv_a_offset_split(ctx, m_val, k_val, out_valid);
 
@@ -481,6 +487,36 @@ static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
     return off;
 }
 
+/* Python a_offset_patch: a_offset_split's row part with no padding, and the
+ * k part k = y*C + c through one channel divide; every tap is in the image. */
+static rocke_value_t* conv_a_offset_patch(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *n, *ho;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &n, &ho);
+    rocke_value_t* n_off = rocke_b_mul(b, n, ctx->p_A_stride_n);
+    rocke_value_t* ho_s = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* hi_off = rocke_b_mul(b, ho_s, ctx->p_A_stride_hi);
+    rocke_value_t* base = rocke_b_add(b, n_off, hi_off);
+    rocke_value_t* wo_s = rocke_b_mul(b, wo, ctx->p_sW);
+    rocke_value_t* wi_off = rocke_b_mul(b, wo_s, ctx->p_A_stride_wi);
+    base = rocke_b_add(b, base, wi_off);
+    rocke_value_t *y, *c;
+    rocke_conv_magic_divmod(
+        b, k_val, ctx->p_magic_k_cpg_mult, ctx->p_magic_k_cpg_shift, ctx->p_cpg, true, &y, &c);
+    rocke_value_t* y_off = rocke_b_mul(b, y, ctx->p_A_stride_hi);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    return off;
+}
+
 /* Python b_offset_split: k_out*stride_k + y*stride_y + x*stride_x + c, the
  * filter strides through 24-bit multiplies. */
 static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
@@ -537,6 +573,13 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
         return off;
     }
 
+    if(ctx->patch)
+    {
+        /* W is a row-major [K, Y*C] matrix: no decode. */
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->p_B_stride_k), kg);
+        *out_valid = rocke_b_cmp_lt(b, kg, ctx->patch_kgemm);
+        return off;
+    }
     if(ctx->split_ab)
         return conv_b_offset_split(ctx, k_out, kg, out_valid);
 

@@ -655,8 +655,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * ping-pong.  "compv4" alone shares the plain single-buffer loop with
          * "mem"/"compv3" and differs only in scheduling hints, so allocating a
          * second A/B tile for it was dead and charged LDS the kernel never used.
+         * dtl fills its two stages by DMA (its own two-stage loop).
          * Mirrors the Python double_buffer condition. */
-        ctx->double_buffer = spec->async_dma || spec->unroll_k;
+        ctx->double_buffer = spec->async_dma || spec->unroll_k || spec->dtl;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
@@ -910,11 +911,47 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                   ? rocke_b_mul(b, ctx->group_idx, ctx->merged ? ctx->c_gm : ctx->p_cpg)
                   : NULL;
     }
+    /* Python: if spec.patch: patch_kgemm = Y * cpg (ungrouped split path only). */
+    ctx->patch = spec->patch;
+    ctx->patch_kgemm = NULL;
+    if(ctx->patch)
+    {
+        if(!ctx->split_ab || ctx->group_idx != NULL)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "patch needs the ungrouped 2-D split addressing path");
+            return false;
+        }
+        ctx->patch_kgemm = rocke_b_mul(b, ctx->p_Y, ctx->p_cpg);
+    }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
     ctx->schedule
         = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
     rocke_schedule_policy_emit_prologue(&ctx->schedule, b);
+
+    /* Python: if spec.dtl: the fragment checks, then
+     * _dtl_mask = b.const_i32((min(_dtl_cpr, 8) - 1) << 3). */
+    ctx->dtl = spec->dtl;
+    ctx->dtl_cpr = 0;
+    ctx->dtl_mask = NULL;
+    if(ctx->dtl)
+    {
+        if(ctx->is_wmma || ctx->a_per_lane != 8 || ctx->b_per_lane != 8)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "dtl needs MFMA fragments of one 16-byte chunk");
+            return false;
+        }
+        if(overrides != NULL
+           && (overrides->a_operand_override != NULL || overrides->a_load_override != NULL))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "dtl does not take A load / operand overrides");
+            return false;
+        }
+        ctx->dtl_cpr = ctx->block_k / 8;
+        const int cpr8 = ctx->dtl_cpr < 8 ? ctx->dtl_cpr : 8;
+        ctx->dtl_mask = rocke_b_const_i32(b, (cpr8 - 1) << 3);
+    }
 
     if(!rocke_ir_builder_ok(b))
     {
@@ -1033,6 +1070,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *
      *   unroll_k     -> kloop_unroll  (2x-unrolled ping-pong body over two
      *                                  LDS buffers)
+     *   prefetch_global_regs -> kloop_prefetch_global_regs (kloop_simple
+     *                                  with tile k+1 carried in VGPRs)
+     *   dtl          -> kloop_dtl     (two DMA-filled LDS stages)
      *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4/basic
      *                                  share this; pipeline string only
      *                                  affects schedule hints inside mfma)
@@ -1045,6 +1085,26 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
     {
         rocke_conv_emit_kloop_wavelet(&ctx);
+    }
+    else if(spec->prefetch_global_regs)
+    {
+        /* The register-prefetch form of kloop_simple, shared with wgrad;
+         * validate() keeps async_dma / unroll_k / wavelet off it. An A load
+         * override writes LDS itself, so it has no staged values to carry. */
+        if(ctx.ov != NULL && ctx.ov->a_load_override != NULL)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "prefetch_global_regs does not support an A load override: the "
+                            "override writes LDS itself instead of returning staged values");
+            return NULL;
+        }
+        rocke_conv_emit_kloop_prefetch_global_regs(&ctx);
+    }
+    else if(spec->dtl)
+    {
+        /* The patch GEMM's DMA-staged two-stage loop (Python elif spec.dtl). */
+        rocke_conv_emit_kloop_dtl(&ctx);
     }
     else if(!ctx.async_dma)
     {

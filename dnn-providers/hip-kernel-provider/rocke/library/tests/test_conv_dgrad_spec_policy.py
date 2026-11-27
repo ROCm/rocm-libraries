@@ -423,6 +423,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "prefetch_addr",
             "prefetch_global_regs",
             "patch",
+            "dtl",
             "tap_outer_k",
             "dy_halo",
             "dy_halo_setprio",
