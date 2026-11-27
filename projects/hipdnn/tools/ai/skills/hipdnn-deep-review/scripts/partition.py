@@ -556,10 +556,11 @@ def cmd_orient_gate(args) -> None:
     """Orient Gate: every repository path CONTEXT.md and orient/*.md cite in backticks
     (`dir/file` or `dir/file:<line>`) exists at PIN.md's BASE, or is a files.txt path absent
     at BASE (a file the change adds). A citation starting `orient/` that names a file under
-    this round's own orient/ directory is this round's self-reference (CONTEXT.md's Areas
-    table), not a repository path, and is checked there instead. Prints `not at base: <path>
-    (cited at <file>:<line>[, +<n> more])` for any other citation; exit 0 only when it prints
-    nothing."""
+    this round's own orient/ directory is this round's self-reference, which can appear
+    anywhere in CONTEXT.md or orient/*.md, not a repository path, and is checked there
+    instead. Prints `not at base: <path> (cited at <file>:<line>, <file>:<line>, ...)`
+    listing every citation site in discovery order (CONTEXT.md, then orient/*.md sorted)
+    for any other citation; exit 0 only when it prints nothing."""
     rd = Path(args.round_dir)
     if not (rd / "PIN.md").is_file():
         fail(f"PIN.md not found: {rd / 'PIN.md'}")
@@ -597,8 +598,7 @@ def cmd_orient_gate(args) -> None:
     ]
     for path in missing:
         where = sites[path]
-        extra = f", +{len(where) - 1} more" if len(where) > 1 else ""
-        print(f"not at base: {path} (cited at {where[0]}{extra})")
+        print(f"not at base: {path} (cited at {', '.join(where)})")
     if missing:
         sys.exit(1)
 
