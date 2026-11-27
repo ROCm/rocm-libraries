@@ -7,17 +7,15 @@
 #
 # ROCm is NOT a pip package and cannot be pinned here. It is a system dependency
 # (libamd_comgr, libamdhip64, hipcc/amdclang) that must be installed separately.
-#   Required:    ROCm 7.x with comgr + HIP discoverable by the dynamic linker.
-#   Recommended: ROCm 7.2. AUTO queries the loaded COMGR compiler to select
-#                the LLVM IR flavor; package-release metadata is not that evidence.
-# Torch is intentionally NOT listed here: the default PyPI wheel is CPU-only.
-# Install a ROCm torch wheel separately, matching the system ROCm version (see
-# README.md and AGENTS.md for commands), before running GPU/numeric lanes.
+#   Required:    ROCm with comgr + HIP discoverable by the dynamic linker; the
+#                recommended release is in dsl_docs/development/setup_guide.md §1.
+#                AUTO queries the loaded COMGR compiler to select the LLVM IR
+#                flavor; package-release metadata is not that evidence.
+# Torch is NOT listed: rocKE does not depend on it, and its remaining uses are
+# being removed. One that still needs it takes a ROCm torch wheel matching the
+# system ROCm, installed separately (the default PyPI wheel is CPU-only).
 
 # --- on-GPU launch + numeric reference (ROCm) --------------------------------
-# torch must be the ROCm build matching your system ROCm, e.g.:
-#   ROCm 7.x:  pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
-#   ROCm 6.2:  pip install --index-url https://download.pytorch.org/whl/rocm6.2 torch
 numpy>=1.24
 
 # --- building the rocke_engine pybind module (cpp/bindings) --------------------
