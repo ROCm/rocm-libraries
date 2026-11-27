@@ -16,7 +16,7 @@ st.func @non_xdl() {
 }
 
 #--- f8 K=64 has no exception.
-# CHECK: error: WMMA in function "first" block "entry"
+# CHECK: violation: WMMA in function "first" block "entry"
 # CHECK-SAME: switch the accumulator
 # CHECK: FATAL ERROR: InsertCoexecHazardPass: in-place WMMA accumulation in 'first': switch the accumulator
 st.func @first() {

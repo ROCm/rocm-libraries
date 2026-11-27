@@ -27,6 +27,7 @@
 #include <climits>
 #include <cstdint>
 #include <iostream>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -230,6 +231,12 @@ struct Verdict {
     bool confirmed = true;
 };
 
+struct InPlaceReport {
+    int violations = 0;
+    int warnings = 0;
+    std::vector<std::string> printedKeys;
+};
+
 // Pairs are chain positions (0,1), (2,3), ... `wmma` needs different A and B from
 // the rest of its pair and from the previous pair, and a pair needs both halves.
 Verdict pairedVerdict(BasicBlock& bb, const StinkyInstruction& wmma) {
@@ -261,25 +268,62 @@ Verdict inPlaceVerdict(BasicBlock& bb, const StinkyInstruction& prev,
     return pairedVerdict(bb, wmma);
 }
 
+void printInPlaceDiagnostic(const Function& func, BasicBlock& bb, const StinkyInstruction& prev,
+                            const StinkyInstruction& wmma, const Verdict& verdict, bool confirmed,
+                            bool xdl) {
+    std::cerr << "[InsertCoexecHazardPass] " << (confirmed ? "violation" : "warning")
+              << ": WMMA in function \"" << func.getName() << "\" block \"" << bb.getLabel()
+              << "\" accumulates the previous WMMA's D in place: " << verdict.reason
+              << (xdl ? "" : "; the rule is unconfirmed for non-XDL WMMAs") << "\n";
+    prev.dump(std::cerr);
+    wmma.dump(std::cerr);
+}
+
+bool shouldPrintInPlaceDiagnostic(InPlaceReport& report, bool confirmed, bool xdl,
+                                  const Verdict& verdict) {
+    constexpr size_t maxPrintedDiagnostics = 3;
+    const std::string key = std::string(confirmed ? "violation:" : "warning:") + verdict.reason +
+                            (xdl ? "" : ":non-xdl");
+    if (std::find(report.printedKeys.begin(), report.printedKeys.end(), key) !=
+        report.printedKeys.end())
+        return false;
+    if (report.printedKeys.size() >= maxPrintedDiagnostics) return false;
+    report.printedKeys.push_back(key);
+    return true;
+}
+
 void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma,
-                              bool abortOnViolation) {
+                              bool abortOnViolation, InPlaceReport* report) {
     const bool xdl = isXDLWMMA(wmma);
     for (const StinkyInstruction* prev : prevWmmas(bb, wmma, xdl)) {
         if (!accumulatesInPlace(*prev, wmma)) continue;
         const Verdict verdict = inPlaceVerdict(bb, *prev, wmma);
         if (!verdict.reason) continue;
         const bool confirmed = verdict.confirmed && xdl;
-        std::cerr << "[InsertCoexecHazardPass] " << (confirmed ? "error" : "warning")
-                  << ": WMMA in function \"" << func.getName() << "\" block \"" << bb.getLabel()
-                  << "\" accumulates the previous WMMA's D in place: " << verdict.reason
-                  << (xdl ? "" : "; the rule is unconfirmed for non-XDL WMMAs") << "\n";
-        prev->dump(std::cerr);
-        wmma.dump(std::cerr);
+        if (report) {
+            if (confirmed)
+                ++report->violations;
+            else
+                ++report->warnings;
+        }
+        if (abortOnViolation ||
+            (report && shouldPrintInPlaceDiagnostic(*report, confirmed, xdl, verdict)))
+            printInPlaceDiagnostic(func, bb, *prev, wmma, verdict, confirmed, xdl);
         if (confirmed && abortOnViolation)
             report_fatal_error("InsertCoexecHazardPass: in-place WMMA accumulation in '" +
                                func.getName() + "': " + verdict.reason);
         return;
     }
+}
+
+void printInPlaceSummary(const Function& func, const InPlaceReport& report) {
+    const int total = report.violations + report.warnings;
+    if (total == 0) return;
+    std::cerr << "[InsertCoexecHazardPass] " << (report.violations ? "violation" : "warning")
+              << ": WMMA in function \"" << func.getName() << "\" has " << report.violations
+              << " in-place accumulation violation(s) and " << report.warnings
+              << " warning(s); printed " << report.printedKeys.size()
+              << " representative diagnostic(s)\n";
 }
 
 // WMMA producer D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst),
@@ -430,6 +474,8 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     void processFunction(Function& func) {
         // v_nops are stripped upstream by StinkyRemoveNopPass; this pass counts the
         // remaining (deliberate, scheduler-placed) fillers and tops up the shortfall.
+        InPlaceReport inPlaceReport;
+        InPlaceReport* report = abortOnInPlaceAccumulation_ ? nullptr : &inPlaceReport;
         for (BasicBlock& bb : func) {
             for (auto it = bb.begin(); it != bb.end();) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -439,7 +485,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                 }
 
                 if (isGfx125(archId_) && isAnyWmma(*inst))
-                    checkInPlaceAccumulation(func, bb, *inst, abortOnInPlaceAccumulation_);
+                    checkInPlaceAccumulation(func, bb, *inst, abortOnInPlaceAccumulation_, report);
 
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
@@ -472,6 +518,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                 ++it;
             }
         }
+        if (report) printInPlaceSummary(func, *report);
     }
 
     int hazardFor(BasicBlock& bb, const StinkyInstruction& consumer, ProducerKind kind,

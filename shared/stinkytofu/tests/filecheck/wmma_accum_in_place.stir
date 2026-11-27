@@ -12,7 +12,7 @@
 # a branch, does not break the chain. Non-XDL WMMAs (FP32 input, gfx12-era
 # 16x16x16) follow the same rules but only warn: the rule is unconfirmed for them.
 #
-# reportOnly reports a broken rule as an error and goes on, so every case runs in
+# reportOnly reports a broken rule as a violation and goes on, so every case runs in
 # one file; wmma_accum_in_place_abort.stir covers the default, which stops codegen.
 # A paired chain that continues from another block cannot be checked and is only
 # a warning.
@@ -22,7 +22,7 @@
 #===----------------------------------------------------------------------===#
 
 #--- f8 K=64 has no exception.
-# CHECK: error: WMMA in function "f8_k64_same_acc" block "entry"
+# CHECK: violation: WMMA in function "f8_k64_same_acc" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @f8_k64_same_acc() {
 ^entry:
@@ -32,7 +32,7 @@ st.func @f8_k64_same_acc() {
 }
 
 #--- A VALU in between does not break the chain.
-# CHECK: error: WMMA in function "f8_k64_valu_between" block "entry"
+# CHECK: violation: WMMA in function "f8_k64_valu_between" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @f8_k64_valu_between() {
 ^entry:
@@ -43,7 +43,7 @@ st.func @f8_k64_valu_between() {
 }
 
 #--- Nor does a loop backedge: no pairing to follow, so this is an error.
-# CHECK: error: WMMA in function "f8_k64_across_backedge" block "loop"
+# CHECK: violation: WMMA in function "f8_k64_across_backedge" block "loop"
 # CHECK-SAME: switch the accumulator
 st.func @f8_k64_across_backedge() {
 ^entry:
@@ -58,7 +58,7 @@ st.func @f8_k64_across_backedge() {
 }
 
 #--- f6xf6 has no exception.
-# CHECK: error: WMMA in function "f6xf6_same_acc" block "entry"
+# CHECK: violation: WMMA in function "f6xf6_same_acc" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @f6xf6_same_acc() {
 ^entry:
@@ -68,7 +68,7 @@ st.func @f6xf6_same_acc() {
 }
 
 #--- f8xf6 has no exception.
-# CHECK: error: WMMA in function "f8xf6_same_acc" block "entry"
+# CHECK: violation: WMMA in function "f8xf6_same_acc" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @f8xf6_same_acc() {
 ^entry:
@@ -78,7 +78,7 @@ st.func @f8xf6_same_acc() {
 }
 
 #--- SWMMAC accumulates into its own D, so a matching D alone is the chain.
-# CHECK: error: WMMA in function "swmmac_same_acc" block "entry"
+# CHECK: violation: WMMA in function "swmmac_same_acc" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @swmmac_same_acc() {
 ^entry:
@@ -88,7 +88,7 @@ st.func @swmmac_same_acc() {
 }
 
 #--- Two types with different rules in one chain.
-# CHECK: error: WMMA in function "bf16_then_f8_k128" block "entry"
+# CHECK: violation: WMMA in function "bf16_then_f8_k128" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @bf16_then_f8_k128() {
 ^entry:
@@ -131,7 +131,7 @@ st.func @independent_wmma_between() {
 #===----------------------------------------------------------------------===#
 
 #--- Same A.
-# CHECK: error: WMMA in function "f8_k128_same_a" block "entry"
+# CHECK: violation: WMMA in function "f8_k128_same_a" block "entry"
 # CHECK-SAME: needs different A and B
 st.func @f8_k128_same_a() {
 ^entry:
@@ -141,7 +141,7 @@ st.func @f8_k128_same_a() {
 }
 
 #--- Same B.
-# CHECK: error: WMMA in function "f8_k128_same_b" block "entry"
+# CHECK: violation: WMMA in function "f8_k128_same_b" block "entry"
 # CHECK-SAME: needs different A and B
 st.func @f8_k128_same_b() {
 ^entry:
@@ -151,7 +151,7 @@ st.func @f8_k128_same_b() {
 }
 
 #--- The two A ranges partly overlap.
-# CHECK: error: WMMA in function "f8_k128_a_partly_overlaps" block "entry"
+# CHECK: violation: WMMA in function "f8_k128_a_partly_overlaps" block "entry"
 # CHECK-SAME: needs different A and B
 st.func @f8_k128_a_partly_overlaps() {
 ^entry:
@@ -161,7 +161,7 @@ st.func @f8_k128_a_partly_overlaps() {
 }
 
 #--- A and B of the second WMMA overlap.
-# CHECK: error: WMMA in function "f8_k128_ab_overlap" block "entry"
+# CHECK: violation: WMMA in function "f8_k128_ab_overlap" block "entry"
 # CHECK-SAME: A and B of one WMMA must not overlap
 st.func @f8_k128_ab_overlap() {
 ^entry:
@@ -196,7 +196,7 @@ st.func @k128_different_ab() {
 #===----------------------------------------------------------------------===#
 
 #--- Same B inside a pair.
-# CHECK: error: WMMA in function "bf16_same_b_in_pair" block "entry"
+# CHECK: violation: WMMA in function "bf16_same_b_in_pair" block "entry"
 # CHECK-SAME: needs different A and B from its pair and the previous pair
 st.func @bf16_same_b_in_pair() {
 ^entry:
@@ -206,7 +206,7 @@ st.func @bf16_same_b_in_pair() {
 }
 
 #--- Same A inside a pair, f16.
-# CHECK: error: WMMA in function "f16_same_a_in_pair" block "entry"
+# CHECK: violation: WMMA in function "f16_same_a_in_pair" block "entry"
 # CHECK-SAME: needs different A and B from its pair and the previous pair
 st.func @f16_same_a_in_pair() {
 ^entry:
@@ -216,7 +216,7 @@ st.func @f16_same_a_in_pair() {
 }
 
 #--- The second pair reuses the A of the previous pair's second WMMA, iu8.
-# CHECK: error: WMMA in function "iu8_reuses_previous_pair" block "entry"
+# CHECK: violation: WMMA in function "iu8_reuses_previous_pair" block "entry"
 # CHECK-SAME: needs different A and B from its pair and the previous pair
 # CHECK: "st.v_wmma_i32_16x16x64_iu8"(v[40:47], v[90:97]
 st.func @iu8_reuses_previous_pair() {
@@ -229,7 +229,7 @@ st.func @iu8_reuses_previous_pair() {
 }
 
 #--- An odd chain leaves its third WMMA unpaired.
-# CHECK: error: WMMA in function "bf16_odd_chain" block "entry"
+# CHECK: violation: WMMA in function "bf16_odd_chain" block "entry"
 # CHECK-SAME: must be paired with the next WMMA
 # CHECK: "st.v_wmma_f32_16x16x32_bf16"(v[60:67]
 st.func @bf16_odd_chain() {
@@ -241,7 +241,7 @@ st.func @bf16_odd_chain() {
 }
 
 #--- A and B of the second WMMA overlap.
-# CHECK: error: WMMA in function "bf16_ab_overlap" block "entry"
+# CHECK: violation: WMMA in function "bf16_ab_overlap" block "entry"
 # CHECK-SAME: A and B of one WMMA must not overlap
 st.func @bf16_ab_overlap() {
 ^entry:
@@ -286,8 +286,6 @@ st.func @f16_and_iu8_pairs() {
 }
 
 #--- A legal second pair in the next block: the check cannot see the first pair.
-# CHECK: warning: WMMA in function "bf16_pair_across_blocks" block "next"
-# CHECK-SAME: the pairs continue from another block and cannot be checked
 # CHECK: warning: WMMA in function "bf16_pair_across_blocks" block "next"
 # CHECK-SAME: the pairs continue from another block and cannot be checked
 st.func @bf16_pair_across_blocks() {
@@ -340,7 +338,7 @@ st.func @f4_32x16_ab_overlap() {
 }
 
 #--- Same B inside an f4xf4 pair.
-# CHECK: error: WMMA in function "f4xf4_same_b_in_pair" block "entry"
+# CHECK: violation: WMMA in function "f4xf4_same_b_in_pair" block "entry"
 # CHECK-SAME: needs different A and B from its pair and the previous pair
 st.func @f4xf4_same_b_in_pair() {
 ^entry:
@@ -350,7 +348,7 @@ st.func @f4xf4_same_b_in_pair() {
 }
 
 #--- An odd f4xf4 chain leaves its third WMMA unpaired.
-# CHECK: error: WMMA in function "f4xf4_odd_chain" block "entry"
+# CHECK: violation: WMMA in function "f4xf4_odd_chain" block "entry"
 # CHECK-SAME: must be paired with the next WMMA
 # CHECK: "st.v_wmma_f32_16x16x128_f8f6f4"(v[60:67]
 st.func @f4xf4_odd_chain() {
@@ -440,9 +438,8 @@ st.func @xdl_then_non_xdl() {
 }
 
 #--- An XDL WMMA skips a non-XDL one in between, so its chain still stands.
-# CHECK: error: WMMA in function "non_xdl_between_xdl" block "entry"
+# CHECK: violation: WMMA in function "non_xdl_between_xdl" block "entry"
 # CHECK-SAME: switch the accumulator
-# CHECK-NOT: "non_xdl_between_xdl"
 st.func @non_xdl_between_xdl() {
 ^entry:
   v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[20:27], v[30:37], v[0:7]) {}

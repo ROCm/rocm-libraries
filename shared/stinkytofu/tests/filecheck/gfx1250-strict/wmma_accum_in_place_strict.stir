@@ -4,7 +4,7 @@
 # gfx1250-strict stepping is checked too.
 
 #--- f8 K=64 has no exception.
-# CHECK: error: WMMA in function "f8_k64_same_acc" block "entry"
+# CHECK: violation: WMMA in function "f8_k64_same_acc" block "entry"
 # CHECK-SAME: switch the accumulator
 st.func @f8_k64_same_acc() {
 ^entry:
