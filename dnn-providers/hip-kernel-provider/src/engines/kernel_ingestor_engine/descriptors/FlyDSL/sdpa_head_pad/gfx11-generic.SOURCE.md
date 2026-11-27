@@ -26,9 +26,9 @@ instance list is untouched.
 | flydsl_kernels_commit | `89ad52fbbb9e252396829a8a44b12e18b7acd970` |
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
-| rocm_version | `7.13.0` |
+| rocm_version | `10.2.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `31d8fd02ac74575a85b25c6f1fa380a9351b8658e28c5bfa1ebb51bd696b023b` |
+| inputs_sha256 | `3f3410309392f3a10bce9890d92d073b23af2d05400481e876803426464ac4c8` |
 
 ## Instances
 
@@ -37,4 +37,4 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_head_pad_f16_bt256` | 100 | 28 | 0 | `7251961bf7250d50` |
+| `sdpa_head_pad_f16_bt256` | 100 | 30 | 0 | `4cbe9d6ef9908bf3` |
