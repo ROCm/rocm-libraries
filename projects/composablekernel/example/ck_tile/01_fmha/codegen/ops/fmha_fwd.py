@@ -2406,9 +2406,26 @@ GFX125_QR_TDM_PINGPONG_HDIMS = (
     (512, 512),
 )
 
-# fp8 (fp8 Q/K/V and P, and MX) takes the same head dims, Q/K rows padded to whole WMMA K
-# slices (see _gfx125_qr_tdm_pingpong_tiles), and the qscales (none, or q/k/v descales per
-# tensor, per head or per block)
+# fp8 and MX take develop's head dims only (d64, d128, d192/128, d256; narrower head dims
+# run padded on the next one up): the others would double the instances CI builds
+GFX125_QR_TDM_PINGPONG_FP8_HDIMS = (
+    (64, 64),
+    (128, 128),
+    (192, 128),
+    (256, 256),
+)
+
+
+def gfx125_qr_tdm_pingpong_hdims(dtype: str):
+    """The head dims (hdim, hdim_v) qr_tdm_pingpong serves for the input type."""
+    if "fp8" in dtype:
+        return GFX125_QR_TDM_PINGPONG_FP8_HDIMS
+    return GFX125_QR_TDM_PINGPONG_HDIMS
+
+
+# fp8 (fp8 Q/K/V and P, and MX): Q/K rows padded to whole WMMA K slices (see
+# _gfx125_qr_tdm_pingpong_tiles), and the qscales (none, or q/k/v descales per tensor, per
+# head or per block)
 GFX125_QR_TDM_PINGPONG_FP8_QSCALES = ("no", "pertensor", "perhead", "blockscale")
 
 
@@ -2861,7 +2878,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                             mx=dtype in cls._DT_MXFP8,
                         )
                     )
-                    for h in GFX125_QR_TDM_PINGPONG_HDIMS
+                    for h in gfx125_qr_tdm_pingpong_hdims(dtype)
                 }
             )
             for h, tiles in cls._sched_tiles(dtype).items():
@@ -2877,7 +2894,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         pipelines = []
         # qr_tdm_pingpong alone, at every input width: its packed-GQA decode first, then
         # every feature (fp8: no scales or per-tensor, per-head or block descales; MX)
-        if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
+        if (hdim, hdim_v) in gfx125_qr_tdm_pingpong_hdims(dtype):
             if dtype in cls._DT_FP16_BF16:
                 qscales = ("no",)
             elif dtype in cls._DT_MXFP8:

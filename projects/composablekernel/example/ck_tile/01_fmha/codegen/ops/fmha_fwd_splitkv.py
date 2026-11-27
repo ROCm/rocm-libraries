@@ -32,6 +32,7 @@ from codegen.ops.fmha_fwd import (
     CppConstraint,
     FmhaFwdTileSize,
     GFX125_QR_TDM_PINGPONG_HDIMS,
+    gfx125_qr_tdm_pingpong_hdims,
     _gfx125_qr_tdm_pingpong_block_scales,
     qr_tdm_pingpong_lds_read_schedule,
     _gfx125_qr_tdm_pingpong_tiles,
@@ -1313,7 +1314,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             *GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES,
         ]:
             # the head dims qr_tdm_pingpong splits
-            for h, _ in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS:
+            for h, _ in gfx125_qr_tdm_pingpong_hdims(dtype):
                 d.setdefault(str(h), FmhaFwdSplitKVCombineTileSize(32, -1))
         return d
 
@@ -1367,7 +1368,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             mx = dtype.startswith("mx")
             return {
                 str(h): _gfx125_qr_tdm_pingpong_splitkv_tiles((h, h_v), fp8=True, mx=mx)
-                for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS
+                for h, h_v in gfx125_qr_tdm_pingpong_hdims(dtype)
             }
         if dtype in ["fp16", "bf16"]:
             tiles = {

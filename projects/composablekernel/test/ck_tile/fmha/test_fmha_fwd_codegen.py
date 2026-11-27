@@ -28,6 +28,7 @@ from codegen.ops.fmha_fwd import (  # noqa: E402
     FmhaFwdApiPool,
     FmhaFwdTileSize,
     GFX125_QR_TDM_PINGPONG_HDIMS,
+    gfx125_qr_tdm_pingpong_hdims,
     GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS,
     GFX125_QR_TDM_SCHED_SMALL_GRID,
     KernelComponentFactoryGfx125,
@@ -1597,7 +1598,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
             sched_hdims = {(h, h) for h in _SCHED_HDIMS.get(dtype, ())}
             with self.subTest(dtype=dtype):
                 tiles = factory.get_hdim_tile_size_dict(dtype)
-                self.assertEqual(set(tiles), set(GFX125_QR_TDM_PINGPONG_HDIMS))
+                self.assertEqual(set(tiles), set(gfx125_qr_tdm_pingpong_hdims(dtype)))
                 for hdim_pair, hdim_tiles in tiles.items():
                     owned = [
                         t for t in hdim_tiles if t.F_pipeline_tag == "qr_tdm_pingpong"
@@ -1636,7 +1637,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 # ("_fp8_" also matches fp8bf16's "_qr_tdm_fp8_sched_" names)
                 kernels = [k for k in kernels if k.F_dtype == dtype]
                 self.assertTrue(kernels)
-                for hdim_pair in GFX125_QR_TDM_PINGPONG_HDIMS:
+                for hdim_pair in gfx125_qr_tdm_pingpong_hdims(dtype):
                     self.assertEqual(
                         {
                             k.F_pipeline.tag
@@ -1648,7 +1649,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     )
                 self.assertEqual(
                     {(k.F_hdim, k.F_tile.F_bn1) for k in kernels},
-                    set(GFX125_QR_TDM_PINGPONG_HDIMS),
+                    set(gfx125_qr_tdm_pingpong_hdims(dtype)),
                 )
                 self.assertEqual(
                     {k.F_pipeline.F_qscale for k in kernels}, qscales[dtype]
@@ -1699,10 +1700,10 @@ class TestGfx125V128Codegen(unittest.TestCase):
         padded in registers on the prefill tiles of GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS,
         whose trips take 64 keys; QK on the widest WMMA K
         dividing the Q/K row (64-deep slices zero padded in registers), rows padded to
-        whole 64-deep slices, or 128-deep ones where that takes fewer scaled WMMAs (d160,
-        d192: 2 for 3); prefill at d64/d128/d256 also has qr_tdm_fp8_sched."""
+        whole 64-deep slices, or 128-deep ones where that takes fewer scaled WMMAs (d192:
+        2 for 3); prefill at d64/d128/d256 also has qr_tdm_fp8_sched."""
         for dtype in ("mxfp8", "mxfp8bf16"):
-            for hdim, hdim_v in GFX125_QR_TDM_PINGPONG_HDIMS:
+            for hdim, hdim_v in gfx125_qr_tdm_pingpong_hdims(dtype):
                 with self.subTest(dtype=dtype, hdim=hdim):
                     _, kernels = get_fwd_blobs(
                         ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
@@ -1771,13 +1772,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 ["gfx1250"],
                 f"*_{dtype}_*",
                 0,
-                [h for h, _ in GFX125_QR_TDM_PINGPONG_HDIMS],
+                [h for h, _ in gfx125_qr_tdm_pingpong_hdims(dtype)],
                 "simplified",
             )
             api = pool.render("test")
             at = [
                 api.index(f"t.hdim_q <= {h} && t.hdim_v <= {hv}")
-                for h, hv in GFX125_QR_TDM_PINGPONG_HDIMS
+                for h, hv in gfx125_qr_tdm_pingpong_hdims(dtype)
             ]
             self.assertEqual(at, sorted(at))
 
