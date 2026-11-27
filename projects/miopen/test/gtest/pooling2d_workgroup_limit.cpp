@@ -10,8 +10,8 @@
 // workgroups in either dimension wraps blockIdx. The 2D pooling kernels map N*C to Z and the
 // vertical tiles to Y; only when that grid exceeds the architecture's limit do the solvers select
 // the kernel variant that linearizes all workgroups into X (otherwise the original launch is
-// used). The cases cover the 65536 Z-workgroup limit on gfx1200/gfx1201, larger Z grids, and a
-// grid that exceeds the limit only in Y. They are valid problems on every architecture. A 32-bit
+// used). The cases cover the Z-workgroup limit of the gfx120X family (65536), larger Z grids, and
+// a grid that exceeds the limit only in Y. They are valid problems on every architecture. A 32-bit
 // index type is used so that the image index mode (wsidx = 1) fits for every shape.
 
 namespace {
