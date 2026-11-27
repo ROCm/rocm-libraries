@@ -401,9 +401,10 @@ without a TheRock gate. It was extracted from the former docs-branch code.
 ### #11023 `lazy-rocm-installation-model` (introduces `_rocm.py`, `_runtime.py`, runtime adapters and `devrocm`)
 
 - Introduce the fuller runtime modules and their tests here. The earlier eager,
-  required-client groundwork is removed from #11019. `ClientIdentity` is returned
-  even when source matching warns and allows use, so build-ROCm comparison remains
-  active. #11024 consumes selection and #11025 activates package initialization.
+  required-client groundwork is removed from #11019. The runtime reads the client's
+  build ROCm after source validation on every path, including when source matching
+  warns and allows use. #11024 consumes selection and #11025 activates package
+  initialization.
 - `TheRockCIRocm` is selected only by `TENSILELITE_ROCM_ADAPTER=therock-ci`. Any
   other value is an error. `THEROCK_PACKAGE_VERSION` being set no longer selects
   anything; it supplies the identity when present.
@@ -964,8 +965,9 @@ Where the implementation went beyond or differs from section 1.2:
   Metadata is available whenever client or canonical wheel consumers need it. The generator environment also carries `ROCM_VERSION=${hip_VERSION}`:
   TheRock's build prefix has no ambient `/opt/rocm` for the legacy version lookup.
   The regression and nine adjacent environment tests passed after the restack.
-- **#11023:** `validate_client` returns the client's SHA and build ROCm together
-  (`ClientIdentity`), so the client is queried once.
+- **#11023:** `validate_client` checks source pairing only and returns nothing.
+  The runtime reads the build ROCm with `client_build_rocm()` and compares it with
+  the selected ROCm; this costs one extra client launch per process.
 - **#11025 tox correction:** `skip_install` applies to all environments. The five
   environments that run package imports (`logic-corpus`, `rocisa`, `coverage-cpp`,
   `unit`, `coverage-unit`) explicitly install the checkout before their first import.
