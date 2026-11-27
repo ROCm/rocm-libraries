@@ -141,6 +141,9 @@ class PpMfmaSpec:
             f"f{p.KH}x{p.KW}",
             f"p{p.PAD}",
             f"bk{self.block_k}",
+            # The baked per-group channel counts: two grouped problems that
+            # differ only in cpg/kpg are different binaries.
+            f"c{p.cpg}k{p.kpg}" if p.groups > 1 else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 

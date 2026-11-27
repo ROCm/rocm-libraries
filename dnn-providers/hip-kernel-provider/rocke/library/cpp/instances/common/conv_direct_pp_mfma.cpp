@@ -195,13 +195,20 @@ rocke_status_t pp_kernel_name(const PpSpec& s, char* out, size_t out_cap)
         return ROCKE_ERR_VALUE;
     }
     const rocke_direct_conv_problem_t* p = s.problem;
-    char f_buf[48], p_buf[24], bk_buf[24];
+    char f_buf[48], p_buf[24], bk_buf[24], ck_buf[48];
     snprintf(f_buf, sizeof f_buf, "f%dx%d", p->KH, p->KW);
     snprintf(p_buf, sizeof p_buf, "p%d", p->PAD);
     snprintf(bk_buf, sizeof bk_buf, "bk%d", s.block_k);
-    const char* parts[3] = {f_buf, p_buf, bk_buf};
+    /* The baked per-group channel counts: grouped problems that differ only
+     * in cpg/kpg are different binaries. Dense names are unchanged. */
+    ck_buf[0] = '\0';
+    if(p->groups > 1)
+    {
+        snprintf(ck_buf, sizeof ck_buf, "c%dk%d", p->cpg, p->kpg);
+    }
+    const char* parts[4] = {f_buf, p_buf, bk_buf, ck_buf};
     int on[1] = {problem_is_bf16(p) ? 1 : 0};
-    return rocke_kernel_name_join(s.name, parts, 3, bf16_flag, on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(s.name, parts, 4, bf16_flag, on, 1, out, out_cap, NULL);
 }
 
 bool pp_is_valid_spec(

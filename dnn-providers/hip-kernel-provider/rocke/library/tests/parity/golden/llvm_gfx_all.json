@@ -29,7 +29,7 @@
       "sha256": "8dc9dc5598521876e8bb439d69b9b57748773696ae07242f7b1dde9d3dbded2a"
     },
     "conv_direct_dgrad_pp_mfma": {
-      "sha256": "672cd19ac7abd25b9cda098e46900e54b4081b739c4518c183cf08079ad70e73"
+      "sha256": "a3af14321b48ff32826d689f8b23d46280e534fc8a6e58f1972cb1d56af9c192"
     },
     "conv_direct_dgrad_wmma": {
       "sha256": "8bea68bb2e0797efd03e6e7746ea57d7986d031aa839052c1ea904aa96733407"
@@ -2111,8 +2111,8 @@
       "conv_direct_dgrad_pp_mfma": {
         "0": "164150a954a8fb0e82026a8999c411af717bbd73158e16e1a36919f86b98ceee",
         "1": "8304dcef9b0b1dee9b5ff3107c67bef8afe4524581853b4a6ce8d812133fb53b",
-        "12": "3c551d901ac96d6126fa86e24d341c1ebaace8125a1bdff9ceedb964912bc37f",
-        "13": "6ef1bc9cd350ef774088a33e20a745dd74517f733fd88b9247b0a75e8dc30b79",
+        "12": "8d5bcbf78bd35bcd94f27f7531cffa41b35eb44295028aa3c5e480d305546230",
+        "13": "1b8eb7c6c40e9724cd7106883b232ddfd64968930b72618d6415844fa02e0b0a",
         "2": "e871507ace753ea70cf974f3ae8dc903d488a760fb8dc812b27613240b92df58",
         "3": "adfef24368543b82078c2fa050f3d9f2a724bd40afbaba5fffeaffba8cf2bdaa",
         "4": "a9f952d5d3499caea4ea623a516c76722430f016e7fe76b33189d132551fdaa2",
