@@ -3416,8 +3416,9 @@ TEST_CASE("GEMM: a gfx115x kernel is modeled with the workgroup mapping it launc
   auto mapping = [&](const origami::hardware_t& hw, int wgm, int wgm_xcc, int stream_k) {
     return ctx_wgm(hw, fixed_wgm_config(wgm, wgm_xcc, stream_k));
   };
-  // What the host picks per problem: the same tile without a declared mapping.
-  auto picked = [&](const origami::hardware_t& hw, int stream_k) {
+  // The model's per-problem estimate (predict_workgroup_mapping): the same tile without a
+  // declared mapping.
+  auto predicted = [&](const origami::hardware_t& hw, int stream_k) {
     auto c    = fixed_wgm_config(0, -1, stream_k);
     c.backend = std::monostate{};
     return ctx_wgm(hw, c);
@@ -3441,12 +3442,12 @@ TEST_CASE("GEMM: a gfx115x kernel is modeled with the workgroup mapping it launc
     REQUIRE(mapping(gfx1151, 0, 1, sk).wgm == gfx1151_default_wgm);
   }
 
-  // Only a persistent kernel with WGM 0 and WGMXCC -1 is picked per problem, StreamK or
+  // Only a persistent kernel with WGM 0 and WGMXCC -1 keeps the per-problem estimate, StreamK or
   // DataParallel.
-  REQUIRE(picked(gfx1151, 3).wgm != gfx1151_default_wgm);
-  REQUIRE(same(mapping(gfx1151, 0, -1, 3), picked(gfx1151, 3)));
-  REQUIRE(
-      same(ctx_wgm(gfx1151, fixed_wgm_config(0, -1, 0, /*persistent=*/true)), picked(gfx1151, 0)));
+  REQUIRE(predicted(gfx1151, 3).wgm != gfx1151_default_wgm);
+  REQUIRE(same(mapping(gfx1151, 0, -1, 3), predicted(gfx1151, 3)));
+  const auto dp_auto = fixed_wgm_config(0, -1, 0, /*persistent=*/true);
+  REQUIRE(same(ctx_wgm(gfx1151, dp_auto), predicted(gfx1151, 0)));
 
   // A spatial-cluster StreamK kernel launches with WGM 1 and WGMXCC 1, auto mapping or not.
   for (int wgm : {0, 8}) {
