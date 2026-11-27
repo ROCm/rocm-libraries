@@ -292,6 +292,17 @@ def test_fwd_rows_are_valid_and_build(row, dtype):
     assert ("_patch" in kernel.name) == bool(spec.patch)
 
 
+def test_dtl_ir_compiles_and_links():
+    """The dtl K loops' LDS DMAs are inline asm with a buffer descriptor
+    operand: a forward and a dgrad dtl row must give a module LLVM accepts."""
+    from rocke.tests.ir_validity import assert_kernel_target_accepts
+
+    fwd = _fwd_spec(next(r for r in _FWD_ROWS if r[0] == "patch_chip_dtl"), "fp16")
+    assert_kernel_target_accepts(build_implicit_gemm_conv(fwd, arch=_ARCH), _ARCH)
+    dg = _dgrad_spec(next(r for r in _DGRAD_ROWS if r[0] == "patch_chip_dtl"), "bf16")
+    assert_kernel_target_accepts(build_implicit_gemm_conv_dgrad(dg, arch=_ARCH), _ARCH)
+
+
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _DGRAD_ROWS, ids=lambda r: r[0])
 def test_dgrad_rows_are_valid_and_build(row, dtype):
