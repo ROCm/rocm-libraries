@@ -58,7 +58,10 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <set>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 #include <sstream>
@@ -6651,6 +6654,27 @@ namespace TensileLite
             ++tally.distinct;
         }
 
+        // HIPBLASLT_USO_BYPASS_REFUSALS: names each bypassed refusal once per kernel and clause.
+        // token may be null (an untagged refusal).
+        void reportBypassedUniformSummationOrderRefusal(std::string const& kernel,
+                                                        char const*        token,
+                                                        std::string_view   where)
+        {
+            const std::string_view tag = token != nullptr ? token : "Untagged";
+            std::string            key;
+            key.append(where).append(1, '|').append(tag).append(1, '|').append(kernel);
+
+            static std::mutex            mutex;
+            static std::set<std::string> reported;
+            std::lock_guard<std::mutex>  lock(mutex);
+            if(!reported.insert(std::move(key)).second)
+                return;
+            std::cerr << "hipBLASLt warning: HIPBLASLT_USO_BYPASS_REFUSALS bypassed the "
+                         "uniform summation order "
+                      << where << " refusal " << tag << " for kernel " << kernel
+                      << " (the first refusal found; later checks were not evaluated)" << std::endl;
+        }
+
         // Statically-knowable reasons a StreamK launch cannot be shown
         // row-uniform: no resolved grid, reduction strategy or Synchronizer
         // pointer is consulted, so the launch-obstacle helper (used by both
@@ -6834,11 +6858,20 @@ namespace TensileLite
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
             problem, hardware, launch, resolvedGA, gsu, nullptr, false, &obstacleToken);
 
+        // A refusal HIPBLASLT_USO_BYPASS_REFUSALS bypasses is tallied as admitted.
+        const bool bypassed
+            = !obstacle.empty() && Debug::Instance().bypassUniformSummationOrderRefusals();
         if(Debug::Instance().printNoSolutionUniformSummationOrder())
         {
             ++uniformSummationOrderTally().examined;
-            if(!obstacle.empty())
+            if(!obstacle.empty() && !bypassed)
                 uniformSummationOrderTallyRecord(obstacleToken);
+        }
+
+        if(bypassed)
+        {
+            reportBypassedUniformSummationOrderRefusal(kernelName, obstacleToken, "selection");
+            return true;
         }
 
         return obstacle.empty();
@@ -7121,8 +7154,20 @@ namespace TensileLite
         if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
             return;
 
-        const std::string reason = uniformSummationOrderLaunchObstacle(
-            problem, hardware, launch, resolvedGlobalAccumulation, gsu, synchronizer, true);
+        char const*       obstacleToken = nullptr;
+        const std::string reason        = uniformSummationOrderLaunchObstacle(problem,
+                                                                       hardware,
+                                                                       launch,
+                                                                       resolvedGlobalAccumulation,
+                                                                       gsu,
+                                                                       synchronizer,
+                                                                       true,
+                                                                       &obstacleToken);
+        if(!reason.empty() && Debug::Instance().bypassUniformSummationOrderRefusals())
+        {
+            reportBypassedUniformSummationOrderRefusal(kernelName, obstacleToken, "launch");
+            return;
+        }
         if(!reason.empty())
         {
             throw UniformSummationOrderError(

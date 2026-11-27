@@ -189,6 +189,7 @@ void Arguments::init()
     use_gpu_timer            = false;
     skip_slow_solution_ratio = 0.0;
     uniform_summation_order  = -1;
+    uniform_check            = hipblaslt_uniform_check::none;
 
     // tuning
     gsu_vector[0] = 0;

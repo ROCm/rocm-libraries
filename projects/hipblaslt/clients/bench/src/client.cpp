@@ -297,6 +297,7 @@ try
     std::string scale_type;
     std::string bias_type;
     std::string bias_source;
+    std::string uniform_check;
     std::string initialization;
     std::string filter;
     std::string activation_type;
@@ -510,6 +511,17 @@ try
         ("ulp",
          value<bool>(&ulp)->default_value(false),
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
+
+        ("uniform_check",
+         value<std::string>(&uniform_check)->default_value("none"),
+         "none or row. row makes the inputs uniform along M (every row of op(A), C, E, and the "
+         "bias and scale vectors along M, equal to row 0) and checks after timing that every row "
+         "of D is bitwise equal to row 0. Adds the row_uniform (pass, FAIL or skip), "
+         "row_uniform_bad_cols and row_uniform_first_row result columns. A failure is reported "
+         "on stderr and does not stop the run. With uniform summation order on, it counts as a "
+         "failed check for --verify_strict. Inputs that sum exactly in any order (rand_int, "
+         "integer_exact, integer types, ...) get a warning, since a pass shows little. Also a "
+         "YAML key.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
@@ -1236,6 +1248,10 @@ try
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
+
+    arg.uniform_check = string_to_hipblaslt_uniform_check(uniform_check);
+    if(arg.uniform_check == static_cast<hipblaslt_uniform_check>(-1))
+        throw std::invalid_argument("Invalid value for --uniform_check " + uniform_check);
 
     if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
         throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");

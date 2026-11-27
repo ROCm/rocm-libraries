@@ -7010,4 +7010,95 @@ Tests:
   beta: 1.0
   unit_check: 1
 
+# Uniform summation order on real kernels: every row of D must equal row 0 when every row of
+# op(A) and C does. hpl inputs round differently in each summation order, so a kernel that sums
+# rows in different orders fails. Each function item pairs a precision with its shape, to avoid a
+# cross product.
+- name: matmul_uniform_rows_hpl
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: T, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  uniform_summation_order: 1
+  uniform_check: row
+  algo_method: 0
+  requested_solution_num: 256
+  unit_check: 0
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+- name: matmul_uniform_rows_hpl_all_solutions
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: T, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  uniform_summation_order: 1
+  uniform_check: row
+  algo_method: 1
+  requested_solution_num: -1
+  unit_check: 0
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+# The row-direction rewrites of a transposed A, C, the bias, the scaleA and scaleAlpha vectors.
+- name: matmul_uniform_rows_hpl_epilogue
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 0, scaleB: 0 }
+      - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 2, scaleB: 2 }
+  transA: T
+  transB: N
+  M: 256
+  N: 256
+  K: 1024
+  alpha: 1
+  beta: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  scaleAlpha_vector: 1
+  initialization: hpl
+  uniform_summation_order: 1
+  uniform_check: row
+  algo_method: 0
+  requested_solution_num: 256
+  unit_check: 0
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+# Each GEMM of a group is checked on its own.
+- name: matmul_uniform_rows_hpl_grouped
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r }
+  transA: N
+  transB: N
+  M: 256
+  N: 256
+  K: 1024
+  grouped_gemm: 2
+  alpha: 1
+  beta: 1
+  initialization: hpl
+  uniform_summation_order: 1
+  uniform_check: row
+  algo_method: 0
+  requested_solution_num: 256
+  unit_check: 0
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
 ...
