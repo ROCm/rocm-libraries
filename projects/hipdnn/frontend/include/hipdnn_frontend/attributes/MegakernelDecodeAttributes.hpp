@@ -24,7 +24,7 @@ namespace hipdnn_frontend::graph
  * Set all fields. Copy the binary selection fields from the matching engine manifest
  * entry: model identifier, source fingerprint (`src`), GPU architecture (`arch`),
  * compute unit count (`cus`), key/value cache layout (`kv`) and block size (`block`),
- * batch size (`M`), tensor parallel size (`tp`), routing mode (`rt`), and whether
+ * batch size (`M`), tensor parallel size (`tp`), runtime geometry mode (`rt`), and whether
  * the binary includes the language model head (`lm_head`). Set `nlayers` to the
  * number of layers to run (a positive 32-bit integer).
  *
