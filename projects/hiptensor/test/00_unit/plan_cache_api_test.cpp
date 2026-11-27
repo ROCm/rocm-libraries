@@ -141,6 +141,11 @@ TEST_F(PlanCacheApiTest, NullHandleReturnsNotInitialized)
               HIPTENSOR_STATUS_NOT_INITIALIZED);
 }
 
+TEST_F(PlanCacheApiTest, ZeroEntriesReturnsInvalidValue)
+{
+    EXPECT_EQ(hiptensorHandleResizePlanCache(mHandle, 0), HIPTENSOR_STATUS_INVALID_VALUE);
+}
+
 // The checks don't depend on whether the plan cache is enabled.
 TEST_F(PlanCacheApiTest, NullFileNameReturnsInvalidValue)
 {
@@ -174,6 +179,7 @@ TEST(PlanCacheDisabledTest, ReadReportsNoCachelines)
               HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(numCachelinesRead, 0u);
 
+    EXPECT_EQ(hiptensorHandleResizePlanCache(handle, 0), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(hiptensorHandleWritePlanCacheToFile(handle, nullptr), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(hiptensorHandleReadPlanCacheFromFile(handle, file.c_str(), nullptr),
               HIPTENSOR_STATUS_INVALID_VALUE);

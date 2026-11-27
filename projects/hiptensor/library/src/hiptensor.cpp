@@ -301,11 +301,11 @@ hiptensorStatus_t hiptensorHandleResizePlanCache(hiptensorHandle_t handle,
         return nullArgumentError(
             "hiptensorHandleResizePlanCache", "handle", HIPTENSOR_STATUS_NOT_INITIALIZED);
 
-    if(handle->getPlanCache() == nullptr)
-        return HIPTENSOR_STATUS_SUCCESS;
-
     if(numEntries < 1u)
         return HIPTENSOR_STATUS_INVALID_VALUE;
+
+    if(handle->getPlanCache() == nullptr)
+        return HIPTENSOR_STATUS_SUCCESS;
 
     handle->getPlanCache()->resize(numEntries);
 
