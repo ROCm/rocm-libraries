@@ -24,6 +24,10 @@
 #define AVERAGE_OPS 0
 #endif
 
+#ifndef MLO_POOLBWD_LINEAR_GRID
+#define MLO_POOLBWD_LINEAR_GRID 0
+#endif
+
 constexpr auto MLO_POOLBWD_LCL_DATA_WIDTH = (MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX +
                                              MLO_POOLING_KERNEL_SZ0 + MLO_POOLING_STRIDE0 - 2) /
                                             MLO_POOLING_STRIDE0;
@@ -50,16 +54,20 @@ extern "C" __global__ __launch_bounds__(block_size) //
                           int mlo_botdf_str,
                           int mlo_topdf_batch_str,
                           int mlo_topdf_channel_str,
-                          int mlo_topdf_str)
+                          int mlo_topdf_str,
+                          int mlo_n_x_tiles,
+                          int mlo_n_y_tiles)
 {
     __shared__ FLOAT lcl_top_diff[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
 
-    int x       = blockIdx.x * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
-    int y       = blockIdx.y * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
+    const PoolingWorkgroup wg =
+        poolingWorkgroup<MLO_POOLBWD_LINEAR_GRID != 0>(mlo_n_x_tiles, mlo_n_y_tiles);
+    int x       = wg.x_tile * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
+    int y       = wg.y_tile * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
     //        int lcl_id = (lcl_id1 << MLO_POOLBWD_GROUP_LG2SZ1) + lcl_id0;
-    int ob = blockIdx.z; // outputs * batch_sz
+    int ob = wg.ob; // outputs * batch_sz
     int b  = ob / mlo_n_outputs;
     int o  = ob - b * mlo_n_outputs;
 
@@ -215,18 +223,20 @@ extern "C" __global__ __launch_bounds__(block_size) //
                           int mlo_botdf_str,
                           int mlo_topdf_batch_str,
                           int mlo_topdf_channel_str,
-                          int mlo_topdf_str)
+                          int mlo_topdf_str,
+                          int mlo_n_x_tiles,
+                          int mlo_n_y_tiles)
 {
     __shared__ FLOAT lcl_top_df[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
     __shared__ index_t lcl_mask[MLO_POOLBWD_LCL_DATA_WIDTH * MLO_POOLBWD_LCL_DATA_HEIGHT];
 
-    int gid0    = blockIdx.x;
-    int gid1    = blockIdx.y;
-    int x       = gid0 * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
-    int y       = gid1 * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
+    const PoolingWorkgroup wg =
+        poolingWorkgroup<MLO_POOLBWD_LINEAR_GRID != 0>(mlo_n_x_tiles, mlo_n_y_tiles);
+    int x       = wg.x_tile * MLO_POOLBWD_GROUP_SZ0 * MLO_POOLBWD_N_HORIZ_OUT_PIX;
+    int y       = wg.y_tile * MLO_POOLBWD_GROUP_SZ1 * MLO_POOLBWD_N_VERT_OUT_PIX;
     int lcl_id0 = threadIdx.x;
     int lcl_id1 = threadIdx.y;
-    int ob      = blockIdx.z; // outputs * batch_sz
+    int ob      = wg.ob; // outputs * batch_sz
     int b       = ob / mlo_n_outputs;
     int o       = ob - b * mlo_n_outputs;
 

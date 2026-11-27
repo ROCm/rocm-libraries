@@ -34,6 +34,7 @@
 
 #include <array>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -65,13 +66,49 @@ inline HipEventPtr make_hip_event()
 ///     error reported anywhere.
 ///
 /// Note this bounds the number of WORK-ITEMS per dimension, not the number of
-/// workgroups; there is no separate per-dimension workgroup-count limit on either path.
+/// workgroups; the Y/Z workgroup-count limit of some architectures is checked separately by
+/// CheckWorkgroupCount().
 ///
 /// \param gdims Global work size, in work-items (already gridDim * blockDim).
 /// \param name Kernel name, used in the exception message.
 /// \throws miopen::Exception if the global work size is not representable.
 MIOPEN_INTERNALS_EXPORT void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims,
                                                     const std::string& name);
+
+/// Largest number of workgroups the hardware launches correctly in the Y or Z dimension, for the
+/// architecture named by \p gcn_arch_name (the gcnArchName device property, a feature suffix such
+/// as "-strict" or ":xnack-" is allowed). Larger launches are accepted by the module launch APIs
+/// and silently return wrong results:
+///   - gfx120X (gfx1200, gfx1201, ...): 65536. The workgroup ID is 16 bits wide, so blockIdx.y/z
+///     wrap and some workgroups run twice while others never run.
+///   - gfx125X (gfx1250, ...): 65535. The workgroup count is truncated to 16 bits, so 65536
+///     workgroups run nothing and 70000 run only the first 4464.
+/// Returns std::numeric_limits<size_t>::max() for architectures without such a limit.
+MIOPEN_INTERNALS_EXPORT size_t GetMaxWorkgroupsYZ(const std::string& gcn_arch_name);
+
+/// \param gdims Global work size, in work-items.
+/// \param ldims Local work size (workgroup size), in work-items.
+/// \param name Kernel name, used in the exception message.
+/// \param max_workgroups_yz Largest allowed Y and Z workgroup count.
+/// \throws miopen::Exception if the Y or Z workgroup count exceeds \p max_workgroups_yz.
+MIOPEN_INTERNALS_EXPORT void CheckWorkgroupCount(const std::array<size_t, 3>& gdims,
+                                                 const std::array<size_t, 3>& ldims,
+                                                 const std::string& name,
+                                                 size_t max_workgroups_yz);
+
+/// The checks every kernel launch must pass: ValidateGlobalWorkSize(), then CheckWorkgroupCount()
+/// with the limit \p get_max_workgroups_yz returns. The limit is only requested for grids above the
+/// smallest limit of any architecture, so small launches need no device query.
+MIOPEN_INTERNALS_EXPORT void ValidateLaunch(const std::array<size_t, 3>& gdims,
+                                            const std::array<size_t, 3>& ldims,
+                                            const std::string& name,
+                                            const std::function<size_t()>& get_max_workgroups_yz);
+
+/// ValidateLaunch() with the limit of the device that runs \p stream.
+MIOPEN_INTERNALS_EXPORT void ValidateLaunch(const std::array<size_t, 3>& gdims,
+                                            const std::array<size_t, 3>& ldims,
+                                            const std::string& name,
+                                            hipStream_t stream);
 
 struct HipEventProfiler
 {

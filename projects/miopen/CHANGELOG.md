@@ -99,6 +99,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   input depth of at least 3 and input width of at least 256 (for example Wan VAE layers). A
   hard-coded rule in `ConvHipImplicitGemm3DGroupFwdXdlops` returned one fixed CK instance for
   these problems ahead of the AI heuristic, and Composable Kernel now accepts that instance for
+  larger problems. The gfx950 rule is removed, so these problems use the AI heuristic. gfx942 is
+  unchanged.
+* [Pooling][BatchNorm] Fixed wrong results on gfx12 from 2D pooling (forward and backward) and
+  BatchNorm forward inference when a launch exceeds the device's Y or Z workgroup limit (65536 on
+  gfx120X, 65535 on gfx125X; [#15001](https://github.com/ROCm/rocm-libraries/issues/15001)). Other
+  launches through `HIPOCKernelInvoke` over the limit now fail with `miopenStatusInternalError`.
+  Pooling on gfx12 with N*C of at least 2^27 and 1x1 planes can also return
+  `miopenStatusInternalError` for a wide tile configuration, because the linearized X work-item
+  count reaches 2^32.
   larger problems. The gfx950 rule is removed, so these problems use the AI heuristic.
 * [BatchNorm] Fixed wrong `dx`, `dscale` and `dbias` in NCHW backward training without saved
   statistics when H*W is at least 4096 and not a multiple of 4. Also fixed BF16 conversion that
