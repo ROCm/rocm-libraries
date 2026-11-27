@@ -66,25 +66,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
-# The HIP MLOps runtime suites, against whichever engines serve those operations:
-# HIP_MLOPS_ENGINE, or the per-operation ingestor engines in its place with
-# HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR.
-if(ENABLE_HIP_MLOPS_ENGINE OR HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
-    target_sources(hip_kernel_provider_integration_tests PRIVATE
-        hip_mlops_engine/IntegrationGpuPassByValue.cpp
-        hip_mlops_engine/IntegrationGpuLayernormBackwardPrecision.cpp
-        hip_mlops_engine/IntegrationGpuBatchnormTrainingSpatialBeyondWorkgroup.cpp
-    )
-endif()
-if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
-    # This target links only the SDKs, not hip_kernel_provider_impl, so it does not inherit
-    # the provider's definition. The layernorm backward and batchnorm training suites pin
-    # their engines by it.
-    target_compile_definitions(hip_kernel_provider_integration_tests
-        PRIVATE HIPDNN_ENGINE_HIP_MLOPS_INGESTOR=1
-    )
-endif()
-
 if(ENABLE_HIP_FLASH2_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
@@ -127,6 +108,35 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             target_sources(hip_kernel_provider_integration_tests PRIVATE
                 kernel_ingestor_engine/${_source}
             )
+        endif()
+    endwhile()
+    # The HIP MLOps runtime suites, each a source and the comma-separated engines it runs on,
+    # on the same rule as the knob suites above: compiled whenever the product root offers
+    # every one of them, so a build whose root ships no HipMlops bundle (the superbuild CI's
+    # example descriptor tree) leaves them out rather than failing on a missing engine.
+    set(_hip_mlops_suites
+        IntegrationGpuPassByValue.cpp
+            BatchnormInference,BatchnormTraining,LayernormFwd,RmsNormFwd
+        IntegrationGpuLayernormBackwardPrecision.cpp LayernormBwd
+        IntegrationGpuBatchnormTrainingSpatialBeyondWorkgroup.cpp BatchnormTraining
+    )
+    while(_hip_mlops_suites)
+        list(POP_FRONT _hip_mlops_suites _source _engines)
+        string(REPLACE "," ";" _engines "${_engines}")
+        set(_offered TRUE)
+        foreach(_engine IN LISTS _engines)
+            hkp_product_offers_engine(_offers "hipkernel:${_engine}")
+            if(NOT _offers)
+                set(_offered FALSE)
+            endif()
+        endforeach()
+        if(_offered)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/hip_mlops/${_source}
+            )
+        else()
+            message(STATUS "hkp: this configuration does not ship the HipMlops engines "
+                           "${_source} runs on, so it is not built.")
         endif()
     endwhile()
     # The packaged convolution suites follow the same rule as the knobs suite above, one

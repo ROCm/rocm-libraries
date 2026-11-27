@@ -1,0 +1,125 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+
+#include "core/Utils.hpp"
+#include "engines/kernel_ingestor_engine/packs/hip_mlops/batchnorm/BatchnormCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/hip_mlops/batchnorm/BatchnormKernelCompileOptions.hpp"
+
+namespace hip_kernel_provider
+{
+
+using namespace compilation;
+
+namespace batchnorm
+{
+
+class BatchnormFwdTrainingParams
+{
+public:
+    BatchnormFwdTrainingParams(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormFwdTrainingParams(
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    BatchnormFwdTrainingParams(const BatchnormFwdTrainingParams&) = delete;
+    BatchnormFwdTrainingParams& operator=(const BatchnormFwdTrainingParams&) = delete;
+
+    BatchnormFwdTrainingParams(BatchnormFwdTrainingParams&&) = default;
+    BatchnormFwdTrainingParams& operator=(BatchnormFwdTrainingParams&&) = default;
+
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
+
+    bool hasSaveMeanVariance() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVariance() const;
+
+    bool hasRunningStats() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* prevRunningMean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* prevRunningVariance() const;
+    double momentumValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                         uint32_t numDeviceBuffers) const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningMean() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
+
+    const std::optional<core::utils::ActivationParams>& optActivation() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
+
+private:
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
+
+    // Save mean/variance
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance = nullptr;
+
+    // Running statistics
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _prevRunningMean = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _prevRunningVariance = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningMean = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
+    bool _hasRunningStats{false};
+
+    std::optional<core::utils::ActivationParams> _optActivation;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
+};
+
+/// The variant, workgroup size and vector size the launch heuristics choose for @p params on a
+/// device of @p multiProcessorCount CUs.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormSpatialConfig defaultBatchnormFwdTrainingConfig(const BatchnormFwdTrainingParams& params,
+                                                         int multiProcessorCount);
+
+/// Whether @p config can run @p params on a device of @p multiProcessorCount CUs
+/// (isSpatialConfigApplicable()).
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+bool isBatchnormFwdTrainingConfigApplicable(const BatchnormFwdTrainingParams& params,
+                                            int multiProcessorCount,
+                                            const BatchnormSpatialConfig& config);
+
+/// The compile options, variant and launches of the BatchNormFwdTrainSpatial program for
+/// @p params on @p gcnArchName with the variant, workgroup size and vector size of @p config:
+/// one launch, or for variant 2 the mean/variance, final mean/variance and normalization
+/// launches. Variant 2's geometry sizes for a device of @p multiProcessorCount CUs of
+/// @p warpSize lanes.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingParams& params,
+                                                     const std::string& gcnArchName,
+                                                     int multiProcessorCount,
+                                                     int warpSize,
+                                                     const BatchnormSpatialConfig& config);
+
+} // namespace batchnorm
+
+} // namespace hip_kernel_provider

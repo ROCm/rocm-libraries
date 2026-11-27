@@ -4719,7 +4719,7 @@ constexpr double F32_TOLERANCE = 1e-5;
 /// shapes (on every arch), and the dispatch cases whose features keep a smaller standard case
 /// in TestGpuFlydslSdpaCdnaDispatch (the frontend lanes keep theirs; COVERAGE.md lists the
 /// families). Instantiated once under the `Comprehensive` prefix (below), which
-/// HIP_MLOPS_ENGINE_test_categories.yaml excludes from the quick and standard tiers; the
+/// HIP_KERNEL_PROVIDER_test_categories.yaml excludes from the quick and standard tiers; the
 /// parameter only carries that prefix.
 class TestGpuFlydslSdpaCdnaComprehensiveTier : public ::testing::TestWithParam<int>
 {
@@ -5199,7 +5199,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMoreQueriesThanKeysWithRowsNoKeyReache
 
 // The full tier only: sweeps and large shapes whose reference costs tens of seconds on a CDNA
 // runner, beside the standard tier's budget. Instantiated once under
-// the `Full` prefix (below), which HIP_MLOPS_ENGINE_test_categories.yaml excludes from the
+// the `Full` prefix (below), which HIP_KERNEL_PROVIDER_test_categories.yaml excludes from the
 // quick, standard and comprehensive tiers; the parameter only carries that prefix.
 class TestGpuFlydslSdpaCdnaFullTier : public ::testing::TestWithParam<int>
 {

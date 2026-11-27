@@ -28,7 +28,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950 with any packed operand layout (FP8 A with FP6 B needs a row-major A), gfx1250 with K-contiguous A and B and the type pairs hipBLASLt has kernels for; off by default, enable with `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON`)
 
 - **[HIP Kernel Provider Plugin](../../../dnn-providers/hip-kernel-provider/README.md)** - Custom HIP kernels compiled at run time with HIPRTC, plus assembly SDPA kernels. This provider has no separate operation support document.
-  - HIP MLops operations: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward). Served by default by the kernel ingestor's per-operation engines (`hipkernel:ResampleFwd`, `hipkernel:LayernormFwd`, ...), or by the hand-written HIP MLops engine (`HIP_MLOPS_ENGINE`) in a build with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF`; both accept the graphs below
+  - HIP MLops operations: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward). Served by the kernel ingestor's per-operation engines (`hipkernel:ResampleFwd`, `hipkernel:LayernormFwd`, ...), which accept the graphs below; a build with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF` serves none of them. The hand-written HIP MLops engine (`HIP_MLOPS_ENGINE`) was removed
     - Layernorm and RMSNorm need an input `x` of rank 4 or 5. The engine declines lower-rank graphs, such as the `[B, S, D]` transformer form.
     - Layernorm declines a graph whose scale, bias, mean, inverse variance, dscale or dbias tensor:
       - is passed by value;

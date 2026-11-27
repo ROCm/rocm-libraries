@@ -799,7 +799,7 @@ start at the `standard` tier, because no FlyDSL device test runs in `quick` or
 `ffm-quick`. Their `standard` tier selects `quick_SdpaFwdPlan_*` and
 `standard_SdpaFwdPlan_*`, so the quick-tier cases run on the FlyDSL SDPA lanes
 from `standard` up, and in `quick` on the other lanes. A case that an engine
-does not accept is declined, and the suite skips it. The HIP_MLOPS, MIOPEN and
+does not accept is declined, and the suite skips it. The HIP MLOps, MIOPEN and
 hipBLASLt lanes have no SDPA support. Their tier YAML files exclude
 `*_SdpaFwdPlan_*`, so they do not load these cases only to decline them.
 

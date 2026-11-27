@@ -45,8 +45,8 @@
  *
  * A test fixture (ALMIOPEN-3070): the first ingestor engine whose graph match spans two
  * nodes. It serves [BatchnormInference, Pointwise] where the Pointwise node consumes the
- * batchnorm output, the way the HIP MLOps engine fuses batchnorm inference with an
- * activation. The activation is classified as the MLOps engine classifies it
+ * batchnorm output, the way hipkernel:BatchnormInference fuses batchnorm inference with an
+ * activation. The activation is classified as that engine classifies it
  * (core::utils::parseActivation) and bound as a token; the kernel-scoped matcher admits
  * only the kernel whose `activation` metadata names it. The clip bounds travel as the
  * `alpha` and `beta` tokens.
@@ -145,7 +145,7 @@ bool isDeviceOperand(const data_objects::TensorAttributes& tensor)
 }
 
 /// The activation the Pointwise node applies, with its clip bounds, or nullopt for one this
-/// engine does not serve. Follows core::utils::parseActivation, which the HIP MLOps engine
+/// engine does not serve. Follows core::utils::parseActivation, which hipkernel:BatchnormInference
 /// uses, so the fused graphs it accepts are the ones that engine accepts.
 struct Activation
 {

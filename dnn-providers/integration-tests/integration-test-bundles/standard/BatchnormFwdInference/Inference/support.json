@@ -1,40 +1,5 @@
 {
   "claims": {
-    "HIP_MLOPS_ENGINE": [
-      {
-        "cases": [
-          "large_fp32_nchw",
-          "tiny_fp32_nchw"
-        ],
-        "support": {
-          "gfx1100": [
-            "linux"
-          ],
-          "gfx1101": [
-            "windows"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1200": [
-            "linux"
-          ],
-          "gfx90a": [
-            "linux"
-          ],
-          "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      }
-    ],
     "MIOPEN_ENGINE": [
       {
         "cases": [

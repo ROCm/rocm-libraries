@@ -57,48 +57,46 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         FILES "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/unit/batchnorm_inference_pointwise/kernels/BatchnormInferencePointwise.cpp"
         KEYS kernels/BatchnormInferencePointwise.cpp
     )
-    if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
-        # This binary discovers the production HipMlops bundles too, and resolves embedded
-        # sources from its own table, so it registers the plugin's HipMlops keys again.
-        set(_hip_mlops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/HipMlops")
-        add_kernels_for_embedding(
-            TARGET hip_kernel_provider_tests
-            FILES "${_hip_mlops_dir}/resample_fwd/kernels/ResampleFwd.cpp"
-                  "${_hip_mlops_dir}/resample_bwd/kernels/ResampleBwd.cpp"
-                  "${_hip_mlops_dir}/layernorm_fwd/kernels/LayernormFwd.cpp"
-                  "${_hip_mlops_dir}/layernorm_bwd/kernels/LayernormBwd.cpp"
-                  "${_hip_mlops_dir}/include/layernorm/LayernormCommon.hpp"
-                  "${_hip_mlops_dir}/rms_norm_fwd/kernels/RMSNormFwd.cpp"
-                  "${_hip_mlops_dir}/rms_norm_bwd/kernels/RMSNormBwd.cpp"
-                  "${_hip_mlops_dir}/batchnorm_inference/kernels/BatchNormFwdInferSpatial.cpp"
-                  "${_hip_mlops_dir}/batchnorm_training/kernels/BatchNormFwdTrainSpatial.cpp"
-                  "${_hip_mlops_dir}/batchnorm_backward/kernels/BatchNormBwdSpatial.cpp"
-                  "${_hip_mlops_dir}/include/batchnorm/Configuration.hpp"
-                  "${_hip_mlops_dir}/include/batchnorm/BatchnormFunctions.hpp"
-                  "${_hip_mlops_dir}/include/batchnorm/ReductionFunctions.hpp"
-                  "${_hip_mlops_dir}/include/batchnorm/StaticUnroll.hpp"
-                  "${_hip_mlops_dir}/include/types/VectorTypes.hpp"
-                  "${_hip_mlops_dir}/include/common/HipKernelActivation.hpp"
-                  "${_hip_mlops_dir}/include/common/HipKernelMath.hpp"
-            KEYS kernels/ResampleFwd.cpp
-                 kernels/ResampleBwd.cpp
-                 kernels/LayernormFwd.cpp
-                 kernels/LayernormBwd.cpp
-                 LayernormCommon.hpp
-                 kernels/RMSNormFwd.cpp
-                 kernels/RMSNormBwd.cpp
-                 kernels/BatchNormFwdInferSpatial.cpp
-                 kernels/BatchNormFwdTrainSpatial.cpp
-                 kernels/BatchNormBwdSpatial.cpp
-                 Configuration.hpp
-                 BatchnormFunctions.hpp
-                 ReductionFunctions.hpp
-                 StaticUnroll.hpp
-                 VectorTypes.hpp
-                 HipKernelActivation.hpp
-                 HipKernelMath.hpp
-        )
-    endif()
+    # This binary discovers the production HipMlops bundles too, and resolves embedded sources
+    # from its own table, so it registers the plugin's HipMlops keys again.
+    set(_hip_mlops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/HipMlops")
+    add_kernels_for_embedding(
+        TARGET hip_kernel_provider_tests
+        FILES "${_hip_mlops_dir}/resample_fwd/kernels/ResampleFwd.cpp"
+              "${_hip_mlops_dir}/resample_bwd/kernels/ResampleBwd.cpp"
+              "${_hip_mlops_dir}/layernorm_fwd/kernels/LayernormFwd.cpp"
+              "${_hip_mlops_dir}/layernorm_bwd/kernels/LayernormBwd.cpp"
+              "${_hip_mlops_dir}/include/layernorm/LayernormCommon.hpp"
+              "${_hip_mlops_dir}/rms_norm_fwd/kernels/RMSNormFwd.cpp"
+              "${_hip_mlops_dir}/rms_norm_bwd/kernels/RMSNormBwd.cpp"
+              "${_hip_mlops_dir}/batchnorm_inference/kernels/BatchNormFwdInferSpatial.cpp"
+              "${_hip_mlops_dir}/batchnorm_training/kernels/BatchNormFwdTrainSpatial.cpp"
+              "${_hip_mlops_dir}/batchnorm_backward/kernels/BatchNormBwdSpatial.cpp"
+              "${_hip_mlops_dir}/include/batchnorm/Configuration.hpp"
+              "${_hip_mlops_dir}/include/batchnorm/BatchnormFunctions.hpp"
+              "${_hip_mlops_dir}/include/batchnorm/ReductionFunctions.hpp"
+              "${_hip_mlops_dir}/include/batchnorm/StaticUnroll.hpp"
+              "${_hip_mlops_dir}/include/types/VectorTypes.hpp"
+              "${_hip_mlops_dir}/include/common/HipKernelActivation.hpp"
+              "${_hip_mlops_dir}/include/common/HipKernelMath.hpp"
+        KEYS kernels/ResampleFwd.cpp
+             kernels/ResampleBwd.cpp
+             kernels/LayernormFwd.cpp
+             kernels/LayernormBwd.cpp
+             LayernormCommon.hpp
+             kernels/RMSNormFwd.cpp
+             kernels/RMSNormBwd.cpp
+             kernels/BatchNormFwdInferSpatial.cpp
+             kernels/BatchNormFwdTrainSpatial.cpp
+             kernels/BatchNormBwdSpatial.cpp
+             Configuration.hpp
+             BatchnormFunctions.hpp
+             ReductionFunctions.hpp
+             StaticUnroll.hpp
+             VectorTypes.hpp
+             HipKernelActivation.hpp
+             HipKernelMath.hpp
+    )
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests
@@ -140,10 +138,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
-if(ENABLE_HIP_MLOPS_ENGINE)
-    add_subdirectory(engines/hip_mlops_engine)
-endif()
-
 if(ENABLE_HIP_FLASH2_ENGINE)
     add_subdirectory(engines/hip_flash2_engine)
 endif()
@@ -179,6 +173,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     target_include_directories(hip_kernel_provider_census_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_BINARY_DIR}/engines)
+
+    # Whether the `product` root ships the HipMlops bundles, the descriptors of the HIP MLOps
+    # engines. The provider compiles those engines whenever the ingestor is built, but a root
+    # that ships other descriptors (the superbuild CI's example descriptor tree) loads none of
+    # them, so the suites that read their descriptors or run them ride this, as FlyDSL's ride
+    # HIPKERNELPROVIDER_FLYDSL_ACTIVE: engines/kernel_ingestor_engine/ adds the HipMlops pack
+    # suites, TestContainer.cpp checks the engines are offered, and the binary reads the
+    # production root (below) only when it holds. The shared HIP MLOps code's own unit tests
+    # (packs/hip_mlops/<family>/) read no descriptors and are always built.
+    # All nine or none: the suites expect every engine.
+    set(HKP_HIP_MLOPS_SHIPPED TRUE)
+    foreach(_hkp_hip_mlops_engine IN ITEMS
+            ResampleFwd ResampleBwd LayernormFwd LayernormBwd RmsNormFwd RmsNormBwd
+            BatchnormInference BatchnormTraining BatchnormBackward)
+        hkp_product_offers_engine(_hkp_offers "hipkernel:${_hkp_hip_mlops_engine}")
+        if(NOT _hkp_offers)
+            set(HKP_HIP_MLOPS_SHIPPED FALSE)
+        endif()
+    endforeach()
+    if(HKP_HIP_MLOPS_SHIPPED)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE HKP_HIP_MLOPS_SHIPPED=1)
+    else()
+        message(STATUS
+            "hkp: this configuration's production descriptor root ships no HipMlops bundle, so "
+            "the HIP MLOps pack suites are not built and TestContainer skips their engines.")
+    endif()
 
     add_subdirectory(engines/kernel_ingestor_engine)
 
@@ -293,8 +313,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
     endif()
 
-    # FlyDSL's kernels, and the HipMlops bundles (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR),
-    # ship in the production shard, which the unit root main() resolves does not reach,
+    # FlyDSL's kernels, and the HipMlops bundles (HKP_HIP_MLOPS_SHIPPED above), ship in the
+    # production shard, which the unit root main() resolves does not reach,
     # so their device cases would find no descriptor for their engine. The binary
     # therefore names the production root as an ADDITIVE one, as the integration binary
     # does, and is built after the pack that fills it.
@@ -302,7 +322,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The ordinary binary only. A census addresses exactly one shard through an explicit
     # HIPDNN_DESCRIPTOR_DIR, and a second root reachable from that process would put
     # kernels in its inventory that the entry running it never named.
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE OR HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE OR HKP_HIP_MLOPS_SHIPPED)
         if(TARGET hkp_packaging_product)
             add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
         endif()

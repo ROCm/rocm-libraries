@@ -31,7 +31,7 @@ C++-to-bundle pipeline, `find_case.py`) and
 |---|---|
 | **Bundle** | One test graph plus the files that describe it. It is either a **single-graph bundle** (`{Name}.json`) or a **sweep** (a `graph.template.json` expanded once per case in `sweep.json`). "Bundle" always includes both. |
 | **Case** | One registered test: a single-graph bundle, or one entry of a sweep. |
-| **Engine** | One implementation inside a provider plugin, named by `--test-engine` (`MIOPEN_ENGINE`, `HIP_MLOPS_ENGINE`, …). A plugin can contain more than one engine. |
+| **Engine** | One implementation inside a provider plugin, named by `--test-engine` (`MIOPEN_ENGINE`, `hipkernel:LayernormFwd`, …). A plugin can contain more than one engine. |
 | **Lane** | One provider engine's run of the suite: `hipdnn_integration_tests` configured for that plugin and engine, and registered in CTest for each tier. |
 | **Test article** | The plugin library under test (`--test-article`). |
 | **Ranked list** | The engines that hipDNN offers for a graph. An engine *accepts* a graph when the engine is on that list. |

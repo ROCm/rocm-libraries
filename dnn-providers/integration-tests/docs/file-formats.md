@@ -821,7 +821,7 @@ one of its two engines shown), in the exact on-disk form:
 ```json
 {
   "claims": {
-    "HIP_MLOPS_ENGINE": {
+    "hipkernel:BatchnormInference": {
       "gfx1151": [
         "windows"
       ],
@@ -842,7 +842,7 @@ Sweep (`quick/Layernorm/Variant2/support.json`, case list shortened):
 ```json
 {
   "claims": {
-    "HIP_MLOPS_ENGINE": [
+    "hipkernel:LayernormFwd": [
       {
         "cases": [
           "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count1",
@@ -877,7 +877,7 @@ Rules:
 
 - `version` must be `1`.
 - **Engine** is the engine name the run passes as `--test-engine`
-  (`MIOPEN_ENGINE`, `HIPBLASLT_ENGINE`, `HIP_MLOPS_ENGINE`, `ASM_SDPA_ENGINE`, …).
+  (`MIOPEN_ENGINE`, `HIPBLASLT_ENGINE`, `ASM_SDPA_ENGINE`, `hipkernel:LayernormFwd`, …).
 - **Arch** is the *base* token of the device — the part of `gcnArchName` before
   the first `:`. It matches exactly. `gfx942` covers `gfx942:sramecc+:xnack-`. It
   does not cover `gfx940`. There are no family wildcards.
@@ -937,7 +937,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa.toml`, `config/hipkernel_flydsl_sdpa_bwd.toml`, and, for the HIP MLOps engines that replace `HIP_MLOPS_ENGINE` under `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR`, `config/hipkernel_ResampleFwd.toml`, `config/hipkernel_ResampleBwd.toml`, `config/hipkernel_LayernormFwd.toml`, `config/hipkernel_LayernormBwd.toml`, `config/hipkernel_RmsNormFwd.toml`, `config/hipkernel_RmsNormBwd.toml`, `config/hipkernel_BatchnormInference.toml`, `config/hipkernel_BatchnormTraining.toml`, `config/hipkernel_BatchnormBackward.toml` |
+| hip-kernel-provider | `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa.toml`, `config/hipkernel_flydsl_sdpa_bwd.toml`, and, for the HIP MLOps engines, `config/hipkernel_ResampleFwd.toml`, `config/hipkernel_ResampleBwd.toml`, `config/hipkernel_LayernormFwd.toml`, `config/hipkernel_LayernormBwd.toml`, `config/hipkernel_RmsNormFwd.toml`, `config/hipkernel_RmsNormBwd.toml`, `config/hipkernel_BatchnormInference.toml`, `config/hipkernel_BatchnormTraining.toml`, `config/hipkernel_BatchnormBackward.toml` |
 
 ```toml
 [meta]
@@ -1030,7 +1030,7 @@ Do not confuse them:
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
 | `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified2D_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml`, and one `hipkernel_<engine>_test_categories_integration.yaml` for each HIP MLOps engine above: `ResampleFwd`, `ResampleBwd`, `LayernormFwd`, `LayernormBwd`, `RmsNormFwd`, `RmsNormBwd`, `BatchnormInference`, `BatchnormTraining`, `BatchnormBackward`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified2D_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml`, and one `hipkernel_<engine>_test_categories_integration.yaml` for each HIP MLOps engine above: `ResampleFwd`, `ResampleBwd`, `LayernormFwd`, `LayernormBwd`, `RmsNormFwd`, `RmsNormBwd`, `BatchnormInference`, `BatchnormTraining`, `BatchnormBackward`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.

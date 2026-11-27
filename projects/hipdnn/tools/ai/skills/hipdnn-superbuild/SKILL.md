@@ -72,7 +72,7 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
    | Flag | Default | Needed when |
    |---|---|---|
-   | `HIPDNN_ENABLE_KERNEL_INGESTOR` | ON | Any descriptor-backed engine, the HIP MLops `hipkernel:*` engines included. Also gates `hipdnn_validate_descriptors`. With a provider build it needs a concrete gfx architecture in `GPU_TARGETS` (pass `-DGPU_TARGETS=<arch>` where `find_package(hip)` detects no GPU), `rocm-kpack` and the kpack Python packer; OFF builds without them and gives the hand-written `HIP_MLOPS_ENGINE`. |
+   | `HIPDNN_ENABLE_KERNEL_INGESTOR` | ON | Any descriptor-backed engine, the HIP MLops `hipkernel:*` engines included. Also gates `hipdnn_validate_descriptors`. With a provider build it needs a concrete gfx architecture in `GPU_TARGETS` (pass `-DGPU_TARGETS=<arch>` where `find_package(hip)` detects no GPU), `rocm-kpack` and the kpack Python packer; OFF builds without them, and then the provider serves no HIP MLops operation. |
    | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
    | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
    | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | Packing any rocKE bundle. With `HIPDNN_ENABLE_KERNEL_INGESTOR` ON and this OFF, the build still configures and packs with the hip producer alone and needs no rocKE wheel, pip or comgr; the `rocKE/` family folder is excluded from every root and any other `rocke` UKD is pruned like an arch-pruned one. With it ON, rocKE is resolved for every descriptor root, so an unresolvable comgr is fatal at configure. |

@@ -89,10 +89,10 @@ def find_external_targets(targets, component):
     basename and preferring the bare name over ninja's path-qualified alias.
 
     A provider can register more than one: hip-kernel-provider creates one per
-    engine it exposes (`hip-kernel-provider-external-integration-check` for
-    HIP_MLOPS_ENGINE and `hip-kernel-provider-asm-sdpa-external-integration-check`
-    for ASM_SDPA_ENGINE), so returning only the exact `<prefix>-<suffix>` match
-    would hide an entire engine's suite."""
+    engine it exposes (`hip-kernel-provider-mlops-layernorm-fwd-external-integration-check`
+    for hipkernel:LayernormFwd and `hip-kernel-provider-asm-sdpa-external-integration-check`
+    for ASM_SDPA_ENGINE, and no bare `<prefix>-<suffix>` target at all), so returning only
+    the exact `<prefix>-<suffix>` match would hide every engine's suite."""
     prefix = COMPONENT_PREFIXES[component]
     suffix = f"-{EXTERNAL_SCOPE_SUFFIX}"
     resolved = {}

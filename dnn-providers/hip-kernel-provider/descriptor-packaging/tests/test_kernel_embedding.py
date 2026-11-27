@@ -3,13 +3,13 @@
 
 """embed_kernel_sources() on a target nothing registered kernels on, configured for real.
 
-The plugin target calls embed_kernel_sources() unconditionally, but only the HIP MLOps
-engine registers kernels on it. With ENABLE_HIP_MLOPS_ENGINE and
-HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR both OFF the target holds no
-KERNELEMBEDDING_KERNEL_FILES, and the module once read the property's -NOTFOUND value as
-a file name and failed the configure. No CI configuration builds that combination, so a
-synthetic NONE-language consumer here includes the production module and its templates
-and configures an empty target beside one that embeds a kernel. Nothing is compiled.
+The plugin target calls embed_kernel_sources() unconditionally, but only the kernel
+ingestor's HIP MLOps engines register kernels on it. With HIPDNN_ENABLE_KERNEL_INGESTOR OFF
+the target holds no KERNELEMBEDDING_KERNEL_FILES, and the module once read the property's
+-NOTFOUND value as a file name and failed the configure. No CI configuration builds without
+the ingestor, so a synthetic NONE-language consumer here includes the production module and
+its templates and configures an empty target beside one that embeds a kernel. Nothing is
+compiled.
 """
 
 import shutil

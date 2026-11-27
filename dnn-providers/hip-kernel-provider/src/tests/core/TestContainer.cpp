@@ -52,10 +52,10 @@ using namespace hip_kernel_provider::core;
 static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
               "Container::getEngineName must match the signature the plugin SDK calls");
 
-#ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
-/// The HIP MLOps operations on the ingestor (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR): one
-/// engine per primary operation, each under its own name and id, in place of HIP_MLOPS_ENGINE.
-/// Literals, as the ingestor names below are.
+#ifdef HKP_HIP_MLOPS_SHIPPED
+/// The HIP MLOps operations on the ingestor: one engine per primary operation, each under its
+/// own name and id. Offered when this build's production root ships the HipMlops bundles
+/// (HKP_HIP_MLOPS_SHIPPED, tests/CMakeLists.txt). Literals, as the ingestor names below are.
 constexpr std::array<const char*, 9> HIP_MLOPS_INGESTOR_ENGINE_NAMES = {
     "hipkernel:ResampleFwd",
     "hipkernel:ResampleBwd",
@@ -86,9 +86,6 @@ static std::vector<std::string> expectedEngineNames()
 #ifdef HIPDNN_ENGINE_ASM_SDPA
     names.emplace_back(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME);
 #endif
-#ifdef HIPDNN_ENGINE_HIP_MLOPS
-    names.emplace_back(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME);
-#endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
     names.emplace_back(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME);
 #endif
@@ -96,7 +93,7 @@ static std::vector<std::string> expectedEngineNames()
     names.emplace_back("hipkernel:ConvFwd");
     names.emplace_back("hipkernel:Pointwise");
 #endif
-#ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
+#ifdef HKP_HIP_MLOPS_SHIPPED
     names.insert(names.end(),
                  HIP_MLOPS_INGESTOR_ENGINE_NAMES.begin(),
                  HIP_MLOPS_INGESTOR_ENGINE_NAMES.end());
@@ -151,34 +148,10 @@ TEST(TestContainer, CopyEngineIdsReportsTheSameCountWithAndWithoutABuffer)
     EXPECT_EQ(copiedEngines, std::min(totalFromCount, MAX_EXPECTED_ENGINES));
 }
 
-TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
+// HIP_MLOPS_ENGINE's name and id stay registered (EngineNames.hpp; ids are never reused), but
+// the hand-written engine was removed (ALMIOPEN-3078) and no engine is offered under its id.
+TEST(TestContainer, OffersNoEngineUnderTheRetiredHipMlopsEngineId)
 {
-#ifndef HIPDNN_ENGINE_HIP_MLOPS
-    GTEST_SKIP();
-#else
-    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
-    uint32_t numEngines = 0;
-    auto totalEngines
-        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
-
-    EXPECT_EQ(numEngines, totalEngines);
-
-    bool containsHipMlopsEngine = false;
-    for(const int64_t engine : engineIds)
-    {
-        containsHipMlopsEngine |= (engine == hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID);
-    }
-    EXPECT_EQ(containsHipMlopsEngine, true);
-#endif
-}
-
-// With the HIP MLOps operations on the ingestor, the hand-written engine is not built and no
-// descriptor engine takes its name or id: each ingestor engine is offered under its own.
-TEST(TestContainer, IngestorModeOffersEachHipMlopsEngineUnderItsOwnIdAndNotHipMlopsEngine)
-{
-#ifndef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
-    GTEST_SKIP();
-#else
     std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
     const auto totalEngines
@@ -188,7 +161,29 @@ TEST(TestContainer, IngestorModeOffersEachHipMlopsEngineUnderItsOwnIdAndNotHipMl
     const auto last = engineIds.begin() + static_cast<std::ptrdiff_t>(numEngines);
     EXPECT_EQ(std::find(engineIds.begin(), last, hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID),
               last)
-        << "HIP_MLOPS_ENGINE is advertised in ingestor mode";
+        << "an engine is advertised under the retired HIP_MLOPS_ENGINE id";
+
+    const char* advertised = nullptr;
+    EXPECT_EQ(
+        Container::getEngineName(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID, &advertised),
+        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+}
+
+// The HIP MLOps operations are served by the ingestor's engines, each offered under its own
+// name and id.
+TEST(TestContainer, OffersEachHipMlopsEngineUnderItsOwnId)
+{
+#ifndef HKP_HIP_MLOPS_SHIPPED
+    GTEST_SKIP() << "this build's production descriptor root ships no HipMlops bundle, so no "
+                    "HIP MLOps engine is offered";
+#else
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
+    uint32_t numEngines = 0;
+    const auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
+    ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
+
+    const auto last = engineIds.begin() + static_cast<std::ptrdiff_t>(numEngines);
     for(const auto* name : HIP_MLOPS_INGESTOR_ENGINE_NAMES)
     {
         const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
@@ -495,11 +490,11 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-// The provider's schema guard's opt-in list (GraphSchema.hpp): the HIP MLOps and HIP Flash2
-// engines claim graph schema 1.4.0 (each of them gates ragged tensors, declared alignments and
-// offset multipliers), and so do the nine HIP MLOps engines on the ingestor (their UEDs'
-// sdk_version; their graph matches run the hand-written engine's same checks), and the ASM SDPA engine and the six FlyDSL SDPA forward engines claim 1.6.0,
-// the SDK's newest (their forward matchers also gate cu_seq_len), and the two FlyDSL SDPA
+// The provider's schema guard's opt-in list (GraphSchema.hpp): the HIP Flash2 engine claims
+// graph schema 1.4.0 (it gates ragged tensors, declared alignments and offset multipliers), and
+// so do the nine HIP MLOps engines on the ingestor (their UEDs' sdk_version; their graph matches
+// gate the same fields), and the ASM SDPA engine and the six FlyDSL SDPA forward engines claim
+// 1.6.0, the SDK's newest (their forward matchers also gate cu_seq_len), and the two FlyDSL SDPA
 // backward engines claim 1.4.0 (their UEDs' sdk_version; their matchers reviewed against every field
 // up to it, and a backward graph never carries cu_seq_len). So does the RDNA WMMA prefill engine,
 // whose matcher gates paged K/V, ragged Q / O and their offset multipliers, and every declared
@@ -514,7 +509,6 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
         {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
         {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.6.0"},
-        {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
         {"hipkernel:ResampleFwd", "1.4.0"},
         {"hipkernel:ResampleBwd", "1.4.0"},
         {"hipkernel:LayernormFwd", "1.4.0"},

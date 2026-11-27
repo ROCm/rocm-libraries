@@ -43,8 +43,8 @@ namespace
 // builder declines forward-training graphs that carry running statistics
 // (MiopenBatchnormPlanBuilder::isApplicable returns false when prev/next running mean+variance
 // and momentum are all set), so MIOpen never executes the momentum path and such a test would
-// only SKIP. Momentum runtime coverage lives in the hip-kernel provider, whose hip_mlops
-// engine does serve full-training running-stats graphs. Layernorm and rmsnorm are likewise
+// only SKIP. Momentum runtime coverage lives in the hip-kernel provider, whose
+// hipkernel:BatchnormTraining engine does serve full-training running-stats graphs. Layernorm and rmsnorm are likewise
 // absent because MIOpen has no plans for those ops.
 class IntegrationGpuPassByValue : public ::testing::Test
 {

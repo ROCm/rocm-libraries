@@ -1,9 +1,9 @@
 # The RMSnorm backward engine on the kernel ingestor (ALMIOPEN-3066), one of the nine
 # engines that serve the HIP MLOps operations, one per primary operation node. Every kernel
 # is embedded source compiled at plan build, with the graph baked in as compile options, as
-# the hand-written HIP_MLOPS_ENGINE does. The bundle ships under
-# descriptors/HipMlops/rms_norm_bwd/ with its kernel source in kernels/, and is packed only
-# with HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR ON.
+# the retired hand-written HIP_MLOPS_ENGINE did. The bundle ships under
+# descriptors/HipMlops/rms_norm_bwd/ with its kernel source in kernels/, and is packed with
+# the kernel ingestor.
 
 engine:
   name: hipkernel:RmsNormBwd

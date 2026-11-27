@@ -271,7 +271,7 @@ do not compute, declined rather than approximated.
 | A device case cannot pass by skipping on an arch FlyDSL ships for | Each GPU case that finds its objects unstaged **fails** on an arch the build ships FlyDSL for, and skips only on other arches |
 | `gen_descriptors.py --check` and `tools/check_shards.py` still refuse a tampered tree | CTest `hip-kernel-provider-flydsl-drift-guards` (pytest, `flydsl/tests/test_drift_guards.py`): copies the content tree and one packed shard, breaks one thing at a time, and requires each check to refuse it. Host-only, quick tier |
 
-Tiers (`HIP_MLOPS_ENGINE_test_categories.yaml`, matched on the GTest full name
+Tiers (`HIP_KERNEL_PROVIDER_test_categories.yaml`, matched on the GTest full name
 `Suite.Case` or `Prefix/Suite.Case/Param`):
 
 | Tier | Runs |

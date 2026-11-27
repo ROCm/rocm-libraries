@@ -558,10 +558,11 @@ jobs:
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
 
       # The production source root below is the example descriptor tree, which ships no
-      # HipMlops bundle, so the kernel ingestor's HIP MLOps engines, the default, would load
-      # no descriptors here and their suites would fail. This lane keeps the hand-written
-      # engine until ALMIOPEN-3078 removes it; hipdnn-linux-mlops-ingestor runs the
-      # ingestor's engines on this architecture.
+      # HipMlops bundle. The kernel ingestor's HIP MLOps engines are still compiled, and the
+      # unit tests of the code they share run, but configure registers none of their pack
+      # suites, runtime suites or external lanes (each is gated on the product root offering
+      # its engines, as the standalone pointwise lane is). hipdnn-linux-mlops-ingestor runs
+      # them on this architecture.
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -574,7 +575,6 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
-            -DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=OFF \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
             -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
@@ -690,14 +690,14 @@ jobs:
             LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
-  # ALMIOPEN-3066: the HIP MLOps operations served by the kernel ingestor, one engine per
-  # operation, in place of HIP_MLOPS_ENGINE. That is the default build since ALMIOPEN-3077,
-  # so this job leaves the ingestor options at their defaults. The Windows lane runs these
-  # engines on its own architecture, but the Linux lane packs the example descriptor tree,
-  # which ships no HipMlops bundle, and keeps the hand-written engine. This job is the only
-  # one that runs the ingestor's engines on gfx942, and the only one that checks every
-  # engine has a lane. Only hipDNN, the integration harness and hip-kernel-provider are
-  # built, from the default production root (rocKE and FlyDSL off, so no DVC content is
+  # The HIP MLOps operations, served by the kernel ingestor's engines, one per operation
+  # (ALMIOPEN-3066; the hand-written HIP_MLOPS_ENGINE was removed in ALMIOPEN-3078). This job
+  # is a default build from the default production root, which ships their HipMlops bundles.
+  # The Windows lane runs these engines on its own architecture, but the Linux lane packs the
+  # example descriptor tree, which ships no HipMlops bundle, so it registers none of their
+  # pack suites, runtime suites or lanes. This job is the only one that runs them on gfx942,
+  # and the only one that checks every engine has a lane. Only hipDNN, the integration
+  # harness and hip-kernel-provider are built (rocKE and FlyDSL off, so no DVC content is
   # needed) and with the ASM SDPA engine off, which this path does not touch.
   hipdnn-linux-mlops-ingestor:
     name: HipDNN Linux HIP MLOps Ingestor
@@ -802,8 +802,9 @@ jobs:
           echo "$lanes"
           test "$(printf '%s\n' "$lanes" | grep -c .)" -eq 9 || { echo "expected 9 HIP MLOps ingestor lanes" >&2; exit 1; }
 
-      # The provider's unit and integration suites (the HipMlops pack tests compile only in
-      # this mode) and every hip-kernel-provider-mlops-<op> lane, graph capture included.
+      # The provider's unit and integration suites (the HipMlops pack and runtime suites
+      # compile only where the production root ships the HipMlops bundles) and every
+      # hip-kernel-provider-mlops-<op> lane, graph capture included.
       # `full` selects each binary once, as in the Linux lane.
       - name: Run tests
         run: |

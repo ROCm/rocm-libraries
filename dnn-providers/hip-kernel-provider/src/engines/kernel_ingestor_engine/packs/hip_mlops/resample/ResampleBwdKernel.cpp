@@ -1,0 +1,270 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "ResampleBwdKernel.hpp"
+
+#include "compilation/KernelCompileOptions.hpp"
+#include "core/Utils.hpp"
+#include "engines/kernel_ingestor_engine/packs/hip_mlops/PlanUtils.hpp"
+#include "engines/kernel_ingestor_engine/packs/hip_mlops/resample/ResamplePlanUtils.hpp"
+
+#include <algorithm>
+#include <cstdint>
+#include <numeric>
+#include <utility>
+
+namespace hip_kernel_provider::resample
+{
+using namespace hip_kernel_provider::compilation;
+using namespace hip_kernel_provider::core::utils;
+
+namespace
+{
+
+void addDimOptions(KernelCompileOptions& options,
+                   const ResampleBwdParams& params,
+                   size_t spatialDims)
+{
+    options.add("HIP_PLUGIN_RESAMPLE_N", dimAt(params.dx(), 0));
+    options.add("HIP_PLUGIN_RESAMPLE_C", dimAt(params.dx(), 1));
+
+    if(spatialDims == 2)
+    {
+        options.add("HIP_PLUGIN_RESAMPLE_DX_D", 1);
+        options.add("HIP_PLUGIN_RESAMPLE_DX_H", dimAt(params.dx(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DX_W", dimAt(params.dx(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_D", 1);
+        options.add("HIP_PLUGIN_RESAMPLE_DY_H", dimAt(params.dy(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_W", dimAt(params.dy(), 3));
+    }
+    else
+    {
+        options.add("HIP_PLUGIN_RESAMPLE_DX_D", dimAt(params.dx(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DX_H", dimAt(params.dx(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_DX_W", dimAt(params.dx(), 4));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_D", dimAt(params.dy(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_H", dimAt(params.dy(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_W", dimAt(params.dy(), 4));
+    }
+}
+
+void addStrideOptions(KernelCompileOptions& options,
+                      const ResampleBwdParams& params,
+                      size_t spatialDims)
+{
+    options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_N", strideAt(params.dx(), 0));
+    options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_C", strideAt(params.dx(), 1));
+    options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_N", strideAt(params.dy(), 0));
+    options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_C", strideAt(params.dy(), 1));
+
+    const auto* index = params.index();
+    options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_N", index == nullptr ? 0 : strideAt(index, 0));
+    options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_C", index == nullptr ? 0 : strideAt(index, 1));
+
+    if(spatialDims == 2)
+    {
+        options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_D", 0);
+        options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_H", strideAt(params.dx(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_W", strideAt(params.dx(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_D", 0);
+        options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_H", strideAt(params.dy(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_W", strideAt(params.dy(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_D", 0);
+        options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_H",
+                    index == nullptr ? 0 : strideAt(index, 2));
+        options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_W",
+                    index == nullptr ? 0 : strideAt(index, 3));
+    }
+    else
+    {
+        options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_D", strideAt(params.dx(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_H", strideAt(params.dx(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_DX_STRIDE_W", strideAt(params.dx(), 4));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_D", strideAt(params.dy(), 2));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_H", strideAt(params.dy(), 3));
+        options.add("HIP_PLUGIN_RESAMPLE_DY_STRIDE_W", strideAt(params.dy(), 4));
+        options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_D",
+                    index == nullptr ? 0 : strideAt(index, 2));
+        options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_H",
+                    index == nullptr ? 0 : strideAt(index, 3));
+        options.add("HIP_PLUGIN_RESAMPLE_INDEX_STRIDE_W",
+                    index == nullptr ? 0 : strideAt(index, 4));
+    }
+}
+
+void addSpatialOptions(KernelCompileOptions& options,
+                       const ResampleBwdParams& params,
+                       size_t spatialDims)
+{
+    if(spatialDims == 2)
+    {
+        options.add("HIP_PLUGIN_RESAMPLE_PRE_PAD_D", 0);
+        options.add("HIP_PLUGIN_RESAMPLE_PRE_PAD_H", params.prePadding()[0]);
+        options.add("HIP_PLUGIN_RESAMPLE_PRE_PAD_W", params.prePadding()[1]);
+        options.add("HIP_PLUGIN_RESAMPLE_STRIDE_D", 1);
+        options.add("HIP_PLUGIN_RESAMPLE_STRIDE_H", params.stride()[0]);
+        options.add("HIP_PLUGIN_RESAMPLE_STRIDE_W", params.stride()[1]);
+        options.add("HIP_PLUGIN_RESAMPLE_WINDOW_D", 1);
+        options.add("HIP_PLUGIN_RESAMPLE_WINDOW_H", params.window()[0]);
+        options.add("HIP_PLUGIN_RESAMPLE_WINDOW_W", params.window()[1]);
+    }
+    else
+    {
+        options.add("HIP_PLUGIN_RESAMPLE_PRE_PAD_D", params.prePadding()[0]);
+        options.add("HIP_PLUGIN_RESAMPLE_PRE_PAD_H", params.prePadding()[1]);
+        options.add("HIP_PLUGIN_RESAMPLE_PRE_PAD_W", params.prePadding()[2]);
+        options.add("HIP_PLUGIN_RESAMPLE_STRIDE_D", params.stride()[0]);
+        options.add("HIP_PLUGIN_RESAMPLE_STRIDE_H", params.stride()[1]);
+        options.add("HIP_PLUGIN_RESAMPLE_STRIDE_W", params.stride()[2]);
+        options.add("HIP_PLUGIN_RESAMPLE_WINDOW_D", params.window()[0]);
+        options.add("HIP_PLUGIN_RESAMPLE_WINDOW_H", params.window()[1]);
+        options.add("HIP_PLUGIN_RESAMPLE_WINDOW_W", params.window()[2]);
+    }
+}
+
+} // namespace
+
+ResampleBwdParams::ResampleBwdParams(
+    const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    : _dy(tensorMap.at(attributes.dy_tensor_uid()))
+    , _dx(tensorMap.at(attributes.dx_tensor_uid()))
+    , _index(attributes.index_tensor_uid().has_value()
+                 ? tensorMap.at(attributes.index_tensor_uid().value())
+                 : nullptr)
+    , _prePadding(toStdVector(attributes.pre_padding()))
+    , _postPadding(toStdVector(attributes.post_padding()))
+    , _stride(toStdVector(attributes.stride()))
+    , _window(toStdVector(attributes.window()))
+    , _resampleMode(attributes.resample_mode())
+    , _paddingMode(attributes.padding_mode())
+    , _computeDataType(computeDataType)
+{
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ResampleBwdParams::dy() const
+{
+    return _dy;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ResampleBwdParams::dx() const
+{
+    return _dx;
+}
+
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ResampleBwdParams::index() const
+{
+    return _index;
+}
+
+const std::vector<int64_t>& ResampleBwdParams::prePadding() const
+{
+    return _prePadding;
+}
+
+const std::vector<int64_t>& ResampleBwdParams::postPadding() const
+{
+    return _postPadding;
+}
+
+const std::vector<int64_t>& ResampleBwdParams::stride() const
+{
+    return _stride;
+}
+
+const std::vector<int64_t>& ResampleBwdParams::window() const
+{
+    return _window;
+}
+
+hipdnn_flatbuffers_sdk::data_objects::ResampleMode ResampleBwdParams::resampleMode() const
+{
+    return _resampleMode;
+}
+
+hipdnn_flatbuffers_sdk::data_objects::PaddingMode ResampleBwdParams::paddingMode() const
+{
+    return _paddingMode;
+}
+
+hipdnn_flatbuffers_sdk::data_objects::DataType ResampleBwdParams::computeDataType() const
+{
+    return _computeDataType;
+}
+
+std::vector<KernelLaunchShape> resampleBwdLaunchShapes(int64_t numElements, int64_t blockSize)
+{
+    return {{"ResampleBwd",
+             numElements / blockSize + (numElements % blockSize != 0 ? 1 : 0),
+             blockSize}};
+}
+
+bool isResampleBwdConfigApplicable(const ResampleBwdParams& params, const ResampleConfig& config)
+{
+    if(!isBlockSizeSupported(config))
+    {
+        return false;
+    }
+    const auto dxDims = tensorDims(*params.dx());
+    const auto numDxElements
+        = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
+    const auto shapes
+        = resampleBwdLaunchShapes(static_cast<int64_t>(numDxElements), config.blockSize);
+    return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
+        return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);
+    });
+}
+
+ResampleKernelBuild buildResampleBwdKernel(const ResampleBwdParams& params,
+                                           const std::string& gcnArchName,
+                                           const ResampleConfig& config)
+{
+    const auto spatialDims = params.dy()->dims()->size() - 2;
+    const auto dyDims = tensorDims(*params.dy());
+    const auto dxDims = tensorDims(*params.dx());
+
+    validateResampleBwdOutputShape(dyDims,
+                                   dxDims,
+                                   params.prePadding(),
+                                   params.postPadding(),
+                                   params.stride(),
+                                   params.window());
+    if(params.index() != nullptr)
+    {
+        validateResampleIndexShape(*params.index(), dyDims, "ResampleBwd");
+    }
+
+    const auto numDxElements
+        = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
+    const auto shapes
+        = resampleBwdLaunchShapes(static_cast<int64_t>(numDxElements), config.blockSize);
+    for(const auto& shape : shapes)
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
+
+    const std::string dyTypeString = getKernelParamTypeString(params.dy()->data_type());
+    const std::string dxTypeString = getKernelParamTypeString(params.dx()->data_type());
+    const std::string computeTypeString = getKernelParamTypeString(params.computeDataType());
+    const std::string indexTypeString = getIndexTypeString(params.index());
+
+    KernelCompileOptions options(params.dy(), gcnArchName);
+    options.add("HIP_PLUGIN_RESAMPLE_DY_TYPE", dyTypeString);
+    options.add("HIP_PLUGIN_RESAMPLE_DX_TYPE", dxTypeString);
+    options.add("HIP_PLUGIN_RESAMPLE_COMPUTE_TYPE", computeTypeString);
+    options.add("HIP_PLUGIN_RESAMPLE_INDEX_TYPE", indexTypeString);
+    options.add("HIP_PLUGIN_RESAMPLE_SPATIAL_DIMS", spatialDims);
+    options.add("HIP_PLUGIN_RESAMPLE_MODE", static_cast<int64_t>(params.resampleMode()));
+    options.add("HIP_PLUGIN_RESAMPLE_DX_ELEMENT_COUNT", numDxElements);
+
+    addDimOptions(options, params, spatialDims);
+    addStrideOptions(options, params, spatialDims);
+    addSpatialOptions(options, params, spatialDims);
+
+    return {std::move(options), config.blockSize, static_cast<unsigned int>(shapes[0].blocks)};
+}
+
+} // namespace hip_kernel_provider::resample

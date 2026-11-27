@@ -118,7 +118,10 @@ These engines report ``SUPPORTS_GRAPH_CAPTURE``. They were verified on gfx950, u
   ``hipkernel:Gfx1151WmmaAttentionDecode``.
 - SDPA backward kernel ingestor engines: ``hipkernel:flydsl_sdpa_bwd_merged`` (gfx950) and
   ``hipkernel:flydsl_sdpa_bwd_split`` (gfx950 and gfx1101).
-- ``HIP_MLOPS_ENGINE``.
+- HIP MLops kernel ingestor engines: ``hipkernel:ResampleFwd``, ``hipkernel:ResampleBwd``,
+  ``hipkernel:LayernormFwd``, ``hipkernel:LayernormBwd``, ``hipkernel:RmsNormFwd``,
+  ``hipkernel:RmsNormBwd``, ``hipkernel:BatchnormInference``, ``hipkernel:BatchnormTraining``, and
+  ``hipkernel:BatchnormBackward``.
 - ``ASM_SDPA_ENGINE``. The forward pass was verified on gfx950 and the backward pass on gfx942.
 - ``HIPBLASLT_ENGINE``.
 - ``HIP_FLASH2_ENGINE`` (optional, off by default), verified on gfx942.

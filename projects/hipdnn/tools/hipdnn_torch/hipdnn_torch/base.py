@@ -45,11 +45,11 @@ _KNOWN_ENGINES = (
     "AOT_CATALOG_ENGINE",
     "ASM_SDPA_ENGINE",
     "HIPBLASLT_ENGINE",
+    # Retired: no current hip-kernel-provider offers it, but an older plugin build still may.
     "HIP_MLOPS_ENGINE",
     "MIOPEN_ENGINE",
     "MIOPEN_ENGINE_DETERMINISTIC",
-    # The HIP MLOps operations on the kernel ingestor
-    # (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON), which replace HIP_MLOPS_ENGINE.
+    # The HIP MLOps operations on the kernel ingestor, which replaced HIP_MLOPS_ENGINE.
     "hipkernel:BatchnormBackward",
     "hipkernel:BatchnormInference",
     "hipkernel:BatchnormTraining",

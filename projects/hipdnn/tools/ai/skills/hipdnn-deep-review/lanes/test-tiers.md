@@ -90,7 +90,7 @@ row of a sweep counts).
      `quick/`, and so on). A YAML with no `quick` category, or with `quick` and no `standard`, is not `split: missing`: record
      `split: n/a <YAML> (<reason>)`. Otherwise compare its `quick` and `standard` patterns and excludes: when they differ, record
      `split: present <YAML>`. When `standard` selects exactly
-     what `quick` selects (the hip-kernel-provider `HIP_MLOPS_ENGINE_test_categories.yaml` says "No distinct Standard* prefix exists, so
+     what `quick` selects (the hip-kernel-provider `HIP_KERNEL_PROVIDER_test_categories.yaml` says "No distinct Standard* prefix exists, so
      standard runs the same tests as quick"), the tier split does not exist: a `Standard` prefix or directory runs in `quick` too, so
      nothing can be moved out of `quick` without leaving PR CI. Record `split: missing` once for the YAML, with every binary it
      categorizes (a YAML shared by several binaries is one record). A binary that holds tests belonging in `standard` has those tests made

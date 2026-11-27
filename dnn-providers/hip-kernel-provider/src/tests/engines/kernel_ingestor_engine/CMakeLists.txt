@@ -16,12 +16,6 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestStandalonePointwise.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestBatchnormInferencePointwisePack.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsResamplePack.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsLayernormPack.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsRmsnormPack.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsBatchnormInferencePack.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsBatchnormTrainingPack.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsDeterminism.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDensePersistent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
@@ -67,6 +61,43 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanLaunchContractGoldens.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestSerializableSourceKind.cpp
 )
+
+# The HIP MLOps code the HipMlops pack shares (packs/hip_mlops/): each family's applicability
+# checks, compile options and launches. These read no descriptors, so they build with the
+# ingestor whatever its production root ships.
+target_sources(hip_kernel_provider_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestPlanUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormCommon.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormFwdInferenceKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormFwdInferenceWithVarianceKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormFwdTrainingKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormFwdTrainingActivKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/batchnorm/TestBatchnormBwdKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/layernorm/TestLayernormApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/layernorm/TestLayernormFwdKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/layernorm/TestLayernormBwdKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/rmsnorm/TestRMSnormApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/rmsnorm/TestRMSnormFwdKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/rmsnorm/TestRMSnormBwdKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/resample/TestResampleApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/resample/TestResampleFwdKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/resample/TestResampleBwdKernel.cpp
+)
+
+# The HIP MLOps engines' own suites read their staged descriptors (loadedSet(), which throws
+# rather than skipping when no set is there) and run them through the provider, so they ride
+# HKP_HIP_MLOPS_SHIPPED (../../CMakeLists.txt): the production root ships the HipMlops bundles.
+if(HKP_HIP_MLOPS_SHIPPED)
+    target_sources(hip_kernel_provider_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestHipMlopsResamplePack.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestHipMlopsLayernormPack.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestHipMlopsRmsnormPack.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestHipMlopsBatchnormInferencePack.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestHipMlopsBatchnormTrainingPack.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/hip_mlops/TestHipMlopsDeterminism.cpp
+    )
+endif()
 
 # The gfx942 unified 3D host tests check the engine's C++ restatements of rocKE rules
 # (admission, split rule, kernel arguments) against tables rocKE itself

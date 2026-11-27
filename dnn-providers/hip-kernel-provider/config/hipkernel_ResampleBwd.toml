@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 # Integration test configuration for hipkernel:ResampleBwd, the kernel ingestor's engine
-# for resample backward (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON).
+# for resample backward.
 # Filters use GTest-style globs: * matches any sequence of characters
 
 [meta]
 version = 1
 
-# No skips or overrides: HIP_MLOPS_ENGINE.toml, the default build's config for the
-# same kernels, has none for this operation, so the harness's standard tolerances apply.
+# No skips or overrides: the harness's standard tolerances apply. The retired
+# HIP_MLOPS_ENGINE's config, which ran the same kernels, had none for this operation either.

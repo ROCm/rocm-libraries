@@ -24,8 +24,8 @@ HipKernelEngine
 ### Key Components
 
 - **Engines** (`src/engines/`): High-level operation orchestration
-    - **HIP MLops operations**: served by default by the kernel ingestor, one engine per operation: `hipkernel:ResampleFwd`, `hipkernel:ResampleBwd`, `hipkernel:LayernormFwd`, `hipkernel:LayernormBwd`, `hipkernel:RmsNormFwd`, `hipkernel:RmsNormBwd`, `hipkernel:BatchnormInference`, `hipkernel:BatchnormTraining` and `hipkernel:BatchnormBackward` (descriptors under `src/engines/kernel_ingestor_engine/descriptors/HipMlops/`). Each has its own external integration lane (`hip-kernel-provider-mlops-<operation>-external-integration-check`) and `config/hipkernel_<engine>.toml`. `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR` selects them; it defaults to `HIPDNN_ENABLE_KERNEL_INGESTOR`, which is on by default
-        - The hand-written **HIP MLops engine** (`src/engines/hip_mlops_engine/`, `HIP_MLOPS_ENGINE`) serves the same operations in their place when it is enabled with `ENABLE_HIP_MLOPS_ENGINE`, which defaults to the opposite of `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR`: configuring with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF`, or with `-DENABLE_HIP_MLOPS_ENGINE=ON`, builds it instead. The two cannot both be built, and configure fails if both are set ON. The engine is being removed
+    - **HIP MLops operations**: served by the kernel ingestor, one engine per operation: `hipkernel:ResampleFwd`, `hipkernel:ResampleBwd`, `hipkernel:LayernormFwd`, `hipkernel:LayernormBwd`, `hipkernel:RmsNormFwd`, `hipkernel:RmsNormBwd`, `hipkernel:BatchnormInference`, `hipkernel:BatchnormTraining` and `hipkernel:BatchnormBackward` (descriptors under `src/engines/kernel_ingestor_engine/descriptors/HipMlops/`, pack and shared applicability checks, compile options and launches under `src/engines/kernel_ingestor_engine/packs/hip_mlops/`). Each has its own external integration lane (`hip-kernel-provider-mlops-<operation>-external-integration-check`) and `config/hipkernel_<engine>.toml`. They are built whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is on (the default); with it off the provider serves none of these operations
+        - The hand-written HIP MLops engine (`HIP_MLOPS_ENGINE`) that served them was removed. Its name and id stay registered in `EngineNames.hpp`, but no engine is offered under them: pin the `hipkernel:<Op>` engine instead
     - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default). Data-type contract: [asm_kernels/README.md](src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#data-type-contract)
     - **HIP Flash2 engine** (`src/engines/hip_flash2_engine/`): Flash-Attention 2 V7 SDPA kernel using precompiled `.co` files for gfx942/gfx950 (FP16). Enabled via `ENABLE_HIP_FLASH2_ENGINE` (off by default)
     - **Packaged gfx950 convolution** (`hipkernel:Gfx950ConvFwdAot`): rocKE forward convolution with FP16/BF16 channels-last storage. See the [integration guide](docs/gfx950_conv_fwd/README.md) for catalog scope, packaging, and tests.
@@ -35,7 +35,7 @@ HipKernelEngine
 
 ### HIP MLops normalization fusion
 
-The HIP MLops batch normalization and RMS normalization plans support
+The HIP MLops batch normalization and RMS normalization engines support
 ReLU, clipped ReLU, and clamp with
 `RELU_FWD` for forward plans or `RELU_BWD` for backward plans. Batch normalization
 forward plans, including training, also accept a fused `IDENTITY` node.
@@ -54,7 +54,7 @@ silently produce incorrect results.
 
 Layer normalization supports only a single normalization node, not fused
 pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions
-describe the HIP MLops engine, not kernel-ingestor descriptor support.
+describe the HIP MLops engines, not the kernel ingestor's other descriptor engines.
 
 ## Building
 

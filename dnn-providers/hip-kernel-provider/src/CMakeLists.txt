@@ -75,10 +75,6 @@ if(KPACK_NEEDED)
     endif()
 endif()
 
-if(ENABLE_HIP_MLOPS_ENGINE)
-    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
-endif()
-
 if(ENABLE_HIP_FLASH2_ENGINE)
     # Precompiled-kernel engine: compile the host-side engine/plan sources into the
     # provider object library. HipFlash2FwdPlan.hip is intentionally excluded (it is
@@ -287,17 +283,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
     endif()
 
-    set(_external_category_args "")
-    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
-        list(APPEND _external_category_args
-            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
-            INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
-            ENVIRONMENT ${TEST_ENVIRONMENT}
-            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
-        )
-    endif()
-
     # Graph-capture lanes. Every engine that reports SUPPORTS_GRAPH_CAPTURE and has an
     # external integration lane below gets a sibling lane, pinned to the same engine, that
     # runs a few quick bundle suites with --graph-capture: each case the engine verifies is
@@ -346,26 +331,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endfunction()
 
     if(TARGET hipdnn_integration_tests)
-        # HIP_MLOPS_ENGINE's lanes. A build that serves the HIP MLOps operations from the
-        # kernel ingestor instead (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR) has no such engine;
-        # its per-operation engines get their lanes from HKP_MLOPS_INGESTOR_ENGINES below. The
-        # provider-wide staging and labelling in between runs either way.
-        if(ENABLE_HIP_MLOPS_ENGINE)
-            add_external_integration_test_target(
-                TARGET_NAME    ${PROJECT_NAME}-external-integration-check
-                PLUGIN_TARGET  hip_kernel_provider
-                ENGINE_NAME    HIP_MLOPS_ENGINE
-                INSTALL_SUBDIR hip_kernel_provider
-                TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
-                ${_external_category_args}
-            )
-            message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
-        else()
-            message(STATUS "HIP_MLOPS_ENGINE not built - skipping external-integration-check")
-        endif()
-
-        # This is a pre-registered CTest test (not a GTest binary), so it is
-        # labeled via apply_ctest_category_labels()/HIP_MLOPS_ENGINE_test_categories_external.yaml.
+        # The provider's pre-registered CTest tests (not GTest binaries) are labeled via
+        # apply_ctest_category_labels()/HIP_KERNEL_PROVIDER_test_categories_external.yaml.
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
             if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
                 # Fold the staged add_test() into the labeled file before labeling;
@@ -402,21 +369,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 )
             endif()
-            # Build tree.
-            if(ENABLE_HIP_MLOPS_ENGINE)
-                apply_ctest_category_labels(
-                    "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
-                    EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
-                )
-            endif()
-        endif()
-
-        if(ENABLE_HIP_MLOPS_ENGINE)
-            _hkp_add_graph_capture_lane(${PROJECT_NAME} "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                ENGINE_NAME    HIP_MLOPS_ENGINE
-                INSTALL_SUBDIR hip_kernel_provider
-                TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
-            )
         endif()
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
@@ -450,14 +402,14 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "hipkernel:StandalonePointwise is not shipped by this descriptor configuration - skipping standalone-pointwise-external-integration-check")
     endif()
 
-    # The HIP MLOps operations on the kernel ingestor (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR),
-    # which serve HIP_MLOPS_ENGINE's bundles in its place, one engine per primary operation.
-    # Each gets an external integration lane pinned to it, over the bundle folders of the
-    # graphs it serves, with ../config/hipkernel_<engine>.toml and, under YAML
-    # categorization, ../hipkernel_<engine>_test_categories_integration.yaml, whose patterns
-    # name the same folders; ../descriptor-packaging/tests/test_mlops_bundle_filters.py fails
-    # on a mismatch. Three fields per engine: its HipMlops descriptor folder, its engine local
-    # name and its bundle folders, comma-separated.
+    # The HIP MLOps operations on the kernel ingestor, one engine per primary operation, which
+    # serve the bundles the retired HIP_MLOPS_ENGINE served. Each gets an external integration
+    # lane pinned to it, over the bundle folders of the graphs it serves, with
+    # ../config/hipkernel_<engine>.toml and, under YAML categorization,
+    # ../hipkernel_<engine>_test_categories_integration.yaml, whose patterns name the same
+    # folders; ../descriptor-packaging/tests/test_mlops_bundle_filters.py fails on a mismatch.
+    # Three fields per engine: its HipMlops descriptor folder, its engine local name and its
+    # bundle folders, comma-separated.
     #
     # Gated, like the standalone pointwise lane above, on the `product` root offering the
     # engine, so a build whose root ships other descriptors reads as absent rather than
@@ -470,7 +422,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     #
     # Every one of these engines reports supports_graph_capture, but the shared graph-capture
     # suites (HKP_GRAPH_CAPTURE_GTEST_FILTER) name quick bundle suites only those in
-    # _hkp_mlops_graph_capture_engines serve: the HIP_MLOPS_ENGINE graph-capture lane's
+    # _hkp_mlops_graph_capture_engines serve: the retired HIP_MLOPS_ENGINE graph-capture lane's
     # coverage. A lane for another would select nothing.
     set(HKP_MLOPS_INGESTOR_ENGINES
         resample_fwd        ResampleFwd        ResampleFwd
@@ -485,7 +437,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     )
     set(_hkp_mlops_graph_capture_engines
         LayernormFwd RmsNormFwd RmsNormBwd BatchnormTraining BatchnormBackward)
-    if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR AND TARGET hipdnn_integration_tests)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND TARGET hipdnn_integration_tests)
         set(_engines ${HKP_MLOPS_INGESTOR_ENGINES})
         while(_engines)
             list(POP_FRONT _engines _snake _local _folders)
@@ -567,7 +519,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/ASM_SDPA_ENGINE.toml
         )
 
-        # Unlike the HIP_MLOPS block above, this target does not re-fold
+        # Unlike the provider-wide block above, this target does not re-fold
         # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider or re-apply
         # HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML (the provider-wide
         # _external.yaml): that staging/labeling is provider-wide and already

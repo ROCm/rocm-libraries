@@ -103,12 +103,12 @@ ALL_ARCHS = "all-ingestor-archs"
 
 _CARVE = (
     ("asm_sdpa_engine", "ASM_SDPA_ENGINE"),
-    ("hip_mlops_engine", "HIP_MLOPS_ENGINE"),
     ("hip_flash2_engine", "FLASH2"),
 )
 #: Path -> surface tag, first match wins. A tag in OUTSIDE_TAGS is outside the surface for
-#: status; every other tag is a surface. Unmatched paths are `other` (outside). The ASM SDPA,
-#: HIP MLOps and flash2 engines, their tests, configs and test-category lists are carved out;
+#: status; every other tag is a surface. Unmatched paths are `other` (outside). The ASM SDPA
+#: and flash2 engines, their tests, configs and test-category lists are carved out (the HIP
+#: MLOps engines are ingestor packs, so they are not);
 #: test_sdk, frontend, data_sdk and other providers fall through to `other`.
 SURFACE_TABLE = (
     *[("carve-out", HKP + f"src/*/{d}/*") for d, _ in _CARVE],

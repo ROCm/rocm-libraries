@@ -3,10 +3,8 @@
 #
 # hip-kernel-provider external integration test categories: the batchnorm training bundles.
 #
-# Pinned to hipkernel:BatchnormTraining via --test-engine, the engine that serves them when
-# HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR is ON, in place of HIP_MLOPS_ENGINE
-# (HIP_MLOPS_ENGINE_test_categories_integration.yaml). Selects the shared
-# integration-test-bundles/<tier>/ suites of the graphs it serves by suite name:
+# Pinned to hipkernel:BatchnormTraining via --test-engine, the engine that serves them. Selects
+# the shared integration-test-bundles/<tier>/ suites of the graphs it serves by suite name:
 #   Batchnorm, BatchnormPointwise.
 # Keep the folders in step with the engine's row in HKP_MLOPS_INGESTOR_ENGINES
 # (src/CMakeLists.txt), whose filter the legacy-label build passes instead of this file;
@@ -14,8 +12,8 @@
 # Engine pinning and support claims do the rest: a claimed case the engine declines fails
 # its lane, an unclaimed one it declines skips.
 #
-# The tiers mirror HIP_MLOPS_ENGINE's lane, narrowed to these folders: they cascade, and
-# only "full" runs the full-tier bundles.
+# The tiers mirror the retired HIP_MLOPS_ENGINE lane's, narrowed to these folders: they
+# cascade, and only "full" runs the full-tier bundles.
 
 _common_excludes: &common_excludes
   - "*DISABLED*"
@@ -80,7 +78,7 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
-# category_timeouts are CTest kill limits, as in HIP_MLOPS_ENGINE's lane: 2x the tier's
+# category_timeouts are CTest kill limits, as in the retired HIP_MLOPS_ENGINE lane: 2x the tier's
 # runtime budget (quick ~5 min, standard ~30 min incl. quick, comprehensive <= 60 min incl.
 # quick+standard; full has no budget).
 execution_settings:

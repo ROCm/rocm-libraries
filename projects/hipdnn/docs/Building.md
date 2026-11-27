@@ -354,7 +354,7 @@ The umbrella `HIPDNN_SKIP_JSON_LIB` also sets `HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_
 
 ### Kernel ingestor
 
-The generic kernel ingestor ([RFC 0017](rfcs/0017_UniversalKernelDescriptor.md), `HIPDNN_ENABLE_KERNEL_INGESTOR`) is built by default. In hipDNN it adds the ingestor and UHD headers to the plugin SDK, their tests and the descriptor tools. In the hip-kernel-provider it packs the provider's kernel descriptors at build time, and its per-operation engines (`hipkernel:ResampleFwd`, `hipkernel:LayernormFwd`, ...) serve the HIP MLops operations in place of the hand-written `HIP_MLOPS_ENGINE`.
+The generic kernel ingestor ([RFC 0017](rfcs/0017_UniversalKernelDescriptor.md), `HIPDNN_ENABLE_KERNEL_INGESTOR`) is built by default. In hipDNN it adds the ingestor and UHD headers to the plugin SDK, their tests and the descriptor tools. In the hip-kernel-provider it packs the provider's kernel descriptors at build time, and its per-operation engines (`hipkernel:ResampleFwd`, `hipkernel:LayernormFwd`, ...) serve the HIP MLops operations, which no other engine serves.
 
 A build that includes the hip-kernel-provider, standalone or through a superbuild preset such as `hip-kernel-provider` or `hipdnn-dev-all`, therefore needs at configure time:
 
@@ -364,9 +364,9 @@ A build that includes the hip-kernel-provider, standalone or through a superbuil
 - A HIP compiler, `CMAKE_HIP_COMPILER` or `CMAKE_CXX_COMPILER`.
 - For a standalone provider build, a hipDNN SDK built with the ingestor, as hipDNN is by default.
 
-Configure fails naming the prerequisite that is missing and how to supply it. To build without the ingestor, configure with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF`; the hip-kernel-provider then builds the hand-written HIP MLops engine instead, until that engine is removed. The rocKE and FlyDSL kernel sets stay off by default, so the default build needs no DVC content.
+Configure fails naming the prerequisite that is missing and how to supply it. To build without the ingestor, configure with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF`; the hip-kernel-provider then serves no HIP MLops operation (the hand-written `HIP_MLOPS_ENGINE` that once served them in that build was removed). The rocKE and FlyDSL kernel sets stay off by default, so the default build needs no DVC content.
 
-A build directory keeps the options it has cached. One configured before the ingestor became the default keeps `HIPDNN_ENABLE_KERNEL_INGESTOR=OFF` and the hand-written engine; use a fresh build directory, or configure it with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DENABLE_HIP_MLOPS_ENGINE=OFF`, to get the new default.
+A build directory keeps the options it has cached. One configured before the ingestor became the default keeps `HIPDNN_ENABLE_KERNEL_INGESTOR=OFF`, and so serves no HIP MLops operation; use a fresh build directory, or configure it with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON`. The removed `ENABLE_HIP_MLOPS_ENGINE` and `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR` options are ignored: configure warns once and drops them from the cache.
 
 ### Kernel packing (rocm_kpack)
 

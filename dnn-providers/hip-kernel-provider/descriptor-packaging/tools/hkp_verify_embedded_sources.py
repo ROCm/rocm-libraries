@@ -43,9 +43,9 @@ The comparison runs one way, from a staged descriptor to the table. Neither
 reverse direction is checked.
 
 A key the table holds that no descriptor names is not an error. Most embedded
-kernels have no descriptor at all: the hip_mlops engine resolves its sources by
-name, as do the compile and cache tests, so requiring a descriptor per key would
-fail on correct code. A rule covering only descriptor-backed keys would have to
+kernels have no descriptor at all: the compile and cache tests resolve their
+sources by name, and a HIP MLOps header resolves by bare name from the kernel that
+includes it, so requiring a descriptor per key would fail on correct code. A rule covering only descriptor-backed keys would have to
 be asked for where the kernel is registered, and nothing distinguishes the two
 kinds there today.
 

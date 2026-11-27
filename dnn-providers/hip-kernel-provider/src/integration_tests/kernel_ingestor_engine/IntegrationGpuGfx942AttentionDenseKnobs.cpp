@@ -84,7 +84,7 @@ using namespace hip_kernel_provider::test_utilities;
  * again.
  *
  * Tiers: the per-kernel rows (about 400 s on MI300X) are instantiated as `Comprehensive/`,
- * which HIP_MLOPS_ENGINE_test_categories.yaml keeps out of the quick, standard and ffm-quick
+ * which HIP_KERNEL_PROVIDER_test_categories.yaml keeps out of the quick, standard and ffm-quick
  * tiers; the coverage, filter, swizzle-legality and save/load cases run in every tier.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration

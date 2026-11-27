@@ -11,7 +11,8 @@
 # Usage:
 # within the engine that contains HIP kernel kernels,
 # call the function add_kernels_for_embedding with arguments being the paths
-# to the kernels within the directory (see hip_mlops_engine for an example)
+# to the kernels within the directory (see kernel_ingestor_engine's HIP MLOps block for an
+# example)
 #
 
 # Keep a list of kernel files to be inlined
@@ -200,7 +201,7 @@ endfunction()
 #   Set <files_variable> and <keys_variable> in the caller to the kernel files and keys
 #   add_kernels_for_embedding() registered on <target>, index for index.
 #
-#   A target nothing registered kernels on (the plugin built without the HIP MLOps engine)
+#   A target nothing registered kernels on (the plugin built without the kernel ingestor)
 #   still gets the generated files, with empty tables: both lists come back empty instead
 #   of holding the property's -NOTFOUND value, which would be read as a file name.
 #   ../../descriptor-packaging/tests/test_kernel_embedding.py configures that case.

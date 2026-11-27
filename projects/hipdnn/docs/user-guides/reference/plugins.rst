@@ -28,7 +28,7 @@ Plugins
 
 - HIP kernel provider (``dnn-providers/hip-kernel-provider``): Provides custom HIP kernels compiled at runtime with HIPRTC, and assembly SDPA kernels. This plugin is under active development and is built separately from hipDNN.
 
-  - Batchnorm, layer normalization, RMS normalization, and resample (HIP MLops engine)
+  - Batchnorm, layer normalization, RMS normalization, and resample (the HIP MLops engines of the kernel ingestor, one per operation, such as ``hipkernel:LayernormFwd``)
   - Scaled dot-product attention (ASM SDPA engine, and the optional HIP Flash2 engine)
 
 

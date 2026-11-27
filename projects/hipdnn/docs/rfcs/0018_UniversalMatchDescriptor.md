@@ -606,7 +606,7 @@ for the ahead-of-time (AOT) path: it is a pack property gated at selection
 ## 9. Arbitration
 
 In the hand-written mlops engine, the first applicable plan builder wins, which is a documented
-latent bug when more than one matches (`HipMlopsEngine.cpp:71`). Descriptor-driven matching makes
+latent bug when more than one matches (`HipMlopsEngine.cpp:71`, since removed). Descriptor-driven matching makes
 overlap explicit and resolves it deterministically, reusing the rule from RFC 0017 §5.
 `IKernelHeuristic::rank()` (`IKernelHeuristic.hpp`) implements this order. A NaN score ranks last.
 
@@ -848,7 +848,7 @@ relations, and cross-tensor dim relations) in one node, with its two non-declara
 paired native matcher. It splits cleanly: the single `sdpa_fwd` node and its operands are the
 engine's pattern, and every gate is criteria. Its match-equivalence
 test ([§13](#13-testing-and-performance)) gates the cutover. The mlops builders follow, reusing the
-`IValidator` primitives (`dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine/plans/ApplicabilityChecks.cpp`) as the reference for their criteria
+`IValidator` primitives (`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/hip_mlops/ApplicabilityChecks.cpp`, formerly under `src/engines/hip_mlops_engine/plans/`) as the reference for their criteria
 lowering. The kernel-table lookups dissolve into the KDP as described in
 [§6](#6-the-native-matcher-escape-hatch).
 

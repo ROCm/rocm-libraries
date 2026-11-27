@@ -94,8 +94,7 @@ Use it to see the full picture of an engine. Do not use it to reproduce a tier.
 |---|---|---|---|
 | miopen-provider | `miopen-provider-external-integration-check` | `MIOPEN_ENGINE` | |
 | hipblaslt-provider | `hipblaslt-provider-external-integration-check` | `HIPBLASLT_ENGINE` | runs with `--gtest_filter=*Matmul*` |
-| hip-kernel-provider | `hip-kernel-provider-external-integration-check` | `HIP_MLOPS_ENGINE` | only with the hand-written engine built (`-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF` or `-DENABLE_HIP_MLOPS_ENGINE=ON`) |
-| hip-kernel-provider | `hip-kernel-provider-mlops-<operation>-external-integration-check` | `hipkernel:ResampleFwd`, `hipkernel:LayernormBwd`, … (one per HIP MLOps operation) | in place of the row above under `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON`, the default; each runs only its operation's bundle folders |
+| hip-kernel-provider | `hip-kernel-provider-mlops-<operation>-external-integration-check` | `hipkernel:ResampleFwd`, `hipkernel:LayernormBwd`, … (one per HIP MLOps operation) | each runs only its operation's bundle folders; built with the kernel ingestor (the default) when its production descriptor root ships the HipMlops bundles |
 | hip-kernel-provider | `hip-kernel-provider-asm-sdpa-external-integration-check` | `ASM_SDPA_ENGINE` | |
 | hipblaslt-provider, hip-kernel-provider | `<lane stem>-graph-capture-external-integration-check` | each engine that reports `SUPPORTS_GRAPH_CAPTURE` | runs a few quick suites with `--graph-capture`; see [Check stream capture](#5-check-stream-capture---graph-capture) |
 | hip-kernel-provider | `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests` | `ASM_SDPA_ENGINE` | GPU reference, C++ SDPA tests only, no tiers |
@@ -334,8 +333,8 @@ the same CPU validator, including the GPU reference's output download:
 for reference in cpu gpu; do
   ./bin/hipdnn_integration_tests \
     --test-article /path/to/libhip_kernel_provider.so \
-    --test-engine HIP_MLOPS_ENGINE \
-    --test-config /path/to/HIP_MLOPS_ENGINE.toml \
+    --test-engine hipkernel:BatchnormInference \
+    --test-config /path/to/hipkernel_BatchnormInference.toml \
     --gtest_filter='*BatchnormForwardInference*:*BatchnormFwdInference*:*BatchnormInference*' \
     --verification-mode "$reference" \
     --validator cpu \
@@ -489,7 +488,7 @@ Tiers limit how long a run takes. A bundle's tier is its top-level directory
 its GTest suite name. A C++ test's tier is its GTest instantiation prefix.
 
 The table shows what each CTest tier selects in the provider lanes. It applies
-to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane narrows the
+to the miopen and hipblaslt files. The ASM_SDPA lane narrows the
 bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
 pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider gfx950
 attention lanes and gfx942 unified 3D lane (see
@@ -497,7 +496,7 @@ attention lanes and gfx942 unified 3D lane (see
 only the `*_SdpaFwd_Default.*` and `*_SdpaFwdPlan_*` bundles in every tier,
 `full` included. The gfx942 dense lane also selects the BSHD stats bundles
 `*_SdpaFwd_bshd_*_stats_*`. The FlyDSL SDPA lanes select the `*_SdpaFwd_*` and
-`*_SdpaFwdPlan_*` bundles. The miopen, hipblaslt and HIP_MLOPS files exclude
+`*_SdpaFwdPlan_*` bundles. The miopen and hipblaslt files exclude
 `*_SdpaFwdPlan_*` from every tier:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
@@ -512,7 +511,6 @@ Each lane YAML also defines an `ffm-quick` category (labels `ffm-quick`,
 It differs for each lane:
 
 - miopen selects `quick_*`, `Smoke/*` and `Quick/*`, the same as its quick tier.
-- HIP_MLOPS selects `quick_*`, `Smoke/*` and `Quick/*`.
 - ASM_SDPA selects the `*Sdpa*` subset of those.
 - hipBLASLt selects only `Smoke/*`, `Quick/*` and `TestCpu*GoldenReference*`,
   so its `ffm-quick` runs no bundles.

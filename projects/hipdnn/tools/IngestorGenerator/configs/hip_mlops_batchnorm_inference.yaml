@@ -2,9 +2,9 @@
 # engines that serve the HIP MLOps operations, one per primary operation node. One pack per
 # form of the node, each with its own operation matcher and dispatch handler. Every kernel
 # is embedded source compiled at plan build, with the graph baked in as compile options, as
-# the hand-written HIP_MLOPS_ENGINE does. The bundle ships under
-# descriptors/HipMlops/batchnorm_inference/ with its kernel source in kernels/, and is
-# packed only with HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR ON.
+# the retired hand-written HIP_MLOPS_ENGINE did. The bundle ships under
+# descriptors/HipMlops/batchnorm_inference/ with its kernel source in kernels/, and is packed with
+# the kernel ingestor.
 
 engine:
   name: hipkernel:BatchnormInference
