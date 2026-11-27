@@ -383,6 +383,38 @@ repos:
           )$
         pass_filenames: false
 
+      # A call with two op-emitting arguments emits them in a compiler-dependent
+      # order, which breaks the C++/Python byte identity. Scans the whole C++
+      # engine, the library C++ instances and both parity emitter trees, and
+      # fails on an allowlist entry that no longer occurs, so it runs on any
+      # change to them or to the tool.
+      - id: rocke-emission-order
+        name: rocKE C++ builder calls emit in a fixed order
+        entry: >-
+          python dnn-providers/hip-kernel-provider/rocke/platform/tools/check_emission_order.py
+        language: python
+        files: &rocke_emission_order_files >-
+          (?x)^dnn-providers/hip-kernel-provider/rocke/(
+            platform/cpp/.*\.(c|cpp|h|hpp)|
+            platform/tests/instances/parity/.*\.(c|cpp|h|hpp)|
+            library/cpp/.*\.(c|cpp|h|hpp)|
+            library/tests/parity/.*\.(c|cpp|h|hpp)|
+            platform/tools/check_emission_order\.py|
+            platform/tests/tools/test_check_emission_order\.py
+          )$
+        pass_filenames: false
+
+      - id: rocke-emission-order-tests
+        name: rocKE emission-order checker self-tests
+        entry: >-
+          python -m pytest -q -p no:cacheprovider --noconftest
+          dnn-providers/hip-kernel-provider/rocke/platform/tests/tools/test_check_emission_order.py
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        # The scan hook's files, since some tests name functions in cpp/.
+        files: *rocke_emission_order_files
+        pass_filenames: false
+
       # Every S/D/C/Z declaration in a /**@{*/ group carries a copy of the
       # block before /**@{*/, so libclang and clangd see it. Fails when a copy
       # differs from that block (fix with sync_group_docs.py --write) or when

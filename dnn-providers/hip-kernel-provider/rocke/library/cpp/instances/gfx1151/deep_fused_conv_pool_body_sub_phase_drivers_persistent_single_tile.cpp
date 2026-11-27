@@ -92,11 +92,12 @@ void rocke_gfx1151_dfcp_emit_persistent_body(rocke_gfx1151_dfcp_build_ctx_t* ctx
 
     /* loop = b.scf_for(block_id_x(), const_i32(num_tiles),
      *                  const_i32(persistent_ctas), iv_name="tile_idx") */
-    loop = rocke_b_scf_for(b,
-                           rocke_b_block_id_x(b),
-                           rocke_b_const_i32(b, num_tiles),
-                           rocke_b_const_i32(b, spec->persistent_ctas),
-                           "tile_idx");
+    {
+        rocke_value_t* lo = rocke_b_block_id_x(b);
+        rocke_value_t* hi = rocke_b_const_i32(b, num_tiles);
+        rocke_value_t* step = rocke_b_const_i32(b, spec->persistent_ctas);
+        loop = rocke_b_scf_for(b, lo, hi, step, "tile_idx");
+    }
 
     /* with loop as tile_idx: ... */
     rocke_b_region_enter(b, loop.body);

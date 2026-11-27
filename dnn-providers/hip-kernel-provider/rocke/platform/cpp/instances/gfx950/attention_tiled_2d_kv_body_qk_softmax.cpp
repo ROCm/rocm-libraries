@@ -201,9 +201,8 @@ static rocke_value_t*
 {
     int atom_idx = r / 4;
     int in_atom = r % 4;
-    return rocke_b_add(ctx->b,
-                       rocke_b_mul(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 4)),
-                       rocke_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
+    rocke_value_t* row = rocke_b_mul(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 4));
+    return rocke_b_add(ctx->b, row, rocke_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
 }
 
 /* 32-lane intra-half XOR reductions for the gfx950 mfma_32x32x16 output tiles
@@ -362,12 +361,18 @@ void rocke_gfx950_attn2d_permute_p_c_to_a16(rocke_gfx950_attn2d_build_ctx_t* ctx
                                             int* out_n)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* lane_col_mod4 = (ctx->lane_col_mod4_v != NULL)
-                                       ? ctx->lane_col_mod4_v
-                                       : rocke_b_mod(b, fh_lane_col(ctx), rocke_b_const_i32(b, 4));
-    rocke_value_t* lane_col_div4 = (ctx->lane_col_div4_v != NULL)
-                                       ? ctx->lane_col_div4_v
-                                       : rocke_b_div(b, fh_lane_col(ctx), rocke_b_const_i32(b, 4));
+    rocke_value_t* lane_col_mod4 = ctx->lane_col_mod4_v;
+    if(lane_col_mod4 == NULL)
+    {
+        rocke_value_t* lane_col = fh_lane_col(ctx);
+        lane_col_mod4 = rocke_b_mod(b, lane_col, rocke_b_const_i32(b, 4));
+    }
+    rocke_value_t* lane_col_div4 = ctx->lane_col_div4_v;
+    if(lane_col_div4 == NULL)
+    {
+        rocke_value_t* lane_col = fh_lane_col(ctx);
+        lane_col_div4 = rocke_b_div(b, lane_col, rocke_b_const_i32(b, 4));
+    }
     rocke_value_t* lane_rg = fh_lane_rg(ctx);
 
     rocke_value_t* vals[4];
@@ -849,7 +854,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 valid_tail = rocke_b_select(
                     b, rocke_b_cmp_lt(b, upper_lim, prefix_tail), upper_lim, prefix_tail);
             }
-            st_row_half_base = rocke_b_mul(b, fh_lane_half32(ctx), rocke_b_const_i32(b, 4));
+            rocke_value_t* lane_half32 = fh_lane_half32(ctx);
+            st_row_half_base = rocke_b_mul(b, lane_half32, rocke_b_const_i32(b, 4));
             rocke_value_t* neg_big = rocke_b_const_i32(b, -(1 << 30));
             rocke_value_t* valid_tail_eff = rocke_b_select(b, mlim_row_ok, valid_tail, neg_big);
             for(int reg = 0; reg < 16; ++reg)

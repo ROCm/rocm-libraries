@@ -493,6 +493,8 @@ if(ROCKE_INSTALL_TESTS)
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the LDS profile parity test (reads cpp/analysis/lds/profiles.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
+    # the emission-order checker test (scans cpp/ and library/cpp/ with a script
+    # from tools/),
     # and the arch-domain artifact/probe unit tests. The host-only support-policy
     # units are installed with the rest of tests/tools; the full regeneration
     # sweep has its own CTest timeout and resource policy.
@@ -517,6 +519,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_dsl_probes.py" EXCLUDE
+              PATTERN "test_check_emission_order.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_arch_table_engine_parity.py" EXCLUDE
               PATTERN "test_lds_profile_engine_parity.py" EXCLUDE
