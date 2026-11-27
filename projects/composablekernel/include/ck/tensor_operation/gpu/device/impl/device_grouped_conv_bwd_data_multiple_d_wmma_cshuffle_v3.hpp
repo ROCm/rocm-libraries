@@ -71,10 +71,9 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
     defined(__gfx117__))
-#if defined(__gfx11__) || defined(__gfx117__)
-    if constexpr(EGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
+
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<EGlobalMemoryDataOperation>())
     {
-#endif
         using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
 
         constexpr index_t LDS_size =
@@ -200,10 +199,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
                 }
             }
         }
-
-#if defined(__gfx11__) || defined(__gfx117__)
     }
-#endif
 #else
     ignore = karg;
     ignore = gemm_kernel_args;

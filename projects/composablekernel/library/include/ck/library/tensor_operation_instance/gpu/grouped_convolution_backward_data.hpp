@@ -150,6 +150,8 @@ struct DeviceOperationInstanceFactory<
                             op_ptrs);
                         add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f32_optimized_loads_instances(
                             op_ptrs);
+                        add_device_grouped_conv2d_bwd_data_xdl_cshuffle_v1_nhwgk_gkyxc_nhwgc_f32_instances_part1(
+                            op_ptrs);
                     }
 #endif
                 }
@@ -496,6 +498,15 @@ struct DeviceOperationInstanceFactory<
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_16_16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_bf16_instances_part1(
+                        op_ptrs);
+                }
+#endif
+#ifdef CK_ENABLE_FP32
+                if constexpr(is_same_v<InDataType, F32> && is_same_v<WeiDataType, F32> &&
+                             is_same_v<OutDataType, F32> && is_same_v<ComputeTypeA, F32> &&
+                             is_same_v<ComputeTypeB, F32>)
+                {
+                    add_device_grouped_conv2d_bwd_data_wmma_v3_nhwgk_gkyxc_nhwgc_f32_instances_part1(
                         op_ptrs);
                 }
 #endif

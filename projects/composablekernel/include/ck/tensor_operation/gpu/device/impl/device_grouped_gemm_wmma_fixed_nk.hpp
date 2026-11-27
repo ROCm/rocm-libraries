@@ -133,12 +133,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
     const auto local_grid_size = local_b2c_tile_map.CalculateGridSize(e_grid_desc_m_n);
 
-#if defined(__gfx11__) || defined(__gfx117__)
-    // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
-    if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
-                   (std::is_same_v<EDataType, ck::half_t> ||
-                    std::is_same_v<EDataType, ck::bhalf_t>)))
-#endif
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<CGlobalMemoryDataOperation>())
     {
         using KernelArgument = typename GridwiseGemm::Argument;
 

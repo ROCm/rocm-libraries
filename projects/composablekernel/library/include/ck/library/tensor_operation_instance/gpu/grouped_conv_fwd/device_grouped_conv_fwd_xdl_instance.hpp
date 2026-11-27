@@ -319,6 +319,22 @@ template <index_t NDimSpatial,
           typename BLayout,
           typename DsLayout,
           typename ELayout,
+          typename DataType,
+          ConvolutionForwardSpecialization ConvSpec>
+using device_grouped_conv_fwd_xdl_f32_small_tile_instances = std::tuple<
+    // clang-format off
+    DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, GemmMNKPadding, 1, 256, 32, 64, 128, 4, 4, 16, 16, 2, 1, S<32, 8, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, S<32, 8, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, 1, 1, S<1, 16, 1, 16>, 4>,
+    DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, GemmMNKPadding, 1, 256, 32, 64, 256, 4, 4, 16, 16, 2, 1, S<64, 4, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, S<64, 4, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, 1, 1, S<1, 16, 1, 16>, 4>,
+    DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, GemmMNKPadding, 1, 128, 32, 32, 128, 4, 4, 16, 16, 2, 1, S<32, 4, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, S<32, 4, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, 1, 1, S<1, 8, 1, 16>, 2>,
+    DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial, ALayout, BLayout, DsLayout, ELayout, DataType, DataType, F32, DataType, Empty_Tuple, DataType, PassThrough, PassThrough, PassThrough, ConvSpec, GemmMNKPadding, 1, 256, 64, 32, 256, 4, 4, 16, 16, 2, 1, S<64, 4, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, S<64, 4, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 4, 4, 1, 1, 1, S<1, 16, 1, 16>, 2>
+    // clang-format on
+    >;
+
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>

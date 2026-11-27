@@ -40,14 +40,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const typename ReduceTrait::ReduceAccElementwiseOperations_ reduce_out_element_ops)
 {
 #if(defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__))
-#if defined(__gfx11__) || defined(__gfx117__)
-    // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
-    using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
-    if constexpr(!(EGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
-                   (std::is_same_v<e_data_type, ck::half_t> ||
-                    std::is_same_v<e_data_type, ck::bhalf_t>)))
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<EGlobalMemoryDataOperation>())
     {
-#endif
         using SelectedEpilogue =
             get_epilogue_t<EpilogueType::ReduceCShuffle, GridwiseGemm, ReduceTrait>;
         constexpr index_t LDS_size =
@@ -64,9 +58,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         GridwiseGemm::template Run<HasMainKBlockLoop, EGlobalMemoryDataOperation, TailNum>(
             p_shared, splitk_batch_offset, karg, epilogue_args);
-#if defined(__gfx11__) || defined(__gfx117__)
     }
-#endif
 #else
     ignore = karg;
     ignore = p_reduces_grid;

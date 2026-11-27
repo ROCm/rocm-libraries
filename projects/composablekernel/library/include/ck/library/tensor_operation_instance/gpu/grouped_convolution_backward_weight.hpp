@@ -370,6 +370,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
 
                         add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instances(
                             op_ptrs);
+                        add_device_grouped_conv2d_bwd_weight_xdl_cshufflev3_nhwgc_gkyxc_nhwgk_f32_instances_part1(
+                            op_ptrs);
                     }
 #endif
 #ifdef CK_ENABLE_TF32
@@ -947,6 +949,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_f16_instances_part1(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_f16_instances_part2(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_f16_instances_part1(
                         op_ptrs);
                     // Explicit GEMM
@@ -979,6 +983,15 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_convnd_bwd_weight_wmma_bf16_bf16_bf16_exp_odd_mn_instances(
                         op_ptrs);
                     add_device_grouped_convnd_bwd_weight_wmma_bf16_bf16_bf16_exp_comp_mnkpadding_instances(
+                        op_ptrs);
+                }
+#endif
+#ifdef CK_ENABLE_FP32
+                if constexpr(is_same_v<InDataType, float> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, float> && is_same_v<ComputeTypeA, float> &&
+                             is_same_v<ComputeTypeB, float>)
+                {
+                    add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_f32_instances_part1(
                         op_ptrs);
                 }
 #endif

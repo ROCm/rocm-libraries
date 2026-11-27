@@ -67,10 +67,9 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
     defined(__gfx117__))
-#if defined(__gfx11__) || defined(__gfx117__)
-    if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
+
+    if constexpr(GridwiseGemm::template IsValidInstanceDevice<CGlobalMemoryDataOperation>())
     {
-#endif
         using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
 
         const auto block_2_ctile_map_ = typename GridwiseGemm::Block2CTileMap{karg.M, karg.N, 4};
@@ -108,9 +107,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
                 karg,
                 epilogue_args);
         }
-#if defined(__gfx11__) || defined(__gfx117__)
     }
-#endif
 #else
     ignore = karg;
     ignore = a_grid_desc_ak0_m_ak1;

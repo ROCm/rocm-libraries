@@ -38,58 +38,61 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     kernel_contraction_multiple_d_wmma_cshuffle_v3(typename DeviceOp::Argument karg)
 {
 #if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
-    static constexpr index_t NumDTensor = GridwiseOp::NumDTensor;
+    if constexpr(GridwiseOp::template IsValidInstanceDevice<InMemoryDataOperationEnum::Set>())
+    {
+        static constexpr index_t NumDTensor = GridwiseOp::NumDTensor;
 
-    const index_t g_idx = amd_wave_read_first_lane(blockIdx.y);
+        const index_t g_idx = amd_wave_read_first_lane(blockIdx.y);
 
-    const long_index_t a_batch_offset =
-        amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetAPtrOffset(g_idx));
-    const long_index_t b_batch_offset =
-        amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetBPtrOffset(g_idx));
-    const long_index_t e_batch_offset =
-        amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetEPtrOffset(g_idx));
+        const long_index_t a_batch_offset =
+            amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetAPtrOffset(g_idx));
+        const long_index_t b_batch_offset =
+            amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetBPtrOffset(g_idx));
+        const long_index_t e_batch_offset =
+            amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetEPtrOffset(g_idx));
 
-    const auto ds_batch_offset =
-        amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetDsPtrOffset(g_idx));
+        const auto ds_batch_offset =
+            amd_wave_read_first_lane(karg.compute_ptr_offset_of_batch_.GetDsPtrOffset(g_idx));
 
-    typename GridwiseOp::AsGridPointer p_as_grid_batch{karg.p_a_grid_ + a_batch_offset};
-    typename GridwiseOp::BsGridPointer p_bs_grid_batch{karg.p_b_grid_ + b_batch_offset};
-    typename GridwiseOp::DsGridPointer p_ds_grid_batch;
+        typename GridwiseOp::AsGridPointer p_as_grid_batch{karg.p_a_grid_ + a_batch_offset};
+        typename GridwiseOp::BsGridPointer p_bs_grid_batch{karg.p_b_grid_ + b_batch_offset};
+        typename GridwiseOp::DsGridPointer p_ds_grid_batch;
 
-    static_for<0, NumDTensor, 1>{}(
-        [&](auto i) { p_ds_grid_batch(i) = karg.p_ds_grid_[i] + ds_batch_offset[i]; });
+        static_for<0, NumDTensor, 1>{}(
+            [&](auto i) { p_ds_grid_batch(i) = karg.p_ds_grid_[i] + ds_batch_offset[i]; });
 
-    constexpr auto epilogue_type =
-        GridwiseOp::IsBWaveTransferApplicable && GridwiseOp::UseDirectStore
-            ? EpilogueType::DirectStore
-            : EpilogueType::CShuffle;
-    using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseOp>;
+        constexpr auto epilogue_type =
+            GridwiseOp::IsBWaveTransferApplicable && GridwiseOp::UseDirectStore
+                ? EpilogueType::DirectStore
+                : EpilogueType::CShuffle;
+        using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseOp>;
 
-    constexpr index_t LDS_size =
-        GridwiseOp::template GetSharedMemoryNumberOfByte<SelectedEpilogue>(get_device_arch());
-    __shared__ char p_shared[LDS_size];
+        constexpr index_t LDS_size =
+            GridwiseOp::template GetSharedMemoryNumberOfByte<SelectedEpilogue>(get_device_arch());
+        __shared__ char p_shared[LDS_size];
 
-    const auto a_grid_desc_ak0_m_ak1 =
-        GridwiseOp::MakeAGridDescriptor_AK0_M_AK1(karg.a_grid_desc_m_k_);
-    const auto b_grid_desc_bk0_n_bk1 =
-        GridwiseOp::MakeBGridDescriptor_BK0_N_BK1(karg.b_grid_desc_n_k_);
+        const auto a_grid_desc_ak0_m_ak1 =
+            GridwiseOp::MakeAGridDescriptor_AK0_M_AK1(karg.a_grid_desc_m_k_);
+        const auto b_grid_desc_bk0_n_bk1 =
+            GridwiseOp::MakeBGridDescriptor_BK0_N_BK1(karg.b_grid_desc_n_k_);
 
-    auto epilogue_args = SelectedEpilogue{};
-    GridwiseOp::template Run<HasMainKBlockLoop, InMemoryDataOperationEnum::Set, TailNum>(
-        p_as_grid_batch,
-        p_bs_grid_batch,
-        p_ds_grid_batch,
-        karg.p_e_grid_ + e_batch_offset,
-        p_shared,
-        make_tuple(a_grid_desc_ak0_m_ak1),
-        make_tuple(b_grid_desc_bk0_n_bk1),
-        karg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
-        karg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
-        karg.block_2_etile_map_,
-        karg.a_element_op_,
-        karg.b_element_op_,
-        karg.cde_element_op_,
-        epilogue_args);
+        auto epilogue_args = SelectedEpilogue{};
+        GridwiseOp::template Run<HasMainKBlockLoop, InMemoryDataOperationEnum::Set, TailNum>(
+            p_as_grid_batch,
+            p_bs_grid_batch,
+            p_ds_grid_batch,
+            karg.p_e_grid_ + e_batch_offset,
+            p_shared,
+            make_tuple(a_grid_desc_ak0_m_ak1),
+            make_tuple(b_grid_desc_bk0_n_bk1),
+            karg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+            karg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+            karg.block_2_etile_map_,
+            karg.a_element_op_,
+            karg.b_element_op_,
+            karg.cde_element_op_,
+            epilogue_args);
+    }
 #else
     ignore = karg;
 #endif
