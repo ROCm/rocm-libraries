@@ -61,7 +61,7 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_fwd_small_mfma.py` | `FwdSmallcMfmaSpec`, `FwdSmallkMfmaSpec` (gfx950 forward, tiny C / K) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_pp_mfma.py` | `FwdPpMfmaSpec` (gfx950 LDS-DMA ping-pong forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_pp_mfma.py` | `PpMfmaSpec` (the ping-pong pipeline the two specs above share) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_fwd_flex_mfma.py` | `FwdFlexMfmaSpec` (gfx950 flattened-pixel implicit-GEMM forward, any filter/stride/dilation/padding) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_flex_mfma.py` | `FwdFlexMfmaSpec` (gfx950 flattened-pixel implicit-GEMM forward, any filter/stride/dilation/padding; also serves dgrad: stride 1 via the forward of the transposed problem, strided in one launch) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_gstream_wmma.py` | `FwdGstreamWmmaSpec` (gfx1250 small-group forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `library/kernels/conv/docs/convolution.md` |

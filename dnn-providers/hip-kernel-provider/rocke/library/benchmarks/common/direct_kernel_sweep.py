@@ -37,6 +37,7 @@ from __future__ import annotations
 import collections
 import hashlib
 import json
+import os
 import struct
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -114,6 +115,7 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     wgrad_waves,
 )
 from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
+    DIRECT_DGRAD_FLEX_MFMA,
     DIRECT_DGRAD_REORGANIZE as _REORGANIZE,
     DIRECT_DGRAD_REORGANIZE_RTC as _REORGANIZE_RTC,
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
@@ -692,6 +694,8 @@ def plan_for(
             identity, hsaco_path, meta, spec, spec.problem, "fwd", ("dy", "w", "dx")
         )
         return DirectPlan(identity, (step,)), "ok"
+    if variant == DIRECT_DGRAD_FLEX_MFMA:
+        return _dgrad_flex_plan(cache, identity, hsaco_path, meta, spec, problem)
     if variant not in _MFMA_DGRAD:
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "dgrad", ("dy", "w", "dx")
@@ -777,8 +781,101 @@ def _batch_split_plan(
     return DirectPlan(identity, tuple(steps)), "ok"
 
 
+def _dgrad_flex_plan(cache, identity, hsaco_path, meta, spec, problem):
+    """A strided dgrad on direct_dgrad_flex_mfma: [the runtime-channel
+    filter transpose into ws_t (wt off)], the phase kernel (dgrad ABI) into dx
+    or, with split_c > 1, into fp32 slabs [split_c, N, H, W, C] that the
+    forward split-C fold sums over a 1x1 problem of dX's extents."""
+    from kernels.common import conv_direct_grouped as dc
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+
+    steps, ws = [], {}
+    weights = "w"
+    if not spec.wt:
+        dtype = identity.dtype_a
+        tkn = {"tiled": True}
+        hid = _helper_identity(
+            identity.arch, 64, _TRANSPOSE_RTC, transpose_rtc_caps(problem), tkn, dtype
+        )
+        entry = cache.entry_meta(hid)
+        if entry is None:
+            return None, "missing cached filter transpose (rebuild the cache)"
+        grid, block = dc.direct_launch_geometry(make_spec(_TRANSPOSE_RTC, problem, tkn))
+        steps.append(
+            DirectStep(
+                kernel_name=entry["kernel_name"],
+                hsaco_path=cache.hsaco_path(hid),
+                signature=conv_direct_transform_signature(dtype, True),
+                grid=grid,
+                block=block,
+                buffers=("w", None, "ws_t"),
+                scalars=tuple(
+                    zip(dc.DIRECT_WEIGHT_TRANSFORM_RTC_ARGS, (problem.cpg, problem.kpg))
+                ),
+            )
+        )
+        ws["ws_t"] = dc.direct_dgrad_workspace_bytes(problem)
+        weights = "ws_t"
+    if spec.split_c == 1:
+        steps.append(
+            _conv_step(
+                identity,
+                hsaco_path,
+                meta,
+                spec,
+                problem,
+                "dgrad",
+                ("dy", weights, "dx"),
+            )
+        )
+        return DirectPlan(identity, tuple(steps), ws), "ok"
+    reduce_id = _split_reduce_identity(
+        identity.arch, identity.wave_size, spec.split_c, identity.dtype_a
+    )
+    entry = cache.entry_meta(reduce_id)
+    if entry is None:
+        return None, f"missing cached {_SPLIT_REDUCE} helper (rebuild the cache)"
+    fp = replace(problem, kpg=problem.cpg, KH=1, KW=1, PAD=0, stride=1, pad_w=-1)
+    reduce_spec = make_spec(_SPLIT_REDUCE, fp, {"split_c": spec.split_c})
+    steps.append(
+        _conv_step(
+            identity,
+            hsaco_path,
+            meta,
+            spec,
+            problem,
+            "dgrad",
+            ("dy", weights, "ws_split"),
+        )
+    )
+    steps.append(
+        DirectStep(
+            kernel_name=entry["kernel_name"],
+            hsaco_path=cache.hsaco_path(reduce_id),
+            signature=conv_direct_args_signature(
+                direct_storage_dtype(identity.dtype_a), direction="fwd"
+            ),
+            grid=reduce_spec.grid(fp),
+            block=(reduce_spec.threads, 1, 1),
+            buffers=("ws_split", "w", "dx"),
+            conv_args=ConvArgs.from_problem(fp, direction="fwd"),
+        )
+    )
+    ws["ws_split"] = spec.workspace_bytes
+    return DirectPlan(identity, tuple(steps), ws), "ok"
+
+
+def _reads_krsc_dgrad_filter(identity) -> bool:
+    """A forward kernel that takes a dgrad's own filter (flex ``wt``):
+    only a dgrad via forward may run it."""
+    return identity.algorithm == "direct_fwd_flex_mfma" and bool(
+        json.loads(identity.knobs).get("wt") if identity.knobs else False
+    )
+
+
 def direct_plans(
-    cache: KernelCache, problem, direction: str, arch: str
+    cache: KernelCache, problem, direction: str, arch: str, dgrad_filter: bool = False
 ) -> Tuple[List[DirectPlan], List[Tuple[KernelIdentity, str]]]:
     """Launch plans for every cached kernel that can run ``problem``.
 
@@ -802,12 +899,114 @@ def direct_plans(
         # dense problem it is the non-grouped kernel with extra divides.
         if identity.algorithm == "direct_grouped_halo" and problem.groups == 1:
             continue
+        if _reads_krsc_dgrad_filter(identity) != dgrad_filter:
+            continue
         plan, why = plan_for(cache, identity, hsaco_path, meta, problem, arch)
         if plan is None:
             rejected.append((identity, why))
         else:
             plans.append(plan)
+    if direction == "dgrad" and DGRAD_VIA_FWD and arch == "gfx950":
+        via, via_rejected = dgrad_via_fwd_plans(cache, problem, arch)
+        plans += via
+        rejected += via_rejected
     return plans, rejected
+
+
+#: Serve a dense stride-1 dgrad with every cached forward kernel as well, on
+#: gfx950 only, where it is validated (ROCKE_DGRAD_VIA_FWD=0 turns it off).
+DGRAD_VIA_FWD = os.environ.get("ROCKE_DGRAD_VIA_FWD", "1") != "0"
+
+
+#: Dgrad via forward runs the tiled filter transpose where it is cached
+#: (ROCKE_TILED_TRANSPOSE=0 turns it off).
+TILED_TRANSPOSE = os.environ.get("ROCKE_TILED_TRANSPOSE", "1") != "0"
+
+
+def transpose_rtc_caps(problem) -> DirectCaps:
+    """The caps the runtime-channel weight transpose of ``problem``'s filter
+    is cached under (it bakes the filter alone; the flip ignores dilation)."""
+    from kernels.conv.direct_aot_jobs import dgrad_transpose_rtc_caps
+
+    return dgrad_transpose_rtc_caps(problem)
+
+
+def dgrad_via_fwd_plans(
+    cache: KernelCache, problem, arch: str
+) -> Tuple[List[DirectPlan], List[Tuple[KernelIdentity, str]]]:
+    """A stride-1 dgrad (dense, grouped or depthwise) as a forward over dY: the runtime-channel
+    transpose writes the flipped, C/K-swapped filter into ``ws_t``, then any
+    cached forward plan of the transposed problem
+    (``dgrad_4c_transposed_problem``) runs with ``dy`` / ``ws_t`` / ``dx`` as
+    its ``x`` / ``w`` / ``y``. The plans keep the forward kernel's identity
+    (and label)."""
+    from kernels.common import conv_direct_grouped as dc
+
+    if problem.stride != 1:
+        return [], []
+    tp = dc.dgrad_4c_transposed_problem(problem)
+    if tp.PAD < 0 or tp.pad_w < -1:
+        return [], []
+    dtype = getattr(problem, "dtype", DIRECT_DTYPE)
+    fplans, rejected = direct_plans(cache, tp, "fwd", arch)
+    out = []
+    # Forward kernels that read the dgrad's own filter need no transpose
+    wplans, _ = direct_plans(cache, tp, "fwd", arch, dgrad_filter=True)
+    for fp in wplans:
+        if "ws_t" in fp.workspaces:
+            continue
+        rw = {"x": "dy", "y": "dx"}
+        steps = tuple(
+            replace(st, buffers=tuple(rw.get(n, n) if n else n for n in st.buffers))
+            for st in fp.steps
+        )
+        out.append(DirectPlan(fp.identity, steps, dict(fp.workspaces), fp.zeroed))
+    # The tiled (LDS, 16-byte) transpose where it is cached and the channel
+    # counts take it, else the per-element one
+    tkn = (
+        {"tiled": True}
+        if TILED_TRANSPOSE
+        and problem.cpg % 8 == 0
+        and problem.kpg % 8 == 0
+        and dtype in ("fp16", "bf16")
+        else {}
+    )
+    hid = _helper_identity(
+        arch, 64, _TRANSPOSE_RTC, transpose_rtc_caps(problem), tkn, dtype
+    )
+    entry = cache.entry_meta(hid)
+    if entry is None and tkn:
+        tkn = {}
+        hid = _helper_identity(
+            arch, 64, _TRANSPOSE_RTC, transpose_rtc_caps(problem), tkn, dtype
+        )
+        entry = cache.entry_meta(hid)
+    if entry is None:
+        return out, rejected
+    tspec = make_spec(_TRANSPOSE_RTC, problem, tkn)
+    grid, block = dc.direct_launch_geometry(tspec)
+    tstep = DirectStep(
+        kernel_name=entry["kernel_name"],
+        hsaco_path=cache.hsaco_path(hid),
+        signature=conv_direct_transform_signature(dtype, True),
+        grid=grid,
+        block=block,
+        buffers=("w", None, "ws_t"),
+        scalars=tuple(
+            zip(dc.DIRECT_WEIGHT_TRANSFORM_RTC_ARGS, (problem.cpg, problem.kpg))
+        ),
+    )
+    ren = {"x": "dy", "w": "ws_t", "y": "dx"}
+    for fp in fplans:
+        if "ws_t" in fp.workspaces:
+            continue
+        steps = (tstep,) + tuple(
+            replace(st, buffers=tuple(ren.get(n, n) if n else n for n in st.buffers))
+            for st in fp.steps
+        )
+        ws = dict(fp.workspaces, ws_t=dc.direct_dgrad_workspace_bytes(problem))
+        out.append(DirectPlan(fp.identity, steps, ws, fp.zeroed))
+    return out, rejected
 
 
 def launch_values(

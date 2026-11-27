@@ -606,7 +606,8 @@ def test_dgrad_cpg4_offers_the_4c_kernel(cache, KH):
     forward-ABI launch over the transposed problem that reads the original
     weights itself (no transform helper, no workspace), with the 4c grid
     (column tiles, group blocks, images). 3x3 also keeps the existing
-    variants; a 1x1 has only the 4c one."""
+    variants and the forward kernels of the transposed problem (dgrad via
+    forward); a 1x1 has only the 4c one."""
     problem = _problem(
         N=3, H=13, W=17, groups=64, cpg=4, kpg=4, KH=KH, KW=KH, PAD=KH // 2
     )
@@ -617,6 +618,8 @@ def test_dgrad_cpg4_offers_the_4c_kernel(cache, KH):
             "direct_grouped_dgrad",
             "direct_grouped_dgrad_mfma",
             "direct_dgrad_mfma_rtc",
+            "direct_grouped",
+            "direct_grouped_halo",
         }
     assert _variants(plans) == expected
     fourc = [p for p in plans if p.identity.algorithm == _4C]
@@ -1045,7 +1048,8 @@ def test_every_split_kernel_has_its_reduction(jobs):
     degrees = {
         json.loads(j.identity.knobs).get("split_c", 1)
         for j in jobs
-        if j.identity.algorithm == "direct_nongrouped"
+        if j.identity.algorithm
+        in ("direct_nongrouped", "direct_fwd_flex_mfma", "direct_dgrad_flex_mfma")
     } - {1}
     assert degrees
     reduces = [j for j in jobs if j.identity.algorithm == "direct_split_reduce"]
@@ -1323,12 +1327,17 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
     plans, _ = dks.direct_plans(cache, _problem(), "dgrad", _ARCH)
     # cpg = kpg = 16 has the fixed-channel MFMA entries and also the
     # runtime-channel ones (one K-atom, one M-tile), and the single-kernel
-    # fused-weight generic dgrad.
+    # fused-weight generic dgrad; and the forward kernels of the transposed
+    # problem (dgrad via forward).
     assert _variants(plans) == {
         "direct_grouped_dgrad",
         "direct_grouped_dgrad_mfma",
         "direct_dgrad_mfma_rtc",
         _FUSED,
+        "direct_grouped",
+        "direct_grouped_halo",
+        "direct_depthwise_win",
+        "direct_fwd_flex_mfma",
     }
     for plan in plans:
         if plan.identity.algorithm not in (
@@ -1645,7 +1654,8 @@ def test_dgrad_rtc_cached_scope(jobs):
         assert k["k_atoms"] in dks.dgrad_rtc_k_atoms(k["waves_k"], k["fold_k32"])
         assert not dks.dgrad_rtc_spills(k, 3, 3, _ARCH)
         assert not (k["waves_k"] > 1 and k["runtime_k_loop"])
-    # One transpose binary and one reorganize binary per fold_k32 serve them.
+    # One transpose binary and one reorganize binary per fold_k32 serve them,
+    # plus the tiled transposes of the strided flex dgrad filters (3x3, 2x2).
     helpers = [
         j.identity
         for j in jobs
@@ -1657,6 +1667,8 @@ def test_dgrad_rtc_cached_scope(jobs):
             ("direct_dgrad_reorganize_rtc", json.dumps({"fold_k32": False})),
             ("direct_dgrad_reorganize_rtc", json.dumps({"fold_k32": True})),
             ("direct_dgrad_transpose_rtc", json.dumps({})),
+            ("direct_dgrad_transpose_rtc", json.dumps({"tiled": True})),
+            ("direct_dgrad_transpose_rtc", json.dumps({"tiled": True})),
         ]
     )
     assert all((i.cpg, i.kpg) == (0, 0) for i in helpers)

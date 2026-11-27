@@ -173,6 +173,9 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
+/* The flex kernels' helpers (tiled weight transpose, split-C folds of the flex
+ * split degrees) follow the 7 wgrad ping-pong ones. */
+#define FLEX_HELPER_CFG_BASE 371
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -3028,6 +3031,52 @@ static int make_wgrad_auto_cfg(int idx, rocke_direct_wgrad_tiled_spec_t* ts)
     }
 }
 
+/* The flex kernels' helpers, emitted as FLEX_HELPER_CFG_BASE + idx (see
+ * _flex_helper_spec in the Python emitter). Returns 0 on success, -1 if
+ * unknown. */
+static int make_flex_helper_cfg(int idx,
+                                int* kind,
+                                rocke_direct_transpose_weights_dgrad_spec_t* st,
+                                rocke_direct_conv_split_reduce_spec_t* sred)
+{
+    memset(st, 0, sizeof(*st));
+    *sred = rocke_direct_conv_split_reduce_spec_default();
+    *kind = KIND_SPLIT_REDUCE;
+    switch(idx)
+    {
+    case 0: /* fp16 3x3, partial k / c tiles */
+        *kind = KIND_TRANSPOSE;
+        st->problem = mk_gp(1, 72, 136, 3, 1, "fp16");
+        st->runtime_channels = true;
+        st->tiled = true;
+        return 0;
+    case 1: /* bf16 2x2, two groups */
+        *kind = KIND_TRANSPOSE;
+        st->problem = mk_gp(2, 64, 40, 2, 0, "bf16");
+        st->runtime_channels = true;
+        st->tiled = true;
+        return 0;
+    case 2:
+        sred->dtype = "fp16";
+        sred->split_c = 3;
+        return 0;
+    case 3:
+        sred->dtype = "bf16";
+        sred->split_c = 6;
+        return 0;
+    case 4:
+        sred->dtype = "fp16";
+        sred->split_c = 12;
+        return 0;
+    case 5:
+        sred->dtype = "bf16";
+        sred->split_c = 16;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* Tiled wgrad ping-pong on one wave group, emitted as WGRAD_PP_CFG_BASE + idx
  * (see _wgrad_pp_spec in the Python emitter). Returns 0 on success, -1 if
  * unknown. */
@@ -3492,7 +3541,15 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WGRAD_PP_CFG_BASE)
+    if(idx >= FLEX_HELPER_CFG_BASE)
+    {
+        if(make_flex_helper_cfg(idx - FLEX_HELPER_CFG_BASE, &kind, &stp, &sred) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WGRAD_PP_CFG_BASE)
     {
         if(make_wgrad_pp_cfg(idx - WGRAD_PP_CFG_BASE, &swd.tiled) != 0)
         {

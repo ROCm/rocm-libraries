@@ -770,12 +770,13 @@ _DIRECT_COUNTS = {
 #: MFMA direct families (small-channel, small-K, ping-pong and flattened-pixel), not
 #: yet in AOT_DIRECT_ALGORITHMS.
 _REFUSED_DIRECT_COUNTS = {
-    "direct_split_reduce": 4,
+    "direct_split_reduce": 7,
     "direct_fwd_smallc_mfma": 222,
     "direct_fwd_smallk_mfma": 44,
     "direct_fwd_pp_mfma": 3,
-    "direct_fwd_flex_mfma": 102,
 }
+#: ... and the flattened-pixel ones, whose count differs per dtype.
+_REFUSED_FLEX_COUNTS = {"fp16": 1699, "bf16": 1673}
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
 #: checked whole. ``check_direct_ir.py``-style runs of every identity are out of tree.
@@ -809,7 +810,10 @@ def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
     assert refused == {
         (dtype, algorithm): count
         for dtype in ("fp16", "bf16")
-        for algorithm, count in _REFUSED_DIRECT_COUNTS.items()
+        for algorithm, count in (
+            *_REFUSED_DIRECT_COUNTS.items(),
+            ("direct_fwd_flex_mfma", _REFUSED_FLEX_COUNTS[dtype]),
+        )
     }
 
 

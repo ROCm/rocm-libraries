@@ -323,12 +323,35 @@ def conv_direct_fwd_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def _xcd_int(xcd: Any) -> int:
+    """``xcd`` as the int the C struct holds: bool (True is 1) or int only, so a
+    value such as 1.5 is refused instead of truncated into a valid knob."""
+    if isinstance(xcd, bool) or (isinstance(xcd, int)):
+        return int(xcd)
+    raise ValueError(f"fwd_flex_mfma xcd must be a bool or an int, got {xcd!r}")
+
+
 def conv_direct_fwd_flex_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`FwdFlexMfmaSpec` -> flat dict (problem nested, dtype included)."""
     return dict(
         problem=_fwd_small_problem_dict(spec.problem),
         bk=spec.bk,
         split_c=spec.split_c,
+        xcd=_xcd_int(spec.xcd),
+        kmaj=spec.kmaj,
+        c_tail=spec.c_tail,
+        bx=spec.bx,
+        cs=spec.cs,
+        wt=spec.wt,
+        ds=spec.ds,
+        h1=spec.h1,
+        zf=spec.zf,
+        zl=spec.zl,
+        k_tail=spec.k_tail,
+        flat=spec.flat,
+        xt8=spec.xt8,
+        grp=spec.grp,
+        sw=spec.sw,
         name=spec.name,
         wave_size=spec.wave_size,
     )

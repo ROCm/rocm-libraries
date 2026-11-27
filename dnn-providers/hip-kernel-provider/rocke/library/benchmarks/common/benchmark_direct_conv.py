@@ -354,6 +354,11 @@ def parse_miopen_cmd_direct(cmd: str):
     # variant. Every other problem keeps one padding for both axes.
     pad_w_ok = (
         (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
+        # a stride-1 dgrad runs as a forward (dgrad via forward, dilated too)
+        or (miopen_args.forw == 2 and sH == 1 and groups == 1)
+        or (miopen_args.forw == 2 and sH == 1 and not dilated)
+        # a 1-D strided dgrad (direct_dgrad_flex_mfma h1)
+        or (miopen_args.forw == 2 and one_d and groups == 1 and not dilated)
         or (
             miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
         )

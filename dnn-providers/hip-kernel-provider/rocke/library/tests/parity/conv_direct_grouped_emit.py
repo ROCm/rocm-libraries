@@ -2521,8 +2521,49 @@ def _wgrad_pp_spec(idx: int):
     return ("wgrad_tiled", sel, "gfx950")
 
 
+# ---------------------------------------------------------------------------
+# The helpers of the gfx950 flex kernels (conv_direct_fwd_flex_mfma), indices
+# 371..376: the tiled runtime-channel weight transpose of the dgrad flex tiles
+# (fp16 3x3 with partial k / c tiles, bf16 2x2 over two groups) and the
+# split-C folds of the flex split degrees 3, 6, 12 and 16.
+# ---------------------------------------------------------------------------
+_FLEX_HELPER_CFG_BASE = 371
+
+
+def _flex_helper_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_FLEX_HELPER_CFG_BASE + idx``, or None."""
+    tp = DirectTransposeWeightsDgradSpec
+    table = {
+        0: (
+            "transpose",
+            tp(problem=_gp(1, 72, 136), runtime_channels=True, tiled=True),
+        ),
+        1: (
+            "transpose",
+            tp(
+                problem=_gp(2, 64, 40, KH=2, PAD=0, dtype="bf16"),
+                runtime_channels=True,
+                tiled=True,
+            ),
+        ),
+        2: ("split_reduce", DirectSplitReduceSpec(dtype="fp16", split_c=3)),
+        3: ("split_reduce", DirectSplitReduceSpec(dtype="bf16", split_c=6)),
+        4: ("split_reduce", DirectSplitReduceSpec(dtype="fp16", split_c=12)),
+        5: ("split_reduce", DirectSplitReduceSpec(dtype="bf16", split_c=16)),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return (*sel, "gfx950")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _FLEX_HELPER_CFG_BASE:
+        sel = _flex_helper_spec(idx - _FLEX_HELPER_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_PP_CFG_BASE:
         sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:

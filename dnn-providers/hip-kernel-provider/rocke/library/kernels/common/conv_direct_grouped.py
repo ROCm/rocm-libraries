@@ -8664,6 +8664,9 @@ class DirectTransposeWeightsDgradSpec:
 
     problem: "DirectConvProblem"
     runtime_channels: bool = False
+    # 64 x 64 (k, c) tiles through LDS, 16-byte loads and stores
+    # (runtime channels; cpg and kpg multiples of 8)
+    tiled: bool = False
 
 
 @dataclass(frozen=True)
@@ -8709,6 +8712,22 @@ def _xform_dtype_tag(dtype: str) -> str:
     return "_f32" if _is_f32_storage(dtype) else ""
 
 
+def _check_tiled_transpose(spec: "DirectTransposeWeightsDgradSpec") -> None:
+    """The tiled transpose's contract: runtime channels, 16-bit elements, and
+    cpg / kpg multiples of 8 (16-byte granules; an off count would store across
+    the next row and race with the neighbouring thread's writes)."""
+    p = spec.problem
+    if not spec.runtime_channels or p.dtype not in ("fp16", "bf16"):
+        raise ValueError(
+            "tiled dgrad filter transpose needs runtime channels and fp16/bf16"
+        )
+    if p.cpg % 8 or p.kpg % 8:
+        raise ValueError(
+            "tiled dgrad filter transpose needs cpg and kpg to be multiples "
+            f"of 8 (got cpg={p.cpg}, kpg={p.kpg})"
+        )
+
+
 def build_direct_transpose_weights_dgrad(
     spec: "DirectTransposeWeightsDgradSpec", arch: str = "gfx950"
 ) -> "KernelDef":
@@ -8725,6 +8744,9 @@ def build_direct_transpose_weights_dgrad(
     Grid: (KH * KW * groups, ceil(kpg / 64), ceil(cpg / 64))
     Block: (64, 1, 1)
     """
+    if spec.tiled:
+        _check_tiled_transpose(spec)
+        return _build_transpose_weights_dgrad_tiled(spec, arch)
     p = spec.problem
     io_type = _io_type(p.dtype)
     BLOCK = 64
@@ -8827,6 +8849,84 @@ def build_direct_transpose_weights_dgrad(
     else:
         b.buffer_store_f16(d_rsrc, dst_safe, c0, val)
 
+    return b.kernel
+
+
+def _build_transpose_weights_dgrad_tiled(
+    spec: "DirectTransposeWeightsDgradSpec", arch: str = "gfx950"
+) -> "KernelDef":
+    """:func:`build_direct_transpose_weights_dgrad` (runtime channels)
+    by 64 x 64 (k, c) tiles of one (group, r', s'): 16-byte loads of W rows
+    into LDS, then each thread gathers 8 k of one c and stores them as one
+    16-byte W_T granule. cpg and kpg must be multiples of 8.
+
+    Grid: (groups * KH * KW, ceil(kpg / 64), ceil(cpg / 64)); block 256.
+    """
+    p = spec.problem
+    io_type = _io_type(p.dtype)
+    eb = _elem_bytes(p.dtype)
+    RS = p.KH * p.KW
+    ROW = 72  # LDS row: 64 c + 8 pad
+    b = IRBuilder(
+        f"direct_transpose_weights_dgrad_{p.short()}_rtc_t64{_xform_dtype_tag(p.dtype)}"
+    )
+    b.kernel.attrs["max_workgroup_size"] = 256
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
+    A_bytes = b.param("A_bytes", I32)
+    D_bytes = b.param("D_bytes", I32)
+    cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
+    kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
+
+    def ci(v: int) -> Value:
+        return b.const_i32(v)
+
+    c0 = ci(0)
+    oob = ci((1 << 31) - 1)
+    tid = b.thread_id_x()
+    bx, k0, cc0 = (
+        b.block_id_x(),
+        b.mul(b.block_id_y(), ci(64)),
+        b.mul(b.block_id_z(), ci(64)),
+    )
+    grp, rs = b.div(bx, ci(RS)), b.mod(bx, ci(RS))
+    rf = b.sub(ci(RS - 1), rs)  # flipped (r, s) = (KH-1-r', KW-1-s'), flattened
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    d_rsrc = b.buffer_rsrc(D, D_bytes)
+    lds = b.smem_alloc(io_type, [1, 64 * ROW], name_hint="wtr_tile")
+    n = 16 // eb
+    for h in range(2):
+        g = b.add(tid, ci(256 * h))
+        row, gc = b.div(g, ci(8)), b.mod(g, ci(8))
+        k, c = b.add(k0, row), b.add(cc0, b.mul(gc, ci(8)))
+        ok = b.land(b.cmp_lt(k, kpg), b.cmp_lt(c, cpg))
+        src = b.add(b.mul(b.add(b.mul(b.add(b.mul(grp, kpg), k), ci(RS)), rf), cpg), c)
+        v = b.buffer_load_vN(
+            a_rsrc, b.select(ok, b.mul(src, ci(eb)), oob), c0, io_type, n
+        )
+        b.smem_store_vN(lds, [c0, b.add(b.mul(row, ci(ROW)), b.mul(gc, ci(8)))], v, n)
+    b.s_waitcnt(lgkmcnt=0)
+    b.s_barrier_bare()
+    for h in range(2):
+        g = b.add(tid, ci(256 * h))
+        crow, kg = b.div(g, ci(8)), b.mod(g, ci(8))
+        vals = []
+        for j in range(8):
+            e = b.smem_load_vN(
+                lds,
+                c0,
+                b.add(b.mul(b.add(b.mul(kg, ci(8)), ci(j)), ci(ROW)), crow),
+                dtype=io_type,
+                n=1,
+            )
+            vals.append(b.vec_extract(e, 0))
+        v = b.vec_pack(vals, io_type)
+        c, k = b.add(cc0, crow), b.add(k0, b.mul(kg, ci(8)))
+        ok = b.land(b.cmp_lt(c, cpg), b.cmp_lt(k, kpg))
+        dst = b.add(b.mul(b.add(b.mul(b.add(b.mul(grp, cpg), c), ci(RS)), rs), kpg), k)
+        _buf_store_vN(
+            b, p.dtype, d_rsrc, b.select(ok, b.mul(dst, ci(eb)), oob), c0, v, 4
+        )
     return b.kernel
 
 
@@ -14627,6 +14727,19 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseWgradSpec):
         return spec.grid(), (spec.threads_per_block, 1, 1)
+    if isinstance(spec, DirectTransposeWeightsDgradSpec) and spec.tiled:
+        if p.cpg % 8 or p.kpg % 8:
+            # 16-byte granules: a count off a multiple of 8 would store across
+            # the next row and race with the neighbouring thread's writes.
+            raise ValueError(
+                "tiled dgrad filter transpose needs cpg and kpg to be multiples "
+                f"of 8 (got cpg={p.cpg}, kpg={p.kpg})"
+            )
+        return (p.groups * p.KH * p.KW, ceil_div(p.kpg, 64), ceil_div(p.cpg, 64)), (
+            256,
+            1,
+            1,
+        )
     if isinstance(spec, DirectTransposeWeightsDgradSpec):
         # One (group, r, s) per x, a 64-wide kpg tile per y, one cpg per z.
         return (p.groups * p.KH * p.KW, ceil_div(p.kpg, 64), p.cpg), (64, 1, 1)

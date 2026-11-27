@@ -918,6 +918,21 @@ rocke_fwd_flex_mfma_spec_t ffx_build_spec(const py::dict& d, std::deque<std::str
     }
     s.bk = dict_int(d, "bk", s.bk);
     s.split_c = dict_int(d, "split_c", s.split_c);
+    s.xcd = dict_int(d, "xcd", s.xcd);
+    s.kmaj = dict_bool(d, "kmaj", s.kmaj);
+    s.c_tail = dict_bool(d, "c_tail", s.c_tail);
+    s.bx = dict_int(d, "bx", s.bx);
+    s.cs = dict_int(d, "cs", s.cs);
+    s.wt = dict_bool(d, "wt", s.wt);
+    s.ds = dict_bool(d, "ds", s.ds);
+    s.h1 = dict_bool(d, "h1", s.h1);
+    s.zf = dict_bool(d, "zf", s.zf);
+    s.zl = dict_int(d, "zl", s.zl);
+    s.k_tail = dict_bool(d, "k_tail", s.k_tail);
+    s.flat = dict_bool(d, "flat", s.flat);
+    s.xt8 = dict_bool(d, "xt8", s.xt8);
+    s.grp = dict_bool(d, "grp", s.grp);
+    s.sw = dict_bool(d, "sw", s.sw);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     return s;
 }

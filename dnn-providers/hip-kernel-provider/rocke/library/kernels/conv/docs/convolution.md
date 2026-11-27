@@ -1646,36 +1646,88 @@ handles any filter, stride, dilation and padding. The arch gate reads
 `ArchTarget` capabilities (wave64, 16-byte `buffer_load ... lds`,
 `mfma_f32_16x16x32`), which of the known targets only gfx950 has.
 
-A workgroup of 8 waves owns a tile of 256 flattened output pixels (N x Ho x Wo)
-and `bk` (128 or 256) output channels. The reduction is over taps x 64-channel
-chunks in a persistent grid of up to 256 blocks:
+A workgroup of 8 waves owns a tile of `bx` (256, or 128 for small outputs)
+flattened output pixels (N x Ho x Wo) and `bk` (64, 128, 192 or 256) output
+channels. The reduction is over taps x 64-channel chunks in a persistent grid
+of up to 256 blocks:
 
-- the im2col mapping is a per-lane pixel base (tile constant) plus a scalar
-  tap offset; taps whose window falls entirely in padding are skipped (a
-  32-bit valid-tap bitmap per pixel, one bit per tap);
+- the im2col mapping is a per-wave LDS offset table built at each tile change
+  (per tap and pixel: the input fibre's byte offset, or an out-of-range offset
+  that zero-fills padding) plus a scalar chunk offset; taps whose window falls
+  entirely in padding are skipped;
 - every operand byte is staged with `buffer_load ... lds` (16 bytes per lane),
   never through VGPRs; the LDS granule XOR swizzle is applied on the global
   side; two static stages avoid cross-stage alias ambiguity for the
   `waitcnt` pass;
 - the 8 waves form two ping-pong groups of 4 (each owning half the pixel
-  tile); group 0 issues the next DMA after the barrier, group 1 issues at
-  its MFMA phase start, so every DMA has a full step to land;
+  tile); group 0 issues the next DMA after the barrier, group 1 issues in
+  its MFMA phase, so every DMA has a full step to land;
 - the `permlane32_swap` epilogue reorders the per-lane MFMA results so that
-  consecutive channels are contiguous in memory without an LDS round-trip;
-- `split_c > 1` slices the channel reduction into `split_c` pieces and
-  writes fp32 partial sums to a workspace that `direct_split_reduce` folds
-  into the output.
+  consecutive channels are contiguous in memory without an LDS round-trip.
 
-Runtime (kernargs, the direct-conv block): batch, extents and both channel
-counts. Build-time: the filter, padding, stride, dilation, `bk`, `split_c`
-and dtype. Constraints: `groups == 1`, `C` a multiple of 64, `K` a multiple
-of 8, stride and dilation both at least 1, at most 32 taps, every extent at
-least 1, the input image, output image, weight tensor and workspace slab
-(when `split_c > 1`) each at most `INT32_MAX` bytes. The AOT grid is
-`FWD_FLEX_LAYERS` times `FWD_FLEX_KNOBS` (`kernels/conv/direct_aot_jobs.py`,
-variant `direct_fwd_flex_mfma`). The C++ twin covers every knob; the
-byte-identity gate is `library/tests/parity/conv_direct_fwd_flex_mfma_emit.{c,py}`,
-the GPU numeric test `library/tests/test_direct_fwd_flex_mfma.py`.
+Every behaviour is a spec knob (there are no module-level switches):
+
+| Knob | Effect |
+| ---- | ------ |
+| `bk`, `bx` | Tile of output channels and pixels (`bk` 64 / 128 / 192 / 256; `bx` 128 needs `bk` 128 / 256, `bk` 192 needs `bx` 256) |
+| `split_c` | Slices the channel reduction into pieces that write fp32 slabs of a workspace, which `direct_split_reduce` folds into the output |
+| `cs` 2 / 4 | In-block split of the reduction (X128 x K256, or X128 x K128): the wave groups take alternate chunks or halves of a chunk and the partial sums meet in LDS, so small layers need no fp32 workspace |
+| `xcd`, `kmaj`, `sw` | XCD tile walk: block renumbering so each XCD walks a contiguous run of tiles (`kmaj`: K-major order, weight-stationary L2); `sw` unrolls the taps of a chunk (positions-inner sweep) |
+| `c_tail`, `flat` | `C % 64 != 0` with `C % 8 == 0`: a zero-filled last chunk, or a flattened (tap, channel) reduction that runs fewer steps (no tap skipping) |
+| `k_tail` | `K % 8 != 0`: the epilogue stores 16-bit elements masked by `K` |
+| `grp` | Grouped problems: the K tiles of every group follow each other and the channel bases move by group (`cs` 1, `split_c` 1) |
+| `xt8` | A wave owns 128 pixels x `bk / 4` channels instead of 64 x `bk / 2` |
+| `wt`, `ds`, `h1`, `zf`, `zl` | The dgrad forms below |
+
+Runtime (kernargs, the direct-conv block): batch, extents and the channel
+counts (the group count for `grp`). Build-time: the filter, padding, stride,
+dilation, the knobs and the dtype (fp16 / bf16). Constraints, each refused by
+`fwd_flex_mfma_reason` with the knob named: `C` a multiple of 64 (8 with
+`c_tail` / `flat`), `K` a multiple of 8 (unless `k_tail`), stride and
+dilation both at least 1, at most 32 taps, every extent at least 1, and the
+input, output, weight tensor and workspace slab (when `split_c > 1`) each at
+most `INT32_MAX` bytes.
+
+### Dgrad Served by the Flex Kernel
+
+The same kernel serves the data gradient (`direct_dgrad_flex_mfma`, the
+`direct_dgrad_flex_mfma` AOT variant):
+
+- **Stride 1.** A dgrad is a forward over dY with the filter flipped and the
+  channel roles swapped (`dgrad_4c_transposed_problem`). The plan
+  (`dgrad_via_fwd_plans` in `library/benchmarks/common/direct_kernel_sweep.py`)
+  runs any cached forward flex kernel of the transposed problem. With `wt` the
+  kernel reads the dgrad's own filter (no transpose pre-pass): a tap reads the
+  flipped position and the weights stage as K halves read back with transposing
+  LDS reads. Otherwise the tiled runtime-channel weight transpose
+  (`DirectTransposeWeightsDgradSpec(tiled=True)`, 64 x 64 (k, c) tiles through
+  LDS, 3x3 and 2x2 filters, `cpg` / `kpg` multiples of 8) writes the flipped
+  filter first.
+- **Strided, one launch** (`ds`, `wt`). Output phase (a, b) of the stride is a
+  stride-1 forward over dY with that phase's taps; the pixel space is
+  phase-major, a tile runs only its phase's taps and stores with stride `s`.
+  `h1` handles a one-row dX with a 1 x S filter (phases along the columns
+  only); `zf` / `zl` handle a stride-2 1 x 1 dgrad, where the epilogue (or a
+  store-only loop) writes the zeros of the tapless phases, so dX needs no
+  memset. With `split_c > 1` the phase kernel writes fp32 slabs that the
+  forward split-C fold sums.
+
+AOT grid (gfx950, fp16 / bf16): `FWD_FLEX_LAYERS` (the strided and stride-1
+forward filters, including those dgrad runs as a forward) and
+`DGRAD_FLEX_LAYERS` (the strided dgrads) crossed with a kept knob set per
+layer cell (`FWD_FLEX_KEPT`, `DGRAD_FLEX_KEPT`, `kernels/conv/direct_aot_jobs.py`,
+variants `direct_fwd_flex_mfma` and `direct_dgrad_flex_mfma`). These kernels are
+served by the AOT cache only; the packaged launch refuses them.
+
+C++ engine mirror: `library/cpp/include/rocke/instance_conv_direct_fwd_flex_mfma.h`
+(spec, validator with the same refusal texts, geometry, kernel names) with the
+builders in `library/cpp/instances/common/conv_direct_fwd_flex_mfma{,_cs2,_cs4}.cpp`;
+it covers every knob. Tests: the byte-identity gate is
+`library/tests/parity/conv_direct_fwd_flex_mfma_emit.{c,py}`; the GPU numeric
+tests are `library/tests/test_direct_fwd_flex_mfma.py` and
+`library/tests/test_direct_fwd_flex_knobs.py` (CPU cases cover builds of every
+knob row, names, validator reasons, geometry, AOT grid counts and C++/Python
+`.ll` equality; GPU cases run on the gfx950 runner lane).
 
 ## Winograd Forward (gfx1250)
 

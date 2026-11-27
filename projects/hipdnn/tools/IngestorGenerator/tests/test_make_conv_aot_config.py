@@ -429,12 +429,12 @@ _DIRECT_GRID = {
     "direct_depthwise_win": 759,
 }
 #: Forward identities per dtype and algorithm of the direct sweep the packaged launch
-#: does not run, and the start of the reason the adapter refuses them with: the
+#: does not run (one count, or one per dtype when the grids differ), and the start of the reason the adapter refuses them with: the
 #: split-C fold, which ships as the second launch of each split-C instance, and the
 #: four gfx950 MFMA direct families (small-channel, small-K, ping-pong and
 #: flattened-pixel), not yet in AOT_DIRECT_ALGORITHMS.
 _DIRECT_REFUSED = {
-    "direct_split_reduce": (4, "'direct_split_reduce' is not packaged"),
+    "direct_split_reduce": (7, "'direct_split_reduce' is not packaged"),
     "direct_fwd_smallc_mfma": (
         222,
         "direct algorithm 'direct_fwd_smallc_mfma' has no packaged launch",
@@ -448,7 +448,7 @@ _DIRECT_REFUSED = {
         "direct algorithm 'direct_fwd_pp_mfma' has no packaged launch",
     ),
     "direct_fwd_flex_mfma": (
-        102,
+        {"fp16": 1699, "bf16": 1673},
         "direct algorithm 'direct_fwd_flex_mfma' has no packaged launch",
     ),
 }
@@ -492,7 +492,7 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
         if algorithm in tool.PACKAGED_DIRECT_ALGORITHMS
     }
     assert refused == {
-        (dtype, algorithm): count
+        (dtype, algorithm): count[dtype] if isinstance(count, dict) else count
         for dtype in ("fp16", "bf16")
         for algorithm, (count, _) in _DIRECT_REFUSED.items()
     }

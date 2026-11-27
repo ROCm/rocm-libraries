@@ -462,6 +462,104 @@ static rocke_kernel_def_t*
 }
 
 /* ===================================================================== *
+ *  _build_transpose_weights_dgrad_tiled: the runtime-channel transpose by
+ *  64 x 64 (k, c) tiles of one (group, r', s'): 16-byte loads of W rows into
+ *  LDS, then each thread gathers 8 k of one c and stores them as one 16-byte
+ *  W_T granule. Grid (groups * KH * KW, ceil(kpg / 64), ceil(cpg / 64)),
+ *  block 256.
+ * ===================================================================== */
+static rocke_kernel_def_t*
+    dconv_build_transpose_tiled(rocke_ir_builder_t* b,
+                                const rocke_direct_transpose_weights_dgrad_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    const rocke_type_t* io_type = rocke_dconv_io_type(b, p->dtype);
+    if(io_type == NULL)
+        return NULL;
+    const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
+    const int eb = rocke_dconv_elem_bytes(p->dtype);
+    const int RS = p->KH * p->KW;
+    const int ROW = 72; /* LDS row: 64 c + 8 pad */
+    dconv_xform_params_t prm;
+
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", 256);
+    dconv_xform_params(b, io_type, true, &prm);
+    rocke_value_t* cpg = prm.rtc_cpg;
+    rocke_value_t* kpg = prm.rtc_kpg;
+
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* oob = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* bx = rocke_b_block_id_x(b);
+    rocke_value_t* by = rocke_b_block_id_y(b);
+    rocke_value_t* k0 = rocke_b_mul(b, by, rocke_b_const_i32(b, 64));
+    rocke_value_t* bz = rocke_b_block_id_z(b);
+    rocke_value_t* cc0 = rocke_b_mul(b, bz, rocke_b_const_i32(b, 64));
+    rocke_value_t* grp = rocke_b_div(b, bx, rocke_b_const_i32(b, RS));
+    rocke_value_t* rs = rocke_b_mod(b, bx, rocke_b_const_i32(b, RS));
+    /* flipped (r, s) = (KH-1-r', KW-1-s'), flattened */
+    rocke_value_t* rf = rocke_b_sub(b, rocke_b_const_i32(b, RS - 1), rs);
+    rocke_value_t* a_rsrc = rocke_b_buffer_rsrc(b, prm.A, prm.A_bytes);
+    rocke_value_t* d_rsrc = rocke_b_buffer_rsrc(b, prm.D, prm.D_bytes);
+    int shape[2] = {1, 64 * ROW};
+    rocke_value_t* lds = rocke_b_smem_alloc(b, io_type, shape, 2, "wtr_tile");
+    const int n = 16 / eb;
+    for(int h = 0; h < 2; ++h)
+    {
+        rocke_value_t* g = rocke_b_add(b, tid, rocke_b_const_i32(b, 256 * h));
+        rocke_value_t* row = rocke_b_div(b, g, rocke_b_const_i32(b, 8));
+        rocke_value_t* gc = rocke_b_mod(b, g, rocke_b_const_i32(b, 8));
+        rocke_value_t* k = rocke_b_add(b, k0, row);
+        rocke_value_t* g8 = rocke_b_mul(b, gc, rocke_b_const_i32(b, 8));
+        rocke_value_t* c = rocke_b_add(b, cc0, g8);
+        rocke_value_t* kok = rocke_b_cmp_lt(b, k, kpg);
+        rocke_value_t* ok = rocke_b_land(b, kok, rocke_b_cmp_lt(b, c, cpg));
+        rocke_value_t* gk = rocke_b_add(b, rocke_b_mul(b, grp, kpg), k);
+        rocke_value_t* gkr = rocke_b_mul(b, gk, rocke_b_const_i32(b, RS));
+        rocke_value_t* src = rocke_b_add(b, rocke_b_mul(b, rocke_b_add(b, gkr, rf), cpg), c);
+        rocke_value_t* sb = rocke_b_mul(b, src, rocke_b_const_i32(b, eb));
+        rocke_value_t* v
+            = rocke_b_buffer_load_vN(b, a_rsrc, rocke_b_select(b, ok, sb, oob), c0, io_type, n);
+        rocke_value_t* rr = rocke_b_mul(b, row, rocke_b_const_i32(b, ROW));
+        rocke_value_t* gg = rocke_b_mul(b, gc, rocke_b_const_i32(b, 8));
+        rocke_value_t* ix[2] = {c0, rocke_b_add(b, rr, gg)};
+        rocke_b_smem_store_vN(b, lds, ix, 2, v, n);
+    }
+    rocke_b_s_waitcnt(b, -1, 0, -1);
+    rocke_b_s_barrier_bare(b);
+    for(int h = 0; h < 2; ++h)
+    {
+        rocke_value_t* g = rocke_b_add(b, tid, rocke_b_const_i32(b, 256 * h));
+        rocke_value_t* crow = rocke_b_div(b, g, rocke_b_const_i32(b, 8));
+        rocke_value_t* kg = rocke_b_mod(b, g, rocke_b_const_i32(b, 8));
+        rocke_value_t* vals[8];
+        for(int j = 0; j < 8; ++j)
+        {
+            rocke_value_t* k8 = rocke_b_mul(b, kg, rocke_b_const_i32(b, 8));
+            rocke_value_t* kj = rocke_b_add(b, k8, rocke_b_const_i32(b, j));
+            rocke_value_t* kr = rocke_b_mul(b, kj, rocke_b_const_i32(b, ROW));
+            rocke_value_t* ix[2] = {c0, rocke_b_add(b, kr, crow)};
+            rocke_value_t* e = rocke_b_smem_load_vN(b, lds, ix, 2, io_type, 1);
+            vals[j] = rocke_b_vec_extract(b, e, 0);
+        }
+        rocke_value_t* v = rocke_b_vec_pack(b, vals, 8, io_type);
+        rocke_value_t* c = rocke_b_add(b, cc0, crow);
+        rocke_value_t* kg8 = rocke_b_mul(b, kg, rocke_b_const_i32(b, 8));
+        rocke_value_t* k = rocke_b_add(b, k0, kg8);
+        rocke_value_t* cok = rocke_b_cmp_lt(b, c, cpg);
+        rocke_value_t* ok = rocke_b_land(b, cok, rocke_b_cmp_lt(b, k, kpg));
+        rocke_value_t* gc2 = rocke_b_add(b, rocke_b_mul(b, grp, cpg), c);
+        rocke_value_t* gcr = rocke_b_mul(b, gc2, rocke_b_const_i32(b, RS));
+        rocke_value_t* dst = rocke_b_add(b, rocke_b_mul(b, rocke_b_add(b, gcr, rs), kpg), k);
+        rocke_value_t* db = rocke_b_mul(b, dst, rocke_b_const_i32(b, eb));
+        rocke_dconv_buf_store_vN(b, is_bf16, d_rsrc, rocke_b_select(b, ok, db, oob), c0, v, 4);
+    }
+    if(!rocke_ir_builder_ok(b))
+        return NULL;
+    return rocke_ir_builder_kernel(b);
+}
+
+/* ===================================================================== *
  *  Public build entries
  * ===================================================================== */
 rocke_kernel_def_t* rocke_build_direct_transpose_weights_dgrad_new(
@@ -481,10 +579,37 @@ rocke_kernel_def_t* rocke_build_direct_transpose_weights_dgrad_new(
                  sizeof name,
                  "direct_transpose_weights_dgrad_%s%s%s",
                  short_buf,
-                 spec->runtime_channels ? "_rtc" : "",
+                 spec->tiled              ? "_rtc_t64"
+                 : spec->runtime_channels ? "_rtc"
+                                          : "",
                  dconv_xform_dtype_tag(spec->problem.dtype));
         if(rocke_ir_builder_init(b, name) != ROCKE_OK)
             return NULL;
+        if(spec->tiled)
+        {
+            if(!spec->runtime_channels
+               || (strcmp(spec->problem.dtype, "fp16") != 0
+                   && strcmp(spec->problem.dtype, "bf16") != 0))
+            {
+                rocke_i_set_err(
+                    b,
+                    ROCKE_ERR_VALUE,
+                    "tiled dgrad filter transpose needs runtime channels and fp16/bf16");
+                return NULL;
+            }
+            if(spec->problem.cpg % 8 != 0 || spec->problem.kpg % 8 != 0)
+            {
+                rocke_i_set_err(
+                    b,
+                    ROCKE_ERR_VALUE,
+                    "tiled dgrad filter transpose needs cpg and kpg to be multiples of 8 "
+                    "(got cpg=%d, kpg=%d)",
+                    spec->problem.cpg,
+                    spec->problem.kpg);
+                return NULL;
+            }
+            return dconv_build_transpose_tiled(b, spec);
+        }
         return dconv_build_transpose(b, spec);
     });
 }

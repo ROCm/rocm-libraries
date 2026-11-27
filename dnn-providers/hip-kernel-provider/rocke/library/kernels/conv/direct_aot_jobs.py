@@ -35,6 +35,8 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
     DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
     DIRECT_FWD_FLEX_MFMA as _FWD_FLEX_MFMA,
+    DIRECT_DGRAD_FLEX_MFMA as _DGRAD_FLEX_MFMA,
+    DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
     DIRECT_FWD_PP_MFMA as _FWD_PP_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
@@ -1141,10 +1143,21 @@ FWD_SMALLK_LAYERS = (
     (1, 7, 0, 3, 1, 1),
 )
 # Flattened-pixel implicit-GEMM forward (direct_fwd_flex_mfma, gfx950): the
-# dense layers it serves, (KH, KW, PAD, pad_w, stride, dil_h, dil_w), and its
-# (tile K, split_c) knobs.
+# dense layers it serves, (KH, KW, PAD, pad_w, stride, dil_h, dil_w): the
+# strided and stride-1 forwards, and the stride-1 forwards the dgrads of the
+# same filters run as (dgrad via forward: "same" / "valid" 3x3, 1x3, 3x1, 5x5
+# and the dilated 3x3 and 1xN filters).
 FWD_FLEX_LAYERS = (
     (3, 3, 1, 1, 2, 1, 1),
+    (3, 3, 1, 1, 1, 1, 1),
+    (3, 3, 0, 0, 1, 1, 1),
+    (3, 1, 0, 0, 1, 1, 1),
+    (3, 1, 1, 0, 1, 1, 1),
+    (1, 3, 0, 0, 1, 1, 1),
+    (3, 3, 0, 0, 2, 1, 1),
+    (3, 3, 2, 2, 1, 1, 1),
+    (1, 3, 0, 2, 1, 1, 1),
+    (3, 1, 2, 0, 1, 1, 1),
     (1, 1, 0, 0, 2, 1, 1),
     (2, 2, 0, 0, 2, 1, 1),
     (3, 3, 24, 24, 1, 24, 24),
@@ -1161,8 +1174,487 @@ FWD_FLEX_LAYERS = (
     (1, 11, 0, 15, 1, 1, 3),
     (1, 11, 0, 25, 1, 1, 5),
     (7, 1, 3, 0, 1, 1, 1),
+    (3, 3, 4, 4, 1, 4, 4),
+    (5, 5, 0, 0, 1, 1, 1),
+    (5, 5, 2, 2, 1, 1, 1),
+    (5, 5, 4, 4, 1, 1, 1),
+    # the 1-D 1 x 16 stride-8 forward (H = 1: the row stride is moot)
+    (1, 16, 0, 4, 8, 1, 1),
 )
-FWD_FLEX_KNOBS = tuple((bk, sc) for bk in (256, 128) for sc in (1, 2, 4))
+# The strided dense dgrads of direct_dgrad_flex_mfma, (KH, KW, PAD, pad_w,
+# stride): 3x3 and 2x2 stride 2, the 1 x 1 stride-2 one (zf: dX's odd rows /
+# columns are zeros the epilogue stores) and the 1-D 1 x 16 stride-8 one (h1).
+DGRAD_FLEX_LAYERS = (
+    (3, 3, 1, 1, 2),
+    (3, 3, 0, 0, 2),
+    (2, 2, 0, 0, 2),
+    (1, 16, 0, 4, 8),
+    (1, 1, 0, 0, 2),
+)
+# Knob sets of the flex grids as label knob strings (name=value-...), and per
+# layer cell "<dtype>-f<KH>x<KW>-p<PAD>x<PAD_W>-s<stride>-d<dil_h>x<dil_w>" the
+# indices of the ones it is offered. The knobs: tile K (bk) and pixels (bx),
+# split_c, the in-block split (cs 2 / 4), the XCD walk (xcd, kmaj, sw: taps
+# swept at compile time), a channel tail (c_tail) or flattened reduction
+# (flat), k_tail, grouped (grp), the dgrad's own filter (wt, else the
+# transposed one), the zero-phase and one-row dgrad forms (zf, zl, h1).
+FWD_FLEX_KEPT = (
+    "bk=128-bx=128-cs=4-kmaj=true-split_c=1-wt=true-xcd=true",
+    "bk=128-bx=128-cs=4-kmaj=true-split_c=1-xcd=true",
+    "bk=128-bx=128-cs=4-kmaj=true-split_c=3-xcd=true",
+    "bk=128-bx=128-cs=4-split_c=1",
+    "bk=128-bx=128-cs=4-split_c=1-wt=true",
+    "bk=128-bx=128-cs=4-split_c=1-wt=true-xcd=true",
+    "bk=128-bx=128-cs=4-split_c=1-xcd=true",
+    "bk=128-bx=128-cs=4-split_c=2",
+    "bk=128-bx=128-cs=4-split_c=2-wt=true",
+    "bk=128-bx=128-cs=4-split_c=2-wt=true-xcd=true",
+    "bk=128-bx=128-cs=4-split_c=2-xcd=true",
+    "bk=128-bx=128-cs=4-split_c=3",
+    "bk=128-bx=128-cs=4-split_c=3-xcd=true",
+    "bk=128-bx=128-cs=4-split_c=4",
+    "bk=128-bx=128-cs=4-split_c=4-wt=true",
+    "bk=128-bx=128-cs=4-split_c=4-wt=true-xcd=true",
+    "bk=128-bx=128-split_c=1",
+    "bk=128-bx=128-split_c=1-wt=true",
+    "bk=128-bx=128-split_c=12-wt=true",
+    "bk=128-bx=128-split_c=8-wt=true",
+    "bk=128-c_tail=true-split_c=1-sw=true-xcd=2",
+    "bk=128-c_tail=true-split_c=1-sw=true-xcd=true",
+    "bk=128-flat=true-split_c=4",
+    "bk=128-kmaj=true-split_c=1-sw=true-xcd=2",
+    "bk=128-kmaj=true-split_c=1-sw=true-xcd=true",
+    "bk=128-kmaj=true-split_c=1-wt=true-xcd=true",
+    "bk=128-kmaj=true-split_c=6-sw=true-xcd=true",
+    "bk=128-split_c=1",
+    "bk=128-split_c=1-sw=true",
+    "bk=128-split_c=1-sw=true-xcd=true",
+    "bk=128-split_c=1-wt=true",
+    "bk=128-split_c=1-wt=true-xcd=true",
+    "bk=128-split_c=1-xcd=true",
+    "bk=128-split_c=12-sw=true",
+    "bk=128-split_c=12-wt=true-xcd=true",
+    "bk=128-split_c=2",
+    "bk=128-split_c=4",
+    "bk=128-split_c=6",
+    "bk=128-split_c=6-xcd=true",
+    "bk=192-c_tail=true-split_c=1-sw=true-xcd=true",
+    "bk=192-flat=true-split_c=1",
+    "bk=192-split_c=1",
+    "bk=192-split_c=1-sw=true",
+    "bk=192-split_c=1-wt=true",
+    "bk=192-split_c=4-sw=true",
+    "bk=256-bx=128-c_tail=true-split_c=16-sw=true-wt=true",
+    "bk=256-bx=128-cs=2-kmaj=true-split_c=1-wt=true-xcd=true",
+    "bk=256-bx=128-cs=2-kmaj=true-split_c=1-xcd=true",
+    "bk=256-bx=128-cs=2-split_c=1",
+    "bk=256-bx=128-cs=2-split_c=1-xcd=true",
+    "bk=256-bx=128-cs=2-split_c=3",
+    "bk=256-bx=128-cs=2-split_c=3-xcd=true",
+    "bk=256-bx=128-grp=true-split_c=1-sw=true",
+    "bk=256-bx=128-grp=true-split_c=1-sw=true-wt=true",
+    "bk=256-bx=128-grp=true-split_c=1-wt=true",
+    "bk=256-bx=128-split_c=1",
+    "bk=256-bx=128-split_c=1-wt=true",
+    "bk=256-bx=128-split_c=8-wt=true",
+    "bk=256-c_tail=true-kmaj=true-split_c=1-xcd=true",
+    "bk=256-c_tail=true-split_c=1",
+    "bk=256-c_tail=true-split_c=1-sw=true-wt=true-xt8=true",
+    "bk=256-c_tail=true-split_c=1-xcd=true",
+    "bk=256-c_tail=true-split_c=3-sw=true-wt=true-xt8=true",
+    "bk=256-c_tail=true-split_c=3-wt=true-xt8=true",
+    "bk=256-c_tail=true-split_c=8-wt=true-xt8=true",
+    "bk=256-flat=true-split_c=1",
+    "bk=256-kmaj=true-split_c=1-sw=true-xcd=2",
+    "bk=256-kmaj=true-split_c=1-sw=true-xcd=true",
+    "bk=256-kmaj=true-split_c=1-wt=true-xcd=true",
+    "bk=256-kmaj=true-split_c=1-xcd=true",
+    "bk=256-split_c=1",
+    "bk=256-split_c=1-sw=true",
+    "bk=256-split_c=1-sw=true-wt=true-xcd=true-xt8=true",
+    "bk=256-split_c=1-sw=true-wt=true-xt8=true",
+    "bk=256-split_c=1-sw=true-xcd=2",
+    "bk=256-split_c=1-sw=true-xcd=true",
+    "bk=256-split_c=1-wt=true",
+    "bk=256-split_c=1-wt=true-xt8=true",
+    "bk=256-split_c=1-xcd=true",
+    "bk=256-split_c=2",
+    "bk=256-split_c=3",
+    "bk=256-split_c=3-xcd=true",
+    "bk=256-split_c=4",
+    "bk=256-split_c=4-xcd=true",
+    "bk=64-c_tail=true-grp=true-split_c=1",
+    "bk=64-c_tail=true-grp=true-split_c=1-sw=true",
+    "bk=64-grp=true-split_c=1",
+    "bk=64-k_tail=true-split_c=1",
+    "bk=64-k_tail=true-split_c=2",
+    "bk=64-k_tail=true-split_c=4",
+    "bk=64-split_c=1",
+    "bk=64-split_c=1-sw=true",
+    "bk=64-split_c=1-sw=true-xcd=true",
+    "bk=64-split_c=1-xcd=true",
+)
+FWD_FLEX_CELL_KEPT = {
+    "bf16-f1x1-p0x0-s2-d1x1": (
+        "3 6 7 10 11 12 13 16 22 27 32 35 36 37 38 40 41 55 59 65 70 78 "
+        "79 80 81 82 83 90 93"
+    ),
+    "bf16-f1x11-p0x15-s1-d1x3": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x11-p0x25-s1-d1x5": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x11-p0x5-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x16-p0x4-s8-d1x1": "6 10 32 70",
+    "bf16-f1x3-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f1x3-p0x1-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 "
+        "64 65 70 71 72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x3-p0x2-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f1x3-p0x3-s1-d1x3": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x3-p0x5-s1-d1x5": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x7-p0x15-s1-d1x5": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x7-p0x3-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f1x7-p0x9-s1-d1x3": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f2x2-p0x0-s2-d1x1": (
+        "3 6 7 10 11 12 13 16 22 27 28 29 32 33 35 36 37 38 40 41 55 59 "
+        "65 70 71 75 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f3x1-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f3x1-p1x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f3x1-p2x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 67 "
+        "70 71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p0x0-s2-d1x1": (
+        "3 6 7 10 11 12 13 16 22 28 29 32 33 37 38 40 41 48 49 50 51 55 "
+        "59 65 70 71 75 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p12x12-s1-d12x12": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p1x1-s1-d1x1": (
+        "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 26 28 29 30 "
+        "31 32 33 34 37 38 40 41 42 43 44 45 47 48 49 50 51 55 56 57 59 "
+        "60 62 63 64 65 66 67 70 71 72 73 75 76 77 78 80 81 83 87 88 89 "
+        "90 91 92 93"
+    ),
+    "bf16-f3x3-p1x1-s2-d1x1": (
+        "1 3 6 7 10 11 12 13 16 22 27 28 29 32 33 35 36 37 38 40 41 48 49 "
+        "50 51 55 59 65 70 71 75 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p24x24-s1-d24x24": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p2x2-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p2x2-s1-d2x2": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p36x36-s1-d36x36": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "bf16-f3x3-p4x4-s1-d4x4": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f5x5-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f5x5-p2x2-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f5x5-p4x4-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "bf16-f7x1-p3x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x1-p0x0-s2-d1x1": (
+        "3 6 7 10 11 12 13 16 22 27 32 35 36 37 38 40 41 55 58 59 61 65 "
+        "70 78 79 80 81 82 83 90 93"
+    ),
+    "fp16-f1x11-p0x15-s1-d1x3": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x11-p0x25-s1-d1x5": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 76 "
+        "77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x11-p0x5-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x16-p0x4-s8-d1x1": "6 10 32 70",
+    "fp16-f1x3-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f1x3-p0x1-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 "
+        "64 65 70 71 72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x3-p0x2-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f1x3-p0x3-s1-d1x3": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x3-p0x5-s1-d1x5": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x7-p0x15-s1-d1x5": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 25 27 28 29 30 31 "
+        "32 33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 "
+        "76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x7-p0x3-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 24 27 28 29 30 31 "
+        "32 33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 "
+        "76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f1x7-p0x9-s1-d1x3": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 25 27 28 29 30 31 "
+        "32 33 34 35 36 37 38 40 41 43 45 55 56 57 59 65 70 71 72 73 75 "
+        "76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f2x2-p0x0-s2-d1x1": (
+        "3 6 7 10 11 12 13 16 22 27 28 29 32 33 35 36 37 38 40 41 55 59 "
+        "65 70 71 75 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f3x1-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 74 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f3x1-p1x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f3x1-p2x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 67 "
+        "70 71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p0x0-s2-d1x1": (
+        "3 6 7 10 11 12 13 16 20 21 22 28 29 32 33 37 38 39 40 41 47 48 "
+        "49 50 51 55 59 65 70 71 75 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p12x12-s1-d12x12": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 69 70 "
+        "71 72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p1x1-s1-d1x1": (
+        "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 "
+        "32 33 34 37 38 40 41 42 43 44 45 46 48 49 50 51 52 53 54 55 56 "
+        "57 59 60 62 63 64 65 66 67 70 71 72 73 75 76 77 78 80 81 83 84 "
+        "85 86 87 88 89 90 91 92 93"
+    ),
+    "fp16-f3x3-p1x1-s2-d1x1": (
+        "1 3 6 7 10 11 12 13 16 22 23 24 27 28 29 32 33 35 36 37 38 40 41 "
+        "47 48 49 50 51 55 59 65 67 70 71 75 78 79 80 81 82 83 90 91 92 "
+        "93"
+    ),
+    "fp16-f3x3-p24x24-s1-d24x24": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 69 70 "
+        "71 72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p2x2-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 60 62 63 64 65 70 "
+        "71 72 73 75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p2x2-s1-d2x2": (
+        "1 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 "
+        "32 33 34 35 36 37 38 40 41 43 45 47 48 49 50 51 55 56 57 59 65 "
+        "67 70 71 72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p36x36-s1-d36x36": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+    "fp16-f3x3-p4x4-s1-d4x4": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 48 49 50 51 55 56 57 59 65 68 70 71 72 73 "
+        "75 76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f5x5-p0x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f5x5-p2x2-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f5x5-p4x4-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 28 29 30 31 32 33 "
+        "34 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 72 73 75 "
+        "76 77 78 80 81 83 90 91 92 93"
+    ),
+    "fp16-f7x1-p3x0-s1-d1x1": (
+        "3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 22 27 28 29 30 31 32 "
+        "33 34 35 36 37 38 40 41 43 45 55 56 57 59 60 62 63 64 65 70 71 "
+        "72 73 75 76 77 78 79 80 81 82 83 90 91 92 93"
+    ),
+}
+DGRAD_FLEX_KEPT = (
+    "bk=128-bx=128-h1=true-split_c=1-wt=true",
+    "bk=128-bx=128-split_c=1-wt=true",
+    "bk=128-bx=128-split_c=1-wt=true-zf=true-zl=8",
+    "bk=128-bx=128-split_c=4-wt=true",
+    "bk=128-h1=true-split_c=1-wt=true",
+    "bk=128-split_c=1",
+    "bk=128-split_c=1-wt=true",
+    "bk=192-split_c=1-wt=true-zf=true",
+    "bk=256-bx=128-c_tail=true-split_c=1-wt=true-zf=true-zl=8",
+    "bk=256-bx=128-split_c=1-wt=true",
+    "bk=256-bx=128-split_c=1-wt=true-zf=true",
+    "bk=256-bx=128-split_c=1-wt=true-zf=true-zl=8",
+    "bk=256-h1=true-split_c=1-wt=true",
+    "bk=256-split_c=1",
+    "bk=256-split_c=1-wt=true",
+)
+DGRAD_FLEX_CELL_KEPT = {
+    "bf16-f1x1-p0x0-s2-d1x1": "7 10 11",
+    "bf16-f1x16-p0x4-s8-d1x1": "0 4 12",
+    "bf16-f2x2-p0x0-s2-d1x1": "1 3 5 6 9 13 14",
+    "bf16-f3x3-p0x0-s2-d1x1": "1 3 5 6 9 13 14",
+    "bf16-f3x3-p1x1-s2-d1x1": "1 3 5 6 9 13 14",
+    "fp16-f1x1-p0x0-s2-d1x1": "2 7 8 10 11",
+    "fp16-f1x16-p0x4-s8-d1x1": "0 4 12",
+    "fp16-f2x2-p0x0-s2-d1x1": "1 3 5 6 9 13 14",
+    "fp16-f3x3-p0x0-s2-d1x1": "1 3 5 6 9 13 14",
+    "fp16-f3x3-p1x1-s2-d1x1": "1 3 5 6 9 13 14",
+}
+
+
+def _flex_knobs(spec: str) -> dict:
+    """The knob dict of a ``name=value-name=value`` knob string."""
+    return {
+        k: True if v == "true" else int(v)
+        for k, v in (part.split("=") for part in spec.split("-"))
+    }
+
+
+def _flex_kept(
+    kept: Tuple[str, ...],
+    cell_kept: Dict[str, str],
+    dtype: str,
+    caps: Optional[DirectCaps],
+) -> Iterator[dict]:
+    """The flex knob sets ``kept`` offers this layer cell (every one for
+    ``caps`` None)."""
+    if caps is None:
+        ids = sorted(
+            {i for k, v in cell_kept.items() if k.startswith(dtype) for i in v.split()},
+            key=int,
+        )
+    else:
+        cell = (
+            f"{dtype}-f{caps.KH}x{caps.KW}-p{caps.PAD}x{caps.PAD_W}"
+            f"-s{caps.stride}-d{caps.dil_h}x{caps.dil_w}"
+        )
+        ids = cell_kept.get(cell, "").split()
+    for i in ids:
+        yield _flex_knobs(kept[int(i)])
+
+
 # Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
 # 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
 FWD_TAPOUTER_DILATIONS = (
@@ -1950,6 +2442,21 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, dh, dw in FWD_FLEX_LAYERS
         ),
     ),
+    _DGRAD_FLEX_MFMA: (
+        "dgrad",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=0,
+            )
+            for kh, kw, pad, pw, st in DGRAD_FLEX_LAYERS
+        ),
+    ),
     _FWD_SMALLK: (
         "fwd",
         tuple(
@@ -2607,8 +3114,11 @@ def _knob_grid(
     elif variant == _FWD_FLEX_MFMA:
         if arch != "gfx950":
             return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
-        for bk, sc in FWD_FLEX_KNOBS:
-            yield dict(bk=bk, split_c=sc)
+        yield from _flex_kept(FWD_FLEX_KEPT, FWD_FLEX_CELL_KEPT, dtype, caps)
+    elif variant == _DGRAD_FLEX_MFMA:
+        if arch != "gfx950":
+            return
+        yield from _flex_kept(DGRAD_FLEX_KEPT, DGRAD_FLEX_CELL_KEPT, dtype, caps)
     elif variant == _FWD_SMALLK_MFMA:
         from rocke.core.arch import ArchTarget
 
@@ -2983,6 +3493,36 @@ def _identity(
     )
 
 
+def dgrad_transpose_rtc_caps(caps) -> DirectCaps:
+    """The caps the runtime-channel dgrad weight transpose of a ``caps.KH x
+    caps.KW`` filter is cached under: it bakes the filter alone (no padding,
+    stride, channel count or dilation)."""
+    return DirectCaps(
+        KH=caps.KH,
+        kw=0 if caps.KW == caps.KH else caps.KW,
+        PAD=0,
+        stride=0,
+        cpg=0,
+        kpg=0,
+    )
+
+
+def _dgrad_helper_caps(caps: DirectCaps) -> DirectCaps:
+    """The capabilities a dgrad helper is built with. Its identity zeroes the
+    padding and stride (its code does not read them), but the grid builds it
+    with those of the MFMA dgrad row that pulls it in -- the one row, baked or
+    runtime channels (cpg == kpg == 0), with its filter and channel counts."""
+    return next(
+        (
+            row
+            for variant in _MFMA_DGRAD
+            for row in DIRECT_CAPABILITIES[variant][1]
+            if (row.KH, row.cpg, row.kpg) == (caps.KH, caps.cpg, caps.kpg)
+        ),
+        caps,
+    )
+
+
 def _helper_identity(
     arch: str,
     wave_size: int,
@@ -3132,6 +3672,34 @@ def probe_problem(
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
+    if variant == _DGRAD_FLEX_MFMA:
+        base = probe_problem(caps, dtype, None, None)
+        if (knobs or {}).get("c_tail"):
+            # the reduction runs over dY's channels; a tail needs K % 64
+            base = replace(base, kpg=base.kpg + 8)
+        return replace(base, H=1) if (knobs or {}).get("h1") else base
+    if variant == _FWD_FLEX_MFMA and (knobs or {}).get("cs", 1) == 4:
+        # the in-block split needs an even chunk count per split-C piece
+        cpg = max(128 * knobs.get("split_c", 1), 256)
+        return replace(probe_problem(caps, dtype, None, None), cpg=cpg)
+    if variant == _FWD_FLEX_MFMA and (knobs or {}).get("k_tail"):
+        # an output channel count that is not a multiple of 8
+        base = probe_problem(caps, dtype, None, None)
+        return replace(base, cpg=max(64 * knobs.get("split_c", 1), 256), kpg=36)
+    if variant == _FWD_FLEX_MFMA and (knobs or {}).get("grp"):
+        # a grouped problem (two groups; 56 channels for a tail)
+        base = probe_problem(caps, dtype, None, None)
+        return replace(base, groups=2, cpg=56 if knobs.get("c_tail") else 64, kpg=64)
+    if variant == _FWD_FLEX_MFMA and (
+        (knobs or {}).get("split_c", 1) * 64 > 256
+        or (knobs or {}).get("c_tail")
+        or (knobs or {}).get("flat")
+    ):
+        # a split-C beyond 4 needs a chunk per piece; a channel tail a C
+        # that is not a multiple of 64.
+        sc = knobs.get("split_c", 1)
+        cpg = max(64 * sc, 256) + (8 if knobs.get("c_tail") or knobs.get("flat") else 0)
+        return replace(probe_problem(caps, dtype, None, None), cpg=cpg)
     if variant in (_FWD_SMALLC, _FWD_SMALLK, _FWD_SMALLC_MFMA, _FWD_SMALLK_MFMA):
         # Ungrouped, the small channel count baked; 128 of the runtime one
         # (a multiple of every channel block and chunk) on a 64x64 image.
@@ -3422,6 +3990,8 @@ def _caps_jobs(
     knob_probe = rtc_dgrad or variant in (
         "direct_wgrad_dw_cols",
         "direct_wgrad_dw_mfma",
+        _FWD_FLEX_MFMA,
+        _DGRAD_FLEX_MFMA,
     )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant, arch, dtype, caps):
@@ -3489,10 +4059,23 @@ def _caps_jobs(
                 )
             )
         if (
-            variant in ("direct_nongrouped", _FWD_FLEX_MFMA)
+            variant in ("direct_nongrouped", _FWD_FLEX_MFMA, _DGRAD_FLEX_MFMA)
             and knobs.get("split_c", 1) > 1
         ):
             cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
+        if variant == _DGRAD_FLEX_MFMA and not knobs.get("wt"):
+            # its filter transpose (the tiled form of dgrad via forward's)
+            tkn = {"tiled": True}
+            hcaps = dgrad_transpose_rtc_caps(caps)
+            cell.append(
+                _job(
+                    _helper_identity(
+                        arch, wave_size, _TRANSPOSE_RTC, hcaps, tkn, dtype
+                    ),
+                    _dgrad_helper_caps(hcaps),
+                    tkn,
+                )
+            )
         if variant in _MFMA_DGRAD:
             for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(
                 knobs, variant
@@ -3663,17 +4246,5 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")
     if identity.direction == "direct_dgrad_helper":
-        # A helper's identity zeroes the padding and stride (its code does
-        # not read them), but the grid builds it with the capabilities of the
-        # MFMA dgrad row that pulled it in -- the one row, baked or runtime
-        # channels (cpg == kpg == 0), with its filter and channel counts.
-        caps = next(
-            (
-                row
-                for variant in _MFMA_DGRAD
-                for row in DIRECT_CAPABILITIES[variant][1]
-                if (row.KH, row.cpg, row.kpg) == (caps.KH, caps.cpg, caps.kpg)
-            ),
-            caps,
-        )
+        caps = _dgrad_helper_caps(caps)
     return _job(identity, caps, knobs)
