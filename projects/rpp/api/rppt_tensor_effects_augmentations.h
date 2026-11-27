@@ -464,9 +464,11 @@ RppStatus rppt_erase(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstDescPtr destination tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0,
  * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr) \param [in]
- * rgbOffsets RGB offset values to use for the glitch augmentation (A single set of 3 Rppi point
- * values that applies to all images in the batch. For each point and for each image in the batch: 0
- * < point.x < width, 0 < point.y < height) \param [in] roiTensorPtrSrc ROI data in HIP memory (for
+ * rgbOffsets RGB offset values to use for the glitch augmentation, one set of 3 Rppi point
+ * values for each image in the batch (1D tensor in pinned / HIP memory (for HIP backend) or
+ * HOST memory (for HOST backend), rgbOffsets[n] holds the set for image n. For each point and
+ * for each image in the batch: 0 < point.x < width, 0 < point.y < height) \param [in]
+ * roiTensorPtrSrc ROI data in HIP memory (for
  * HIP backend) or HOST memory (for HOST backend) for each image in source tensor (2D tensor of size
  * batchSize * 4, in either format - XYWH(xy.x, xy.y, roiWidth, roiHeight) or LTRB(lt.x, lt.y, rb.x,
  * rb.y)) \param [in] roiType ROI type used (RpptRoiType::XYWH or RpptRoiType::LTRB) \param [in]
