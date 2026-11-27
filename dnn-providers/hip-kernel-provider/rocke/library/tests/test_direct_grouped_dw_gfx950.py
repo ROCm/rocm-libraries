@@ -339,6 +339,17 @@ def test_win_rows_are_valid_and_build(row, dtype):
     assert grid == spec.grid()
 
 
+@pytest.mark.parametrize("rid", ["f_dense_dma", "d_dense_dma"])
+def test_win_dma_ir_compiles_and_links(rid):
+    """The dense form's LDS DMAs are inline asm with a buffer descriptor
+    operand: the forward and the dgrad must give a module LLVM accepts."""
+    from rocke.tests.ir_validity import assert_kernel_target_accepts
+
+    spec = _win_spec(next(r for r in _WIN_ROWS if r[0] == rid), "fp16")
+    kernel = build_direct_depthwise_dgrad_windowed(spec, arch="gfx950")
+    assert_kernel_target_accepts(kernel, "gfx950")
+
+
 def test_win_kernel_names_are_unique():
     """The flags are all in the name, so no two rows share a symbol."""
     names = [
