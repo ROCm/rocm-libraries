@@ -30,6 +30,7 @@ SCALAR_ARG_FORMATS: Mapping[str, tuple[str, int, int]] = {
     "i32": ("i", 4, 4),
     "i64": ("q", 8, 8),
     "f32": ("f", 4, 4),
+    "f64": ("d", 8, 8),
 }
 
 
@@ -72,7 +73,7 @@ def pack_args(
     lands 4 bytes before its expected kernarg slot and the kernel
     reads garbage as the pointer, then segfaults on first access.
 
-    Supported types: ``ptr<..., global>``, ``i32``, ``i64``, ``f32``.
+    Supported types: ``ptr<..., global>``, ``i32``, ``i64``, ``f32``, ``f64``.
     """
     # The Python struct format is built with no implicit padding;
     # we insert explicit ``B`` bytes when alignment requires it.
@@ -90,7 +91,7 @@ def pack_args(
             arg_val: Any = device_pointer(v)
         elif ty in SCALAR_ARG_FORMATS:
             fmt_char, size, align = SCALAR_ARG_FORMATS[ty]
-            if ty == "f32":
+            if ty in ("f32", "f64"):
                 arg_val = float(v)
             elif ty == "i32":
                 arg_val = _as_i32_bits(int(v))
@@ -125,7 +126,7 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
     host work is smallest.
     """
     fmt_parts: List[str] = ["<"]
-    # plan: (name, kind) with kind in {"ptr", "f32", "i32", "int"} -- the
+    # plan: (name, kind) with kind in {"ptr", "float", "i32", "int"} -- the
     # only per-call work is reading values[name] and coercing by kind.
     plan: List[Tuple[str, str]] = []
     offset = 0
@@ -136,7 +137,10 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
             fmt_char, size, align, kind = "Q", 8, 8, "ptr"
         elif ty in SCALAR_ARG_FORMATS:
             fmt_char, size, align = SCALAR_ARG_FORMATS[ty]
-            kind = "f32" if ty == "f32" else ("i32" if ty == "i32" else "int")
+            if ty in ("f32", "f64"):
+                kind = "float"
+            else:
+                kind = "i32" if ty == "i32" else "int"
         else:
             raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
         pad = (-offset) % align
@@ -156,7 +160,7 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
             v = values[name]
             if kind == "ptr":
                 out.append(device_pointer(v))
-            elif kind == "f32":
+            elif kind == "float":
                 out.append(float(v))
             elif kind == "i32":
                 out.append(_as_i32_bits(int(v)))
@@ -204,6 +208,8 @@ def pack_args_kernelparams(
             out.append(ctypes.c_int64(int(v)))
         elif ty == "f32":
             out.append(ctypes.c_float(float(v)))
+        elif ty == "f64":
+            out.append(ctypes.c_double(float(v)))
         else:
             raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
     return out

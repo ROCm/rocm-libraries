@@ -207,8 +207,8 @@ def sig_param(name: str, dtype: str, addr_space: str = "global") -> dict:
 
 
 def sig_scalar(name: str, ty: str) -> dict:
-    """One scalar signature entry (``i32`` / ``i64`` / ``f32``)."""
-    if ty not in ("i32", "i64", "f32"):
+    """One scalar signature entry (``i32`` / ``i64`` / ``f32`` / ``f64``)."""
+    if ty not in ("i32", "i64", "f32", "f64"):
         raise ValueError(f"unsupported scalar arg type {ty!r}")
     return {"name": name, "type": ty}
 

@@ -729,6 +729,11 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_compliance_patterns.py" EXCLUDE)
 
     endblock()
+    # tests/helpers/test_elementary.py checks the stored f64 coefficient tables against their
+    # generator (it skips them where the generator or mpmath is missing): install the
+    # generator next to the test, where the relocated test tree looks for it.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_elementary_coefficients.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/helpers")
 
     # The top-level developer runner is not part of the standalone platform
     # component, but its command-plan regression tests run in the relocated
