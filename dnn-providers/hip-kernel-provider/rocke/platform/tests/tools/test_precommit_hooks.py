@@ -256,7 +256,9 @@ def test_every_file_a_rocke_hook_runs_exists(rocke_hooks):
     )
 
 
-@pytest.mark.parametrize("hook_id", ["rocke-on-deletion", "rocke-hook-checks"])
+@pytest.mark.parametrize(
+    "hook_id", ["rocke-pending-lanes", "rocke-on-deletion", "rocke-hook-checks"]
+)
 def test_a_wrapped_hook_says_skip_and_passes_where_rocke_is_not_checked_out(
     rocke_hooks, hook_id, tmp_path
 ):
@@ -274,3 +276,18 @@ def test_a_wrapped_hook_says_skip_and_passes_where_rocke_is_not_checked_out(
     )
     assert result.returncode == 0
     assert result.stdout == f"SKIP: {hook.args[0]} is not checked out\n"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # The shared CTest category parser the provider's categories go through.
+        "shared/ctest/parse_ctest_categories.py",
+        # The teams each registry record must name.
+        ".github/CODEOWNERS",
+        "dnn-providers/hip-kernel-provider/ROCKE_ENGINE_test_categories_external.yaml",
+    ],
+)
+def test_the_registry_hook_takes_the_files_it_reads_outside_rocke(rocke_hooks, path):
+    (hook,) = [hook for hook in rocke_hooks if hook.hook_id == "rocke-pending-lanes"]
+    assert hook.takes(path)
