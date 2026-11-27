@@ -34,7 +34,7 @@ you must destroy the current handle and create another rocSPARSE handle on a new
 If you want handle creation to be stream-ordered instead, use :ref:`rocsparse_handle_create_`,
 which binds the handle to a user-provided stream and enqueues all setup work on that stream
 without blocking the host. Handles created this way are destroyed with
-:ref:`rocsparse_handle_destroy_`, which also reports an optional error descriptor.
+:ref:`rocsparse_handle_destroy_`.
 Neither routine can be called during HIP graph stream capture.
 
 .. note::
