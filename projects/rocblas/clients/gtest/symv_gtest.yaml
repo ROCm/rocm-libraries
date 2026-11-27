@@ -107,6 +107,26 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_nan
 
+# alpha == 0, beta == 0 must zero y even when it holds NaN.
+# atomics_mode 1 reaches the double buffered kernels on gfx908 and gfx90a.
+- name: symv_NaN_double_buffered
+  category: quick
+  function:
+  - symv
+  - symv_batched
+  - symv_strided_batched
+  precision: *single_double_precisions
+  uplo: [ U, L ]
+  matrix_size:
+    - { N:  7, lda:  7 } # N % 32 != 0, generic kernel
+    - { N: 32, lda: 32 } # N % 32 == 0
+    - { N: 33, lda: 33 }
+  incx_incy: *incx_incy_range_small
+  alpha: [ 0.0 ]
+  beta: [ .NaN ] # NaN is converted to 0.0 in test code
+  batch_count: [ 2 ]
+  atomics_mode: [ 1 ]
+
 - name: symv_medium
   category: pre_checkin
   function: symv
