@@ -1,16 +1,23 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# CTest enrolment of the library test suites in the installed test tree.
+# CTest enrolment of the library test suites in the installed test tree, and of
+# one build-tree entry (see below).
 #
-# Included by platform/CMakeLists.txt (inside if(ROCKE_INSTALL_PYTHON_TESTS),
-# only when this library tree sits beside platform/), so a library test is
+# Included by platform/CMakeLists.txt (inside if(ROCKE_INSTALL_TESTS) and
+# if(ROCKE_INSTALL_PYTHON_TESTS), only when this library tree sits beside
+# platform/), so a library test is
 # enrolled -- or a new lane added -- by editing this file alone. Each entry is
 # appended to _ROCKE_INSTALLED_CTEST_ENTRIES in the including scope. The library
 # tree is staged under tests/library of the install, and every path below is
 # relative to the CTestTestfile, hence the ROCKE_TEST_CTEST_REL prefix.
 #
 # A test that is in library/tests but in no list here does not run in CI.
+#
+# One entry is registered for the build tree instead, with add_test(NAME ...): the
+# A/B harness driver tests below, which need the rocKE source tree. As this file
+# is read only inside those two options, a build tree with BUILD_TESTING on but
+# either option off does not register it.
 #
 # A pytest entry starts its command with ${_ROCKE_INSTALLED_PYTEST}, which
 # platform/CMakeLists.txt defines. The explicit gates do not. The configure
@@ -230,13 +237,25 @@ endif()
 # that pins the shared dense spec's C++ mirror to the Python, the
 # oracle-free uniform-probability checker and subject contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
-# packed-offset host checks (test_attention_dense_varlen_keys.py), the gfx950
-# dense varlen K/V buffer bound on the emitted IR, the tiled-2D spec validators'
-# refusals (their engine-comparison cases skip here, where rocke_engine is not
-# built), the gfx942 sliced-K ring's slice width and refusals
-# (test_attn_k_slice_hd.py), and the backward-test memo bound in tests/conftest.py.
+# packed-offset host checks (test_attention_dense_varlen_keys.py), the dense
+# K/V buffer bounds on the emitted IR (gfx950 varlen, and the slab bound of the
+# strided bodies of both archs), which dense bodies read their stride kernargs
+# (on the emitted IR), the dense launch-time stride admission and its
+# torch-free runner, the dense A/B harness (its statistics and speed bar, and
+# the driver's pure functions: the driver tests run it in a subprocess that
+# exports a rocKE source tree, so they skip in the installed tree with that
+# reason; rocke_library_attention_strided_ab_dryrun below runs them in a build
+# tree), the tiled-2D spec validators' refusals (their engine-comparison cases
+# skip here, where rocke_engine is not built), the gfx942 sliced-K ring's slice width
+# and refusals (test_attn_k_slice_hd.py), and the backward-test memo bound in
+# tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
+# Quick runs this entry unsplit on one CI shard, so its TIMEOUT holds the S2
+# headroom of TESTING.md 5.0.3 (at least twice the longest run) over the whole
+# run, timed on a loaded host with ctest -R '^rocke_library_attention_cpu_pytest$'.
+# The strided tests lengthen the run, and the longest run is the one from a source
+# tree: re-time both before lowering the limit.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_gemm.py"
     "tests/library/tests/test_attention_bwd_body.py"
@@ -251,8 +270,11 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
-    "tests/library/tests/test_attention_dense_gfx942_golden.py"
-    "tests/library/tests/test_attention_dense_varlen_keys.py"
+    "tests/library/tests/test_attention_dense_strided_admission.py"
+    "tests/library/tests/test_attention_dense_strided_runner.py"
+    "tests/library/tests/test_attention_dense_stride_reads.py"
+    "tests/library/tests/test_attention_ab_stats.py"
+    "tests/library/tests/test_attention_dense_strided_ab_dryrun.py"
     "tests/library/tests/test_attention_dense_varlen_keys.py"
     "tests/library/tests/test_attention_scalar_cache_key.py"
     "tests/library/tests/test_attention_spec_predicate_parity.py"
@@ -291,11 +313,13 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"
     "tests/library/tests/dispatch/attention/test_review_followups.py"
-    # One node id, not the file: the rest of test_attention_builds.py
+    # Node ids, not the file: the rest of test_attention_builds.py
     # disassembles HSACO, so it needs the compiler tools this lane does not
     # inject, and its budget sentinel turns a missing-tool skip into a
-    # failure. This test is pure host-side signature/params mirroring.
-    "tests/library/tests/test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params")
+    # failure. These tests are pure host side: signature/params mirroring,
+    # and which runtime kernargs the gfx942 dense bodies read in their IR.
+    "tests/library/tests/test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params"
+    "tests/library/tests/test_attention_builds.py::TestAttentionDenseGfx942RuntimeShapeCollision::test_runtime_shape_body_reads_every_kernarg")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -320,7 +344,28 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
        "  ENVIRONMENT \"\${_rocke_library_attention_cpu_pytest_environment}\"\n"
-       "  TIMEOUT 180)\n")
+       "  TIMEOUT 420)\n")
+
+# The A/B harness driver tests (test_attention_dense_strided_ab_dryrun.py) run the
+# driver in a subprocess that exports the rocKE source tree, which the installed
+# tree does not carry, so they skip in the CPU lane above. A build tree runs the
+# whole file from the source tree here; nothing installs this entry. A skip here
+# means the driver did not run, so the entry fails on one; -rs prints its reason.
+# The file runs in seconds, well inside its TIMEOUT, which stops a hung driver
+# subprocess long before the test's own 600 s subprocess limit.
+if(BUILD_TESTING)
+  add_test(
+    NAME rocke_library_attention_strided_ab_dryrun
+    COMMAND "${Python3_EXECUTABLE}" -m pytest
+            "${CMAKE_CURRENT_LIST_DIR}/test_attention_dense_strided_ab_dryrun.py" -v -rs)
+  set_tests_properties(
+    rocke_library_attention_strided_ab_dryrun
+    PROPERTIES
+      LABELS "ckc;python;host"
+      ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_LIST_DIR}/../../platform/python"
+      FAIL_REGULAR_EXPRESSION "[0-9]+ skipped"
+      TIMEOUT 120)
+endif()
 
 # The pure runner policy and the real subprocess/process-tree contracts run as
 # two entries, each with its own whole-entry budget.
@@ -620,6 +665,18 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  SKIP_RETURN_CODE 77\n"
+       "  TIMEOUT 1200)\n")
+
+# Strided dense attention numeric lane, gfx942 and gfx950 (torch-free, so it runs in
+# a GPU lane that has no torch). Its own entry, selected by name like the two above:
+# one test file with one launch matrix per body, and a GPU of the other arch (or none)
+# skips the device cases while the host cases still run.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_strided_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_strided_numeric.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_strided_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 1200)\n")
 
 # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950

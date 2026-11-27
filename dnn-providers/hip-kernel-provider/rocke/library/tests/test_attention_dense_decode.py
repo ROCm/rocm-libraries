@@ -19,8 +19,14 @@ the launched spec's baked mapping. The fake builder's comparisons return
 
 from __future__ import annotations
 
+import copy
 import dataclasses
+import importlib.util
 import itertools
+import json
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -217,6 +223,18 @@ def test_nonpersist_decode_reads_the_shape_from_the_runtime_params(name, window)
             assert got == want, (name, (Hq, Hkv, B, S), (bx, by, bz))
 
 
+def _exact_num_persistent(name, Hq, Hkv, B, S):
+    """The workgroup count a persist decode needs (the formulas of the gqa_pair
+    class docstrings, NQB = S // 256), written out here independently of the decode
+    classes; None for an order that fixes no single count (the grid-stride orders,
+    and hq_minor_swz, which needs a multiple of the XCD count)."""
+    nqb = S // 256
+    return {
+        "gqa_pair": nqb * Hkv * B,
+        "gqa_pair_2phase": nqb * Hq * B // 2,
+    }.get(name)
+
+
 def _persist_specs():
     """Every persist decode on every shape where it is legal, with and without
     causal masking, plus the interleave variant of qb_major."""
@@ -227,11 +245,8 @@ def _iter_persist_specs():
     for name in sorted(Gfx950AttentionDenseSpec.supported_persist_decodes() - {"auto"}):
         for shape, causal in itertools.product(_SHAPES, (True, False)):
             Hq, Hkv, B, S = shape
-            nqb = S // 256
-            num_persistent = {
-                "gqa_pair": nqb * Hkv * B,
-                "gqa_pair_2phase": nqb * Hq * B // 2,
-            }.get(name, 256)
+            exact = _exact_num_persistent(name, Hq, Hkv, B, S)
+            num_persistent = 256 if exact is None else exact
             for interleave in ((False, True) if name == "qb_major" else (False,)):
                 try:
                     spec = _spec(
@@ -271,6 +286,169 @@ def test_persist_decode_is_a_bijection(spec):
 def test_every_persist_decode_is_covered():
     covered = {p.values[0].persist_decode for p in _persist_specs()}
     assert covered == set(PERSIST_DECODES)
+
+
+@pytest.mark.parametrize("spec", _persist_specs())
+def test_required_num_persistent_is_the_count_check_asks_for(spec):
+    """gqa_pair and gqa_pair_2phase state the workgroup count their baked shape
+    needs (``_exact_num_persistent``); every other persist order fixes no single
+    count (None; hq_minor_swz only needs a multiple of the XCD count). ``check``
+    accepts the required count and, one workgroup off, names it and the count it
+    got."""
+    decode = PERSIST_DECODES[spec.persist_decode]
+    shape = (spec.num_query_heads, spec.num_kv_heads, spec.batch, spec.seqlen_q)
+    required = decode.required_num_persistent(spec)
+    assert required == _exact_num_persistent(spec.persist_decode, *shape)
+    assert decode.check(spec) is None
+    if required is None:
+        return
+    assert spec.num_persistent == required
+    off_by_one = copy.copy(spec)
+    object.__setattr__(off_by_one, "num_persistent", required + 1)
+    message = decode.check(off_by_one)
+    assert message is not None, "check accepted a count one workgroup off"
+    assert f"({required}), got {required + 1}" in message
+
+
+@pytest.mark.parametrize("causal", (True, False))
+@pytest.mark.parametrize("shape", _SHAPES, ids=lambda s: "x".join(map(str, s)))
+def test_required_num_persistent_depends_on_the_shape_only(causal, shape):
+    """The census generator asks a decode about a kernel's own spec, which has
+    another order and count: the answer is a formula of the shape, whether or not
+    the order is legal for it (gqa_pair on MHA)."""
+    spec = _spec(*shape, causal, persistent=True, num_persistent=256)
+    for name, decode in PERSIST_DECODES.items():
+        assert decode.required_num_persistent(spec) == _exact_num_persistent(
+            name, *shape
+        ), name
+
+
+_PROVIDER = Path(__file__).resolve().parents[3]
+_PACKS = _PROVIDER / "src" / "tests" / "engines" / "kernel_ingestor_engine" / "packs"
+_GENERATOR = _PACKS / "gen_attention_dense_served_set.py"
+_PAIR_FLIPS = {"persistent_gqa_pair", "persistent_gqa_pair_2phase"}
+
+
+def _require_generator():
+    """Skip where rocKE is not inside the provider's source tree (an installed test
+    tree); in a source checkout a missing generator is a failure, so moving it cannot
+    turn its tests into skips."""
+    if not (_PROVIDER / "src").is_dir():
+        pytest.skip("rocKE is not inside the hip-kernel-provider source tree")
+    assert _GENERATOR.is_file(), f"the census generator moved: {_GENERATOR}"
+
+
+def _load_generator():
+    """The provider's census generator, loaded by path."""
+    _require_generator()
+    spec = importlib.util.spec_from_file_location(
+        "gen_attention_dense_served_set_under_test", _GENERATOR
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _write_catalog(tmp_path, spec):
+    """A one-kernel gfx950 catalog (KDP) whose kernel has ``spec``."""
+    catalog = tmp_path / "gfx950_attention_dense.kdp.json"
+    descriptor = {"name": "k", "kernel_source": {"spec": dataclasses.asdict(spec)}}
+    catalog.write_text(json.dumps({"kernelDescriptors": [descriptor]}))
+    return catalog
+
+
+def _table_labels(table_text):
+    """The flip labels of the census rows in a generator's output."""
+    return {
+        row.split('"')[5] for row in table_text.splitlines() if row.startswith("    {")
+    }
+
+
+def test_census_generator_flips_every_persist_decode_the_spec_accepts():
+    """The orders come from the spec class's own accepted set (not from the registry
+    the generator reads), and each flip sets that order in the spec and in the KMD."""
+    gen = _load_generator()
+    accepted = Gfx950AttentionDenseSpec.supported_persist_decodes()
+    flips = {
+        label: flip
+        for label, flip in gen._FLIPS["gfx950"].items()
+        if label.startswith("persistent_") and label != "persistent_ragged"
+    }
+    assert set(flips) == {f"persistent_{decode}" for decode in accepted}
+    for decode in accepted:
+        spec_flips, kmd = flips[f"persistent_{decode}"]
+        assert spec_flips == {"persistent": True, "persist_decode": decode}
+        assert kmd == (("persistent", 1), ("persist_decode", decode))
+
+
+@pytest.mark.parametrize(
+    "heads, own_order, kept, dropped",
+    [
+        pytest.param((8, 2), "auto", _PAIR_FLIPS, set(), id="gqa4"),
+        # A default-grid kernel that names a pair order: its ``persistent`` flip ends
+        # on that order too, so it needs the decode's count as well.
+        pytest.param(
+            (8, 2),
+            "gqa_pair",
+            _PAIR_FLIPS | {"persistent"},
+            set(),
+            id="gqa4-names-gqa_pair",
+        ),
+        pytest.param(
+            (8, 2),
+            "gqa_pair_2phase",
+            _PAIR_FLIPS | {"persistent"},
+            set(),
+            id="gqa4-names-gqa_pair_2phase",
+        ),
+        # MHA: the pair orders are illegal whatever the count, so those flips are left
+        # out, and an order that takes any count stays.
+        pytest.param((8, 8), "auto", {"persistent_qb_major"}, _PAIR_FLIPS, id="mha"),
+    ],
+)
+def test_census_generator_gives_a_gqa_pair_flip_the_count_its_decode_requires(
+    heads, own_order, kept, dropped, tmp_path, monkeypatch, capsys
+):
+    """The kernel's own count (256) is not the one gqa_pair needs for its shape, yet
+    every flip that ends on a pair order is in the table: the count comes from the
+    decode. Flips rocKE's spec rejects are left out."""
+    gen = _load_generator()
+    spec = _spec(*heads, 1, 512, True, persist_decode=own_order)  # two blocks of 256
+    catalog = _write_catalog(tmp_path, spec)
+    monkeypatch.setattr(sys, "argv", ["gen", f"gfx950={catalog}"])
+    gen.main()
+    labels = _table_labels(capsys.readouterr().out)
+    assert kept <= labels
+    assert not dropped & labels
+
+
+def test_build_driver_runs_the_census_generator_with_the_decode_count(tmp_path):
+    """The build's own route (kernel_ingestor_engine/CMakeLists.txt): the table driver
+    runs the generator under ``python -I`` after putting rocKE's trees on ``sys.path``
+    itself, and lists the rocKE modules the generator imported in the depfile, so a
+    change to the decode formulas regenerates the table."""
+    _require_generator()
+    catalog = _write_catalog(tmp_path, _spec(8, 2, 1, 512, True))  # GQA 4
+    table, depfile = tmp_path / "table.inc", tmp_path / "table.inc.d"
+    run = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(_PACKS / "gen_gfx942_attention_unified_3d_table.py"),
+            str(_GENERATOR),
+            "--out",
+            str(table),
+            "--depfile",
+            str(depfile),
+            f"--generator-arg=gfx950={catalog}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert _PAIR_FLIPS <= _table_labels(table.read_text())
+    assert "attention_dense_decode.py" in depfile.read_text()
 
 
 def test_bt_hkv_minor_follows_its_documented_order():

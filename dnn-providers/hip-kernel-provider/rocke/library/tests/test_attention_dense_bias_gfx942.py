@@ -35,6 +35,7 @@ from _dense_bias_common import (
     band_kwargs,
     reference,
 )
+from kernels.common._attention_dense_strides import DENSE_STRIDE_NAMES
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx942.attention_dense import (
     _BIAS_FLOOR,
@@ -44,6 +45,7 @@ from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
     _use_bias_x4,
     attention_dense_signature,
+    body_serves_strides,
     build_attention_dense,
     run_attention_dense_torch,
     supports_attention_dense,
@@ -178,16 +180,29 @@ def test_every_mode_is_served_with_and_without_bias(mode):
 @pytest.mark.parametrize("mode", list(_MODES))
 def test_kernel_params_match_the_launcher_signature(mode):
     """KernelLauncher packs kernargs by position, so the builder's params and
-    attention_dense_signature must name the same list, the four bias params last
-    (after the fast-division pairs, the sink pointer and the LSE pointer)."""
+    attention_dense_signature must name the same list, the four bias params before the
+    twelve strides (after the fast-division pairs, the sink pointer and the LSE
+    pointer)."""
     spec = _bias(_MODES[mode])
     params = [p.name for p in build_attention_dense(spec).params]
     assert params == [a["name"] for a in attention_dense_signature(spec)]
-    assert params[-4:] == _BIAS_PARAMS
+    # The four bias params come before the twelve launch-time strides, which stay last.
+    assert params[-16:-12] == _BIAS_PARAMS
+    assert tuple(params[-12:]) == DENSE_STRIDE_NAMES
     plain = _without_bias(spec)
     plain_params = [p.name for p in build_attention_dense(plain).params]
-    assert plain_params == params[:-4]
+    assert plain_params == params[:-16] + params[-12:]
     assert plain_params == [a["name"] for a in attention_dense_signature(plain)]
+
+
+@pytest.mark.parametrize("mode", list(_MODES))
+def test_a_bias_body_takes_packed_tensors_only(mode):
+    """The bias reads are written against packed Q/K/V/O, so a bias body ignores its
+    12 stride kernargs and the runner admits packed tensors only. The same mode
+    without the bias reads them: the bias alone turns the strides off."""
+    spec = _bias(_MODES[mode])
+    assert body_serves_strides(spec) is False
+    assert body_serves_strides(_without_bias(spec)) is True
 
 
 # --------------------------------------------------------------------------- #

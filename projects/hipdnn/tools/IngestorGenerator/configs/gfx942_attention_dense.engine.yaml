@@ -24,7 +24,7 @@
 # object (emit_lse=False emits no new IR).
 #
 # use_additive_bias is a compile-time variant too: the kernel adds an fp32 attn_mask,
-# read through one more pointer and three runtime strides (dispatch.v2). It is a cell
+# read through one more pointer and three runtime strides (dispatch.v4). It is a cell
 # axis (use_attn_bias), a KMD field and a name token (_addb, set by enumerate.feature_fields
 # so no plain kernel's name, spec or code object changes), and its cells sweep the tile only.
 #
@@ -465,27 +465,55 @@ launch_surface:
       window, so a bias graph with a window passes graph_match and then matches no kernel.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
+  # Which candidates may serve a graph whose operands are not packed BSHD. `use_additive_bias`
+  # is listed for the bias part of the rule, which both arches share in AttentionDenseNative.cpp
+  # (AttentionDenseArch::readsStrides, through this arch's candidateAddsBias hook).
+  - name: layout
+    python_source: kernels/gfx942/attention_dense.py:body_serves_strides
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [ragged, lds_num_buffers, v_reg_prefetch, use_additive_bias]
+    guard: >
+      AttentionDenseArch::readsStrides() (AttentionDenseNative.cpp) restates rocKE's
+      body_serves_strides and is what kernelMatches(), prepare() and the census ask.
+      Its bias part is shared by both arches: a record that adds a bias
+      (use_additive_bias 1) reads no strides (BIAS_BODIES_READ_STRIDES is false), nor
+      does one whose bias field is malformed; an absent use_additive_bias is the KMD
+      default 0. Every other record goes to this arch's candidateReadsStrides(): it
+      reads the strides when it is not ragged, has one K buffer (lds_num_buffers 1)
+      and no next-tile V prefetch (v_reg_prefetch 0); an absent or mistyped field
+      answers false. A graph whose operands are not packed BSHD matches only a
+      candidate that reads them, after graphMatches() has run the host stride
+      predicate (denseStridesAdmit) on Q, K, V and O at the loosest tile and
+      kernelMatches() has asked again at the candidate's own block_n; graphMatches()
+      declines such a graph outright when it has an attn_mask (cause attn_mask),
+      since no bias body reads the strides.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseCatalogTiles.cpp
+
   - name: kernargs
     python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
     kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode, use_additive_bias]
     guard: >
-      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse), the ABI of gfx942's plain
-      launch contract (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg
+      kernelSignature(RUNTIME_STRIDES, grid, writesLse), the ABI of gfx942's strided
+      launch contract (hipkernel.gfx942_attention_dense.dispatch.v3), is the 10-arg
       form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) on
       every non-persistent grid; on the persistent grid a <d>_magic, <d>_shift i32 pair
-      per fast-division divisor of persist_decode follows, in the decode's own order
-      (14 or 16 args); an emit_lse=1 kernel takes lse_ptr last (offset 56, 72 or 80),
-      chosen by whether the graph binds a stats output. use_sinks=False everywhere.
+      per fast-division divisor of persist_decode follows, in the decode's own order;
+      an emit_lse=1 kernel then takes lse_ptr (offset 56, 72 or 80), chosen by whether
+      the graph binds a stats output; and the twelve i32 stride_{q,k,v,o}_{batch,head,token}
+      come last (22 to 29 args). The same lists without the strides
+      (RUNTIME_HEAD_COUNTS) restore plans saved under dispatch.v1. use_sinks=False everywhere.
       Validated at prepare() time by buildIngestorKernelCode(..., expectedSignature),
       and at restore by restoreIngestorLaunch() before any saved value is read; the
       restore selects the form from the saved stats.uid, grid_order and persist_decode
       first. launch() packs its argument addresses in the same order and throws if their
       count is not the signature's. A use_additive_bias=1 candidate takes the
-      RUNTIME_HEAD_COUNTS_WITH_BIAS form of the dispatch.v2 contract: the same list with
-      additive_bias_ptr and its batch/head/sq strides appended last, after lse_ptr, so the
-      bias candidate has 14 arguments on the grid (15 with lse_ptr) and the catalog ships
-      no persistent bias kernel.
+      RUNTIME_STRIDES_WITH_BIAS form of the dispatch.v4 contract: the same list with
+      additive_bias_ptr and its batch/head/sq strides after lse_ptr, before the twelve
+      strides, so the bias candidate has 26 arguments on the grid (27 with lse_ptr) and the
+      catalog ships no persistent bias kernel; its body addresses packed Q/K/V/O and ignores
+      the strides. The RUNTIME_HEAD_COUNTS_WITH_BIAS form (14 or 15 arguments) restores plans
+      saved with a bias under dispatch.v2.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
 
   # The gfx942 arch descriptor's additive-bias hook: the shared pack reads use_additive_bias

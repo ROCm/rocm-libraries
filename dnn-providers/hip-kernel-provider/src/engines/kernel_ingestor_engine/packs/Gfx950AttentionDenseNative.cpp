@@ -4,13 +4,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
-#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
@@ -34,11 +32,13 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
  * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
- * tiles with their LDS budget, no sliding window, and the v1 (8-argument) and v2
- * (10-argument) launch contracts. A kernel built with an additive bias (the
- * use_additive_bias KMD field) takes the v3 contract, which adds the bias pointer and its
- * strides: 14 arguments. No head count is compared: the kernel reads both as kernargs
- * taken from the graph.
+ * tiles with their LDS budget, no sliding window, and the launch contracts: the strided one
+ * (22 arguments, 26 for a kernel built with an additive bias) the catalog dispatches through,
+ * and the legacy v1 (8-argument), v2 (10-argument) and v3 (14-argument, with a bias) ones
+ * older plans restore through. A kernel built with an additive bias (the use_additive_bias
+ * KMD field) adds the bias pointer and its strides before the twelve; its body addresses
+ * packed Q/K/V/O and ignores the strides. No head count is compared: the kernel reads both
+ * as kernargs taken from the graph.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -53,6 +53,78 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_de
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
+
+// The KMD fields the stride rule below reads besides attention_dense::RAGGED_FIELD. The KMD does
+// not declare `persistent` or `persist_decode` (no catalog kernel is persistent), so a record that
+// has neither is the grid body.
+constexpr std::string_view PERSISTENT_FIELD = "persistent";
+constexpr std::string_view PERSIST_DECODE_FIELD = "persist_decode";
+/// The decode a persistent record that names none, or `auto`, resolves to one of rocKE's runtime
+/// decodes (`auto` never picks a gqa_pair order).
+constexpr std::string_view AUTO_PERSIST_DECODE = "auto";
+
+/**
+ * @brief Whether a candidate's body, taken as one without an additive bias, addresses Q, K, V
+ *        and O through the twelve stride arguments.
+ *
+ * rocKE's `_reads_dense_strides` (kernels/gfx950/attention_dense.py), restated: the grid body (one
+ * workgroup per query block) and its KV-segment form read them, and so does the persistent body
+ * in every work order that decodes through the shape parameters (`runtime_shape`: qb_major,
+ * hkv_major, bt_hkv_minor, hq_minor_swz, auto) and its wide-DMA form. The gqa_pair and
+ * gqa_pair_2phase orders (their workgroup count is a formula of the baked shape) and ragged,
+ * varlen and paged specs keep packed addressing and ignore them. So do the additive-bias bodies,
+ * but this rule does not read use_additive_bias: for a bias record it answers as for the body
+ * without the bias, which may be true. AttentionDenseArch::readsStrides, its only caller, answers
+ * for the bias bodies before it asks this rule.
+ *
+ * The KMD carries `ragged` and, once a persistent kernel ships, `persistent` and `persist_decode`;
+ * a record that names neither is the grid body, and a field that is present and malformed is not
+ * assumed to read the strides, so such a record still matches packed graphs and never a strided
+ * one. Not representable here, and why that is safe: varlen and paged kernels take more arguments
+ * than the 22 this catalog's contract launches, so the signature census and prepare() refuse them
+ * first; rocKE's `runtime_shape` also excludes a persistent kernel with a moving bottom-right
+ * diagonal (causal_bottom_right at seqlen_q != seqlen_kv), which has no KMD field (the graph match
+ * declines such graphs), and the census fails the day a shipped kernel of that class makes the
+ * two disagree.
+ *
+ * This and AttentionDenseArch::readsStrides are the one place the served set lives; a change to
+ * it is this function and its tests. The census compares readsStrides with rocKE's own
+ * `body_serves_strides` on every shipped kernel and on one flip of each body class
+ * (TestGfx950AttentionDenseCatalogTiles.cpp), so a change to either side that makes them disagree
+ * fails there: serving a body that does not read its strides is a silent wrong result.
+ */
+bool candidateReadsStrides(const KernelDefinition& kernel)
+{
+    if(attention_dense::integerMetadata(kernel, attention_dense::RAGGED_FIELD) != 0)
+    {
+        return false;
+    }
+    // `persistent` and `persist_decode` are optional fields (the declining accessors are for the
+    // required ones), so they are read with find and get_if: absent is the grid body, malformed
+    // is not assumed to read the strides.
+    const auto persistentField = kernel.metadata.find(std::string(PERSISTENT_FIELD));
+    if(persistentField == kernel.metadata.end())
+    {
+        return true;
+    }
+    const auto* persistent = std::get_if<int64_t>(&persistentField->second);
+    if(persistent == nullptr)
+    {
+        return false;
+    }
+    if(*persistent != 1)
+    {
+        return *persistent == 0;
+    }
+    const auto decodeField = kernel.metadata.find(std::string(PERSIST_DECODE_FIELD));
+    if(decodeField == kernel.metadata.end())
+    {
+        return true;
+    }
+    const auto* decode = std::get_if<std::string>(&decodeField->second);
+    return decode != nullptr
+           && (*decode == AUTO_PERSIST_DECODE || attention_dense::parsePersistDecode(*decode));
+}
 
 attention_dense::AttentionDenseGeometry gfx950Geometry(int64_t blockM,
                                                        int64_t seqLenQ,
@@ -92,20 +164,21 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.servesWindows = false;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
+    // The grid and persistent bodies read the strides; the gqa_pair orders, the ragged body
+    // and the bias bodies address packed storage and ignore them.
+    arch.candidateReadsStrides = &candidateReadsStrides;
     arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
-    arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
-                            attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
-    arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
-                           attention_dense::AttentionDenseAbi::BAKED_HEAD_COUNTS};
-    arch.biasContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
-                         attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    // A bias kernel takes the strided arguments and the bias's before the strides, so its
+    // plans are saved under their own name; the current handler serves both.
+    arch.setContracts(GFX950_ATTENTION_DENSE_CONTRACTS);
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX950_ARCH = gfx950Arch();
 static_assert(GFX950_ARCH.isConsistent(),
-              "gfx950Arch(): a served feature's token is unspelled, or the bias hook and the bias "
-              "contract do not come together (their tokens, name and kernel-argument form)");
+              "gfx950Arch(): the descriptor is not coherent (AttentionDenseArch::isConsistent "
+              "names each rule: the stride rule, the contracts' names and kernel-argument forms, "
+              "and the tokens of a served feature)");
 
 std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -257,11 +330,9 @@ double scoreKernel(const MatchContext& context,
 
 } // namespace
 
-MetadataValues gfx950AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
-                                                const AttentionDenseProblem& problem,
-                                                int64_t blockM)
+const attention_dense::AttentionDenseArch& gfx950AttentionDenseArch()
 {
-    return attention_dense::launchValues(binding, problem, blockM, GFX950_ARCH);
+    return GFX950_ARCH;
 }
 
 Gfx950AttentionDenseLaunchInputs
@@ -284,17 +355,15 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for the current (v2, which also serves v3) or the legacy
-/// (v1) contract, process-lifetime. Both share one module cache and loader.
-const IKernelDispatchHandler<Handle>& gfx950AttentionDenseDispatchHandler(bool legacy)
+/// This engine's dispatch handlers, one per handler-owning row of
+/// GFX950_ATTENTION_DENSE_CONTRACTS, process-lifetime. All share one module cache and loader.
+const attention_dense::AttentionDenseDispatchHandlers& gfx950AttentionDenseDispatchHandlers()
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
         gfx950AttentionDenseKpackModuleCache());
-    static const auto s_v1 = attention_dense::makeDispatchHandler(
-        s_kpackLoader, GFX950_ARCH, GFX950_ARCH.legacyContract);
-    static const auto s_v2 = attention_dense::makeDispatchHandler(
-        s_kpackLoader, GFX950_ARCH, GFX950_ARCH.currentContract);
-    return legacy ? *s_v1 : *s_v2;
+    static const attention_dense::AttentionDenseDispatchHandlers s_handlers(s_kpackLoader,
+                                                                            GFX950_ARCH);
+    return s_handlers;
 }
 
 } // namespace
@@ -304,16 +373,11 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog: plain kernels take v2 and bias
-    // kernels v3, both served (and saved under) by the current handler.
-    scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
-    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
-              &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
-    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
-              &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
-    // Kept so plans saved under v1 still load and launch their 8-argument code object.
-    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
-              &gfx950AttentionDenseDispatchHandler(/*legacy=*/true));
+    // The UDD's unversioned name dispatches the catalog, all of which takes the strides:
+    // plain kernels the strided contract and bias kernels the strided bias contract, both
+    // served (and saved under) by the current handler. The legacy rows keep plans saved under
+    // v3, v2 and v1 loading and launching their 14-, 10- and 8-argument code objects.
+    gfx950AttentionDenseDispatchHandlers().registerWith(scope, DISPATCH_SYMBOL);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

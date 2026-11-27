@@ -100,13 +100,39 @@ Each executable candidate expands into many concrete specs through its
 `sweep_space` / `sample_space`; how that space is built is the next section.
 Production `algorithm="auto"` selection never sees the opt-in candidates, with
 one exception: on gfx942 and gfx950 an unpinned request that declares
-contiguous tensors (`layout="dense"`) and has more than one query row is
+dense tensors (`layout="dense"`) and has more than one query row is
 pinned to the arch's dense kernel at its default spec (the gfx950 body --
 grid, persistent, or persistent with wide DMA -- comes from
 `gfx950_dense.dense_auto_order`). A single-row `layout="dense"` request goes
-to `attention_strided_decode`, which reads the contiguous K/V as a strided view
+to `attention_strided_decode`, which reads K/V as a strided view
 and takes the dense tensor ABI (`q`/`k`/`v`/`out`, BSHD or BHSD). Paged or
 unspecified layouts keep the unified route.
+
+The dense kernels take the Q/K/V/O strides at launch: twelve trailing `i32`
+kernel arguments (a batch, head and token element stride per tensor; the
+head-dim stride is 1). The request carries no stride field and the pinned
+spec does not change. The binding (`bind_dense_attention_torch`) hands the
+tensor views, in logical `[B, S, H, D]` order, to `run_attention_dense_torch`,
+which reads their strides and launches only what
+`kernels.common._attention_dense_strides.admit_dense_launch_strides` accepts
+(its stride check is `dense_strides_admit`), so a BHSD buffer viewed as
+`[B, S, H, D]`, a batch slice or a packed QKV view launches without a copy. A
+view with a head-dim stride other than 1, a stride that is not a multiple of 8
+elements or a base that is not 16-byte aligned (among the other reasons in
+`DENSE_STRIDE_REASONS`) raises `ValueError` with the decline reason. The
+alignment is that of the real address, also for a raw address or an object
+with only `data_ptr()` or `ptr()`. A view that has `stride()` is judged packed
+by its strides (extent-1 axes ignored), not by `is_contiguous()`; a view with
+no `stride()` that says it is not contiguous is refused, because its layout
+cannot be read. An O whose bytes meet those of Q, K or V also raises
+`ValueError`: the kernel writes O while other workgroups still read the inputs,
+so an O cut out of a fused QKV buffer would give a wrong result. The bodies
+that keep packed `[B, S, H, D]` addressing take the same twelve arguments but
+do not read them (`body_serves_strides` is False), and the runner admits packed
+tensors only for them: on gfx950 the `gqa_pair` orders, the fp8 K/V-cache
+bodies, ragged, varlen and paged specs; on gfx942 the `v_reg_prefetch=1` and
+`lds_num_buffers=2` pipelines and paged specs; and the additive-bias bodies on
+both (a request with `use_attn_bias=True` needs packed Q, K, V and O).
 
 ## Tuning knob space
 

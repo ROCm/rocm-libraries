@@ -377,7 +377,7 @@ def priority_ranker(
     return candidates
 
 
-# Per-arch dense candidate order for unpinned contiguous-layout requests.
+# Per-arch dense candidate order for unpinned dense-layout requests.
 _DENSE_AUTO_ORDER = {
     # One candidate whose default spec already picks its body.
     "gfx942": lambda req: (gfx942_dense.CANDIDATE_NAME,),
@@ -389,9 +389,10 @@ def _dense_auto_pin(req: AttentionRequest) -> Optional[AttentionRequest]:
     """Pin an unpinned ``layout='dense'`` request with more than one query row
     to the first dense candidate of its arch's order that admits it.
 
-    Contiguous tensors are the only layout the dense kernels read, so a paged
-    (or unspecified) layout never reaches them. Single-row (decode) requests
-    go to the strided split-KV decode kernel, which reads contiguous K/V as a
+    The dense kernels read ``[B, S, H, D]`` tensors (any strides the runner
+    admits, see :func:`kernels.common._attention_dense_strides.dense_strides_admit`),
+    so a paged (or unspecified) layout never reaches them. Single-row (decode)
+    requests go to the strided split-KV decode kernel, which reads K/V as a
     strided view.
     """
     if any(
@@ -421,7 +422,7 @@ def dispatch_attention(
     Unpinned (``algorithm`` / ``spec_id`` left at ``auto``) it returns the
     unified 2D-tiled or 3D split-KV path, a pure function of the problem whose
     CTA geometry the instance builder resolves (see :mod:`.common`). The one
-    exception is a request for contiguous tensors (``layout='dense'``): with
+    exception is a request for dense tensors (``layout='dense'``): with
     more than one query row on an arch with a dense kernel it gets that
     kernel's default spec (see :func:`_dense_auto_pin`), and with one query
     row on gfx942/gfx950 the strided split-KV decode kernel. Otherwise a tuned

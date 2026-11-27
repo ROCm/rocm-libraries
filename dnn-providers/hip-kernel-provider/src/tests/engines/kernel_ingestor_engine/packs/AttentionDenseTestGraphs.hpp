@@ -15,6 +15,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -33,6 +34,8 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
@@ -101,6 +104,9 @@ struct OperandSpec
     /// the matcher's per-operand clauses exist to catch.
     SdpaLayout layout = SdpaLayout::BSHD;
     std::optional<data_objects::DataType> dataType;
+    /// The byte alignment the tensor declares for its device pointer; unset, the schema's
+    /// default of 16.
+    std::optional<int64_t> alignment;
 };
 
 /// A tensor beside Q, K, V and O: the stats output, or one the node does not name.
@@ -329,7 +335,9 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
             spec.passByValueUid == uid,
             spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
                                   : ::flatbuffers::Optional<int64_t>(),
-            spec.alignmentUid == uid ? spec.alignmentBytes : DEFAULT_ALIGNMENT_BYTES));
+            spec.alignmentUid == uid
+                ? spec.alignmentBytes
+                : spec.operands.at(slot).alignment.value_or(DEFAULT_ALIGNMENT_BYTES)));
     }
 
     const auto addTensor = [&](const TensorSpec& tensor) {
@@ -677,8 +685,10 @@ inline constexpr uint32_t POINTER_BYTES = 8;
 
 inline constexpr uint32_t SCALAR_BYTES = 4;
 
-/// The argument list attention_dense_signature declares, under the names it gives them.
-inline std::vector<KernelArgument> pythonAbi()
+/// The ten arguments attention_dense_signature declares before any optional group: the four
+/// pointers, scale and the five shape values. Every kernel built before the strides took
+/// exactly these.
+inline std::vector<KernelArgument> pythonShapeAbi()
 {
     return {KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "q_ptr"},
             KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "k_ptr"},
@@ -692,16 +702,56 @@ inline std::vector<KernelArgument> pythonAbi()
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
-/// The emit_lse form: the same ten arguments, then lse_ptr, the FP32 stats output.
-inline std::vector<KernelArgument> pythonLseAbi()
+/// The twelve i32 strides attention_dense_signature declares last of all: for Q, K, V and O
+/// in turn, the batch, head and token stride. Spelled out rather than taken from the pack's
+/// DENSE_STRIDE_NAMES, so a rename or reorder on one side fails here.
+inline std::vector<KernelArgument> pythonStrideAbi()
 {
-    auto signature = pythonAbi();
+    std::vector<KernelArgument> strides;
+    for(const char* tensor : {"q", "k", "v", "o"})
+    {
+        for(const char* axis : {"batch", "head", "token"})
+        {
+            strides.push_back(KernelArgument{
+                BY_VALUE_KIND, SCALAR_BYTES, 0, std::string("stride_") + tensor + "_" + axis});
+        }
+    }
+    return strides;
+}
+
+/// @p signature with the twelve strides appended, the way the builder declares them last.
+inline std::vector<KernelArgument> withStrides(std::vector<KernelArgument> signature)
+{
+    const auto strides = pythonStrideAbi();
+    signature.insert(signature.end(), strides.begin(), strides.end());
+    return signature;
+}
+
+/// The argument list attention_dense_signature declares, under the names it gives them: the
+/// ten shape arguments, then the twelve strides.
+inline std::vector<KernelArgument> pythonAbi()
+{
+    return withStrides(pythonShapeAbi());
+}
+
+/// The ten shape arguments then lse_ptr, the FP32 stats output: the emit_lse form before
+/// anything is appended after it.
+inline std::vector<KernelArgument> pythonLseShapeAbi()
+{
+    auto signature = pythonShapeAbi();
     signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
     return signature;
 }
 
+/// The emit_lse form: the same ten arguments, then lse_ptr, the FP32 stats output, then the
+/// twelve strides.
+inline std::vector<KernelArgument> pythonLseAbi()
+{
+    return withStrides(pythonLseShapeAbi());
+}
+
 /// @p signature with the four arguments kernels/common/_attention_additive_bias.py appends
-/// to a use_additive_bias kernel, last.
+/// to a use_additive_bias kernel. They come before the twelve strides, which stay last.
 inline std::vector<KernelArgument> withBiasTail(std::vector<KernelArgument> signature)
 {
     signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "additive_bias_ptr"});
@@ -713,17 +763,19 @@ inline std::vector<KernelArgument> withBiasTail(std::vector<KernelArgument> sign
     return signature;
 }
 
-/// The use_additive_bias form: the ten arguments, then the four of the bias tail.
+/// The use_additive_bias form: the ten arguments, the four of the bias tail, then the twelve
+/// strides. A bias kernel's body addresses packed tensors, but it declares the strides all the
+/// same, so one argument list serves the plain and the bias kernels.
 inline std::vector<KernelArgument> pythonBiasAbi()
 {
-    return withBiasTail(pythonAbi());
+    return withStrides(withBiasTail(pythonShapeAbi()));
 }
 
-/// The emit_lse form of a bias kernel (gfx942): the ten arguments, lse_ptr, then the bias
-/// tail, which comes after everything else.
+/// The emit_lse form of a bias kernel (gfx942): the ten arguments, lse_ptr, the bias tail,
+/// then the twelve strides.
 inline std::vector<KernelArgument> pythonLseBiasAbi()
 {
-    return withBiasTail(pythonLseAbi());
+    return withStrides(withBiasTail(pythonLseShapeAbi()));
 }
 
 /// A KPACK descriptor for @p arch's engine recording @p signature, carrying the completed
@@ -762,6 +814,16 @@ inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>*
     registerNativeIngestorSymbols();
     return hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
         std::string(arch.dispatchSymbol));
+}
+
+/// The launch state prepare() builds for @p kernel over @p graph (attention_dense::resolveLaunch
+/// of @p graph's arch): the bindings, the canonical strides, the tile and the grid, which no
+/// code archive is needed to read. Throws what prepare() throws.
+inline AttentionDenseLaunchInputs
+    resolveLaunchOf(const Graph& graph, const BoundTokens& bound, const KernelDefinition& kernel)
+{
+    return attention_dense::resolveLaunch(
+        graph.context(), bound, kernel, graph.arch().engineArch());
 }
 
 /// The message prepare() throws for @p bound and @p kernel over @p graph, or empty if it

@@ -126,7 +126,7 @@ A list of IR operations. Kernel body and structured control-flow bodies are regi
 
 ## Runtime Param Field
 
-A spec field the kernel body reads as a runtime kernel argument instead of baking into the body, declared by overriding `runtime_param_fields` on the spec that owns the body. The launcher cache key excludes exactly those fields, so one compiled binary serves every value of them — this is what collapses the AOT batch x seqlen instance explosion. Declaring a field the body still bakes is a cache collision. Currently only the gfx950 aligned dense attention path opts in, with `("batch", "seqlen_q", "seqlen_kv")`. See [instances/attention.md](../instances/attention.md#runtime-param-fields).
+A spec field the kernel body reads as a runtime kernel argument instead of baking into the body, declared by overriding `runtime_param_fields` on the spec that owns the body. The launcher cache key excludes exactly those fields, so one compiled binary serves every value of them — this is what collapses the AOT batch x seqlen instance explosion. Declaring a field the body still bakes is a cache collision. Currently the gfx942 and gfx950 dense attention kernels opt in on their runtime-shape path, with `("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")`. See [instances/attention.md](../instances/attention.md#runtime-param-fields).
 
 ## SmemType
 

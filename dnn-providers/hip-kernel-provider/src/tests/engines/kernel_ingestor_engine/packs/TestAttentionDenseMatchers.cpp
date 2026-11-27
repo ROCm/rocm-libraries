@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -219,6 +220,12 @@ TEST_P(TestAttentionDenseMatch, ServesOnlyASingleKvSegment)
 // =============================================================================
 // 32-bit addressing. K/V is bounded in bytes, Q/O in elements; O must have Q's dims, so
 // the Q bound is the O bound. One head, so the sequence length carries the whole count.
+//
+// Beside the whole-tensor bound the stride predicate holds each slab to the kernel's own
+// offsets: Q and O to fewer than 2^31 elements, K and V to a reach below 2^31 bytes that
+// counts the two tiles of slack a load may run past the data. The graph match asks with the
+// loosest tile (one row), so it declines the graphs no tile could serve; each candidate asks
+// again with its own block_n.
 // =============================================================================
 
 TEST_P(TestAttentionDenseMatch, QueryElementBoundAdmitsTheLastGraphUnderIt)
@@ -243,7 +250,10 @@ TEST_P(TestAttentionDenseMatch, QueryElementBoundAdmitsTheLastGraphUnderIt)
 TEST_P(TestAttentionDenseMatch, KeyValueByteBoundAdmitsTheLastGraphUnderIt)
 {
     // Two bytes an element, so the bound falls at half the Q/O sequence length: that pins
-    // the bytes factor.
+    // the bytes factor. A load may run two rows past the data even at the loosest tile, so
+    // the last admitted length is two rows short of the whole-tensor bound: its reach is
+    // exactly 2^31 bytes, and its last element starts at 2^31 - 2. One row longer, the whole
+    // tensor is still under 2^31 bytes and the slab rule alone declines it.
     for(const int64_t headSize : {int64_t{64}, int64_t{128}})
     {
         SCOPED_TRACE("head_size " + std::to_string(headSize));
@@ -253,8 +263,12 @@ TEST_P(TestAttentionDenseMatch, KeyValueByteBoundAdmitsTheLastGraphUnderIt)
         spec.numKvHeads = 1;
         spec.headSize = headSize;
 
+        spec.seqLenKv = OFFSET_LIMIT / (headSize * 2) - 2;
+        EXPECT_TRUE(matchGraph(arch(), spec).has_value()) << "a reach of exactly 2^31 bytes";
+
         spec.seqLenKv = OFFSET_LIMIT / (headSize * 2) - 1;
-        EXPECT_TRUE(matchGraph(arch(), spec).has_value()) << "2^31 - 2 * head_size bytes";
+        EXPECT_EQ(loggedDecline(arch(), spec).cause, "size_limit")
+            << "one row past the reach, the whole tensor under 2^31 bytes";
 
         spec.seqLenKv = OFFSET_LIMIT / (headSize * 2);
         EXPECT_EQ(loggedDecline(arch(), spec).cause, "size_limit") << "exactly 2^31 bytes";
@@ -272,10 +286,52 @@ TEST_P(TestAttentionDenseMatch, ACandidateServesTheLargestTiledGraphUnderEachBou
     query.seqLenQ = OFFSET_LIMIT / HEAD_SIZE - 256;
     EXPECT_TRUE(matchesKernel(arch(), query, makeKernel(arch(), query)));
 
+    // K/V: the bm256/bn64 candidate reaches two tiles of 64 rows past the data, so the
+    // largest tile-aligned length is 128 rows under the whole-tensor bound.
     GraphSpec keyValue = query;
     keyValue.seqLenQ = SEQ;
-    keyValue.seqLenKv = OFFSET_LIMIT / (HEAD_SIZE * 2) - 64;
+    keyValue.seqLenKv = OFFSET_LIMIT / (HEAD_SIZE * 2) - 128;
     EXPECT_TRUE(matchesKernel(arch(), keyValue, makeKernel(arch(), keyValue)));
+}
+
+namespace
+{
+
+/// makeKernel's record with its block_n moved to @p blockN (block_m stays 256).
+KernelDefinition
+    makeKernelWithTile(const AttentionDenseTestArch& arch, const GraphSpec& spec, int64_t blockN)
+{
+    auto kernel = makeKernel(arch, spec);
+    kernel.metadata[std::string("block_n")] = blockN;
+    return kernel;
+}
+
+} // namespace
+
+TEST_P(TestAttentionDenseMatch, TheKeyValueSlackFollowsTheCandidatesOwnTile)
+{
+    // The graph match cannot know the tile, so it asks with one-row tiles; each candidate asks
+    // again with its own block_n, whose reach is the padded length plus two of its tiles.
+    auto spec = baseGraph();
+    spec.batch = 1;
+    spec.numQueryHeads = 1;
+    spec.numKvHeads = 1;
+    spec.seqLenQ = SEQ;
+
+    // 2^23 - 128 rows: a multiple of every tile below. The reach is 2^31 bytes at a tile of
+    // 64, which fits; the 128-row tile reaches 128 rows further and does not.
+    spec.seqLenKv = OFFSET_LIMIT / (HEAD_SIZE * 2) - 128;
+    ASSERT_TRUE(matchGraph(arch(), spec).has_value());
+    EXPECT_TRUE(matchesKernel(arch(), spec, makeKernelWithTile(arch(), spec, 32)));
+    EXPECT_TRUE(matchesKernel(arch(), spec, makeKernelWithTile(arch(), spec, 64)));
+    EXPECT_FALSE(matchesKernel(arch(), spec, makeKernelWithTile(arch(), spec, 128)));
+
+    // 2^23 - 64 rows: the graph is served (a one-row tile reaches two rows), the 32-row tile
+    // fits, and the 64-row tile reaches 64 rows past the limit.
+    spec.seqLenKv = OFFSET_LIMIT / (HEAD_SIZE * 2) - 64;
+    ASSERT_TRUE(matchGraph(arch(), spec).has_value());
+    EXPECT_TRUE(matchesKernel(arch(), spec, makeKernelWithTile(arch(), spec, 32)));
+    EXPECT_FALSE(matchesKernel(arch(), spec, makeKernelWithTile(arch(), spec, 64)));
 }
 
 // Products past int64_t. An unchecked product would wrap to INT64_MIN, under any bound,
@@ -369,24 +425,261 @@ TEST_P(TestAttentionDenseMatch, DeclinesKeyHeadsThatDoNotDivideTheQueryHeads)
     }
 }
 
-TEST_P(TestAttentionDenseMatch, DeclinesEachOperandThatIsNotDenseBshd)
+// =============================================================================
+// Launch-time layout rules. Each operand's strides, alignment and slab go through the stride
+// predicate on both arches, whether or not the arch's kernels read them; a graph it declines
+// is declined for the predicate's own reason, before any arch's packed-only rule. One operand
+// at a time, beside operands that pass, so only its clause stands between the graph and the
+// launch.
+// =============================================================================
+
+namespace
 {
-    // One operand at a time, beside operands that pass their own clauses, so only its clause
-    // stands between the graph and a launch that reads wrong elements in bounds.
+
+/// The cause the graph match logs for @p spec.
+std::string declineCause(const AttentionDenseTestArch& arch, const GraphSpec& spec)
+{
+    return loggedDecline(arch, spec).cause;
+}
+
+/// A graph whose operands are not packed BSHD but are an admissible layout: served, by the
+/// grid body of either arch, which reads the strides.
+void expectServed(const AttentionDenseTestArch& arch, const GraphSpec& spec)
+{
+    EXPECT_TRUE(matchGraph(arch, spec).has_value());
+    EXPECT_TRUE(matchesKernel(arch, spec, makeKernel(arch, spec)));
+}
+
+} // namespace
+
+TEST_P(TestAttentionDenseMatch, DeclinesAZeroOrNegativeStrideOnAnAxisThatSteps)
+{
+    // The default graph has extents above 1 everywhere, so every axis steps.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        for(size_t axis = 0; axis < 3; ++axis)
+        {
+            for(const int64_t value : {int64_t{0}, int64_t{-8}, int64_t{-1024}})
+            {
+                SCOPED_TRACE("uid " + std::to_string(uid) + " axis " + std::to_string(axis)
+                             + " stride " + std::to_string(value));
+                auto spec = baseGraph();
+                auto strides = spec.stridesOf(uid);
+                strides[axis] = value;
+                spec.operand(uid).strides = strides;
+                EXPECT_EQ(declineCause(arch(), spec), "stride_alignment");
+            }
+        }
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesAFourElementPadAndAnyStrideOffTheEightElementGrid)
+{
+    // The hipDNN alignment default is 16 bytes: a stride off the 8-element grid is declined
+    // whatever the kernel could tolerate.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        for(size_t axis = 0; axis < 3; ++axis)
+        {
+            for(const int64_t pad : {int64_t{4}, int64_t{1}, int64_t{2}})
+            {
+                SCOPED_TRACE("uid " + std::to_string(uid) + " axis " + std::to_string(axis)
+                             + " pad " + std::to_string(pad));
+                auto spec = baseGraph();
+                auto strides = spec.stridesOf(uid);
+                strides[axis] += pad;
+                spec.operand(uid).strides = strides;
+                EXPECT_EQ(declineCause(arch(), spec), "stride_alignment");
+            }
+        }
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesATokenStrideBelowTheHeadSize)
+{
     for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
     {
         SCOPED_TRACE("uid " + std::to_string(uid));
         auto spec = baseGraph();
-        spec.operand(uid).layout = SdpaLayout::BHSD;
-        EXPECT_EQ(loggedDecline(arch(), spec).cause, "layout");
+        auto strides = spec.stridesOf(uid);
+        strides[2] = HEAD_SIZE - 8;
+        spec.operand(uid).strides = strides;
+        EXPECT_EQ(declineCause(arch(), spec), "stride_alignment");
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesAHeadDimStrideOtherThanOne)
+{
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(uid));
+        auto spec = baseGraph();
+        auto strides = spec.stridesOf(uid);
+        strides[3] = 2;
+        spec.operand(uid).strides = strides;
+        EXPECT_EQ(declineCause(arch(), spec), "head_dim_stride");
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesAnOperandThatOverlapsItself)
+{
+    // Strides that are positive and on the grid but fold two index tuples onto one element:
+    // a head stride below the head size, and a token stride below the heads it spans.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(uid));
+        auto heads = baseGraph();
+        auto strides = heads.stridesOf(uid);
+        strides[1] = HEAD_SIZE / 2;
+        heads.operand(uid).strides = strides;
+        EXPECT_EQ(declineCause(arch(), heads), "overlap");
+
+        auto tokens = baseGraph();
+        strides = tokens.stridesOf(uid);
+        strides[2] = HEAD_SIZE;
+        tokens.operand(uid).strides = strides;
+        EXPECT_EQ(declineCause(arch(), tokens), "overlap") << "token rows over the head rows";
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesABaseThatIsNotSixteenByteAligned)
+{
+    // The match's own alignment clause (the operand totals, before any layout is judged) holds
+    // every base to the 16 bytes the kernels declare on their pointer parameters, so it is the
+    // cause here; the predicate's `pointer_alignment` is the same rule's second line, reached
+    // where no match ran (prepare, a saved plan).
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        for(const int64_t alignment : {int64_t{1}, int64_t{2}, int64_t{4}, int64_t{8}})
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid) + " alignment " + std::to_string(alignment));
+            auto spec = baseGraph();
+            spec.operand(uid).alignment = alignment;
+            EXPECT_EQ(declineCause(arch(), spec), "alignment");
+        }
+    }
+
+    // A coarser declared alignment is fine.
+    auto coarse = baseGraph();
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        coarse.operand(uid).alignment = 256;
+    }
+    EXPECT_TRUE(matchGraph(arch(), coarse).has_value());
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesAStridedGraphThatAlsoUnderDeclaresAlignment)
+{
+    // A head-major Q (a layout the grid bodies read through their strides) is served when its
+    // base declares 16 bytes or more and declined with the alignment cause, not served and not
+    // declined for its layout, when it declares less. The same holds for a padded-row graph.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        for(const SdpaLayout layout : {SdpaLayout::BHSD, SdpaLayout::PADDED_BSHD})
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid) + " layout "
+                         + std::to_string(static_cast<int>(layout)));
+            auto strided = baseGraph();
+            strided.operand(uid).layout = layout;
+            strided.operand(uid).alignment = 16;
+            expectServed(arch(), strided);
+
+            for(const int64_t alignment : {int64_t{8}, int64_t{24}})
+            {
+                SCOPED_TRACE("alignment " + std::to_string(alignment));
+                strided.operand(uid).alignment = alignment;
+                const auto decline = loggedDecline(arch(), strided);
+                EXPECT_EQ(decline.cause, "alignment") << decline.detail;
+            }
+        }
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, AnAxisOfExtentOneIsExemptWhateverItsStride)
+{
+    // One batch, one KV head: the batch stride of every operand and K's and V's head stride
+    // multiply an index that is always 0, so a stride of 0, a negative one or one off the
+    // grid is no defect there. Both arches serve it (the canonical strides are the packed
+    // ones).
+    auto spec = baseGraph();
+    spec.batch = 1;
+    spec.numKvHeads = 1;
+    const std::map<int64_t, int64_t> batchStride{
+        {Q_UID, 0}, {K_UID, -7}, {V_UID, 12345}, {O_UID, 12345}};
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        auto strides = spec.stridesOf(uid);
+        strides[0] = batchStride.at(uid);
+        if(uid == K_UID || uid == V_UID)
+        {
+            strides[1] = 3;
+        }
+        spec.operand(uid).strides = strides;
+    }
+    EXPECT_TRUE(matchGraph(arch(), spec).has_value());
+}
+
+TEST_P(TestAttentionDenseMatch, DeclinesAStrideOf2p31OrMoreOnEveryAxis)
+{
+    // The kernel takes each stride as an i32 argument: 2^31 would wrap to negative.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        for(size_t axis = 0; axis < 3; ++axis)
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid) + " axis " + std::to_string(axis));
+            auto spec = baseGraph();
+            auto strides = spec.stridesOf(uid);
+            strides[axis] = OFFSET_LIMIT;
+            spec.operand(uid).strides = strides;
+            EXPECT_EQ(declineCause(arch(), spec), "size_limit");
+        }
+    }
+}
+
+TEST_P(TestAttentionDenseMatch, ANonPackedLayoutIsServed)
+{
+    // One operand at a time, beside operands that pass their own clauses. Each layout is an
+    // admissible one (aligned, positive, non-overlapping strides): the grid body of both arches
+    // reads the strides and serves it.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE("uid " + std::to_string(uid));
+        auto bhsd = baseGraph();
+        bhsd.operand(uid).layout = SdpaLayout::BHSD;
+        expectServed(arch(), bhsd);
 
         // One padded batch: dense in every other axis.
-        auto padded = baseGraph();
-        auto strides = padded.stridesOf(uid);
+        auto paddedBatch = baseGraph();
+        auto strides = paddedBatch.stridesOf(uid);
         strides[0] += 8;
-        padded.operand(uid).strides = strides;
-        EXPECT_EQ(loggedDecline(arch(), padded).cause, "layout");
+        paddedBatch.operand(uid).strides = strides;
+        expectServed(arch(), paddedBatch);
+
+        // Rows padded by 8 elements, the layout a row-aligned allocator gives.
+        auto paddedRows = baseGraph();
+        paddedRows.operand(uid).layout = SdpaLayout::PADDED_BSHD;
+        expectServed(arch(), paddedRows);
     }
+}
+
+TEST_P(TestAttentionDenseMatch, PackedQkvAndGroupedQueryLayoutsAreServed)
+{
+    // Q, K and V cut out of one [B, S, 3, H, D] buffer: every token stride is 3 * H * D and
+    // every batch stride S times that, the head stride D. O is its own packed tensor.
+    auto qkv = baseGraph();
+    for(const int64_t uid : {Q_UID, K_UID, V_UID})
+    {
+        qkv.operand(uid).strides = std::vector<int64_t>{
+            SEQ * 3 * HEADS * HEAD_SIZE, HEAD_SIZE, 3 * HEADS * HEAD_SIZE, 1};
+    }
+    expectServed(arch(), qkv);
+
+    // Eight query heads over two KV heads, every operand head-major.
+    auto grouped = baseGraph();
+    grouped.numQueryHeads = 8;
+    grouped.numKvHeads = 2;
+    grouped.setEveryLayout(SdpaLayout::BHSD);
+    expectServed(arch(), grouped);
 }
 
 TEST_P(TestAttentionDenseMatch, DeclinesEachOperandOfAnotherRankOrAZeroExtent)
@@ -813,6 +1106,71 @@ TEST_P(TestAttentionDenseBiasMatch, ServesNoBiasGraphWithASlidingWindowFromTheSh
         // window would serve it, and its absence from the catalog is what leaves none.
         EXPECT_TRUE(servedBy(biasWindowGraph, candidate(1, WINDOW)));
     }
+}
+
+/// A bias body addresses packed Q, K, V and O, so a bias graph whose operands are not packed BSHD
+/// has no candidate. The graph match declines it by name, under the attn_mask cause, naming the
+/// first stride a bias kernel would misread. Each graph without its bias is served (the control
+/// that keeps the decline from passing for its layout alone), as is the packed graph with it.
+TEST_P(TestAttentionDenseBiasMatch, DeclinesABiasOverOperandsThatAreNotPackedBshd)
+{
+    struct Case
+    {
+        const char* what;
+        GraphSpec spec;
+        /// The decline's detail: the first stride that is not packed, and its packed value.
+        const char* stride;
+    };
+    std::vector<Case> cases;
+    auto headMajor = withBias({BATCH, HEADS, SEQ, SEQ});
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+    cases.push_back({"every operand head-major",
+                     headMajor,
+                     "stride_q_head is 32768, where packed BSHD has 128"});
+    auto keyHeadMajor = withBias({BATCH, HEADS, SEQ, SEQ});
+    keyHeadMajor.operand(K_UID).layout = SdpaLayout::BHSD;
+    cases.push_back({"K head-major", keyHeadMajor, "stride_k_head is 32768"});
+    auto paddedOutput = withBias({BATCH, HEADS, SEQ, SEQ});
+    paddedOutput.operand(O_UID).layout = SdpaLayout::PADDED_BSHD;
+    cases.push_back({"O rows padded by 8", paddedOutput, "stride_o_batch"});
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.what);
+        const auto decline = loggedDecline(arch(), c.spec);
+        EXPECT_EQ(decline.cause, "attn_mask") << decline.detail;
+        EXPECT_NE(decline.detail.find("do not read the stride arguments"), std::string::npos)
+            << decline.detail;
+        EXPECT_NE(decline.detail.find(c.stride), std::string::npos) << decline.detail;
+
+        auto withoutBias = c.spec;
+        withoutBias.attnMaskUid = std::nullopt;
+        withoutBias.unnamedTensors.clear();
+        expectServed(arch(), withoutBias);
+    }
+    EXPECT_TRUE(matchGraph(arch(), withBias({BATCH, HEADS, SEQ, SEQ})).has_value());
+}
+
+/// The kernel match holds the same line on its own, for a binding it is handed over a graph the
+/// graph match would have declined: a bias candidate serves the packed graph and not the same
+/// graph with head-major operands, whose strides its body would ignore.
+TEST_P(TestAttentionDenseBiasMatch, ABiasCandidateServesPackedOperandsOnly)
+{
+    const Graph packed(arch(), withBias({BATCH, HEADS, SEQ, SEQ}));
+    const auto bound = packed.match();
+    ASSERT_TRUE(bound.has_value());
+    auto headMajor = withBias({BATCH, HEADS, SEQ, SEQ});
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+    const Graph strided(arch(), headMajor);
+
+    auto biasKernel = makeKernel(arch(), baseGraph());
+    biasKernel.metadata[std::string("use_additive_bias")] = int64_t{1};
+    const auto serves = [&](const Graph& graph) {
+        return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+            std::string(arch().kernelMatchSymbol))(graph.context(), *bound, biasKernel);
+    };
+    EXPECT_TRUE(serves(packed));
+    EXPECT_FALSE(serves(strided));
 }
 
 /// kernel_match reads the bias flag from the binding instead of assuming one; a binding

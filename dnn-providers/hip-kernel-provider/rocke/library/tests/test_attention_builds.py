@@ -1575,6 +1575,7 @@ class TestAttentionHelpers(unittest.TestCase):
         """
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
+        from kernels.common._attention_dense_strides import DENSE_STRIDE_NAMES
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec,
             _has_shape_params,
@@ -1583,8 +1584,9 @@ class TestAttentionHelpers(unittest.TestCase):
             build_attention_dense,
         )
 
-        # The i32 shape/head scalars; every other kernarg is a pointer, scale, or
-        # the paged block-table stride, none of which the launcher reads off the spec.
+        # The i32 shape/head scalars; every other kernarg is a pointer, scale, the
+        # paged block-table stride, or one of the 12 trailing Q/K/V/O strides: the
+        # launcher reads the shape scalars and the strides off the spec, not the rest.
         shape_scalars = (
             "batch",
             "seqlen_q",
@@ -1649,9 +1651,9 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertEqual(
                     _has_shape_params(spec), "batch" in [p.name for p in params]
                 )
-                # The launchers bind exactly the signature's shape/head scalars and
-                # (persistent) fast-division pairs, in order, from
-                # attention_dense_runtime_args.
+                # The launchers bind exactly the signature's shape/head scalars,
+                # (persistent) fast-division pairs and the 12 trailing strides, in
+                # order, from attention_dense_runtime_args.
                 self.assertEqual(
                     list(attention_dense_runtime_args(spec)),
                     [
@@ -1659,7 +1661,13 @@ class TestAttentionHelpers(unittest.TestCase):
                         for a in sig
                         if a["name"] in shape_scalars
                         or a["name"].endswith(("_magic", "_shift"))
+                        or a["name"] in DENSE_STRIDE_NAMES
                     ],
+                )
+                # Every dense body ends with the 12 strides, after every other param.
+                self.assertEqual(
+                    [a["name"] for a in sig][-len(DENSE_STRIDE_NAMES) :],
+                    list(DENSE_STRIDE_NAMES),
                 )
                 self.assertEqual(
                     bool(spec.fastdiv_divisors),
@@ -1687,6 +1695,15 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertEqual(
             [a["type"] for a in fp8_sig if a["name"] in ("k_scale", "v_scale")],
             ["f32", "f32"],
+        )
+        # The scales sit right after ``scale`` and the 12 strides stay the tail: the
+        # fp8 K/V body takes the same ABI as every dense body and ignores the strides.
+        self.assertEqual(
+            [a["name"] for a in fp8_sig][4:7], ["scale", "k_scale", "v_scale"]
+        )
+        self.assertEqual(
+            [a["name"] for a in fp8_sig][-len(DENSE_STRIDE_NAMES) :],
+            list(DENSE_STRIDE_NAMES),
         )
         self.assertNotIn(
             "k_scale",
@@ -4078,9 +4095,14 @@ class TestAttentionDenseGfx950PersistentRuntimeShape(unittest.TestCase):
 
     def test_kernargs_append_the_decode_order_fastdiv_pairs(self):
         """ABI == ptrs + scale, the five shape i32s, then a magic/shift pair per
-        divisor of the resolved order, in the built kernel's param order; the
-        values are ``calculate_magic_numbers`` of the divisors and divide every
-        work-item index exactly."""
+        divisor of the resolved order, then the 12 stride i32s, in the built
+        kernel's param order; the values are ``calculate_magic_numbers`` of the
+        divisors (and divide every work-item index exactly) and the packed
+        ``[B, S, H, D]`` strides."""
+        from kernels.common._attention_dense_strides import (
+            DENSE_STRIDE_NAMES,
+            packed_launch_strides,
+        )
         from kernels.common.attention_dense_decode import PERSIST_DECODES
         from rocke.helpers.magic_division import calculate_magic_numbers
         from kernels.gfx950.attention_dense import (
@@ -4099,17 +4121,21 @@ class TestAttentionDenseGfx950PersistentRuntimeShape(unittest.TestCase):
                 pairs = [f"{d}_{p}" for d in divisors for p in ("magic", "shift")]
                 fields = list(self._RUNTIME_FIELDS) + pairs
                 self.assertEqual(list(spec.runtime_kernarg_fields), fields)
+                # The strides are not shape kernargs of the spec: they follow them.
+                abi = fields + list(DENSE_STRIDE_NAMES)
                 head = len(self._ABI_HEAD)
                 sig = attention_dense_signature(spec)
-                self.assertEqual(
-                    [a["name"] for a in sig], list(self._ABI_HEAD) + fields
-                )
+                self.assertEqual([a["name"] for a in sig], list(self._ABI_HEAD) + abi)
                 params = build_attention_dense(spec, arch="gfx950").params[head:]
-                self.assertEqual([p.name for p in params], fields)
-                self.assertEqual([p.type.name for p in params], ["i32"] * len(fields))
+                self.assertEqual([p.name for p in params], abi)
+                self.assertEqual([p.type.name for p in params], ["i32"] * len(abi))
 
                 args = attention_dense_runtime_args(spec)
-                self.assertEqual(list(args), fields)
+                self.assertEqual(list(args), abi)
+                self.assertEqual(
+                    {n: args[n] for n in DENSE_STRIDE_NAMES},
+                    packed_launch_strides(spec),
+                )
                 nqb = spec.seqlen_q // spec.block_m
                 value = {
                     "batch": spec.batch,
@@ -4164,6 +4190,10 @@ class TestAttentionDenseGfx950PersistentRuntimeShape(unittest.TestCase):
         import hashlib
         from dataclasses import replace
 
+        from kernels.common._attention_dense_strides import (
+            DENSE_STRIDE_NAMES,
+            packed_launch_strides,
+        )
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import (
             attention_dense_runtime_args,
@@ -4189,10 +4219,13 @@ class TestAttentionDenseGfx950PersistentRuntimeShape(unittest.TestCase):
                 self.assertFalse(spec.runtime_shape)
                 self.assertEqual(spec.runtime_param_fields, ())
                 self.assertEqual(spec.fastdiv_divisors, ())
-                self.assertEqual(attention_dense_runtime_args(spec), {})
+                # No shape kernargs: the only runtime args are the 12 packed strides.
+                self.assertEqual(
+                    attention_dense_runtime_args(spec), packed_launch_strides(spec)
+                )
                 self.assertEqual(
                     [a["name"] for a in attention_dense_signature(spec)],
-                    list(self._ABI_HEAD),
+                    list(self._ABI_HEAD) + list(DENSE_STRIDE_NAMES),
                 )
                 self.assertRegex(spec.kernel_name(), r"_hq\d+_kv\d+_.*sq\d+_sk\d+")
                 if other is not None:
@@ -4543,16 +4576,33 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         IR that did not split per shape; with no baked gfx942 body left, the check
         is that each declared ``runtime_kernarg_fields`` param is actually used.
         The define-line match proves the probe can see the param names at all.
+
+        The exceptions are per arm, and an exempt param must stay unread, so a body
+        that starts reading one forces this map to follow. The one-item grid takes
+        its batch index from the workgroup id and reads every tensor through its own
+        (batch, head) slab (the stride parameters), so it never reads ``batch``. It
+        reads ``seqlen_q`` only where something is sized by it: the query-block
+        count of the ``bt_hkv_minor`` block order (``auto`` picks it for the causal
+        default), the bottom-right diagonal offset, the LSE row index and the
+        KV-segment store. The ``qb_minor`` arms pin the order that reads no
+        query-block count, so the feature is the only reader there. The persistent
+        grid reads both for its work count.
         """
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.gfx942.attention_dense import build_attention_dense
 
+        qb_minor = dict(nonpersist_decode="qb_minor")
+        # arm -> (spec fields, the runtime kernargs its body does not read)
         arms = {
-            "default": {},
-            "sliding_window": dict(sliding_window=128),
-            **{v: kw for v, (kw, _) in self._PERSIST_VARIANTS.items()},
+            "default": ({}, ("batch",)),
+            "qb_minor": (qb_minor, ("batch", "seqlen_q")),
+            "sliding_window": (dict(sliding_window=128), ("batch", "seqlen_q")),
+            "bottom_right": (dict(qb_minor, causal_bottom_right=True), ("batch",)),
+            "lse": (dict(qb_minor, emit_lse=True), ("batch",)),
+            "kv_segments": (dict(qb_minor, kv_segments=2), ("batch",)),
+            **{v: (kw, ()) for v, (kw, _) in self._PERSIST_VARIANTS.items()},
         }
-        for arm, kw in arms.items():
+        for arm, (kw, unread) in arms.items():
             with self.subTest(arm=arm):
                 spec = self._spec(**self._BASE_KWARGS, **kw)
                 self.assertTrue(spec.runtime_shape)
@@ -4562,6 +4612,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 lines = ir.splitlines()
                 (define,) = [ln for ln in lines if ln.startswith("define ")]
                 body = "\n".join(ln for ln in lines if not ln.startswith("define "))
+                self.assertLessEqual(set(unread), set(spec.runtime_kernarg_fields))
                 for field in spec.runtime_kernarg_fields:
                     self.assertRegex(
                         define,
@@ -4569,6 +4620,14 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                         f"{arm}: kernarg {field!r} is not declared under its name; "
                         "the use probe below cannot see it",
                     )
+                    if field in unread:
+                        self.assertNotRegex(
+                            body,
+                            rf"%{field}\b",
+                            f"{arm}: kernarg {field!r} is now read; take it out of "
+                            "this arm's exemptions",
+                        )
+                        continue
                     self.assertRegex(
                         body,
                         rf"%{field}\b",
@@ -4868,10 +4927,12 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         decode order, which appends that order's fast-division magic/shift pairs --
         a different tail per order, so a launcher packing one order's pairs for the
         other would feed the decode the wrong divisors. Each arm is also checked
-        with ``use_sinks``, which appends ``sink_ptr`` after all of those.
+        with ``use_sinks``, which appends ``sink_ptr`` after all of those; the 12
+        stride i32s close every arm.
         """
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
+        from kernels.common._attention_dense_strides import DENSE_STRIDE_NAMES
         from kernels.gfx942.attention_dense import (
             attention_dense_signature,
             build_attention_dense,
@@ -4927,12 +4988,24 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         # The runtime path's whole point: exactly five extra i32 shape kernargs,
         # after scale; the persistent grid appends its decode's magic/shift pairs.
+        # The 12 stride i32s are the constant tail of every arm, after all of those.
+        strides = list(DENSE_STRIDE_NAMES)
         rt_names = [a["name"] for a in attention_dense_signature(rt)]
         self.assertEqual(
             rt_names,
-            ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale", *self._RUNTIME_FIELDS],
-            "runtime-shape gfx942 ABI is not q/k/v/o + scale plus the five shape args",
+            [
+                "q_ptr",
+                "k_ptr",
+                "v_ptr",
+                "o_ptr",
+                "scale",
+                *self._RUNTIME_FIELDS,
+                *strides,
+            ],
+            "runtime-shape gfx942 ABI is not q/k/v/o + scale plus the five shape "
+            "args and the 12 strides",
         )
+        rt_head = rt_names[: -len(strides)]
         for variant, spec in persist.items():
             with self.subTest(arm=variant, tail="fastdiv"):
                 pairs = [
@@ -4943,19 +5016,21 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 self.assertTrue(pairs, f"{variant}: no fast-division kernargs")
                 self.assertEqual(
                     [a["name"] for a in attention_dense_signature(spec)],
-                    rt_names + pairs,
+                    rt_head + pairs + strides,
                     f"{variant}: persistent ABI is not the default ABI plus its "
-                    "decode's magic/shift pairs",
+                    "decode's magic/shift pairs before the strides",
                 )
 
-        # Sinks append exactly one kernarg, last, after any fast-division pairs.
+        # Sinks append exactly one kernarg, after any fast-division pairs and before
+        # the 12 strides, which stay last.
         for plain, with_sinks in (
             (rt, rt_sinks),
             *((persist[v], s) for v, s in persist_sinks.items()),
         ):
+            plain_names = [a["name"] for a in attention_dense_signature(plain)]
             self.assertEqual(
                 [a["name"] for a in attention_dense_signature(with_sinks)],
-                [a["name"] for a in attention_dense_signature(plain)] + ["sink_ptr"],
+                plain_names[: -len(strides)] + ["sink_ptr"] + strides,
             )
 
 
@@ -5089,8 +5164,13 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     _ABI_HEAD = ("q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale")
 
     def test_signature_appends_the_five_runtime_params(self):
-        """Runtime ABI == q/k/v/o + scale + five trailing i32s, matching the built
-        kernel's params and the launcher's runtime-args dict, in one order."""
+        """Runtime ABI == q/k/v/o + scale + five trailing i32s + the 12 stride i32s,
+        matching the built kernel's params and the launcher's runtime-args dict, in
+        one order; the stride values are the packed ``[B, S, H, D]`` ones."""
+        from kernels.common._attention_dense_strides import (
+            DENSE_STRIDE_NAMES,
+            packed_launch_strides,
+        )
         from kernels.gfx942.attention_dense import (
             attention_dense_runtime_args,
             attention_dense_signature,
@@ -5103,23 +5183,25 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
         self.assertEqual(rt.fastdiv_divisors, ())
         self.assertEqual(rt.runtime_kernarg_fields, self._RUNTIME_FIELDS)
 
+        # The strides are not shape kernargs of the spec: they follow them.
+        abi = list(self._RUNTIME_FIELDS) + list(DENSE_STRIDE_NAMES)
         rt_sig = attention_dense_signature(rt)
         head = len(self._ABI_HEAD)
-        self.assertEqual(
-            [a["name"] for a in rt_sig],
-            list(self._ABI_HEAD) + list(self._RUNTIME_FIELDS),
-        )
-        self.assertEqual(
-            [a["type"] for a in rt_sig[head:]],
-            ["i32"] * len(self._RUNTIME_FIELDS),
-        )
+        self.assertEqual([a["name"] for a in rt_sig], list(self._ABI_HEAD) + abi)
+        self.assertEqual([a["type"] for a in rt_sig[head:]], ["i32"] * len(abi))
         trailing = build_attention_dense(rt, arch="gfx942").params[head:]
-        self.assertEqual([p.name for p in trailing], list(self._RUNTIME_FIELDS))
+        self.assertEqual([p.name for p in trailing], abi)
         self.assertEqual([p.type.name for p in trailing], ["i32"] * len(trailing))
 
         args = attention_dense_runtime_args(rt)
-        self.assertEqual(list(args), list(self._RUNTIME_FIELDS))
-        self.assertEqual(args, {f: getattr(rt, f) for f in self._RUNTIME_FIELDS})
+        self.assertEqual(list(args), abi)
+        self.assertEqual(
+            {f: args[f] for f in self._RUNTIME_FIELDS},
+            {f: getattr(rt, f) for f in self._RUNTIME_FIELDS},
+        )
+        self.assertEqual(
+            {f: args[f] for f in DENSE_STRIDE_NAMES}, packed_launch_strides(rt)
+        )
 
     # Non-pow2 everywhere: B=3, gqa=40/8=5, nqb=1280/256=5 (block_m 256 at D128),
     # so every divisor needs a real magic, and 5 / 40 give a magic >= 2**31 --
@@ -5132,9 +5214,11 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
     def test_persistent_kernargs_append_fastdiv_pairs_per_decode(self):
         """Persistent ABI == the five shape i32s + a magic/shift i32 pair per
-        divisor of the resolved decode, in the built kernel's param order; the
-        launcher's values are ``calculate_magic_numbers`` of the divisors, packed
-        as two's-complement i32, and divide every work-item index exactly."""
+        divisor of the resolved decode + the 12 stride i32s, in the built kernel's
+        param order; the launcher's values are ``calculate_magic_numbers`` of the
+        divisors, packed as two's-complement i32, and divide every work-item index
+        exactly."""
+        from kernels.common._attention_dense_strides import DENSE_STRIDE_NAMES
         from rocke.helpers.magic_division import calculate_magic_numbers
         from kernels.gfx942.attention_dense import (
             attention_dense_runtime_args,
@@ -5155,19 +5239,19 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
                 pairs = [f"{d}_{p}" for d in divisors for p in ("magic", "shift")]
                 fields = list(self._RUNTIME_FIELDS) + pairs
                 self.assertEqual(list(spec.runtime_kernarg_fields), fields)
+                # The strides are not shape kernargs of the spec: they follow them.
+                abi = fields + list(DENSE_STRIDE_NAMES)
 
                 head = len(self._ABI_HEAD)
                 sig = attention_dense_signature(spec)
-                self.assertEqual(
-                    [a["name"] for a in sig], list(self._ABI_HEAD) + fields
-                )
-                self.assertEqual([a["type"] for a in sig[head:]], ["i32"] * len(fields))
+                self.assertEqual([a["name"] for a in sig], list(self._ABI_HEAD) + abi)
+                self.assertEqual([a["type"] for a in sig[head:]], ["i32"] * len(abi))
                 params = build_attention_dense(spec, arch="gfx942").params[head:]
-                self.assertEqual([p.name for p in params], fields)
-                self.assertEqual([p.type.name for p in params], ["i32"] * len(fields))
+                self.assertEqual([p.name for p in params], abi)
+                self.assertEqual([p.type.name for p in params], ["i32"] * len(abi))
 
                 args = attention_dense_runtime_args(spec)
-                self.assertEqual(list(args), fields)
+                self.assertEqual(list(args), abi)
                 self.assertEqual(
                     {f: args[f] for f in self._RUNTIME_FIELDS},
                     {f: getattr(spec, f) for f in self._RUNTIME_FIELDS},

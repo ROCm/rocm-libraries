@@ -28,6 +28,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
@@ -59,6 +60,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::SymbolScope;
 using serialization::expectIngestorPlanRefusal;
 using serialization::IngestorPlanPayload;
+using testing::launchValuesUnder;
 
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
@@ -156,7 +158,11 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
 
     IngestorPlanPayload payload = validConvFwdPayload();
     payload.dispatchSymbol = std::string(dispatchSymbol);
-    payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.launchValues = launchValuesUnder(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+                                             gfx950AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
     return payload;
@@ -180,7 +186,11 @@ IngestorPlanPayload gfx950AttentionDenseBiasPayload(bool withBiasTail)
 
     IngestorPlanPayload payload = validConvFwdPayload();
     payload.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
-    payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.launchValues = launchValuesUnder(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
+                                             gfx950AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(/*withHeads=*/true);
     if(withBiasTail)
@@ -197,7 +207,7 @@ IngestorPlanPayload gfx950AttentionDenseBiasPayload(bool withBiasTail)
     return payload;
 }
 
-// A gfx942 dense-attention payload under its one contract, saved with stats uid `stats`
+// A gfx942 dense-attention payload under its v1 contract, saved with stats uid `stats`
 // (ATTENTION_DENSE_NO_STATS for none), that passes every check before the module load when
 // `withHeads` is true and `writesLse` says whether `stats` is bound: gfx942 launches the
 // same ten arguments as gfx950's v2, and lse_ptr after them to a kernel that writes LSE.
@@ -218,7 +228,11 @@ IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads,
 
     IngestorPlanPayload payload = validConvFwdPayload();
     payload.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
-    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.launchValues = launchValuesUnder(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
+                                             gfx942AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
     if(writesLse)
@@ -250,7 +264,11 @@ IngestorPlanPayload gfx942AttentionDenseBiasPayload(bool withBiasTail,
 
     IngestorPlanPayload payload = validConvFwdPayload();
     payload.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
-    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.launchValues = launchValuesUnder(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+                                             gfx942AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256});
     payload.symbol = "attention_dense";
     payload.recordedSignature = gfx950AttentionDenseSignature(/*withHeads=*/true);
     uint32_t offset = 56;
@@ -273,7 +291,7 @@ IngestorPlanPayload gfx942AttentionDenseBiasPayload(bool withBiasTail,
     return payload;
 }
 
-/// A gfx942 payload saved on the persistent grid at @p savedDecode (304 CTAs) whose code
+/// A gfx942 payload saved on the persistent grid at @p savedDecode (304 workgroups) whose code
 /// object records the pairs of @p recordedDecode, or none for an empty one, and lse_ptr
 /// after them when @p lse.
 IngestorPlanPayload
@@ -296,7 +314,12 @@ IngestorPlanPayload
     problem.numKvHeads = 4;
     problem.headSize = 128;
     problem.dataType = data_objects::DataType::HALF;
-    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256}, grid);
+    payload.launchValues = launchValuesUnder(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
+                                             gfx942AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256},
+                                             grid);
     uint32_t offset = 56;
     for(const auto& divisor : recordedDivisors)
     {
@@ -491,7 +514,7 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsAcceptTheirOw
     expectRefusal(bias, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
 }
 
-// gfx942's one contract restores only the 10-argument code object it launches.
+// gfx942's v1 contract restores only the 10-argument code object it launches.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractRefusesTheEightArgumentSignature)
 {
     expectRefusal(gfx942AttentionDensePayload(/*withHeads=*/false),
@@ -605,6 +628,331 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesAStatsUidItNeve
     expectRefusal(missing, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "needs launch value 'stats.uid'");
 }
 
+// ---------------------------------------------------------------------------
+// The strided contracts (gfx950 v4, gfx942 v3) against the legacy ones
+//
+// Each strided contract restores only a code object that takes the twelve strides last, and
+// each legacy contract only one that does not, so a plan never launches a kernel with the
+// wrong argument count.
+// ---------------------------------------------------------------------------
+
+/// Appends the twelve strides to @p signature as a strided kernel records them: last, packed
+/// after whatever precedes them.
+void appendRecordedStrides(std::vector<KernelArgument>& signature)
+{
+    for(const char* tensor : {"q", "k", "v", "o"})
+    {
+        for(const char* axis : {"batch", "head", "token"})
+        {
+            const uint32_t end = signature.back().offset + signature.back().size;
+            signature.push_back(
+                KernelArgument{"by_value", 4, end, std::string("stride_") + tensor + "_" + axis});
+        }
+    }
+}
+
+/// The packed strides of the restore fixtures' shape: batch 2, seqlen 512, 8 query heads
+/// over 4 kv heads of 128 elements.
+AttentionDenseStrides fixtureStrides()
+{
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    return attention_dense::packedI32LaunchStrides(problem).value();
+}
+
+/// A gfx950 payload under the strided contract that passes every check before the module
+/// load when @p recordsStrides: its code object records v2's ten arguments, then the strides
+/// unless told otherwise. Saved as prepare() saves a plan for a grid kernel, whose body reads
+/// the strides, unless @p readsStrides says otherwise (a gqa_pair or bias body).
+IngestorPlanPayload gfx950AttentionDenseStridedPayload(bool recordsStrides,
+                                                       bool readsStrides = true)
+{
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
+    binding.strides = fixtureStrides();
+    binding.blockN = 64;
+    binding.readsStrides = readsStrides;
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::BFLOAT16;
+
+    auto payload = gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED,
+                                               /*withHeads=*/true);
+    payload.launchValues = launchValuesUnder(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED,
+                                             gfx950AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256});
+    if(recordsStrides)
+    {
+        appendRecordedStrides(payload.recordedSignature);
+    }
+    return payload;
+}
+
+/// The same for gfx942, saved with stats uid @p stats; lse_ptr precedes the strides when
+/// @p writesLse.
+IngestorPlanPayload gfx942AttentionDenseStridedPayload(bool recordsStrides,
+                                                       int64_t stats = ATTENTION_DENSE_NO_STATS,
+                                                       bool writesLse = false)
+{
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    binding.stats = stats;
+    binding.strides = fixtureStrides();
+    binding.blockN = 64;
+    binding.readsStrides = true;
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::HALF;
+
+    auto payload = gfx942AttentionDensePayload(/*withHeads=*/true, stats, writesLse);
+    payload.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED);
+    payload.launchValues = launchValuesUnder(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED,
+                                             gfx942AttentionDenseArch(),
+                                             binding,
+                                             problem,
+                                             int64_t{256});
+    if(recordsStrides)
+    {
+        appendRecordedStrides(payload.recordedSignature);
+    }
+    return payload;
+}
+
+// The matching signature passes: the plan reaches the launch-value check, which a block_m
+// the arch does not build then refuses.
+TEST_F(TestIngestorPlanRestoreChecks, AttentionDenseStridedContractsAcceptTheirOwnSignature)
+{
+    auto gfx950 = gfx950AttentionDenseStridedPayload(/*recordsStrides=*/true);
+    gfx950.launchValues["block_m"] = int64_t{64};
+    expectRefusal(gfx950, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+
+    for(const auto& [stats, writesLse] :
+        {std::pair{ATTENTION_DENSE_NO_STATS, false}, std::pair{int64_t{7}, true}})
+    {
+        SCOPED_TRACE(stats);
+        auto gfx942 = gfx942AttentionDenseStridedPayload(/*recordsStrides=*/true, stats, writesLse);
+        gfx942.launchValues["block_m"] = int64_t{48};
+        expectRefusal(gfx942, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+    }
+}
+
+// A code object without the strides, such as one packed before them, does not restore
+// under a strided contract: the launch would write twelve arguments the kernel never reads.
+TEST_F(TestIngestorPlanRestoreChecks, AttentionDenseStridedContractsRefuseAKernelWithoutStrides)
+{
+    for(const auto& payload :
+        {gfx950AttentionDenseStridedPayload(/*recordsStrides=*/false),
+         gfx942AttentionDenseStridedPayload(/*recordsStrides=*/false),
+         gfx942AttentionDenseStridedPayload(/*recordsStrides=*/false, int64_t{7}, true)})
+    {
+        SCOPED_TRACE(payload.dispatchSymbol);
+        expectRefusal(payload,
+                      HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                      "the saved kernel's arguments do not match what this provider launches");
+    }
+}
+
+// The reverse: a legacy contract restores only its own older code object, never a kernel
+// that takes the strides, whose last twelve arguments the legacy launch would not write. The
+// bias contracts too: their kernels take the bias tail last, after any lse_ptr.
+TEST_F(TestIngestorPlanRestoreChecks, AttentionDenseLegacyContractsRefuseAKernelWithStrides)
+{
+    auto v1 = gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, false);
+    auto v2 = gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, true);
+    auto v3 = gfx950AttentionDenseBiasPayload(/*withBiasTail=*/true);
+    auto gfx942V1 = gfx942AttentionDensePayload(/*withHeads=*/true);
+    auto gfx942V2 = gfx942AttentionDenseBiasPayload(/*withBiasTail=*/true);
+    auto gfx942V2Lse
+        = gfx942AttentionDenseBiasPayload(/*withBiasTail=*/true, int64_t{7}, /*writesLse=*/true);
+    for(auto* payload : {&v1, &v2, &v3, &gfx942V1, &gfx942V2, &gfx942V2Lse})
+    {
+        SCOPED_TRACE(payload->dispatchSymbol);
+        appendRecordedStrides(payload->recordedSignature);
+        expectRefusal(*payload,
+                      HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                      "the saved kernel's arguments do not match what this provider launches");
+    }
+}
+
+// The restore re-runs the graph match's layout gate on the saved strides, after the
+// signature check. A plan whose kernel does not read the strides (reads_strides 0, here a
+// gfx950 gqa_pair body) holds packed strides only, so one that is not the packed stride of the
+// saved dims is refused by its own name; a plan whose kernel reads them (every grid kernel of
+// either arch) holds any layout the stride predicate admits, so a stride the predicate declines
+// is refused under the predicate's reason.
+TEST_F(TestIngestorPlanRestoreChecks, AttentionDenseStridedContractsRefuseAStrideTheirGateDeclines)
+{
+    auto packedOnly
+        = gfx950AttentionDenseStridedPayload(/*recordsStrides=*/true, /*readsStrides=*/false);
+    packedOnly.launchValues["stride_k_token"] = int64_t{1024};
+    expectRefusal(packedOnly, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'stride_k_token'");
+
+    auto gfx950 = gfx950AttentionDenseStridedPayload(/*recordsStrides=*/true);
+    gfx950.launchValues["stride_v_head"] = int64_t{64};
+    expectRefusal(gfx950, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "(overlap)");
+
+    auto gfx942 = gfx942AttentionDenseStridedPayload(/*recordsStrides=*/true);
+    gfx942.launchValues["stride_o_batch"] = int64_t{0};
+    expectRefusal(gfx942, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "(stride_alignment)");
+
+    // A head stride below the head size folds heads onto each other.
+    auto overlapping = gfx942AttentionDenseStridedPayload(/*recordsStrides=*/true);
+    overlapping.launchValues["stride_q_head"] = int64_t{64};
+    expectRefusal(overlapping, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "(overlap)");
+}
+
+/// What the handler registered under @p payload's dispatch name throws when it restores
+/// @p payload on no device (ordinal -1): every check before the device load runs, and the load
+/// then refuses the ordinal. Empty when nothing is thrown, which no case expects.
+std::string restoreOnNoDevice(const IngestorPlanPayload& payload)
+{
+    const auto* handler
+        = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(payload.dispatchSymbol);
+    EXPECT_NE(handler, nullptr) << payload.dispatchSymbol;
+    if(handler == nullptr)
+    {
+        return {};
+    }
+    const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs inputs{payload.dispatchSymbol,
+                                                                payload.launchValues};
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode code;
+    code.kernelId = payload.kernelDescriptorId;
+    code.sourceKind = payload.sourceKind;
+    code.symbol = payload.symbol;
+    code.target = payload.target;
+    code.sha256 = payload.sha256;
+    code.recordedSignature = payload.recordedSignature;
+    code.codeObject = payload.codeObject;
+    try
+    {
+        static_cast<void>(handler->restoreLaunch(inputs, std::move(code), -1));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return error.getMessage();
+    }
+    return {};
+}
+
+// The gfx950 strided plan as prepare() saves it for a grid kernel, whose body reads the strides
+// (reads_strides 1), with head-major operands: the handler restores it past the signature check
+// and the stride checks, and stops only at the device load. The same plan saved for a body that
+// does not read the strides is refused by the name of the first stride that is not packed.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseRestoresAHeadMajorPlanOfAGridKernel)
+{
+    // Head-major (B, H, S, D) storage of the fixtures' shape: batch H * S * D, head S * D (a
+    // slab), token D for each of Q, K, V and O.
+    constexpr int64_t HEAD = 128;
+    constexpr int64_t SLAB = 512 * HEAD;
+    const AttentionDenseStrides headMajor{
+        8 * SLAB, SLAB, HEAD, 4 * SLAB, SLAB, HEAD, 4 * SLAB, SLAB, HEAD, 8 * SLAB, SLAB, HEAD};
+    auto payload = gfx950AttentionDenseStridedPayload(/*recordsStrides=*/true);
+    for(std::size_t index = 0; index < headMajor.size(); ++index)
+    {
+        payload.launchValues[std::string(attention_dense::DENSE_STRIDE_NAMES.at(index))]
+            = headMajor.at(index);
+    }
+    const std::string restored = restoreOnNoDevice(payload);
+    EXPECT_NE(restored.find("which names no device"), std::string::npos) << restored;
+
+    payload.launchValues["reads_strides"] = int64_t{0};
+    const std::string packedOnly = restoreOnNoDevice(payload);
+    EXPECT_NE(packedOnly.find("launch value 'stride_q_head'"), std::string::npos) << packedOnly;
+    EXPECT_NE(packedOnly.find("reads_strides is 0"), std::string::npos) << packedOnly;
+}
+
+/// A payload under @p contract, a legacy contract of @p arch, with the restore fixtures' shape,
+/// a [B, 1, Sq, Skv] bias where the contract adds one, and the argument list the contract
+/// launches (attention_dense::kernelSignature on the qb_minor grid, without lse_ptr). A contract
+/// that takes the strides saves them as prepare() does for a body that reads packed operands
+/// only (the bias bodies among them): the packed strides, a block_n both arches build, and
+/// reads_strides 0.
+IngestorPlanPayload
+    legacyAttentionDensePayload(const attention_dense::AttentionDenseArch& arch,
+                                const attention_dense::AttentionDenseContract& contract)
+{
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
+    if(attention_dense::takesStrides(contract.abi))
+    {
+        binding.strides = fixtureStrides();
+        binding.blockN = 64;
+        binding.readsStrides = false;
+    }
+    if(attention_dense::addsBias(contract.abi))
+    {
+        binding.bias = AttentionDenseBias{5, {512 * 512, 0, 512}};
+    }
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::BFLOAT16;
+
+    IngestorPlanPayload payload = validConvFwdPayload();
+    payload.dispatchSymbol = std::string(contract.symbol);
+    payload.launchValues = launchValuesUnder(contract.symbol, arch, binding, problem, int64_t{256});
+    payload.symbol = "attention_dense";
+    payload.recordedSignature = attention_dense::kernelSignature(
+        contract.abi, attention_dense::AttentionDenseGrid{}, /*writesLse=*/false);
+    return payload;
+}
+
+// Every legacy contract of each arch's contract table restores the code object that takes its
+// own arguments, reaching the launch-value check, which a block_m neither arch builds then
+// refuses; and no code object that takes twelve more arguments after them (the strides, for a
+// contract that predates them). Driven by the tables, and a contract that takes the strides is
+// saved as prepare() saves one, so the rows a later contract change turns legacy (the strided
+// ones) are covered with no edit here; the hand-written payloads above pin each list's argument
+// names.
+TEST_F(TestIngestorPlanRestoreChecks, EveryLegacyAttentionDenseContractRestoresOnlyItsOwnArguments)
+{
+    // The legacy contracts that predate the strides, which no later change adds to: gfx950 v1,
+    // v2 and v3, gfx942 v1 and v2.
+    for(const auto& [arch, preStride] : {std::pair{&gfx950AttentionDenseArch(), std::size_t{3}},
+                                         std::pair{&gfx942AttentionDenseArch(), std::size_t{2}}})
+    {
+        SCOPED_TRACE(std::string(arch->label));
+        std::size_t preStrideRows = 0;
+        for(const auto& contract : arch->legacyContracts)
+        {
+            if(contract.symbol.empty())
+            {
+                continue;
+            }
+            preStrideRows += attention_dense::takesStrides(contract.abi) ? 0 : 1;
+            SCOPED_TRACE(std::string(contract.symbol));
+            auto own = legacyAttentionDensePayload(*arch, contract);
+            own.launchValues["block_m"] = int64_t{48};
+            expectRefusal(own, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+
+            auto strided = legacyAttentionDensePayload(*arch, contract);
+            appendRecordedStrides(strided.recordedSignature);
+            expectRefusal(strided,
+                          HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                          "the saved kernel's arguments do not match what this provider launches");
+        }
+        EXPECT_EQ(preStrideRows, preStride);
+    }
+}
+
 // The saved grid selects the argument list before anything is checked: a persistent plan
 // restores the code object that takes its decode's fast-division pairs (and lse_ptr after
 // them), reaching the launch-value check, which a broken block_m then refuses.
@@ -654,10 +1002,12 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesAKernelThatDisa
     expectRefusal(gridPlan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, MISMATCH);
 }
 
-// The unversioned gfx942 name resolves to the gfx942 handler, which reads only v1.
+// The unversioned gfx942 name resolves to the catalog's handler, the strided contract's,
+// which reads only that contract: a plan with the strided kernel and values passes the
+// signature check and is refused by name.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseRefusesItsUnversionedAlias)
 {
-    auto payload = gfx942AttentionDensePayload(/*withHeads=*/true);
+    auto payload = gfx942AttentionDenseStridedPayload(/*recordsStrides=*/true);
     payload.dispatchSymbol = "hipkernel.gfx942_attention_dense.dispatch";
 
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "names no launch-value contract");

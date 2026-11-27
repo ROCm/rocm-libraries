@@ -13,7 +13,7 @@ tuning geometry: ``spec_id`` names it and ``tuning_id`` names one
 configuration from its knob space -- the tile (``block_m`` / ``block_n``)
 included -- with ``auto`` being the candidate's default spec. The candidates
 are opt-in: only an explicit ``algorithm`` + ``spec_id`` selects one, except
-that an unpinned request for contiguous tensors (``layout='dense'``) with more
+that an unpinned request for dense tensors (``layout='dense'``) with more
 than one query row is pinned to the body :func:`dense_auto_order` names (see
 :func:`dispatch.attention.dispatch_attention`). Admission is the kernel's own
 ``supports_attention_dense``; dispatch adds no stricter gate.
@@ -321,7 +321,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
 
 
 def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
-    """Candidate names, best first, for an unpinned contiguous-layout request.
+    """Candidate names, best first, for an unpinned dense-layout request.
 
     The persistent body pays off once the default tile yields at least one
     work item per persistent CTA and the causal diagonal is fixed (the moving

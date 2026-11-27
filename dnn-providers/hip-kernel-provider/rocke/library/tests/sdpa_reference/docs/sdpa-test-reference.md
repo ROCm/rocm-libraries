@@ -57,8 +57,9 @@ signatures, and why a kernel update does not automatically replace its baseline.
 New gfx942/gfx950 qualifications record the `dense-v2` replay ABI and freeze the
 runtime shape and indexing scalars alongside the exported signature. Both
 architectures use the production runtime-argument helper
-(`attention_dense_runtime_args`): on both, it includes the shape, the head counts
-and, on the persistent grid, the work decode's fast-division parameters. Older
+(`attention_dense_runtime_args`): on both, it includes the shape, the head counts,
+on the persistent grid the work decode's fast-division parameters, and the twelve
+`stride_{q,k,v,o}_{batch,head,token}` values of packed `[B, S, H, D]` tensors. Older
 dense sources without the helper expose only
 batch and sequence-length scalars. Qualification rejects a signature with
 unbound arguments before writing a certificate. Replay binds fresh HIP pointers,

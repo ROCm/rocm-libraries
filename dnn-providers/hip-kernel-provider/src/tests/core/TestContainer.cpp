@@ -566,6 +566,31 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         }
     }
 #endif
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    // The rocKE dense engine of gfx942 and gfx950 serves this head-major (BHSD) graph: the
+    // strides are launch arguments, and both catalogs ship bf16 D128 non-causal kernels whose
+    // bodies read them. Wherever this install loaded the device's dense catalog the engine must
+    // serve the graph; anywhere else it is not counted, and the total says it must not apply.
+    {
+        std::string_view denseEngine;
+        if(deviceString == "gfx942")
+        {
+            denseEngine = kernel_ingestor_engine::GFX942_ATTENTION_DENSE_ENGINE_NAME;
+        }
+        else if(deviceString == "gfx950")
+        {
+            denseEngine = kernel_ingestor_engine::GFX950_ATTENTION_DENSE_ENGINE_NAME;
+        }
+        if(!denseEngine.empty()
+           && kernel_ingestor_engine::testing::findLoadedSet(denseEngine) != nullptr)
+        {
+            EXPECT_TRUE(
+                applies(hipdnn_data_sdk::utilities::engineNameToId(std::string(denseEngine))))
+                << denseEngine << " declined a head-major graph its catalog serves";
+            ++expected;
+        }
+    }
+#endif
     EXPECT_EQ(applicableEngines.size(), expected);
 }
 

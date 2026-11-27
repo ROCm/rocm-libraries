@@ -35,14 +35,17 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - `attn_mask`: the engine serves an fp32 tensor `[B|1, Hq|1, Sq|1, Skv]` (extent 1 or
   full on each leading axis, indexed by the query head), real, not ragged and not
   pass-by-value, with a unit-stride key axis and its largest element index below 2^31.
-  It declines any other `attn_mask`, with the cause in the INFO log.
+  It declines any other `attn_mask`, with the cause in the INFO log. It also declines an
+  `attn_mask` whose Q, K, V or O is not packed BSHD, at the graph match, with the cause
+  `attn_mask`, the first stride that differs and its packed value: the bias kernels read
+  no Q/K/V/O strides (see Layouts).
   `-inf` masks a key; a row with no unmasked key outputs 0, as the hipDNN reference
   does for a row of `-inf` scores. A finite value, `finfo(float32).min` included, is a
   score like any other (a row of them gets the uniform softmax), and a NaN on a visible
   key makes its row NaN, as in the reference.
-- Launch grids: the one-CTA-per-block grid at the `qb_minor` block order (every cell),
+- Launch grids: the one-workgroup-per-block grid at the `qb_minor` block order (every cell),
   `bt_hkv_minor` and `hq_minor_swz` where the reduction kept them, and at D128 without a
-  window the persistent grid: 304 CTAs (`num_persistent`) striding over the work items in
+  window the persistent grid: 304 workgroups (`num_persistent`) striding over the work items in
   a pinned `persist_decode` order (`qb_major`, `bt_hkv_minor`, `hkv_major` or
   `hq_minor_swz`, as kept), with a fast-division magic/shift pair per decode divisor as
   kernel arguments. KMD fields `persistent`, `num_persistent`, `persist_decode`,
@@ -71,6 +74,45 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - Batch, sequence lengths and both head counts are runtime kernel arguments, so every
   variant serves any shape its tile divides. Each variant is built at batch 1,
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
+- Layouts: Q, K, V and O may be any `[B, S, H, D]` view whose strides the engine's host predicate
+  admits (`packs/AttentionDenseStrides.hpp`, the C++ twin of rocKE's `dense_strides_admit`), so
+  BSHD, BHSD, batch slices and packed QKV graphs are served. Every variant takes the twelve
+  `stride_{q,k,v,o}_{batch,head,token}` arguments last (after `lse_ptr` where there is one,
+  and after the bias pointer and its three strides in a bias variant).
+  The grid and persistent variants read them. Two kinds of variant ignore them, so a graph
+  whose operands are not packed BSHD never matches those: the `v_reg_prefetch` and
+  `lds_num_buffers` 2 pipelines, and the bias variants (`use_additive_bias` 1), whose bias
+  read indexes only by the bias's own three strides. The bias kernels address packed Q, K, V
+  and O, and the extra stride arithmetic is not shown to fit their register budget; serving
+  strides there is open work, as it is for the K double-buffer and V register-prefetch
+  pipelines. A strided graph with an `attn_mask` is declined at the graph match (see
+  `attn_mask` above).
+  The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
+  (a token stride at least the head size), no operand may overlap itself, each operand must
+  declare a base alignment that is a multiple of 16 bytes, and the slabs must stay inside the kernel's
+  32-bit offsets. Any other graph is declined with an INFO line naming the reason (`operand`,
+  `alignment`, `head_dim_stride`, `stride_alignment`, `overlap` or `size_limit`). A graph that
+  declares another alignment is declined first, with `alignment`, before its layout is
+  judged; the stride predicate's own `pointer_alignment` reason is the second line for the
+  same rule and is what refuses a plan when it is prepared (a declared alignment of 0 or less
+  counts as 1 there, so it is refused too).
+- Output memory: the launch refuses (`HIPDNN_PLUGIN_STATUS_BAD_PARAM`) an output whose byte
+  span meets the span of Q, K or V, for example an O cut out of the fused QKV buffer. The
+  kernel writes O while other workgroups still read the inputs, so the result would be wrong
+  with no error. The test compares spans, not elements, so an O interleaved with an input is
+  refused even where they share no element. Q, K and V may share storage with each other.
+  A launch that writes the LSE also refuses a stats output whose span (the packed FP32
+  [B, Hq, Sq, 1] tensor) meets the span of Q, K, V, O or, for a bias kernel, the bias (up to
+  the last element its strides reach): the kernel writes the LSE while other workgroups still
+  read the inputs and write O.
+- Saved plans: new plans are saved under `hipkernel.gfx942_attention_dense.dispatch.v3`, which
+  records the twelve strides, and plans with a bias under `dispatch.v4`, which also records the
+  bias. Plans saved under `dispatch.v1` and `dispatch.v2` (the bias contract before the
+  strides) still restore and launch their own older kernel arguments. The restore re-checks the
+  saved strides against the saved `block_n` and `reads_strides` flag, and refuses a `dispatch.v4`
+  plan that says its bias kernel reads the strides. Beyond that, `reads_strides` and `block_n` are
+  trusted, as `block_m` is: a saved plan carries no KMD knobs, so the restore cannot ask which
+  body its code object is.
 - Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
   `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` and `gfx942_dense_persist_aot`.
   Only `gfx942_dense_qbminor` declares the `attn_bias` feature, which is what keeps the
@@ -87,6 +129,10 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
     - Split KV (`kv_segments` > 1; needs a workspace and a combine launch).
     - Window rows that see no key (seqlen_q - seqlen_kv >= W) in a graph that binds a stats
       (LSE) output: see the Mask entry above.
+  - Not yet in the gfx942 kernel: an `attn_mask` over Q, K, V or O that are not
+    packed BSHD (BHSD, a batch slice, a fused QKV buffer). The bias bodies ignore the strides, so the
+    graph match declines such a graph with the cause `attn_mask` instead of letting every
+    bias kernel miss.
   - Not in the catalog: sliding windows other than 128, 512, 1024 and 2048 keys (W is a
     compile-time parameter). W=4096 (Mistral-7B-v0.1, StarCoder2, Command R7B, OLMo 3,
     EXAONE 4.0; all D128) is the first to add.
@@ -96,7 +142,9 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
     other than 64 and 128, FP32 and FP8 data types, dropout, block masks, an `attn_mask`
     other than the fp32 additive bias above, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
     64, 128, 256 and 512 with block_n 32, 64 and 128, per cell as listed in the selection.
-  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets).
+  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets). With strided
+    operands the same limits also hold per batch-and-head slab, where a K/V slab counts the two
+    tiles a load may reach past the data.
   - Design limit: FLOAT accumulation, so a DOUBLE compute type is declined.
 
 ## Files
@@ -175,7 +223,20 @@ order. Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which 
   `packs/AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit, and retrain the
   L2 if the KDP's kernels changed (see Models).
-- Saved plans store their launch values under `hipkernel.gfx942_attention_dense.dispatch.v1`
-  (the kernel reads the head counts at runtime: this engine's first contract), or `.v2` for
-  a plan that serves a bias kernel (v1 plus the bias uid and its batch, query-head and
-  query-row strides). Both stay registered so saved plans keep loading.
+- Saved plans store their launch values under `hipkernel.gfx942_attention_dense.dispatch.v3`
+  (the kernel reads the head counts and the strides at runtime), or `.v4` for a plan that
+  serves a bias kernel (v3 plus the bias uid and its batch, query-head and query-row
+  strides). Plans saved under `.v1` (this engine's first contract: head counts at runtime)
+  and `.v2` (its bias contract before the strides) still load. All four stay registered so
+  saved plans keep loading. The four are one table, `GFX942_ATTENTION_DENSE_CONTRACTS` in
+  `packs/Gfx942AttentionDenseLaunchValues.hpp` (symbol, kernel arguments, role); the
+  descriptor, the dispatch handlers and the restore's name lookup derive from it. A new
+  version is a new versioned name, one new row, and the row it supersedes turned `LEGACY`.
+  The bias contract is versioned with the current one, so a new current version needs a new
+  bias version too: two new names, two new rows with the bias row after the current one
+  (`isContractTable` refuses a table whose bias row comes first), and both superseded rows
+  turned `LEGACY`. A table holds at most 8 legacy rows (`ATTENTION_DENSE_MAX_LEGACY_CONTRACTS`).
+  A change of the
+  kernel arguments also needs the shared ABI code (`AttentionDenseAbi` and the argument
+  builders in `packs/AttentionDenseCommon.hpp` and `packs/AttentionDenseNative.cpp`) and a
+  saved-plan golden sample.

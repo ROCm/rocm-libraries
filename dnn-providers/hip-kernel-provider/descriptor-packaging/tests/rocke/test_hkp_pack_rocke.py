@@ -580,6 +580,10 @@ def test_rocke_compiles_and_packs(
     # Read off the object comgr actually produced. rocke emits argument names,
     # which a HIP extern "C" kernel does not, so the dispatch-time comparison
     # covers names here and not only kind and size.
+    # The twelve i32 strides come last, after every other argument.
+    strides = [
+        f"stride_{t}_{axis}" for t in "qkvo" for axis in ("batch", "head", "token")
+    ]
     signature = ks["signature"]
     assert [a["kind"] for a in signature] == [
         "global_buffer",
@@ -592,7 +596,7 @@ def test_rocke_compiles_and_packs(
         "by_value",
         "by_value",
         "by_value",
-    ]
+    ] + ["by_value"] * len(strides)
     assert [a["name"] for a in signature] == [
         "q_ptr",
         "k_ptr",
@@ -604,7 +608,7 @@ def test_rocke_compiles_and_packs(
         "seqlen_kv",
         "num_query_heads",
         "num_kv_heads",
-    ]
+    ] + strides
 
 
 def test_rocke_symbol_capture_differs_from_builder(

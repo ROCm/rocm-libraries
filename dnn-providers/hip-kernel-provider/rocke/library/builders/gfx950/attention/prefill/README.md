@@ -38,14 +38,34 @@ The persistent body also takes a host-computed fast-division magic/shift pair pe
 work-decode divisor, so its grid-stride decode does no runtime division.
 Sub-modes that still bake the shape into the body — ragged, varlen, paged, moving
 bottom-right causal, and the `gqa_pair` / `gqa_pair_2phase` persistent orders (their
-CTA count is a formula of the shape) — keep per-shape identity. Baked grid kernels
+workgroup count is a formula of the shape) — keep per-shape identity. Baked grid kernels
 still take batch and both seqlens as parameters; that ABI does not make a baked
 diagonal safe to reuse for a different sequence-length difference.
+
+Q, K, V and O are logical `[B, S, H, D]` views of any storage layout the host admits: every
+kernel takes twelve trailing `i32` arguments, a batch, head and token element stride per
+tensor (the head-dim stride is 1), after all other parameters, so BSHD, BHSD, batch slices
+and packed QKV views launch without a copy. The grid body, its KV-segment form, the
+persistent body in every order that reads the runtime shape, and the wide-DMA form read
+them. The `gqa_pair` orders, the fp8 K/V-cache bodies, ragged, varlen and paged specs, and
+the additive-bias bodies (`use_additive_bias`) take the arguments and ignore them;
+`run_attention_dense_torch` admits packed tensors only for those (`body_serves_strides`) and
+raises `ValueError` for any other layout; serving strides there is open work, per body
+family: additive bias, fp8 K/V-cache, ragged, varlen and paged, and `gqa_pair` orders.
+A strided O is refused with `kv_segments > 1`,
+and so is an O whose bytes meet those of Q, K or V (the kernel writes O while other
+workgroups still read the inputs). The strides are not a spec field: the kernel name and
+the cache key do not change. The admission rules (stride multiples, alignment, overlap,
+size limits) are in `kernels/common/_attention_dense_strides.py`.
 
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
 persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;
 block-order knobs are `persist_decode`, `nonpersist_decode`, and
 `chiplet_num_xcds` (see `../ALGORITHM.md` §8.2).
+
+The measured cost of the launch-time strides against the baseline kernels and the
+strided-layout catalog sweep, for gfx942 and gfx950, are in
+[`dense_attention_launch_time_strides_case_study.md`](dense_attention_launch_time_strides_case_study.md).
 
 ## Persistent (grid-stride) mode
 
@@ -299,6 +319,14 @@ run_attention_dense_torch(
   overflows to a NaN row.
 - **Composes with** every mask (none, top-left and bottom-right causal, sliding window,
   lookahead), fixed ragged, packed varlen, sinks and LSE, fp16/bf16, D64/D128.
+- **Packed Q, K, V and O only.** The bias bodies take the twelve Q/K/V/O stride
+  arguments and ignore them: the bias read indexes only by the bias's own three
+  strides, and the bias bodies were added while the stride work was open and were not
+  ported to it. The D128 bias body with LSE already sits at the 256-VGPR budget (it
+  keeps its bias loads scalar because the 4-wide ones spill), so the extra stride
+  arithmetic may not fit. A strided Q, K, V or O raises `ValueError`; the hipDNN
+  engine declines such a graph with the cause `attn_mask`. Serving strides here is open
+  work.
 
 Through the dispatcher, set `use_attn_bias=True` (fp32 only: `attn_bias_dtype="f32"`) on
 an `AttentionRequest` pinned to `gfx950_dense_grid` and pass the bias as
@@ -410,7 +438,7 @@ by representative cases in `platform/tests/golden/rocke_representative_ir_sha256
 Every alias above (causal kinds fix the right bound at 0, full attention ignores the
 alignment, single-token full attention is causal, equal-length top-left folds for the
 dense kernel only) is resolved in one place, `normalize_band` in
-[common.py](dispatch/attention/common.py), into a frozen `AttentionBand(left_bound,
+[common.py](../../../../dispatch/attention/common.py), into a frozen `AttentionBand(left_bound,
 right_bound, alignment)`. The unified problem fields, the feature set and the dense
 band all read that value. The feature vocabulary is `causal`, `full_attention`
 (no bound on either side), and `band` (a lookahead or non-causal window); a candidate
@@ -481,8 +509,17 @@ original sweep result.
    `cu_seqlens_q/kv`) currently trails the dense/persistent path and flyDSL on
    ragged batches. Follow-ups: extend the hkv-major L2-locality decode and the
    persistent grid-stride mode to varlen (today persistent is uniform-batch only),
-   and improve per-sequence load balance across CTAs so short and long sequences
-   in a batch don't serialize.
+   and improve per-sequence load balance across workgroups so short and long
+   sequences in a batch don't serialize.
+3. **Launch-time strides: the open items.** Serve the strides in the bodies that
+   still ignore them: additive bias, fp8 K/V-cache, ragged, varlen and paged, and
+   `gqa_pair` orders;
+   port the scalar LDS-DMA destination to the non-wide persistent bodies; find what
+   the stride addressing costs in the persistent bodies (the D64 64/8-head shapes
+   fail the speed bar in the re-time after the per-row lazy-rescale change); re-time
+   the gfx950 bodies at more than one compiler (the re-time ran at one); and re-run
+   the gfx950 strided-layout catalog sweep on them. Details in
+   [the case study](dense_attention_launch_time_strides_case_study.md), section 7.
 
 ## Notes
 

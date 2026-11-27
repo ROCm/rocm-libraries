@@ -239,20 +239,58 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
     return b.bitcast(bits, VectorType(dtype, width))
 
 
+# What ``_check_lse_buffer`` needs from the LSE buffer before it reads anything else.
+_LSE_BUFFER_ATTRS = (
+    "shape",
+    "dtype",
+    "is_contiguous",
+    "data_ptr",
+    "numel",
+    "element_size",
+)
+
+
 def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
-    on q's GPU, and not overlapping any input or output tensor."""
-    import torch
+    on q's GPU, and not overlapping any input or output tensor.
 
-    if not isinstance(lse, torch.Tensor):
-        raise ValueError("lse must be a torch tensor")
-    if lse.dtype != torch.float32:
+    Every tensor here is a torch tensor or the device-buffer view of a caller that
+    does not use torch; these are the attributes each one needs:
+
+    * ``lse``: ``shape``, ``dtype`` (FP32 is any dtype whose ``str()`` ends in
+      ``float32``: torch's or numpy's), ``is_contiguous()``, ``data_ptr()``,
+      ``numel()``, ``element_size()``, ``device`` and ``is_cuda`` (True). One of the
+      first six missing raises ``ValueError`` that names every one that is missing;
+      a missing ``device`` raises ``AttributeError``.
+    * ``q``: ``device`` and ``is_cuda`` (True); a missing ``device`` raises
+      ``AttributeError``.
+    * each tensor of ``inputs`` that is not None (q, k, v, out and the optional
+      tensors): ``device``, ``is_cuda`` (True) and ``numel()``, and, when it has
+      elements, ``shape``, ``stride()``, ``data_ptr()`` and ``element_size()``.
+      Apart from ``is_cuda``, these are read without a check first, so a missing
+      one raises ``AttributeError``: a caller without torch that asks for LSE
+      passes views that have all of them.
+
+    A caller that does not use torch passes views that declare ``is_cuda``; a
+    tensor without it, or with it False, is refused with ``ValueError`` (a CPU
+    view whose ``device`` equals q's would otherwise reach a GPU kernel by its
+    host address). ``device`` is still compared with q's."""
+    missing = [a for a in _LSE_BUFFER_ATTRS if not hasattr(lse, a)]
+    if missing:
+        raise ValueError(
+            f"lse must be a tensor or a device view; it lacks {', '.join(missing)}"
+        )
+    if not str(lse.dtype).endswith("float32"):
         raise ValueError("lse must have dtype float32")
     if tuple(lse.shape) != expected:
         raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")
     if not lse.is_contiguous():
         raise ValueError("lse must be contiguous")
-    if not q.is_cuda or not lse.is_cuda or lse.device != q.device:
+    if (
+        not getattr(q, "is_cuda", False)
+        or not getattr(lse, "is_cuda", False)
+        or lse.device != q.device
+    ):
         raise ValueError("lse and q must be GPU tensors on the same device")
 
     lse_start = lse.data_ptr()
@@ -260,7 +298,7 @@ def _check_lse_buffer(lse, q, expected, inputs):
     for name, tensor in inputs.items():
         if tensor is None:
             continue
-        if not tensor.is_cuda or tensor.device != q.device:
+        if not getattr(tensor, "is_cuda", False) or tensor.device != q.device:
             raise ValueError(f"{name} must be on q's GPU device")
         if not tensor.numel():
             continue

@@ -264,19 +264,49 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
     kmd_fields: [ragged, seqlen_q, batch, use_additive_bias]
     guard: >
-      kernelSignature(RUNTIME_HEAD_COUNTS), the catalog's dispatch.v2 contract,
-      returns the 10-arg form
-      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads):
-      the runtime-shape grid body reads the shape and both head counts as
-      kernargs, all taken from the graph at launch (the metadata carries no head
-      fields). kernelSignature(BAKED_HEAD_COUNTS), the 8-arg form, is used only
-      to restore plans saved under dispatch.v1. A use_additive_bias=1 candidate
-      takes the 14-arg dispatch.v3 form: the v2 list, then additive_bias_ptr and
-      its batch/head/sq strides last. Every variant is non-persistent
+      kernelSignature(RUNTIME_STRIDES), the catalog's strided contract
+      (dispatch.v4), returns the 22-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads, then
+      the twelve i32 stride_{q,k,v,o}_{batch,head,token} last): the runtime-shape
+      grid body reads the shape, both head counts and every stride as kernargs,
+      all taken from the graph at launch (the metadata carries no head fields).
+      kernelSignature(RUNTIME_HEAD_COUNTS), the 10-arg form without the strides,
+      and kernelSignature(BAKED_HEAD_COUNTS), the 8-arg form, are used only to
+      restore plans saved under dispatch.v2 and dispatch.v1. A use_additive_bias=1
+      candidate takes the RUNTIME_STRIDES_WITH_BIAS form of the dispatch.v5 contract:
+      the 10-arg list, then additive_bias_ptr and its batch/head/sq strides, then the
+      twelve strides (26 args); its body addresses packed Q/K/V/O and ignores the
+      strides. The 14-arg RUNTIME_HEAD_COUNTS_WITH_BIAS form (the v2 list, then the
+      bias) restores plans saved with a bias under dispatch.v3. Every variant is non-persistent
       and on the runtime-shape path, which enumerate.pin and the aligned catalog
       keep true. use_sinks=False; no sink_ptr slot. Validated at prepare() time
       by buildIngestorKernelCode(..., expectedSignature).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
+
+  # Which candidates may serve a graph whose operands are not packed BSHD. The mirror also reads
+  # `persistent` and `persist_decode`, but only where a record carries them: no persistent
+  # kernel ships, so the KMD declares neither and they are not listed here. `use_additive_bias`
+  # is listed for the bias part of the rule, which both arches share in AttentionDenseNative.cpp
+  # (AttentionDenseArch::readsStrides, through this arch's candidateAddsBias hook).
+  - name: layout
+    python_source: kernels/gfx950/attention_dense.py:body_serves_strides
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [ragged, use_additive_bias]
+    guard: >
+      AttentionDenseArch::readsStrides() (AttentionDenseNative.cpp) restates rocKE's
+      body_serves_strides and is what kernelMatches(), prepare() and the census ask.
+      Its bias part is shared by both arches: a record that adds a bias
+      (use_additive_bias 1) reads no strides (BIAS_BODIES_READ_STRIDES is false), nor
+      does one whose bias field is malformed. Every other record goes to this arch's
+      candidateReadsStrides(): a ragged record reads no strides; a record without a
+      persistent field is the grid body and reads them; a persistent record reads
+      them unless its persist_decode is a gqa_pair order or is malformed. A graph
+      whose operands are not packed BSHD matches only a candidate that reads them,
+      after graphMatches() has run the host stride predicate (denseStridesAdmit) on
+      Q, K, V and O at the loosest tile and kernelMatches() has asked again at the
+      candidate's own block_n; graphMatches() declines such a graph outright when it
+      has an attn_mask (cause attn_mask), since no bias body reads the strides.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseCatalogTiles.cpp
 
   # The gfx950 arch descriptor's additive-bias hook: the shared pack reads use_additive_bias
   # through it, never by name.

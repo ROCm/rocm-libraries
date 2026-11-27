@@ -7,6 +7,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseCatalogTileTestSupport.hpp"
 
 /**
@@ -35,6 +36,21 @@ TEST(TestGfx942AttentionDenseCatalogTiles, EveryShippedKernelsTileIsOneTheEngine
 {
     expectEveryShippedAttentionDenseTileIsLaunchable(GFX942_ATTENTION_DENSE_ENGINE_NAME,
                                                      &isSupportedGfx942AttentionDenseTile);
+}
+
+/// Every shipped kernel takes exactly the arguments the engine's current contract launches.
+TEST(TestGfx942AttentionDenseCatalogTiles, EveryShippedKernelTakesTheArgumentsTheEngineLaunches)
+{
+    expectEveryShippedAttentionDenseKernelTakesTheLaunchedArguments(
+        GFX942_ATTENTION_DENSE_ENGINE_NAME, gfx942AttentionDenseArch());
+}
+
+/// Every shipped kernel is judged by the engine as rocKE judges it: it reads its strides, or the
+/// engine would hand it a strided graph it cannot address. Also one flip of each body class.
+TEST(TestGfx942AttentionDenseCatalogTiles, EveryShippedKernelReadsItsStridesAsRockeSaysItDoes)
+{
+    expectEveryShippedAttentionDenseKernelReadsItsStridesAsRockeSaysItDoes(
+        GFX942_ATTENTION_DENSE_ENGINE_NAME, "gfx942", gfx942AttentionDenseArch());
 }
 
 } // namespace

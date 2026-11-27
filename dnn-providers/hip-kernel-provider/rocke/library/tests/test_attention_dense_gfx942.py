@@ -37,6 +37,10 @@ import re
 
 import pytest
 
+from kernels.common._attention_dense_strides import (
+    DENSE_STRIDE_NAMES,
+    packed_launch_strides,
+)
 from kernels.common.attention_dense_decode import FASTDIV_DIVIDEND_LIMIT
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx942.attention_dense import (
@@ -47,6 +51,7 @@ from kernels.gfx942.attention_dense import (
     attention_dense_runtime_args,
     attention_dense_signature,
     bf16_cfvst_supported,
+    body_serves_strides,
     build_attention_dense,
     default_use_exp2_fast,
     gfx942_kernel_name,
@@ -905,15 +910,18 @@ _PAGED = dict(sliding_window=256, paged=True, block_size=16, num_kv_blocks=256)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_paged_is_supported_and_takes_the_dma_v_path(dtype):
     """Paged builds at both dtypes and resolves cfvst off by policy, so its name
-    carries no ``cfvst0`` override tag."""
+    carries no ``cfvst0`` override tag. Its block-table arguments come right before
+    the 12 stride arguments every body takes last; paged is a packed-only body."""
     spec = _spec(dtype=dtype, **_PAGED)
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
     assert not spec.resolved_use_cfvst()
     assert not spec.resolved_use_v_swizzle()
     assert "cfvst" not in gfx942_kernel_name(spec)
+    assert not body_serves_strides(spec)
     params = [p.name for p in build_attention_dense(spec, arch="gfx942").params]
-    assert params[-3:] == ["block_tables", "kv_lens", "block_table_stride"]
+    assert params[-12:] == list(DENSE_STRIDE_NAMES)
+    assert params[-15:-12] == ["block_tables", "kv_lens", "block_table_stride"]
 
 
 def test_paged_rejects_forced_cfvst():
@@ -2882,9 +2890,9 @@ def _fastdiv(n: int, magic_i32: int, shift: int) -> int:
 def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     """The persistent kernarg ABI is the five shape params, then one
     ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per divisor of the RESOLVED
-    decode order -- in the signature, in the built kernel's params and in the
-    runtime args, all in one order. A skew mis-binds kernargs and corrupts results on
-    GPU only.
+    decode order, then the 12 stride i32s -- in the signature, in the built
+    kernel's params and in the runtime args, all in one order. A skew mis-binds
+    kernargs and corrupts results on GPU only.
 
     The values are checked two ways: equal to
     :func:`rocke.helpers.magic_division.calculate_magic_numbers` for the divisor (magic
@@ -2911,15 +2919,18 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     pairs = tuple(f"{d}_{p}" for d in divisors for p in ("magic", "shift"))
     assert spec.runtime_kernarg_fields == spec.runtime_param_fields + pairs
 
+    # The strides are not shape kernargs of the spec: they follow them.
+    abi = spec.runtime_kernarg_fields + DENSE_STRIDE_NAMES
     head = ("q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale")
     sig = attention_dense_signature(spec)
-    assert tuple(p["name"] for p in sig) == head + spec.runtime_kernarg_fields
+    assert tuple(p["name"] for p in sig) == head + abi
     assert all(p["type"] == "i32" for p in sig[len(head) :])
     kd = build_attention_dense(spec, arch="gfx942")
-    assert tuple(p.name for p in kd.params) == head + spec.runtime_kernarg_fields
+    assert tuple(p.name for p in kd.params) == head + abi
 
     args = attention_dense_runtime_args(spec)
-    assert tuple(args) == spec.runtime_kernarg_fields
+    assert tuple(args) == abi
+    assert {n: args[n] for n in DENSE_STRIDE_NAMES} == packed_launch_strides(spec)
     value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": nqb}
     for d in divisors:
         magic, shift = calculate_magic_numbers(value[d])
@@ -2933,12 +2944,16 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
 
 def test_non_persistent_kernarg_abi_has_no_fastdiv_pairs():
     """The default grid divides once per CTA, so its ABI is exactly the shape
-    params -- a stray fast-division pair there would shift nothing in the body but
-    would be a kernarg the launcher fills and the kernel never declared."""
+    params followed by the 12 stride i32s -- a stray fast-division pair there would
+    shift nothing in the body but would be a kernarg the launcher fills and the
+    kernel never declared."""
     spec = _spec(head_size=128, dtype="fp16")
     assert spec.fastdiv_divisors == ()
     assert spec.runtime_kernarg_fields == spec.runtime_param_fields
-    assert tuple(attention_dense_runtime_args(spec)) == spec.runtime_param_fields
+    assert (
+        tuple(attention_dense_runtime_args(spec))
+        == spec.runtime_param_fields + DENSE_STRIDE_NAMES
+    )
 
 
 def test_auto_persist_decode_keys_on_the_resolved_order():

@@ -76,6 +76,10 @@ struct KernelSpec
     int64_t causal = 1;
     int64_t slidingWindow = 0;
     int64_t ragged = 0;
+    /// The persistent body and its work order. The KMD declares neither field (no shipped kernel is
+    /// persistent), so a record carries them only where a case sets them.
+    std::optional<int64_t> persistent;
+    std::optional<std::string> persistDecode;
     int64_t blockM = 256;
     int64_t blockN = 64;
     /// Absent is a record written before the field, which the KMD default completes to 0.
@@ -115,6 +119,14 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("block_m"), spec.blockM},
         {std::string("block_n"), spec.blockN},
     };
+    if(spec.persistent.has_value())
+    {
+        kernel.metadata[std::string("persistent")] = *spec.persistent;
+    }
+    if(spec.persistDecode.has_value())
+    {
+        kernel.metadata[std::string("persist_decode")] = *spec.persistDecode;
+    }
     if(spec.useAdditiveBias.has_value())
     {
         kernel.metadata[std::string("use_additive_bias")] = *spec.useAdditiveBias;
@@ -427,13 +439,14 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsHeadSize64)
 // Silent-wrong-answer cases first
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdLayout)
+TEST(TestGfx950AttentionDenseGraphMatch, ServesBhsdLayout)
 {
-    // The kernel bakes BSHD strides and takes no stride kernargs; BHSD is wrong elements.
-    // One operand at a time runs on both arches in TestAttentionDenseMatchers.cpp.
+    // The grid body reads the strides, so a head-major tensor is addressed correctly. One
+    // operand at a time runs on both arches in TestAttentionDenseMatchers.cpp.
     GraphSpec spec;
     spec.setEveryLayout(SdpaLayout::BHSD);
-    EXPECT_FALSE(matchGraph(spec).has_value());
+    EXPECT_TRUE(matchGraph(spec).has_value());
+    EXPECT_TRUE(matchesKernel(spec, KernelSpec{}));
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpelling)
@@ -450,22 +463,24 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpell
     EXPECT_TRUE(matchGraph(bhsd).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
+TEST(TestGfx950AttentionDenseGraphMatch, ServesPaddedSequenceStride)
 {
     // Far likelier in a real graph than a full transpose: BSHD axis ORDER, but token rows
-    // padded past heads * headSize. The kernel bakes heads * headSize as the row stride,
-    // so every row after the first is read off by the accumulated padding.
-    //
-    // batch = 1 makes the batch axis unit-extent and therefore exempt from the stride
-    // compare, which leaves the sequence-stride clause as the only thing that can catch
-    // this. Heads and sequence both stay above 1 so neither of those is exempted away.
-    GraphSpec packed;
-    packed.batch = 1;
-    EXPECT_TRUE(matchGraph(packed).has_value());
-
-    GraphSpec padded = packed;
+    // padded past heads * headSize (here by 8 elements, the 16-byte grid). The kernel reads the
+    // row stride from its argument, so the padding is stepped over.
+    GraphSpec padded;
+    padded.batch = 1;
     padded.operand(Q_UID).layout = SdpaLayout::PADDED_BSHD;
-    EXPECT_FALSE(matchGraph(padded).has_value());
+    EXPECT_TRUE(matchGraph(padded).has_value());
+    EXPECT_TRUE(matchesKernel(padded, KernelSpec{}));
+
+    // A pad of 4 elements is off the 16-byte grid: declined whatever the kernel tolerates.
+    GraphSpec fourElementPad;
+    fourElementPad.batch = 1;
+    auto strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
+    strides.at(2) += 4;
+    fourElementPad.operand(Q_UID).strides = strides;
+    EXPECT_EQ(loggedDecline(GFX950_ATTENTION_DENSE, fourElementPad).cause, "stride_alignment");
 }
 
 // ---------------------------------------------------------------------------
@@ -480,24 +495,34 @@ LoggedDecline loggedDecline(const GraphSpec& spec)
     return attention_dense_graphs::loggedDecline(GFX950_ATTENTION_DENSE, spec);
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheBakedStridesWhenQIsNotBshd)
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheStrideWhenQsStrideBreaksARule)
 {
+    // A head-major Q is served; one whose token stride is off the 8-element grid is not, and the
+    // line names the operand, the axis and the value.
     GraphSpec spec;
-    spec.operand(Q_UID).layout = SdpaLayout::BHSD;
+    auto strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
+    strides.at(2) = 516;
+    spec.operand(Q_UID).strides = strides;
     const auto decline = loggedDecline(spec);
-    EXPECT_EQ(decline.cause, "layout");
-    EXPECT_NE(decline.detail.find("Q (uid 1)"), std::string::npos) << decline.detail;
-    // The BSHD strides for dims [2, 4, 256, 128].
-    EXPECT_NE(decline.detail.find("131072, 128, 512, 1"), std::string::npos) << decline.detail;
+    EXPECT_EQ(decline.cause, "stride_alignment");
+    EXPECT_NE(decline.detail.find("q token stride 516"), std::string::npos) << decline.detail;
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOIsNotBshd)
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOsStridesOverlap)
 {
+    // Heads packed closer than head_size: the output's heads overlap, which would write one
+    // head's elements over another's.
     GraphSpec spec;
-    spec.operand(O_UID).layout = SdpaLayout::BHSD;
+    auto strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
+    strides.at(1) = HEAD_SIZE / 2;
+    spec.operand(O_UID).strides = strides;
     const auto decline = loggedDecline(spec);
-    EXPECT_EQ(decline.cause, "layout");
-    EXPECT_NE(decline.detail.find("O (uid 4)"), std::string::npos) << decline.detail;
+    EXPECT_EQ(decline.cause, "overlap");
+    // The line names the operand and shows its dims and strides: B2, 4 heads, 256 tokens of 128.
+    EXPECT_NE(decline.detail.find("o dims (2, 4, 256, 128) with strides (131072, 64, 512, 1) "
+                                  "overlap themselves"),
+              std::string::npos)
+        << decline.detail;
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
@@ -572,25 +597,24 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphWithNoSdpaForward
     EXPECT_TRUE(decline.cause.empty()) << "[" << decline.cause << "]" << decline.detail;
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
+TEST(TestGfx950AttentionDenseGraphMatch, ServesPaddedOutputSequenceStride)
 {
-    // Exact-equality rule, same as the inputs: a dense-but-padded row stride is not the
-    // layout the epilogue bakes. Batch is 1 so the batch axis is unit-extent and exempt,
-    // leaving the sequence stride as the only clause that can reject this graph.
-    GraphSpec spec;
-    spec.batch = 1;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec padded = spec;
+    // The output has its own strides: a padded row stride is stepped over like the inputs'.
+    // Batch is 1 so the batch axis is unit-extent and exempt.
+    GraphSpec padded;
+    padded.batch = 1;
     padded.operand(O_UID).layout = SdpaLayout::PADDED_BSHD;
-    EXPECT_FALSE(matchGraph(padded).has_value());
+    EXPECT_TRUE(matchGraph(padded).has_value());
+    EXPECT_TRUE(matchesKernel(padded, KernelSpec{}));
 }
 
 // ---------------------------------------------------------------------------
-// One stride axis at a time. hasBshdStrides ANDs four per-axis clauses, and the layouts
-// above each break two at once (BHSD: head and sequence; padded: sequence and batch).
-// Each case below perturbs exactly one axis of one operand at B=2, H=4, so no axis is
-// unit-extent and exempt, and that axis's clause is the only one that can decline it.
+// One stride axis at a time. The layouts above each move two at once (BHSD: head and
+// sequence; padded: sequence and batch). Each case below perturbs exactly one axis of one
+// operand at B=2, H=4, so no axis is unit-extent and exempt, and the stride predicate
+// (attention_dense::denseStridesAdmit) serves the move or declines it by that axis alone:
+// stride_alignment for a zero stride, overlap for heads that run into the next row, and
+// head_dim_stride for the element axis.
 // ---------------------------------------------------------------------------
 
 /// Indices into a (B, H, S, D) stride vector.
@@ -606,35 +630,36 @@ std::vector<int64_t> packedStridesWith(std::size_t axis, int64_t stride)
     return strides;
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAPaddedBatchStrideAlone)
+TEST(TestGfx950AttentionDenseGraphMatch, ServesAPaddedBatchStrideAlone)
 {
     // A query sliced out of a larger allocation: rows and heads packed, batches spaced one
-    // row further apart. The kernel bakes S * H * D as the batch pitch, so every batch
-    // after the first is read one row early.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec padded = spec;
+    // row further apart. The kernel reads the batch pitch from its argument.
+    GraphSpec padded;
     padded.operand(Q_UID).strides
         = packedStridesWith(BATCH_STRIDE, SEQ * HEADS * HEAD_SIZE + HEADS * HEAD_SIZE);
-    EXPECT_FALSE(matchGraph(padded).has_value());
+    EXPECT_TRUE(matchGraph(padded).has_value());
+    EXPECT_TRUE(matchesKernel(padded, KernelSpec{}));
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAKeyValueCacheViewByItsBatchStride)
+TEST(TestGfx950AttentionDenseGraphMatch, ServesAKeyValueCacheViewByItsBatchStride)
 {
     // K and V as views of a cache allocated for twice the sequence: each batch's rows are
-    // packed, but batches sit a whole cache length apart.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
+    // packed, but batches sit a whole cache length apart. Each operand has its own strides.
     const auto cacheView = packedStridesWith(BATCH_STRIDE, 2 * SEQ * HEADS * HEAD_SIZE);
-    GraphSpec keyView = spec;
+    GraphSpec keyView;
     keyView.operand(K_UID).strides = cacheView;
-    EXPECT_FALSE(matchGraph(keyView).has_value());
+    EXPECT_TRUE(matchGraph(keyView).has_value());
+    EXPECT_TRUE(matchesKernel(keyView, KernelSpec{}));
 
-    GraphSpec valueView = spec;
+    GraphSpec valueView;
     valueView.operand(V_UID).strides = cacheView;
-    EXPECT_FALSE(matchGraph(valueView).has_value());
+    EXPECT_TRUE(matchGraph(valueView).has_value());
+    EXPECT_TRUE(matchesKernel(valueView, KernelSpec{}));
+
+    GraphSpec both;
+    both.operand(K_UID).strides = cacheView;
+    both.operand(V_UID).strides = cacheView;
+    EXPECT_TRUE(matchesKernel(both, KernelSpec{}));
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABroadcastBatchStride)
@@ -931,12 +956,11 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
 {
     // O's extents here are positive and rank-4, so the well-formedness predicate passes
-    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX, and that
-    // product is what hasBshdStrides derives O's batch stride from. As ordered, the
-    // head-count compare rejects the graph before O's layout is read; the case exists to
-    // keep the overflow-capable domain reachable and declined. O's strides are written out
-    // as the ordinary dense BSHD spelling of the PROBLEM shape, so no stride value is what
-    // rejects this graph.
+    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX, the packed
+    // batch stride of such an O. As ordered, the head-count compare rejects the graph before
+    // O's layout is read; the case exists to keep the overflow-capable domain reachable and
+    // declined. O's strides are written out as the ordinary dense BSHD spelling of the PROBLEM
+    // shape, so no stride value is what rejects this graph.
     const GraphSpec spec;
     EXPECT_TRUE(matchGraph(spec).has_value());
 
@@ -994,9 +1018,9 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
 {
     // Q dims {2, 2^30, 2^30, 128}: S * H * D = 2^67, which does not fit in int64_t, and Q
     // and O carry the batch stride 0 it would wrap to beside packed head, row and element
-    // strides. hasBshdStrides forms that product through checkedProduct, which removes the
-    // undefined behaviour but is not observable in any verdict: every graph whose S * H * D
-    // overflows also overflows B * S * H * D, which the Q bound declines.
+    // strides. The stride predicate forms that product only through overflow-checked steps,
+    // which removes the undefined behaviour but is not observable in any verdict: every graph
+    // whose S * H * D overflows also overflows B * S * H * D, which the Q bound declines.
     const std::vector<int64_t> wrappedStrides{0, HEAD_SIZE, (int64_t{1} << 30) * HEAD_SIZE, 1};
     GraphSpec spec;
     spec.numQueryHeads = int64_t{1} << 30;
@@ -1412,6 +1436,102 @@ TEST(TestGfx950AttentionDenseGraphMatch, ReadsDeprecatedCausalWithBottomRightAli
 // ---------------------------------------------------------------------------
 // kernel_match
 // ---------------------------------------------------------------------------
+
+// The grid body and the persistent body in a work order that decodes through the shape parameters
+// read the strides; the gqa_pair orders (their workgroup count is a formula of the baked shape)
+// keep packed addressing and ignore them, so a graph whose operands are not packed BSHD is refused
+// through the fields that select them, while a packed graph still matches. The KMD declares neither
+// field today (no shipped kernel is persistent): a record carries them only where the catalog gains
+// such a kernel, and a record without them is the grid body.
+TEST(TestGfx950AttentionDenseKernelMatch, ServesAStridedGraphFromEveryBodyThatReadsTheStrides)
+{
+    GraphSpec headMajor;
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+
+    const KernelSpec grid;
+    EXPECT_TRUE(matchesKernel(headMajor, grid)) << "the grid body reads the strides";
+    KernelSpec notPersistent;
+    notPersistent.persistent = 0;
+    EXPECT_TRUE(matchesKernel(headMajor, notPersistent));
+
+    // Persistent, in every work order that decodes through the shape parameters, and the one that
+    // names none (`auto` never picks a gqa_pair order).
+    KernelSpec unnamed;
+    unnamed.persistent = 1;
+    EXPECT_TRUE(matchesKernel(headMajor, unnamed));
+    for(const char* decode : {"auto", "qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        SCOPED_TRACE(decode);
+        KernelSpec persistent;
+        persistent.persistent = 1;
+        persistent.persistDecode = decode;
+        EXPECT_TRUE(matchesKernel(GraphSpec{}, persistent)) << "a packed graph is served";
+        EXPECT_TRUE(matchesKernel(headMajor, persistent)) << "a strided graph is served";
+    }
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesAStridedGraphFromAGqaPairPersistentBody)
+{
+    GraphSpec headMajor;
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+    GraphSpec oneOperand;
+    oneOperand.operand(O_UID).layout = SdpaLayout::BHSD;
+
+    for(const char* decode : {"gqa_pair", "gqa_pair_2phase"})
+    {
+        SCOPED_TRACE(decode);
+        KernelSpec persistent;
+        persistent.persistent = 1;
+        persistent.persistDecode = decode;
+        EXPECT_TRUE(matchesKernel(GraphSpec{}, persistent)) << "a packed graph is served";
+        EXPECT_FALSE(matchesKernel(headMajor, persistent)) << "a strided graph is refused";
+        EXPECT_FALSE(matchesKernel(oneOperand, persistent)) << "one operand off packed is enough";
+    }
+
+    // A malformed field is not assumed to be a body that reads the strides.
+    for(const char* field : {"persistent", "persist_decode"})
+    {
+        SCOPED_TRACE(field);
+        auto mistyped = makeKernel(KernelSpec{});
+        mistyped.metadata[std::string("persistent")] = int64_t{1};
+        mistyped.metadata[std::string(field)] = std::string("1");
+        EXPECT_TRUE(matchesKernelDefinition(GraphSpec{}, mistyped));
+        EXPECT_FALSE(matchesKernelDefinition(headMajor, mistyped));
+    }
+    auto unknownDecode = makeKernel(KernelSpec{});
+    unknownDecode.metadata[std::string("persistent")] = int64_t{1};
+    unknownDecode.metadata[std::string("persist_decode")] = std::string("diagonal");
+    EXPECT_FALSE(matchesKernelDefinition(headMajor, unknownDecode));
+}
+
+// A ragged record is never matched (the engine serves shape-generic candidates only), and a
+// record without its ragged field is malformed: it serves packed graphs and not strided ones.
+TEST(TestGfx950AttentionDenseKernelMatch, DoesNotAssumeAMalformedRecordReadsTheStrides)
+{
+    GraphSpec headMajor;
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+    auto erased = makeKernel(KernelSpec{});
+    erased.metadata.erase("ragged");
+    EXPECT_FALSE(matchesKernelDefinition(GraphSpec{}, erased)) << "kernel_match needs ragged 0";
+    EXPECT_FALSE(matchesKernelDefinition(headMajor, erased));
+
+    KernelSpec ragged;
+    ragged.ragged = 1;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, ragged));
+    EXPECT_FALSE(matchesKernel(headMajor, ragged));
+}
+
+// Strided layouts keep matching on the graph's own dims: the head counts reach the kernel from
+// the graph, so the one candidate of a (dtype, head size, mask, tile) serves a grouped
+// head-major graph too.
+TEST(TestGfx950AttentionDenseKernelMatch, ServesAGroupedHeadMajorGraphFromTheOneCandidate)
+{
+    GraphSpec grouped;
+    grouped.numQueryHeads = 8;
+    grouped.numKvHeads = 2;
+    grouped.setEveryLayout(SdpaLayout::BHSD);
+    EXPECT_TRUE(matchesKernel(grouped, KernelSpec{}));
+}
 
 TEST(TestGfx950AttentionDenseKernelMatch, AcceptsTheCandidateBakedForThisGraph)
 {

@@ -8,7 +8,12 @@ layout and sequence shape -- since the schema carries those only as tensor
 uids. ``head_dim`` reads q and v together: ``192x128`` is a q / k head dim of
 192 with a v head dim of 128, its own kernel rather than a 192. ``layout`` is
 q's stride order, or ``ragged`` when q is packed by per-batch offsets (the
-tensor's ``ragged_offset_tensor_uid``) whatever its strides.
+tensor's ``ragged_offset_tensor_uid``) whatever its strides. The forward catalog
+also tells ``sbhd`` (sequence outermost) from the two common orders, and a
+``_padded`` name marks a ``bhsd`` or ``bshd`` q with a stride larger than the
+dense product: a packed QKV buffer, a batch slice, a padded token stride. The
+backward catalog keeps the two plain names, so a padded backward q stays
+``bhsd`` or ``bshd``.
 
 Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
 ``heads``, ``layout``, ``mask``, ``seq``, ``scale``. The rest are optional
@@ -72,7 +77,11 @@ HEAD_DIMS = {
     (256, 256): "256",
 }
 # Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
+# The backward catalog lists exactly these.
 LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd"}
+# Forward only: the order (s, b, h, d), and a padded form of each LAYOUTS name.
+SBHD_ORDER = (2, 0, 1, 3)
+PADDED_LAYOUTS = {"bhsd": "bhsd_padded", "bshd": "bshd_padded"}
 
 FEATURES = (
     Feature("dtype:bf16", ("q_tensor_uid",)),
@@ -86,6 +95,15 @@ FEATURES = (
     Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),
     Feature("heads:mqa", QK_FIELDS, "one k/v head"),
     *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in LAYOUTS.values()),
+    Feature("layout:sbhd", ("q_tensor_uid",), "sequence outermost, then batch"),
+    *(
+        Feature(
+            f"layout:{name}",
+            ("q_tensor_uid",),
+            f"{plain} order, a stride larger than the dense product",
+        )
+        for plain, name in PADDED_LAYOUTS.items()
+    ),
     Feature("layout:ragged", ("q_tensor_uid",), "q packed by per-batch offsets"),
     Feature("mask:none", MASK_FIELDS),
     Feature("mask:causal_top_left", MASK_FIELDS),
@@ -179,6 +197,41 @@ def ports(node: dict):
     return has
 
 
+def q_layout(q: dict, *, extended: bool) -> str:
+    """The ``layout`` value of a q tensor that is not ragged.
+
+    Dims of extent one tie in the stride order and keep their bhsd order, and
+    their strides are ignored. ``extended`` adds the forward names: ``sbhd``,
+    and ``bhsd`` / ``bshd`` with ``_padded`` when a stride is larger than the
+    dense product of its order. A stride below that product (rows that overlap)
+    and a padded ``sbhd`` are not catalogued.
+    """
+    dims, strides = q["dims"], q["strides"]
+    # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
+    order = tuple(sorted(range(4), key=lambda dim: -strides[dim]))
+    name = LAYOUTS.get(order)
+    if name is None and extended and order == SBHD_ORDER:
+        name = "sbhd"
+    if name is None:
+        raise FeatureError(f"q stride order {order} is not a catalogued layout")
+    if not extended:
+        return name
+    dense, extent = [0] * 4, 1
+    for dim in reversed(order):
+        dense[dim] = extent
+        extent *= dims[dim]
+    real = [dim for dim in range(4) if dims[dim] != 1]
+    if any(strides[dim] < dense[dim] for dim in real):
+        raise FeatureError(
+            f"q strides {strides} overlap for dims {dims}: not a catalogued layout"
+        )
+    if all(strides[dim] == dense[dim] for dim in real):
+        return name
+    if name not in PADDED_LAYOUTS:
+        raise FeatureError(f"q strides {strides} pad a {name} layout: not catalogued")
+    return PADDED_LAYOUTS[name]
+
+
 def core_features(
     node: dict,
     attrs: dict,
@@ -187,6 +240,7 @@ def core_features(
     dtypes: dict[str, str],
     decode: bool,
     ragged: bool,
+    extended_layouts: bool = False,
 ) -> set[str]:
     """The exclusive groups shared by forward and backward.
 
@@ -195,6 +249,8 @@ def core_features(
     ``seq:decode`` or as an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
     ``ragged`` says whether a ragged q is ``layout:ragged`` or uncatalogued.
     ``dtypes`` maps q's data_type as serialized to its dtype value.
+    ``extended_layouts`` says whether ``layout`` also names ``sbhd`` and the
+    padded forms (``q_layout``), as the forward catalog does.
     """
     inputs = node.get("inputs") or {}
     q, k, v = (tensors_by_uid[inputs[f"{port}_tensor_uid"]] for port in "qkv")
@@ -222,11 +278,7 @@ def core_features(
             raise FeatureError("ragged q is not catalogued")
         layout = "ragged"
     else:
-        # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
-        order = tuple(sorted(range(4), key=lambda dim: -q["strides"][dim]))
-        if order not in LAYOUTS:
-            raise FeatureError(f"q stride order {order} is not a catalogued layout")
-        layout = LAYOUTS[order]
+        layout = q_layout(q, extended=extended_layouts)
 
     features = {
         f"dtype:{dtypes[dtype]}",
@@ -277,7 +329,13 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
     attrs = node.get("attributes") or {}
     has = ports(node)
     features = core_features(
-        node, attrs, tensors_by_uid, dtypes=DTYPES, decode=True, ragged=True
+        node,
+        attrs,
+        tensors_by_uid,
+        dtypes=DTYPES,
+        decode=True,
+        ragged=True,
+        extended_layouts=True,
     )
 
     if (

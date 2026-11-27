@@ -27,7 +27,14 @@
           "1_8_2048_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
           "1_8_288_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
           "2_8_1024_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
-          "2_8_512_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound"
+          "2_8_512_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
+          "bhsd_batch_slice_fp16_2_8_512_64_causal_tl",
+          "bhsd_gqa_bf16_1_16_2_384_128_causal_br",
+          "bhsd_mha_fp16_1_32_512_128_causal_br",
+          "padded_token_o_bhsd_bf16_2_8_1024_64_causal_br",
+          "qkv_packed_gqa_bf16_1_16_2_384_128_causal_br",
+          "qkv_packed_mha_bf16_1_4_512_128_causal_br",
+          "sbhd_fp16_2_8_512_64_causal_tl"
         ],
         "support": {
           "gfx942": [
@@ -80,7 +87,14 @@
           "1_8_2048_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
           "1_8_288_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
           "2_8_1024_64_bfp16_nhwc_attn_scale_value0p125_diagonal_alignmentbottom_right_right_bound0",
-          "2_8_512_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound"
+          "2_8_512_64_fp16_nhwc_attn_scale_value0p125_diagonal_alignmenttop_left_noright_bound",
+          "bhsd_batch_slice_fp16_2_8_512_64_causal_tl",
+          "bhsd_gqa_bf16_1_16_2_384_128_causal_br",
+          "bhsd_mha_fp16_1_32_512_128_causal_br",
+          "padded_token_o_bhsd_bf16_2_8_1024_64_causal_br",
+          "qkv_packed_gqa_bf16_1_16_2_384_128_causal_br",
+          "qkv_packed_mha_bf16_1_4_512_128_causal_br",
+          "sbhd_fp16_2_8_512_64_causal_tl"
         ],
         "support": {
           "gfx950": [

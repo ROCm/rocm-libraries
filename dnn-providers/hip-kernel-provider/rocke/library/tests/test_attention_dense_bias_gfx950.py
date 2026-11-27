@@ -18,11 +18,13 @@ import pytest
 
 from _dense_bias_common import assert_kernel_bias_constants
 from kernels.common._attention_additive_bias import additive_bias_strides
+from kernels.common._attention_dense_strides import DENSE_STRIDE_NAMES
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx950.attention_dense import (
     LOG2E,
     Gfx950AttentionDenseSpec,
     attention_dense_signature,
+    body_serves_strides,
     build_attention_dense,
     run_attention_dense_torch,
 )
@@ -68,14 +70,33 @@ def _bias(spec_kw):
 @pytest.mark.parametrize("mode", list(_MODES))
 def test_kernel_params_match_the_launcher_signature(mode):
     """KernelLauncher packs kernargs by position, so the builder's params and
-    attention_dense_signature must name the same list, the four bias params last."""
+    attention_dense_signature must name the same list, the four bias params before
+    the twelve strides."""
     spec = _bias(_MODES[mode])
     params = [p.name for p in build_attention_dense(spec).params]
     assert params == [a["name"] for a in attention_dense_signature(spec)]
-    assert params[-4:] == _BIAS_PARAMS
+    # The four bias params come before the twelve launch-time strides, which stay last.
+    assert params[-16:-12] == _BIAS_PARAMS
+    assert tuple(params[-12:]) == DENSE_STRIDE_NAMES
     plain = replace(spec, use_additive_bias=False)
     plain_params = [p.name for p in build_attention_dense(plain).params]
-    assert plain_params == params[:-4]
+    assert plain_params == params[:-16] + params[-12:]
+
+
+# The modes whose body keeps packed addressing with the bias off too.
+_PACKED_MODES = ("ragged", "varlen")
+
+
+@pytest.mark.parametrize("mode", list(_MODES))
+def test_a_bias_body_takes_packed_tensors_only(mode):
+    """The bias reads are written against packed Q/K/V/O, so a bias body ignores its
+    12 stride kernargs and the runner admits packed tensors only. The same mode
+    without the bias reads them, except the modes that are packed anyway: the bias
+    alone turns the strides off."""
+    spec = _bias(_MODES[mode])
+    assert body_serves_strides(spec) is False
+    plain = replace(spec, use_additive_bias=False)
+    assert body_serves_strides(plain) is (mode not in _PACKED_MODES)
 
 
 @pytest.mark.parametrize("mode", list(_MODES))

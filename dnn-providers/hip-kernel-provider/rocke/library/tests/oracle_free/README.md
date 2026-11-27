@@ -319,13 +319,32 @@ The last item is checked on the CPU. A contract lowers each quick spec to LLVM
 IR and classifies every floating-point instruction against that path: no mask on
 the scores, a key-tile loop over `seqlen_kv / block_n`, uncast weights in the
 normalizer, one cast into the PV operand, one `alpha` for the normalizer and for
-every accumulator element, one `fdiv 1.0, l`, and no fast-math flag. A second
+every accumulator element, one `fdiv 1.0, l`, and no fast-math flag. The loop
+compare is the only conditional branch; the only other compare allowed is the
+empty-slab guard `seqlen_kv > 0 ? records : 0` of a K or V buffer resource, so no
+compare can cut a slab short while it holds keys. The record count it guards is
+not traced here; `test_strided_kv_bound_is_the_slab_extent` evaluates it on the
+kernel IR. A second
 contract traces the MFMA operands: the score chains multiply K from its LDS
 region by Q, the value chains start from the rescaled accumulator and multiply V
 from its LDS region by the cast weights, each weight enters every value chain
-once, and the chain lengths are `head_size / 8` and `block_n / 8`. An
-instruction or operand outside the path fails with "re-derive the bound"; the
-bound is never widened to absorb it.
+once, and the chain lengths are `head_size / 8` and `block_n / 8`. Q, K and V
+must come from their own pointer arguments: the kernel takes its strides at
+launch, so the trace follows each address through the per-(batch, head) slab
+pointer, or the buffer resource built over it, back to `%<t>_ptr`, and a step
+whose offset reads another tensor's stride argument breaks it (the module
+docstring of `_permutation_path.py` gives the rule). An instruction or operand
+outside the path fails with "re-derive the bound"; the bound is never widened to
+absorb it.
+
+Which (batch, head) slab the kernel picks with a tensor's own strides is index
+arithmetic, and neither these contracts nor the relation see every mistake in
+it: the GPU lane runs batch 1, where the launch passes a batch stride of 0, so a
+K slab found with its batch and head strides swapped reads the first KV head
+for every head while V stays right, and each key still pairs with its own value.
+`test_each_work_item_reads_its_own_slabs` in
+`test_attention_dense_gfx950_varlen_kv_bound.py` checks that choice on the kernel
+IR of every strided gfx942 and gfx950 body, for every work item.
 
 The other items are assumptions about the hardware and the compiler. Of the
 compiled code object this suite reads only the floating-point mode; how each

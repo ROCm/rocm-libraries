@@ -1832,6 +1832,21 @@ def cases():
                 "wide_lds_dma": True,
             },
         ),
+        # The wide-DMA body on a work order that decodes through the shape params,
+        # so it reads its 12 stride params and takes the strided wide-DMA loader
+        # (gqa_pair above bakes the shape and keeps packed addressing).
+        (
+            "persist_wdma_qbmaj_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "num_query_heads": 32,
+                "num_kv_heads": 8,
+                "persistent": True,
+                "num_persistent": 16,
+                "persist_decode": "qb_major",
+                "wide_lds_dma": True,
+            },
+        ),
         # D=64 packed-row DMA loader (2 rows/instr, unpadded LDS) on the persistent
         # builder -- locks the head_size=64 fix (fp16_h64 above only exercises the
         # default builder).
@@ -2065,6 +2080,10 @@ def cases():
     for _variant, _over in (
         ("causal_sq512", {}),
         ("hqswz_sq512", {"nonpersist_decode": "hq_minor_swz"}),
+        # BF16 D128 without a mask: the strided grid body that keeps a per-row LDS
+        # destination for its K/V DMA (LDS_ROW_VGPR); causal_sq512 above takes the
+        # scalar per-kernel base instead.
+        ("noncausal_sq512", {"causal": False}),
         ("persist_causal_sq512", _persist942),
         ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
         ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),

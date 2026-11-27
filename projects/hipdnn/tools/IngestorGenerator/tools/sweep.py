@@ -240,7 +240,9 @@ def load_config(path):
             raise ConfigError(f"{key} must be a nonempty ordered list")
         names = set()
         for row in rows:
-            _fields(row, fields)
+            _fields(row, fields, ("benchmarking",) if key == "arms" else ())
+            if type(row.get("benchmarking", True)) is not bool:
+                raise ConfigError("an arm's benchmarking must be a boolean")
             name = _text(row["name"], "name")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name) or name in names:
                 raise ConfigError(f"unsafe or duplicate {key} name: {name}")
@@ -467,7 +469,8 @@ def phase_env(original, arm, attempt):
         ),
         HIPDNN_CACHE_DIR=str(attempt / "cache"),
         HIPDNN_LOG_FILE=str(attempt / "hipdnn.log"),
-        HIPDNN_FORCE_BENCHMARKING="1",
+        # An arm with `benchmarking: false` serves the ranker's top-ranked candidate.
+        HIPDNN_FORCE_BENCHMARKING="1" if arm.get("benchmarking", True) else "0",
         HIPDNN_LOG_LEVEL="info",
     )
     return env
