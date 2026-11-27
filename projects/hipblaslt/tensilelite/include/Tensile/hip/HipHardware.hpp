@@ -34,6 +34,8 @@
 
 #include <tensilelitehost/export.h>
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 namespace TensileLite
@@ -58,12 +60,26 @@ namespace TensileLite
 
             std::shared_ptr<origami::hardware_t> analyticalHardware;
 
+            // Read once when the device is constructed: /sys/module/amdgpu/version and the
+            // device's /sys/bus/pci/devices/<bdf>/xgmi_physical_id. Empty and -1 when
+            // unreadable.
+            std::string amdgpuVersion;
+            long long   xgmiPhysicalId = -1;
+
+            // The AIDPlacementBit kernel argument: aidPlacementBit(amdgpuVersion, xgmiPhysicalId).
+            std::optional<int32_t> aidPlacementBit() const;
+
             virtual std::string archName() const override;
         };
 
         // Whether the near-die rule, xgmi_physical_id & 1, holds on this amdgpu
         // version: amdgpu 6.19 and newer.
         TENSILELITEHOST_EXPORT bool page24RuleHolds(std::string const& amdgpuVersion);
+
+        // xgmiPhysicalId & 1 where the near-die rule holds and the id is known,
+        // otherwise nullopt.
+        TENSILELITEHOST_EXPORT std::optional<int32_t> aidPlacementBit(std::string const& amdgpuVersion,
+                                                                      long long xgmiPhysicalId);
 
         TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetCurrentDevice();
         TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetDevice(int deviceId);

@@ -38,6 +38,7 @@
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "mx_scale_format.hpp"
+#include "swizzle_layout.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "get_all_search_type_for_test.hpp"
@@ -1155,16 +1156,41 @@ namespace
         return 0;
     }
 
-    // MXScaleFormat id of HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT, the only
-    // layout that sets it.
+    // MXScaleFormat id of HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT and
+    // _128_4_PAGE24_EXT, the only layouts that set it.
     constexpr int kMXScaleFormatHostPreSwizzle128x4
         = static_cast<int>(TensileLite::MXScaleFormat::HostPreSwizzle128x4);
 
     inline int benchScaleAFormat(const TensileLite::ContractionProblemGemm& problem)
     {
         if(problem.mxBlockA() && problem.mxScaleFormat() == kMXScaleFormatHostPreSwizzle128x4)
-            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+            return problem.swizzleLayoutA()
+                           == static_cast<int>(TensileLite::SwizzleLayout::P48Page24)
+                       ? HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT
+                       : HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
         return benchScaleFormat(problem.mxTypeA(), problem.mxBlockA(), problem.useScaleAB());
+    }
+
+    /// Value of --swizzleLayoutA or --swizzleLayoutB in a bench line; empty for Default.
+    /// hipblaslt-bench has neither option, so replaying a line for another layout fails
+    /// rather than running HIPBLASLT_ORDER_COL256_R128_EXT data.
+    inline const char* benchSwizzleLayoutName(int layout)
+    {
+        using Layout = TensileLite::SwizzleLayout;
+        switch(static_cast<Layout>(layout))
+        {
+        case Layout::Default:
+            return "";
+        case Layout::P48:
+            return "P48";
+        case Layout::P16:
+            return "P16";
+        case Layout::P48Page24:
+            return "P48Page24";
+        case Layout::P48Page24Split:
+            return "P48Page24Split";
+        }
+        return "unknown";
     }
 
     inline int benchScaleBFormat(const TensileLite::ContractionProblemGemm& problem)
@@ -1311,6 +1337,10 @@ namespace
             problem.useScaleCD() ? "--scaleD" : "",
             problem.swizzleTensorA() ? "--swizzleA" : "",
             problem.swizzleTensorB() ? "--swizzleB" : "",
+            problem.swizzleLayoutA() ? "--swizzleLayoutA" : "",
+            benchSwizzleLayoutName(problem.swizzleLayoutA()),
+            problem.swizzleLayoutB() ? "--swizzleLayoutB" : "",
+            benchSwizzleLayoutName(problem.swizzleLayoutB()),
             rocblaslt::benchAlphaFlag(problem),
             problem.useGradient() ? "--gradient" : "",
             problem.useE() ? "--use_e" : "",
@@ -2073,14 +2103,20 @@ namespace
         return format != RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
     }
 
+    // The scale modes shuffled in 128-row by 4-K-block tiles.
+    bool isScale128x4(RocblasltContractionProblem::ScalingFormat format)
+    {
+        return format == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+               || format
+                      == RocblasltContractionProblem::ScalingFormat::
+                          Block_32_UE8M0_128_4_PAGE24_EXT;
+    }
+
     // MXScaleFormat id (tensilelite Contractions.py) that the caller's scale layout
     // requires of a solution; 0 for the layouts selection does not tell apart.
     int hostMXScaleFormat(const RocblasltContractionProblem& prob)
     {
-        return (prob.scaleAType
-                    == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
-                || prob.scaleBType
-                       == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+        return (isScale128x4(prob.scaleAType) || isScale128x4(prob.scaleBType))
                    ? kMXScaleFormatHostPreSwizzle128x4
                    : 0;
     }
@@ -2337,6 +2373,7 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2388,6 +2425,7 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT:
 	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
@@ -2469,11 +2507,13 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setSwizzleLayoutA(rocblaslt_swizzle_layout(prob.orderA));
+        tensileProblem.setSwizzleLayoutB(rocblaslt_swizzle_layout(prob.orderB));
         tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
             prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
-            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+            isScale128x4(prob.scaleAType))
           rocblaslt::setHostMXScaleA(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
@@ -2481,7 +2521,7 @@ namespace
                                      hostMXScalesArePacked(prob.scaleAType));
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
             prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
-            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+            isScale128x4(prob.scaleBType))
           rocblaslt::setHostMXScaleB(tensileProblem,
                                      rocisa::DataType::E8,
                                      32,
@@ -2687,6 +2727,7 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT:
             rocblaslt::setHostMXScaleA(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2739,6 +2780,7 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT:
             rocblaslt::setHostMXScaleB(tensileProblem,
                                        rocisa::DataType::E8,
                                        32,
@@ -2831,11 +2873,13 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setSwizzleLayoutA(rocblaslt_swizzle_layout(prob.orderA));
+        tensileProblem.setSwizzleLayoutB(rocblaslt_swizzle_layout(prob.orderB));
         tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
 	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+   	   isScale128x4(prob.scaleAType))
 	    rocblaslt::setHostMXScaleA(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
@@ -2843,7 +2887,7 @@ namespace
 	                               hostMXScalesArePacked(prob.scaleAType));
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+   	   isScale128x4(prob.scaleBType))
 	    rocblaslt::setHostMXScaleB(tensileProblem,
 	                               rocisa::DataType::E8,
 	                               32,
@@ -2942,6 +2986,7 @@ namespace
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -2971,6 +3016,7 @@ namespace
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
@@ -3260,11 +3306,13 @@ namespace
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         std::unordered_set<TensileLite::LazyLoadingInit>                  m_deviceSet;
         std::unordered_map<std::string, std::shared_ptr<hipDeviceProp_t>> m_devicePropMap;
-        std::unordered_map<std::string, std::shared_ptr<TensileLite::Hardware>> m_hardwareMap;
 #else
         std::shared_ptr<hipDeviceProp_t>       m_deviceProp;
-        std::shared_ptr<TensileLite::Hardware> m_hardware;
 #endif
+        // Per HIP device ID, written by initialize() under that device's adapter mutex. Kept
+        // per device rather than per architecture because HipAMDGPU carries the device's
+        // xgmi_physical_id.
+        std::vector<std::shared_ptr<TensileLite::Hardware>> m_hardware;
         std::string m_tensileLibPath;
 
         // The adapter object. mutable is used to allow adapters to be modified
@@ -3280,7 +3328,8 @@ namespace
 
     public:
         TensileHost()
-            : m_adapters(GetDeviceCount())
+            : m_hardware(GetDeviceCount())
+            , m_adapters(m_hardware.size())
         {
             // We mark TensileHost as initialized. This is so that CI tests can
             // verify that the initialization occurs in the "multiheaded" tests
@@ -3320,20 +3369,16 @@ namespace
         {
             return m_devicePropMap.at(deviceName);
         }
-        auto get_hardware(const std::string& deviceName) const
-        {
-            return m_hardwareMap.at(deviceName);
-        }
 #else
         auto& get_device_property() const
         {
             return m_deviceProp;
         }
-        auto get_hardware() const
-        {
-            return m_hardware;
-        }
 #endif
+        auto get_hardware(int deviceId) const
+        {
+            return m_hardware.at(deviceId);
+        }
         auto& get_adapters() const
         {
             return m_adapters;
@@ -3518,7 +3563,6 @@ namespace
                         std::string deviceString
                             = deviceFullString.substr(0, deviceFullString.find(":"));
                         m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
-                        m_hardwareMap[deviceString] = TensileLite::hip::GetDevice(devId);
                     }
                 }
 
@@ -3530,7 +3574,6 @@ namespace
                 hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
                 m_deviceProp = std::make_shared<hipDeviceProp_t>(prop);
-                m_hardware = TensileLite::hip::GetDevice(deviceId);
 
                 // Load library
                 auto lib = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
@@ -3556,6 +3599,8 @@ namespace
             }();
 
             static_cast<void>(adapter.initializeLazyLoading(processor, path.string()));
+
+            m_hardware.at(deviceId) = TensileLite::hip::GetDevice(deviceId);
 
             if(!m_library && once != 0)
             {
@@ -3611,14 +3656,12 @@ namespace
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         if(deviceProp)
             *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
-        if(hardware)
-            *hardware = host.get_hardware(rocblaslt_internal_get_arch_name());
 #else
         if(deviceProp)
             *deviceProp = host.get_device_property();
-        if(hardware)
-            *hardware = host.get_hardware();
 #endif
+        if(hardware)
+            *hardware = host.get_hardware(device);
 
         return adapter;
     }
@@ -4137,11 +4180,8 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
         return false;
 
     // Nor for FP6 A + FP6 B with scales shuffled in 128-row by 4-K-block tiles
-    bool isScale128x4
-        = (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT
-           && prob.scaleBType
-                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT);
-    if(isFp6Datatype(prob.a_type) && isFp6Datatype(prob.b_type) && isScale128x4)
+    if(isFp6Datatype(prob.a_type) && isFp6Datatype(prob.b_type) && isScale128x4(prob.scaleAType)
+       && isScale128x4(prob.scaleBType))
         return false;
 
     return handle->useRocRoller == 1

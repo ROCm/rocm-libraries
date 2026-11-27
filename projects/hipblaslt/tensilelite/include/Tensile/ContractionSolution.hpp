@@ -185,7 +185,9 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* int32 whose bit 0 is hip::HipAMDGPU::aidPlacementBit(). */ \
+        X_MACRO(AIDPlacementBit)
 
     enum class CustomArgSemantic
     {
@@ -1181,6 +1183,10 @@ namespace TensileLite
         // Synchronizer pointer (not allocated yet). Wired into softwarePredicate().
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
+        // A custom kernel with an AIDPlacementBit argument runs only where
+        // hip::HipAMDGPU::aidPlacementBit() is known (amdgpu 6.19 and newer).
+        // Wired into softwarePredicate() and selectionPredicate().
+        bool                 aidPlacementSupported(Hardware const& hardware) const;
         // Device scalar alpha reuses the ScaleAlphaVec pointer and reserves
         // internalArg0 bit 11. Reject older kernels which do not advertise the
         // matching load and GSU-mask layout.
