@@ -208,6 +208,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] algo Controls algorithm selection. Use `HIPTENSOR_ALGO_DEFAULT` to let the heuristic choose. Returns `HIPTENSOR_STATUS_NOT_SUPPORTED` if the specified algorithm isn't available.
 //! @param[in] jitMode Controls whether hipTensor can use JIT-compiled kernels.
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED When `handle` or `pref` is null.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorCreatePlanPreference(const hiptensorHandle_t    handle,
                                                                  hiptensorPlanPreference_t* pref,
                                                                  hiptensorAlgo_t            algo,
@@ -258,7 +259,7 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHand
 //! @param[in] workspacePref Parameter that affects workspace size calculation.
 //! @param[out] workspaceSizeEstimate The estimated workspace size in bytes needed for the operation.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `handle`, `desc` or `workspaceSizeEstimate` is null.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
@@ -304,13 +305,13 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! The resulting plan can be passed to the corresponding `hiptensor*Execute` function to perform the operation.
 //! The plan is created for the currently active HIP device.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
-//! @param[out] plan Pointer to the `hiptensorPlan_t` structure that will contain all execution information (including selected kernel).
+//! @param[out] plan Pointer to the `hiptensorPlan_t` structure that will contain all execution information (including selected kernel). Left unchanged when the call fails.
 //! @param[in] desc Opaque structure encoding the operation details.
 //! @param[in] pref Opaque structure limiting the applicable kernels. May be `nullptr` to use defaults.
 //! @param[in] workspaceSizeLimit Maximum workspace size in bytes that the operation may use.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When a viable kernel is found.
 //! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When no viable kernel can be found.
-//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `handle`, `plan` or `desc` is null.
 //! @retval `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` When the provided workspace is too small.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
