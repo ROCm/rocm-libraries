@@ -7193,19 +7193,14 @@ namespace TensileLite
         if(problem.getParams().uniformSummationOrder() == 0)
             return;
 
-        // The dynamic work queue keeps every tile whole or splits every tile alike.
-        if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
-        {
-            const std::string obstacle = streamKDynamicSplitUniformityObstacle(
-                *this, problem, hardware, problem.getNumTiles(sizeMapping, 1));
-            if(!obstacle.empty())
-                throw UniformSummationOrderError(
-                    "hipBLASLt Error: solution '" + this->kernelName
-                    + "' cannot guarantee uniform summation order for this launch: the "
-                      "dynamic-queue StreamK path splits "
-                    + obstacle);
-            return;
-        }
+        // The dynamic work queue goes through the same clauses as the static
+        // grid, its split uniformity included (DynamicQueueSKTiles), so an algo
+        // cached or selected with the mode off is refused here as at selection.
+        // SynchronizerNull guards the static kernels' switch to the parallel
+        // reduction on a null Flags pointer; the dynamic queue never takes its
+        // reduction from that pointer, so the clause is skipped for it.
+        const bool requireSynchronizer
+            = launch.effectiveWorkAssignment != WorkAssignment::DynamicWorkQueue;
 
         char const*       obstacleToken = nullptr;
         const std::string reason        = uniformSummationOrderLaunchObstacle(problem,
@@ -7214,7 +7209,7 @@ namespace TensileLite
                                                                        resolvedGlobalAccumulation,
                                                                        gsu,
                                                                        synchronizer,
-                                                                       true,
+                                                                       requireSynchronizer,
                                                                        &obstacleToken);
         if(!reason.empty() && Debug::Instance().bypassUniformSummationOrderRefusals())
         {

@@ -3078,3 +3078,29 @@ TEST_F(StreamKDynamicSplitSolveTest, UniformSummationOrderIgnoresPartialOverride
     EXPECT_EQ(solution->streamKDynamicDecomposition(problem, device, tiles).tiles, tiles);
     EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, device));
 }
+
+// The launch gate checks a dynamic-queue launch against every static
+// obstacle, not only the split's uniformity, so a solution selected with the
+// mode off (or cached) and launched with it on is refused at solve().
+TEST_F(StreamKDynamicSplitSolveTest, UniformSummationOrderLaunchGateChecksTheDynamicQueue)
+{
+    for(int streamK : {4, 5})
+    {
+        SCOPED_TRACE("StreamK " + std::to_string(streamK));
+        auto s       = dynamicSplitSolution(streamK);
+        auto problem = dynamicSplitGemm(longKTiles(1));
+        problem.setParams().setUniformSummationOrder(1);
+        ASSERT_EQ(s->resolvePersistentSettings(problem, device).effectiveWorkAssignment,
+                  WorkAssignment::DynamicWorkQueue);
+        const size_t tiles = problem.getNumTiles(s->sizeMapping, 1);
+        ASSERT_EQ(s->streamKDynamicDecomposition(problem, device, tiles).tiles, tiles);
+        EXPECT_NO_THROW(solveWithFakeBuffers(*s, problem, device));
+
+        s->problemType.useInitialStridesCD = true;
+        EXPECT_FALSE(s->uniformSummationOrderSupported(problem, device));
+        EXPECT_THROW(solveWithFakeBuffers(*s, problem, device), UniformSummationOrderError);
+
+        problem.setParams().setUniformSummationOrder(0);
+        EXPECT_NO_THROW(solveWithFakeBuffers(*s, problem, device));
+    }
+}
