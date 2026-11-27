@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,6 +86,9 @@ void testing_rotg(const Arguments& arg)
     ref_rotg<T, U>(ha_gold, hb_gold, hc_gold, hs_gold);
     cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
+    // r is as large as the inputs, so scale its absolute tolerance by |r|
+    const double a_error = rel_error * std::max(double(rocblas_abs(ha_gold[0])), 1.0);
+
     // Test rocblas_pointer_mode_host
     if(arg.unit_check || arg.norm_check)
     {
@@ -104,7 +107,7 @@ void testing_rotg(const Arguments& arg)
 
             if(arg.unit_check)
             {
-                near_check_general<T>(1, 1, 1, ha_gold, ha, rel_error);
+                near_check_general<T>(1, 1, 1, ha_gold, ha, a_error);
                 near_check_general<T>(1, 1, 1, hb_gold, hb, rel_error);
                 near_check_general<U>(1, 1, 1, hc_gold, hc, rel_error);
                 near_check_general<T>(1, 1, 1, hs_gold, hs, rel_error);
@@ -220,7 +223,7 @@ void testing_rotg(const Arguments& arg)
 
             if(arg.unit_check)
             {
-                near_check_general<T>(1, 1, 1, ha_gold, ha, rel_error);
+                near_check_general<T>(1, 1, 1, ha_gold, ha, a_error);
                 near_check_general<T>(1, 1, 1, hb_gold, hb, rel_error);
                 near_check_general<U>(1, 1, 1, hc_gold, hc, rel_error);
                 near_check_general<T>(1, 1, 1, hs_gold, hs, rel_error);

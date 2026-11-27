@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -210,7 +210,9 @@ INSTANTIATE_ROTG_CHECK_NUMERICS(rocblas_double_complex* const*, double* const*)
 template <typename T, typename U, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __forceinline__ __device__ __host__ void rocblas_rotg_calc(T& a, T& b, U& c, T& s)
 {
-    T scale = rocblas_abs(a) + rocblas_abs(b);
+    // scale by max(|a|, |b|) rather than |a| + |b|, which can overflow when r does not
+    T roe   = rocblas_abs(a) > rocblas_abs(b) ? a : b;
+    T scale = rocblas_abs(roe);
     if(scale == 0.0)
     {
         c = 1.0;
@@ -223,7 +225,6 @@ __forceinline__ __device__ __host__ void rocblas_rotg_calc(T& a, T& b, U& c, T& 
         T sa  = a / scale;
         T sb  = b / scale;
         T r   = scale * sqrt(sa * sa + sb * sb);
-        T roe = rocblas_abs(a) > rocblas_abs(b) ? a : b;
         r     = copysign(r, roe);
         c     = a / r;
         s     = b / r;
@@ -242,7 +243,7 @@ __forceinline__ __device__ __host__ void rocblas_rotg_calc(T& a, T& b, U& c, T& 
 {
     if(rocblas_abs(a) != 0.)
     {
-        auto scale = rocblas_abs(a) + rocblas_abs(b);
+        auto scale = rocblas_abs(a) > rocblas_abs(b) ? rocblas_abs(a) : rocblas_abs(b);
         auto sa    = rocblas_abs(a / scale);
         auto sb    = rocblas_abs(b / scale);
         auto norm  = scale * sqrt(sa * sa + sb * sb);

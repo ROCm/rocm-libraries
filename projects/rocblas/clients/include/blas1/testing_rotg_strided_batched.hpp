@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -149,6 +149,11 @@ void testing_rotg_strided_batched(const Arguments& arg)
     }
     cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
+    // r is as large as the inputs, so scale its absolute tolerance by |r|
+    double a_error = rel_error;
+    for(size_t b = 0; b < batch_count; b++)
+        a_error = std::max(a_error, rel_error * double(rocblas_abs(ha_gold[b][0])));
+
     // Test rocblas_pointer_mode_host
     if(arg.pointer_mode_host)
     {
@@ -172,7 +177,7 @@ void testing_rotg_strided_batched(const Arguments& arg)
         {
             if(enable_near_check_general)
             {
-                near_check_general<T>(1, 1, 1, stride_a, ha_gold, ra, batch_count, rel_error);
+                near_check_general<T>(1, 1, 1, stride_a, ha_gold, ra, batch_count, a_error);
                 near_check_general<T>(1, 1, 1, stride_b, hb_gold, rb, batch_count, rel_error);
                 near_check_general<U>(1, 1, 1, stride_c, hc_gold, rc, batch_count, rel_error);
                 near_check_general<T>(1, 1, 1, stride_s, hs_gold, rs, batch_count, rel_error);
@@ -299,7 +304,7 @@ void testing_rotg_strided_batched(const Arguments& arg)
         {
             if(enable_near_check_general)
             {
-                near_check_general<T>(1, 1, 1, stride_a, ha_gold, ra, batch_count, rel_error);
+                near_check_general<T>(1, 1, 1, stride_a, ha_gold, ra, batch_count, a_error);
                 near_check_general<T>(1, 1, 1, stride_b, hb_gold, rb, batch_count, rel_error);
                 near_check_general<U>(1, 1, 1, stride_c, hc_gold, rc, batch_count, rel_error);
                 near_check_general<T>(1, 1, 1, stride_s, hs_gold, rs, batch_count, rel_error);
