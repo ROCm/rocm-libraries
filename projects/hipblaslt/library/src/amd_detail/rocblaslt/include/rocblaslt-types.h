@@ -546,6 +546,8 @@ struct RocblasltContractionProblem
         Block_128_F16_ZP,
         // E8M0 per 32 K elements, shuffled in 128-row by 4-K-block tiles.
         Block_32_UE8M0_128_4_EXT,
+        // E8M0 per 128 elements along K (1x128 blocks), packed like Block_32_UE8M0.
+        Block_128_UE8M0,
     };
 
     hipblasOperation_t trans_a;

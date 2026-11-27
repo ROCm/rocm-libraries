@@ -31,7 +31,8 @@ namespace
                            Scale::Block_32_UE4M3,
                            Scale::Block_16_UE4M3,
                            Scale::Block_32_UE5M3,
-                           Scale::Block_16_UE5M3})
+                           Scale::Block_16_UE5M3,
+                           Scale::Block_128_UE8M0})
         {
             SCOPED_TRACE(static_cast<int>(packed));
             const Need need = rocblaslt_mx_scale_need_for(packed, packed);

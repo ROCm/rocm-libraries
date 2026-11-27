@@ -637,7 +637,8 @@ try
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
          "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
-         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B). "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B), "
+         "1019 = B128E8 (K multiple of 128). "
          "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
          "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
          "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
@@ -652,7 +653,8 @@ try
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
          "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
-         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B).")
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B), "
+         "1019 = B128E8 (K multiple of 128).")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -1325,6 +1327,8 @@ try
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         if(s == 1018)
             return hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
+        if(s == 1019)
+            return hipblaslt_scaling_format::Block_128_UE8M0;
         // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
         if(s >= 1006 && s <= 1017)
             return static_cast<hipblaslt_scaling_format>(s);
@@ -1348,6 +1352,7 @@ try
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleA == hipblaslt_scaling_format::Block_128_UE8M0
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
     if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
@@ -1358,6 +1363,7 @@ try
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleB == hipblaslt_scaling_format::Block_128_UE8M0
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 

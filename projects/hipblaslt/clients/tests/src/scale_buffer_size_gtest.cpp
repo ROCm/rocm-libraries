@@ -108,5 +108,13 @@ namespace
             EXPECT_EQ(blockScaleBufferSize(3, 128, format, false, false), 64);
             EXPECT_EQ(blockScaleBufferSize(128, 3, format, true, true), 256);
         }
+        {
+            // One scale per 128 elements along K already fills the 128-element K step of the
+            // scaled WMMA (dimk = 1), so neither dimension is padded: K = 256 gives two
+            // K blocks for each of the 3 rows or columns.
+            auto const format = hipblaslt_scaling_format::Block_128_UE8M0;
+            EXPECT_EQ(blockScaleBufferSize(256, 3, format, true, false), 6);
+            EXPECT_EQ(blockScaleBufferSize(3, 256, format, false, false), 6);
+        }
     }
 }

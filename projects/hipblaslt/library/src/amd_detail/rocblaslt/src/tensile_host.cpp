@@ -1210,7 +1210,12 @@ namespace
             switch(mxType)
             {
             case rocisa::DataType::E8:
-                return mxBlock == 32 ? 3 : mxBlock == 16 ? 4 : 0;
+                // 128: hipblaslt_scaling_format::Block_128_UE8M0, numbered as
+                // HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT.
+                return mxBlock == 32    ? 3
+                       : mxBlock == 16  ? 4
+                       : mxBlock == 128 ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT
+                                        : 0;
             case rocisa::DataType::Float8:
                 return mxBlock == 32 ? 5 : mxBlock == 16 ? 6 : 0;
             case rocisa::DataType::E5M3:
@@ -2407,6 +2412,10 @@ namespace
             rocblaslt::setHostMXScaleA(
                 tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
             break;
+        case RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0:
+            rocblaslt::setHostMXScaleA(
+                tensileProblem, rocisa::DataType::E8, 128, padMXScaleTensorFreeDim);
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
                 tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
@@ -2457,6 +2466,10 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
                 tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0:
+            rocblaslt::setHostMXScaleB(
+                tensileProblem, rocisa::DataType::E8, 128, padMXScaleTensorFreeDim);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
@@ -2756,6 +2769,10 @@ namespace
             rocblaslt::setHostMXScaleA(
                 tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
             break;
+        case RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0:
+            rocblaslt::setHostMXScaleA(
+                tensileProblem, rocisa::DataType::E8, 128, padMXScaleTensorFreeDim);
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
                 tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
@@ -2807,6 +2824,10 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
                 tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0:
+            rocblaslt::setHostMXScaleB(
+                tensileProblem, rocisa::DataType::E8, 128, padMXScaleTensorFreeDim);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
@@ -3011,7 +3032,8 @@ namespace
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
             || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3
-            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3)
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0)
         {
             inputs.scaleA = nullptr;
             inputs.mxsa   = reinterpret_cast<const void*>(prob.scaleA);
@@ -3040,7 +3062,8 @@ namespace
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3
-            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3)
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_128_UE8M0)
         {
             inputs.scaleB = nullptr;
             inputs.mxsb   = reinterpret_cast<const void*>(prob.scaleB);

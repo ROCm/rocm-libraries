@@ -34,6 +34,9 @@ inline std::string groupedCApiUnsupportedReason(const Arguments& arg)
     if(arg.scaleB != arg.scaleA
        || (arg.scaleA != hipblaslt_scaling_format::none && !isBlockScaling(arg.scaleA)))
         return "supports only the MX scale modes, the same on A and B";
+    // Grouped GEMM takes MX blocks of 16 or 32 K elements only (the library's mxBlockSize).
+    if(isBlockScaling(arg.scaleA) && blockSize(arg.scaleA) != 16 && blockSize(arg.scaleA) != 32)
+        return "supports only MX blocks of 16 or 32 elements along K";
     if(arg.scaleC || arg.scaleD || arg.scaleE || arg.scaleAlpha_vector || arg.amaxD)
         return "supports no scaling other than MX";
     if(arg.swizzle_a || arg.swizzle_b)
@@ -234,6 +237,9 @@ private:
         hipblasLtMatmulMatrixScale_t mode;
         switch(format)
         {
+        case hipblaslt_scaling_format::Block_32_UE8M0:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+            break;
         case hipblaslt_scaling_format::Block_16_UE8M0:
             mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
             break;
@@ -256,8 +262,9 @@ private:
             mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
             break;
         default:
-            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-            break;
+            // groupedCApiUnsupportedReason admits only the formats above; never guess a mode,
+            // since the scales were generated for this format's block size.
+            return ok(HIPBLAS_STATUS_INVALID_VALUE);
         }
         if(!upload(scales_, scaleA) || !upload(scales_, scaleB))
             return false;
