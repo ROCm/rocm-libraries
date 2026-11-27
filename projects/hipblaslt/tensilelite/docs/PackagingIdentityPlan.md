@@ -1,7 +1,7 @@
 # AIHPBLAS-3989: TensileLite packaging identity — plan and decisions
 
-Scope: the rocm-libraries TensileLite packaging stack (#11016–#11032, decision records
-in #11254) and the TheRock branch `users/alvasile/tensilelite_packaging`.
+Scope: the rocm-libraries TensileLite packaging stack (#11016–#11032, #16430, #15580,
+decision records in #11254) and the TheRock branch `users/alvasile/tensilelite_packaging`.
 
 Origin: archana-ramalingam's comment on #11016
 (<https://github.com/ROCm/rocm-libraries/pull/11016#issuecomment-6757079254>). The
@@ -28,6 +28,23 @@ restacked on `develop` at `1a219615ebf0`.
 Complete Python SDK native-build support remains follow-up work; the runtime
 SDK adapter is already implemented separately. Section 1.5 records the #15579
 validation and its limits. The preceding status and SHA table are historical.
+
+**Current status (2026-11-27):** this block supersedes the status notes above.
+
+- #11016–#11019 and #15579 (R0) were squash-merged on 2026-11-20.
+- The open stack is GitHub stack #16726, bottom to top: #11020, #11021, #11022,
+  #16430, #11023, #11024, #11025, #11026, #11027, #11028, #11030, #11031, #11032,
+  #15580 (R1), #11254. All are drafts.
+- #16430 is new. It makes hipBLASLt and hipSPARSELt generate kernels from the same
+  packaged TensileLite and removes the source-tree generation path
+  (`CODEGEN_ROOT`). See its section in 1.2.
+- `rocisa_stinkytofu_adaptor` was removed on develop (#15452); rocisa/StinkyTofu
+  conversion is native. F3 is closed and the adaptor no longer appears on any
+  `PYTHONPATH`.
+- `validate_client()` checks source pairing only. The runtime reads the client's
+  build ROCm separately with `client_build_rocm()`; there is no `ClientIdentity`.
+- Follow-ups added since 2026-11-17: T15 (section 1.3) and F9–F10 (section 1.4).
+  F1 and F4 are refined.
 
 The table below is the state at the start of the review.
 
@@ -57,8 +74,8 @@ release-candidate testing.
 
 | # | Requirement | Status |
 | --- | --- | --- |
-| P1 | A Python package is a standalone, canonical distribution inside its super-repository. | Done for the `tensilelite` wheel (#11016). rocisa, its adaptor and the client are not Python distributions yet (F3, F4). |
-| P2 | `pip install path/to/project` works against the installed ROCm, and does not rebuild or replace the native libraries under test. | Done for `tensilelite`: plain pip, tox and sdist builds agree (decision 1). Kernel generation installs nothing into the build Python (#11022, decision 9). The client records the ROCm it was built against and is checked at run time (decision 14). rocisa and `stinkytofu` are still reached by path (F3, F4). |
+| P1 | A Python package is a standalone, canonical distribution inside its super-repository. | Done for the `tensilelite` wheel (#11016). rocisa and the client are not Python distributions yet (F4). |
+| P2 | `pip install path/to/project` works against the installed ROCm, and does not rebuild or replace the native libraries under test. | Done for `tensilelite`: plain pip, tox and sdist builds agree (decision 1). Kernel generation installs nothing into the build Python (#11022, #16430, decision 9). The client records the ROCm it was built against and is checked at run time (decision 14). rocisa, with StinkyTofu linked into it, is still reached by path (F4). |
 | P3 | A dedicated TheRock stage builds the wheel once and stages it with the SDK. | Not done. The wheel is built in hipBLASLt's CMake and shipped in `blas_test` (F1). |
 | P4 | Validation runs against the installed, shipped ROCm binaries, without rebuilding or substituting them. | Partly. T8–T10 and R1 test the installed wheel against the artifact's own components (decision 9). Pip-SDK and native-package validation is F2. |
 | P5 | Results carry provenance: SDK build, package version, native component versions, source revisions, Python version, test inputs and generated artifacts. | Partly. T11 records the wheel, the client's version and commit, the TheRock manifest's package version and commit, and the Python version. Native component versions beyond the manifest, test inputs and generated artifacts are not recorded (F7). |
@@ -75,15 +92,18 @@ release-candidate testing.
 The rocm-libraries stack, bottom to top:
 
 ```text
-#11016 → … → #11019 → R0 (new) → #11020 → … → #11028 | #11030 → #11031 → #11032 → R1 (new) | #11254 (docs, stays on top)
-  lands without TheRock   gated on TheRock (conditional enablement slices)
+merged: #11016 → … → #11019 → R0 (#15579)
+open:   #11020 → #11021 → #11022 → #16430 → #11023 → … → #11028 | #11030 → #11031 → #11032 → R1 (#15580) | #11254 (docs, stays on top)
+          lands without TheRock                                   gated on TheRock (conditional enablement slices)
 ```
 
 This keeps the stack's original design.
 
-1. **#11016 → #11028 land without any TheRock change.** Every TheRock input is
-   optional there (decisions 6–8), and TheRock `main` keeps working with the stack's
-   artifacts (#11020 keeps the layout `main` expects).
+1. **#11016 → #11028, including #16430, land without any TheRock change.** Every
+   TheRock input is optional there (decisions 6–8), and TheRock `main` keeps working
+   with the stack's artifacts (#11020 keeps the layout `main` expects). TheRock's
+   separately configured hipSPARSELt builds its own copy of the wheel from
+   hipBLASLt's installed metadata until T15 and F1 exist.
 2. **TheRock PRs T1–T13 (section 1.3) land independently of rocm-libraries.** Each
    works with today's rocm-libraries pin. Some depend on an earlier TheRock PR, as
    listed in section 1.3.
@@ -96,7 +116,7 @@ This keeps the stack's original design.
    | #11030 `therock-rocm-identity` | T1 in rocm-libraries' `therock-ref` (TheRock passes `THEROCK_PACKAGE_VERSION`) |
    | #11031 `rocm-version-validation` | T1, through #11030 |
    | #11032 `python-sdk-runtime` | T2 merged **and in a published nightly `rocm-sdk-core`** (not `therock-ref`; see its section) |
-   | R1 (new) | T8–T10 in `therock-ref` (installed-wheel runner on both jobs) |
+   | R1 (#15580) | T8–T10 in `therock-ref` (installed-wheel runner on both jobs), and ROCm/TheRock#9914 installing the artifact's wheel before running `rocjitsu_race_smoke.py` |
 
    They are reviewed and rebased with the stack while they wait.
 4. **After TheRock's rocm-libraries submodule includes R1:** TheRock cleanup T14
@@ -378,8 +398,8 @@ without a TheRock gate. It was extracted from the former docs-branch code.
   `create_device_library`, drop the `_codegen_sources` glob and its manifest
   entries and keep `_logic_files`. The wheel recipe keeps its own source globs;
   extops already depend on `HIPBLASLT_PYTHON_DEPS`. Drop the source-tree entries
-  from the code-generation `PYTHONPATH`, except `rocisa_stinkytofu_adaptor`, which
-  still comes from the source tree until it has a package (F3).
+  from the code-generation `PYTHONPATH`. (`rocisa_stinkytofu_adaptor` was kept here
+  originally; develop #15452 removed it, so only the wheel and native rocisa remain.)
 - Remove `TENSILELITE_ROCM_VERSION=` from the code-generation environment. Keep
   `ROCM_PATH=<selected root>` for standalone builds (decision 14's
   `hipblaslt_resolve_build_rocm_root()`).
@@ -397,6 +417,51 @@ without a TheRock gate. It was extracted from the former docs-branch code.
 - The wheel's label is already checked since #11020 (`--expected-version`); in
   TheRock builds that expected value is the passed identity (decision 7).
 - Drop this branch's CMake changes to the compatibility wheel (decision 13).
+
+### #16430 `shared-packaged-generator` (hipBLASLt and hipSPARSELt from one packaged generator)
+
+New PR between #11022 and #11023. It combines the shared-generator branch with the
+two steps that followed it (hipSPARSELt's own wheel in TheRock, and removal of the
+source-tree path).
+
+- **Generator target.** `tensilelite_prepare_generator()` creates
+  `tensilelite-generator`. It unpacks the selected wheel into its own build
+  directory and runs it with the matching native rocisa, the selected Python, tool
+  directories and the host sanitizer runtime. hipBLASLt dense generation, ExtOps
+  and hipSPARSELt use it. `HIPBLASLT_PREPARE_TENSILELITE_GENERATOR=ON` prepares it
+  even when hipBLASLt generates nothing itself.
+- **Package selection.** A command-scoped Python startup hook makes generation,
+  including spawned workers, import the selected `tensilelite` and `rocisa` even
+  when editable installs exist in the same environment. Nothing is installed into
+  the selected Python (decision 9).
+- **Wheel input.** `TENSILELITE_GENERATOR_WHEEL` names an explicit wheel file;
+  otherwise the canonical wheel is built from the current source. The supplied wheel
+  must match the producer's distribution version, and its source revision when one
+  is known; a no-Git source archive keeps package/version checks and skips source
+  pairing. With an explicit wheel, hipBLASLt's test artifact installs that same
+  wheel. This is the input F1 uses (it replaces the planned `TENSILELITE_WHEEL_DIR`).
+- **Installed interface.** hipBLASLt's `tensilelite-devel` component installs
+  relocatable generator helpers and `tensilelite-generator-metadata.json` (wheel
+  version, source revision, ROCm identity).
+- **hipSPARSELt.** It always generates from the packaged generator. Standalone
+  hipSPARSELt uses its embedded hipBLASLt's generator. TheRock's staged hipSPARSELt
+  builds the canonical wheel itself from the shared source and hipBLASLt's installed
+  metadata, and configuration fails if its source revision or
+  `THEROCK_PACKAGE_VERSION` differs from hipBLASLt's. TheRock does not pass
+  `THEROCK_PACKAGE_VERSION` to hipSPARSELt yet (T15), so the identity currently
+  comes from that metadata; F9 removes this fallback once T15 is available.
+- **Removed.** `create_device_library()` requires `GENERATOR`. `CODEGEN_ROOT`,
+  `HIPBLASLT_CODEGEN_ROOT`, `PYTHON_EXECUTABLE`, `HOST_ASAN`, `HOST_TSAN` and
+  `HIPSPARSELT_USE_PACKAGED_TENSILELITE` are removed, with an error pointing to
+  `tensilelite_prepare_generator()`. There is no interim source-mode fallback.
+- **Gate:** none. It works with today's TheRock; the duplicate hipSPARSELt wheel
+  build ends with F1.
+- **Validation:** gfx942 standalone hipBLASLt (device off), standalone hipSPARSELt
+  embedding hipBLASLt (all gfx942 sparse logic), and TheRock with tests off and on
+  using unchanged TheRock code. The two TheRock-built wheels were byte-identical,
+  rebuilds were no-ops, and `hipsparselt-test` passed on the generated kernels.
+  Windows and other architectures were not built.
+- User documentation: [PackagedGenerator.md](PackagedGenerator.md).
 
 ### #11023 `lazy-rocm-installation-model` (introduces `_rocm.py`, `_runtime.py`, runtime adapters and `devrocm`)
 
@@ -603,7 +668,7 @@ This removes the full-versus-base rejection in pip-SDK environments.
   - **Repo hygiene:** add the workflow to CODEOWNERS and the CI trigger maps in the
     same PR (AGENTS.md working rules).
 
-### R1 (new branch) `users/alvasile/AIHPBLAS-3989-installed-wheel-test-artifacts`
+### R1 (#15580) `users/alvasile/AIHPBLAS-3989-installed-wheel-test-artifacts`
 
 A new PR stacked on #11032. It stops unpacking the `tensilelite` wheel into the
 test-artifact root, so tests import only the installed wheel.
@@ -613,16 +678,22 @@ test-artifact root, so tests import only the installed wheel.
     `scripts/install_release_wheels.py` into `share/hipblaslt/tensilelite` (added in
     #11020);
   - keep installing the wheel under `wheels/` and the tests under `tensilelite/Tests`;
-  - keep `rocisa`, `rocisa_stinkytofu_adaptor` and `stinkytofu` at their current
-    paths, which T8's runner exposes through its shim directory;
+  - keep `rocisa` at its current path, which T8's runner exposes through its shim
+    directory (the adaptor is gone, and develop #15723 stopped staging StinkyTofu's
+    Python package);
   - remove `install_release_wheels.py` and its tests only if nothing else uses it.
     #11022's build-tree unpacking does use it, so expect to keep the script and drop
     only the artifact install step.
-- **Tests:** an installed-tree layout test proving there is no `tensilelite/`
-  package at the artifact root, and that the wheel and tests are present.
+  - `clients/scripts/rocjitsu/rocjitsu_race_smoke.py` no longer puts the artifact
+    root on `PYTHONPATH`; its caller installs the artifact's wheel. #11025 already
+    moved the script to `python -m tensilelite run`.
+- **Tests:** none added. The planned layout test was removed in review: its
+  installed-root case was always skipped in CI, and its source-tree case repeated
+  the explicit-wheel test. TheRock's T13 checks guard the artifact layout.
 - **Gate:** land only after T8–T10 (the installed-wheel runner, wired to both jobs)
   are in rocm-libraries' `therock-ref`. TheRock `main`'s current runner imports the
-  unpacked copy, so landing earlier breaks TheRock's TensileLite jobs.
+  unpacked copy, so landing earlier breaks TheRock's TensileLite jobs. ROCm/TheRock#9914
+  must also install the artifact's wheel before it runs the race smoke script.
 - **Justification:** with `PYTHONPATH` at the component root, the unpacked copy
   shadows the installed wheel. Removing it makes the tests exercise what ships
   (decision 9).
@@ -785,6 +856,10 @@ land in any order.
 | **T12** build(blas): exclude source-only TensileLite tests from `blas_test` | One `exclude` pattern in `artifact-blas.toml` | Source-tree contract tests don't belong in installed artifacts | — | The pattern matches nothing that shouldn't be excluded today |
 | **T13** test: TensileLite artifact-layout checks | `test_artifact_structure.py`: when `wheels/` exists, the `tensilelite` wheel and installed tests are in `blas_test`, no `source_only` tests, and the client is in `blas_test` only | Guards the layout the runner relies on and Q097 client ownership | — | Checks apply only when `wheels/` exists |
 | **T14** (after the submodule includes R1) test(tensilelite): remove the existing-path branch | Delete T8's existing-path branch and make T13's checks unconditional | Once the pinned rocm-libraries ships a wheel-only artifact (R1), that branch is dead code | Submodule includes R1, T8, T13 | Lands only after that bump; rebased onto `main` then |
+| **T15** (added 2026-11-27) build(sparse): pass `THEROCK_PACKAGE_VERSION` to hipSPARSELt | One `CMAKE_ARGS` line for hipSPARSELt, mirroring T1 | #16430's staged hipSPARSELt checks its identity against hipBLASLt's; with the value passed, the metadata fallback can go (F9) | — | #16430 accepts the value when present and falls back to hipBLASLt's metadata otherwise |
+
+The adaptor named in T8's shim no longer exists (develop #15452); the shim needs
+only `rocisa`.
 
 Verification:
 
@@ -848,7 +923,21 @@ Work items:
   so there is only one wheel to trust.
 - Stage W also runs on Windows, since device generation does. Wheels must be
   reproducible (`SOURCE_DATE_EPOCH`), or only one platform's wheel is published.
-- Prerequisite: F3.
+
+Refinements (2026-11-27), after #16430 and the RFC0019 review (F10):
+
+- **One wheel for both products.** Stage W's wheel goes to hipBLASLt and to the
+  separately configured hipSPARSELt through #16430's `TENSILELITE_GENERATOR_WHEEL`
+  (a file, replacing `TENSILELITE_WHEEL_DIR`). hipSPARSELt then stops building its
+  own copy, and the test artifact installs the same wheel.
+- **Native generator dependencies.** rocisa (with StinkyTofu) and Origami are
+  built before hipBLASLt in an architecture-independent group, and kernel
+  generation and rocisa's own tests use that same build. Running TensileLite's and
+  rocisa's tests before generation is the target order. This needs F4.
+- **Order.** The pure-Python wheel stays upstream of the native builds: it is an
+  input to kernel generation, so producing it after the SDK wheels would create a
+  cycle. The SDK consumer-validation and publication job reuses the same wheel.
+- The former prerequisite F3 is closed (the adaptor was removed).
 
 ### F2 — Validation phases for both TheRock installation forms
 
@@ -862,16 +951,15 @@ Work items:
   exercising `SystemRocm` with the manifest identity.
 - Both record provenance (as T11).
 
-### F3 — Move `rocisa_stinkytofu_adaptor` out of the source tree
+### F3 — Move `rocisa_stinkytofu_adaptor` out of the source tree (closed)
 
-Package it in the `tensilelite` wheel or in a rocisa artifact. Required before F1,
-because stage W and the math-libs consumer won't have the source tree on
-`PYTHONPATH`.
+Closed by develop #15452, which removed the adaptor; rocisa/StinkyTofu conversion
+now lives in native rocisa. It is no longer a prerequisite for F1.
 
 ### F4 — rocisa packaging (D6)
 
-rocisa, its adaptor and stinkytofu are still reached by path (the T8 shim, the
-code-generation `PYTHONPATH`).
+rocisa, with StinkyTofu linked into it, is still reached by path (the T8 shim and the
+generator's native support).
 
 - **Target:** a standalone rocisa package built against the installed ROCm, using
   the Python stable ABI first, and linking the installed `libstinkytofu` rather than
@@ -885,6 +973,13 @@ code-generation `PYTHONPATH`).
   an error for TheRock-stamped builds and a warning for dev builds. Until rocisa is
   packaged it is built and used in the same tree, so build and run ROCm are the same
   by construction.
+- **Before any rocisa wheel is published:** replace the placeholder version `0.1.0`
+  with a real version and source identity that match TensileLite; link the shared
+  installed `liborigami` instead of a private static copy (RFC0019 P3), or agree an
+  explicit exception; decide who owns the StinkyTofu library; and ship required
+  runtime resources such as `intrinsics.st.bc`.
+- One wheel for rocisa and StinkyTofu is enough: StinkyTofu is linked into rocisa
+  and has no separate Python consumer today.
 
 ### F5 — Client in the runtime artifact (Q109)
 
@@ -923,6 +1018,34 @@ Origami is the reference implementation of the TheRock Python packaging stage, a
 its PR (rocm-libraries#10975) is still open. Read it before designing F1's wheel
 stage, so the two stages use one pattern for building, staging and validating a
 wheel.
+
+### F9 — Remove hipSPARSELt's identity fallback (after T15)
+
+#16430's staged hipSPARSELt takes its ROCm identity from hipBLASLt's installed
+metadata when TheRock passes no `THEROCK_PACKAGE_VERSION`. Once T15 is in the
+TheRock revisions that rocm-libraries CI uses, require the value under TheRock, as
+#11030 does for hipBLASLt. F1 later removes hipSPARSELt's own wheel build.
+
+### F10 — Align with TheRock RFC0019 (ROCm/TheRock#6050)
+
+RFC0019 describes custom Python bindings as `native build → SDK wheels → binding
+wheel`. TensileLite does not fit that order: its pure-Python wheel is an input to
+the native kernel build (F1). Points to settle with the RFC owners:
+
+- record TensileLite's upstream ordering, with the same wheel reused for SDK
+  validation and publication;
+- the source location, the import namespace and rocisa's ownership are left open by
+  the RFC; this stack keeps the current layout;
+- official SDK-backed wheels must depend on a matching `rocm[libraries]` and call
+  `rocm_sdk.initialize_process()`. `setup.py` and `_rocm.py` do neither today, and a
+  looser stable-release dependency must be decided together with the strict
+  wheel/ROCm and client pairing rules (decisions 2, 5, 14);
+- publication follows the Origami pilot's shared infrastructure (F8); TheRock's
+  release classification has no TensileLite entry yet;
+- validation needs fresh consumer installs and loaded-library checks, separating
+  generated-kernel tests from shipped-library tests (F2, F7).
+
+A comment on the RFC is drafted but not posted.
 
 ## 1.5 Implementation notes (updated 2026-11-17)
 
@@ -1428,9 +1551,9 @@ Applies to T8 (runner), T11 (provenance) and the later TheRock wheel stage.
 ## Decision 9 — Test and build what ships, without modifying the builder (Decided)
 
 - **A. Tests import the installed wheel.**
-  - T8: `PYTHONPATH` is a temporary directory with links to only `rocisa`,
-    `rocisa_stinkytofu_adaptor` and `stinkytofu`, and the runner asserts that
-    `tensilelite` was imported from the installed location before testing.
+  - T8: `PYTHONPATH` is a temporary directory with links to only the native Python
+    packages (`rocisa`; the adaptor has since been removed), and the runner asserts
+    that `tensilelite` was imported from the installed location before testing.
   - R1: removes the unpacked copy from the test-artifact root once TheRock uses that
     runner.
 - **B. Kernel generation uses the built wheel, without installing it.**
@@ -1445,6 +1568,10 @@ Applies to T8 (runner), T11 (provenance) and the later TheRock wheel stage.
       dependencies come from the build's Python as they do on develop.
   - The wheel-recipe module and `TENSILELITE_WHEEL_DIR` are not added in this
     effort; they move to F1 (revised 2026-11-11).
+  - #16430 replaces the per-command `PYTHONPATH` with the prepared
+    `tensilelite-generator` target and a startup hook that selects the unpacked
+    wheel and native rocisa. The principle is unchanged: nothing is installed into
+    the selected Python. Its explicit-wheel input is `TENSILELITE_GENERATOR_WHEEL`.
 - **C. Build-time Python dependencies come from the rocm-libraries checkout being
   built** (TheRock T4–T6): an independent improvement replacing TheRock's
   hand-copied hipBLASLt dependency list; not required by any rocm-libraries branch.
@@ -1473,10 +1600,9 @@ Justification:
 
 Open points:
 
-- `rocisa`, its adaptor and `stinkytofu` are still reached by path until rocisa is
-  packaged (D6).
-- `rocisa_stinkytofu_adaptor` is imported from the source tree during code
-  generation. Before the end state it must move into the wheel or a rocisa artifact.
+- `rocisa` is still reached by path until it is packaged (D6, F4).
+- `rocisa_stinkytofu_adaptor` was removed on develop (#15452), so nothing is
+  imported from the source tree during code generation.
 
 ## Decision 10 — Support for pre-TheRock native installs (Decided: best effort, no CI)
 
@@ -1526,7 +1652,8 @@ Follow-up: F5 (section 1.4).
   file (#11022, decision 9); the recipe module and `TENSILELITE_WHEEL_DIR` are F1.
   F1 needs decision 3's explicit SHA passed to both the wheel and the client.
 - **Validation phases for the pip SDK and native packages** are F2.
-- **`rocisa_stinkytofu_adaptor` moves out of the source tree** before F1 (F3).
+- **`rocisa_stinkytofu_adaptor` moves out of the source tree** before F1 (F3; closed,
+  the adaptor was removed on develop).
 - **rocisa packaging stays deferred (D6).** It is the remaining gap against
   requirement P1, standalone packaging (F4).
 - **Checking generated kernel libraries against hipBLASLt's SHA** is parked (F6).
@@ -1534,7 +1661,7 @@ Follow-up: F5 (section 1.4).
   roughly 7 a month recently, so any cross-checkout guarantee would need the same
   whole-repo-SHA rule hipBLASLt already applies to tuning files.
 
-Follow-ups: F1–F8 (section 1.4).
+Follow-ups: F1–F10 (section 1.4).
 
 ## Decision 13 — Remove the compatibility package (Decided)
 
