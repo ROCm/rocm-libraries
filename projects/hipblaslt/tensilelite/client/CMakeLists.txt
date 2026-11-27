@@ -128,8 +128,10 @@ add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 hipblaslt_attach_tensilelite_metadata(tensilelite-client)
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 
-add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
-target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+    add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
+    target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+endif()
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
@@ -160,10 +162,12 @@ if(TENSILELITE_CLIENT_FORCE_RPATH AND UNIX AND NOT APPLE)
     find_program(TENSILELITE_PATCHELF patchelf)
     if(TENSILELITE_PATCHELF)
         foreach(_client IN ITEMS tensilelite-client cpu-gemm-driver)
-            add_custom_command(TARGET ${_client} POST_BUILD
-                COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
-                        "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"
-                VERBATIM)
+            if(TARGET ${_client})
+                add_custom_command(TARGET ${_client} POST_BUILD
+                    COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
+                            "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"
+                    VERBATIM)
+            endif()
         endforeach()
     else()
         message(WARNING

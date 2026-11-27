@@ -307,6 +307,18 @@ def test_canonical_wheel_and_client_stay_paired_through_incremental_builds(
 include(cmake/TensileLiteWheel.cmake)
 hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 """)
+    shutil.copyfile(
+        _ROOT / "cmake/hipblaslt_python.cmake", src / "cmake/hipblaslt_python.cmake"
+    )
+    cmake.write_text(cmake.read_text() + """
+set(hipblaslt_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(HIPBLASLT_ENABLE_DEVICE ON)
+add_library(_rocisa SHARED probe.cpp)
+hipblaslt_attach_tensilelite_metadata(_rocisa)
+include(cmake/hipblaslt_python.cmake)
+hipblaslt_configure_tensilelite_python("")
+add_dependencies(tensilelite-python-build-environment tensilelite-canonical-release-wheel)
+""")
     _git(src, "add", ".")
     _git(src, "commit", "-qm", "wheel fixture")
     arguments = (
@@ -322,7 +334,7 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
             str(build),
             "--target",
             "tensilelite-client",
-            "tensilelite-canonical-release-wheel",
+            "tensilelite-python-build-environment",
             "--parallel",
             "2",
         )
@@ -347,6 +359,12 @@ hipblaslt_add_tensilelite_release_wheel("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite
                 node for node in ast.parse(stamp).body if isinstance(node, ast.Assign)
             )
             assert ast.literal_eval(assignment.value) == revision
+        unpacked_stamp = build / "tensilelite-wheel/tensilelite/_build_info.py"
+        assert f"SOURCE_REVISION = {revision!r}" in unpacked_stamp.read_text()
+        assert list((build / "tensilelite-wheel").glob("tensilelite-*.dist-info")) == [
+            build
+            / f"tensilelite-wheel/tensilelite-{publication['metadata']['distribution_version']}.dist-info"
+        ]
         return revision
 
     clean = build_and_check()
