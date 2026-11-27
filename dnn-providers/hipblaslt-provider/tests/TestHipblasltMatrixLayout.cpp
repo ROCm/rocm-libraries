@@ -217,9 +217,9 @@ TEST(TestHipblasltMatrixLayout, NegativeLeadingDimensionThrows)
     for(const auto& row : rows)
     {
         const FloatTensorHolder holder(row.dims, row.strides);
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(
             holder.attrs);
-        EXPECT_THROW(HipblasltMatrixLayout const matLayout(tensorWrapper),
+        EXPECT_THROW(const HipblasltMatrixLayout matLayout(tensorWrapper),
                      hipdnn_plugin_sdk::HipdnnPluginException)
             << "strides " << row.strides[row.strides.size() - 2] << ","
             << row.strides[row.strides.size() - 1];
@@ -246,10 +246,10 @@ TEST(TestHipblasltMatrixLayout, ZeroLeadingDimensionIsAccepted)
     for(const auto& row : rows)
     {
         const FloatTensorHolder holder(row.dims, row.strides);
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(
             holder.attrs);
         EXPECT_NO_THROW({
-            HipblasltMatrixLayout const matLayout(tensorWrapper);
+            const HipblasltMatrixLayout matLayout(tensorWrapper);
             EXPECT_NE(matLayout.matrixLayout(), nullptr);
         }) << "strides "
            << row.strides[row.strides.size() - 2] << "," << row.strides[row.strides.size() - 1];
@@ -277,10 +277,10 @@ TEST(TestHipblasltMatrixLayout, NonPositiveStrideOfSizeOneDimIsNotALeadingDimens
     for(const auto& row : rows)
     {
         const FloatTensorHolder holder(row.dims, row.strides);
-        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(
             holder.attrs);
         EXPECT_NO_THROW({
-            HipblasltMatrixLayout const matLayout(tensorWrapper);
+            const HipblasltMatrixLayout matLayout(tensorWrapper);
             EXPECT_NE(matLayout.matrixLayout(), nullptr);
         }) << "dims "
            << row.dims[0] << "x" << row.dims[1] << " strides " << row.strides[0] << ","

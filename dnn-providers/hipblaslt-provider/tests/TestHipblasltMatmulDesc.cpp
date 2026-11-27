@@ -129,7 +129,7 @@ TEST(TestHipblasltMatmulDesc, CloneReproducesEpilogueConfiguration)
     desc.setEpilogueActArg1(0.75f);
     desc.setBiasDataType(HIP_R_16F);
 
-    HipblasltMatmulDesc const copy = desc.clone();
+    const HipblasltMatmulDesc copy = desc.clone();
 
     EXPECT_EQ(getDescAttribute<hipblasLtEpilogue_t>(copy, HIPBLASLT_MATMUL_DESC_EPILOGUE),
               HIPBLASLT_EPILOGUE_GELU_BIAS);

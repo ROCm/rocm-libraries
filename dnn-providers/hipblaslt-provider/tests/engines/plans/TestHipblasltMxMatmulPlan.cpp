@@ -193,7 +193,7 @@ TEST(TestMxMatmulParams, ThrowsOnColumnMajorOutput)
 {
     auto fb = createValidMxMatmulGraph(
         {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {1, 32}, {32, 4}, {4, 32});
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const GraphWrapper graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 
     EXPECT_THROW(MxMatmulParams(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap()),
