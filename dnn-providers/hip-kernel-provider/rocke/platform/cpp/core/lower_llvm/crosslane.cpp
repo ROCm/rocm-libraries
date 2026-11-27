@@ -1071,7 +1071,18 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
         {
             rocke_strbuf_append(&args.sb, ", ");
         }
-        rocke_strbuf_append(&args.sb, rocke_ll_operand_with_type(L, op->operands[i]));
+        /* A buffer descriptor is a <4 x i32> in the IR but the ptr addrspace(8)
+         * that make.buffer.rsrc returns in LLVM; the asm operand takes the type
+         * of its LLVM definition. */
+        if(rocke_i_is_buffer_descriptor(op->operands[i]))
+        {
+            rocke_strbuf_appendf(
+                &args.sb, "ptr addrspace(8) %s", rocke_ll_operand(L, op->operands[i]));
+        }
+        else
+        {
+            rocke_strbuf_append(&args.sb, rocke_ll_operand_with_type(L, op->operands[i]));
+        }
     }
     if(args.sb.oom)
     {
