@@ -248,14 +248,12 @@ namespace rocsparse
                             sdata[bi][bi] = diag;
                         }
                     }
-                    else
+
+                    // A pivot that is still zero after the optional boost is a numerical zero.
+                    if(diag == static_cast<T>(0))
                     {
-                        // Check for numeric pivot
-                        if(diag == static_cast<T>(0))
-                        {
-                            pivot = true;
-                            continue;
-                        }
+                        pivot = true;
+                        continue;
                     }
 
                     for(J bk = bi + 1 + threadIdx.x; bk < block_dim; bk += DIMX)

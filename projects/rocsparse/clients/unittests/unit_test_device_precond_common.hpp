@@ -1653,7 +1653,7 @@ namespace precond_ut
     // `want_position` is zero based; the library reports it in the matrix index base.
     // Without a zero pivot (none or numeric_near) the factor is the plain one and is
     // compared too.
-    template <Kind K, typename T>
+    template <Kind K, typename T, typename I = int32_t, typename J = int32_t>
     void singular_case(rocsparse_handle      handle,
                        const csr_matrix<T>&  a,
                        const run_options&    opt,
@@ -1661,7 +1661,7 @@ namespace precond_ut
                        int64_t               want_position,
                        rocsparse_index_base  base = rocsparse_index_base_zero)
     {
-        dev_csr<T, int32_t, int32_t> d;
+        dev_csr<T, I, J> d;
         d.init(a, 1, true, base);
         ASSERT_NE(d.A, nullptr);
         run_result<T> out;

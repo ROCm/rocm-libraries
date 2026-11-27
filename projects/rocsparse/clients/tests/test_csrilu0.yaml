@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -188,6 +188,24 @@ Tests:
 - name: csrilu0_extra
   category: pre_checkin
   function: csrilu0_extra
+
+# Every diagonal of the tridiagonal matrix is at most 4 in magnitude, so the tolerance 10
+# boosts each of them to zero: the zero pivot is row 0.
+- name: csrilu0
+  category: pre_checkin
+  function: csrilu0
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [50]
+  numericboost: [1]
+  boosttol: [10.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_tridiagonal]
 
 # Nightly
 - name: csrilu0

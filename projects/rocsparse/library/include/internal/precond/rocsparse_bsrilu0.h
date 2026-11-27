@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -47,6 +47,11 @@ extern "C" {
  *  \f$A_{j,j}\f$ is missing (structural zero) or the diagonal block \f$A_{j,j}\f$ is not
  *  invertible (numerical zero).
  *
+ *  \note
+ *  If numeric boost is enabled (see \ref rocsparse_sbsrilu0_numeric_boost "rocsparse_Xbsrilu0_numeric_boost()"),
+ *  a diagonal entry that is exactly zero after the optional boost is reported as a zero pivot,
+ *  whatever its value before the boost.
+ *
  *  \note \p rocsparse_bsrilu0_zero_pivot is a blocking function. It might negatively influence
  *  performance.
  *
@@ -81,6 +86,10 @@ rocsparse_status rocsparse_bsrilu0_zero_pivot(rocsparse_handle   handle,
  *
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
+ *
+ *  \note A diagonal entry that is exactly zero after the boost, for example because
+ *  \p boost_val is zero, is reported as a zero pivot by \ref rocsparse_bsrilu0_zero_pivot.
+ *  If \p tol is negative, no value is replaced.
  *
  *  \note \p tol and \p boost_val can be in host or device memory.
  *

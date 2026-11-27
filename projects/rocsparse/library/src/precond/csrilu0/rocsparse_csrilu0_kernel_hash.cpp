@@ -237,16 +237,16 @@ namespace rocsparse
         {
             const auto diag_val     = rocsparse::load_done_row_data(&csr_val[row_diag]);
             const auto abs_diag_val = rocsparse::abs(diag_val);
+            auto       pivot_val    = diag_val;
             if(boost)
             {
                 const bool is_too_small = (abs_diag_val <= boost_tol);
                 if(is_too_small)
                 {
+                    pivot_val = rocsparse::assign_ilu0_boost_value(diag_val, boost_val);
                     if(lid == 0)
                     {
-                        rocsparse::store_done_row_data(
-                            &csr_val[row_diag],
-                            rocsparse::assign_ilu0_boost_value(diag_val, boost_val));
+                        rocsparse::store_done_row_data(&csr_val[row_diag], pivot_val);
                     };
                 };
             }
@@ -261,14 +261,15 @@ namespace rocsparse
                         rocsparse::atomic_min(singular_pivot, (row + idx_base));
                     }
                 }
+            }
 
-                const bool is_zero_pivot = (diag_val == static_cast<T>(0));
-                if(is_zero_pivot)
+            // A pivot that is still zero after the optional boost is a numerical zero.
+            const bool is_zero_pivot = (pivot_val == static_cast<T>(0));
+            if(is_zero_pivot)
+            {
+                if(lid == 0)
                 {
-                    if(lid == 0)
-                    {
-                        rocsparse::atomic_min(zero_pivot, (row + idx_base));
-                    }
+                    rocsparse::atomic_min(zero_pivot, (row + idx_base));
                 }
             }
         }

@@ -42,6 +42,11 @@ extern "C" {
 *  \p position can be in host or device memory. If no zero pivot has been found,
 *  \p position is set to -1 and \ref rocsparse_status_success is returned instead.
 *
+*  \note
+*  If numeric boost is enabled (see \ref rocsparse_scsrilu0_numeric_boost "rocsparse_Xcsrilu0_numeric_boost()"),
+*  a diagonal entry that is exactly zero after the optional boost is reported as a zero pivot,
+*  whatever its value before the boost.
+*
 *  \note \p rocsparse_csrilu0_zero_pivot is a blocking function. It might negatively influence
 *  performance.
 *
@@ -138,6 +143,11 @@ rocsparse_status rocsparse_csrilu0_get_tolerance(rocsparse_handle   handle,
 *  \p position can be in host or device memory. If no singular pivot has been found,
 *  \p position is set to -1.
 *
+*  \note
+*  While numeric boost is enabled (see \ref rocsparse_scsrilu0_numeric_boost "rocsparse_Xcsrilu0_numeric_boost()"),
+*  a near numerical zero is not reported. A diagonal entry that is exactly zero after the optional
+*  boost is still reported, as by \ref rocsparse_csrilu0_zero_pivot.
+*
 *  \note rocsparse_csrilu0_singular_pivot() is a blocking function. It might influence
 *  performance negatively.
 *
@@ -171,6 +181,10 @@ rocsparse_status rocsparse_csrilu0_singular_pivot(rocsparse_handle   handle,
  *
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
+ *
+ *  \note A diagonal entry that is exactly zero after the boost, for example because
+ *  \p boost_val is zero, is reported as a zero pivot by \ref rocsparse_csrilu0_zero_pivot.
+ *  If \p tol is negative, no value is replaced.
  *
  *  \note \p tol and \p boost_val can be in host or device memory.
  *
