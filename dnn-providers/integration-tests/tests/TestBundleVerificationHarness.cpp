@@ -100,6 +100,12 @@ protected:
     }
 };
 
+// The cases that reach a real device live in their own suite so the device boundary
+// shows in the suite name; SetUp()/TearDown() are the host fixture's.
+class TestGoldenHarnessFixtureDevice : public TestGoldenHarnessFixture
+{
+};
+
 // uids: x=1, y=2, scale=3, bias=4, epsilon=5, prev_mean=8, prev_variance=9, momentum=10
 std::shared_ptr<IntegrationTestBundle> makeRuntimePbvFillBundle()
 {
@@ -284,7 +290,7 @@ void expectPackedInputsTwinBundleTensors(hipdnn_flatbuffers_sdk::data_objects::D
     }
 }
 
-TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
+TEST(TestBundleVerificationHarnessDevice, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
 {
     SKIP_IF_NO_DEVICES();
     auto bundle = makeRuntimePassByValueBundle();
@@ -362,7 +368,7 @@ std::shared_ptr<IntegrationTestBundle> makeMixedTypeOutputBundle()
 // Writing the sentinel on the device instead of filling the host buffer and uploading
 // it must leave every output holding the same bytes, or a tensor an engine never wrote
 // would stop looking untouched.
-TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
+TEST(TestBundleVerificationHarnessDevice, DeviceSentinelFillMatchesTheHostFill)
 {
     SKIP_IF_NO_DEVICES();
     auto bundle = makeMixedTypeOutputBundle();
@@ -702,7 +708,7 @@ TEST_F(TestGoldenHarnessFixture, RaggedBundleWithoutBlobsIsUnverifiable)
     EXPECT_TRUE(harness.inputs().empty());
 }
 
-TEST_F(TestGoldenHarnessFixture, RaggedDeviceSentinelFillMatchesTheHostFill)
+TEST_F(TestGoldenHarnessFixtureDevice, RaggedDeviceSentinelFillMatchesTheHostFill)
 {
     SKIP_IF_NO_DEVICES();
     const auto bundle = loadRunnableRaggedBundle(
@@ -1101,7 +1107,7 @@ TEST(TestBundleVerificationHarness, AliasVariantPackPointsTheViewIntoTheOwnerOnT
                                       *inputs.at(K_ALIAS_OWNER_UID));
 }
 
-TEST(TestBundleVerificationHarness, AliasVariantPackPointsTheViewIntoTheOwnerOnTheDevice)
+TEST(TestBundleVerificationHarnessDevice, AliasVariantPackPointsTheViewIntoTheOwnerOnTheDevice)
 {
     SKIP_IF_NO_DEVICES();
     const auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
@@ -1241,7 +1247,7 @@ TEST_F(TestGoldenHarnessFixture, AliasInASubByteGraphHasNoTensorInEitherInputSet
     EXPECT_EQ(harness.packedInputs().count(2), 1u);
 }
 
-TEST_F(TestGoldenHarnessFixture, AliasInASubByteGraphPointsTheDeviceViewIntoThePackedOwner)
+TEST_F(TestGoldenHarnessFixtureDevice, AliasInASubByteGraphPointsTheDeviceViewIntoThePackedOwner)
 {
     SKIP_IF_NO_DEVICES();
     testing_support::HarnessMocks mocks;
@@ -1613,7 +1619,7 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetBenchmarkGetsTheEnginePointers)
 // post-benchmark value to a test. What this test still verifies directly: the exact
 // code path runs on real device memory with a forced failure and leaves the device
 // clean -- no crash, no leaked HIP error state.
-TEST_F(TestGoldenHarnessFixture, BenchmarkFailureDoesNotCrashOrLeaveTheDeviceErrored)
+TEST_F(TestGoldenHarnessFixtureDevice, BenchmarkFailureDoesNotCrashOrLeaveTheDeviceErrored)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1817,7 +1823,7 @@ TEST(TestBundleVerificationHarness, StartOffsetStagingThrowsForATensorWithoutABu
 
 // The device copies start the offset past a 256-byte aligned address and hold the
 // tensor's bytes; the output's copy goes back into the output, around the sentinel.
-TEST(TestBundleVerificationHarness, StartOffsetStagingPlacesTheDeviceCopyPastAnAlignedAddress)
+TEST(TestBundleVerificationHarnessDevice, StartOffsetStagingPlacesTheDeviceCopyPastAnAlignedAddress)
 {
     SKIP_IF_NO_DEVICES();
     const auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
@@ -1871,7 +1877,7 @@ TEST(TestBundleVerificationHarness, StartOffsetStagingPlacesTheDeviceCopyPastAnA
 
 // The whole engine run under a device placement: the engine gets the moved device
 // copies, and its output reaches the golden comparison.
-TEST_F(TestGoldenHarnessFixture, StartOffsetEngineRunOnTheDeviceReachesTheComparison)
+TEST_F(TestGoldenHarnessFixtureDevice, StartOffsetEngineRunOnTheDeviceReachesTheComparison)
 {
     SKIP_IF_NO_DEVICES();
     testing_support::HarnessMocks mocks;
@@ -2079,7 +2085,7 @@ TEST_F(TestGoldenHarnessFixture, LiveRowReferenceOutputIsComparedOnlyInTheLiveRo
 // A GPU reference leaves its output on the device. Under the default validator a
 // live-row output is copied to the host and compared there; under --validator gpu it is
 // reported as not comparable.
-TEST_F(TestGoldenHarnessFixture, LiveRowDeviceReferenceOutputIsComparedOnTheHost)
+TEST_F(TestGoldenHarnessFixtureDevice, LiveRowDeviceReferenceOutputIsComparedOnTheHost)
 {
     SKIP_IF_NO_DEVICES();
     for(const auto validator : {ValidatorDevice::AUTO, ValidatorDevice::GPU})
@@ -2446,7 +2452,7 @@ TEST_F(TestGoldenHarnessFixture, RaggedRecipeLiveRowsLikeResolvesOnTheFilledQ)
 // A GPU reference leaves the ragged outputs of a recipe bundle on the device. Under the
 // default validator they are copied to the host and compared there; under
 // --validator gpu they are reported as not comparable.
-TEST_F(TestGoldenHarnessFixture, RaggedRecipeDeviceReferenceOutputIsComparedOnTheHost)
+TEST_F(TestGoldenHarnessFixtureDevice, RaggedRecipeDeviceReferenceOutputIsComparedOnTheHost)
 {
     SKIP_IF_NO_DEVICES();
     const auto c = fixtures::raggedSdpaGappedStatsCase();

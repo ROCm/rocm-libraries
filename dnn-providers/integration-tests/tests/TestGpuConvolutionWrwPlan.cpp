@@ -549,7 +549,7 @@ TEST(TestGpuConvolutionWrwPlanBuilder, UnregisteredSignatureThrows)
 // FP32 plan execution tests
 // ============================================================================
 
-TEST(TestGpuConvolutionWrwPlan, ExecutePlan)
+TEST(TestGpuConvolutionWrwPlanDevice, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -557,7 +557,7 @@ TEST(TestGpuConvolutionWrwPlan, ExecutePlan)
         {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
 }
 
-TEST(TestGpuConvolutionWrwPlan, ExecutePlanMultiChannel)
+TEST(TestGpuConvolutionWrwPlanDevice, ExecutePlanMultiChannel)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -565,7 +565,7 @@ TEST(TestGpuConvolutionWrwPlan, ExecutePlanMultiChannel)
         {1, 3, 8, 8}, {1, 6, 8, 8}, {6, 3, 3, 3}, {1, 1}, {1, 1}, {1, 1});
 }
 
-TEST(TestGpuConvolutionWrwPlan, ExecutePlanStride2)
+TEST(TestGpuConvolutionWrwPlanDevice, ExecutePlanStride2)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -573,7 +573,7 @@ TEST(TestGpuConvolutionWrwPlan, ExecutePlanStride2)
         {1, 1, 8, 8}, {1, 2, 3, 3}, {2, 1, 3, 3}, {0, 0}, {2, 2}, {1, 1});
 }
 
-TEST(TestGpuConvolutionWrwPlan, ExecutePlanDilation)
+TEST(TestGpuConvolutionWrwPlanDevice, ExecutePlanDilation)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -581,7 +581,7 @@ TEST(TestGpuConvolutionWrwPlan, ExecutePlanDilation)
         {1, 2, 6, 6}, {1, 3, 4, 4}, {3, 2, 3, 3}, {1, 1}, {1, 1}, {2, 2});
 }
 
-TEST(TestGpuConvolutionWrwPlan, ExecutePlanAsymmetricPadding)
+TEST(TestGpuConvolutionWrwPlanDevice, ExecutePlanAsymmetricPadding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -593,7 +593,7 @@ TEST(TestGpuConvolutionWrwPlan, ExecutePlanAsymmetricPadding)
 // FP16 plan execution tests
 // ============================================================================
 
-TEST(TestGpuConvolutionWrwPlanFp16, ExecutePlan)
+TEST(TestGpuConvolutionWrwPlanDeviceFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -605,7 +605,7 @@ TEST(TestGpuConvolutionWrwPlanFp16, ExecutePlan)
 // BF16 plan execution tests
 // ============================================================================
 
-TEST(TestGpuConvolutionWrwPlanBfp16, ExecutePlan)
+TEST(TestGpuConvolutionWrwPlanDeviceBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 

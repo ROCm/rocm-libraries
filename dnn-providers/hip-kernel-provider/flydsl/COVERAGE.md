@@ -1229,7 +1229,7 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   and `TestGpuFlydslSdpaCdnaComprehensiveTier.DropsF32PackedSequencesWithTheDenseMask`;
   on gfx12 the only RDNA prefill dropout objects). The references also run
   `TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump` and
-  `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`, and the frontend-built lane
+  `TestGpuRaggedSdpaDensifyDevice.PhiloxDropoutWithItsDumpMatchesCpu`, and the frontend-built lane
   `StandardPackedDropout/IntegrationGpuFlydslSdpaFrontendParity`.
 - **Dropout with a strided mask and at `head_dim` 96 on gfx12:** the gfx12 dropout objects gained builds that read a mask one
   key at a time (24, so a mask broadcast along the keys or at any key stride drops on gfx12 as on

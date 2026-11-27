@@ -148,6 +148,12 @@ protected:
     }
 };
 
+// The cases that reach a real device live in their own suite so the device boundary
+// shows in the suite name; SetUp()/TearDown() are the host fixture's.
+class TestBundleReferenceValidationHarnessDevice : public TestBundleReferenceValidationHarness
+{
+};
+
 } // namespace
 
 // Registration only ever creates this harness for a bundle that already has
@@ -259,7 +265,7 @@ TEST_F(TestBundleReferenceValidationHarness,
 // values back off the device needs a real device (ITensor::rawDeviceData()
 // hipMallocs lazily), so this is gated the same way every GPU-path case in this
 // binary is; on a deviceless machine it skips rather than requiring a GPU.
-TEST_F(TestBundleReferenceValidationHarness,
+TEST_F(TestBundleReferenceValidationHarnessDevice,
        UseDeviceReachesTheDeviceWhenBothTheRegistrationAndTheExecutorWantIt)
 {
     SKIP_IF_NO_DEVICES();

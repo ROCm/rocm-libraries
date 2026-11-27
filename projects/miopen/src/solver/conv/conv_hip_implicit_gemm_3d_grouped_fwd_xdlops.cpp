@@ -235,90 +235,43 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
             return std::nullopt;
         };
 
-        std::optional<std::size_t> found_index;
-        if(ctx.GetStream().GetDeviceName() == "gfx942")
+        // gfx942 hard-coded picks. A row applies when the input channels C and output channels K
+        // fall in its inclusive ranges, and names one CK instance with its usual position in the
+        // valid kernel list as a lookup hint. Problems that match no row use the AI model.
+        struct HardcodedPick
         {
-            if(index == 0 && problem.GetGroupCount() == 1 && problem.GetAlphaBetaCase() == DEFAULT)
+            std::size_t min_c;
+            std::size_t max_c;
+            std::size_t min_k;
+            std::size_t max_k;
+            std::size_t index_hint;
+            const char* kernel;
+        };
+        // clang-format off
+        static const HardcodedPick gfx942_picks[] = {
+            // This instance only applies to 1x1 filters with no padding.
+            {0, 32, 0, 127, 1,
+             "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 32, 32, Filter1x1Pad0, "
+             "32, 32, 2, 1, 8, 8, 8, 1, 1, 1>"},
+        };
+        // clang-format on
+
+        std::optional<std::size_t> found_index;
+        if(problem.GetGroupCount() == 1 && problem.GetAlphaBetaCase() == DEFAULT)
+        {
+            const auto C = problem.GetInChannels();
+            const auto K = problem.GetOutChannels();
+
+            MIOPEN_LOG_I("3D Conv Implicit GEMM Fwd Xdlops: selecting kernel for K="
+                         << K << " C=" << C << " G=" << problem.GetGroupCount()
+                         << " Type=" << problem.GetInDataType());
+
+            for(const auto& pick : gfx942_picks)
             {
-                int K = problem.GetOutChannels();
-
-                MIOPEN_LOG_I("3D Conv Implicit GEMM Fwd Xdlops: selecting kernel for K="
-                             << K << " C=" << problem.GetInChannels() << " G="
-                             << problem.GetGroupCount() << " Type=" << problem.GetInDataType());
-
-                if((problem.GetInDataType() == miopenHalf) ||
-                   (problem.GetInDataType() == miopenBFloat16))
+                if(C >= pick.min_c && C <= pick.max_c && K >= pick.min_k && K <= pick.max_k)
                 {
-                    if((problem.GetInChannels()) <= 32)
-                    {
-                        if(K < 128)
-                        {
-                            found_index = find_kernel(
-                                1,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 32, 32, "
-                                "Filter1x1Pad0, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>");
-                        }
-                        else
-                        {
-                            found_index = find_kernel(
-                                2,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, 128, "
-                                "32, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, 1>");
-                        }
-                    }
-                    else
-                    {
-                        if(K < 16)
-                        {
-                            found_index = find_kernel(
-                                1,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, "
-                                "Default, 32, 32, 2, 1, 8, 8, 1, 1, 1, 1>");
-                        }
-                        else if(K <= 32)
-                        {
-                            found_index = find_kernel(
-                                2,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, "
-                                "Default, "
-                                "16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, "
-                                "BlkGemmPipelineVersion: v1>");
-                        }
-                        else if(K < 64)
-                        {
-                            found_index = find_kernel(
-                                57,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
-                                "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
-                        }
-                        else if(K < 256)
-                        {
-                            found_index = find_kernel(
-                                10,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 128, "
-                                "64, 32, Default, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>");
-                        }
-                        else
-                        {
-                            found_index = find_kernel(
-                                31,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
-                                "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-                        }
-                    }
-                }
-                else if(problem.GetInDataType() == miopenFloat)
-                {
-                    if((problem.GetInChannels()) >= 256)
-                    {
-                        found_index = find_kernel(
-                            2,
-                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, "
-                            "Default, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: "
-                            "Interwave, BlkGemmPipelineVersion: v2>");
-                    }
+                    found_index = find_kernel(pick.index_hint, pick.kernel);
+                    break;
                 }
             }
         }

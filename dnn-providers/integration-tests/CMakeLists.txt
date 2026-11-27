@@ -204,11 +204,19 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
 
+    # The partition check's own tests (the check itself is registered with the tier suites
+    # below).
+    add_test(
+        NAME hipdnn_tier_partition_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_check_tier_partition.py
+    )
+
     # None of these suites uses a third-party plugin; don't let a broken one
     # installed in the developer's environment fail them.
     set_tests_properties(
         hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
-        hipdnn_support_features_python_tests
+        hipdnn_support_features_python_tests hipdnn_tier_partition_python_tests
         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
     )
 
@@ -497,8 +505,8 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
     # from-scratch GPU reference implementation, and our own golden data directly),
     # so the ASAN-only MIOpen-cache-clear fixture miopen-provider/hipblaslt-provider
     # wire up does not apply here.
-    # hipdnn_gpu_ref_tests has its own tier file: its quick tier is fp32-only
-    # (see test_categories_gpu_ref.yaml).
+    # hipdnn_gpu_ref_tests has its own tier file: its quick tier is an opt-in list of one
+    # fp32 case per kernel family (see test_categories_gpu_ref.yaml).
     set(HIPDNN_IT_GPU_REF_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_gpu_ref.yaml")
     foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests
                        hipdnn_golden_data_tests)
@@ -515,6 +523,41 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endforeach()
+
+    # Every test of these binaries must run in exactly one tier, and every quick-tier
+    # pattern must select a test: a test no tier selects never runs, and the YAML filters
+    # do not report one. The unit-test quick tier must also select no device test. Unlabeled,
+    # so the superbuild lane (which runs the suites that carry no tier label) runs it, and not
+    # the per-tier TheRock lanes.
+    if(Python3_FOUND)
+        foreach(_tp_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests)
+            set(_tp_yaml "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+            # The unit-test quick tier must run on a host without a GPU, so it may select no
+            # test that skips for lack of a device. The gpu-ref quick tier runs on the GPU.
+            set(_tp_no_device_skips --no-device-skips quick)
+            if(_tp_target STREQUAL "hipdnn_gpu_ref_tests")
+                set(_tp_yaml "${HIPDNN_IT_GPU_REF_CATEGORIES_YAML}")
+                set(_tp_no_device_skips)
+            endif()
+            add_test(
+                NAME ${_tp_target}_tier_partition
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_tier_partition.py
+                        --yaml ${_tp_yaml}
+                        --exe $<TARGET_FILE:${_tp_target}>
+                        --require-match quick
+                        ${_tp_no_device_skips}
+            )
+            if(TEST_ENVIRONMENT)
+                set_tests_properties(${_tp_target}_tier_partition
+                    PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+            endif()
+            if(TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(${_tp_target}_tier_partition
+                    PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+            endif()
+        endforeach()
+    endif()
 
     # The refusal check, next to the GTest suites. It is the only pre-registered check
     # staged here: the others run python scripts from the source tree. Labelled from

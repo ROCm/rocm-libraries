@@ -207,6 +207,22 @@ class TestGAPopSizeDecay:
         assert ga._decay_type == "large_space"
         assert ga.pop_size > 8
 
+    def test_large_space_keeps_pop_size_when_auto_pop_size_false(self):
+        # Same space/pop_size as test_large_space_increases_pop_size, but with
+        # auto_pop_size=False the caller pinned pop_size explicitly, so the
+        # large-space growth must not fire either.
+        space = _make_space(keys={"DepthU": list(range(256)), "SourceSwap": [0, 1]})
+        mating = _make_mating(space)
+        ga = GeneticAlgorithm(
+            space, mating,
+            evaluate=lambda x: np.ones((1, len(x))),
+            pop_size=8,
+            n_gen=1, seed=1, verbose=0,
+            auto_pop_size=False,
+        )
+        assert ga.pop_size == 8
+        assert ga._decay_type == "none"
+
     def test_small_space_reduces_pop_size(self):
         # max var size (18) < pop_size (100)/5=20 → halved to 50
         # n_perms = 3*18*2 = 108 >= 50, so passes the n_perms check

@@ -89,6 +89,32 @@ TIER_NAME = re.compile(
     r"|(?:Test|Integration)[A-Z0-9][^/]*\.(?:cpp|cc|cxx|hpp|h))"
 )
 
+# Changes under these trigger the EXEC lane (lanes/execution-contract.md): provider and core
+# runtime code. A path under one is in scope unless it is documentation, sits under a
+# component of EXEC_EXCLUDED_DIRS (tests, fixtures, samples) or is a test file (`test_stem`).
+# Production `.ued.json` descriptors and `flydsl/gen_descriptors.py` are in scope. The two
+# contract documents are in scope by exact path.
+EXEC_PREFIXES = (
+    "dnn-providers/",
+    "projects/hipdnn/backend/",
+    "projects/hipdnn/frontend/",
+    "projects/hipdnn/plugin_sdk/",
+    "projects/hipdnn/data_sdk/",
+)
+EXEC_EXCLUDED_DIRS = {
+    "test",
+    "tests",
+    "integration_tests",
+    "integration-tests",
+    "test_descriptors",
+    "fixtures",
+    "examples",
+}
+EXEC_DOCS = (
+    "projects/hipdnn/docs/user-guides/how-to/capture-hipgraph.rst",
+    "projects/hipdnn/docs/PluginDevelopment.md",
+)
+
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
 CONCERN_LANES = {
@@ -108,6 +134,7 @@ CONCERN_LANES = {
     "DRIFT",
     "IMPACT",
     "APPL",
+    "EXEC",
 }
 # Prefixes of every agent that writes a report. PROVISIONAL_ID matches `<prefix><k>-p<n>`
 # and the invalid follow-up form `<prefix><k>-f<j>-p<n>`.
@@ -398,6 +425,18 @@ def concern_scope(lane: str, rows):
                 or TIER_NAME.fullmatch(name(r[0]))
             )
         ]
+    if lane == "EXEC":
+        return [
+            r
+            for r in rows
+            if r[0] in EXEC_DOCS
+            or (
+                r[0].startswith(EXEC_PREFIXES)
+                and not is_docs(r[0])
+                and EXEC_EXCLUDED_DIRS.isdisjoint(r[0].split("/")[:-1])
+                and test_stem(r[0]) is None
+            )
+        ]
     if lane == "DESIGN":
         return [r for r in rows if not is_docs(r[0])]
     return rows
@@ -478,7 +517,7 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD, DEPS, IMPACT, APPL and TIER scope to their trigger files, DESIGN to the
+    scope). BUILD, DEPS, IMPACT, APPL, TIER and EXEC scope to their trigger files, DESIGN to the
     non-documentation files, other concern lanes take every changed file; DRIFT also lists
     drift.txt and is N/A when its Trigger is `no`. The diff is not read."""
     rd = Path(args.round_dir)

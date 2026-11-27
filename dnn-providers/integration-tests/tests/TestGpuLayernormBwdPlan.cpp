@@ -492,7 +492,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
 // FP32 plan execution tests
 // =========================
 
-TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNchw)
+TEST(TestGpuLayernormBwdPlanDeviceFp32, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -500,7 +500,7 @@ TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, 3, layernorm::getTolerance<float>());
 }
 
-TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNhwc)
+TEST(TestGpuLayernormBwdPlanDeviceFp32, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -508,7 +508,7 @@ TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNhwc)
         {5, 4, 3, 2}, TensorLayout::NHWC, 3, layernorm::getTolerance<float>());
 }
 
-TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNchwWithDoubleEpsilon)
+TEST(TestGpuLayernormBwdPlanDeviceFp32, ExecutePlanNchwWithDoubleEpsilon)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -520,7 +520,7 @@ TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNchwWithDoubleEpsilon)
 // FP16 plan execution tests
 // =========================
 
-TEST(TestGpuLayernormBwdPlanFp16, ExecutePlanNchw)
+TEST(TestGpuLayernormBwdPlanDeviceFp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -528,7 +528,7 @@ TEST(TestGpuLayernormBwdPlanFp16, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, 3, layernorm::getTolerance<half>());
 }
 
-TEST(TestGpuLayernormBwdPlanFp16, ExecutePlanNhwc)
+TEST(TestGpuLayernormBwdPlanDeviceFp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -540,7 +540,7 @@ TEST(TestGpuLayernormBwdPlanFp16, ExecutePlanNhwc)
 // BFP16 plan execution tests
 // =========================
 
-TEST(TestGpuLayernormBwdPlanBfp16, ExecutePlanNchw)
+TEST(TestGpuLayernormBwdPlanDeviceBfp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -548,7 +548,7 @@ TEST(TestGpuLayernormBwdPlanBfp16, ExecutePlanNchw)
         {5, 4, 3, 2}, TensorLayout::NCHW, 3, layernorm::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuLayernormBwdPlanBfp16, ExecutePlanNhwc)
+TEST(TestGpuLayernormBwdPlanDeviceBfp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 

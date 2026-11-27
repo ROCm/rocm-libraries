@@ -380,13 +380,13 @@ RawBwdSpec alibiTopLeftSpec()
 
 } // namespace
 
-class TestGpuSdpaBwdPlanExecutor : public ::testing::TestWithParam<BwdExecutorCase>
+class TestGpuSdpaBwdPlanExecutorDevice : public ::testing::TestWithParam<BwdExecutorCase>
 {
 };
 
 // The GPU plan must bind the node's bias and dBias, and apply its band and ALiBi terms, exactly
 // as the CPU plan does.
-TEST_P(TestGpuSdpaBwdPlanExecutor, MatchesCpuExecutor)
+TEST_P(TestGpuSdpaBwdPlanExecutorDevice, MatchesCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     const RawBwdSpec& spec = GetParam().spec;
@@ -506,7 +506,7 @@ TEST_P(TestGpuSdpaBwdPlanExecutor, MatchesCpuExecutor)
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestGpuSdpaBwdPlanExecutor,
+                         TestGpuSdpaBwdPlanExecutorDevice,
                          ::testing::Values(
                              // Bias and dBias with a bottom-right causal band.
                              BwdExecutorCase{"BiasBottomRightCausal", RawBwdSpec{}, 301},
@@ -518,7 +518,7 @@ INSTANTIATE_TEST_SUITE_P(,
 
 // Probability 0 drops no element: dQ, dK and dV equal the graph without dropout fields bit for
 // bit, whether the node names a seed and offset or not, and equal the CPU executor's.
-TEST(TestGpuSdpaBwdPlanZeroDropout, EqualsNoDropoutBitForBitAndTheCpuExecutor)
+TEST(TestGpuSdpaBwdPlanZeroDropoutDevice, EqualsNoDropoutBitForBitAndTheCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     constexpr int64_t HEAD_DIM = 8;

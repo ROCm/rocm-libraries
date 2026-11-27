@@ -1071,11 +1071,12 @@ void runResamplePlanExecuteForType(const TensorLayout& layout, bool isForward)
 
 } // namespace
 
-class TestGpuResamplePlanExecution : public testing::TestWithParam<std::tuple<DataType, bool, bool>>
+class TestGpuResamplePlanExecutionDevice
+    : public testing::TestWithParam<std::tuple<DataType, bool, bool>>
 {
 };
 
-TEST_P(TestGpuResamplePlanExecution, MatchesCpuReference)
+TEST_P(TestGpuResamplePlanExecutionDevice, MatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1100,7 +1101,7 @@ TEST_P(TestGpuResamplePlanExecution, MatchesCpuReference)
 
 INSTANTIATE_TEST_SUITE_P(
     DataTypeLayoutAndDirection,
-    TestGpuResamplePlanExecution,
+    TestGpuResamplePlanExecutionDevice,
     testing::Combine(testing::Values(DataType::FLOAT, DataType::HALF, DataType::BFLOAT16),
                      testing::Bool(),
                      testing::Bool()));
@@ -1145,11 +1146,11 @@ const std::vector<ResampleGeometryCase>& resampleGeometryCases()
 
 } // namespace
 
-class TestGpuResamplePlanGeometry : public testing::TestWithParam<ResampleGeometryCase>
+class TestGpuResamplePlanGeometryDevice : public testing::TestWithParam<ResampleGeometryCase>
 {
 };
 
-TEST_P(TestGpuResamplePlanGeometry, FwdMatchesCpuReference)
+TEST_P(TestGpuResamplePlanGeometryDevice, FwdMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1172,7 +1173,7 @@ TEST_P(TestGpuResamplePlanGeometry, FwdMatchesCpuReference)
     }
 }
 
-TEST_P(TestGpuResamplePlanGeometry, BwdMatchesCpuReference)
+TEST_P(TestGpuResamplePlanGeometryDevice, BwdMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1196,13 +1197,13 @@ TEST_P(TestGpuResamplePlanGeometry, BwdMatchesCpuReference)
 }
 
 INSTANTIATE_TEST_SUITE_P(Geometries,
-                         TestGpuResamplePlanGeometry,
+                         TestGpuResamplePlanGeometryDevice,
                          testing::ValuesIn(resampleGeometryCases()),
                          [](const testing::TestParamInfo<ResampleGeometryCase>& info) {
                              return info.param.name;
                          });
 
-TEST(TestGpuResampleFwdPlanNoIndex, MaxpoolWithoutIndexMatchesCpuReference)
+TEST(TestGpuResampleFwdPlanNoIndexDevice, MaxpoolWithoutIndexMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 

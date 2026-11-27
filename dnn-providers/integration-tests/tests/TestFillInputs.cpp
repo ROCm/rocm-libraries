@@ -1461,7 +1461,7 @@ TEST(TestFillInputs, SdpaBwdWithComputedRaggedOffsetsIsRefused)
 // With a device filler the forward runs on the device: O and stats come back current
 // on both sides (the CPU forward leaves them on the host only) and are still the forward
 // of Q, K and V.
-TEST(TestGpuFillInputs, SdpaBwdOAndStatsAreTheForwardOfQkvOnTheDevice)
+TEST(TestGpuFillInputsDevice, SdpaBwdOAndStatsAreTheForwardOfQkvOnTheDevice)
 {
     SKIP_IF_NO_DEVICES();
     SdpaBwdOptions opts;
@@ -1479,7 +1479,7 @@ TEST(TestGpuFillInputs, SdpaBwdOAndStatsAreTheForwardOfQkvOnTheDevice)
     expectOAndStatsAreForwardOfQkv<bfloat16>(inputs, 0.35f, /*causal=*/true, 1e-2f);
 }
 
-TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsTheAttnMaskAndRuntimeScale)
+TEST(TestGpuFillInputsDevice, SdpaBwdDerivationOnTheDeviceAddsTheAttnMaskAndRuntimeScale)
 {
     SKIP_IF_NO_DEVICES();
     SdpaBwdOptions opts;
@@ -1500,7 +1500,7 @@ TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsTheAttnMaskAndRuntimeSca
                                           static_cast<const float*>(inputs.at(11)->rawHostData()));
 }
 
-TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsIsDerivedOnTheDevice)
+TEST(TestGpuFillInputsDevice, SdpaBwdWithRank3StatsIsDerivedOnTheDevice)
 {
     SKIP_IF_NO_DEVICES();
     SdpaBwdOptions opts;
@@ -1514,7 +1514,7 @@ TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsIsDerivedOnTheDevice)
     expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
 }
 
-TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsAlibi)
+TEST(TestGpuFillInputsDevice, SdpaBwdDerivationOnTheDeviceAddsAlibi)
 {
     SKIP_IF_NO_DEVICES();
     SdpaBwdOptions opts;
@@ -1531,7 +1531,7 @@ TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsAlibi)
 }
 
 // A forward graph the GPU executor declines goes to the CPU executor.
-TEST(TestGpuFillInputs, SdpaBwdForwardDeclinedOnTheDeviceRunsOnTheCpu)
+TEST(TestGpuFillInputsDevice, SdpaBwdForwardDeclinedOnTheDeviceRunsOnTheCpu)
 {
     SKIP_IF_NO_DEVICES();
     using ::testing::_;
@@ -1550,7 +1550,7 @@ TEST(TestGpuFillInputs, SdpaBwdForwardDeclinedOnTheDeviceRunsOnTheCpu)
 
 // A forward graph the GPU executor rejects before it launches (std::invalid_argument)
 // goes to the CPU executor, after the GPU attempt uploaded O and stats.
-TEST(TestGpuFillInputs, SdpaBwdForwardRejectedOnTheDeviceRunsOnTheCpu)
+TEST(TestGpuFillInputsDevice, SdpaBwdForwardRejectedOnTheDeviceRunsOnTheCpu)
 {
     SKIP_IF_NO_DEVICES();
     using ::testing::_;
@@ -1571,7 +1571,7 @@ TEST(TestGpuFillInputs, SdpaBwdForwardRejectedOnTheDeviceRunsOnTheCpu)
 
 // A device failure after the GPU executor accepted the graph is no fault in the graph:
 // it fails the fill rather than falling back.
-TEST(TestGpuFillInputs, SdpaBwdForwardFailingOnTheDeviceIsADeviceInputError)
+TEST(TestGpuFillInputsDevice, SdpaBwdForwardFailingOnTheDeviceIsADeviceInputError)
 {
     SKIP_IF_NO_DEVICES();
     using ::testing::_;
@@ -1661,7 +1661,7 @@ TEST(TestFillInputs, DeviceFillerLeavesSmallTensorsOnTheHostPath)
 // Large tensors are generated on the device and are done by the time fillInputs()
 // returns. Dropping `fillPending`, the final wait or the type dispatch each leaves a
 // tensor unfilled or still being written, which only a run on a device can see.
-TEST(TestFillInputs, DeviceFillerFillsLargeTensorsOnTheDeviceWithinRange)
+TEST(TestFillInputsDevice, DeviceFillerFillsLargeTensorsOnTheDeviceWithinRange)
 {
     SKIP_IF_NO_DEVICES();
     if(!DeviceInputFiller::isSupported())
@@ -1719,7 +1719,7 @@ TEST(TestFillInputs, DeviceFillerFillsLargeTensorsOnTheDeviceWithinRange)
 
 // The threshold is inclusive: a tensor of exactly minElements() goes to the device and one
 // element fewer stays on the host, so neither side drifts off the measured crossover.
-TEST(TestFillInputs, DeviceFillerThresholdIsInclusiveOfMinElements)
+TEST(TestFillInputsDevice, DeviceFillerThresholdIsInclusiveOfMinElements)
 {
     SKIP_IF_NO_DEVICES();
     if(!DeviceInputFiller::isSupported())
@@ -2384,7 +2384,7 @@ TEST(TestFillInputs, AliasOwnerGapsHoldZeros)
 
 // x is large enough for the device fill, and is an owner, so it is filled on the host;
 // w is not an owner and still goes to the device.
-TEST(TestFillInputs, AliasOwnerIsFilledOnTheHostWithADeviceFiller)
+TEST(TestFillInputsDevice, AliasOwnerIsFilledOnTheHostWithADeviceFiller)
 {
     SKIP_IF_NO_DEVICES();
     if(!DeviceInputFiller::isSupported())
