@@ -64,8 +64,14 @@ header's first WMMA region, a region cut by an `s_barrier_wait`, a movable `s_ba
 issuing) puts ready WMMAs ahead of ds_loads and fillers until the queue depth is outstanding,
 even when a ds_load's stage falls behind its even line. A ds_load whose stage has reached its
 end (the last load its barrier waits for) is not held. The `DsSpread` stages that were held
-count their batches from where the fill ended. Barriers, prefetches and `tensor_load_to_lds`
-keep their own schedule, and the loop-head deferral wins.
+count their batches from where the fill ended. The fill is skipped (the held stages start at the
+reset) when the WMMAs it would take leave a held stage too few batches before its end, so that
+the longest run of back-to-back ds_loads exceeds what a full queue hides,
+`ceil(queue depth x WMMA latency / cycles per load)`, at the LDS rate the pacer plans with
+(`DsReadCyclesPerLoad`): 11 for depth 8, latency 8 and 6 cycles per load; no limit with
+`DsReadCyclesPerLoad=0`. A fill that leaves enough WMMAs after it, or whose skip would not
+shorten the run, is not changed. Barriers, prefetches and `tensor_load_to_lds` keep their own
+schedule, and the loop-head deferral wins.
 
 ```
 cover = cycles until the pipe has run everything queued
