@@ -26,7 +26,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pytest
 from rocke.numeric import storage
-from rocke.numeric.compare import peak_relative_error
+from rocke.numeric.compare import tolerance_excess
+from rocke.numeric.tolerance import sum_of_products_tolerance
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import arch_skip_reason, skip_needing_arch
 
@@ -65,12 +66,27 @@ def _wave_size(arch: str) -> int:
     return ArchTarget.from_gfx(arch).wave_size
 
 
-_TOL = 5e-2
-_TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
-# The tiled depthwise kernel accumulates in fp32 and rounds once on store, so a
-# correct result is within about one output ulp; the loose tolerances above
-# would still pass it with a filter tap dropped.
-_TILED_TOL = {"fp16": 5e-3, "bf16": 1.5e-2}
+def _conv_excess(
+    out, ref, magnitude, *, out_dtype: str, partial_roundings: int = 2
+) -> float:
+    """How far the worst output is from its bound (at most 1.0 passes): the
+    :func:`~rocke.numeric.tolerance.sum_of_products_tolerance` of the output
+    type with fp32 partial sums (every direct kernel accumulates in fp32) and
+    each output's ``magnitude`` (the reference on the operands' absolute
+    values). A NaN output (an element left unwritten) gives ``inf``."""
+    return tolerance_excess(
+        out,
+        ref,
+        sum_of_products_tolerance(
+            out_dtype, magnitude, partial_roundings=partial_roundings
+        ),
+    )
+
+
+#: The fp32 dW outputs of the direct wgrad kernels add workgroup partials with
+#: fp32 atomics, in an order that changes from run to run; each add rounds the
+#: running sum, and the bound allows four such roundings at full magnitude.
+_WGRAD_ATOMIC_ROUNDINGS = 4
 
 
 # ---------------------------------------------------------------------------
@@ -486,13 +502,6 @@ _COL_AOT_SHAPES: List[Tuple[dict, List[Tuple[int, int, int, int]]]] = [
 ]
 
 
-# fp16 and bf16 round the *output* to 10/7 mantissa bits, so the meaningful
-# bound is on the ref_scale-normalised max-abs error.  bf16 carries 3 fewer
-# mantissa bits than fp16, so it gets the same looser bound the rest of this
-# suite already uses for it (_TOL_BF16) rather than borrowing fp16's.
-_COL_TOL = {"fp16": _TOL, "bf16": _TOL_BF16}
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -557,7 +566,6 @@ def _run_grouped_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[boo
         dtype=dtype,
         grid=grid,
         block=block,
-        tol=_TOL_BF16 if dtype == "bf16" else _TOL,
         label=f"{shape.id}  {dtype}",
         arch=arch,
     )
@@ -655,17 +663,12 @@ def _run_depthwise_one(
         return False, f"compile failed: {e}"
 
     grid, block = direct_launch_geometry(spec)
-    if tiled is not None:
-        tol = _TILED_TOL[dtype]
-    else:
-        tol = _TOL_BF16 if dtype == "bf16" else _TOL
     return _run_forward_device(
         artifact,
         p,
         dtype=dtype,
         grid=grid,
         block=block,
-        tol=tol,
         label=f"{shape.id}  {dtype}",
         arch=arch,
     )
@@ -678,7 +681,6 @@ def _run_forward_device(
     dtype: str,
     grid: tuple[int, int, int],
     block: tuple[int, int, int],
-    tol: float,
     label: str,
     arch: str,
 ) -> tuple[bool, str]:
@@ -686,8 +688,8 @@ def _run_forward_device(
 
     The tail every forward runner shares: NHWC ``x``, KRSC ``w`` (U(-1, 1)
     draws from seed 0 stored as ``dtype``), ``(N, Ho, Wo, K)`` ``y``, the
-    float64 reference of the stored values and the ``max|ref|``-normalised
-    max-abs comparison. ``dtype`` is passed rather than read off ``p``: the
+    float64 reference of the stored values and the element-wise comparison of
+    :func:`_conv_excess`. ``dtype`` is passed rather than read off ``p``: the
     column-streamed spec carries its own.
 
     Returns ``(passed, reason)``.
@@ -697,7 +699,9 @@ def _run_forward_device(
     rng = np.random.default_rng(0)
     x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 1.0)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 1.0)
-    ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
+    x_values, w_values = storage.decode(x, dtype), storage.decode(w, dtype)
+    ref = direct_fwd_reference(p, x_values, w_values)
+    magnitude = direct_fwd_reference(p, np.abs(x_values), np.abs(w_values))
     # NaN-fill D, so an output element the kernel leaves unwritten fails the
     # comparison instead of matching a zero reference.
     y = poisoned((p.N, p.Ho, p.Wo, p.total_k), dtype, 0xFF)
@@ -708,10 +712,10 @@ def _run_forward_device(
     except HipError as e:
         return False, f"kernel load or launch failed: {e}"
 
-    rel_err = peak_relative_error(storage.decode(y, dtype), ref, floor=1.0)
-    if not rel_err < tol:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
-    print(f"  PASS  {label}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    excess = _conv_excess(storage.decode(y, dtype), ref, magnitude, out_dtype=dtype)
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
+    print(f"  PASS  {label}  {arch}  error/bound={excess:.2e}", flush=True)
     return True, ""
 
 
@@ -786,7 +790,6 @@ def _run_depthwise_col_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         dtype=shape.dtype,
         grid=grid,
         block=block,
-        tol=_COL_TOL[shape.dtype],
         label=shape.id,
         arch=arch,
     )
@@ -842,7 +845,6 @@ def _run_depthwise_col_aot(
             dtype=spec.dtype,
             grid=grid,
             block=block,
-            tol=_COL_TOL[spec.dtype],
             label=label,
             arch=arch,
         )
@@ -1284,7 +1286,9 @@ def _run_dgrad_device(
     rng = np.random.default_rng(42)
     dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
-    ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
+    dy_values, w_values = storage.decode(dy, dtype), storage.decode(w, dtype)
+    ref = direct_dgrad_reference(p, dy_values, w_values)
+    magnitude = direct_dgrad_reference(p, np.abs(dy_values), np.abs(w_values))
     dx = poisoned((p.N, p.H, p.W, p.total_c), dtype, 0xFF)
     try:
         dx = launch_direct_conv(
@@ -1293,11 +1297,10 @@ def _run_dgrad_device(
     except HipError as e:
         return False, f"kernel load or launch failed: {e}"
 
-    rel_err = peak_relative_error(storage.decode(dx, dtype), ref, floor=1.0)
-    tol = _TOL_BF16 if dtype == "bf16" else _TOL
-    if not rel_err < tol:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
-    print(f"  PASS  {label}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    excess = _conv_excess(storage.decode(dx, dtype), ref, magnitude, out_dtype=dtype)
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
+    print(f"  PASS  {label}  {arch}  error/bound={excess:.2e}", flush=True)
     return True, ""
 
 
@@ -1349,7 +1352,7 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
     """Correctness tests for direct conv with bf16 I/O tensors.
 
     Uses the same harness as ``TestDirectConvCorrectness`` but with
-    ``dtype="bf16"`` and a looser tolerance (``_TOL_BF16``).  cpg=4 is
+    ``dtype="bf16"`` and bf16's bound.  cpg=4 is
     excluded because there is no ``mfma_f32_4x4x4_bf16`` atom on CDNA. The
     bf16 grouped dgrad cases are in :class:`TestDirectConvDgradCorrectness`.
     """
@@ -1701,9 +1704,9 @@ def _run_nongrouped_spec(
     rng = np.random.default_rng(0)
     x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), p.dtype, 1.0)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), p.dtype, 1.0)
-    ref = direct_fwd_reference(
-        p, storage.decode(x, p.dtype), storage.decode(w, p.dtype)
-    )
+    x_values, w_values = storage.decode(x, p.dtype), storage.decode(w, p.dtype)
+    ref = direct_fwd_reference(p, x_values, w_values)
+    magnitude = direct_fwd_reference(p, np.abs(x_values), np.abs(w_values))
     x_dev, w_dev = DeviceArray(x, p.dtype), DeviceArray(w, p.dtype)
     y_dev = DeviceArray.zeros((p.N, p.Ho, p.Wo, p.total_k), p.dtype)
     # A split-C kernel writes fp32 partial sums into a workspace that a second
@@ -1733,12 +1736,13 @@ def _run_nongrouped_spec(
     except HipError as e:
         return False, f"kernel load or launch failed: {e}"
 
-    rel_err = peak_relative_error(storage.decode(y_dev.read(), p.dtype), ref, floor=1.0)
-    tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
-    # `not <` so a NaN rel_err (an unwritten workspace slab) fails too.
-    if not rel_err < tol:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
-    print(f"  PASS  {case_id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    # An unwritten workspace slab gives a NaN output and an infinite excess.
+    excess = _conv_excess(
+        storage.decode(y_dev.read(), p.dtype), ref, magnitude, out_dtype=p.dtype
+    )
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
+    print(f"  PASS  {case_id}  {arch}  error/bound={excess:.2e}", flush=True)
     return True, ""
 
 
@@ -2426,9 +2430,9 @@ def _run_wgrad_one(
     x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 0.5)
     # dY: output gradient [N, Ho, Wo, K]
     dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
-    ref = direct_wgrad_reference(
-        p, storage.decode(x, dtype), storage.decode(dy, dtype)
-    )  # [K, KH, KW, cpg]
+    x_values, dy_values = storage.decode(x, dtype), storage.decode(dy, dtype)
+    ref = direct_wgrad_reference(p, x_values, dy_values)  # [K, KH, KW, cpg]
+    magnitude = direct_wgrad_reference(p, np.abs(x_values), np.abs(dy_values))
 
     # With ws_replicas = R, D is the two-stage scratch: R replica slabs of
     # each group's dW slab, which the reduce kernel would fold. The test folds
@@ -2450,15 +2454,19 @@ def _run_wgrad_one(
         return False, f"kernel load or launch failed: {e}"
     dw = dw_dev.read().sum(axis=1).reshape(ref.shape)
 
-    rel_err = peak_relative_error(dw, ref, floor=1.0)
-    tol = _TOL_BF16 if dtype == "bf16" else _TOL
-    passed = rel_err < tol
-    if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    excess = _conv_excess(
+        dw,
+        ref,
+        magnitude,
+        out_dtype="fp32",
+        partial_roundings=_WGRAD_ATOMIC_ROUNDINGS,
+    )
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
     print(
         f"  PASS  {shape.id}  {arch}  {dtype}  "
         f"wk={waves_k} wc={waves_c} wq={waves_q} mk={mfma_k} hpb={hpb}  "
-        f"rtc={int(runtime_channels)}  rel_err={rel_err:.2e}",
+        f"rtc={int(runtime_channels)}  error/bound={excess:.2e}",
         flush=True,
     )
     return True, ""
@@ -2521,9 +2529,11 @@ def _run_dw_wgrad_one(
     rng = np.random.default_rng(42)
     x = stored_uniform(rng, (p.N, p.H, p.W, C), dtype, 0.5)
     dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, C), dtype, 0.5)
-    ref = direct_wgrad_reference(
-        p, storage.decode(x, dtype), storage.decode(dy, dtype)
-    ).reshape(C, p.KH * p.KW)
+    x_values, dy_values = storage.decode(x, dtype), storage.decode(dy, dtype)
+    ref = direct_wgrad_reference(p, x_values, dy_values).reshape(C, p.KH * p.KW)
+    magnitude = direct_wgrad_reference(p, np.abs(x_values), np.abs(dy_values)).reshape(
+        C, p.KH * p.KW
+    )
 
     R = spec.ws_replicas
     workspace = DeviceArray.zeros((R, C, p.KH * p.KW), "fp32")
@@ -2536,11 +2546,16 @@ def _run_dw_wgrad_one(
         block=block,
         direction="wgrad",
     )
-    rel_err = peak_relative_error(workspace.read().sum(axis=0), ref, floor=1.0)
-    tol = _TOL_BF16 if dtype == "bf16" else _TOL
-    # `not <` so a NaN rel_err (non-finite output) fails too.
-    if not rel_err < tol:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    # A non-finite output gives an infinite excess.
+    excess = _conv_excess(
+        workspace.read().sum(axis=0),
+        ref,
+        magnitude,
+        out_dtype="fp32",
+        partial_roundings=_WGRAD_ATOMIC_ROUNDINGS,
+    )
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
     return True, ""
 
 
@@ -2887,7 +2902,8 @@ def _launch_cfg(spec):
 
 
 def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
-    """Run (transpose[, reorganize], fprop) on ``problem``; returns rel_err."""
+    """Run (transpose[, reorganize], fprop) on ``problem``; returns the
+    :func:`_conv_excess` of dX (at most 1.0 passes)."""
     from rocke.runtime.device_array import DeviceArray
     from rocke.runtime.launcher import KernelLauncher
 
@@ -2909,7 +2925,9 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     rng = np.random.default_rng(7)
     dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
-    ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
+    dy_values, w_values = storage.decode(dy, dtype), storage.decode(w, dtype)
+    ref = direct_dgrad_reference(p, dy_values, w_values)
+    magnitude = direct_dgrad_reference(p, np.abs(dy_values), np.abs(w_values))
 
     ws_t_bytes = direct_dgrad_workspace_bytes(p)
     ws_coa_bytes = direct_dgrad_coalesced_workspace_bytes(
@@ -2964,7 +2982,9 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
         block=block,
         dtype=dtype,
     )
-    return peak_relative_error(storage.decode(dx_dev.read(), dtype), ref, floor=1.0)
+    return _conv_excess(
+        storage.decode(dx_dev.read(), dtype), ref, magnitude, out_dtype=dtype
+    )
 
 
 def _dw_wgrad_skip_reason(arch: str | None) -> str:
@@ -3126,7 +3146,6 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
             )
 
         kernels = None
-        tol = _TOL_BF16 if dtype == "bf16" else _TOL
         for N, H, W, groups, cpg, kpg in shapes:
             problem = DirectConvProblem(
                 N=N, H=H, W=W, groups=groups, cpg=cpg, kpg=kpg, dtype=dtype
@@ -3135,10 +3154,12 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
             if kernels is None or not runtime_channels:
                 kernels = build(problem)
             with self.subTest(case=label, dtype=dtype, shape=problem.short()):
-                rel_err = _run_mfma_dgrad_pipeline(
+                excess = _run_mfma_dgrad_pipeline(
                     GPU_ARCH, problem, spec, kernels, dtype
                 )
-                self.assertLess(rel_err, tol, f"{label} {problem.short()} {dtype}")
+                self.assertLessEqual(
+                    excess, 1.0, f"{label} {problem.short()} {dtype}: error/bound"
+                )
 
     def test_mfma_dgrad_baked(self):
         # One baked binary per shape, on every shape of every case: grouped
@@ -3416,7 +3437,7 @@ def _run_aot_wgrad_one(
     arch: str, variant: str, problem, knobs: dict, integer: bool = False
 ) -> float:
     """Build ``variant`` on its cache probe, launch it on ``problem``, return
-    the max error relative to the largest reference dW entry.
+    the :func:`_conv_excess` of dW (at most 1.0 passes).
 
     With ``integer`` the inputs are small integers, so every partial sum is
     exact in fp32 whatever the atomic order and a correct kernel returns 0.
@@ -3471,9 +3492,9 @@ def _run_aot_wgrad_one(
     else:
         x = stored_uniform(rng, x_shape, p.dtype, 0.5)
         dy = stored_uniform(rng, dy_shape, p.dtype, 0.5)
-    ref = direct_wgrad_reference(
-        p, storage.decode(x, p.dtype), storage.decode(dy, p.dtype)
-    )  # [K, KH, KW, cpg]
+    x_values, dy_values = storage.decode(x, p.dtype), storage.decode(dy, p.dtype)
+    ref = direct_wgrad_reference(p, x_values, dy_values)  # [K, KH, KW, cpg]
+    magnitude = direct_wgrad_reference(p, np.abs(x_values), np.abs(dy_values))
 
     # The atomic kernel adds into a zeroed dW; the fold writes dW whole,
     # so poison it to catch an element the fold misses.
@@ -3513,8 +3534,13 @@ def _run_aot_wgrad_one(
         }
         fold(fvalues, config=LaunchConfig(grid=fgrid, block=fblock, fence=True))
 
-    rel_err = peak_relative_error(dw.read(), ref, floor=1.0)
-    return float("inf") if np.isnan(rel_err) else rel_err
+    return _conv_excess(
+        dw.read(),
+        ref,
+        magnitude,
+        out_dtype="fp32",
+        partial_roundings=_WGRAD_ATOMIC_ROUNDINGS,
+    )
 
 
 # The cases below are the gfx950 (wave64 MFMA) AOT wgrad kernels; the gfx1250
@@ -3531,13 +3557,14 @@ class TestDirectWgradAotKernelsCorrectness(unittest.TestCase):
     def _check(self, dtype: str) -> None:
         from kernels.common.conv_direct_grouped import DirectConvProblem
 
-        tol = _TOL_BF16 if dtype == "bf16" else _TOL
         for case_id, variant, shape, knobs in _AOT_WGRAD_CASES:
             problem = DirectConvProblem(dtype=dtype, **shape)
             with self.subTest(case=case_id, dtype=dtype):
-                rel_err = _run_aot_wgrad_one(GPU_ARCH, variant, problem, knobs)
-                print(f"  {case_id:24s} {dtype}  rel_err={rel_err:.2e}", flush=True)
-                self.assertLess(rel_err, tol, f"{case_id} {problem.short()} {dtype}")
+                excess = _run_aot_wgrad_one(GPU_ARCH, variant, problem, knobs)
+                print(f"  {case_id:24s} {dtype}  error/bound={excess:.2e}", flush=True)
+                self.assertLessEqual(
+                    excess, 1.0, f"{case_id} {problem.short()} {dtype}: error/bound"
+                )
 
     def test_aot_wgrad_fp16(self):
         self._check("fp16")

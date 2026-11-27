@@ -3,7 +3,7 @@
 """Correctness tests for implicit-GEMM forward convolution across pipelines.
 
 Runs a small sweep of conv shapes and pipeline/epilogue combinations, verifies
-each kernel output against a float32 reference, and asserts no failures.
+each kernel output against a float64 reference, and asserts no failures.
 
 Coverage:
   - Pipelines: mem, compv3, compv4, basic (MFMA arches); mem, wavelet (WMMA/gfx1250)
@@ -34,6 +34,8 @@ from builders.common.conv_reference import (
     tf32_reference_tol,
 )
 from rocke.numeric import storage
+from rocke.numeric.compare import tolerance_excess
+from rocke.numeric.tolerance import sum_of_products_tolerance
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import skip_needing_arch
 from rocke.tests.sweep_guard import assert_case_ran
@@ -199,30 +201,33 @@ _WMMA_PIPELINES = ("mem", "wavelet")
 _EPILOGUES = ("default", "cshuffle")
 _DTYPES = ("fp16", "bf16")
 
-_TOL = {"fp16": 5e-2, "bf16": 5e-2}
-
 # fp32 storage. ``tf32`` is not a storage dtype: it builds
 # ``ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")``.
 _FP32_DTYPES = ("fp32", "tf32")
 _STORAGE = {"fp16": "fp16", "bf16": "bf16", "fp32": "fp32", "tf32": "fp32"}
 
 
-def _tolerance(dtype: str, arch: str) -> float:
-    """Peak-relative error bound for ``dtype`` on ``arch``.
+def _verdict(out, ref, magnitude, dtype: str, arch: str) -> tuple[bool, str]:
+    """``(passed, metric)`` of an output against its float64 reference.
 
     Every dtype is checked against a float64 reference of the exact stored
-    inputs; fp16 and bf16 round that reference to the output dtype, as the
-    kernel's store does. The bf16x3 emulation is close to fp32, and the 1e-4
-    bound fails a single bf16 pass or a dropped cross term. gfx942 hardware TF32
-    ignores the low 13 mantissa bits, so its reference is computed from inputs
-    masked the same way (``conv_reference.tf32_reference_inputs``). That leaves
-    only accumulation error, and the fp32 bound applies.
+    inputs. For fp16 and bf16 every element must be within the
+    :func:`~rocke.numeric.tolerance.sum_of_products_tolerance` of the output
+    type with fp32 partial sums and each output's ``magnitude``, which holds
+    the store's rounding to the output type. fp32 and TF32
+    keep their peak-relative bounds: the bf16x3 emulation is close to fp32, and
+    the 1e-4 bound fails a single bf16 pass or a dropped cross term. gfx942
+    hardware TF32 ignores the low 13 mantissa bits, so its reference is
+    computed from inputs masked the same way
+    (``conv_reference.tf32_reference_inputs``). That leaves only accumulation
+    error, and the fp32 bound applies.
     """
-    if dtype == "fp32":
-        return 1e-4
-    if dtype == "tf32":
-        return tf32_reference_tol(arch)
-    return _TOL[dtype]
+    if dtype in ("fp16", "bf16"):
+        excess = tolerance_excess(out, ref, sum_of_products_tolerance(dtype, magnitude))
+        return excess <= 1.0, f"error/bound={excess:.2e}"
+    tol = 1e-4 if dtype == "fp32" else tf32_reference_tol(arch)
+    rel_err = float(np.abs(out - ref).max()) / max(1.0, float(np.abs(ref).max()))
+    return rel_err < tol, f"rel_err={rel_err:.2e} (tol {tol:.1e})"
 
 
 # ---------------------------------------------------------------------------
@@ -231,18 +236,26 @@ def _tolerance(dtype: str, arch: str) -> float:
 
 
 def _reference(problem, a_stored, b_stored, dtype: str, arch: str) -> np.ndarray:
-    """float64 forward convolution of the values the kernel reads, rounded to
-    the output storage dtype the way the kernel's store rounds it.
+    """float64 forward convolution of the values the kernel reads, unrounded:
+    the bound holds the store's rounding, and a reference rounded the same
+    way could differ from a correct kernel by a whole ulp.
 
-    TF32 operands are masked as ``arch``'s MMA reads them; fp32 output is kept
-    in float64, since rounding the reference to fp32 would only add error."""
+    TF32 operands are masked as ``arch``'s MMA reads them."""
     storage_dtype = _STORAGE[dtype]
     a = tf32_reference_inputs(storage.decode(a_stored, storage_dtype), arch, dtype)
     b = tf32_reference_inputs(storage.decode(b_stored, storage_dtype), arch, dtype)
-    reference = conv_fwd_reference(a, b, problem)
-    if storage_dtype == "fp32":
-        return reference
-    return storage.round_to(reference, storage_dtype).astype(np.float64)
+    return conv_fwd_reference(a, b, problem)
+
+
+def _magnitude(problem, a_stored, b_stored, dtype: str) -> np.ndarray:
+    """Per output, the sum of its products' absolute values: the forward
+    convolution of the stored operands' absolute values."""
+    storage_dtype = _STORAGE[dtype]
+    return conv_fwd_reference(
+        np.abs(storage.decode(a_stored, storage_dtype)),
+        np.abs(storage.decode(b_stored, storage_dtype)),
+        problem,
+    )
 
 
 def _select_warp_tile_k(arch: str, dtype: str, warp_tile_mn: int, tile_k: int) -> int:
@@ -458,14 +471,13 @@ def _run_one(
 
     rt.memcpy_d2h(as_u8_buffer(d_host), d_dev.ptr(), d_host.nbytes)
     out = storage.decode(d_host, storage_dtype).astype(np.float64)
-    ref_scale = max(1.0, float(np.abs(ref).max()))
-    rel_err = float(np.abs(out - ref).max()) / ref_scale
-    tol = _tolerance(dtype, arch)
-    passed = rel_err < tol
+    passed, metric = _verdict(
+        out, ref, _magnitude(problem, a_host, b_host, dtype), dtype, arch
+    )
     if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+        return False, metric
     print(
-        f"  PASS  {shape.id}  {dtype}  {pipeline}/{epilogue}  rel_err={rel_err:.2e}",
+        f"  PASS  {shape.id}  {dtype}  {pipeline}/{epilogue}  {metric}",
         flush=True,
     )
     return True, ""

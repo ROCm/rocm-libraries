@@ -51,6 +51,8 @@ from typing import List, Tuple
 
 import numpy as np
 from rocke.numeric import storage
+from rocke.numeric.compare import tolerance_excess
+from rocke.numeric.tolerance import sum_of_products_tolerance
 from rocke.runtime.hip_module import get_device_arch
 from rocke.core.arch.target import known_arches
 from rocke.runtime.host_buffers import as_u8_buffer
@@ -177,8 +179,6 @@ _PIPELINES = ("mem", "compv3", "compv4", "basic")
 _EPILOGUES = ("default", "cshuffle")
 _DTYPES = ("fp16", "bf16")
 
-_TOL = {"fp16": 5e-2, "bf16": 5e-2}
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -199,6 +199,32 @@ def _wgrad_inputs(problem, dtype: str, seed: int = 0, low: float = -1.0):
 def _wgrad_reference(x, dy, dtype: str, p) -> np.ndarray:
     """float64 dW (KYXC / KZYXC) of the stored ``dtype`` inputs ``x`` / ``dy``."""
     return conv_wgrad_reference(storage.decode(x, dtype), storage.decode(dy, dtype), p)
+
+
+def _wgrad_excess(
+    out, ref, x, dy, dtype: str, p, *, split_k: int, same_sign: bool = False
+) -> float:
+    """How far the worst dW element is from its bound (at most 1.0 passes):
+    the :func:`~rocke.numeric.tolerance.sum_of_products_tolerance` of a
+    ``dtype`` dW, with each element's magnitude (dW of the inputs' absolute
+    values). One launch accumulates in fp32 and rounds once; a split-K launch
+    adds ``split_k`` partials into dW atomically in ``dtype``, each add
+    rounding the running sum. With inputs of random sign those roundings
+    partly cancel and the bound's default room covers them; with
+    ``same_sign`` inputs they add up, and the bound allows one per partial."""
+    magnitude = conv_wgrad_reference(
+        np.abs(storage.decode(x, dtype)), np.abs(storage.decode(dy, dtype)), p
+    )
+    if split_k > 1:
+        tolerance = sum_of_products_tolerance(
+            dtype,
+            magnitude,
+            partial_dtype=dtype,
+            partial_roundings=max(2, split_k) if same_sign else 2,
+        )
+    else:
+        tolerance = sum_of_products_tolerance(dtype, magnitude)
+    return tolerance_excess(out, ref, tolerance)
 
 
 def _make_spec(
@@ -505,16 +531,21 @@ def _run_one(
             f"spk{split_k}) -- whole groups are not being written"
         )
 
-    abs_diff = np.abs(out_values - ref)
-    ref_scale = max(1.0, float(np.abs(ref).max()))
-    rel_err = float(abs_diff.max()) / ref_scale
-    tol = _TOL[dtype]
-    passed = rel_err < tol
-    if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    excess = _wgrad_excess(
+        out_values,
+        ref,
+        X_t,
+        dY_t,
+        dtype,
+        p,
+        split_k=max(1, spec.split_k),
+        same_sign=positive,
+    )
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
     print(
         f"  PASS  {shape.id}  {dtype}  {pipeline}/{epilogue}  spk{split_k}  "
-        f"rel_err={rel_err:.2e}",
+        f"error/bound={excess:.2e}",
         flush=True,
     )
     return True, ""
@@ -1647,9 +1678,6 @@ def _check_two_stage(
         return False, f"runtime error: {exc}"
 
     dW_ref = _wgrad_reference(X_t, dY_t, dtype, p)
-    max_abs = float(np.abs(dW_ref).max())
-    if max_abs < 1e-6:
-        return True, "reference near-zero; skipped numeric check"
 
     # Coverage guards, checked before the tolerance so a dropped slab reports
     # as "whole rows missing" rather than as a vague numeric failure.
@@ -1681,10 +1709,11 @@ def _check_two_stage(
             f"-- the merged column index decompacts to the wrong position"
         )
 
-    tol = 5e-2
-    rel_err = float(np.abs(dW_ours - dW_ref).max()) / max_abs
-    if rel_err >= tol:
-        return False, f"rel_err={rel_err:.3e} >= tol={tol}"
+    # Stage 1 writes fp32 partials to a workspace; stage 2 sums them and
+    # rounds once.
+    excess = _wgrad_excess(dW_ours, dW_ref, X_t, dY_t, dtype, p, split_k=1)
+    if not excess <= 1.0:
+        return False, f"error/bound={excess:.3e} > 1"
     return True, ""
 
 
@@ -1708,7 +1737,6 @@ class TestConvWgradTwoStage(unittest.TestCase):
     """
 
     ARCH = GPU_ARCH
-    TOL_FP16 = 5e-2
 
     @classmethod
     def setUpClass(cls):
