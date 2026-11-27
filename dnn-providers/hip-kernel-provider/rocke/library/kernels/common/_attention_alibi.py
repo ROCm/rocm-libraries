@@ -72,7 +72,11 @@ _LOG2E = 1.4426950408889634
 def check_alibi_slopes(spec, alibi_slopes) -> None:
     """Host check of the ``alibi_slopes`` argument of a runner: ``None`` (the
     built-in slopes) or an fp32 contiguous GPU tensor ``[num_query_heads]``, and
-    only when ``spec`` (a dense spec or a unified problem) has ALiBi on."""
+    only when ``spec`` (a dense spec or a unified problem) has ALiBi on.
+
+    Torch-free callers pass a device buffer with only ``shape``, ``stride`` and
+    ``data_ptr``, as for the other runner arguments; its dtype is the caller's
+    to get right."""
     if alibi_slopes is None:
         return
     if not spec.use_alibi:
@@ -82,11 +86,12 @@ def check_alibi_slopes(spec, alibi_slopes) -> None:
             f"alibi_slopes must have shape ({spec.num_query_heads},), "
             f"got {tuple(alibi_slopes.shape)}"
         )
-    if str(alibi_slopes.dtype) != "torch.float32":
-        raise ValueError(f"alibi_slopes must be float32, got {alibi_slopes.dtype}")
-    if not alibi_slopes.is_contiguous():
+    dtype = getattr(alibi_slopes, "dtype", None)
+    if dtype is not None and str(dtype) != "torch.float32":
+        raise ValueError(f"alibi_slopes must be float32, got {dtype}")
+    if alibi_slopes.stride(0) != 1:
         raise ValueError("alibi_slopes must be contiguous")
-    if not alibi_slopes.is_cuda:
+    if not getattr(alibi_slopes, "is_cuda", True):
         raise ValueError("alibi_slopes must be a CUDA tensor")
 
 

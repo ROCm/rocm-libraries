@@ -148,8 +148,18 @@ class _FakeSlopes:
         self.shape, self.dtype, self._contiguous = shape, dtype, contiguous
         self.is_cuda = True
 
-    def is_contiguous(self):
-        return self._contiguous
+    def stride(self, dim):
+        return 1 if self._contiguous else 2
+
+
+class _TorchFreeSlopes:
+    """A torch-free device buffer: no ``dtype``, ``is_cuda`` or ``is_contiguous``."""
+
+    def __init__(self, shape, stride=1):
+        self.shape, self._stride = shape, stride
+
+    def stride(self, dim):
+        return self._stride
 
 
 def _problem(**kw):
@@ -174,6 +184,7 @@ def _problem(**kw):
         ({"use_alibi": True}, _FakeSlopes((4,)), "shape"),
         ({"use_alibi": True}, _FakeSlopes((8,), dtype="torch.float16"), "float32"),
         ({"use_alibi": True}, _FakeSlopes((8,), contiguous=False), "contiguous"),
+        ({"use_alibi": True}, _TorchFreeSlopes((8,), stride=2), "contiguous"),
     ],
 )
 def test_unified_runner_checks_slopes_against_problem(problem_kw, slopes, match):
@@ -192,3 +203,7 @@ def test_unified_runner_checks_slopes_against_problem(problem_kw, slopes, match)
             softcap=0.0,
             alibi_slopes=slopes,
         )
+
+
+def test_slopes_check_accepts_torch_free_buffer():
+    alibi.check_alibi_slopes(_problem(use_alibi=True), _TorchFreeSlopes((8,)))
