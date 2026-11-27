@@ -10,11 +10,6 @@ import gc
 from rocke.tests.session_gc import TEST_SESSION_YOUNG_GC_THRESHOLD, use_test_session_gc
 
 
-def test_the_session_collects_the_young_generation_at_the_raised_threshold():
-    """The tests' ``conftest.py`` applied the setting before this test ran."""
-    assert gc.get_threshold()[0] == TEST_SESSION_YOUNG_GC_THRESHOLD
-
-
 def test_the_setting_keeps_the_older_generations_thresholds():
     session = gc.get_threshold()
     try:

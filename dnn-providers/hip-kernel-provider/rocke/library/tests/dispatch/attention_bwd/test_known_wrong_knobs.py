@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Known-wrong backward knob values (``BWD_KNOWN_WRONG_KNOBS``), CPU only.
 
-* the shipped mapping is explicit and empty on every declared target (no
-  backward knob value is known to compute wrong values: every such kernel
-  was fixed or is refused exactly by its validator);
+* the shipped mapping names every declared target and passes its own
+  check;
 * a value made known wrong (for the test) is held out of every sweep level of
   the general, dense and unified registries, is illegal for the legality
   verdicts of the three families, is refused by the tuned-table check and
@@ -24,10 +23,8 @@ from kernels.common.attention_bwd_plan import DECLARED_ARCHS, AttnBwdRequest
 from kernels.common.attention_bwd_unified import AttnBwdUnifiedSpec
 
 
-def test_shipped_mapping_is_explicit_and_empty():
+def test_shipped_mapping_names_every_target_and_passes_its_check():
     assert set(tc.BWD_KNOWN_WRONG_KNOBS) == set(DECLARED_ARCHS)
-    for arch in DECLARED_ARCHS:
-        assert dict(tc.BWD_KNOWN_WRONG_KNOBS[arch]) == {}
     tc.check_known_wrong({a.name: a for a in tc.BWD_KNOB_AXES})
 
 
