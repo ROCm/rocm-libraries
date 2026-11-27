@@ -67,6 +67,11 @@ tier that runs no GPU entries (quick) fails on an entry registered as GPU work
 (the GPU resource lock or the GPU label), unless ``GPU_ENTRY_ALLOWLIST`` names
 it with its reason.
 
+``check`` also prints the projection of each tier in ``SCHEDULED_TIERS``
+(comprehensive), which has no budget yet, and fails on nothing there. Its
+entries without a time are named and left out, and a split entry that only
+such a tier runs divides evenly, as its cases are not listed.
+
 ``check`` judges one operating system: the one it runs on, or ``--column``.
 The registration it lists is that system's, so another system's column cannot
 be judged from it. ``check`` also fails when an entry a CI tier runs has no
@@ -161,6 +166,7 @@ __all__ = [
     "GPU_ENTRY_ALLOWLIST",
     "RECORD_DROP_FLOOR_SECONDS",
     "RECORD_DROP_FRACTION",
+    "SCHEDULED_TIERS",
     "STEP_LIMIT_SECONDS",
     "TEST_SECONDS_FLOOR",
     "RegisteredEntry",
@@ -182,6 +188,7 @@ __all__ = [
     "recorded_sources",
     "recorded_test_seconds",
     "registered_entries",
+    "scheduled_tier_report",
     "slow_test_seconds_from_ctest_logs",
     "source_breaches",
     "split_entry_shard_seconds",
@@ -268,6 +275,17 @@ CI_TIERS = (
         runs_gpu_entries=False,
     ),
     TierLayout("standard", shards=4, budget_seconds=540.0),
+)
+
+# The tiers CI runs that have no rocKE budget yet (TESTING.md section 5.0.3):
+# `check` prints each shard's projection and names the entries it cannot count,
+# but fails on nothing. The nightly runs comprehensive as 4 shards in the same
+# 30-minute step, and the tier labels cascade, so a comprehensive shard runs
+# every quick, standard and comprehensive entry. Until rocKE gives the tier a
+# budget, the step limit is the one bound its shards have, so it stands in the
+# layout's budget field; the report calls it the step, not a budget.
+SCHEDULED_TIERS = (
+    TierLayout("comprehensive", shards=4, budget_seconds=STEP_LIMIT_SECONDS),
 )
 
 # The entries registered as GPU work that still run in a tier that runs no GPU
@@ -654,6 +672,23 @@ def evaluate_tiers(
     return verdicts
 
 
+def _untimed_names(
+    entries: Iterable[RegisteredEntry],
+    whole_seconds: Mapping[str, float],
+    tiers: Sequence[TierLayout],
+) -> list[str]:
+    """The entries one of ``tiers`` runs that ``whole_seconds`` has no time
+    for, sorted."""
+    return sorted(
+        {
+            entry.name
+            for entry in entries
+            if any(entry.runs_in(tier) for tier in tiers)
+            and entry.name not in whole_seconds
+        }
+    )
+
+
 def untimed_entries(
     entries: Iterable[RegisteredEntry],
     entry_times: Mapping[str, Mapping],
@@ -661,18 +696,35 @@ def untimed_entries(
 ) -> list[str]:
     """One failure per column and entry that a CI tier runs and the column has
     no time for: such an entry would otherwise count as 0 s."""
-    in_ci = sorted(
-        {entry.name for entry in entries if any(entry.runs_in(t) for t in tiers)}
-    )
+    entries = list(entries)
     return [
         f"{column}: {name} has no time in the data, so no shard counts it; run "
         f"it in a CI job and record its time from the job's `ctest -V` log: "
         f"check_entry_times.py record --column {column} --source "
         f'"<which jobs and dates>" LOG...'
         for column, recorded in entry_times.items()
-        for name in in_ci
-        if name not in recorded["seconds"]
+        for name in _untimed_names(entries, recorded["seconds"], tiers)
     ]
+
+
+def scheduled_tier_report(
+    verdict: TierVerdict,
+    entries: Iterable[RegisteredEntry],
+    whole_seconds: Mapping[str, float],
+) -> str:
+    """One line for a tier of ``SCHEDULED_TIERS``: each shard's projection
+    (``verdict``, from ``whole_seconds``) against the step limit, and the
+    ``entries`` it runs that have no time, which the projection leaves out."""
+    per_shard = " / ".join(f"{seconds:.0f}" for seconds in verdict.shard_seconds)
+    untimed = _untimed_names(entries, whole_seconds, [verdict.tier])
+    line = (
+        f"{verdict.column} {verdict.tier.label} ({verdict.tier.shards} shard(s)), "
+        f"not checked (no budget yet): {per_shard} s per shard, slowest "
+        f"{verdict.slowest_seconds:.0f} s of the {STEP_LIMIT_SECONDS:.0f} s step"
+    )
+    if untimed:
+        line += f"; not counted, without a time: {', '.join(untimed)}"
+    return line
 
 
 def item_budget_breaches(
@@ -1258,6 +1310,9 @@ def _check(arguments: argparse.Namespace) -> int:
     verdicts = evaluate_tiers(entries, column, entry_keys)
     for verdict in verdicts:
         print(verdict.summary())
+    seconds = column[arguments.column]["seconds"]
+    for verdict in evaluate_tiers(entries, column, entry_keys, SCHEDULED_TIERS):
+        print(scheduled_tier_report(verdict, entries, seconds))
     breaches = tier_breaches(entries, column, verdicts)
     for breach in breaches:
         print(f"FAIL {breach}")

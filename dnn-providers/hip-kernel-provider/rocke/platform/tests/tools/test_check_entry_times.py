@@ -820,6 +820,36 @@ def test_check_exits_nonzero_exactly_when_a_tier_is_over_budget(
     assert ("FAIL linux standard" in capsys.readouterr().out) == bool(exit_code)
 
 
+def test_check_projects_the_comprehensive_tier_without_failing_it(
+    tmp_path, capsys
+) -> None:
+    """A comprehensive shard runs every entry whose labels cascade to it; an
+    entry only that tier runs, with no time, is named and fails nothing."""
+    listing = tmp_path / "listing.json"
+    listing.write_text(
+        json.dumps(
+            _listing(
+                _test("rocke_std", ["standard", "comprehensive"], WHOLE_COMMAND),
+                _test("rocke_nightly", ["comprehensive"], WHOLE_COMMAND),
+                _test("rocke_nightly_timed", ["comprehensive"], WHOLE_COMMAND),
+            )
+        ),
+        encoding="utf-8",
+    )
+    times = tmp_path / "entry_times.json"
+    times.write_text(
+        json.dumps(_column(rocke_std=100.0, rocke_nightly_timed=2000.0)),
+        encoding="utf-8",
+    )
+    argv = [*_data_options(times), "check", "--column", "linux"]
+    assert check.main([*argv, "--listing", str(listing)]) == 0
+    assert (
+        "linux comprehensive (4 shard(s)), not checked (no budget yet): "
+        "2100 / 2100 / 2100 / 2100 s per shard, slowest 2100 s of the 1800 s step; "
+        "not counted, without a time: rocke_nightly"
+    ) in capsys.readouterr().out
+
+
 def test_check_fails_a_new_entry_until_its_time_is_recorded(tmp_path, capsys) -> None:
     listing, times = _write_inputs(tmp_path, 20.0)
     listing.write_text(
