@@ -69,6 +69,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBuffer_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerStreamKGrid_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerStreamKKernargs_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerWgmKernargs_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIteratorSelection_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
@@ -79,6 +81,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ThreadSafeValue_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EnumStrings_test.cpp"
 )
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,

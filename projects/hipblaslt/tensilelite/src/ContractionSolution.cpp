@@ -27,6 +27,8 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/MagicDivision.hpp>
+#include <Tensile/RocRollerStreamKGrid.hpp>
+#include <Tensile/RocRollerStreamKKernargs.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 
@@ -62,7 +64,6 @@
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
-#include <unordered_map>
 
 #include <sstream>
 
@@ -163,177 +164,6 @@ namespace TensileLite
             throw std::runtime_error(
                 concatenate(name, " ", value, " does not fit its kernel argument type"));
         return value;
-    }
-
-    std::string toString(CustomArgSemantic arg)
-    {
-        static const std::array<std::string, static_cast<int>(CustomArgSemantic::COUNT)> CustomArgSemanticStrings = {
-            #define X_MACRO(name) TENSILELITE_TO_STR(name),
-            CustomArgSemantic_MACRO
-            #undef X_MACRO
-        };
-        return CustomArgSemanticStrings[static_cast<int>(arg)];
-    }
-
-    CustomArgSemantic fromStringCustomArgSemantic(std::string& str)
-    {
-        static const std::map<std::string, CustomArgSemantic> CustomArgSemanticMap = {
-            #define X_MACRO(name) {TENSILELITE_TO_STR(name), CustomArgSemantic::name},
-            CustomArgSemantic_MACRO
-            #undef X_MACRO
-        };
-
-        auto it = CustomArgSemanticMap.find(str);
-        if (it == CustomArgSemanticMap.end())
-            throw std::runtime_error(concatenate("Invalid CustomArgSemantic value: ", str));
-        return it->second;
-    }
-
-    std::ostream& operator<<(std::ostream& stream, const CustomArgSemantic& t)
-    {
-        return stream << toString(t);
-    }
-
-    std::istream& operator>>(std::istream& stream, CustomArgSemantic& t)
-    {
-        std::string strValue;
-        stream >> strValue;
-        t = fromStringCustomArgSemantic(strValue);
-        return stream;
-    }
-
-    std::string toString(CustomArgDefinition arg)
-    {
-        auto s = toString(arg.type) + " " + toString(arg.semantic);
-        if(arg.padding > 0)
-            s += " padding:" + std::to_string(arg.padding);
-        return s;
-    }
-
-    std::ostream& operator<<(std::ostream& stream, const CustomArgDefinition& t)
-    {
-        return stream << toString(t);
-    }
-
-    std::istream& operator>>(std::istream& stream, CustomArgDefinition& t)
-    {
-        std::string strType;
-        std::string strSemantic;
-        stream >> strType >> strSemantic;
-        t.type = fromStringCustomArgType(strType);
-        t.semantic = fromStringCustomArgSemantic(strSemantic);
-        return stream;
-    }
-
-    std::string toString(CustomGridSize size)
-    {
-        switch(size)
-        {
-        case CustomGridSize::One:              return "One";
-        case CustomGridSize::TilesX:           return "TilesX";
-        case CustomGridSize::TilesY:           return "TilesY";
-        case CustomGridSize::Batch:            return "Batch";
-        case CustomGridSize::TilesXY:          return "TilesXY";
-        case CustomGridSize::TilesXYBatch:     return "TilesXYBatch";
-        case CustomGridSize::StreamKWithBatch: return "StreamKWithBatch";
-        case CustomGridSize::StreamKNoBatch:   return "StreamKNoBatch";
-        case CustomGridSize::PersistentGrid: return "PersistentGrid";
-        case CustomGridSize::PersistentWithBatch: return "PersistentWithBatch";
-        case CustomGridSize::PersistentNoBatch: return "PersistentNoBatch";
-        case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
-        case CustomGridSize::TilesYGSU:        return "TilesYGSU";
-        case CustomGridSize::ComputeUnits:     return "ComputeUnits";
-        case CustomGridSize::CustomGridSize_Count:
-            break;
-        }
-
-        throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
-    }
-
-    CustomGridSize fromStringCustomGridSize(std::string& str)
-    {
-        static const std::unordered_map<std::string, CustomGridSize> lookup = {
-            {"One",              CustomGridSize::One},
-            {"TilesX",           CustomGridSize::TilesX},
-            {"TilesY",           CustomGridSize::TilesY},
-            {"Batch",            CustomGridSize::Batch},
-            {"TilesXY",          CustomGridSize::TilesXY},
-            {"TilesXYBatch",     CustomGridSize::TilesXYBatch},
-            {"StreamKWithBatch", CustomGridSize::StreamKWithBatch},
-            {"StreamKNoBatch",   CustomGridSize::StreamKNoBatch},
-            {"PersistentGrid", CustomGridSize::PersistentGrid},
-            {"PersistentWithBatch", CustomGridSize::PersistentWithBatch},
-            {"PersistentNoBatch", CustomGridSize::PersistentNoBatch},
-            {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
-            {"TilesYGSU",        CustomGridSize::TilesYGSU},
-            {"ComputeUnits",     CustomGridSize::ComputeUnits},
-        };
-
-        auto it = lookup.find(str);
-        if(it != lookup.end())
-            return it->second;
-
-        throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", str));
-    }
-
-    std::ostream& operator<<(std::ostream& stream, const CustomGridSize& t)
-    {
-        return stream << toString(t);
-    }
-
-    std::istream& operator>>(std::istream& stream, CustomGridSize& t)
-    {
-        std::string strValue;
-        stream >> strValue;
-        t = fromStringCustomGridSize(strValue);
-        return stream;
-    }
-
-    std::string toString(CustomWorkspaceType type)
-    {
-        switch(type)
-        {
-        case CustomWorkspaceType::None:
-            return "None";
-        case CustomWorkspaceType::SplitK:
-            return "SplitK";
-        case CustomWorkspaceType::StreamK:
-            return "StreamK";
-        case CustomWorkspaceType::StreamKWithReduction:
-            return "StreamKWithReduction";
-        case CustomWorkspaceType::CustomWorkspaceType_Count:
-            break;
-        }
-
-        throw std::runtime_error(concatenate("Invalid CustomWorkspaceType value: ", static_cast<int>(type)));
-    }
-
-    CustomWorkspaceType fromStringCustomWorkspaceType(std::string& str)
-    {
-        if(str == toString(CustomWorkspaceType::None))
-            return CustomWorkspaceType::None;
-        else if(str == toString(CustomWorkspaceType::SplitK))
-            return CustomWorkspaceType::SplitK;
-        else if(str == toString(CustomWorkspaceType::StreamK))
-            return CustomWorkspaceType::StreamK;
-        else if(str == toString(CustomWorkspaceType::StreamKWithReduction))
-            return CustomWorkspaceType::StreamKWithReduction;
-        else
-            throw std::runtime_error(concatenate("Invalid CustomWorkspaceType value: ", str));
-        return CustomWorkspaceType::CustomWorkspaceType_Count;
-    }
-
-    std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t)
-    {
-        return stream << toString(t);
-    }
-
-    std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t)
-    {
-        std::string strValue;
-        stream >> strValue;
-        t = fromStringCustomWorkspaceType(strValue);
-        return stream;
     }
 
     enum class KERNELARGTYPE
@@ -2702,6 +2532,19 @@ namespace TensileLite
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
 
+        // Resolved once, and only for a kernel that reads it: the launch geometry
+        // and the numWGs kernarg are the same value by construction, and so is
+        // the workspace sized from it. The grid itself lives in StreamK.cpp.
+        std::optional<uint32_t> rrSKGridValue;
+
+        auto rrSKGrid = [&]() -> uint32_t {
+            if(!rrSKGridValue)
+                rrSKGridValue = rocRollerStreamKCheckedGrid(problem, hardware);
+            return *rrSKGridValue;
+        };
+        if(usesRocRollerStreamK())
+            rrSKGrid();
+
         dim3 tiles;
         calculateTiles(tiles, problem);
 
@@ -2828,6 +2671,9 @@ namespace TensileLite
                     break;
                 case CustomGridSize::ComputeUnits:
                     dim = static_cast<size_t>(computeUnits);
+                    break;
+                case CustomGridSize::RocRollerStreamKGrid:
+                    dim = static_cast<size_t>(rrSKGrid());
                     break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
@@ -3000,6 +2846,28 @@ namespace TensileLite
             return *wgmKernargs;
         };
 
+        // rocRoller Stream-K kernels read M, N, K, the macrotile and the grid.
+        // Same memoisation: computed only if a custom kernel argument asks for
+        // one of these semantics.
+        std::optional<RocRollerStreamKKernargs> skKernargs;
+        auto skKernarg = [&]() -> RocRollerStreamKKernargs const& {
+            if(!skKernargs)
+            {
+                if(problem.problemSizes().size() < 3)
+                    throw std::runtime_error(
+                        "rocRoller Stream-K kernargs need M, N and K problem sizes");
+                skKernargs = evaluateRocRollerStreamKKernargs(
+                    static_cast<int64_t>(problem.problemSizes()[0]),
+                    static_cast<int64_t>(problem.problemSizes()[1]),
+                    static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
+                    customKernel.macrotile.x,
+                    customKernel.macrotile.y,
+                    customKernel.macrotile.z,
+                    rrSKGrid());
+            }
+            return *skKernargs;
+        };
+
         for(auto arg : customKernel.args)
         {
             if(T_Debug)
@@ -3043,6 +2911,18 @@ namespace TensileLite
                         problem.problemSizes().size() >= 3
                             ? problem.problemSizes()[problem.problemSizes().size() - 3]
                             : 1,
+                        arg.type);
+                    break;
+                // rocRoller sizes A's scale tensor {M, K / block} and reads the
+                // second extent; the division truncates as it does there.
+                case CustomArgSemantic::SizeSumScaleA:
+                    if(problem.mxBlockA() == 0)
+                        throw std::runtime_error(
+                            "SizeSumScaleA needs an MX block size for A");
+                    rv.args.appendCustomType(
+                        "SizeSumScaleA",
+                        problem.problemSizes()[problem.problemSizes().size() - 1]
+                            / problem.mxBlockA(),
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideA0:
@@ -3662,7 +3542,50 @@ namespace TensileLite
                 case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
                     rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
                     break;
+                // ceil(size / tile) as int64. A 32-bit declaration would truncate.
+                case CustomArgSemantic::RR_NumTilesM:
+                    if(arg.type != CustomArgType::int64)
+                        throw std::runtime_error("RR_NumTilesM needs an int64 kernel argument");
+                    rv.args.appendCustomType("RR_NumTilesM", wgmKernarg().numTilesM, arg.type);
+                    break;
+                case CustomArgSemantic::RR_NumTilesN:
+                    if(arg.type != CustomArgType::int64)
+                        throw std::runtime_error("RR_NumTilesN needs an int64 kernel argument");
+                    rv.args.appendCustomType("RR_NumTilesN", wgmKernarg().numTilesN, arg.type);
+                    break;
 
+                // rocRoller Stream-K. The work decomposition is hoisted into
+                // kernargs; see RocRollerStreamKKernargs.hpp.
+                case CustomArgSemantic::RR_SKNumTilesN:
+                    rv.args.appendCustomType("RR_SKNumTilesN", skKernarg().numTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumWGs:
+                    rv.args.appendCustomType("RR_SKNumWGs", skKernarg().numWGs, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumSKTiles:
+                    rv.args.appendCustomType("RR_SKNumSKTiles", skKernarg().numSKTiles, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumSKTilesPerWG:
+                    rv.args.appendCustomType("RR_SKNumSKTilesPerWG", skKernarg().numSKTilesPerWG, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumDPTiles:
+                    rv.args.appendCustomType("RR_SKNumDPTiles", skKernarg().numDPTiles, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumDPTilesPerWG:
+                    rv.args.appendCustomType("RR_SKNumDPTilesPerWG", skKernarg().numDPTilesPerWG, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicMultipleIters:
+                    rv.args.appendCustomType("RR_SKMagicMultipleIters", skKernarg().magicMultipleIters, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicShiftsIters:
+                    rv.args.appendCustomType("RR_SKMagicShiftsIters", skKernarg().magicShiftsIters, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicMultipleNumTilesN:
+                    rv.args.appendCustomType("RR_SKMagicMultipleNumTilesN", skKernarg().magicMultipleNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicShiftsNumTilesN:
+                    rv.args.appendCustomType("RR_SKMagicShiftsNumTilesN", skKernarg().magicShiftsNumTilesN, arg.type);
+                    break;
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));
             }
@@ -5881,6 +5804,16 @@ namespace TensileLite
                 }
             }
         }
+        else if(workspaceType == CustomWorkspaceType::RocRollerStreamK)
+        {
+            // One partial tile per workgroup, reserved unconditionally: unlike
+            // Tensile's Stream-K, rocRoller emits partials whenever tiles >=
+            // grid, so there is no `tiles % grid` exemption to test. The grid
+            // comes from the same helper the launch uses.
+            size += sizeMapping.macroTile.x * sizeMapping.macroTile.y
+                    * sizeMapping.workspaceSizePerElemC
+                    * rocRollerStreamKGrid(problem, hardware);
+        }
         else if(workspaceType == CustomWorkspaceType::SplitK)
         {
             // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
@@ -6284,6 +6217,37 @@ namespace TensileLite
     bool ContractionSolution::handwrittenCustomKernel() const
     {
         return !customKernel.name.empty() && !customKernel.generated;
+    }
+
+    bool ContractionSolution::usesRocRollerStreamK() const
+    {
+        if(!handwrittenCustomKernel())
+            return false;
+        if(customKernel.grid.x == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.grid.y == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.grid.z == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.workspaceType == CustomWorkspaceType::RocRollerStreamK)
+            return true;
+        for(auto const& arg : customKernel.args)
+        {
+            switch(arg.semantic)
+            {
+            case CustomArgSemantic::RR_SKNumTilesN:
+            case CustomArgSemantic::RR_SKNumWGs:
+            case CustomArgSemantic::RR_SKNumSKTiles:
+            case CustomArgSemantic::RR_SKNumSKTilesPerWG:
+            case CustomArgSemantic::RR_SKNumDPTiles:
+            case CustomArgSemantic::RR_SKNumDPTilesPerWG:
+            case CustomArgSemantic::RR_SKMagicMultipleIters:
+            case CustomArgSemantic::RR_SKMagicShiftsIters:
+            case CustomArgSemantic::RR_SKMagicMultipleNumTilesN:
+            case CustomArgSemantic::RR_SKMagicShiftsNumTilesN:
+                return true;
+            default:
+                break;
+            }
+        }
+        return false;
     }
 
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
@@ -6954,10 +6918,42 @@ namespace TensileLite
             return detail;
         };
 
-        if(handwrittenCustomKernel() && !customKernel.uniformSummationOrder)
+        // rocRoller Stream-K is not USO compliant when its grid splits output
+        // tiles. A data-parallel rocRoller kernel declares uniformSummationOrder.
+        if(usesRocRollerStreamK())
+        {
+            uint32_t grid = 0;
+            try
+            {
+                grid = rocRollerStreamKGrid(problem, hardware);
+            }
+            catch(RocRollerStreamKBatchError const&)
+            {
+                return refuse("RocRollerStreamKBatch",
+                              "rocRoller Stream-K launches a single batch");
+            }
+            catch(std::runtime_error const&)
+            {
+                return refuse("RocRollerStreamKGrid",
+                              "rocRoller Stream-K grid is not available");
+            }
+            const bool uneven = problem.problemSizes().size() >= 3
+                                && rocRollerStreamKSplitsTilesUnevenly(
+                                    static_cast<int64_t>(problem.problemSizes()[0]),
+                                    static_cast<int64_t>(problem.problemSizes()[1]),
+                                    static_cast<uint32_t>(customKernel.macrotile.x),
+                                    static_cast<uint32_t>(customKernel.macrotile.y),
+                                    grid);
+            if(uneven)
+                return refuse("RocRollerStreamKSplit",
+                              "rocRoller Stream-K splits output tiles unevenly");
+        }
+        else if(handwrittenCustomKernel() && !customKernel.uniformSummationOrder)
+        {
             return refuse("CustomKernel",
                           "custom kernel " + customKernel.name
                               + " is not supported under uniform summation order");
+        }
 
         if(sizeMapping.isStreamK())
         {

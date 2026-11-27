@@ -103,6 +103,14 @@ _METADATA_NAME_TO_SEMANTIC = {
     "RNDSeed":                "RNDSeed",
 }
 
+# rocRoller Stream-K hoists its work decomposition into kernargs whose names
+# carry no numeric suffix, so they are safe to match by name here. Its four
+# libdivide constants DO carry an unstable suffix and are classified by
+# expression instead, in RocRollerStreamK.custom_arg_for_metadata.
+from .RocRollerStreamK import STABLE_NAME_TO_SEMANTIC as _ROCROLLER_SK_NAMES
+
+_METADATA_NAME_TO_SEMANTIC.update(_ROCROLLER_SK_NAMES)
+
 _ACTIVATION_ARG_INDEX = {
     "activationAlpha": 0,
     "activationBeta":  1,
@@ -375,6 +383,21 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
 
     # rocRoller suffixes (Subtract_21, MagicMultiple_26, WGM_18) are not
     # stable. The expression tree selects the launch semantic.
+    # Stream-K's MagicMultiple_/MagicShifts_ constants carry the same kind of
+    # unstable numeric suffix, and the same constant changes suffix between
+    # tiles, so they are classified by the divisor their expression reads.
+    #
+    # This runs before the workgroup-mapping hook because the two overlap on
+    # MagicMultiple over the N tile count. The Stream-K classifier is the
+    # strict one -- it only claims the unsigned form -- so putting it first
+    # resolves the overlap without it ever taking a workgroup-mapping
+    # argument. A kernel never carries both: rocRoller forces
+    # workgroupMappingDim = -1 for every Stream-K kernel.
+    from .RocRollerStreamK import custom_arg_for_metadata as sk_custom_arg_for_metadata
+    skArg = sk_custom_arg_for_metadata(metaArg)
+    if skArg is not None:
+        return skArg
+
     from .RocRollerWgm import custom_arg_for_metadata
     wgmArg = custom_arg_for_metadata(metaArg)
     if wgmArg is not None:
@@ -464,7 +487,88 @@ def _hasRocRollerWgmArgs(args):
     return any(arg.get("semantic") in roles for arg in args)
 
 
-def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
+# gfx950 occupancy model. Four SIMDs per CU, a 512-entry unified VGPR+AGPR
+# file per SIMD allocated in blocks of eight, at most eight waves resident
+# per SIMD, and 160 KiB of LDS per CU. maxBlocksPerMultiProcessor is 32,
+# equal to 8 waves/SIMD x 4 SIMDs for a single-wave workgroup, so it does
+# not add a separate clamp. gfx942 has 64 KiB of LDS per CU; this table is
+# gfx950-only.
+_AMDGCN_TARGET = re.compile(r'\.amdgcn_target\s+"amdgcn-amd-amdhsa--([A-Za-z0-9]+)')
+
+
+def architecture_from_assembly(text):
+    """ISA named by an ``.amdgcn_target`` directive, or None when it is absent."""
+    if not text:
+        return None
+    match = _AMDGCN_TARGET.search(text)
+    return match.group(1) if match else None
+
+
+def recordedRocRollerOccupancy(kernelMeta, architecture):
+    """Workgroups per CU, or 0 when the architecture is not gfx950.
+
+    The gfx950 model is the only one recorded. Any other architecture,
+    including a missing tag, records 0, which serialization omits.
+    """
+    if architecture != "gfx950":
+        return 0
+    return rocRollerOccupancy(kernelMeta)
+
+
+_CU_SIMDS = 4
+_VGPRS_PER_SIMD = 512
+_VGPR_ALLOC_GRANULE = 8
+_MAX_WAVES_PER_SIMD = 8
+_LDS_BYTES_PER_CU = 160 * 1024
+
+
+def rocRollerOccupancy(kernelMeta):
+    """Workgroups resident per CU, from a kernel's static resource usage.
+
+    This mirrors hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, which is
+    what the rocRoller JIT path queries on the loaded kernel
+    (rocroller/gemm.cpp:633-638) and feeds to origami's Stream-K grid
+    selection. Recording it at capture time is what lets the rocRoller-off
+    path reach the same grid without loading the code object.
+
+    Returns 0 when the metadata does not carry enough to decide, which
+    callers must read as "unknown" rather than as "zero workgroups".
+    """
+    if not isinstance(kernelMeta, dict):
+        return 0
+    waveSize = kernelMeta.get(".wavefront_size", 64)
+    flat = kernelMeta.get(".max_flat_workgroup_size", 0)
+    if not waveSize or not flat:
+        return 0
+
+    wavesPerGroup = -(-int(flat) // int(waveSize))
+    if wavesPerGroup <= 0:
+        return 0
+
+    # .agpr_count is not added. On gfx90a and later LLVM reports .vgpr_count
+    # as NumVGPRsForWavesPerEU, the unified arch-plus-acc allocation.
+    # .agpr_count is a subset of that count. A missing count is unknown,
+    # not zero registers.
+    if ".vgpr_count" not in kernelMeta:
+        return 0
+    vgprs = int(kernelMeta[".vgpr_count"])
+    granule = _VGPR_ALLOC_GRANULE
+    allocated = max(-(-vgprs // granule) * granule, granule)
+    wavesPerSimd = min(_VGPRS_PER_SIMD // allocated, _MAX_WAVES_PER_SIMD)
+    if wavesPerSimd <= 0:
+        return 0
+    byWaves = (wavesPerSimd * _CU_SIMDS) // wavesPerGroup
+
+    lds = int(kernelMeta.get(".group_segment_fixed_size", 0))
+    # More LDS than a CU has means the kernel cannot launch.
+    if lds > _LDS_BYTES_PER_CU:
+        return 0
+    byLds = _LDS_BYTES_PER_CU // lds if lds > 0 else byWaves
+
+    return max(1, min(byWaves, byLds))
+
+
+def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig, architecture=None):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
     if not isinstance(fullYaml, dict):
         raise RuntimeError(f"Custom kernel '{kernelName}' has no parseable .amdgpu_metadata YAML")
@@ -484,6 +588,21 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         )
 
     metadataArgs = kernelMeta[".args"]
+    from .RocRollerWgm import check_stride_layout
+    strideNames = []
+    for metaArg in metadataArgs:
+        if isinstance(metaArg, dict):
+            if metaArg.get(".name"):
+                strideNames.append(metaArg[".name"])
+            expr = metaArg.get(".expression")
+            if isinstance(expr, dict) and expr.get("name"):
+                strideNames.append(expr["name"])
+    problemType = kernelConfig.get("ProblemType") or {}
+    check_stride_layout(
+        strideNames,
+        kernelName,
+        [("its ProblemType", problemType.get("TransposeA"), problemType.get("TransposeB"))],
+    )
     args = [_metadataArgToCustomArg(a, kernelName) for a in metadataArgs]
     if args and args[-1]["semantic"] == "ScaleBlockSizeA":
         last = metadataArgs[-1]
@@ -502,6 +621,10 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         headerArgs.sort(key=lambda a: _HEADER_SEMANTIC_ORDER[a["semantic"]])
         args = headerArgs + dataArgs
 
+    from .RocRollerStreamK import is_streamk_metadata as _isRocRollerStreamK
+
+    isRocRollerSK = _isRocRollerStreamK(args)
+
     mi = kernelConfig.get("MatrixInstruction", kernelConfig.get("MIBlock", [0,0,0,0]))
     if len(mi) >= 9 and "MIWaveTile" not in kernelConfig:
         wt = [mi[5], mi[6]]
@@ -512,11 +635,28 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     depthU = kernelConfig.get("DepthU", 0)
     macrotile = [mi[0] * wt[0] * wg[0], mi[1] * wt[1] * wg[1], depthU]
 
-    # Fallback: parse macrotile from kernel name if computed values are zero
+    # Fallback: parse macrotile from kernel name if computed values are zero.
+    # rocRoller spells its workgroup tile WGT_<m>x<n>x<k> rather than
+    # MT<m>x<n>x<k>, and a captured rocRoller kernel carries no
+    # MatrixInstruction/DepthU for the computation above to use. The tile is
+    # load-bearing for Stream-K -- it is the divisor in every hoisted kernarg
+    # and it sizes the partial-tile workspace -- so a zero here must not
+    # survive.
     if macrotile[0] == 0 or macrotile[1] == 0:
-        m = re.search(r'MT(\d+)x(\d+)x(\d+)', kernelName)
+        m = re.search(r'(?:MT|WGT_)(\d+)x(\d+)x(\d+)', kernelName)
         if m:
             macrotile = [int(m.group(1)), int(m.group(2)), int(m.group(3))]
+
+    if isRocRollerSK and (
+        macrotile[0] <= 0 or macrotile[1] <= 0 or macrotile[2] <= 0
+    ):
+        raise RuntimeError(
+            f"Custom kernel '{kernelName}' is a rocRoller Stream-K kernel but "
+            f"its macrotile resolved to {macrotile}. Stream-K divides by the "
+            f"macrotile to derive every hoisted kernarg, so it cannot be "
+            f"inferred later; give the kernel a WGT_<m>x<n>x<k> name or "
+            f"declare MatrixInstruction/MIWaveTile/DepthU in custom.config."
+        )
 
     threads = [kernelMeta.get(".max_flat_workgroup_size", 256), 1, 1]
 
@@ -524,7 +664,14 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     # DataParallel assigns whole tiles to persistent workgroups. Ordinary GEMM
     # uses strategy None and reaches the tile-grid branches below.
-    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) in (1, 2):
+    if isRocRollerSK:
+        # rocRoller decomposes the work itself from the hoisted kernargs and
+        # reads only workgroup X, so the launch is a flat grid of exactly the
+        # numWGs the kernargs were computed for. It must not go through
+        # StreamKNoBatch, whose grid comes from Tensile's own Stream-K
+        # decomposition -- a different partitioning from rocRoller's.
+        grid = ["RocRollerStreamK", "One", "One"]
+    elif isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) in (1, 2):
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
         # sk.grid already counts every batch's tiles, so the launch must not
@@ -546,22 +693,63 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         # take their GSU slices along gridDim.y.
         grid = ["TilesX", "TilesYGSU", "Batch"]
 
-    # Workspace is left unset here and derived in
-    # Solution._assignCustomKernelParameters, which sees the logic file's
-    # ProblemType rather than the advisory copy in custom.config.
+    # A rocRoller Stream-K kernel stores partial tiles unconditionally, and
+    # the auto-derivation only fires for a PartialsBuffer GlobalSplitU
+    # algorithm, which a handwritten custom kernel does not have.
+    workspaceType = "None"
+    workspaceSizePerElemC = 0
+    if isRocRollerSK:
+        workspaceType = "RocRollerStreamK"
+        # rocRoller accumulates in F32 and sizes the partial tile from that.
+        # The hipBLASLt rocRoller path rejects any other accumulator, so a
+        # logic-file compute type of half or double must not change the width.
+        workspaceSizePerElemC = 4
+
     return {
         "name": kernelName,
         "args": args,
         "macrotile": macrotile,
         "threads": threads,
         "grid": grid,
-        "workspaceType": "None",
-        "workspaceSizePerElemC": 0,
+        # Only the rocRoller Stream-K grid reads it; other kernels keep 0 so
+        # their library entries are unchanged.
+        "occupancy": recordedRocRollerOccupancy(kernelMeta, architecture) if isRocRollerSK else 0,
+        "workspaceType": workspaceType,
+        "workspaceSizePerElemC": workspaceSizePerElemC,
         "workspaceSizePerElemBias": 0,
     }
 
+def markRocRollerDataParallelUniform(kernelName, customKernel):
+    """A data-parallel rocRoller kernel keeps each output tile's K loop whole."""
+    if not isinstance(customKernel, dict) or not str(kernelName).startswith("RR_GEMM_"):
+        return
+    grid = customKernel.get("grid") or []
+    if "RocRollerStreamK" in grid:
+        return
+    for arg in customKernel.get("args") or []:
+        if str(arg.get("semantic", "")).startswith("RR_SK"):
+            return
+    customKernel["uniformSummationOrder"] = True
+
+
+def _transpose_pair(problemType):
+    if problemType is None:
+        return None, None
+    if isinstance(problemType, dict):
+        return problemType.get("TransposeA"), problemType.get("TransposeB")
+    try:
+        return problemType["TransposeA"], problemType["TransposeB"]
+    except (KeyError, TypeError):
+        return None, None
+
+
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = None, kernelConfig: dict = None
+    kernelName: str,
+    internalSupportParams: dict,
+    directory: str = None,
+    kernelConfig: dict = None,
+    *,
+    problemType=None,
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -590,8 +778,8 @@ def getCustomKernelConfig(
 
     # A handwritten kernel skips the derivation that resolves "Auto", and the
     # runtime picks which scale modes it serves from this field.
-    problemType = kernelConfig.get("ProblemType", {})
-    if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
+    configProblemType = kernelConfig.get("ProblemType", {})
+    if (configProblemType.get("MXBlockA", 0) or configProblemType.get("MXBlockB", 0)) and kernelConfig.get(
             "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
                                      "HostPreSwizzle128x4"):
         raise RuntimeError(
@@ -643,14 +831,40 @@ def getCustomKernelConfig(
         # Only a kernel without an explicit CustomKernel block needs
         # amdhsa.kernels; the rocRoller kernels embed about 1 MB of it, so it is
         # parsed here and not for every kernel.
+        contents = getCustomKernelContents(kernelName, directory)
         fullYaml = _readEmbeddedYaml(kernelName, directory)
-        kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
+        kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(
+            kernelName,
+            fullYaml,
+            kernelConfig,
+            architecture=architecture_from_assembly(contents),
+        )
 
     kernelConfig["CustomKernel"]["name"] = kernelName
     kernelConfig["CustomKernel"].setdefault("workspaceType", "None")
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemBias", 0)
+    # 0 means "not recorded". An explicitly written CustomKernel block keeps
+    # whatever it declares; only rocRoller Stream-K reads this.
+    kernelConfig["CustomKernel"].setdefault("occupancy", 0)
     kernelConfig["CustomKernelName"] = kernelName
+
+    from .RocRollerWgm import check_stride_layout, stride_names_in_text
+    if kernelName.startswith("RR_GEMM_"):
+        configProblem = kernelConfig.get("ProblemType") or {}
+        constraints = [
+            ("its ProblemType", configProblem.get("TransposeA"), configProblem.get("TransposeB")),
+        ]
+        logic_a, logic_b = _transpose_pair(problemType)
+        if logic_a is not None or logic_b is not None:
+            constraints.append(("the logic file", logic_a, logic_b))
+        check_stride_layout(
+            stride_names_in_text(getCustomKernelContents(kernelName, directory)),
+            kernelName,
+            constraints,
+        )
+
+    markRocRollerDataParallelUniform(kernelName, kernelConfig.get("CustomKernel"))
 
     validateCustomPersistentArgs(kernelConfig)
 

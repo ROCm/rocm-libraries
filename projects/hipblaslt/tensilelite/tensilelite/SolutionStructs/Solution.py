@@ -2290,7 +2290,8 @@ class Solution(collections.abc.Mapping):
     gsu = state.get("GlobalSplitU", 1)
     grid = ck.get("grid", [])
     oneSlicePerTile = all(
-      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
+      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch",
+            "RocRollerStreamK") for g in grid)
     if gsu not in (0, 1) and oneSlicePerTile:
       raise RuntimeError(
         f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
@@ -2300,6 +2301,21 @@ class Solution(collections.abc.Mapping):
     # rejects one during solution selection instead of failing at launch.
     if oneSlicePerTile:
       state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
+
+    # The three rocRoller Stream-K pieces have to travel together. A kernarg
+    # without the grid and workspace, or a grid without the kernargs, makes
+    # the host size a flag region the kernel does not own.
+    skArgs = [a.get("semantic") for a in (ck.get("args") or [])
+              if str(a.get("semantic", "")).startswith("RR_SK")]
+    skGrid = any(g == "RocRollerStreamK" for g in grid)
+    skWorkspace = ck.get("workspaceType") == "RocRollerStreamK"
+    if skArgs or skGrid or skWorkspace:
+      if not (skArgs and skGrid and skWorkspace):
+        raise RuntimeError(
+          f"Custom kernel '{ck.get('name', '?')}' mixes rocRoller Stream-K "
+          f"pieces: grid {grid}, workspaceType {ck.get('workspaceType')!r}, "
+          f"RR_SK arguments {skArgs}. The RocRollerStreamK grid, the "
+          f"RocRollerStreamK workspace and the RR_SK kernargs are one kernel.")
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1

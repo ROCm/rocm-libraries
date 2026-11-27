@@ -44,6 +44,7 @@
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/CustomArgSemantic.hpp>
 #include <Tensile/MXScaleFormat.hpp>
 #include <Tensile/StreamK.hpp>
 #include <Tensile/Predicates.hpp>
@@ -60,201 +61,6 @@
 
 namespace TensileLite
 {
-    #define CustomArgSemantic_MACRO \
-        /* Core GEMM problem args */ \
-        X_MACRO(SizeFree0) \
-        X_MACRO(SizeFree1) \
-        X_MACRO(SizeFree2) \
-        X_MACRO(SizeFree3) \
-        X_MACRO(SizeSum) \
-        X_MACRO(SizeSumDiv2) \
-        X_MACRO(SizeSum1) \
-        X_MACRO(SizeSum2) \
-        X_MACRO(StrideA0) \
-        X_MACRO(StrideA1) \
-        X_MACRO(StrideA2) \
-        X_MACRO(StrideB0) \
-        X_MACRO(StrideB1) \
-        X_MACRO(StrideB2) \
-        X_MACRO(StrideC0) \
-        X_MACRO(StrideC1) \
-        X_MACRO(StrideC2) \
-        X_MACRO(StrideD0) \
-        X_MACRO(StrideD1) \
-        X_MACRO(StrideD2) \
-        X_MACRO(StrideE0) \
-        X_MACRO(StrideE1) \
-        X_MACRO(StrideScaleA0) \
-        X_MACRO(StrideScaleA1) \
-        X_MACRO(StrideScaleB0) \
-        X_MACRO(StrideScaleB1) \
-        X_MACRO(StrideA0Bytes) \
-        X_MACRO(StrideB0Bytes) \
-        X_MACRO(StrideC0Bytes) \
-        X_MACRO(StrideD0Bytes) \
-        X_MACRO(StrideMetadata0) \
-        X_MACRO(StrideMetadata1) \
-        X_MACRO(StrideCK) \
-        X_MACRO(Alpha) \
-        X_MACRO(Beta) \
-        X_MACRO(ComputeUnits) \
-        X_MACRO(SplitK) \
-        X_MACRO(OutputBF16) \
-        X_MACRO(Padding) \
-        X_MACRO(ConstantZero) \
-        X_MACRO(ConstantOne) \
-        X_MACRO(DebugPattern) \
-        /* Pointer args */ \
-        X_MACRO(AddressA) \
-        X_MACRO(AddressB) \
-        X_MACRO(AddressC) \
-        X_MACRO(AddressD) \
-        X_MACRO(AddressE) \
-        X_MACRO(AddressMetadata) \
-        X_MACRO(AddressWorkspace) \
-        X_MACRO(AddressFlags) \
-        X_MACRO(AddressSynchronizer) \
-        X_MACRO(AddressTD) \
-        X_MACRO(AddressScaleA) \
-        X_MACRO(AddressScaleB) \
-        X_MACRO(AddressScaleC) \
-        X_MACRO(AddressScaleD) \
-        X_MACRO(AddressMXScaleA) \
-        X_MACRO(AddressMXScaleB) \
-        X_MACRO(AddressScaleAlphaVec) \
-        X_MACRO(AddressBias) \
-        X_MACRO(AddressAmaxOut) \
-        X_MACRO(AmaxWS) \
-        X_MACRO(AmaxSync) \
-        X_MACRO(Synchronizer) \
-        X_MACRO(DebugBuffer) \
-        /* Kernel metadata args */ \
-        X_MACRO(GemmInfo) \
-        X_MACRO(GemmCount) \
-        X_MACRO(InternalArgs) \
-        X_MACRO(InternalArgs1) \
-        X_MACRO(TensileInternalArg0) \
-        X_MACRO(TensileInternalArg1) \
-        X_MACRO(NumWorkGroups) \
-        /* Persistent and legacy scheduling args */ \
-        X_MACRO(ItersPerTile) \
-        X_MACRO(MagicNumberItersPerTile) \
-        X_MACRO(MagicShiftItersPerTile) \
-        X_MACRO(TotalIters) \
-        X_MACRO(SKItersPerWG) \
-        X_MACRO(SKGrid) \
-        X_MACRO(SKTilesAndSplit) \
-        X_MACRO(MagicNumberSizeAlg1) \
-        X_MACRO(MagicShiftSizeAlg1) \
-        X_MACRO(MagicNumberSizeAlg2) \
-        X_MACRO(MagicShiftSizeAlg2) \
-        /* Epilogue control args */ \
-        X_MACRO(BiasType) \
-        X_MACRO(StrideBias) \
-        X_MACRO(FactorDim) \
-        X_MACRO(ActivationTypeArg) \
-        X_MACRO(ActivationArg) \
-        X_MACRO(GSUSync) \
-        /* Random seed args */ \
-        X_MACRO(RNDSeed) \
-        /* The whole fixed-size fused GEMM-A2A kernarg segment */ \
-        X_MACRO(FusedA2ASegment) \
-        /* Appended to preserve existing CustomArgSemantic values. */ \
-        X_MACRO(PersistentGrid) \
-        X_MACRO(BatchOffsetD) \
-        X_MACRO(BatchOffsetC) \
-        X_MACRO(BatchOffsetA) \
-        X_MACRO(BatchOffsetB) \
-        X_MACRO(AddressGateResidual) \
-        X_MACRO(GateResidualType) \
-        X_MACRO(StrideGate0) \
-        X_MACRO(StrideGate1) \
-        X_MACRO(StrideGate2) \
-        X_MACRO(StrideE2) \
-        X_MACRO(StrideScaleA2) \
-        X_MACRO(StrideScaleB2) \
-        X_MACRO(StrideMetadata2) \
-        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps \
-           them distinct from another generator's WorkgroupMapping. */ \
-        X_MACRO(RR_WorkgroupMapping) \
-        X_MACRO(RR_MagicMultipleWgm) \
-        X_MACRO(RR_MagicShiftAndSignWgm) \
-        X_MACRO(RR_MagicMultipleNumTilesN) \
-        X_MACRO(RR_MagicShiftAndSignNumTilesN) \
-        X_MACRO(RR_QuotientTilesMByWgm) \
-        X_MACRO(RR_MagicMultipleWgmTail) \
-        X_MACRO(RR_MagicShiftAndSignWgmTail) \
-        X_MACRO(RR_QuotientTilesByBlock) \
-        X_MACRO(RR_MagicMultipleWgmMainBlock) \
-        X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
-        X_MACRO(AddressScaleZeroA) \
-        X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported) \
-        X_MACRO(DeltaPeerD)
-
-    enum class CustomArgSemantic
-    {
-        #define X_MACRO(name) name,
-        CustomArgSemantic_MACRO
-        #undef X_MACRO
-        COUNT,
-    };
-
-    TENSILELITEHOST_EXPORT std::string toString(CustomArgSemantic arg);
-    TENSILELITEHOST_EXPORT CustomArgSemantic fromStringCustomArgSemantic(std::string& str);
-    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgSemantic& t);
-    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgSemantic& t);
-
-    struct CustomArgDefinition
-    {
-        CustomArgType type;
-        CustomArgSemantic semantic;
-        size_t padding = 0;
-        size_t index   = 0;
-    };
-
-    TENSILELITEHOST_EXPORT std::string toString(CustomArgDefinition arg);
-    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgDefinition& t);
-    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgDefinition& t);
-
-    enum CustomGridSize
-    {
-        One,
-        TilesX,
-        TilesY,
-        Batch,
-        TilesXY,
-        TilesXYBatch,
-        StreamKWithBatch,
-        StreamKNoBatch,
-        TilesXYBatchGSU,
-        PersistentGrid,
-        PersistentWithBatch,
-        PersistentNoBatch,
-        TilesYGSU,
-        ComputeUnits,
-        CustomGridSize_Count,
-    };
-
-    TENSILELITEHOST_EXPORT std::string toString(CustomGridSize mode);
-    TENSILELITEHOST_EXPORT CustomGridSize fromStringCustomGridSize(std::string& str);
-    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomGridSize& t);
-    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomGridSize& t);
-
-    enum CustomWorkspaceType
-    {
-        None,
-        SplitK,
-        StreamK,
-        StreamKWithReduction,
-        CustomWorkspaceType_Count,
-    };
-
-    TENSILELITEHOST_EXPORT std::string toString(CustomWorkspaceType type);
-    TENSILELITEHOST_EXPORT CustomWorkspaceType fromStringCustomWorkspaceType(std::string& str);
-    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
-    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
-
     struct CustomKernel
     {
         // Every member needs a default: mapOptional leaves absent keys untouched, so an
@@ -272,9 +78,13 @@ namespace TensileLite
         // rely on sizeMapping for workspace/Stream-K decisions, so several code
         // paths must treat them like the legacy non-custom case.
         bool generated = false;
+        // Workgroups this kernel can keep resident per CU, captured from its
+        // static resource usage. 0 means not recorded. Only the rocRoller
+        // Stream-K grid reads it (see rocRollerStreamKGrid).
+        size_t occupancy = 0;
         // Declared by a hand-written kernel that reduces every row of D in the
-        // same order, so identical rows of A give bitwise-identical rows of D.
-        // Uniform summation order refuses hand-written kernels without it.
+        // same order. A data-parallel RR_GEMM kernel runs without it. Other
+        // hand-written kernels are refused while uniform summation order is on.
         bool uniformSummationOrder = false;
     };
   
@@ -620,6 +430,34 @@ namespace TensileLite
     {
     public:
         explicit UniformSummationOrderError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
+    /**
+     * Thrown when a rocRoller Stream-K launch would run data-parallel tiles.
+     * The kernel cannot execute that regime. A distinct type so the rocblaslt
+     * host maps it to invalid_value; a generic runtime_error is an internal error.
+     */
+    class RocRollerStreamKDataParallelError : public std::runtime_error
+    {
+    public:
+        explicit RocRollerStreamKDataParallelError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
+    /**
+     * Thrown when a rocRoller Stream-K launch is asked for a batch other than 1.
+     * The kernargs do not count batch. A distinct type so the host maps it to
+     * invalid_value, the same as the data-parallel refusal.
+     */
+    class RocRollerStreamKBatchError : public std::runtime_error
+    {
+    public:
+        explicit RocRollerStreamKBatchError(const std::string& what)
             : std::runtime_error(what)
         {
         }
@@ -1325,6 +1163,31 @@ namespace TensileLite
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
 
+        // True for an externally captured kernel (rocRoller, aiter, triton) as
+        // opposed to a Tensile-generated one that merely carries customKernel
+        // metadata. Public because hipBLASLt's dispatch layer needs it to tell
+        // the two apart when sizeMapping alone cannot (tensile_host.cpp).
+        bool handwrittenCustomKernel() const;
+
+        // True for a hand-written custom kernel launched on rocRoller's Stream-K
+        // grid: one whose grid or workspace is RocRollerStreamK, or that reads
+        // an RR_SK kernarg derived from that grid.
+        bool usesRocRollerStreamK() const;
+
+        // True when this solution is a rocRoller Stream-K kernel and the launch
+        // for problem would run data-parallel tiles, which the kernel cannot do
+        // (see rocRollerStreamKHasDataParallelTiles in RocRollerStreamKKernargs.hpp).
+        // The launch throws in that case; selection must refuse the solution.
+        //
+        // The grid origami picks depends on problem.workspaceSize(): a workspace
+        // too small for the partial tiles forces the grid to the tile count.
+        // A support check with a small workspace can therefore report no
+        // data-parallel tiles, and a later launch of the same problem with a
+        // larger workspace can throw. The check fails safe. It is not a
+        // function of the problem sizes alone.
+        bool rocRollerStreamKHasDataParallelTiles(Problem const&  problem,
+                                                  Hardware const& hardware) const;
+
     private:
         void validateStreamKClusterDescriptor() const;
 
@@ -1335,7 +1198,45 @@ namespace TensileLite
                                                  size_t         gsu,
                                                  size_t         tiles) const;
 
-        bool handwrittenCustomKernel() const;
+        // The Stream-K grid for a rocRoller custom kernel: the single source of
+        // truth for both the launch geometry and the numWGs kernarg, which must
+        // never disagree, and for the partial-tile workspace sized from it.
+        //
+        // Deliberately NOT getPersistentGridImpl() / resolveStreamKSettings():
+        // rocRoller partitions work differently and substituting Tensile's
+        // decomposition would silently corrupt its fixup pass.
+        //
+        // A port of rocRoller's chooseStreamKGridSize
+        // (library/src/amd_detail/rocblaslt/src/rocroller/runtime_args_selection.cpp):
+        // origami::streamk::select_reduction then select_grid_size, both in
+        // k_split_aware mode, over the same field set rocRoller populates. The
+        // marshalling lives in RocRollerStreamKGrid.hpp so the oracle test
+        // (tests/RocRollerStreamKGrid_test.cpp) can hold it against a verbatim
+        // transcription of that function.
+        //
+        // Deliberately NOT getPersistentGridImpl()'s origami adapter: that one
+        // also sets a_transpose, b_transpose, mi and workgroup_mapping and uses
+        // depthU for mt.k, which selects a different grid.
+        //
+        // One deviation, documented at the definition: customKernel.occupancy
+        // == 0 (not recorded by the logic file) means the grid cannot be
+        // reproduced at all, so this falls back to the CU count honouring
+        // smCountTarget and persistentMaxCUs, clamped to StreamKFlagElements.
+        // So does missing analytical hardware, and an empty problem (M, N or
+        // batch 0), on which origami divides by the zero tile count.
+        // chooseStreamKGridSize returns the origami answer unchanged. The
+        // launch keeps that answer when no workgroup holds a partial tile
+        // (tiles % grid == 0), which is a data-parallel grid of one workgroup
+        // per tile and may exceed StreamKFlagElements. A grid that does write
+        // flags (tiles % grid != 0) and is wider than that slot is clamped to
+        // it: each problem's flag slot is StreamKFlagElements ints.
+        // Defined in StreamK.cpp, next to the other Stream-K launch helpers.
+        uint32_t rocRollerStreamKGrid(Problem const& problem, Hardware const& hardware) const;
+
+        // The grid a launch uses, or a throw when that grid would run
+        // data-parallel tiles. Memoised by the caller.
+        uint32_t rocRollerStreamKCheckedGrid(Problem const&  problem,
+                                             Hardware const& hardware) const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.

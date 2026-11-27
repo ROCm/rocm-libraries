@@ -157,6 +157,17 @@ BATCH_TAG = "BatchSizeEqual"
 BUFFER_TAG = "BufferAddressingLimitCheck"
 
 
+def test_streamk_metadata_pins_batch_without_the_rr_gemm_name():
+    """Batch is the Stream-K decomposition, not the name. A kernel with the
+    RocRollerStreamK workspace and any other name still launches one batch."""
+    built = _state(name="capture_without_the_prefix", macrotile=(16, 16, 128))
+    built["CustomKernel"]["workspaceType"] = "RocRollerStreamK"
+    tags = _by_tag(built)
+    assert len(tags.get(BATCH_TAG, [])) == 1
+    assert tags[BATCH_TAG][0].value == 1
+    assert M_TAG not in tags and K_TAG not in tags
+
+
 def test_batch_is_pinned_to_one():
     """The kernels are 2-D: no batch strides, workgroup_id_z unread, but a
     grid of [TilesX, TilesY, Batch]. Every z-slice recomputes batch 0, so

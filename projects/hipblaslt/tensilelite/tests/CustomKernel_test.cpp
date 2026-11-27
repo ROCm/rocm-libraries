@@ -30,6 +30,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -39,6 +40,9 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/RocRollerStreamKGrid.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 #ifndef TENSILE_YAML
 #include <Tensile/msgpack/MessagePack.hpp>
 #endif
@@ -85,6 +89,51 @@ TEST(CustomKernelTest, UniformSummationOrderDeserializes)
         ASSERT_TRUE(reader.error.empty()) << reader.error.front();
         EXPECT_EQ(kernel.name, "probe");
         EXPECT_EQ(kernel.uniformSummationOrder, declared);
+    }
+}
+
+namespace
+{
+    // Reads one {type: uint32, semantic: <name>} argument the way a logic file carries it.
+    std::vector<std::string> readArgSemantic(std::string const& name, CustomArgSemantic& semantic)
+    {
+        msgpack::zone                          zone;
+        std::map<std::string, msgpack::object> fields{
+            {"type", msgpack::object(std::string("uint32"), zone)},
+            {"semantic", msgpack::object(name, zone)}};
+
+        msgpack::sbuffer packed;
+        msgpack::pack(packed, fields);
+        auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+        CustomArgDefinition             arg;
+        Serialization::MessagePackInput reader(unpacked.get());
+        reader.input(arg);
+        semantic = arg.semantic;
+        return reader.error;
+    }
+}
+
+// rocRoller names its N tile count numTiles1 (dimension 1). The semantics are
+// named by N, and the dimension-index spelling is not a semantic.
+TEST(CustomKernelTest, StreamKTileCountSemanticsDeserialize)
+{
+    for(auto const& [name, expected] :
+        {std::pair{"RR_SKNumTilesN", CustomArgSemantic::RR_SKNumTilesN},
+         std::pair{"RR_SKMagicMultipleNumTilesN", CustomArgSemantic::RR_SKMagicMultipleNumTilesN},
+         std::pair{"RR_SKMagicShiftsNumTilesN", CustomArgSemantic::RR_SKMagicShiftsNumTilesN}})
+    {
+        CustomArgSemantic semantic{};
+        auto const        errors = readArgSemantic(name, semantic);
+        EXPECT_TRUE(errors.empty()) << name;
+        EXPECT_EQ(semantic, expected) << name;
+    }
+
+    for(auto const* name :
+        {"RR_SKNumTiles1", "RR_SKMagicMultipleNumTiles1", "RR_SKMagicShiftsNumTiles1"})
+    {
+        CustomArgSemantic semantic{};
+        EXPECT_FALSE(readArgSemantic(name, semantic).empty()) << name;
     }
 }
 #endif
@@ -462,6 +511,22 @@ TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
     EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), 4);
 }
 
+// rocRoller's non-TN MX kernels read the K extent of A's scale tensor, which
+// does not depend on the layout.
+TEST(CustomKernelTest, SizeSumScaleAIsTheScaleBlockCountAlongK)
+{
+    for(bool transA : {true, false})
+    {
+        SCOPED_TRACE(::testing::Message() << "transA=" << transA);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::SizeSumScaleA,
+                                     mxScaleProblem(64, 64, 128, transA, false)),
+                  4);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::SizeSumScaleA,
+                                     mxScaleProblem(64, 64, 96, transA, true)),
+                  3);
+    }
+}
+
 namespace
 {
     // Grid x and ComputeUnits kernarg of a persistent probe kernel.
@@ -507,6 +572,340 @@ TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
     EXPECT_EQ(computeUnitsLaunch(64, 48), std::make_pair(size_t{48}, int32_t{48}));
     EXPECT_EQ(computeUnitsLaunch(0, 96), std::make_pair(size_t{96}, int32_t{96}));
     EXPECT_EQ(computeUnitsLaunch(4 * cus, 0), std::make_pair(size_t{cus}, int32_t{cus}));
+}
+
+namespace
+{
+    ContractionProblemGemm rocRollerStreamKProblem(size_t m, size_t n, size_t batch = 1)
+    {
+        auto problem = ContractionProblemGemm::GEMM(false,
+                                                    false,
+                                                    m,
+                                                    n,
+                                                    1024,
+                                                    std::max<size_t>(m, 1),
+                                                    1024,
+                                                    std::max<size_t>(m, 1),
+                                                    1.0,
+                                                    false,
+                                                    batch);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+
+    // A rocRoller Stream-K probe kernel with square macrotiles. With no
+    // occupancy recorded its grid is the CU count, capped by smCountTarget.
+    // With readsKernargs it also reads its grid and data-parallel tile count;
+    // without, it only launches on the grid and binds its partials.
+    struct RocRollerStreamKProbe
+    {
+        ContractionSolution    solution;
+        ContractionProblemGemm problem;
+
+        RocRollerStreamKProbe(uint32_t tile,
+                              int      smCountTarget,
+                              bool     readsKernargs = true,
+                              size_t   m             = 1024,
+                              size_t   n             = 1024)
+            : problem(rocRollerStreamKProblem(m, n))
+        {
+            if(readsKernargs)
+            {
+                configureProbeKernel(solution,
+                                     {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
+                solution.customKernel.args.push_back(
+                    {CustomArgType::uint32, CustomArgSemantic::RR_SKNumDPTiles});
+            }
+            else
+                configureProbeKernel(
+                    solution, {CustomArgType::address, CustomArgSemantic::AddressWorkspace});
+            solution.customKernel.macrotile = TensileLite::dim3(tile, tile, 128);
+            solution.customKernel.grid
+                = {CustomGridSize::RocRollerStreamKGrid, CustomGridSize::One, CustomGridSize::One};
+            problem.setParams().setSmCountTarget(smCountTarget);
+        }
+
+        KernelInvocation launch() const
+        {
+            ContractionInputs inputs;
+            StreamKSettings   sk;
+            return solution.generateCustomCall<false>(problem, inputs, probeDevice(), sk);
+        }
+
+        bool refused() const
+        {
+            return solution.rocRollerStreamKHasDataParallelTiles(problem, probeDevice());
+        }
+    };
+}
+
+// The launch grid and the numWGs kernarg are one value, and a rocRoller Stream-K
+// kernel launches exactly where its grid leaves no data-parallel tiles: up to
+// but not including two tiles per workgroup. Selection refuses the same points.
+TEST(CustomKernelTest, RocRollerStreamKLaunchRefusesDataParallelTiles)
+{
+    constexpr uint32_t cus = TensileLite::testing::_SPX_CU;
+
+    // 1024x1024 in 128x128 tiles is 64 tiles.
+    struct Case
+    {
+        int  grid;
+        bool launches;
+    };
+    for(Case c : {Case{0, true}, // 64 tiles < 256 workgroups
+                  Case{64, true}, // tiles == grid
+                  Case{48, true}, // grid < tiles < 2 * grid
+                  Case{33, true}, // just below 2 * grid
+                  Case{32, false}, // tiles == 2 * grid
+                  Case{8, false}})
+    {
+        uint32_t const        grid = c.grid == 0 ? cus : static_cast<uint32_t>(c.grid);
+        RocRollerStreamKProbe probe(128, c.grid);
+        EXPECT_EQ(probe.refused(), !c.launches) << "grid " << grid;
+        if(!c.launches)
+        {
+            EXPECT_THROW(probe.launch(), RocRollerStreamKDataParallelError) << "grid " << grid;
+            continue;
+        }
+        auto const fits = probe.launch();
+        EXPECT_EQ(fits.numWorkGroups.x, grid);
+        ASSERT_EQ(fits.args.size(), 2 * sizeof(uint32_t));
+        uint32_t args[2] = {};
+        std::memcpy(args, fits.args.data(), sizeof(args));
+        EXPECT_EQ(args[0], grid);
+        EXPECT_EQ(args[1], 0u) << "grid " << grid;
+    }
+
+    // 4096 tiles of 16x16 on the full grid: 16 per workgroup.
+    EXPECT_THROW(RocRollerStreamKProbe(16, 0).launch(), RocRollerStreamKDataParallelError);
+}
+
+// The refusal hangs off the grid, not off the kernargs: a kernel that only
+// launches on rocRoller's grid is refused at the same point.
+TEST(CustomKernelTest, RocRollerStreamKGridAloneIsEnoughToRefuse)
+{
+    EXPECT_NO_THROW(RocRollerStreamKProbe(128, 33, false).launch());
+    RocRollerStreamKProbe const tooSmall(128, 32, false);
+    EXPECT_TRUE(tooSmall.refused());
+    EXPECT_THROW(tooSmall.launch(), RocRollerStreamKDataParallelError);
+}
+
+// An empty problem has no tiles, on which origami divides by zero: the grid
+// falls back to the CU budget without reaching it, and nothing is refused.
+TEST(CustomKernelTest, RocRollerStreamKEmptyProblemLaunches)
+{
+    hip::HipAMDGPU device;
+    device.processor          = AMDGPU::Processor::gfx950;
+    device.computeUnitCount   = TensileLite::testing::_SPX_CU;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::get_hardware_for_arch(origami::hardware_t::architecture_t::gfx950,
+                                                   TensileLite::testing::_SPX_CU,
+                                                   163840,
+                                                   262144,
+                                                   4 * 1024 * 1024,
+                                                   2100000));
+
+    for(auto [m, n] : {std::pair<size_t, size_t>{0, 1024}, {1024, 0}, {0, 0}})
+    {
+        RocRollerStreamKProbe probe(128, 16, true, m, n);
+        probe.solution.customKernel.occupancy = 2;
+        EXPECT_FALSE(probe.solution.rocRollerStreamKHasDataParallelTiles(probe.problem, device))
+            << m << "x" << n;
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+        auto const        launch
+            = probe.solution.generateCustomCall<false>(probe.problem, inputs, device, sk);
+        EXPECT_EQ(launch.numWorkGroups.x, 16u) << m << "x" << n;
+    }
+}
+
+// Occupancy 19 on a 16x16 tile of a 2048x2048 problem is a data-parallel
+// origami answer: one workgroup per tile, 16384 of them, wider than the
+// flag slot. The launch must keep that grid. Clamping it to the slot would
+// leave eight tiles per workgroup and the data-parallel check would refuse
+// a problem rocRoller runs. The numWGs kernarg is the same value.
+TEST(CustomKernelTest, RocRollerStreamKOrigamiGridIsNotClamped)
+{
+    hip::HipAMDGPU device;
+    device.processor          = AMDGPU::Processor::gfx950;
+    device.computeUnitCount   = TensileLite::testing::_SPX_CU;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::get_hardware_for_arch(origami::hardware_t::architecture_t::gfx950,
+                                                   TensileLite::testing::_SPX_CU,
+                                                   163840,
+                                                   262144,
+                                                   4 * 1024 * 1024,
+                                                   2100000));
+
+    RocRollerStreamKProbe probe(16, 0, true, 2048, 2048);
+    probe.solution.customKernel.occupancy        = 19;
+    probe.solution.sizeMapping.workspaceSizePerElemC = 4;
+    probe.problem.setWorkspaceSize(size_t{1} << 28);
+
+    // launch() uses the plain AMDGPU probe device, which has no origami
+    // hardware, so the grid would be the CU fallback. This device is the one
+    // the assertion is about.
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    auto const        launch
+        = probe.solution.generateCustomCall<false>(probe.problem, inputs, device, sk);
+    EXPECT_EQ(launch.numWorkGroups.x, 16384u);
+    ASSERT_GE(launch.args.size(), sizeof(uint32_t));
+    uint32_t numWGs = 0;
+    std::memcpy(&numWGs, launch.args.data(), sizeof(numWGs));
+    EXPECT_EQ(numWGs, 16384u);
+}
+
+// Only rocRoller Stream-K kernels are refused, and only they resolve its grid.
+TEST(CustomKernelTest, OnlyRocRollerStreamKKernelsUseItsGrid)
+{
+    ContractionSolution plain;
+    configureProbeKernel(plain, {CustomArgType::uint32, CustomArgSemantic::SplitK});
+    EXPECT_FALSE(plain.usesRocRollerStreamK());
+
+    // 4096 tiles of 16x16 would be refused on any Stream-K grid.
+    plain.customKernel.macrotile = TensileLite::dim3(16, 16, 128);
+    EXPECT_FALSE(plain.rocRollerStreamKHasDataParallelTiles(dummyProblem(), probeDevice()));
+
+    ContractionSolution kernargOnly;
+    configureProbeKernel(kernargOnly, {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
+    EXPECT_TRUE(kernargOnly.usesRocRollerStreamK());
+
+    ContractionSolution workspaceOnly;
+    configureProbeKernel(workspaceOnly, {CustomArgType::uint32, CustomArgSemantic::SplitK});
+    workspaceOnly.customKernel.workspaceType = CustomWorkspaceType::RocRollerStreamK;
+    EXPECT_TRUE(workspaceOnly.usesRocRollerStreamK());
+
+    // A Tensile-generated kernel is never launched on rocRoller's grid.
+    workspaceOnly.customKernel.generated = true;
+    EXPECT_FALSE(workspaceOnly.usesRocRollerStreamK());
+}
+
+// A batch other than 1 is a refusal, not an exception that escapes selection.
+TEST(CustomKernelTest, UniformSummationOrderRefusesAStreamKBatch)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
+    solution.customKernel.grid = {CustomGridSize::RocRollerStreamKGrid,
+                                  CustomGridSize::One,
+                                  CustomGridSize::One};
+    auto problem = rocRollerStreamKProblem(128, 256, 2);
+    problem.setParams().setUniformSummationOrder(1);
+    EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, probeDevice()));
+}
+
+// The flag is what admits a handwritten kernel. The RR_GEMM_ prefix does not.
+TEST(CustomKernelTest, UniformSummationOrderFollowsTheDeclaredFlag)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SplitK});
+    solution.customKernel.name = "RR_GEMM_probe";
+    auto problem = rocRollerStreamKProblem(128, 256);
+    problem.setParams().setUniformSummationOrder(1);
+    EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, probeDevice()));
+
+    solution.customKernel.uniformSummationOrder = true;
+    EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, probeDevice()));
+}
+
+// RR_NumTilesM and RR_NumTilesN are int64. A 32-bit declaration is refused
+// rather than written truncated.
+TEST(CustomKernelTest, RocRollerNumTilesKernargIsEightBytes)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::int64, CustomArgSemantic::RR_NumTilesM});
+    solution.customKernel.args.push_back(
+        {CustomArgType::int64, CustomArgSemantic::RR_NumTilesN});
+
+    auto              problem = dummyProblem();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    auto const        invocation
+        = solution.generateCustomCall<false>(problem, inputs, probeDevice(), sk);
+    EXPECT_EQ(invocation.args.size(), 2 * sizeof(int64_t));
+
+    ContractionSolution narrow;
+    configureProbeKernel(narrow, {CustomArgType::int32, CustomArgSemantic::RR_NumTilesM});
+    EXPECT_THROW(narrow.generateCustomCall<false>(problem, inputs, probeDevice(), sk),
+                 std::runtime_error);
+}
+
+// assembleRocRollerStreamKGrid is the input assembly rocRollerStreamKGrid uses.
+TEST(CustomKernelTest, RocRollerStreamKGridInputs)
+{
+    RocRollerStreamKGridRequest req;
+    req.freeA                 = {16, 32, 2};
+    req.freeB                 = {64};
+    req.bound                 = {8, 4};
+    req.batch                 = {3};
+    req.smCountTarget         = 48;
+    req.computeUnitCount      = 256;
+    req.persistentMaxCUs      = 0;
+    req.tileM                 = 128;
+    req.tileN                 = 128;
+    req.tileK                 = 64;
+    req.occupancy             = 2;
+    req.workspaceSize         = 4096;
+    req.workspaceSizePerElemC = 8;
+    req.hasAnalyticalHardware = true;
+
+    auto const plan = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+    EXPECT_TRUE(plan.useOrigami);
+    EXPECT_EQ(plan.inputs.m, 16u * 32u * 2u);
+    EXPECT_EQ(plan.inputs.n, 64u);
+    EXPECT_EQ(plan.inputs.k, 32u);
+    EXPECT_EQ(plan.inputs.batch, 3u);
+    EXPECT_EQ(plan.inputs.numCUs, 48u);
+    EXPECT_EQ(plan.inputs.workspaceSizePerElemC, 8u);
+
+    req.smCountTarget = -4;
+    EXPECT_EQ(assembleRocRollerStreamKGrid(req, StreamKFlagElements).inputs.numCUs, 0u);
+
+    // occupancy 0 never reaches origami. The grid is the CU count.
+    req.smCountTarget = 0;
+    req.occupancy     = 0;
+    auto const noOccupancy = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+    EXPECT_FALSE(noOccupancy.useOrigami);
+    EXPECT_EQ(noOccupancy.fallbackGrid, 256u);
+
+    // A positive smCountTarget caps that fallback, and so does the flag region.
+    req.smCountTarget = 32;
+    EXPECT_EQ(assembleRocRollerStreamKGrid(req, StreamKFlagElements).fallbackGrid, 32u);
+    req.smCountTarget    = 0;
+    req.computeUnitCount = static_cast<int>(StreamKFlagElements) + 100;
+    EXPECT_EQ(assembleRocRollerStreamKGrid(req, StreamKFlagElements).fallbackGrid,
+              StreamKFlagElements);
+
+    // Missing analytical hardware is the same fallback, even with occupancy.
+    req.computeUnitCount       = 256;
+    req.smCountTarget          = 40;
+    req.occupancy              = 4;
+    req.hasAnalyticalHardware  = false;
+    auto const noHardware = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+    EXPECT_FALSE(noHardware.useOrigami);
+    EXPECT_EQ(noHardware.fallbackGrid, 40u);
+    EXPECT_EQ(noHardware.inputs.workspaceSizePerElemC, 8u);
+}
+
+// The member uses that assembly: no analytical hardware, occupancy recorded,
+// grid is the smCountTarget cap. A CU count above the flag region clamps.
+TEST(CustomKernelTest, RocRollerStreamKGridMemberUsesTheAssembly)
+{
+    RocRollerStreamKProbe probe(128, 40);
+    probe.solution.customKernel.occupancy = 4;
+    EXPECT_EQ(probe.launch().numWorkGroups.x, 40u);
+
+    hip::HipAMDGPU device;
+    device.processor        = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = static_cast<int>(StreamKFlagElements) + 50;
+    RocRollerStreamKProbe wide(128, 0);
+    wide.solution.customKernel.occupancy = 0;
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    auto const        launch
+        = wide.solution.generateCustomCall<false>(wide.problem, inputs, device, sk);
+    EXPECT_EQ(launch.numWorkGroups.x, static_cast<size_t>(StreamKFlagElements));
 }
 
 namespace

@@ -822,6 +822,7 @@ class ProblemPredicate(Properties.Predicate):
         # (getRocRollerSelectedSolutions) guards all three; that is stricter than
         # correctness requires.
         customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
+        emittedBatchEqual = False
         if customKernel and str(customKernel.get('name', '')).startswith('RR_GEMM_'):
             # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
             # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped by the
@@ -848,12 +849,27 @@ class ProblemPredicate(Properties.Predicate):
             # workgroup_id_z, but their grid is [TilesX, TilesY, Batch], so every
             # z-slice recomputes batch 0 and batches 1..N-1 come back wrong.
             rv += [cls('BatchSizeEqual', index=0, value=1)]
+            emittedBatchEqual = True
 
             # Each tensor gets one buffer descriptor sized over the whole tensor
             # with a 32-bit num_records, so at 4 GiB the output is zeroed rather
             # than the launch failing. The rocRoller-on path rejects the same
             # problems in RocRollerGemmKernel::exceedsBufferAddressingLimit.
             rv += [cls('BufferAddressingLimitCheck')]
+
+        # Batch is a property of the Stream-K decomposition, not of the
+        # RR_GEMM_ name. A kernel recognized from its grid, workspace or
+        # RR_SK kernargs launches one batch; the grid counts every batch and
+        # the kernargs do not. The name gate above already emits this for
+        # the shipped family.
+        if customKernel and not emittedBatchEqual:
+            skGrid = 'RocRollerStreamK' in (customKernel.get('grid') or [])
+            skWorkspace = customKernel.get('workspaceType') == 'RocRollerStreamK'
+            skArgs = any(str(a.get('semantic', '')).startswith('RR_SK')
+                         for a in (customKernel.get('args') or [])
+                         if isinstance(a, dict))
+            if skGrid or skWorkspace or skArgs:
+                rv += [cls('BatchSizeEqual', index=0, value=1)]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
         # it, a multi-solution lookup also accepts the neighboring tile.
@@ -914,11 +930,23 @@ class CustomKernel:
                    macrotile=d['macrotile'],
                    threads=d['threads'],
                    grid=d['grid'],
+                   # Workgroups resident per CU, captured from the kernel's
+                   # static resource usage. 0 means "not recorded". Only
+                   # rocRoller Stream-K grid selection needs it; everything
+                   # else carries it through untouched.
+                   occupancy=d.get('occupancy', 0),
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
                    generated=d.get('generated', False),
                    uniformSummationOrder=d.get('uniformSummationOrder', False))
+
+    def state(self):
+        rv = {key: state(getattr(self, key)) for key in self.StateKeys}
+        # Emitted only when recorded so kernels without it serialize unchanged.
+        if getattr(self, 'occupancy', 0):
+            rv['occupancy'] = self.occupancy
+        return rv
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
