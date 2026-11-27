@@ -252,30 +252,44 @@ def _run_in_python(script: str) -> list[str]:
     return out.stdout.splitlines()
 
 
-@pytest.mark.skipif(not child.ADDRESS_SPACE_CAP_APPLIES, reason="no RLIMIT_AS")
-def test_the_child_caps_its_own_address_space() -> None:
-    """In a real process the cap becomes the RLIMIT_AS soft limit and an
-    allocation past it raises MemoryError; a lower limit the process
-    inherited stays, and the hard limit is left as it is."""
+def _tightest(*limits: int) -> int:
+    """The lowest of ``limits``, an unlimited one counting as no limit."""
     import resource
 
+    finite = [limit for limit in limits if limit != resource.RLIM_INFINITY]
+    return min(finite) if finite else resource.RLIM_INFINITY
+
+
+@pytest.mark.skipif(not child.ADDRESS_SPACE_CAP_APPLIES, reason="no RLIMIT_AS")
+def test_the_child_caps_its_own_address_space() -> None:
+    """In a real process the cap becomes the RLIMIT_AS soft limit (or a lower
+    limit the process inherited stays) and an allocation past it raises
+    MemoryError; a soft limit below a later cap stays, and the hard limit is
+    left as it is. The expected limits follow whatever limits this test runs
+    under (the child process inherits them)."""
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    cap, lower = 1 << 30, 3 << 29
+    if _tightest(soft, hard) < lower:
+        pytest.skip(f"inherited RLIMIT_AS {soft, hard} is below {lower} bytes")
     lines = _run_in_python(
         "import resource\n"
         "from rocke.runtime._comgr_fresh_process import limit_address_space\n"
-        "limit_address_space(1 << 30)\n"
+        f"limit_address_space({cap})\n"
         "print(*resource.getrlimit(resource.RLIMIT_AS))\n"
         "try:\n"
-        "    bytearray(2 << 30)\n"
+        f"    bytearray({2 * cap})\n"
         "except MemoryError:\n"
         "    print('MemoryError')\n"
-        "resource.setrlimit(resource.RLIMIT_AS, (3 << 29, 3 << 29))\n"
-        "limit_address_space(1 << 31)\n"
+        f"resource.setrlimit(resource.RLIMIT_AS, ({lower}, {lower}))\n"
+        f"limit_address_space({4 * cap})\n"
         "print(*resource.getrlimit(resource.RLIMIT_AS))\n"
     )
     assert lines == [
-        f"{1 << 30} {resource.RLIM_INFINITY}",
+        f"{_tightest(cap, soft, hard)} {hard}",
         "MemoryError",
-        f"{3 << 29} {3 << 29}",
+        f"{lower} {lower}",
     ]
 
 

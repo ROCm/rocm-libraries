@@ -261,9 +261,11 @@ def test_iglp_opt_1_sits_only_in_loop_bodies_that_read_lds(
 
 
 @pytest.mark.parametrize(
-    "arch, fields, stages_through_lds", _HINT_CASES, ids=_HINT_CASE_IDS
+    "arch, fields",
+    [(arch, fields) for arch, fields, _ in _HINT_CASES],
+    ids=_HINT_CASE_IDS,
 )
-def test_every_hint_configuration_compiles(arch, fields, stages_through_lds):
+def test_every_hint_configuration_compiles(arch, fields):
     """Each configuration compiles with the loaded compiler, in the
     memory-capped fresh process its ``iglp_opt(1)`` asks for. On a compiler
     without LLVM commit 576e1affab35 the configurations without LDS staging

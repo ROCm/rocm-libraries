@@ -29,7 +29,8 @@ import json
 import sys
 
 COMPILE_ERROR_EXIT_STATUS = 2
-OUT_OF_MEMORY_EXIT_STATUS = 3
+# Not 3: on Windows abort() can exit with 3, which would read as out of memory.
+OUT_OF_MEMORY_EXIT_STATUS = 4
 # Python's own exit status for an uncaught exception.
 UNCAUGHT_EXCEPTION_EXIT_STATUS = 1
 
