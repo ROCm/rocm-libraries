@@ -95,6 +95,10 @@ bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& c
 // type allows the same one under InPlaceRule. Only WMMAs count toward "previous".
 // A broken rule stops codegen: switching the accumulator needs a free register
 // range that this pass cannot pick.
+//
+// Non-XDL WMMAs (FP32 input, gfx12-era 16x16x16) follow the same rules, but the
+// rule is unconfirmed for them, so they only warn. An XDL WMMA counts only XDL
+// WMMAs toward "previous", so a non-XDL one in between does not break its chain.
 //===----------------------------------------------------------------------===//
 
 enum class InPlaceRule {
@@ -153,50 +157,62 @@ bool differentAB(const StinkyInstruction& x, const StinkyInstruction& y) {
     return xs.size() > 1 && ys.size() > 1 && !xs[0].isOverlap(ys[0]) && !xs[1].isOverlap(ys[1]);
 }
 
-const StinkyInstruction* adjacentWmmaInBlock(const StinkyInstruction& from, bool forward) {
+bool isAnyWmma(const StinkyInstruction& inst) {
+    return isWMMA(inst) || isSWMMA(inst) || isMXWMMA(inst);
+}
+
+// The WMMAs a chain counts: only XDL ones for an XDL chain, every WMMA otherwise.
+bool isChainWmma(const StinkyInstruction& inst, bool xdlChain) {
+    return xdlChain ? isXDLWMMA(inst) : isAnyWmma(inst);
+}
+
+const StinkyInstruction* adjacentWmmaInBlock(const StinkyInstruction& from, bool forward,
+                                             bool xdlChain) {
     for (IRBase* node = forward ? from.getNext() : from.getPrev(); node;
          node = forward ? node->getNext() : node->getPrev()) {
         auto* inst = dyn_cast<StinkyInstruction>(node);
         if (!inst || isPseudoInst(inst)) continue;
         if (isCall(*inst)) return nullptr;
-        if (isXDLWMMA(*inst)) return inst;
+        if (isChainWmma(*inst, xdlChain)) return inst;
     }
     return nullptr;
 }
 
-// The nearest XDL WMMA before `from` on every path; from the block end when null.
-void collectPrevWmmas(BasicBlock& bb, const StinkyInstruction* from,
+// The nearest chain WMMA before `from` on every path; from the block end when null.
+void collectPrevWmmas(BasicBlock& bb, const StinkyInstruction* from, bool xdlChain,
                       std::unordered_set<const BasicBlock*>& visited,
                       std::vector<const StinkyInstruction*>& prev) {
     for (IRBase* node = from ? from->getPrev() : bb.getTerminator(); node; node = node->getPrev()) {
         auto* inst = dyn_cast<StinkyInstruction>(node);
         if (!inst || isPseudoInst(inst)) continue;
         if (isCall(*inst)) return;
-        if (isXDLWMMA(*inst)) {
+        if (isChainWmma(*inst, xdlChain)) {
             prev.push_back(inst);
             return;
         }
     }
     for (BasicBlock* pred : bb.getPredecessors())
-        if (visited.insert(pred).second) collectPrevWmmas(*pred, nullptr, visited, prev);
+        if (visited.insert(pred).second) collectPrevWmmas(*pred, nullptr, xdlChain, visited, prev);
 }
 
-std::vector<const StinkyInstruction*> prevWmmas(BasicBlock& bb, const StinkyInstruction& wmma) {
+std::vector<const StinkyInstruction*> prevWmmas(BasicBlock& bb, const StinkyInstruction& wmma,
+                                                bool xdlChain) {
     std::unordered_set<const BasicBlock*> visited;
     std::vector<const StinkyInstruction*> prev;
-    collectPrevWmmas(bb, &wmma, visited, prev);
+    collectPrevWmmas(bb, &wmma, xdlChain, visited, prev);
     return prev;
 }
 
 // The in-place chain ending at `last`, oldest first. Empty when it continues from
 // another block, where its pairing cannot be checked.
 std::vector<const StinkyInstruction*> inBlockChain(BasicBlock& bb, const StinkyInstruction& last) {
+    const bool xdlChain = isXDLWMMA(last);
     std::vector<const StinkyInstruction*> chain{&last};
     for (;;) {
         const StinkyInstruction& head = *chain.back();
-        const StinkyInstruction* prev = adjacentWmmaInBlock(head, /*forward=*/false);
+        const StinkyInstruction* prev = adjacentWmmaInBlock(head, /*forward=*/false, xdlChain);
         if (!prev) {
-            for (const StinkyInstruction* p : prevWmmas(bb, head))
+            for (const StinkyInstruction* p : prevWmmas(bb, head, xdlChain))
                 if (accumulatesInPlace(*p, head)) return {};
             break;
         }
@@ -226,7 +242,8 @@ Verdict pairedVerdict(BasicBlock& bb, const StinkyInstruction& wmma) {
         if (!differentAB(*chain[i], wmma))
             return {"needs different A and B from its pair and the previous pair"};
     if (pos % 2 == 0) {
-        const StinkyInstruction* next = adjacentWmmaInBlock(wmma, /*forward=*/true);
+        const StinkyInstruction* next =
+            adjacentWmmaInBlock(wmma, /*forward=*/true, isXDLWMMA(wmma));
         if (!next || !accumulatesInPlace(wmma, *next)) return {"must be paired with the next WMMA"};
     }
     return {};
@@ -246,16 +263,19 @@ Verdict inPlaceVerdict(BasicBlock& bb, const StinkyInstruction& prev,
 
 void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma,
                               bool abortOnViolation) {
-    for (const StinkyInstruction* prev : prevWmmas(bb, wmma)) {
+    const bool xdl = isXDLWMMA(wmma);
+    for (const StinkyInstruction* prev : prevWmmas(bb, wmma, xdl)) {
         if (!accumulatesInPlace(*prev, wmma)) continue;
         const Verdict verdict = inPlaceVerdict(bb, *prev, wmma);
         if (!verdict.reason) continue;
-        std::cerr << "[InsertCoexecHazardPass] " << (verdict.confirmed ? "error" : "warning")
+        const bool confirmed = verdict.confirmed && xdl;
+        std::cerr << "[InsertCoexecHazardPass] " << (confirmed ? "error" : "warning")
                   << ": WMMA in function \"" << func.getName() << "\" block \"" << bb.getLabel()
-                  << "\" accumulates the previous WMMA's D in place: " << verdict.reason << "\n";
+                  << "\" accumulates the previous WMMA's D in place: " << verdict.reason
+                  << (xdl ? "" : "; the rule is unconfirmed for non-XDL WMMAs") << "\n";
         prev->dump(std::cerr);
         wmma.dump(std::cerr);
-        if (verdict.confirmed && abortOnViolation)
+        if (confirmed && abortOnViolation)
             report_fatal_error("InsertCoexecHazardPass: in-place WMMA accumulation in '" +
                                func.getName() + "': " + verdict.reason);
         return;
@@ -418,10 +438,11 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                     continue;
                 }
 
+                if (isGfx125(archId_) && isAnyWmma(*inst))
+                    checkInPlaceAccumulation(func, bb, *inst, abortOnInPlaceAccumulation_);
+
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
-                    if (isGfx125(archId_))
-                        checkInPlaceAccumulation(func, bb, *inst, abortOnInPlaceAccumulation_);
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
                                                             /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::TRANS,

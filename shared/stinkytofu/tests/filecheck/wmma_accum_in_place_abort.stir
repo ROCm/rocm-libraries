@@ -2,7 +2,18 @@
 # XFAIL: report_fatal_error aborts stinkytofu-opt.
 #
 # Without reportOnly, a broken in-place WMMA accumulation rule stops codegen at
-# the first case, so the second function is never checked.
+# the first case, so the second function is never checked. A non-XDL WMMA only
+# warns, so codegen goes on past it.
+
+#--- f32 has no exception, but the rule is unconfirmed for non-XDL WMMAs.
+# CHECK: warning: WMMA in function "non_xdl" block "entry"
+# CHECK-SAME: switch the accumulator; the rule is unconfirmed for non-XDL WMMAs
+st.func @non_xdl() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x4_f32"(v[20:21], v[22:23], v[0:7]) {}
+  v[0:7] = "st.v_wmma_f32_16x16x4_f32"(v[24:25], v[26:27], v[0:7]) {}
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
 
 #--- f8 K=64 has no exception.
 # CHECK: error: WMMA in function "first" block "entry"
