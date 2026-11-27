@@ -7,7 +7,7 @@ not derive it from any engine; each engine's support claims decide which cases
 it runs. The one place the plan rests on an engine is the trims T8, T9 and T11
 (§4.3), which come from measured MIOpen runs. Backward-data (`ConvolutionBwd`)
 and weight gradient (`ConvolutionWrw`) are out of scope; each gets its own plan
-in this folder (`convolution-bwd.md`, `convolution-wrw.md`).
+in this folder ([convolution-bwd.md](convolution-bwd.md), `convolution-wrw.md`).
 
 The plan follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (Per-Op Test Plans); [§8](#8-how-the-sweep-was-built) states the method this plan used.
 See [the test-plans index](README.md) for the plans and the tier definitions.
