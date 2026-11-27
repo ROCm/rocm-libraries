@@ -3703,9 +3703,11 @@ class IRBuilder:
         value: Value,
         *,
         ordering: str = "monotonic",
+        scope: Optional[str] = None,
     ) -> Value:
         """Atomic add into a global tensor; returns the value at the slot
-        *before* the add (LLVM ``atomicrmw add`` semantics).
+        *before* the add (LLVM ``atomicrmw add`` semantics). ``scope`` (None =
+        the lowering default, system) picks the sync scope of the operation.
 
         Supports ``i32`` and ``f32`` operands. Used by the MoE sort
         kernel and FMHA backward (fp32 dQ accumulate across the K loop).
@@ -3716,11 +3718,16 @@ class IRBuilder:
             )
         if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
             raise ValueError(f"unknown ordering {ordering!r}")
+        attrs = {"elem_type": value.type.name, "ordering": ordering}
+        if scope is not None:
+            if scope not in _FENCE_SCOPES:
+                raise ValueError(f"unknown atomic scope {scope!r}")
+            attrs["scope"] = scope
         return self._op(
             "memref.global_atomic_add",
             [ptr, idx, value],
             [value.type],
-            attrs={"elem_type": value.type.name, "ordering": ordering},
+            attrs=attrs,
             result_name_hint="atom_add",
         ).result
 
@@ -3903,6 +3910,41 @@ class IRBuilder:
             [ptr, idx, expect],
             attrs={"scope": scope},
         )
+
+    def global_flag_wait_ge_bounded(
+        self,
+        ptr: Value,
+        idx: Value,
+        expect: Value,
+        max_polls: Value,
+        *,
+        scope: str = "agent",
+        ordering: str = "acquire",
+    ) -> Value:
+        """Bounded spin until the i32 flag ``ptr[idx] >= expect``.
+
+        Like :meth:`global_flag_wait_eq` (acquire load at ``scope`` in a
+        self-contained loop) but gives up after ``max_polls`` polls. Returns
+        the last observed flag value, so the caller detects a timeout with
+        ``result < expect`` and can raise an error flag instead of hanging.
+        """
+        _check_flag_ptr("global_flag_wait_ge_bounded", ptr)
+        for what, v in (("expect", expect), ("max_polls", max_polls), ("idx", idx)):
+            if v.type.name != "i32":
+                raise ValueError(
+                    f"global_flag_wait_ge_bounded expects an i32 {what}, got {v.type.name}"
+                )
+        if scope not in _FENCE_SCOPES:
+            raise ValueError(f"unknown flag scope {scope!r}")
+        if ordering not in ("acquire", "monotonic"):
+            raise ValueError(f"unknown flag wait ordering {ordering!r}")
+        return self._op(
+            "memref.global_flag_wait_ge_bounded",
+            [ptr, idx, expect, max_polls],
+            [I32],
+            attrs={"scope": scope, "ordering": ordering},
+            result_name_hint="flag_seen",
+        ).result
 
     def fp16_zero(self) -> Value:
         return self._op(

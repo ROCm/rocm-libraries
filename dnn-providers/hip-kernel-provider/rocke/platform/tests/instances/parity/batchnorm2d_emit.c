@@ -110,6 +110,15 @@ static const bn_cfg_t CONFIGS[] = {
     {4, 4, 7, 7, 256, 2, "f16", true, false, 1, 4, false, true},
     {4, 4, 16, 16, 256, 2, "f16", false, false, 1, 2, false, true},
     {4, 8, 14, 14, 256, 2, "bf16", true, true, 2, 2, true, true},
+    /* 50..55 f32 data (static and dynamic) */
+    {2, 8, 14, 14, 256, 4, "f32", true, false, 1, 1, false, true},
+    {1, 16, 8, 8, 64, 2, "f32", false, false, 1, 1, false, true},
+    {2, 8, 16, 16, 64, 2, "f32", true, true, 1, 1, true, true},
+    {4, 8, 14, 14, 256, 4, "f32", true, true, 2, 2, false, true},
+    {2, 8, 16, 16, 64, 2, "f32", true, true, 1, 1, false},
+    {2, 8, 16, 16, 64, 4, "f32", false, false, 1, 1, false},
+    /* 56 dynamic, 16-bit, shipped vec=8 / block 512 class */
+    {2, 8, 7, 7, 512, 8, "bf16", true, true, 1, 1, true, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))

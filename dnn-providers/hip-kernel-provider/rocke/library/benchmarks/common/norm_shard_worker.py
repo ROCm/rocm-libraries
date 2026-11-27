@@ -75,8 +75,12 @@ def rocke_case_key(case: dict) -> str:
     """
     dims = dict(case["dims"])
     if case["family"] == "bnorm":
-        return case_key(dims, dtype=case["dtype"], family="batchnorm2d",
-                         extra=f"training={case['mode'] == 'training'}")
+        return case_key(
+            dims,
+            dtype=case["dtype"],
+            family="batchnorm2d",
+            extra=f"training={case['mode'] == 'training'}",
+        )
     return case_key(dims, dtype=case["dtype"], family="norm2d", extra="kind=layernorm")
 
 
@@ -86,23 +90,60 @@ def run_miopen_case(case: dict, *, timeout: int = 120) -> Optional[float]:
     if binary is None:
         return None
     dims = dict(case["dims"])
-    dtype_token = "fp16" if case["dtype"] == "fp16" else "bfp16"
+    # MIOpenDriver spells the fp32 driver plainly ``bnorm`` (no dtype suffix).
+    from benchmarks.common.parse_norm_miopen import BNORM_DTYPES
+
+    dtype_token = {v: k[len("bnorm") :] for k, v in BNORM_DTYPES.items()}[case["dtype"]]
     if case["family"] == "bnorm":
         forw = "2" if case["mode"] == "inference" else "1"
         save = "1" if case["mode"] == "training" else "0"
         argv = [
-            binary, f"bnorm{dtype_token}", "-F", forw,
-            "-n", str(dims["n"]), "-c", str(dims["c"]),
-            "-H", str(dims["h"]), "-W", str(dims["w"]),
-            "-m", "1", "-r", "1", "-s", save,
-            "-t", "1", "-w", "1", "-V", "0", "-i", "20",
+            binary,
+            f"bnorm{dtype_token}",
+            "-F",
+            forw,
+            "-n",
+            str(dims["n"]),
+            "-c",
+            str(dims["c"]),
+            "-H",
+            str(dims["h"]),
+            "-W",
+            str(dims["w"]),
+            "-m",
+            "1",
+            "-r",
+            "1",
+            "-s",
+            save,
+            "-t",
+            "1",
+            "-w",
+            "1",
+            "-V",
+            "0",
+            "-i",
+            "20",
         ]
         pattern = _MIOPEN_BN_RE
     else:
         argv = [
-            binary, f"layernorm{dtype_token}", "-F", "1",
-            "-X", f"{dims['rows']}x{dims['cols']}",
-            "-o", "1", "-t", "1", "-w", "1", "-V", "0", "-i", "20",
+            binary,
+            f"layernorm{dtype_token}",
+            "-F",
+            "1",
+            "-X",
+            f"{dims['rows']}x{dims['cols']}",
+            "-o",
+            "1",
+            "-t",
+            "1",
+            "-w",
+            "1",
+            "-V",
+            "0",
+            "-i",
+            "20",
         ]
         pattern = _MIOPEN_LN_RE
 
@@ -111,7 +152,9 @@ def run_miopen_case(case: dict, *, timeout: int = 120) -> Optional[float]:
     env = dict(os.environ)
     env.update(_MIOPEN_ENV_EXTRA)
     try:
-        proc = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(
+            argv, env=env, capture_output=True, text=True, timeout=timeout
+        )
     except (subprocess.TimeoutExpired, OSError):
         return None
     m = pattern.search(proc.stdout + "\n" + proc.stderr)
@@ -132,15 +175,32 @@ def case_argv(case: dict, *, arch: str, dtype: str) -> list:
     if case["family"] == "bnorm":
         dims = dict(case["dims"])
         return [
-            "--n", str(dims["n"]), "--c", str(dims["c"]),
-            "--h", str(dims["h"]), "--w", str(dims["w"]),
+            "--n",
+            str(dims["n"]),
+            "--c",
+            str(dims["c"]),
+            "--h",
+            str(dims["h"]),
+            "--w",
+            str(dims["w"]),
             "--training" if case["mode"] == "training" else "--inference",
-            "--dtype", dtype, "--arch", arch,
+            "--dtype",
+            dtype,
+            "--arch",
+            arch,
         ]
     dims = dict(case["dims"])
     return [
-        "--rows", str(dims["rows"]), "--cols", str(dims["cols"]),
-        "--kind", "layernorm", "--dtype", dtype, "--arch", arch,
+        "--rows",
+        str(dims["rows"]),
+        "--cols",
+        str(dims["cols"]),
+        "--kind",
+        "layernorm",
+        "--dtype",
+        dtype,
+        "--arch",
+        arch,
     ]
 
 
@@ -149,14 +209,18 @@ def case_label(case: dict) -> str:
     return f"{case['family']}/{case['dtype']}/{case['mode']}/{dims}"
 
 
-def run_one_case(case: dict, *, script: Path, arch: str, forwarded: Sequence[str]) -> dict:
+def run_one_case(
+    case: dict, *, script: Path, arch: str, forwarded: Sequence[str]
+) -> dict:
     """Run one case in its own subprocess; return ``{rows, rc, stderr_tail}``."""
     with tempfile.TemporaryDirectory(prefix="rocke-norm-case-") as tmp:
         tmp_results = Path(tmp) / "case.jsonl"
         argv = [
-            sys.executable, str(script),
+            sys.executable,
+            str(script),
             *case_argv(case, arch=arch, dtype=case["dtype"]),
-            "--results", str(tmp_results),
+            "--results",
+            str(tmp_results),
             *forwarded,
         ]
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=600)
@@ -179,13 +243,24 @@ def run_one_case(case: dict, *, script: Path, arch: str, forwarded: Sequence[str
 def make_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--family", choices=sorted(_SCRIPTS), required=True)
-    ap.add_argument("--cases", required=True, metavar="FILE",
-                    help="JSON Lines of ParsedCase dicts, this shard's share")
-    ap.add_argument("--results", required=True, metavar="FILE",
-                    help="JSON Lines this shard appends one row per candidate to")
+    ap.add_argument(
+        "--cases",
+        required=True,
+        metavar="FILE",
+        help="JSON Lines of ParsedCase dicts, this shard's share",
+    )
+    ap.add_argument(
+        "--results",
+        required=True,
+        metavar="FILE",
+        help="JSON Lines this shard appends one row per candidate to",
+    )
     ap.add_argument("--arch", default="gfx950")
-    ap.add_argument("forwarded", nargs=argparse.REMAINDER,
-                    help="forwarded verbatim to the AOT script, e.g. --fast-rank")
+    ap.add_argument(
+        "forwarded",
+        nargs=argparse.REMAINDER,
+        help="forwarded verbatim to the AOT script, e.g. --fast-rank",
+    )
     return ap
 
 
@@ -205,10 +280,14 @@ def main(argv=None) -> int:
         for i, case in enumerate(cases):
             label = case_label(case)
             print(f"[{i + 1}/{len(cases)}] {label}", flush=True)
-            outcome = run_one_case(case, script=script, arch=args.arch, forwarded=forwarded)
+            outcome = run_one_case(
+                case, script=script, arch=args.arch, forwarded=forwarded
+            )
             if outcome["rc"] != 0:
                 rc_all = rc_all or outcome["rc"]
-                print(f"  FAIL rc={outcome['rc']}\n{outcome['stderr_tail']}", flush=True)
+                print(
+                    f"  FAIL rc={outcome['rc']}\n{outcome['stderr_tail']}", flush=True
+                )
                 continue
             best = None
             for row in outcome["rows"]:

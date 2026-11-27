@@ -221,6 +221,14 @@ static rocke_value_t* rocke_red_warp_xor_reduce(rocke_ir_builder_t* b,
     return cur;
 }
 
+rocke_value_t* rocke_warp_xor_reduce(rocke_ir_builder_t* b,
+                                     rocke_value_t* val,
+                                     rocke_reduce_combine_t combine,
+                                     int wave_size)
+{
+    return rocke_red_warp_xor_reduce(b, val, combine, wave_size);
+}
+
 /* --------------------------------------------------------- block_lds_reduce */
 
 rocke_value_t* rocke_block_lds_reduce(rocke_ir_builder_t* b,
@@ -744,7 +752,8 @@ int rocke_welford_block_reduce_stable_wave_prologue(rocke_ir_builder_t* b,
             m2_r = rocke_b_warp_shuffle_xor(b, m2_w, mask);
             cnt_r = rocke_b_warp_shuffle_xor(b, cnt_w, mask);
         }
-        rocke_red_welford_merge_pair(b, mean_w, m2_w, cnt_w, mean_r, m2_r, cnt_r, &mean_w, &m2_w, &cnt_w);
+        rocke_red_welford_merge_pair(
+            b, mean_w, m2_w, cnt_w, mean_r, m2_r, cnt_r, &mean_w, &m2_w, &cnt_w);
     }
 
     num_warps = block_size / wave_size;

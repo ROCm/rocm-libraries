@@ -92,6 +92,16 @@ typedef rocke_value_t* (*rocke_combine_fn)(rocke_ir_builder_t* b,
 rocke_value_t* rocke_tree_reduce(
     rocke_ir_builder_t* b, rocke_combine_fn combine, void* user, rocke_value_t* const* xs, int n);
 
+/* _warp_xor_reduce(b, val, combine=..., wave_size=...) analogue: wave-internal
+ * XOR butterfly over `wave_size` lanes (a power of two; it may be smaller than
+ * the hardware wave to reduce within lane groups). Every lane of a group gets
+ * the group's reduction. Returns NULL (and sets sticky error) on a wave_size
+ * that is not a power of two. */
+rocke_value_t* rocke_warp_xor_reduce(rocke_ir_builder_t* b,
+                                     rocke_value_t* val,
+                                     rocke_reduce_combine_t combine,
+                                     int wave_size);
+
 /* --------------------------------------------------------- block_lds_reduce */
 
 /* block_lds_reduce(b, val, lds_buf, tid, block_size, combine) analogue.

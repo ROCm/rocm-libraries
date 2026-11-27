@@ -12,14 +12,16 @@
  *     def io_ir_type(dtype: str) -> Type:
  *         if dtype in ("f16", "fp16"): return F16
  *         if dtype == "bf16":          return BF16
+ *         if dtype == "f32":           return F32
  *         raise ValueError(...)
  *
  * The Python helper takes no IRBuilder and raises ValueError on an unsupported
  * dtype. C99 has no exceptions, so we expose two faithful spellings:
  *
  *   rocke_io_ir_type(dtype)
- *       Pure map. Returns the interned scalar singleton (rocke_f16()/rocke_bf16())
- *       for "f16"/"fp16"/"bf16"; returns NULL for anything else (the analog of
+ *       Pure map. Returns the interned scalar singleton
+ *       (rocke_f16()/rocke_bf16()/rocke_f32()) for "f16"/"fp16"/"bf16"/"f32";
+ *       returns NULL for anything else (the analog of
  *       "raise ValueError"). No error state is set because there is no builder.
  *
  *   rocke_b_io_ir_type(b, dtype)
@@ -40,7 +42,8 @@ extern "C" {
 
 /* Pure dtype-string -> canonical scalar Type.
  *
- * Accepts "f16", "fp16" (alias) -> rocke_f16(); "bf16" -> rocke_bf16().
+ * Accepts "f16", "fp16" (alias) -> rocke_f16(); "bf16" -> rocke_bf16();
+ * "f32" -> rocke_f32().
  * Returns NULL for any other value (the Python ValueError path). f8/i8 paths
  * deliberately do NOT resolve here -- their compute dtype isn't f32 and they go
  * through their own helpers, exactly as in Python. */
@@ -58,7 +61,8 @@ const rocke_type_t* rocke_b_io_ir_type(rocke_ir_builder_t* b, const char* dtype)
  *         target = io_ir_type(dtype)
  *         b.global_store(ptr, idx, b.cast_f32_to(value_f32, target))
  *
- * Truncates an f32 value to `dtype` ("f16"/"fp16"/"bf16") and stores it as one
+ * Truncates an f32 value to `dtype` ("f16"/"fp16"/"bf16"; "f32" stores as is)
+ * and stores it as one
  * scalar global store. Mirrors the Python builder-call sequence exactly:
  *   1. resolve `target` via io_ir_type (builder-aware, so an unsupported dtype
  *      records the same ValueError text on the sticky-error model and returns),
@@ -77,6 +81,7 @@ void rocke_b_store_scalar_from_f32(rocke_ir_builder_t* b,
  *     def load_scalar(b, ptr, idx, *, dtype) -> Value:
  *         if dtype in ("f16", "fp16"): return b.global_load_f16(ptr, idx)
  *         if dtype == "bf16":          return b.global_load_bf16(ptr, idx)
+ *         if dtype == "f32":           return b.global_load_f32(ptr, idx)
  *         raise ValueError(f"unsupported I/O dtype {dtype!r}")
  *
  * One scalar global load returning a value in the native dtype. The Python

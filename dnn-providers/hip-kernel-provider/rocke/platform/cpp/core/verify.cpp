@@ -353,6 +353,7 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
         *n = 2;
         return scope_order_keys;
     case ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ:
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_GE_BOUNDED:
         *n = 1;
         return scope_keys;
     default:
@@ -673,6 +674,40 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         }
         check_sync_attrs(
             v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
+    }
+    else if(o == ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_GE_BOUNDED)
+    {
+        if(op->num_operands != 4 || op->num_results != 1)
+        {
+            v_errf(v,
+                   op,
+                   "%s: expected 4 operands / 1 result, got %d / %d",
+                   name,
+                   op->num_operands,
+                   op->num_results);
+            return;
+        }
+        const rocke_type_t* pt = op->operands[0]->type;
+        if(!pt || pt->kind != ROCKE_TYPE_PTR || !pt->space || strcmp(pt->space, "global")
+           || strcmp(tn(pt->pointee), "i32"))
+        {
+            v_errf(v, op, "%s: expected a global i32 pointer, got %s", name, tn(pt));
+        }
+        const char* what[] = {"index", "expect", "max_polls"};
+        for(int i = 0; i < 3; ++i)
+        {
+            const rocke_type_t* t = op->operands[i + 1]->type;
+            if(strcmp(tn(t), "i32"))
+            {
+                v_errf(v, op, "%s: %s must be i32, got %s", name, what[i], tn(t));
+            }
+        }
+        check_sync_attrs(v, op, NULL);
+        const char* ordering = rocke_attr_get_str(&op->attrs, "ordering");
+        if(ordering && strcmp(ordering, "acquire") && strcmp(ordering, "monotonic"))
+        {
+            v_errf(v, op, "%s: unknown ordering '%s'", name, ordering);
+        }
     }
     else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
     {
