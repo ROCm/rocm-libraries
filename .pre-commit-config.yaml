@@ -575,7 +575,7 @@ repos:
         files: &rocke_emitter_pair_files |
           (?x)^dnn-providers/hip-kernel-provider/rocke/platform/(
             CMakeLists\.txt|cmake/[^/]+|tests/CMakeLists\.txt|tests/cmake/[^/]+|
-            tests/golden/attention_dense_spec_vectors\.json|
+            tests/golden/attention_dense(_gfx950)?_spec_vectors\.json|
             cpp/(?!bindings/).+(?<!\.md)|
             tools/(gen_arch_domain_cpp|gen_cxx_keywords_cpp|run_build_tree_ctest)\.py|
             python/rocke/(
