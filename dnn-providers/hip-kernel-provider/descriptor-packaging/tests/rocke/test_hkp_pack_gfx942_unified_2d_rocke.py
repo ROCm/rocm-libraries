@@ -23,38 +23,13 @@ import pytest
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
 from hkp_pack.kpack_resolver import load_kpack
-from pack_helpers import _run_cli, read_shipped, run_pipeline
+from pack_helpers import _run_cli, marshalled_signature, read_shipped, run_pipeline
 
 ARCH = "gfx942"
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "rocke"
 SOURCE = "kernels/gfx942/attention_tiled_2d.py"
 BUILDER = "build_unified_attention_2d_tiled"
 PREDICATE = "supports_tiled_2d_spec"
-
-# The kernel arguments the native pack marshals, in order (Gfx942AttentionUnified2DNative.cpp).
-PACK_ABI = [
-    ("output_ptr", "global_buffer"),
-    ("query_ptr", "global_buffer"),
-    ("key_cache_ptr", "global_buffer"),
-    ("value_cache_ptr", "global_buffer"),
-    ("sink_ptr", "global_buffer"),
-    ("block_tables_ptr", "global_buffer"),
-    ("seq_lens_ptr", "global_buffer"),
-    ("alibi_slopes_ptr", "global_buffer"),
-    ("qq_bias_ptr", "global_buffer"),
-    ("query_start_len_ptr", "global_buffer"),
-    ("scale", "by_value"),
-    ("k_scale", "by_value"),
-    ("v_scale", "by_value"),
-    ("out_scale", "by_value"),
-    ("softcap", "by_value"),
-    ("num_seqs", "by_value"),
-    ("block_table_stride", "by_value"),
-    ("qq_bias_stride0", "by_value"),
-    ("num_query_heads", "by_value"),
-    ("num_kv_heads", "by_value"),
-    ("sliding_window", "by_value"),
-]
 
 
 def _selected_spec(spec_id, head_size):
@@ -149,6 +124,7 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
     spec_id,
     head_size,
 ):
+    from kernels.common.attention_unified import _tiled_2d_signature
     from kernels.gfx942.attention_tiled_2d import build_unified_attention_2d_tiled
 
     spec = _selected_spec(spec_id, head_size)
@@ -166,15 +142,20 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
     assert ks["kind"] == "kpack"
     assert ks["symbol"] == spec.kernel_name()
 
-    # The signature recorded off the compiled object is the builder's parameter list and
-    # the argument list the native pack marshals, name for name.
+    # The signature recorded off the compiled object is the builder's parameter list, and
+    # that list is the launch signature rocKE declares for the tiled 2D kernels: the one
+    # the native pack's own list is checked against (RockeKernelSignatures.hpp).
     kernel = build_unified_attention_2d_tiled(spec, arch=ARCH)
     kpack, _comp = load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(out / ARCH / ks["library"])
     blob = bytes(archive.get_kernel(ks["toc_key"], ARCH))
     assert ks["signature"] == kernel_signature(blob, ks["symbol"], "t")
-    assert [(a["name"], a["kind"]) for a in ks["signature"]] == PACK_ABI
-    assert [p.name for p in kernel.params] == [name for name, _ in PACK_ABI]
+    assert [(a["name"], a["kind"]) for a in ks["signature"]] == marshalled_signature(
+        kernel
+    )
+    assert [p.name for p in kernel.params] == [
+        p["name"] for p in _tiled_2d_signature(ARCH, spec.dtype)
+    ]
 
     result = _run_cli(str(kdp), "--kpack-python-dir", rocm_kpack_dir, mode="full")
     assert result.returncode == 0, result.stdout + result.stderr

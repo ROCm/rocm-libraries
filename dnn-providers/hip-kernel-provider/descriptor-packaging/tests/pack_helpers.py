@@ -41,6 +41,18 @@ def run_pipeline(**kwargs):
     return pipeline.run_pipeline(generic_targets_json=GENERIC_TARGETS_JSON, **kwargs)
 
 
+def marshalled_signature(kernel):
+    """The argument list a rocKE kernel's params describe, as hkp_pack records it off the
+    compiled object: (name, kind) per param, ``global_buffer`` for a pointer and
+    ``by_value`` for a scalar."""
+    from rocke.core.ir import PtrType
+
+    return [
+        (p.name, "global_buffer" if isinstance(p.type, PtrType) else "by_value")
+        for p in kernel.params
+    ]
+
+
 def _read(path):
     return json.loads(path.read_text(encoding="utf-8"))
 

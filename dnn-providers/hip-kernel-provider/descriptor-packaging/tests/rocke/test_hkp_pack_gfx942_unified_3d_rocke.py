@@ -24,7 +24,7 @@ import pytest
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
 from hkp_pack.kpack_resolver import load_kpack
-from pack_helpers import _run_cli, read_shipped, run_pipeline
+from pack_helpers import _run_cli, marshalled_signature, read_shipped, run_pipeline
 
 ARCH = "gfx942"
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "multi_launch_decode_merge"
@@ -119,16 +119,6 @@ def _pack(
     return out
 
 
-def _expected_signature(kernel):
-    """The marshalled argument list a builder's params describe: names and kinds."""
-    from rocke.core.ir import PtrType
-
-    return [
-        (p.name, "global_buffer" if isinstance(p.type, PtrType) else "by_value")
-        for p in kernel.params
-    ]
-
-
 def test_the_split_kv_module_packs_both_launches_from_one_object(
     tmp_path, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir, rocke_available
 ):
@@ -172,7 +162,7 @@ def test_the_split_kv_module_packs_both_launches_from_one_object(
     ):
         assert ks["signature"] == kernel_signature(blob, ks["symbol"], "t")
         assert [(a["name"], a["kind"]) for a in ks["signature"]] == (
-            _expected_signature(kernel)
+            marshalled_signature(kernel)
         )
     assert segment["signature"] != reduce["signature"]
 
