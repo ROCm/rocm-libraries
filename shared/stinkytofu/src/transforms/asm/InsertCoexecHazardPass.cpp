@@ -244,7 +244,8 @@ Verdict inPlaceVerdict(BasicBlock& bb, const StinkyInstruction& prev,
     return pairedVerdict(bb, wmma);
 }
 
-void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma) {
+void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma,
+                              bool abortOnViolation) {
     for (const StinkyInstruction* prev : prevWmmas(bb, wmma)) {
         if (!accumulatesInPlace(*prev, wmma)) continue;
         const Verdict verdict = inPlaceVerdict(bb, *prev, wmma);
@@ -254,7 +255,7 @@ void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const Stinky
                   << "\" accumulates the previous WMMA's D in place: " << verdict.reason << "\n";
         prev->dump(std::cerr);
         wmma.dump(std::cerr);
-        if (verdict.confirmed)
+        if (verdict.confirmed && abortOnViolation)
             report_fatal_error("InsertCoexecHazardPass: in-place WMMA accumulation in '" +
                                func.getName() + "': " + verdict.reason);
         return;
@@ -297,7 +298,8 @@ bool transOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) 
 class InsertCoexecHazardPass : public StinkyInstPass {
    public:
     static char ID;
-    InsertCoexecHazardPass() = default;
+    explicit InsertCoexecHazardPass(bool abortOnInPlaceAccumulation)
+        : abortOnInPlaceAccumulation_(abortOnInPlaceAccumulation) {}
 
     const char* getName() const override {
         return "InsertCoexecHazardPass";
@@ -418,7 +420,8 @@ class InsertCoexecHazardPass : public StinkyInstPass {
 
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
-                    checkInPlaceAccumulation(func, bb, *inst);
+                    if (isGfx125(archId_))
+                        checkInPlaceAccumulation(func, bb, *inst, abortOnInPlaceAccumulation_);
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
                                                             /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::TRANS,
@@ -467,6 +470,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
 
     GfxArchID archId_ = GfxArchID{};
     const HWModel* hw_ = nullptr;
+    bool abortOnInPlaceAccumulation_;
 };
 
 char InsertCoexecHazardPass::ID = 0;
@@ -474,7 +478,7 @@ char InsertCoexecHazardPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertCoexecHazardPass() {
-    return std::make_unique<InsertCoexecHazardPass>();
+std::unique_ptr<Pass> createInsertCoexecHazardPass(bool abortOnInPlaceAccumulation) {
+    return std::make_unique<InsertCoexecHazardPass>(abortOnInPlaceAccumulation);
 }
 }  // namespace stinkytofu

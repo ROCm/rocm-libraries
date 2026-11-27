@@ -33,7 +33,13 @@ class Pass;
 /// each consumer, scan back for an overlapping XDL/TRANS producer, and space them by
 /// VALU-pipe co-execution slots.
 ///
+/// On gfx12.5 it also checks in-place WMMA accumulation: a WMMA that accumulates the
+/// previous WMMA's D into the same accumulator against its type's rule stops codegen.
+/// With \p abortOnInPlaceAccumulation false it is reported as an error and the pass goes
+/// on, so one run reports every case.
+///
 /// Per-function pass; run over all functions via createFunctionToModuleAdaptor.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertCoexecHazardPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertCoexecHazardPass(
+    bool abortOnInPlaceAccumulation = true);
 
 }  // namespace stinkytofu
