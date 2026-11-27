@@ -273,6 +273,15 @@ def test_an_mlp_data_model_cannot_rank_a_slot(tmp_path):
 
 
 # --- Each rule, broken once ------------------------------------------------------
+def _declarative_udd(doc):
+    del doc["dispatch_symbol"]
+    doc.update(
+        grid={"x": 1, "y": 1, "z": 1},
+        block={"x": 64, "y": 1, "z": 1},
+        args_signature=[],
+    )
+
+
 def _ued(edit):
     return {"fixture.ued": edit}
 
@@ -697,6 +706,13 @@ NEGATIVE_CASES = {
     "uhd_empty_kmds": (
         {"predict_engine.uhd": _ranker_trained(kmds=[])},
         r"trained_against.kmds must be a non-empty array",
+    ),
+    # RFC 0021 §6: a declarative launch passes the workspace base, over the shared
+    # region a slot's kernel must skip.
+    "declarative_slot_udd": (
+        {"dq.udd": _declarative_udd},
+        r"KDP dq.kdp.json of slotted engine 'hipkernel:SlottedFixture' dispatches "
+        r"through UDD dq.udd.json, a declarative launch",
     ),
 }
 

@@ -72,6 +72,13 @@ struct KernelDefinition
     /// before trusting the payload's type, and decodes the metadata itself otherwise.
     std::shared_ptr<const void> prepared;
     KernelPrepareFn preparedBy = nullptr;
+    /// The compiled launch of the pack's UDD when it is declarative, set by the state
+    /// manager for every kernel of such a pack; null for a native UDD. The handler under
+    /// DECLARATIVE_LAUNCH_SYMBOL evaluates it. Shared and immutable, so a plan that copies
+    /// the definition carries the launch with it. Appended after the prepared fields so a
+    /// thirteen-initializer builder written against an earlier SDK keeps its meaning.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
+    std::shared_ptr<const CompiledLaunch> launch = nullptr;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -138,12 +145,15 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, up to eleven initializers at a time (the two
-// trailing prepared fields are set afterwards), so its field count is pinned here the way
-// KernelSource's is in Descriptors.hpp. std::string converts implicitly to
-// std::filesystem::path, so a path field inserted ahead of originDirectory would
-// otherwise compile and silently rebind every initializer after it. Only the count --
-// two same-typed members swapped past each other still brace-initialize.
+// KernelDefinition is built positionally, up to fourteen initializers at a time, so its
+// field count is pinned here the way KernelSource's is in Descriptors.hpp. The first
+// thirteen fields are the hipdnn_plugin_sdk 1.1.0 layout and `launch` is the fourteenth,
+// so a builder written against 1.1.0 still compiles with the same meaning. Two implicit
+// conversions make the order matter: std::string to std::filesystem::path, and
+// std::shared_ptr<const CompiledLaunch> to std::shared_ptr<const void>. A field inserted
+// ahead of either would compile and silently rebind every initializer after it. Only the
+// count is checked -- two same-typed members swapped past each other still
+// brace-initialize.
 static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                DescriptorId,
                                                DescriptorId,
@@ -157,7 +167,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::filesystem::path,
                                                std::map<std::string, KernelSource>,
                                                std::shared_ptr<const void>,
-                                               KernelPrepareFn>
+                                               KernelPrepareFn,
+                                               std::shared_ptr<const CompiledLaunch>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        DescriptorId,
                                                        DescriptorId,
@@ -172,6 +183,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::map<std::string, KernelSource>,
                                                        std::shared_ptr<const void>,
                                                        KernelPrepareFn,
+                                                       std::shared_ptr<const CompiledLaunch>,
                                                        std::string>,
               "KernelDefinition gained or lost a field; append only, then extend this "
               "assertion and every positional construction of it.");

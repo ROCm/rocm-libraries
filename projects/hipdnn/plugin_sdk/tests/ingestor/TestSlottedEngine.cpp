@@ -618,6 +618,35 @@ TEST(TestSlottedEngine, AMultiLaunchSlotBesideSingleLaunchSlotsIsApplicableAndBu
     EXPECT_EQ(fixture.log().launches[1].kernel, testId(0x21));
 }
 
+// A slot handler's workspaceBytes is asked only about admitted kernels, so BAD_PARAM from it
+// is a fault, not a decline: the engine's maximum fails, with or without a workspace limit,
+// rather than leaving out the refusing kernel's scratch.
+TEST(TestSlottedEngine, BadParamFromASlotHandlersWorkspaceBytesFailsTheEnginesMaximum)
+{
+    const Kernels kernels{{{0x11, "prep_a", 64, 0}},
+                          {{0x21, "dkdv_a", 64, 4096}},
+                          {{0x31, "dq_refuses", 64, -1}, {0x32, "dq_small", 128, 100}}};
+    SlottedEngineFixture fixture(kernels);
+    const TestGraph graph(makeGraphId(1));
+    const StubHandle handle;
+
+    for(const auto& settings :
+        {Settings{}, Settings{{hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 9000}}})
+    {
+        SCOPED_TRACE(settings.empty() ? "unlimited" : "limited");
+        const Config config(settings);
+        try
+        {
+            static_cast<void>(fixture.engine().getMaxWorkspaceSize(handle, graph, config.get()));
+            ADD_FAILURE() << "getMaxWorkspaceSize left out the refusing kernel";
+        }
+        catch(const HipdnnPluginException& ex)
+        {
+            EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << ex.getMessage();
+        }
+    }
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

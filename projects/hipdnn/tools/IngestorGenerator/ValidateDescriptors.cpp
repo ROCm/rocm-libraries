@@ -31,6 +31,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
@@ -56,7 +57,9 @@
  * typed registration (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
  * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle. A UED whose
  * `graph_match` uses the `nodes` arm needs no stub: the loader compiles its pattern
- * against the op-schema registry while reading the file.
+ * against the op-schema registry while reading the file. A declarative UDD names no
+ * symbol: the loader gives it the reserved `DECLARATIVE_LAUNCH_SYMBOL`, which every
+ * provider registers once, so the validator registers one stub under it too.
  *
  * Every UHD bound through a role map, for every architecture and metric, is also admitted
  * as the runtime admits that role: KMD fields and `features_hash` must match, kernel-scoped
@@ -258,10 +261,12 @@ void forEachRoleModel(const std::map<std::string, std::vector<DescriptorId>>& re
 
 /// Every native symbol name one DescriptorSet references, across all its hook kinds:
 /// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
-/// `matcher.scope` onto the graph- or kernel-scoped registry), every
+/// `matcher.scope` onto the graph- or kernel-scoped registry), every native
 /// `dispatches[].dispatchSymbol`, and the `native.symbol` of every native UHD any role
 /// map binds, for every architecture. Harvested from pass 1's unresolved-symbol sets,
-/// before any stub is registered.
+/// before any stub is registered. Declarative matchers and dispatches are skipped: their
+/// formulas name no symbol, and a declarative UDD's reserved symbol is registered by
+/// registerStubs regardless.
 ///
 /// `dispatch` also carries, per symbol, the launch names (the keys of `sources`) of the
 /// first kernel found under a pack that binds it, `nullopt` until one is found. The stub
@@ -293,6 +298,11 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         }
         for(const auto& matcher : set.matchers)
         {
+            // A declarative matcher names no symbol for a stub to stand in for.
+            if(matcher.criteria != nullptr)
+            {
+                continue;
+            }
             if(matcher.scope == MatchScope::GRAPH)
             {
                 harvested.graphCriterion.insert(matcher.matchSymbol);
@@ -304,6 +314,12 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         }
         for(const auto& dispatch : set.dispatches)
         {
+            // A declarative dispatch carries the reserved symbol, not one a stub stands in
+            // for.
+            if(dispatch.launch != nullptr)
+            {
+                continue;
+            }
             harvested.dispatch.try_emplace(dispatch.dispatchSymbol);
         }
         // A slotted engine's packs live on its slots (RFC 0021 §4), each bound to its own
@@ -315,7 +331,8 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
                     set.dispatches.begin(), set.dispatches.end(), [&](const DispatchDescriptor& d) {
                         return d.id == pack.dispatchId;
                     });
-                if(bound == set.dispatches.end() || pack.kernels.empty())
+                if(bound == set.dispatches.end() || bound->launch != nullptr
+                   || pack.kernels.empty())
                 {
                     continue;
                 }
@@ -359,11 +376,20 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
 
 std::map<std::string, StubDispatchHandler> stubDispatchHandlers;
 
-/// Registers a no-op stub per unique harvested name into each registry. `harvestSymbols`
-/// pre-dedupes into `std::set`s, which is required: two descriptor sets may legally
-/// share a symbol name and `NativeRegistry::registerSymbol` throws on a duplicate.
+/// Stands in for the provider's declarative-launch handler. Single launch, like the real
+/// one, so a declarative pack's multi-launch kernel is dropped and reported here as it is
+/// at runtime.
+StubDispatchHandler declarativeLaunchStub;
+
+/// Registers a no-op stub per unique harvested name into each registry, plus the
+/// declarative-launch stub under DECLARATIVE_LAUNCH_SYMBOL. `harvestSymbols` pre-dedupes
+/// into `std::set`s, which is required: two descriptor sets may legally share a symbol
+/// name and `NativeRegistry::registerSymbol` throws on a duplicate. No harvested name
+/// collides with the reserved one, which the loader refuses as an authored symbol.
 void registerStubs(const HarvestedSymbols& harvested)
 {
+    DispatchRegistry<ValidatorHandle>::registerSymbol(std::string(DECLARATIVE_LAUNCH_SYMBOL),
+                                                      &declarativeLaunchStub);
     for(const auto& symbol : harvested.graphMatch)
     {
         GraphMatchRegistry::registerSymbol(symbol, &stubGraphMatch);

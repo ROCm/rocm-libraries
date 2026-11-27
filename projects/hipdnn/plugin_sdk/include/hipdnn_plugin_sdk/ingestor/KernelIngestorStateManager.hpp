@@ -27,9 +27,12 @@
 
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
@@ -54,7 +57,8 @@ struct KernelDispatcher
     const IKernelDispatchHandler<THandle>* handler = nullptr;
 };
 
-/// A UMD plus the native function its matchSymbol resolved to at construction.
+/// A UMD plus the native functions its matchSymbol resolved to at construction. The
+/// functions stay null for a declarative UMD, whose compiled criteria the descriptor holds.
 struct ResolvedMatcher
 {
     MatchDescriptor descriptor;
@@ -239,12 +243,12 @@ public:
     /// An unslotted engine: one implicit slot.
     /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
     ///         that compete at the same arch tier on a device.
-    /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
-    /// build does not ship.
+    /// @throws std::runtime_error a native UMD or the engine's graph_match names a symbol
+    ///         this build does not ship.
     ///
     /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
-    /// isApplicable().
+    /// isApplicable(). Declarative criteria arrive already compiled.
     /// @param describedBy Names the engine in the graph_match resolution failure, which
     ///        is the only one of the three that has no descriptor of its own to name:
     ///        the symbol lives on the UED, so without this the diagnostic would carry
@@ -395,6 +399,13 @@ public:
         return _graphMatch;
     }
 
+    /// True when any UMD is declarative, so a catalog build resolves `$device.*` for it.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
+    bool readsCriteria() const
+    {
+        return _readsCriteria;
+    }
+
     /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
     /// order the packs first list them.
     const std::vector<ResolvedCandidateFilter>& candidateFilters() const
@@ -459,7 +470,11 @@ private:
             const auto id = matcher.id;
             const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
             ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr, nullptr};
-            if(resolved.descriptor.scope == MatchScope::GRAPH)
+            if(resolved.descriptor.criteria != nullptr)
+            {
+                _readsCriteria = true;
+            }
+            else if(resolved.descriptor.scope == MatchScope::GRAPH)
             {
                 resolved.graphFn
                     = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
@@ -589,10 +604,12 @@ private:
 
             std::vector<KernelDefinition> packDefinitions;
             packDefinitions.reserve(pack.kernels.size());
+            const auto& packDispatch = _dispatches.find(pack.dispatchId)->second;
             // What this pack's native handler launches, read once per pack. The empty set is
             // a single-launch handler, which reads `kernel_source`.
-            const std::set<std::string> handlerLaunches
-                = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
+            const std::set<std::string> handlerLaunches = packDispatch.handler->launchNames();
+            // Null for a native UDD. A declarative one is attached to every kernel it keeps.
+            const auto& packLaunch = packDispatch.descriptor.launch;
             // What this pack has claimed so far, so a slotted engine can release it when a
             // later kernel of the pack is refused. Left empty for an unslotted engine, which
             // throws instead.
@@ -608,9 +625,22 @@ private:
                 }
                 refusal = std::move(message);
             };
+            // RFC 0021 §6: a slot's kernel finds its scratch past the shared region through the
+            // offset tokens, which only a native handler reads. A declarative launch passes the
+            // workspace base, so its kernels would write over the shared region.
+            if(_slotted && packLaunch != nullptr)
+            {
+                refuse(describeDescriptor("dispatch", packDispatch.descriptor.name, pack.dispatchId)
+                       + " is a declarative launch, which a slotted engine cannot use: its "
+                         "workspace arguments are not offset past the shared region");
+            }
 
             for(const auto& kernel : pack.kernels)
             {
+                if(!refusal.empty())
+                {
+                    break;
+                }
                 const auto isAdaptable = [](const KernelSource& source) {
                     return source.kind == KernelSourceKind::EMBEDDED_SOURCE
                            || source.kind == KernelSourceKind::KPACK;
@@ -658,6 +688,51 @@ private:
                                      << "; a variant with a different launch set belongs in its"
                                         " own pack, dropping it");
                     continue;
+                }
+
+                // A declarative launch runs precompiled code only: its formulas carry no
+                // compile options, so source compiled at plan-build time has nothing to read.
+                // And it marshals the arguments its args_signature lists, so a kernel whose
+                // packaged signature disagrees in count, kind or size could never launch. A
+                // packaged signature that records argument names must also carry the
+                // authored names in order, or the launch would pass operands to the wrong
+                // parameters; clang records none for an `extern "C"` kernel, and those
+                // arguments match on kind and size alone. An empty packaged signature is a
+                // kernel that takes no arguments.
+                if(packLaunch != nullptr)
+                {
+                    if(kernel.source.kind == KernelSourceKind::EMBEDDED_SOURCE)
+                    {
+                        HIPDNN_PLUGIN_LOG_ERROR(
+                            "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                         << " is EMBEDDED_SOURCE, but "
+                                         << describeDescriptor("pack", pack.name, pack.id)
+                                         << " launches it through a declarative UDD, which runs"
+                                            " precompiled kernels only; dropping it");
+                        continue;
+                    }
+                    const auto& packaged = kernel.source.signature;
+                    const auto& declared = packLaunch->signature();
+                    const bool agrees
+                        = std::equal(packaged.begin(),
+                                     packaged.end(),
+                                     declared.begin(),
+                                     declared.end(),
+                                     [](const KernelArgument& lhs, const KernelArgument& rhs) {
+                                         return lhs.kind == rhs.kind && lhs.size == rhs.size
+                                                && (lhs.name.empty() || lhs.name == rhs.name);
+                                     });
+                    if(!agrees)
+                    {
+                        HIPDNN_PLUGIN_LOG_ERROR(
+                            "ingestor: "
+                            << describeDescriptor("kernel", kernel.name, kernel.id)
+                            << " takes the arguments " << describeKernelSignature(packaged)
+                            << ", but the declarative UDD of "
+                            << describeDescriptor("pack", pack.name, pack.id) << " passes "
+                            << describeKernelSignature(declared) << "; dropping it");
+                        continue;
+                    }
                 }
 
                 auto key = completeMetadata(slot.schema, kernel);
@@ -724,7 +799,8 @@ private:
                                                            // prepareDefinitions() fills these
                                                            // in once every slot is indexed.
                                                            nullptr,
-                                                           nullptr});
+                                                           nullptr,
+                                                           packLaunch});
             }
 
             if(!refusal.empty())
@@ -911,7 +987,9 @@ private:
                 for(const auto& matcherId : pack.matcherIds)
                 {
                     const auto& matcher = _matchers.at(matcherId);
+                    // A declarative matcher names no symbol a filter could be registered under.
                     if(matcher.descriptor.scope != MatchScope::KERNEL
+                       || matcher.descriptor.criteria != nullptr
                        || !visited.insert(matcherId).second)
                     {
                         continue;
@@ -958,6 +1036,8 @@ private:
     /// order the packs first list them. Resolved at construction, like the matchers: the
     /// registry is immutable once the provider loaded, and absence means no refinement.
     std::vector<ResolvedCandidateFilter> _candidateFilters;
+    /// True when any UMD is declarative, so a catalog build resolves `$device.*` for it.
+    bool _readsCriteria = false;
 };
 
 template <typename THandle>
@@ -975,12 +1055,12 @@ public:
     /// An unslotted engine: one implicit slot.
     /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
     ///         that compete at the same arch tier on a device.
-    /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
-    /// build does not ship.
+    /// @throws std::runtime_error a native UMD or the engine's graph_match names a symbol
+    ///         this build does not ship.
     ///
     /// Matcher, dispatch, and graph_match symbols resolve here, eagerly, so a missing
     /// one excludes this engine at construction instead of throwing later from
-    /// isApplicable().
+    /// isApplicable(). Declarative criteria arrive already compiled.
     /// @param describedBy Names the engine in the graph_match resolution failure, which
     ///        is the only one of the three that has no descriptor of its own to name:
     ///        the symbol lives on the UED, so without this the diagnostic would carry
@@ -2509,6 +2589,14 @@ private:
                           GraphMatcherMemo& graphVerdicts) const
     {
         Catalog catalog;
+        // The `$device.*` values criteria read, resolved once per slot's catalog build and
+        // only for an engine that has criteria to read them.
+        std::optional<CriteriaDevice> criteriaDevice;
+        if(_state->readsCriteria())
+        {
+            criteriaDevice.emplace(context.deviceProperties);
+        }
+        const MatcherInputs inputs{context, bound, criteriaDevice};
 
         for(size_t packIndex = firstPack; packIndex < slot.packs.size(); ++packIndex)
         {
@@ -2520,7 +2608,7 @@ private:
                 continue;
             }
 
-            if(!graphLevelMatchersPass(pack, context, graphVerdicts, bound))
+            if(!graphLevelMatchersPass(pack, inputs, graphVerdicts))
             {
                 HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "pack " << toString(pack.id)
                                                   << " declined at a graph-scoped matcher");
@@ -2546,7 +2634,8 @@ private:
 
                 // Referenced, not rebuilt or copied: every field was settled at
                 // construction, and `definitions` never changes after it.
-                if(kernelLevelMatchersPass(pack, context, bound, precomputed))
+                if(kernelLevelMatchersPass(pack, inputs, precomputed)
+                   && declarativeLaunchResolves(inputs, precomputed))
                 {
                     catalog.entries.push_back(&precomputed);
                     ++admitted;
@@ -2555,10 +2644,11 @@ private:
 
             if(admitted == 0)
             {
-                HIPDNN_PLUGIN_LOG_INFO(_logPrefix
-                                       << "pack " << toString(pack.id) << " admitted no kernel of "
-                                       << pack.kernels.size()
-                                       << " at the arch gate or a kernel-scoped matcher");
+                HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "pack " << toString(pack.id)
+                                                  << " admitted no kernel of "
+                                                  << pack.kernels.size()
+                                                  << " at the arch gate, a kernel-scoped matcher"
+                                                     " or its declarative launch");
                 continue;
             }
 
@@ -2714,10 +2804,31 @@ private:
         entries.resize(kept);
     }
 
+    /// What every matcher of one catalog build reads besides the candidate kernel.
+    struct MatcherInputs
+    {
+        const MatchContext& context;
+        const BoundTokens& bound;
+        /// Set whenever the engine has a declarative UMD.
+        const std::optional<CriteriaDevice>& criteriaDevice;
+    };
+
+    /// @p kernel is null for a graph-scoped matcher.
+    static bool matcherPasses(const ResolvedMatcher& matcher,
+                              const MatcherInputs& inputs,
+                              const KernelDefinition* kernel)
+    {
+        if(const auto& criteria = matcher.descriptor.criteria)
+        {
+            return criteria->passes(CriteriaSymbols(inputs.bound, *inputs.criteriaDevice, kernel));
+        }
+        return kernel == nullptr ? matcher.graphFn(inputs.context, inputs.bound)
+                                 : matcher.kernelFn(inputs.context, inputs.bound, *kernel);
+    }
+
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
-                                const MatchContext& context,
-                                GraphMatcherMemo& graphVerdicts,
-                                const BoundTokens& bound) const
+                                const MatcherInputs& inputs,
+                                GraphMatcherMemo& graphVerdicts) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {
@@ -2731,7 +2842,7 @@ private:
             if(memo == graphVerdicts.end())
             {
                 GraphMatcherVerdict verdict;
-                verdict.passed = matcher.graphFn(context, bound);
+                verdict.passed = matcherPasses(matcher, inputs, nullptr);
                 memo = graphVerdicts.emplace(matcherId, std::move(verdict)).first;
             }
 
@@ -2744,8 +2855,7 @@ private:
     }
 
     bool kernelLevelMatchersPass(const KernelDescriptorPack& pack,
-                                 const MatchContext& context,
-                                 const BoundTokens& bound,
+                                 const MatcherInputs& inputs,
                                  const KernelDefinition& kernel) const
     {
         for(const auto& matcherId : pack.matcherIds)
@@ -2755,12 +2865,44 @@ private:
             {
                 continue;
             }
-            if(!matcher.kernelFn(context, bound, kernel))
+            if(!matcherPasses(matcher, inputs, &kernel))
             {
                 return false;
             }
         }
         return true;
+    }
+
+    /// False when @p kernel's declarative launch does not resolve for this graph and device:
+    /// a formula breaks its rule, a pointer's tensor has no uid, or the launch passes a
+    /// device limit (CompiledLaunch::resolve() throws BAD_PARAM). RFC 0017 §8.6 allows no
+    /// failure after the engine accepted a graph, so the kernel declines here, as a matcher
+    /// would, rather than at plan build. A kernel without a declarative launch passes. Any
+    /// other failure propagates.
+    bool declarativeLaunchResolves(const MatcherInputs& inputs,
+                                   const KernelDefinition& kernel) const
+    {
+        if(kernel.launch == nullptr)
+        {
+            return true;
+        }
+        try
+        {
+            static_cast<void>(kernel.launch->resolve(inputs.context, inputs.bound, kernel));
+            return true;
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            {
+                throw;
+            }
+            HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "kernel " << toString(kernel.kernelId)
+                                              << " declined: its declarative launch does not "
+                                                 "resolve for this graph: "
+                                              << error.getMessage());
+            return false;
+        }
     }
 
     /// Opens the shard of @p gcnArchName, or logs the failure once and returns empty.

@@ -14,6 +14,12 @@ registration patterns, not another engine's applicability rules.
 | Native score | `double(const MatchContext&, const BoundTokens&, const KernelDefinition&)` | Rank surviving candidates for `heuristic: native` |
 | Dispatch | `IKernelDispatchHandler<Handle>` | Workspace, owned preparation and exact launch |
 
+In place of a pack graph criterion or candidate matcher, a UMD may carry declarative
+`criteria` (RFC 0018 A.1) over the bound tokens, `$kernel.*` and `$device.*`; it then needs
+no hook or registration. In place of a dispatch handler, a single-launch pack of packaged
+kernels may write its UDD as declarative launch formulas, which need no hook or
+registration either; [declarative-dispatch.md](declarative-dispatch.md) owns that contract.
+
 A multi-launch pack (descriptors carrying `sources`) overrides `launchNames()` to return
 the launch names of its kernels' `sources` maps, the same set for every kernel; the state
 manager drops a kernel whose set differs. The handler owns launch order and the workspace
@@ -221,7 +227,7 @@ What the sketch relies on beyond the contract above and `LaunchKernelDefinition.
 
 ## Registration and inventory proof
 
-`SymbolScope<Handle>` supplies typed symbols for UED graph match, graph/kernel UMDs,
+`SymbolScope<Handle>` supplies typed symbols for UED graph match, native graph/kernel UMDs,
 optional UHD score and UDD dispatch. The non-owning dispatch registry requires
 handler/module-cache lifetime beyond a per-handle `Container`. Extensions preserve
 existing symbols. Both the registration declaration and the `IngestorPacks.cpp` table

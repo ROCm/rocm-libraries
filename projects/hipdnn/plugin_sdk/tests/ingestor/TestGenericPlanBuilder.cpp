@@ -425,6 +425,283 @@ TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeTakesTheMaxAcrossSurvivo
     EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{}), 256U);
 }
 
+/// The default engine's pack packaged as kpack, under a declarative UDD compiled from
+/// @p launch. The kernel matcher declines kernel_64_half, so the candidates are
+/// kernel_256_float and kernel_64_float, ranked in that order by block size.
+std::unique_ptr<StateManager> makeDeclarativeStateManager(const nlohmann::json& launch)
+{
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    for(auto& kernel : pack.kernels)
+    {
+        kernel.source = makeKpackSource();
+    }
+    return std::make_unique<StateManager>(
+        makeSchema(),
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        std::vector<DispatchDescriptor>{makeDeclarativeDispatch<TestHandle>(launch)},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        NativeGraphMatch{"test.graph"});
+}
+
+/// workspaceOnlyLaunch() with @p formula at @p pointer, a JSON pointer into the UDD.
+nlohmann::json launchWith(const std::string& pointer, const char* formula)
+{
+    auto launch = workspaceOnlyLaunch();
+    launch[nlohmann::json::json_pointer(pointer)] = nlohmann::json::parse(formula);
+    return launch;
+}
+
+/// The block sizes of the kernels @p manager admits for @p graph on the test device.
+std::vector<int64_t> admittedBlockSizes(const StateManager& manager, const TestGraph& graph)
+{
+    const auto properties = testDeviceProperties();
+    std::vector<int64_t> blockSizes;
+    for(const auto* kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+    {
+        blockSizes.push_back(kernel->getIntMetadata(BLOCK_SIZE));
+    }
+    return blockSizes;
+}
+
+/// RFC 0017 §8.6: an engine that accepted a graph must build a plan for it. So the catalog
+/// resolves each declarative launch when it admits the kernel, and a launch that does not
+/// resolve for the graph declines its kernel there, as a matcher would: a formula that
+/// breaks its rule, and a launch past a device limit (the test device has 64 KiB of LDS).
+/// Each formula fails for kernel_256_float only, which ranks first, so a kept kernel would
+/// be the one a plan is built for.
+TEST(TestIngestorGenericPlanBuilder, ADeclarativeKernelWhoseLaunchDoesNotResolveIsNotAdmitted)
+{
+    struct Case
+    {
+        const char* name;
+        const char* pointer;
+        const char* formula;
+    };
+    const std::vector<Case> cases{
+        {"grid formula", "/grid/x", R"({"-": [100, "$kernel.block_size"]})"},
+        {"block formula", "/block/x", R"({"-": [100, "$kernel.block_size"]})"},
+        {"shared memory formula", "/shared_mem_bytes", R"({"-": [100, "$kernel.block_size"]})"},
+        {"workspace formula", "/workspace_bytes", R"({"-": [100, "$kernel.block_size"]})"},
+        // The launch's block.x is 64 for every kernel, so the grid carries the kernel's
+        // size: 2^24 x 64 = 2^30 fits one launch axis; 2^26 x 64 = 2^32 does not.
+        {"grid times block past the axis limit",
+         "/grid/x",
+         R"({"*": ["$kernel.block_size", 262144]})"},
+        // 512 work-items fit a workgroup; 2048 do not.
+        {"block past the workgroup limit", "/block/x", R"({"*": ["$kernel.block_size", 8]})"},
+        // 64 x 257 = 16448 bytes fit 64 KiB; 256 x 257 = 65792 do not.
+        {"LDS past the device's", "/shared_mem_bytes", R"({"*": ["$kernel.block_size", 257]})"},
+    };
+    uint8_t graphSeed = 0xE0;
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+        const auto manager
+            = makeDeclarativeStateManager(launchWith(testCase.pointer, testCase.formula));
+        const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+        const TestDeviceResolver resolver;
+        const TestPlanBuilder builder(engine, *manager, resolver);
+        const TestGraph graph(makeGraphId(graphSeed++));
+
+        EXPECT_EQ(admittedBlockSizes(*manager, graph), (std::vector<int64_t>{64}));
+        EXPECT_TRUE(builder.isApplicable(0, graph));
+
+        flatbuffers::FlatBufferBuilder fbb;
+        const auto engineConfig = makeEmptyEngineConfig(fbb);
+        KnobFilterContext context;
+        builder.buildPlan(0, graph, engineConfig, context);
+        EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+    }
+}
+
+/// When a declarative launch resolves for no candidate, the engine does not accept the
+/// graph, rather than accepting it and failing every plan build with INTERNAL_ERROR.
+TEST(TestIngestorGenericPlanBuilder, ADeclarativeLaunchThatResolvesForNoKernelIsNotApplicable)
+{
+    const std::vector<std::pair<const char*, const char*>> fields{
+        {"/grid/x", R"({"-": [0, "$kernel.block_size"]})"},
+        {"/workspace_bytes", R"({"-": [0, "$kernel.block_size"]})"}};
+    uint8_t graphSeed = 0xE8;
+    for(const auto& [pointer, formula] : fields)
+    {
+        SCOPED_TRACE(pointer);
+        const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+        const auto manager = makeDeclarativeStateManager(launchWith(pointer, formula));
+        const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+        const TestDeviceResolver resolver;
+        const TestPlanBuilder builder(engine, *manager, resolver);
+        const TestGraph graph(makeGraphId(graphSeed++));
+
+        EXPECT_TRUE(admittedBlockSizes(*manager, graph).empty());
+        EXPECT_FALSE(builder.isApplicable(0, graph));
+    }
+}
+
+/// A knob pinned to a kernel whose declarative launch declined the graph names a kernel
+/// the catalog does not hold: the configuration is unsatisfiable (INVALID_VALUE), not a
+/// plan that fails to build (INTERNAL_ERROR). The other value still builds.
+TEST(TestIngestorGenericPlanBuilder, AKnobPinnedToADeclinedDeclarativeKernelIsUnsatisfiable)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeDeclarativeStateManager(
+        launchWith("/grid/x", R"({"-": [100, "$kernel.block_size"]})"));
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xEA));
+    ASSERT_TRUE(builder.isApplicable(0, graph));
+
+    const auto buildPinned = [&](int64_t blockSize, KnobFilterContext& context) {
+        flatbuffers::FlatBufferBuilder fbb;
+        const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, blockSize);
+        KnobFilterSettings settings;
+        builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+        context.setExecutionSettings(settings);
+        builder.buildPlan(0, graph, engineConfig, context);
+    };
+
+    KnobFilterContext pinnedToDeclined;
+    try
+    {
+        buildPinned(256, pinnedToDeclined);
+        ADD_FAILURE() << "a knob pinned to the declined kernel built a plan";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+    {
+        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE) << ex.getMessage();
+    }
+
+    KnobFilterContext pinnedToAdmitted;
+    buildPinned(64, pinnedToAdmitted);
+    EXPECT_EQ(pinnedToAdmitted.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+}
+
+/// A kernel whose workspace formula fails for this graph is not admitted, so the largest
+/// workspace is the surviving kernel's, with or without a workspace limit, and neither
+/// path fails the engine for the graph. `block_size - 100` fails for kernel_64_float and
+/// is 156 bytes for kernel_256_float.
+TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeSkipsAKernelWhoseWorkspaceFormulaFails)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeDeclarativeStateManager(
+        launchWith("/workspace_bytes", R"({"-": ["$kernel.block_size", 100]})"));
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xA0));
+
+    EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{}), 156U);
+
+    KnobFilterSettings limited;
+    limited.ingestorSettings.workspaceLimit = 1000;
+    EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, limited), 156U);
+}
+
+/// Under a workspace limit and a shortlist of one, the kernel served is the best one whose
+/// workspace formula holds. `100 - block_size` fails for kernel_256_float, which ranks
+/// first, and is 36 bytes for kernel_64_float. A declining kernel that reached the
+/// workspace filter would either fail it or, kept, fill the shortlist and fail to build.
+TEST(TestIngestorGenericPlanBuilder, AWorkspaceLimitAndShortlistOfOneSkipADecliningKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeDeclarativeStateManager(
+        launchWith("/workspace_bytes", R"({"-": [100, "$kernel.block_size"]})"));
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xEB));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    settings.ingestorSettings.workspaceLimit = 1000;
+    settings.ingestorSettings.shortlistLimit = 1;
+
+    EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, settings), 36U);
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+}
+
+/// Answers block size as WorkspaceEqualsBlockSizeHandler does, but throws @p status from
+/// workspaceBytes for the 64-thread kernel.
+class ThrowingWorkspaceHandler : public WorkspaceEqualsBlockSizeHandler
+{
+public:
+    explicit ThrowingWorkspaceHandler(hipdnnPluginStatus_t status)
+        : _status(status)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
+                          const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(_status, "workspace failed");
+        }
+        return WorkspaceEqualsBlockSizeHandler::workspaceBytes(context, bound, kernel);
+    }
+
+private:
+    hipdnnPluginStatus_t _status;
+};
+
+/// A native handler's workspaceBytes is asked only about admitted kernels, so a throw is a
+/// fault, never a decline: whatever its status, it fails the workspace query, with or
+/// without a limit, and the workspace filter of a plan build.
+TEST(TestIngestorGenericPlanBuilder, AnyFailureFromANativeWorkspaceBytesPropagates)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    KnobFilterSettings limited;
+    limited.ingestorSettings.workspaceLimit = 1000;
+    uint8_t graphSeed = 0xA4;
+    for(const auto status : {HIPDNN_PLUGIN_STATUS_BAD_PARAM, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR})
+    {
+        SCOPED_TRACE("status " + std::to_string(static_cast<int>(status)));
+        const ThrowingWorkspaceHandler handler(status);
+        const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+        const auto manager = makeStateManager();
+        const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+        const TestDeviceResolver resolver;
+        const TestPlanBuilder builder(engine, *manager, resolver);
+        const TestGraph graph(makeGraphId(graphSeed++));
+
+        const auto expectStatus = [status](const auto& call, const char* what) {
+            try
+            {
+                call();
+                ADD_FAILURE() << what << " did not throw";
+            }
+            catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+            {
+                EXPECT_EQ(ex.getStatus(), status) << what << ": " << ex.getMessage();
+            }
+        };
+        for(const auto& settings : {KnobFilterSettings{}, limited})
+        {
+            expectStatus(
+                [&] { static_cast<void>(builder.getMaxWorkspaceSize(0, graph, settings)); },
+                settings.ingestorSettings.workspaceLimit.has_value()
+                    ? "limited getMaxWorkspaceSize"
+                    : "unlimited getMaxWorkspaceSize");
+        }
+
+        flatbuffers::FlatBufferBuilder fbb;
+        const auto engineConfig = makeEmptyEngineConfig(fbb);
+        KnobFilterContext context;
+        context.setExecutionSettings(limited);
+        expectStatus([&] { builder.buildPlan(0, graph, engineConfig, context); },
+                     "limited buildPlan");
+    }
+}
+
 TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorOnAnEmptyRankedCatalog)
 {
     const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);

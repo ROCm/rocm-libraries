@@ -1,0 +1,144 @@
+{
+  "version": "1.0",
+  "id": "8d4b2f71-3a6e-4c95-b1d8-6f2e0c9a7b51",
+  "name": "fixture declarative dispatch",
+  "grid": {
+    "x": {
+      "ceil_div": [
+        {
+          "*": [
+            "$x.dims[0]",
+            "$w.dims[0]",
+            {
+              "-": [
+                {
+                  "+": [
+                    "$x.dims[2]",
+                    1
+                  ]
+                },
+                "$w.dims[2]"
+              ]
+            },
+            {
+              "-": [
+                {
+                  "+": [
+                    "$x.dims[3]",
+                    1
+                  ]
+                },
+                "$w.dims[3]"
+              ]
+            }
+          ]
+        },
+        "$kernel.block_size"
+      ]
+    },
+    "y": 1,
+    "z": 1
+  },
+  "block": {
+    "x": "$kernel.block_size",
+    "y": 1,
+    "z": 1
+  },
+  "workspace_bytes": 0,
+  "args_signature": [
+    {
+      "name": "x",
+      "kind": "pointer",
+      "source": {
+        "from": "tensor",
+        "ref": "$x"
+      }
+    },
+    {
+      "name": "w",
+      "kind": "pointer",
+      "source": {
+        "from": "tensor",
+        "ref": "$w"
+      }
+    },
+    {
+      "name": "y",
+      "kind": "pointer",
+      "source": {
+        "from": "tensor",
+        "ref": "$y"
+      }
+    },
+    {
+      "name": "n",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$x",
+        "axis": 0
+      }
+    },
+    {
+      "name": "c",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$x",
+        "axis": 1
+      }
+    },
+    {
+      "name": "h",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$x",
+        "axis": 2
+      }
+    },
+    {
+      "name": "width",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$x",
+        "axis": 3
+      }
+    },
+    {
+      "name": "k",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$w",
+        "axis": 0
+      }
+    },
+    {
+      "name": "r",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$w",
+        "axis": 2
+      }
+    },
+    {
+      "name": "s",
+      "kind": "scalar",
+      "type": "i32",
+      "source": {
+        "from": "dim",
+        "ref": "$w",
+        "axis": 3
+      }
+    }
+  ]
+}

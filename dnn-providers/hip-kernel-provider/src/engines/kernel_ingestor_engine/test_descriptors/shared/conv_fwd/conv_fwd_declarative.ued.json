@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "id": "7228baba-b63c-4c5e-bf32-0d6649c44bbd",
+  "name": "hipkernel:ConvFwdDeclarative",
+  "graph_match": {
+    "nodes": [
+      {
+        "kind": "op",
+        "id": "conv",
+        "op": "convolution",
+        "operands": {
+          "x": "$x",
+          "w": "$w"
+        },
+        "results": {
+          "y": "$y"
+        }
+      }
+    ]
+  },
+  "sort_kernel_catalog": {
+    "default": "6d0c2a52-3c0d-4664-947a-c52ba65260c4"
+  },
+  "metadata": "1a9d24f3-52a5-434f-8a69-2d59ae0557d4",
+  "knobs": [
+    "block_size"
+  ]
+}

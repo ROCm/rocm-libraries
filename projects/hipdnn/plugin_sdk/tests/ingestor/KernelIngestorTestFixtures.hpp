@@ -33,6 +33,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -647,6 +648,69 @@ inline std::vector<DispatchDescriptor> makeTestDispatches()
 {
     ensureNoopDispatchRegistered<THandle>();
     return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
+}
+
+/// Stands in for the provider's handler under DECLARATIVE_LAUNCH_SYMBOL: workspaceBytes and
+/// prepare evaluate the kernel's compiled launch, as the provider's do, so a kernel the
+/// catalog admitted with a launch that fails would fail its plan build. Launches nothing.
+template <typename THandle>
+class DeclarativeTestDispatchHandler : public NoopDispatchHandler<THandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
+                          const KernelDefinition& kernel) const override
+    {
+        return launchOf(kernel).workspaceBytes(context, bound, kernel);
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& bound,
+                                              const KernelDefinition& kernel) const override
+    {
+        static_cast<void>(launchOf(kernel).resolve(context, bound, kernel));
+        return std::make_unique<PreparedDispatch>();
+    }
+
+private:
+    static const CompiledLaunch& launchOf(const KernelDefinition& kernel)
+    {
+        if(kernel.launch == nullptr)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                        "kernel '" + kernel.name + "' carries no launch");
+        }
+        return *kernel.launch;
+    }
+};
+
+/// A declarative UDD compiled from @p launch, as the loader builds one, with the test
+/// handler registered under the reserved symbol it names. Registration is global and
+/// idempotent, as ensureNoopDispatchRegistered's is.
+template <typename THandle>
+inline DispatchDescriptor makeDeclarativeDispatch(const nlohmann::json& launch,
+                                                  const DescriptorId& id = DISPATCH_ID)
+{
+    static const DeclarativeTestDispatchHandler<THandle> s_handler;
+    const std::string symbol(DECLARATIVE_LAUNCH_SYMBOL);
+    if(DispatchRegistry<THandle>::tryResolve(symbol) == nullptr)
+    {
+        DispatchRegistry<THandle>::registerSymbol(symbol, &s_handler);
+    }
+    DispatchDescriptor dispatch{id, "declarative dispatch", symbol};
+    dispatch.launch = compileLaunch(launch, dispatch.name, "test declarative dispatch");
+    dispatch.launchJson = dispatch.launch->source();
+    return dispatch;
+}
+
+/// One launch whose only argument is the workspace (`global_buffer`, 8 bytes: the
+/// signature makeKpackSource() packages) and whose workspace is @p workspaceBytes.
+inline nlohmann::json workspaceOnlyLaunch(const nlohmann::json& workspaceBytes = 0)
+{
+    return {{"grid", {{"x", 1}, {"y", 1}, {"z", 1}}},
+            {"block", {{"x", 64}, {"y", 1}, {"z", 1}}},
+            {"workspace_bytes", workspaceBytes},
+            {"args_signature", {{{"name", "ws"}, {"kind", "workspace"}}}}};
 }
 
 inline KernelSource makeEmbeddedSource(const std::string& sourceFile = "Test.cpp",
@@ -1336,12 +1400,19 @@ public:
         return _launches;
     }
 
-    /// Scratch only, as RFC 0021 §6 requires of a slotted kernel.
+    /// Scratch only, as RFC 0021 §6 requires of a slotted kernel. A negative scratch models
+    /// a handler that refuses the kernel's workspace with BAD_PARAM.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
     {
-        return static_cast<size_t>(kernel.getIntMetadata(SCRATCH));
+        const auto scratch = kernel.getIntMetadata(SCRATCH);
+        if(scratch < 0)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                        "kernel '" + kernel.name + "' refuses its workspace");
+        }
+        return static_cast<size_t>(scratch);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,

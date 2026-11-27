@@ -41,7 +41,9 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
@@ -93,7 +95,8 @@
  *  - Every file-backed descriptor must carry `version`, the UMD included (RFC 0018 A.1
  *    makes it optional), since an unversioned type cannot be gated. An inline kernel
  *    gates against its pack's UKD row.
- *  - A UMD's `kernel_fields` (RFC 0018 A.1) fails as an unknown key, dropping its packs.
+ *  - A UMD's `kernel_fields` and `allow_override_shape` (RFC 0018 A.1) fail as unknown
+ *    keys, dropping its packs.
  *  - Packs and standalone kernels are keyed by (id, arch), not id alone (RFC 0020
  *    §13.2.1): a per-arch shard ships one id per arch.
  *  - A standalone UKD may carry `arch`, and an inline kernel may narrow its pack's list.
@@ -125,8 +128,22 @@
  * RFC 0020 §4.3.2 or §4.3.3 check fails its file like any other format error, and no
  * engine is registered.
  *
- * Only fields Descriptors.hpp models are parsed. The RFCs describe more, such as
- * `criteria` beside `nodes` and `features_signature`, which arrive with follow-up RFCs.
+ * A UMD carries exactly one of `match_symbol` and `criteria`. `match_symbol` is resolved
+ * through the native registries when the set is validated. `criteria` is compiled with
+ * the JSON Expression Language while the file is read (CompiledCriteria.hpp), and each
+ * pack listing the UMD checks its references against the pack's engine; a reference that
+ * engine does not publish drops the pack.
+ *
+ * A UDD carries exactly one of `dispatch_symbol` and the declarative launch keys (`grid`,
+ * `block`, `shared_mem_bytes`, `workspace_bytes`, `args_signature`). `dispatch_symbol` is
+ * resolved through the native registries when the set is validated, and may not use the
+ * reserved name DECLARATIVE_LAUNCH_SYMBOL. The declarative keys are compiled while the file
+ * is read (CompiledLaunch.hpp), the UDD takes the reserved name, and each pack listing the
+ * UDD checks its references against the pack's engine as for `criteria`.
+ *
+ * Only fields Descriptors.hpp models are parsed. The RFCs describe more, such as an
+ * engine-scoped `criteria` beside `graph_match.nodes` and `features_signature`, which
+ * arrive with follow-up RFCs.
  * This loader mirrors the structs exactly, so a new field is a change in both places and
  * nowhere else.
  *
@@ -1221,28 +1238,91 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    // `kernel_fields` (RFC 0018 A.1) and the declarative `criteria` arm are deliberately
+    // `kernel_fields` and `allow_override_shape` (RFC 0018 A.1) are deliberately
     // unsupported and fail as unknown keys; see the file header.
-    requireKnownKeys(root, {"version", "revision", "id", "name", "scope", "match_symbol"}, where);
+    requireKnownKeys(
+        root, {"version", "revision", "id", "name", "scope", "match_symbol", "criteria"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
     matcher.name = requireString(root, "name", where);
     matcher.scope = matchScopeFromString(requireString(root, "scope", where), where);
-    matcher.matchSymbol = requireString(root, "match_symbol", where);
+    // One that declares neither states no check; one that declares both hides a
+    // conjunction a pack states by listing two matchers (RFC 0018 A.1).
+    const bool native = root.contains("match_symbol");
+    if(native == root.contains("criteria"))
+    {
+        fail(where + " must declare exactly one of 'match_symbol' and 'criteria'");
+    }
+    if(native)
+    {
+        matcher.matchSymbol = requireString(root, "match_symbol", where);
+    }
+    else
+    {
+        matcher.criteriaJson = root.at("criteria");
+        matcher.criteria
+            = compileCriteria(matcher.criteriaJson, matcher.scope, "key 'criteria' in " + where);
+    }
     matcher.revision = declaredRevisionOf(root, where);
     return matcher;
 }
 
+/// The keys a UDD's declarative arm may carry. `launches` and `intermediates` are listed so
+/// compileLaunch refuses them as not supported yet rather than as unknown keys.
+inline constexpr std::array<std::string_view, 7> UDD_DECLARATIVE_KEYS = {"grid",
+                                                                         "block",
+                                                                         "shared_mem_bytes",
+                                                                         "workspace_bytes",
+                                                                         "args_signature",
+                                                                         "launches",
+                                                                         "intermediates"};
+
 inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
                                                   const std::string& where)
 {
-    requireKnownKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
+    std::vector<std::string_view> known{"version", "id", "name", "dispatch_symbol"};
+    known.insert(known.end(), UDD_DECLARATIVE_KEYS.begin(), UDD_DECLARATIVE_KEYS.end());
+    requireKnownKeys(root, known.data(), known.data() + known.size(), where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
     dispatch.name = requireString(root, "name", where);
-    dispatch.dispatchSymbol = requireString(root, "dispatch_symbol", where);
+    // A UDD that declares neither arm says nothing about how to launch; one that declares
+    // both leaves two launches for one kernel.
+    const bool native = root.contains("dispatch_symbol");
+    const bool declarative
+        = std::any_of(std::begin(UDD_DECLARATIVE_KEYS),
+                      std::end(UDD_DECLARATIVE_KEYS),
+                      [&root](std::string_view key) { return root.contains(key); });
+    if(native == declarative)
+    {
+        fail(where
+             + " must declare exactly one of 'dispatch_symbol' and the declarative launch keys"
+               " ('grid', 'block', 'shared_mem_bytes', 'workspace_bytes', 'args_signature')");
+    }
+    if(native)
+    {
+        dispatch.dispatchSymbol = requireString(root, "dispatch_symbol", where);
+        // The reserved name belongs to the handler that runs every declarative launch; an
+        // authored UDD naming it would run that handler with no compiled launch.
+        const std::string_view symbol = dispatch.dispatchSymbol;
+        const bool reserved
+            = symbol.substr(0, DECLARATIVE_LAUNCH_SYMBOL.size()) == DECLARATIVE_LAUNCH_SYMBOL
+              && (symbol.size() == DECLARATIVE_LAUNCH_SYMBOL.size()
+                  || symbol[DECLARATIVE_LAUNCH_SYMBOL.size()] == '.');
+        if(reserved)
+        {
+            fail(where + " names dispatch_symbol '" + dispatch.dispatchSymbol
+                 + "', which is reserved for declarative launches");
+        }
+    }
+    else
+    {
+        dispatch.launch = compileLaunch(root, dispatch.name, "UDD in " + where);
+        dispatch.launchJson = dispatch.launch->source();
+        dispatch.dispatchSymbol = std::string(DECLARATIVE_LAUNCH_SYMBOL);
+    }
     return dispatch;
 }
 
@@ -3184,6 +3264,14 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         // step.
         std::map<DescriptorId, MatchDescriptor> matchers;
         std::map<DescriptorId, DispatchDescriptor> dispatches;
+        // RFC 0018 A.5 checks 5 and 6, per (matcher, engine, slot): a matcher several of this
+        // engine's packs list is checked once against each KMD those packs declare kernels
+        // under, the slot's for a slotted engine. "" means its references all resolve.
+        std::map<std::pair<DescriptorId, size_t>, std::string> criteriaErrors;
+        // The same pair check for a declarative UDD's launch formulas, per (UDD, engine, slot).
+        std::map<std::pair<DescriptorId, size_t>, std::string> launchErrors;
+        // What the engine publishes to those checks. The loader sets at most one arm.
+        const GraphMatch engineMatch = engineGraphMatch(engine);
 
         for(auto* packEntry : packEntries)
         {
@@ -3257,6 +3345,23 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                         = "names matcher " + toString(matcherId) + ", which no descriptor defines";
                     break;
                 }
+                if(matcher->criteria != nullptr)
+                {
+                    auto [checked, inserted]
+                        = criteriaErrors.try_emplace(std::make_pair(matcherId, slotIndex));
+                    if(inserted)
+                    {
+                        checked->second
+                            = criteriaReferenceError(*matcher->criteria, engineMatch, packSchema);
+                    }
+                    if(!checked->second.empty())
+                    {
+                        reason = "pairs " + describeDescriptor("matcher", matcher->name, matcherId)
+                                 + " with engine '" + engine.name + "', but its criteria "
+                                 + checked->second;
+                        break;
+                    }
+                }
                 packMatchers.push_back(matcher);
             }
 
@@ -3267,6 +3372,22 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             {
                 reason = "names dispatch descriptor " + toString(pack.dispatchId)
                          + ", which no descriptor defines";
+            }
+            if(reason.empty() && dispatch->launch != nullptr)
+            {
+                auto [checked, inserted]
+                    = launchErrors.try_emplace(std::make_pair(dispatch->id, slotIndex));
+                if(inserted)
+                {
+                    checked->second
+                        = launchReferenceError(*dispatch->launch, engineMatch, packSchema);
+                }
+                if(!checked->second.empty())
+                {
+                    reason = "pairs " + describeDescriptor("dispatch", dispatch->name, dispatch->id)
+                             + " with engine '" + engine.name + "', but its launch "
+                             + checked->second;
+                }
             }
 
             // Referenced kernels join the inline ones before either check below, so a
@@ -3891,6 +4012,10 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
         bool resolvable = true;
         for(const auto& matcher : set.matchers)
         {
+            if(matcher.criteria != nullptr)
+            {
+                continue;
+            }
             const bool registered = matcher.scope == MatchScope::GRAPH
                                         ? GraphCriterionRegistry::isRegistered(matcher.matchSymbol)
                                         : KernelMatcherRegistry::isRegistered(matcher.matchSymbol);

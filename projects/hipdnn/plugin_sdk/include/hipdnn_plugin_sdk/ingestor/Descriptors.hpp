@@ -655,20 +655,36 @@ enum class MatchScope
     KERNEL, ///< Reads `$kernel.*` too; disqualifies only the one kernel.
 };
 
-/// UMD: one applicability check, shared by id across packs.
+class CompiledCriteria;
+
+/// UMD: one applicability check, shared by id across packs. Exactly one arm is set:
+/// @ref matchSymbol names a native criterion, or @ref criteria holds a declarative one.
+///
+/// `operator==` is authored-content equality: it compares @ref criteriaJson and ignores the
+/// compiled @ref criteria pointer, so the copies of one UMD shipped in per-arch shards, each
+/// compiled from its own file, compare equal.
 struct MatchDescriptor
 {
     DescriptorId id{};
     std::string name;
     MatchScope scope = MatchScope::GRAPH;
-    std::string matchSymbol; ///< Resolved through NativeRegistry.
+    std::string matchSymbol; ///< Resolved through NativeRegistry; empty with @ref criteria.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
+    /// The declarative `criteria` arm, compiled when the UMD is read (see
+    /// CompiledCriteria.hpp). Null for a native criterion. Immutable and shared by every
+    /// copy of the descriptor. Each file compiles its own, so two equal descriptors read
+    /// from different files hold different pointers. Not part of operator==.
+    std::shared_ptr<const CompiledCriteria> criteria = nullptr;
+    /// The authored `criteria` value, kept verbatim. Null for a native criterion. Compared
+    /// by operator== in place of @ref criteria.
+    nlohmann::json criteriaJson = nullptr;
 };
 
 inline bool operator==(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
 {
-    return std::tie(lhs.id, lhs.name, lhs.scope, lhs.matchSymbol, lhs.revision)
-           == std::tie(rhs.id, rhs.name, rhs.scope, rhs.matchSymbol, rhs.revision);
+    return std::tie(lhs.id, lhs.name, lhs.scope, lhs.matchSymbol, lhs.revision, lhs.criteriaJson)
+           == std::tie(
+               rhs.id, rhs.name, rhs.scope, rhs.matchSymbol, rhs.revision, rhs.criteriaJson);
 }
 
 inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
@@ -676,18 +692,37 @@ inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
     return !(lhs == rhs);
 }
 
-/// UDD: how to invoke a kernel, shared by every kernel in a pack.
+class CompiledLaunch;
+
+/// UDD: how to invoke a kernel, shared by every kernel in a pack. Exactly one arm is set:
+/// an authored `dispatch_symbol` names a native dispatch handler, or the declarative keys
+/// (`grid`, `block`, `args_signature`, ...) describe one launch as formulas, compiled into
+/// @ref launch. A declarative UDD's @ref dispatchSymbol is DECLARATIVE_LAUNCH_SYMBOL, the
+/// reserved name of the one handler that evaluates any compiled launch.
+///
+/// `operator==` is authored-content equality: it compares @ref launchJson and ignores the
+/// compiled @ref launch pointer, so the copies of one UDD shipped in per-arch shards, each
+/// compiled from its own file, compare equal.
 struct DispatchDescriptor
 {
     DescriptorId id{};
     std::string name;
     std::string dispatchSymbol; ///< Resolved through NativeRegistry.
+    /// The authored declarative body (every key except `version`, `id` and `name`), as
+    /// `CompiledLaunch::source()`. Null for a native UDD. Compared by operator== in place of
+    /// @ref launch.
+    nlohmann::json launchJson = nullptr;
+    /// The declarative launch, compiled when the UDD is read (see CompiledLaunch.hpp). Null
+    /// for a native UDD. Immutable and shared by every copy of the descriptor. Each file
+    /// compiles its own, so two equal descriptors read from different files hold different
+    /// pointers. Not part of operator==.
+    std::shared_ptr<const CompiledLaunch> launch = nullptr;
 };
 
 inline bool operator==(const DispatchDescriptor& lhs, const DispatchDescriptor& rhs)
 {
-    return std::tie(lhs.id, lhs.name, lhs.dispatchSymbol)
-           == std::tie(rhs.id, rhs.name, rhs.dispatchSymbol);
+    return std::tie(lhs.id, lhs.name, lhs.dispatchSymbol, lhs.launchJson)
+           == std::tie(rhs.id, rhs.name, rhs.dispatchSymbol, rhs.launchJson);
 }
 
 inline bool operator!=(const DispatchDescriptor& lhs, const DispatchDescriptor& rhs)

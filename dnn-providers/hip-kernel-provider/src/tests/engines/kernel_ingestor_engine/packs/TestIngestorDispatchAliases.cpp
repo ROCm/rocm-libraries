@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "core/Handle.hpp"
@@ -47,6 +48,8 @@ TEST(TestIngestorDispatchAliases, EachVersionedAliasResolvesToTheSameHandler)
     expectOneHandler("hipkernel.conv_fwd.dispatch", CONV_FWD_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
                      GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    expectOneHandler(hipdnn_plugin_sdk::ingestor::DECLARATIVE_LAUNCH_SYMBOL,
+                     hipdnn_plugin_sdk::ingestor::DECLARATIVE_LAUNCH_SYMBOL_V1);
 }
 
 // A superseded contract keeps its own handler, so a plan saved under it still restores

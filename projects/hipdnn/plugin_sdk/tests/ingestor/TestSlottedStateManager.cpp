@@ -331,6 +331,38 @@ TEST_F(TestSlottedStateManagerDefault, ADuplicateKernelIdInOneSlotDropsThatPack)
               (Names{"dkdv_a", "dkdv_b", "dkdv_c"}));
 }
 
+// RFC 0021 §6: a declarative launch passes the workspace base, so a slot's kernel would
+// write over the shared region instead of reading its scratch offset.
+TEST_F(TestSlottedStateManagerDefault, APackDispatchingThroughADeclarativeLaunchIsDropped)
+{
+    const auto declarativeId = testId(0x40);
+    auto dq = dqPacks();
+    dq.front().dispatchId = declarativeId;
+    // Each kernel takes exactly the launch's arguments, so only the slot rule can drop it.
+    for(auto& kernel : dq.front().kernels)
+    {
+        kernel.source = makeKpackSource();
+    }
+    std::vector<KernelSlotInput> slots;
+    slots.push_back(slotInput("prep", 0xA1, prepPacks()));
+    slots.push_back(slotInput("dkdv", 0xA2, dkdvPacks()));
+    slots.push_back(slotInput("dq", 0xA3, std::move(dq)));
+    auto dispatches = makeStubDispatches();
+    dispatches.push_back(makeDeclarativeDispatch<StubHandle>(workspaceOnlyLaunch(), declarativeId));
+
+    const Manager manager(std::move(slots),
+                          std::vector<MatchDescriptor>{},
+                          std::move(dispatches),
+                          NativeGraphMatch{GRAPH_MATCH},
+                          WS_BYTES,
+                          "engine 'slotted fixture'");
+
+    EXPECT_TRUE(manager.enumerableCatalog(2, _context).entries.empty());
+    EXPECT_EQ(namesOf(manager.enumerableCatalog(1, _context)),
+              (Names{"dkdv_a", "dkdv_b", "dkdv_c"}));
+    EXPECT_FALSE(manager.slotProgramVerdict(_context).applicable);
+}
+
 TEST_F(TestSlottedStateManagerDefault, AnUnslottedEngineIsOneImplicitSlot)
 {
     const Manager manager(slotSchema(0xA2, "kmd"),

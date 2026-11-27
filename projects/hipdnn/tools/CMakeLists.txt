@@ -515,11 +515,15 @@ endif()
         set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS)
         # <test suffix>|<root>|<engine>. The multi-launch bundle has its own engine: a validator
         # that stopped declaring the pack's launch names has its kernels dropped with an ERROR
-        # and exits non-zero here, which the single-launch root cannot show.
+        # and exits non-zero here, which the single-launch root cannot show. The
+        # declarative-launch bundle holds a UDD written as launch formulas, which the loader
+        # gives the reserved dispatch symbol: a validator that harvested that symbol, or
+        # registered no stub under it, drops that engine and fails here.
         foreach(
             smokeCase
             "smoke|${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT}|${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
             "smoke_multi_launch|${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch|hipkernel:ValidateFixtureMultiLaunch"
+            "smoke_declarative_launch|${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/declarative_launch|hipkernel:ValidateFixtureDeclarative"
         )
             string(REPLACE "|" ";" smokeCase "${smokeCase}")
             list(GET smokeCase 0 smokeName)

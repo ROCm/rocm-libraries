@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 - **Status**: In progress
-- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). The declarative `criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
-- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
+- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). A native UDD's `dispatch_symbol` and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. A UDD may instead describe one launch declaratively (`CompiledLaunch.hpp`), run by one provider handler under the reserved `hipdnn.declarative_launch` symbol. A UMD either names a native symbol or carries declarative `criteria`, compiled with the SDK expression library (`CompiledCriteria.hpp`). The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). The UDD `launches[]` program and intermediates, the `scalar` and `attribute` argument sources, explicit kernarg offsets, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
+- **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #14705 applied
 
 ## Table of Contents
 
@@ -113,12 +113,14 @@ stays a full provider, one per dependency. This complements build-time codegen.
 
 ### 1.1 What Ships Now Versus Later
 
-The single-kernel path ships. In the shipped loader, every UMD, UDD, and UHD names a native C++
-symbol: a UMD `matchSymbol`, a UDD `dispatchSymbol`, and a `NATIVE` UHD `payload`
-(`Descriptors.hpp`). The declarative criteria of RFC 0018 and the UDD formulas are not yet built.
-The `jsonexpr` interpreter (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/jsonexpr/`) exists but
-the loader does not use it. `HeuristicKind::MODEL` (a trained model such as LightGBM) has no
-adapter yet.
+The single-kernel path ships. In the shipped loader, every UHD names a native C++ symbol, a
+`NATIVE` UHD `payload` (`Descriptors.hpp`). A UMD either names a native `matchSymbol` or carries the
+declarative criteria of RFC 0018, which the loader compiles with the `jsonexpr` interpreter
+(`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp`). A UDD either names a native
+`dispatch_symbol` or describes one launch with the declarative formulas of
+[§6](#6-dispatch-and-workspace), compiled with the same interpreter (`CompiledLaunch.hpp`); the
+multi-launch `launches[]` program is not yet built. `HeuristicKind::MODEL` (a trained model such as
+LightGBM) has no adapter yet.
 
 | Capability | This RFC (day-one) | Deferred to a follow-up |
 |---|---|---|
@@ -344,7 +346,7 @@ prepares the sampled candidates, each loaded and dispatch-ready in the same plan
 per pack they came from, so the measured winner can be chosen and cached.
 
 The generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery
-(the matcher, the expression interpreter, the selector, and the predicate and custom-plan registries)
+(the matcher, the expression interpreter, the selector, and the predicate and native-dispatch registries)
 lives inside the provider behind those contracts. Two engine-plugin ABI entry points are added beside
 those contracts rather than inside the provider: **`hipdnnEnginePluginEnumerateCandidates`**, which pages
 an engine's matched catalog as complete knob tuples with stable candidate ids, and
@@ -364,7 +366,7 @@ additive:
 | A **graph identity**, an additive field carried on the graph | so logs and graph dumps name one graph across serialization round trips; no provider cache keys on it, the applicability cache keys on graph content (§8.1) |
 | An extended **`$device.*` property set** | the expression vocabulary reads device facts hipDNN does not carry today |
 | **UED names** in hipDNN's engine-id space, registered at load | a descriptor-backed engine needs an id the host already understands, and a name diagnostics can print |
-| A **workspace entry point for custom plans** | the workspace query arrives before a plan exists, so a custom-plan handler must be able to answer it |
+| A **workspace entry point for native dispatch handlers** | the workspace query arrives before a plan exists, so a native dispatch handler must be able to answer it |
 
 ---
 
@@ -1023,8 +1025,8 @@ arm is set to `f32` once and publishes it as a single typed token, present only 
 carries a compile-time value at all. A precomputed field is declared in the hipDNN schema like any
 other field and versioned with it, so adding one is an additive schema change, not a per-pack
 extension point. A file naming a predicate the provider does not ship fails to resolve, so the
-registry is part of its published contract. The dispatch layer has an analogous custom plan
-([Section 6](#6-dispatch-and-workspace)); together they form a graded ladder from declarative data,
+registry is part of its published contract. The dispatch layer has an analogous native dispatch
+handler ([Section 6](#6-dispatch-and-workspace)); together they form a graded ladder from declarative data,
 to a named escape hatch for a step that needs real C++, to a full provider.
 
 **Applicability is two cheap stages.** The engine's `graph_match` runs first, at most once per
@@ -1151,11 +1153,14 @@ Its bound `$y` dims feed the fused kernel's launch formulas the same way the sin
 
 The second hard problem is dispatching a matched kernel with no bespoke code. The dispatch ABI
 lives in a **UDD (Universal Dispatch Descriptor)**, referenced by ID: one UDD per KDP, shared by
-every child kernel. A UDD holds one or more **Launches**, each a dispatch step (grid, block,
-shared memory, workspace, argument signature) that a kernel's source fills to run. A
-single-kernel UDD has one Launch, shown below; a multi-launch UDD runs several in order. The
-launch ABI is written once, so every kernel in the pack inherits it; a kernel needing a different
-one belongs in a different pack.
+every child kernel. A UDD carries exactly one of two arms. The **declarative arm**, the subject of
+this section, holds one or more **Launches**, each a dispatch step (grid, block, shared memory,
+workspace, argument signature) that a kernel's source fills to run. The **native arm**,
+`dispatch_symbol`, names a registered C++ dispatch handler instead (the escape hatch at the end of
+this section). A single-kernel UDD has one Launch, written at the top level of the UDD as shown
+below; a multi-launch UDD runs several in order ([§15.1](#151-several-kernels-for-one-operation)).
+The launch ABI is written once, so every kernel in the pack inherits it; a kernel needing a
+different one belongs in a different pack.
 
 **One expression language**, shared with the criteria
 ([Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) and specified in its own
@@ -1174,6 +1179,16 @@ reference none of them can resolve is rejected at load rather than failing close
 graph. So the pairing of a pack's UDD with its engine is checkable at build and at drop-in load: a
 UDD referencing a graph field the engine's pattern does not bind is rejected then, before it can
 reach a live graph. Plan-time fail-closed is only a backstop.
+
+The loader runs this check for each pairing of a declarative UDD with an engine
+(`launchReferenceError` in `CompiledLaunch.hpp`) and drops the pack, with an error naming the
+reference, the UDD, the engine and the pack, when it fails. It applies the rules the criteria
+check applies ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)):
+`$kernel.*` must name a field of the engine's KMD and `$device.*` a device property on every arm;
+every other reference, and the `ref` of every `pointer`, `dim` and `stride` argument, must be
+something a `nodes` pattern binds. A `native` match publishes no set before a graph arrives, so
+those references are not checked against it, and an engine with no `graph_match` binds no tensor,
+so a UDD with any `pointer`, `dim` or `stride` argument cannot pair with it.
 
 ```jsonc
 {  // a UDD; every $q.* field below is one the pack's matcher bound (Section 5)
@@ -1207,7 +1222,6 @@ the generic launcher assembles the call directly from the matched graph:
     {"name": "Q",          "kind": "pointer", "source": {"from": "tensor", "ref": "$q"}},
     {"name": "seqlen_q",   "kind": "scalar", "type": "i64", "source": {"from": "dim",    "ref": "$q", "axis": 2}},
     {"name": "stride_q",   "kind": "scalar", "type": "i64", "source": {"from": "stride", "ref": "$q", "axis": 2}},
-    {"name": "epsilon",    "kind": "scalar", "type": "f32", "source": {"from": "scalar", "ref": "$eps"}},
     {"name": "scale_log2", "kind": "scalar", "type": "f32",
        "source": {"from": "expr",                  // 1/sqrt(head size), converted to log2 units
                   "expr": {"*": [{"rsqrt": ["$q.dims[3]"]}, 1.4426950408889634]}}},
@@ -1216,28 +1230,92 @@ the generic launcher assembles the call directly from the matched graph:
 }
 ```
 
-Each argument's `source` is one of a small set: a tensor pointer, a dim or stride read off a
-bound tensor, an attribute, a scalar operand's value, a computed expression, or the
-plan-allocated workspace. These name the same schema fields the criteria use: a `dim` source is
-the field `$q.dims[2]`, an `expr` source is a formula in the same token language, and together
-they describe the full kernel call as data, letting the launcher assemble it without per-kernel
-code. In `dim` and `stride` sources, `axis` selects a logical dimension, the same indexing
-`$q.dims` and `$q.strides` use; `$q.stride_order[axis]` is that dimension's stride rank.
+Each argument has a `kind`. A `pointer` passes the device address of a bound tensor and reads
+`{"from": "tensor", "ref": "$q"}`. A `scalar` is passed by value as its `type`, one of `i32`,
+`u32`, `i64` and `f32`. It reads a dim or stride off a bound tensor,
+`{"from": "dim" | "stride", "ref": "$q", "axis": i}`, or a computed formula,
+`{"from": "expr", "expr": ...}`. A `workspace` passes the plan-allocated scratch and takes no
+`source`. These name the same schema fields the criteria use: a `dim` source is the field
+`$q.dims[2]`, an `expr` source is a formula in the same token language, and together they
+describe the full kernel call as data, letting the launcher assemble it without per-kernel code.
+In `dim` and `stride` sources, `ref` is a `$`-prefixed pattern variable and `axis` a
+non-negative integer that selects a logical dimension, the same indexing `$q.dims` and
+`$q.strides` use; `$q.stride_order[axis]` is that dimension's stride rank. Argument names are
+non-empty and unique. They name the argument in diagnostics, and they must match the kernel's
+parameter names where its packaged signature records them (see *Kernel sources and saved plans*
+below). The arguments bind to the kernel's parameters in written order.
 
-**A `scalar` source resolves whenever its value exists.** A scalar operand carries its value one
-of two ways ([RFC 0016](0016_RuntimePassByValueTensors.md)): baked into the graph at build time,
-or marked `is_runtime_pass_by_value` and supplied per execution through the variant pack, where
-its entry is a host pointer to the scalar. A baked value folds into the packed argument buffer
-once at plan build; a runtime one is read from the variant pack on each launch, through the same
-uid lookup the launcher already performs for every tensor pointer. Arguments are packed per
-launch, so the runtime case costs a read, and the UDD does not name which case it is getting. The
-argument's declared `type` governs: the launcher coerces the supplied scalar to it, so a kernel
-taking an `f32` accepts any scalar operand hipDNN can carry.
+**Explicit kernarg offsets.** Not yet built. An argument entry that carries an `offset` is refused
+as not supported yet; the written order alone places each argument.
+
+**Attribute and `scalar` sources.** Not yet built. The loader refuses `{"from": "attribute"}` and
+`{"from": "scalar"}` as not supported yet. An `expr` source can read any symbol the engine's match
+publishes, a node attribute included, so a value baked into the graph is reachable today. A
+scalar operand carries its value one of two ways
+([RFC 0016](0016_RuntimePassByValueTensors.md)): baked into the graph at build time, or marked
+`is_runtime_pass_by_value` and supplied per execution through the variant pack, where its entry
+is a host pointer to the scalar. A `scalar` source resolves whenever its value exists. A baked
+value folds into the packed argument buffer once at plan build; a runtime one is read from the
+variant pack on each launch, through the same uid lookup the launcher already performs for every
+tensor pointer. Arguments are packed per launch, so the runtime case costs a read, and the UDD
+does not name which case it is getting. The argument's declared `type` governs: the launcher
+coerces the supplied scalar to it, so a kernel taking an `f32` accepts any scalar operand hipDNN
+can carry.
+
+**Keys and arms.** `grid`, `block` and `args_signature` are required, with all three axes of
+`grid` and of `block`; `args_signature` may be empty. `shared_mem_bytes` and `workspace_bytes`
+are optional and default to 0. A formula is an expression object, a `$` reference or a number.
+Any declarative key selects the declarative arm, and a UDD that also carries `dispatch_symbol`,
+or carries neither, is refused, as is an unknown key. The loader compiles the arm when it reads
+the file (`compileLaunch` in `CompiledLaunch.hpp`) and gives the UDD the reserved dispatch symbol
+`hipdnn.declarative_launch`, which no authored `dispatch_symbol` may use or extend.
+
+**Evaluation and failure.** Formulas evaluate over the symbols criteria read: the engine's
+binding, `$graph.*`, `$kernel.*` (including `name[i]` of an `int_list` field) and `$device.*`,
+where a device property the runtime does not report reads as null. The language computes in
+double, so a value is an integer only when it is a whole number of magnitude at most 2^53. Each
+value then meets the rule of its field:
+
+| Field | Rule |
+|---|---|
+| `grid` and `block` axes | integer in [1, 2^32 − 1] |
+| `shared_mem_bytes` | integer in [0, 2^32 − 1] |
+| `workspace_bytes` | integer in [0, 2^53] |
+| `i32` argument | integer in the int32 range |
+| `u32` argument | integer in [0, 2^32 − 1] |
+| `i64` argument | integer (magnitude at most 2^53) |
+| `f32` argument | finite number within the float range, narrowed to float |
+
+A number literal that breaks its rule is refused when the UDD is read. A formula that, for one
+graph, yields null, a bool, a string, an array, or a value that breaks its rule throws
+`HIPDNN_PLUGIN_STATUS_BAD_PARAM` naming the UDD and the field, and so does a `pointer` whose tensor
+the binding holds no uid for. So does a launch the device cannot run: grid times block on any
+axis above 2^32 − 1 work-items, a block of more than 1024 work-items, or `shared_mem_bytes` above
+the device's LDS per workgroup (not checked when the device does not report it). The catalog
+resolves the launch when it admits each kernel, so any of these failures drops that kernel for the
+graph, as a failed matcher would, and an engine left with no kernel declines the graph
+([§8.6](#86-the-base-path-invariant)). An admitted kernel's launch resolves again at plan build
+for the same graph and device.
+
+**Kernel sources and saved plans.** A declarative launch runs precompiled code: the state manager
+drops, with an error, a kernel of a declarative pack whose source is `embedded_source`, or whose
+packaged `signature` differs from the arguments in count, kind or size
+(8 bytes for a pointer, the workspace and an `i64`; 4 for the other scalars). Where the packaged
+signature records parameter names, each must equal the argument name written in the same position,
+so a swapped pair of same-sized operands is refused; clang records no names for an `extern "C"`
+kernel, whose arguments match on kind and size alone. `hkp_pack` turns
+authored `hip`, `hsaco` and `rocke` sources into `kpack` entries, so every authored kind
+qualifies. A saved plan stores the resolved launch, its geometry, sizes and argument values, as
+plain data under `hipdnn.declarative_launch.v1`, because the formulas are data that can change
+independently of the saved code object. Restoring the plan re-evaluates nothing; it checks the
+stored grid and block against the same work-item limits, and `shared_mem_bytes` against the LDS
+of the device it loads on, and refuses a launch that does not fit.
 
 The generic launcher runs the same steps for every kernel: resolve the argument sources against the
 bound variables, evaluate the grid/block/shared/workspace formulas, pack the arguments, load the
-kernel's code object, and launch. A parsed dispatch spec, cached kernel handle, and preallocated
-argument buffer keep this close to hand-written launch cost.
+kernel's code object, and launch. The provider registers one dispatch handler under the reserved
+symbol; it resolves the launch at plan build and holds the resolved values, so a launch only
+maps tensor uids to device pointers.
 
 ![The generic dispatch dataflow: a bound symbol table feeds the UDD's formula evaluator and argument resolver](../images/ukd_dispatch_flow.svg)
 
@@ -1324,26 +1402,30 @@ wants a generated pack set rather than hand-written ones.
 ]
 ```
 
-**Escape hatch: a custom plan.** When declarative dispatch cannot express what a kernel needs,
-for example a swizzled or data-dependent grid, host-side logic between launches, or nonstandard
-compile flags, a UDD may name a registered custom plan instead of the declarative fields:
+**Escape hatch: a native dispatch handler.** When declarative dispatch cannot express what a
+kernel needs, for example a swizzled or data-dependent grid, host-side logic between launches,
+several launches, or compile options chosen at plan build, a UDD names a registered native
+dispatch handler instead of the declarative fields:
 
 ```jsonc
-{"custom_plan": "hipdnn.persistent_gemm", "config": {"compile_flags": ["-mllvm", "..."]}}  // a UDD
+{"version": "1.0", "id": "...", "name": "...", "dispatch_symbol": "hipkernel.conv_fwd.dispatch"}  // a UDD
 ```
 
-As with the native matcher, the descriptor carries only a symbol name and typed config, never
-inline code, and the handler resolves from the provider-internal registry. Because a custom plan
-replaces the UDD's declarative fields, its handler owns everything those fields would have
-provided, including workspace: it must supply a workspace calculation alongside its launch,
-answerable before a kernel is chosen and before any plan is built, because that is when hipDNN
-asks. A handler that can launch but cannot size its scratch is incomplete. The exact shape of that
-entry point is left to the UDD follow-up; matching and applicability still happen declaratively
-through the engine's pattern and the pack's matchers, so only the launch itself becomes C++. On
-the drop-in path a custom plan must be a built-in registered handler, subject to the source-trust
-rules for drop-in packages. An engine with kernel slots uses native handlers that read the offset
-tokens, because declarative workspace arguments are not offset past the shared region
-([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)).
+As with the native matcher, the descriptor carries only a symbol name, never inline code, and the
+handler resolves from the provider-internal registry (`DispatchRegistry`, an
+`IKernelDispatchHandler`). Because a native handler replaces the UDD's declarative fields, it owns
+everything those fields would have provided, including workspace: `workspaceBytes` answers the
+workspace query before a kernel is chosen and before any plan is built, because that is when
+hipDNN asks, and `prepare` and `launch` build and run the plan. `workspaceBytes` is asked only
+about kernels the catalog admitted, so a throw from it is a fault, never a decline: whatever its
+status, it fails the workspace query and the workspace-limit filter. A kernel that cannot serve a
+graph declines at a matcher. Matching and applicability still
+happen declaratively through the engine's pattern and the pack's matchers, so only the launch
+itself becomes C++. On the drop-in path a native dispatch handler must be a built-in registered
+handler, subject to the source-trust rules for drop-in packages. An engine with kernel slots uses
+native handlers that read the offset tokens, because declarative workspace arguments are not offset
+past the shared region ([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)). The
+packer refuses a slotted engine's pack whose UDD is declarative, and the state manager drops it.
 
 ---
 
@@ -1515,9 +1597,10 @@ the ones reading `$kernel.*`, last. A graph-level failure disqualifies every ker
 that lists that matcher, so the broadly shared checks prune before the per-kernel pass runs. A
 criterion reads the binding and never adds to it.
 *Produces two things, cached together under the applicability key:* the **catalog**, the kernels
-whose full matcher set passed, keyed by each kernel's metadata value tuple; and the **bound token
-state**, the match's binding read alongside the `$kernel.*` and `$device.*` values the criteria
-resolved.
+whose full matcher set passed and, under a declarative UDD, whose launch resolved for this graph
+and device ([§6](#6-dispatch-and-workspace)), keyed by each kernel's metadata value tuple; and the
+**bound token state**, the match's binding read alongside the `$kernel.*` and `$device.*` values
+the criteria resolved.
 
 **7. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
 survived matching. For an engine with kernel slots, every slot's catalog must be non-empty
@@ -1590,7 +1673,8 @@ and the launcher resolves each dispatch argument against it by uid.
 ### 8.6 The Base-Path Invariant
 
 **Accept implies a launchable kernel.** Returning true from `isApplicable` means at least one
-kernel passed every matcher in some pack, and it is a promise the engine keeps for the rest of the
+kernel passed every matcher in some pack and, under a declarative UDD, resolved its launch for the
+graph. It is a promise the engine keeps for the rest of the
 flow. Applicability is the only stage where declining is free: an empty catalog answers false, and
 hipDNN moves on to the next engine having lost nothing.
 
@@ -1602,7 +1686,9 @@ applicability and every later stage is a read, so there is nothing an engine can
 late. Producing no launchable kernel after accepting is a bug, not a legal outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
-never accepted. For an engine with kernel slots, accepting promises a launchable kernel in every
+never accepted. Likewise a kernel whose declarative launch does not resolve for the graph
+([§6](#6-dispatch-and-workspace)) is dropped when the catalog is built. For an engine with kernel
+slots, accepting promises a launchable kernel in every
 slot. The same invariant applies to a composite's mandatory
 stage.
 
@@ -2111,13 +2197,14 @@ Four areas are new here:
 
 ### 14.2 Follow-up RFCs
 
-The state of each row is: KDP + AOT packaging is built (kpack). For the UED, both `graph_match`
-arms are built (`nodes` and `native`). For the UMD and UHD, only the native arms are built
-(`matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
-metadata schema have no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as
-`MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter exists but
-the loader does not use it. Shape matching, runtime drop-in, adapters, composition, and JIT are
-not yet built.
+The state of each row is: KDP + AOT packaging is built (kpack). The UED has both arms
+(`graph_match.nodes` and `graph_match.native`). The UMD has both arms (`criteria` and
+`matchSymbol`). For the UHD, only the `NATIVE` arm is built. UDD + dispatch and KMD + metadata
+schema have no RFC yet. The UDD has both arms: a native `dispatch_symbol`, and the single-launch
+declarative arm of [§6](#6-dispatch-and-workspace); its `launches[]` program and intermediates, the
+`scalar` and `attribute` sources and explicit kernarg offsets are not yet built. The KMD loads as
+`MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter compiles UMD
+`criteria` and UDD launch formulas. Shape matching, runtime drop-in, adapters, composition, and JIT are not yet built.
 
 The pieces this document frames but does not design land in focused follow-up RFCs, each bundling
 a descriptor format with the subsystem it drives. Together they form the planned series below.
@@ -2280,7 +2367,9 @@ and the hand-off between them. Until `launches[]` exists the handler declares th
 launches (`launchNames()`, provisional), and the plugin SDK's kernel ingestor state manager drops
 a kernel whose launch names differ from that set when it builds its catalog, so an accepted kernel
 is always launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a
-single-launch handler that reads `kernel_source`.
+single-launch handler that reads `kernel_source`. The declarative-launch handler of
+[§6](#6-dispatch-and-workspace) is single-launch too, so a pack with a declarative UDD keeps only
+kernels that carry `kernel_source`.
 
 ### 15.2 One Graph Split Across Several Engines
 
@@ -2621,8 +2710,8 @@ choices; none is a dependency.
   it is paired with.
 - **UDD (Universal Dispatch Descriptor):** the dispatch ABI, meaning argument binding and ordering,
   grid, block, shared memory, and workspace. It holds one or more Launches (one for a single-kernel
-  pack, several for a multi-launch one). One per KDP, shared by every child kernel, and reused
-  across packs by ID.
+  pack, several for a multi-launch one), or names a native dispatch handler by `dispatch_symbol`.
+  One per KDP, shared by every child kernel, and reused across packs by ID.
 - **Criteria expression:** the declarative `{"op": [args]}` tree that forms a matcher's checks, over
   `$`-prefixed references to the symbols the engine's pattern published plus the ambient
   `$graph.*` / `$device.*` and per-kernel `$kernel.*` namespaces. Plain data the safe interpreter
@@ -2731,7 +2820,8 @@ choices; none is a dependency.
   adapter in the provider SDK; deferred to its own follow-up RFC.
 - **Escape hatch:** a named, registry-resolved handler for logic the declarative model cannot
   express, carried as a symbol name, never inline code. It stands beside a descriptor, never inside
-  an expression: the operator set is closed and admits no provider hook. Two instances, at two
-  scopes: the **native criterion** (pack, named by a UMD — reads the binding) and the **custom
-  plan** (dispatch side). The **native match** (engine, `graph_match.native`) uses the same
-  named-symbol mechanism as one of the two `graph_match` arms.
+  an expression: the operator set is closed and admits no provider hook. Two instances, both
+  at pack scope: the **native criterion** (named by a UMD — reads the binding) and the **native
+  dispatch handler** (named by a UDD's `dispatch_symbol` — launches the kernel). The **native
+  match** (engine, `graph_match.native`) uses the same named-symbol mechanism as one of the two
+  `graph_match` arms.
