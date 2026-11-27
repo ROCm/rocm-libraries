@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import warnings
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -28,9 +29,9 @@ _THEROCK_CI_SOURCE = "TheRock CI build"
 _ADAPTER_ENV = "TENSILELITE_ROCM_ADAPTER"
 _THEROCK_CI_ADAPTER = "therock-ci"
 
-# Temporary compatibility gates. Keep the implementation below intact so the
-# version and Python-SDK paths can be re-enabled once TheRock provides them.
-_ENABLE_ROCM_VERSION_VALIDATION = False
+# Temporary compatibility gate. Keep the Python-SDK implementation below intact
+# until a published rocm-sdk-core nightly ships the tool console scripts it
+# needs (clang-offload-bundler).
 _ENABLE_PYTHON_ROCM_RUNTIME = False
 
 class TensileLiteRuntimeError(ImportError):
@@ -83,11 +84,16 @@ def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
     """Select and validate the ROCm installation for a TensileLite wheel."""
-    expected = (
-        _expected_rocm_version(distribution, distribution_version)
-        if _ENABLE_ROCM_VERSION_VALIDATION
-        else "BYPASS"
-    )
+    expected = _expected_rocm_version(distribution, distribution_version)
+    rocm = _select_and_validate(distribution, distribution_version, expected)
+    if expected is None:
+        _warn_not_checked(distribution, distribution_version, rocm)
+    return rocm
+
+
+def _select_and_validate(
+    distribution: str, distribution_version: str | None, expected: str | None
+) -> ValidatedRocm:
     if _therock_ci_selected():
         return _validate_therock_ci(
             distribution, distribution_version, expected, _therock_ci_version()
@@ -97,6 +103,32 @@ def validate_distribution(
         if python_sdk_version is not None:
             return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
     return _validate_system_rocm(distribution, distribution_version, expected)
+
+
+class RocmNotCheckedWarning(UserWarning):
+    """A development build was used without checking it against the selected ROCm."""
+
+
+_not_checked_warned = False
+
+
+def _warn_not_checked(
+    distribution: str, distribution_version: str | None, rocm: ValidatedRocm
+) -> None:
+    """Warn, once per process, that a development build makes no ROCm claim."""
+    global _not_checked_warned
+    if _not_checked_warned:
+        return
+    _not_checked_warned = True
+    shown_version = distribution_version or package_version(distribution)
+    warnings.warn(
+        f"{distribution} {shown_version} is a development build with no ROCm identity, "
+        "so it was not checked against the selected ROCm.\n"
+        f"  selected ROCm: {rocm.version or 'unknown'} at {rocm.path}\n"
+        f"  selected by: {rocm.source}",
+        RocmNotCheckedWarning,
+        stacklevel=3,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -276,15 +308,14 @@ def _validate_therock_ci(
     )
     executable_search_paths = _therock_ci_executable_search_paths()
     selected_path = executable_search_paths[0]
-    if expected != "BYPASS":
-        _validate_compatibility(
-            distribution=distribution,
-            distribution_version=distribution_version,
-            expected_version=expected,
-            actual_version=version,
-            path=selected_path,
-            source=_THEROCK_CI_SOURCE,
-        )
+    _validate_compatibility(
+        distribution=distribution,
+        distribution_version=distribution_version,
+        expected_version=expected,
+        actual_version=version,
+        path=selected_path,
+        source=_THEROCK_CI_SOURCE,
+    )
     return TheRockCIRocm(
         path=selected_path,
         version=version,
@@ -330,15 +361,14 @@ def _validate_python_sdk(
     version = _canonical_rocm_version(python_sdk_version)
     path = _python_sdk_location()
     executable_search_paths = _python_sdk_executable_search_paths()
-    if expected != "BYPASS":
-        _validate_compatibility(
-            distribution=distribution,
-            distribution_version=distribution_version,
-            expected_version=expected,
-            actual_version=version,
-            path=path,
-            source=_PYTHON_SDK_SOURCE,
-        )
+    _validate_compatibility(
+        distribution=distribution,
+        distribution_version=distribution_version,
+        expected_version=expected,
+        actual_version=version,
+        path=path,
+        source=_PYTHON_SDK_SOURCE,
+    )
     return PythonRocm(
         path=path,
         version=version,
@@ -399,16 +429,15 @@ def _validate_system_rocm(
         path / "lib" / "llvm" / "bin",
         path / "libexec" / "hipblaslt" / "tensilelite",
     )
-    if expected != "BYPASS":
-        _validate_compatibility(
-            distribution=distribution,
-            distribution_version=distribution_version,
-            expected_version=expected,
-            actual_version=actual,
-            path=path,
-            source=resolved.source,
-            base_only=identity_kind == "base",
-        )
+    _validate_compatibility(
+        distribution=distribution,
+        distribution_version=distribution_version,
+        expected_version=expected,
+        actual_version=actual,
+        path=path,
+        source=resolved.source,
+        base_only=identity_kind == "base",
+    )
     return SystemRocm(
         path=path,
         version=actual,
