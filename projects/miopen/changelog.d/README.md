@@ -31,3 +31,11 @@ If `develop` has pending fragments, dispatch the workflow and merge its PR. For 
 ## Opt in another project
 
 Add the directory name under `projects/` to `OPTED_IN_PROJECTS` in the [shared script](../../../.github/scripts/changelog_fragments.py), create a `changelog.d/` directory with a contributor guide, and mark the newest `CHANGELOG.md` section with the `## (Unreleased) ` prefix. Update the project's contributor guidance and choose CODEOWNERS for fragments and the consolidated changelog. The shared **Changelog fragments** workflow runs weekly and on demand, using a separate bot PR for each registered project. No project-specific workflow or App setup is needed.
+
+Before merging the opt-in, verify that pre-commit actually checks a fragment from
+the new project. Run `pre-commit run changelog-fragments --files <fragment-path>`
+with a valid sample and check that the hook reports **Passed**, not **Skipped**.
+Then make the sample invalid (for example, remove its bullet marker) and confirm
+the hook fails. If the project is globally excluded in
+[`.pre-commit-config.yaml`](../../../.pre-commit-config.yaml), adjust the
+exclusion to let its `changelog.d/` files through before enabling the bot.

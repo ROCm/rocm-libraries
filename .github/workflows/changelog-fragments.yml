@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/changelog-fragments.yml'
       - '.github/scripts/changelog_fragments.py'
+      - 'projects/*/CHANGELOG.md'
       - 'projects/*/changelog.d/**'
 
 permissions:
@@ -103,5 +104,6 @@ jobs:
           body: |
             Moves merged `${{ matrix.project }}` fragments into the unreleased changelog and removes the consumed files.
 
-            Before merging, check that consumed fragments still exist unchanged on `develop`.
+            Before merging, check that the target heading is still the newest unreleased heading on `develop`
+            and that the consumed fragments still exist there unchanged. If either changed, refresh this PR first.
             Do not push to this branch; use **Changelog fragments → Run workflow** to refresh it.
