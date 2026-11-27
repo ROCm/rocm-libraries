@@ -37,24 +37,18 @@ typedef struct
 
 /* MUST match CONFIGS in batchnorm2d_bwd_emit.py (index for index). */
 static const bn_bwd_cfg_t CONFIGS[] = {
-    {"bwd", 256, 4, "f16", 1, 1, false},
-    {"bwd", 256, 4, "bf16", 1, 1, false},
-    {"bwd", 1024, 8, "f16", 1, 1, false},
-    {"bwd", 128, 2, "bf16", 1, 1, true},
-    {"bwd", 512, 8, "f16", 1, 2, false},
-    {"bwd", 256, 4, "bf16", 1, 8, true},
-    {"bwd", 1024, 4, "f16", 2, 1, false},
-    {"bwd", 128, 8, "bf16", 8, 1, true},
-    {"bwd", 512, 2, "f16", 4, 1, true},
-    {"bwd", 256, 8, "f16", 1, 4, false},
-    {"reduce", 256, 8, "f16", 1, 1, false},
-    {"apply", 256, 8, "f16", 1, 1, false},
-    {"reduce", 512, 8, "bf16", 1, 1, true},
-    {"apply", 512, 8, "bf16", 1, 1, true},
-    {"reduce", 128, 4, "f16", 1, 1, true},
-    {"apply", 128, 4, "f16", 1, 1, true},
-    {"reduce", 512, 4, "bf16", 1, 1, false},
-    {"apply", 512, 4, "bf16", 1, 1, false},
+    {"bwd", 256, 4, "f16", 1, 1, false},     {"bwd", 256, 4, "bf16", 1, 1, false},
+    {"bwd", 1024, 8, "f16", 1, 1, false},    {"bwd", 128, 2, "bf16", 1, 1, true},
+    {"bwd", 512, 8, "f16", 1, 2, false},     {"bwd", 256, 4, "bf16", 1, 8, true},
+    {"bwd", 1024, 4, "f16", 2, 1, false},    {"bwd", 128, 8, "bf16", 8, 1, true},
+    {"bwd", 512, 2, "f16", 4, 1, true},      {"bwd", 256, 8, "f16", 1, 4, false},
+    {"reduce", 256, 8, "f16", 1, 1, false},  {"apply", 256, 8, "f16", 1, 1, false},
+    {"reduce", 512, 8, "bf16", 1, 1, true},  {"apply", 512, 8, "bf16", 1, 1, true},
+    {"reduce", 128, 4, "f16", 1, 1, true},   {"apply", 128, 4, "f16", 1, 1, true},
+    {"reduce", 512, 4, "bf16", 1, 1, false}, {"apply", 512, 4, "bf16", 1, 1, false},
+    {"bwd", 256, 4, "f32", 1, 1, false},     {"bwd", 128, 2, "f32", 1, 2, true},
+    {"reduce", 256, 4, "f32", 1, 1, false},  {"apply", 256, 4, "f32", 1, 1, false},
+    {"reduce", 512, 2, "f32", 1, 1, true},   {"apply", 512, 2, "f32", 1, 1, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))

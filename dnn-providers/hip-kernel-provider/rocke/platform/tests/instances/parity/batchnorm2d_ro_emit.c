@@ -33,6 +33,10 @@ static const ro_cfg_t CONFIGS[] = {
     {"train", 256, 8, 2, "f16", false, false},
     {"train", 512, 8, 32, "f16", false, true},
     {"bwd", 256, 8, 2, "bf16", false, true},
+    {"train", 256, 4, 16, "f32", false, true},
+    {"bwd", 256, 4, 16, "f32", false, true},
+    {"train", 512, 2, 32, "f32", false, true},
+    {"bwd", 512, 2, 32, "f32", false, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))

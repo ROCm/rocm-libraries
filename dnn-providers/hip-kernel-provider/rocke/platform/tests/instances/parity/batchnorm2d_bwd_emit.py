@@ -39,6 +39,12 @@ CONFIGS = [
     ("apply", 128, 4, "f16", 1, 1, True),  # 15
     ("reduce", 512, 4, "bf16", 1, 1, False),  # 16
     ("apply", 512, 4, "bf16", 1, 1, False),  # 17
+    ("bwd", 256, 4, "f32", 1, 1, False),  # 18 f32
+    ("bwd", 128, 2, "f32", 1, 2, True),  # 19 f32
+    ("reduce", 256, 4, "f32", 1, 1, False),  # 20 f32
+    ("apply", 256, 4, "f32", 1, 1, False),  # 21 f32
+    ("reduce", 512, 2, "f32", 1, 1, True),  # 22 f32
+    ("apply", 512, 2, "f32", 1, 1, True),  # 23 f32
 ]
 
 

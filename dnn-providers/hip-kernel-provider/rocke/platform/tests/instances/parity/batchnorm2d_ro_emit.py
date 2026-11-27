@@ -28,6 +28,10 @@ CONFIGS = [
     ("train", 256, 8, 2, "f16", False, False),  # 6
     ("train", 512, 8, 32, "f16", False, True),  # 7
     ("bwd", 256, 8, 2, "bf16", False, True),  # 8
+    ("train", 256, 4, 16, "f32", False, True),  # 9 f32
+    ("bwd", 256, 4, 16, "f32", False, True),  # 10 f32
+    ("train", 512, 2, 32, "f32", False, True),  # 11 f32
+    ("bwd", 512, 2, 32, "f32", False, True),  # 12 f32
 ]
 
 
