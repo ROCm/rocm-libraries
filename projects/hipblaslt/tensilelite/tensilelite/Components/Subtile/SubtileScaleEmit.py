@@ -322,7 +322,7 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
 # Uses BufferLoadB128 with lds=True. M0 is set to scaleLdsBase, and
 # sharedVgprGROffset[0] = serial * scaleLoadWidth serves as both the
 # global read offset (from SRD) and the LDS write offset (from M0).
-def globalReadDoScaleSubtile(tc, writer, kernel):
+def globalReadDoScaleSubtile(tc, writer, kernel, mt=None):
   module = Module()
 
   if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
@@ -344,9 +344,14 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 
   # DTL load: data goes directly from global memory to LDS (no intermediate VGPR)
   mubuf = MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
+  if mt is None:
+    scaleComment = "scale%s: DTL b128 load" % tc
+  else:
+    mt_s = " MT=n" if int(mt) == 0 else " MT=n+%d" % int(mt)
+    scaleComment = "%s%s tile=0 K=0" % ("SA" if tc == "MXSA" else "SB", mt_s)
   module.add(BufferLoadB128(dst=None, vaddr=vgpr(tileInfo.sharedVgprGROffset[0]),
                             saddr=sgpr("Srd%s" % tc, 4), soffset=0, mubuf=mubuf,
-                            comment="scale%s: DTL b128 load" % tc))
+                            comment=scaleComment))
 
   return module
 

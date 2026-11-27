@@ -57,3 +57,13 @@ def test_streamk_dtl_first_prefetch_waits_for_previous_tile_lds_reads(streamk_dt
     barrier = setup.rfind("s_barrier")
     assert barrier != -1, "no s_barrier between the persistent loop start and the first DirectToLds load"
     assert "s_waitcnt lgkmcnt(0)" in setup[:barrier], "no LDS wait before that barrier"
+
+
+def test_streamk_dtl_classic_back_edge_adds_no_second_sync(streamk_dtl_result):
+    """The classic preloop syncs before its first DirectToLds load, so the
+    Subtile-only back-edge sync stays off this kernel."""
+    _base, source, error = streamk_dtl_result
+    assert error == 0
+    close = source.index("label_PersistentLoopClose:")
+    back_edge = source.index("label_PersistentLoopStart", close)
+    assert "s_barrier" not in source[close:back_edge]

@@ -823,6 +823,17 @@ class StreamK(TileProcessingStrategy):
         # StreamKLocalEnd is always ItersPerTile. These SGPRs are not allocated
         # in DP-only mode; readers use the constants directly.
         module.add(SSubU32(dst=sgpr("StreamKLocalStart"), src0=sgpr("PersistentIteration"), src1=sgpr(sTmp+1), comment="Local iteration start"))
+        # A start inside an epoch selects the wrong half of every scale and
+        # flips the dual-period tail's parity. The host packs SKItersPerWG so
+        # this cannot happen; the assert catches a host built without it.
+        if g > 1 and writer.asmAssert.enableAsserts:
+            sPhase = writer.sgprPool.checkOut(1, "skLocalStartPhase", preventOverflow=False)
+            vAssert = writer.vgprPool.checkOut(2, "skLocalStartEpochAssert")
+            module.add(SAndB32(dst=sgpr(sPhase), src0=sgpr("StreamKLocalStart"), src1=g - 1,
+                               comment="assert: local start on a scale epoch"))
+            module.add(writer.asmAssert.eq(sgpr(sPhase), 0, vAssert))
+            writer.vgprPool.checkIn(vAssert)
+            writer.sgprPool.checkIn(sPhase)
         # local end (SK tile)
         module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("PersistentIterationEnd"), src1=sgpr(sRealEnd), comment="1. (Local) iteration end (SK tile)"))
         module.add(SSubU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sTmp+1), comment="2. Local iteration end (SK tile)"))

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import math
+import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -10,7 +11,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from .LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity, GRPlacementStrategy)
+      ReadGranularity, GRPlacementStrategy, HalfDisjointPlanRefused)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, ceilDivide, plsinBlockSchedTile, isMxf4SubtilePath
@@ -1376,7 +1377,8 @@ def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB)
 
   The completed-DepthU parity is bit log2(DepthU) of global K.  The tail is
   the final global K interval under both data-parallel and StreamK execution,
-  so global K is the authoritative phase source.
+  and StreamK starts every workgroup on a whole epoch (skKGranularity), so
+  global K parity equals the parity of this workgroup's DU count.
   """
   assert kernel["DepthU"] > 0 and \
       kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
@@ -1400,6 +1402,23 @@ def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB)
 
   module.add(aligned)
   return module
+
+
+MXFP8_HALF_DISJOINT_ENV = "TENSILE_MXFP8_HALF_DISJOINT"
+
+
+def mxfp8HalfDisjointLds() -> bool:
+  """Base schedule of every dual-period MXFP8 main loop in this build.
+
+  TENSILE_MXFP8_HALF_DISJOINT=1 (the default) splits each body into
+  half-disjoint LDS read/write halves; 0 keeps the uniform PGR2 epoch cohorts.
+  It is read at codegen time and does not enter the kernel name, so one
+  library holds one strategy.
+  """
+  value = os.environ.get(MXFP8_HALF_DISJOINT_ENV, "1").strip()
+  if value not in ("0", "1"):
+    raise ValueError("%s must be 0 or 1, got %r" % (MXFP8_HALF_DISJOINT_ENV, value))
+  return value == "1"
 
 
 def mainLoop(writer, kernel):
@@ -1485,6 +1504,15 @@ def mainLoop(writer, kernel):
       forcedPartition = (MFMASchedulerConfig._even_split_size(M, mnM),
                          MFMASchedulerConfig._even_split_size(N, mnN))
 
+  # A wave group stacked along one axis splits each atom on that axis over
+  # several cooperative buffer loads.  Uniform epoch cohorts count those loads.
+  grLoadsPerAtom = {}
+  if schedulerPartitionPrefetch:
+    for tc, ti, gran, tiles in (('A', tiA, grAGran, M), ('B', tiB, grBGran, N)):
+      atoms = ceilDivide(tiles, max(1, int(gran.mn)))
+      if atoms and ti.numGRTotal and ti.numGRTotal % atoms == 0:
+        grLoadsPerAtom[tc] = ti.numGRTotal // atoms
+
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
   singlePartition = ((pgr == 0) or (schedulerPlr == 0)) \
@@ -1531,6 +1559,9 @@ def mainLoop(writer, kernel):
       tailPartitionSizeM = 0
   if wider and not tailOwnTiles:
       candidates = wider
+  schedulerHalfDisjoint = schedulerPartitionPrefetch and mxfp8HalfDisjointLds()
+  scheduler = None
+  refusals = []
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1554,6 +1585,9 @@ def mainLoop(writer, kernel):
           doubleBufferTensors=schedulerDoubleBuffer,
           prefetchNextPartition=schedulerPartitionPrefetch,
           uniformPgrEpoch=(schedulerPartitionPrefetch and schedulerPgr == 2),
+          uniformEpochVmemCohortSize=5,
+          halfDisjointLds=schedulerHalfDisjoint,
+          grLoadsPerAtom=grLoadsPerAtom,
           partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
@@ -1566,12 +1600,23 @@ def mainLoop(writer, kernel):
           tailPartitionSizeM=tailPartitionSizeM,
       )
 
-      scheduler = LogicalScheduler(cfg)
-      scheduler.build()
+      candidate = LogicalScheduler(cfg)
+      try:
+          candidate.build()
+      except HalfDisjointPlanRefused as refusal:
+          refusals.append(f"partition {partSizeM}x{partSizeN}: {refusal}")
+          continue
+      scheduler = candidate
 
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
+  # A half-disjoint dual-period main loop has no fallback.  Raising rejects the
+  # kernel: getSourceFileString turns a RuntimeError into a codegen failure.
+  if scheduler is None:
+      raise RuntimeError(
+          "%s: no dual-period MXFP8 partition candidate has a half-disjoint schedule (%s)"
+          % (writer.states.kernelName, "; ".join(refusals)))
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo

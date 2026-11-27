@@ -68,14 +68,14 @@ def _config(**over):
 
 
 def _cohort2_config(**over):
-    """Shaped so the derived cohort is two atoms.
+    """A uniform epoch whose cohorts are two one-load atoms.
 
-    4+4 single-tile A/B requests over a 2x2 partition grid give ceil(8/4)=2.
     Keeping the granularity at one tile means an atom is a tile, so the
     hoist's tile ranges stay readable.
     """
     params = dict(numMFMATilesM=4, numMFMATilesN=4,
-                  partitionSizeM=2, partitionSizeN=2)
+                  partitionSizeM=2, partitionSizeN=2,
+                  uniformEpochVmemCohortSize=2)
     params.update(over)
     return _config(**params)
 
@@ -99,6 +99,7 @@ def _scheduler(cfg, partitions):
     sched = LogicalScheduler.__new__(LogicalScheduler)
     sched.config = cfg
     sched._partitions = partitions
+    sched._halfLoadHalf = None
     return sched
 
 
@@ -133,71 +134,6 @@ def test_uniform_epoch_requires_partition_directed_prefetch():
 
 def test_a_valid_uniform_epoch_config_is_accepted():
     assert _config().uniformPgrEpoch is True
-
-
-# ── the derived cohort width ─────────────────────────────────
-
-def test_an_atom_covers_one_read_granule():
-    """A and B each contribute one request per gr granule of tiles."""
-    cfg = _config(grA=ReadGranularity(mn=2, k=1),
-                  grB=ReadGranularity(mn=4, k=1))
-    assert cfg.uniformEpochVmemAtoms == 8 // 2 + 8 // 4
-
-
-def test_a_partial_granule_still_costs_a_whole_atom():
-    cfg = _config(numMFMATilesM=7, grA=ReadGranularity(mn=2, k=1))
-    assert cfg.uniformEpochVmemAtoms == 4 + 8      # ceil(7/2) = 4
-
-
-def test_scaled_tensors_add_one_atom_each():
-    """One scale dword covers the epoch, so each scale tensor is one read."""
-    plain = _config()
-    scaled = _config(lrSA=ReadGranularity(mn=2, k=1),
-                     lrSB=ReadGranularity(mn=2, k=1))
-    assert scaled.uniformEpochVmemAtoms == plain.uniformEpochVmemAtoms + 2
-
-
-def test_the_cohort_spreads_the_epoch_over_every_slot():
-    """_distribute_grs sends atom i to slot i//cohort.
-
-    The width is right exactly when the last atom lands in the last slot and
-    no earlier: that is what makes the epoch span the partitions.
-    """
-    cfg = _config()
-    atoms, cohort = cfg.uniformEpochVmemAtoms, cfg.uniformEpochVmemCohortSize
-    slots = cfg.numPartitions * cfg.numSubIterK
-    assert (atoms - 1) // cohort == slots - 1
-
-
-@pytest.mark.parametrize("grA_mn, grB_mn, scaled, expected", [
-    (2, 2, False, 2),      # 4+4 atoms over 4 slots
-    (2, 1, False, 3),      # 4+8
-    (1, 1, False, 4),      # 8+8
-    (1, 1, True, 5),       # 8+8 plus two scale reads
-])
-def test_the_cohort_width_follows_the_shape(grA_mn, grB_mn, scaled, expected):
-    """The width is a property of the shape, not a tuned constant."""
-    extra = {}
-    if scaled:
-        extra = dict(lrSA=ReadGranularity(mn=2, k=1),
-                     lrSB=ReadGranularity(mn=2, k=1))
-    cfg = _config(grA=ReadGranularity(mn=grA_mn, k=1),
-                  grB=ReadGranularity(mn=grB_mn, k=1), **extra)
-    assert cfg.uniformEpochVmemCohortSize == expected
-
-
-def test_fewer_atoms_than_slots_still_gives_a_cohort_of_one():
-    """An epoch smaller than the grid cannot reach every slot.
-
-    The width floors at one rather than zero, which would make the slot index
-    undefined; the epoch then simply occupies the first few slots.
-    """
-    cfg = _config(numMFMATilesM=4, numMFMATilesN=4,
-                  grA=ReadGranularity(mn=4, k=1),
-                  grB=ReadGranularity(mn=4, k=1),
-                  partitionSizeM=2, partitionSizeN=2)
-    assert cfg.uniformEpochVmemAtoms == 2
-    assert cfg.uniformEpochVmemCohortSize == 1
 
 
 # ── the frontier ─────────────────────────────────────────────
@@ -422,7 +358,8 @@ def test_cohort_spans_into_b_once_a_is_exhausted():
     """The epoch is ordered A then B, so an oversized cohort reaches B."""
     # A holds only two atoms, so a width-3 cohort has to reach into B.
     cfg = _config(numMFMATilesM=2, numMFMATilesN=10,
-                  partitionSizeM=1, partitionSizeN=5)
+                  partitionSizeM=1, partitionSizeN=5,
+                  uniformEpochVmemCohortSize=3)
     parts = _grid(numK=1, numPartitions=4)
     parts[1][0].lrs.append(_lr('B', 0, 0, 0, 1, partition=1))
     _scheduler(cfg, parts)._move_uniform_epoch_p0_overwrite_reads(parts)

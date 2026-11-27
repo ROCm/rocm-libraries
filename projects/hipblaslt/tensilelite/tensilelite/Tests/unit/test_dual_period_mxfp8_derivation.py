@@ -160,6 +160,8 @@ def _derive(gfx950_iim, assembler, capsys, mi, depth_u, pgr, plr, **overrides):
 
 # MT256x256, MIWT 8x4, MIWG 2x4 — the non-scale F8 subtile geometry.
 _MI_8WAVE = [16, 16, 128, 1, 1, 8, 4, 2, 4]
+# MIWT 2x2 / MIWG 1x1 normalizes to one scheduler partition.
+_MI_SINGLE_PARTITION = [16, 16, 128, 1, 1, 2, 2, 1, 1]
 # MT256x256, MIWT 8x8, MIWG 2x2 — the shipped DU256/PGR1 MXFP8 geometry.
 _MI_PGR1 = [16, 16, 128, 1, 1, 8, 8, 2, 2]
 
@@ -168,7 +170,7 @@ _MI_PGR1 = [16, 16, 128, 1, 1, 8, 8, 2, 2]
 # Dual-period path: PGR2 + DU128 MXFP8 is ACCEPTED with the right scale period.
 # ---------------------------------------------------------------------------
 def test_dual_period_accepts_pgr2_du128(_gp_gfx950, gfx950_iim, assembler, capsys):
-    sol, out = _derive(gfx950_iim, assembler, capsys, _MI_8WAVE, 128, 2, 0)
+    sol, out = _derive(gfx950_iim, assembler, capsys, _MI_8WAVE, 128, 2, 1)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     assert sol.get("_DualPeriodMXFP8") is True
     assert sol["DepthU"] == 128
@@ -178,6 +180,25 @@ def test_dual_period_accepts_pgr2_du128(_gp_gfx950, gfx950_iim, assembler, capsy
     assert sol["_DepthUMXSA"] == 8 and sol["_DepthUMXSB"] == 8
     # single-DU: data per-uid DepthU equals loop DepthU -> PGR2 legal.
     assert isSubtileMultiDU(sol) is False
+
+
+def test_dual_period_accepts_plr0(_gp_gfx950, gfx950_iim, assembler, capsys):
+    sol, out = _derive(gfx950_iim, assembler, capsys, _MI_8WAVE, 128, 2, 0)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["PrefetchLocalRead"] == 0
+    assert sol.get("_DualPeriodMXFP8") is True
+    assert sol["DepthU"] == 128
+    assert sol["_ScalePeriodUA"] == 256 and sol["_ScalePeriodUB"] == 256
+    assert sol["_ScaleReuseA"] == 2 and sol["_ScaleReuseB"] == 2
+
+
+def test_dual_period_rejects_single_partition_geometry(
+        _gp_gfx950, gfx950_iim, assembler, capsys):
+    sol, out = _derive(
+        gfx950_iim, assembler, capsys, _MI_SINGLE_PARTITION, 128, 2, 1)
+    assert sol.get("Valid") is False
+    assert "dual-period MXFP8 requires at least two normalized partitions" in out
+    assert sol.get("_DualPeriodMXFP8") is False
 
 
 # ---------------------------------------------------------------------------
