@@ -44,6 +44,12 @@ whose setup or teardown raised, whose process ended before it did, or whose
 file failed to collect, in any run the lane's records hold, even if another
 run of it passed. A lane's records directory kept across a CI step's retries
 holds every attempt, so a test that passed only on a retry is red here.
+
+A test every shard of a lane left to another shard has no verdict in that lane:
+a shard's records are missing, or CI ran each entry on one shard only while
+each kept its own share of the tests (``rocke.tests.ci_shard``), and no test
+failed. The report lists these tests; ``--every-shard`` says each lane's
+records hold every shard of its run, and fails the audit on any of them.
 """
 
 from __future__ import annotations
@@ -151,6 +157,9 @@ class LaneRun:
     unmapped: set[str] = field(default_factory=set)
     # Each test that failed in a run of the lane -> how each failed run ended.
     failures: dict[TestId, list[str]] = field(default_factory=dict)
+    # Tests every shard that collected them left to another shard of the lane,
+    # none of whose records ran or skipped them.
+    left_to_missing_shards: set[TestId] = field(default_factory=set)
 
     def note(self, test: TestId, event: str, reason: str) -> None:
         """Keep the furthest event of ``test`` and every reason given for it."""
@@ -234,6 +243,7 @@ def lane_run(
     for test in other_shard:
         if lane.progress.get(test) == "collected":
             del lane.progress[test]
+            lane.left_to_missing_shards.add(test)
     return lane
 
 
@@ -371,7 +381,8 @@ def report(
     limbo: list[LimboTest], failed: list[FailedTest], lanes: list[LaneRun]
 ) -> str:
     """The audit's report: the counts, each lane's tests run, each test that
-    failed, then each test in limbo with its reasons."""
+    failed, the tests every shard of a lane left to another, then each test in
+    limbo with its reasons."""
     lines = [
         "# Audit of CI runs",
         "",
@@ -411,6 +422,21 @@ def report(
                 for name, outcomes in test.outcomes.items()
             )
             lines.append(f"| `{test.path}` | `{test.node}` | {how} |")
+    for lane in lanes:
+        if lane.left_to_missing_shards:
+            lines += [
+                "",
+                (
+                    f"Tests every shard of lane {lane.name} left to another shard, "
+                    "so no verdict there (a shard's records are missing, or CI ran "
+                    "each entry on one shard only): "
+                    f"{len(lane.left_to_missing_shards)}"
+                ),
+            ]
+            lines += [
+                f"- `{path}::{node}`"
+                for path, node in sorted(lane.left_to_missing_shards)
+            ]
     unmapped = sorted(set().union(*(lane.unmapped for lane in lanes)))
     if unmapped:
         lines += ["", f"Records naming no source test file: {len(unmapped)}"]
@@ -460,6 +486,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--report", type=Path, help="write the report here too")
     parser.add_argument(
+        "--every-shard",
+        action="store_true",
+        help="each lane's records hold every shard of its run: fail on a test "
+        "every shard of a lane left to another",
+    )
+    parser.add_argument(
         "--tree",
         type=Path,
         default=ROCKE_DIR,
@@ -495,8 +527,9 @@ def main(argv: list[str] | None = None) -> int:
         if len(text) < 20000
         else text[:20000] + "\n[report truncated; see --report]"
     )
+    unsharded = args.every_shard and any(lane.left_to_missing_shards for lane in lanes)
     no_evidence = any(_no_evidence(lane) for lane in lanes)
-    return 1 if limbo or failed or no_evidence else 0
+    return 1 if limbo or failed or no_evidence or unsharded else 0
 
 
 if __name__ == "__main__":

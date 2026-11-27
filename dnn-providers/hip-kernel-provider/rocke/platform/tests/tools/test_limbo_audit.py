@@ -732,3 +732,38 @@ def test_waits_for_gfx950():
     text = report.read_text()
     assert "Lanes that ran no test, so no evidence: gfx1100" in text
     assert "| gfx1100 | gfx1100 | 0 | 0 |" in text
+
+
+_SIX_TESTS = "".join(f"def test_{index}():\n    pass\n\n" for index in range(6))
+
+
+def test_every_shard_fails_on_a_test_no_shard_of_a_lane_ran(tmp_path):
+    """One shard's records of a lane leave the other shards' tests without a
+    verdict there: listed always, and a failure under ``--every-shard``; the
+    records of every shard leave none."""
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SIX_TESTS})
+
+    def shard(index: int, records: Path) -> Path:
+        return _run_lane(
+            tree,
+            records,
+            "gfx942",
+            "-p",
+            "rocke.tests.ctest_shard",
+            environment={"ROCKE_TEST_SHARD": f"{index}/3"},
+        )
+
+    one_shard = shard(0, tmp_path / "one_shard")
+    report = tmp_path / "limbo.md"
+    lanes = {"gfx942": one_shard}
+    listed = "Tests every shard of lane gfx942 left to another shard"
+    assert _main(tree, lanes, report) == 0
+    assert listed in report.read_text()
+    assert _main(tree, lanes, report, "--every-shard") == 1
+    assert listed in report.read_text()
+    every_shard = tmp_path / "every_shard"
+    for index in range(3):
+        shard(index, every_shard)
+    lanes = {"gfx942": every_shard}
+    assert _main(tree, lanes, report, "--every-shard") == 0
+    assert "left to another shard" not in report.read_text()
