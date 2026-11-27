@@ -206,26 +206,20 @@ set(_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT "--timeout=60")
 # pytest path and option arguments. _ROCKE_PLATFORM_PYTEST_IGNORE_<part>, when
 # set, lists files under tests/ that the part must not collect (for example a
 # file that runs in its own CTest entry); each becomes an --ignore. Every
-# argument is quoted. Every part shares the installed pytest command, the
-# marker filter, the per-test limit, the labels, the CTest limit and the
-# environment list that the installed CTestTestfile defines as
-# _rocke_platform_pytest_environment.
+# part shares the installed pytest command, the marker filter, the per-test
+# limit, the labels, the CTest limit and the environment list that the
+# installed CTestTestfile defines as _rocke_platform_pytest_environment.
 function(rocke_platform_pytest_entry out_var part)
-  set(_test_name "rocke_pytest_${part}")
   set(_pytest_argument_list ${ARGN})
   foreach(_ignored_file IN LISTS _ROCKE_PLATFORM_PYTEST_IGNORE_${part})
     list(APPEND _pytest_argument_list --ignore "${ROCKE_TEST_CTEST_REL}tests/${_ignored_file}")
   endforeach()
-  set(_pytest_arguments "")
-  foreach(_pytest_argument IN LISTS _pytest_argument_list)
-    string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
-  endforeach()
-  string(CONCAT _entry
-         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_pytest_arguments} -m \"${_ROCKE_PLATFORM_PYTEST_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT})\n"
-         "set_tests_properties(${_test_name} PROPERTIES\n"
-         "  LABELS \"ckc;python;standard\"\n"
-         "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
-         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
+  rocke_installed_pytest_entry(_entry "rocke_pytest_${part}" WORKERS
+    ARGUMENTS ${_pytest_argument_list}
+              -m "${_ROCKE_PLATFORM_PYTEST_MARKERS}" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT}
+    LABELS ckc python standard
+    ENVIRONMENT "\${_rocke_platform_pytest_environment}"
+    TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})
   set(${out_var} "${_entry}" PARENT_SCOPE)
 endfunction()
 
@@ -431,6 +425,8 @@ include(CTest)
 # The CTest TIMEOUT of every test entry, one limit per resource class. Outside
 # BUILD_TESTING: the installed test text below uses the limits too.
 include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
+# The shape of every installed pytest entry (rocke_installed_pytest_entry).
+include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/InstalledPytestEntry.cmake")
 
 # Every installed GPU pytest entry limits each test, so a test that stalls
 # fails under its own name instead of running the entry into its CTest limit

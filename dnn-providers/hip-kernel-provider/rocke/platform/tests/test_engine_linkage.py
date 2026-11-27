@@ -275,21 +275,38 @@ def configure_error_after_library_lists_edit(tmp_path, before, after):
     return " ".join(configured.stderr.split())
 
 
+# The start of the explicit gates' list in library/tests/ctest_lists.cmake: the
+# place the cases below plant an entry registered by hand, as the gates are, not
+# through rocke_library_pytest_entry.
+_EXPLICIT_GATES_LIST = "set(_ROCKE_EXPLICIT_PYTEST_GATES"
+
+
+def _hand_written_entry(launcher: str) -> str:
+    """CMake that appends an installed pytest entry run by ``launcher``, written
+    by hand rather than through rocke_library_pytest_entry, then a newline."""
+    return (
+        "string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "
+        f'"add_test(rocke_library_hand_written_pytest {launcher} x.py)\\n"\n'
+        '       "set_tests_properties(rocke_library_hand_written_pytest '
+        'PROPERTIES TIMEOUT 9)\\n")\n'
+    )
+
+
 @requires_cmake
 @requires_library_lists
 @pytest.mark.parametrize(
     ("before", "after", "reported"),
     [
         pytest.param(
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest ",
-            "rocke_library_conv_fwd_aot_packaging_pytest",
+            _EXPLICIT_GATES_LIST,
+            _hand_written_entry("python -m pytest") + _EXPLICIT_GATES_LIST,
+            "rocke_library_hand_written_pytest",
             id="python-m-pytest",
         ),
         pytest.param(
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest pytest ",
-            "rocke_library_conv_fwd_aot_packaging_pytest",
+            _EXPLICIT_GATES_LIST,
+            _hand_written_entry("pytest") + _EXPLICIT_GATES_LIST,
+            "rocke_library_hand_written_pytest",
             id="pytest-program",
         ),
         pytest.param(
