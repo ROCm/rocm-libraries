@@ -192,6 +192,52 @@ test_categories:
     labels:
       - "emu-fast"
 
+  # rocjitsu suites run through tensilelite/Tests/emulation/run_rocjitsu.py,
+  # which sets the worker count and per-test timeout; its rocjitsu_pytest
+  # plugin picks the job's shard from SHARD_INDEX/TOTAL_SHARDS.
+  # rocjitsu-quick: pre-submit (TheRock tensilelite-rocjitsu job); all configs
+  # for the target except rocjitsu_slow ones (over 45 min each under rocjitsu).
+  rocjitsu-quick:
+    description: "Common GEMM tests under rocjitsu for pre-submit CI (no rocjitsu_slow)"
+    test_paths:
+      - "tensilelite/Tests/common"
+    pytest_markers:
+      - "{AMDGPU_TARGETS}"
+    exclude_markers:
+      - "rocjitsu_slow"
+    parallel_workers: 16
+    pytest_args:
+      - "-p"
+      - "rocjitsu_pytest"
+      - "--dist=worksteal"
+      - "--client-lock-scope=worker"
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
+    labels:
+      - "rocjitsu-quick"
+
+  # rocjitsu-full: nightly; all configs for the target. The slowest take over
+  # 4 h, beyond TheRock's 210-min job cap: raise PYTEST_TEST_TIMEOUT and
+  # ROCJITSU_SUITE_TIMEOUT where it runs.
+  rocjitsu-full:
+    description: "All common GEMM tests for the target under rocjitsu (nightly)"
+    test_paths:
+      - "tensilelite/Tests/common"
+    pytest_markers:
+      - "{AMDGPU_TARGETS}"
+    parallel_workers: 16
+    pytest_args:
+      - "-p"
+      - "rocjitsu_pytest"
+      - "--dist=worksteal"
+      - "--client-lock-scope=worker"
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
+    labels:
+      - "rocjitsu-full"
+
   # Arch-agnostic emulation nightly — runs ALL tests for the target arch.
   emu-full:
     description: "All common GEMM tests for emulation nightly"
