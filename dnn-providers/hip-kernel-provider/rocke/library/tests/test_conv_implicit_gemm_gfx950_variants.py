@@ -30,6 +30,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from rocke.helpers.layouts import LdsLayout
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.device_array import DeviceArray
@@ -372,6 +373,11 @@ def test_fwd_refusals():
     refused("dtl: 16-bit operands, packed LDS tiles", dtl=True, lds_k_pad=16)
     refused("dtl: tile_k / 8 must be a power of two", dtl=True, tile_k=96)
     refused("dtl has its own K loop", dtl=True, async_dma=True)
+    refused(
+        "an explicit lds_layout is refused",
+        dtl=True,
+        lds_layout=LdsLayout.padded_k(64, 8),
+    )
     refused(
         "dtl: C must be divisible by 8",
         dtl=True,
