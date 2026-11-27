@@ -79,7 +79,7 @@ const vector<vector<int>> large_batch_matrix_size_range = {
     {15, 15},
     {129, 129},
 };
-const vector<int> large_batch_n_size_range = {15};
+const vector<int> large_batch_n_size_range = {15, 129};
 
 Arguments geqlf_setup_arguments(geqlf_tuple tup)
 {

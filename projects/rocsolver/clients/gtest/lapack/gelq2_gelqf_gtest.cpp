@@ -79,7 +79,7 @@ const vector<vector<int>> large_batch_matrix_size_range = {
     {129, 129},
 };
 
-const vector<int> large_batch_n_size_range = {33};
+const vector<int> large_batch_n_size_range = {15, 129};
 
 Arguments gelqf_setup_arguments(gelqf_tuple tup)
 {

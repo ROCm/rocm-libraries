@@ -76,6 +76,7 @@ const static vector<gerqf_tuple> very_large_problem_range = {
 };
 const vector<vector<int>> large_batch_matrix_size_range = {
     {7, 7},
+    {129, 129},
 };
 
 const vector<int> large_batch_n_size_range = {7, 129};
