@@ -776,7 +776,9 @@ def test_record_marks_an_entry_measured_and_drops_its_stale_slow_tests(
     times.write_text(json.dumps(column), encoding="utf-8")
     log = tmp_path / "durations.log"
     log.write_text(_FAST_CONTRACTS_LOG, encoding="utf-8")
+    # The entry falls from 4.0 s to 1.5 s, which needs the flag.
     argv = ["--entry-times", str(times), "record", "--column", "linux"]
+    argv += ["--accept-drops"]
     assert check.main([*argv, "--source", "test log", str(log)]) == 0
     recorded = json.loads(times.read_text(encoding="utf-8"))["linux"]
     assert "test_seconds" not in recorded
@@ -1197,6 +1199,8 @@ def test_record_updates_logged_entries_and_keeps_the_rest(tmp_path) -> None:
     durations_log.write_text(_DURATIONS_LOG, encoding="utf-8")
     argv = ["--entry-times", str(times), "record", "--column", "linux"]
     logs = [str(shard_log), str(durations_log)]
+    # rocke_golden_static falls from 250 s to 34 s, which needs the flag.
+    argv += ["--accept-drops"]
     assert check.main([*argv, "--source", "test logs", *logs]) == 0
     recorded = json.loads(times.read_text(encoding="utf-8"))["linux"]
     assert recorded["seconds"] == {
@@ -1448,6 +1452,51 @@ def test_prune_refuses_a_registration_without_rocke_entries(tmp_path) -> None:
         ValueError, match="prune failed - the registration has no rocke_"
     ):
         check.main(argv)
+
+
+def test_record_refuses_a_large_drop_unless_accepted(tmp_path) -> None:
+    """A log of a run that skipped most of an entry still passes, so a time far
+    below the previous one is refused and nothing is written."""
+    _, times = _write_inputs(tmp_path, 250.0)
+    before = times.read_text(encoding="utf-8")
+    log = tmp_path / "shard3.log"
+    log.write_text(_SHARD_LOG, encoding="utf-8")
+    argv = ["--entry-times", str(times), "record", "--column", "linux"]
+    argv += ["--source", "test logs", str(log)]
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "record failed - linux drops=1, expected no time below 0.5 of its "
+            "previous value: rocke_golden_static: 250.00 s -> 34.00 s; record"
+        ),
+    ):
+        check.main(argv)
+    assert times.read_text(encoding="utf-8") == before
+    assert check.main([*argv, "--accept-drops"]) == 0
+    recorded = json.loads(times.read_text(encoding="utf-8"))["linux"]["seconds"]
+    assert recorded["rocke_golden_static"] == 34.0
+
+
+@pytest.mark.parametrize(
+    "previous, recorded, dropped",
+    [
+        (250.0, 124.9, True),
+        (250.0, 125.0, False),
+        (1.5, 0.4, True),
+        (1.2, 0.3, False),
+        (10.0, 30.0, False),
+    ],
+    ids=["below-half", "at-half", "past-the-floor", "within-the-floor", "rise"],
+)
+def test_large_drops_needs_half_and_the_floor(
+    previous: float, recorded: float, dropped: bool
+) -> None:
+    drops = check.large_drops({"rocke_x": previous}, {"rocke_x": recorded})
+    assert drops == ([f"rocke_x: {previous:.2f} s -> {recorded:.2f} s"] * dropped)
+
+
+def test_large_drops_ignores_a_new_entry() -> None:
+    assert check.large_drops({}, {"rocke_new": 0.1}) == []
 
 
 def test_record_refuses_logs_without_rocke_entries(tmp_path) -> None:

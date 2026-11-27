@@ -14,9 +14,11 @@ entry runs whole on every shard.
 The check combines three inputs:
 
 - The time each ``rocke_*`` entry costs when run whole, per operating system,
-  from ``entry_times.json`` beside this file, recorded from CI logs; and the
-  time of each slow test of a split pytest entry (``test_seconds``), recorded
-  from logs of runs with pytest's ``--durations`` report.
+  from ``entry_times.json`` beside this file, recorded from CI logs of that
+  system's pull-request runners (Linux gfx942, Windows gfx110X), so a time is
+  what the entry costs on those targets and no other target is modelled; and
+  the time of each slow test of a split pytest entry (``test_seconds``),
+  recorded from logs of runs with pytest's ``--durations`` report.
 - The live CTest registration: which tiers an entry is in, and whether it
   splits across shards. Relabelling an entry is judged without re-measuring it.
 - Each split entry of a sharded tier, listed with its own command, working
@@ -81,7 +83,9 @@ entry runs::
 
 Refresh one operating system's times from ``ctest -V`` logs of CI test jobs
 (any tier, any shard; entries the logs do not show passing keep their previous
-time).
+time). A time that falls below ``RECORD_DROP_FRACTION`` of the entry's previous
+one is refused unless ``--accept-drops`` is given: a run that skipped most of
+an entry's tests still passes.
 A split entry's whole time is the sum over its shards of each shard's median;
 when the logs lack a shard, it is the shard count times the median shard. Test
 seconds come from the logs that carry pytest's ``--durations`` report, for the
@@ -153,6 +157,8 @@ __all__ = [
     "CI_TIERS",
     "ENTRY_TIMES_PATH",
     "GPU_ENTRY_ALLOWLIST",
+    "RECORD_DROP_FLOOR_SECONDS",
+    "RECORD_DROP_FRACTION",
     "STEP_LIMIT_SECONDS",
     "TEST_SECONDS_FLOOR",
     "RegisteredEntry",
@@ -166,6 +172,7 @@ __all__ = [
     "gpu_entry_breaches",
     "host_column",
     "item_budget_breaches",
+    "large_drops",
     "load_entry_times",
     "lowered_ceiling",
     "measured_entries_from_ctest_logs",
@@ -190,6 +197,13 @@ CEILING_STEP_SECONDS = 10
 # `record` keeps the test seconds of the tests at least this slow; the time of
 # the faster ones stays in what the keys without a weight share.
 TEST_SECONDS_FLOOR = 1.0
+# `record` refuses, unless told to accept it, a time that falls below this
+# share of the entry's previous time by at least RECORD_DROP_FLOOR_SECONDS: a
+# log of a run that skipped most of an entry's tests (another target's GPU
+# tests, a missing prerequisite) still passes, and its time would hide the
+# entry's real cost. The floor keeps run-to-run noise of fast entries out.
+RECORD_DROP_FRACTION = 0.5
+RECORD_DROP_FLOOR_SECONDS = 1.0
 # Collecting one entry takes seconds; a collection still running after this
 # long is stuck.
 _COLLECTION_TIMEOUT_SECONDS = 600.0
@@ -1088,6 +1102,22 @@ def measured_entries_from_ctest_logs(logs: Iterable[Path]) -> list[str]:
     )
 
 
+def large_drops(
+    previous: Mapping[str, float], recorded: Mapping[str, float]
+) -> list[str]:
+    """One line per entry whose ``recorded`` time is below
+    ``RECORD_DROP_FRACTION`` of its ``previous`` time by at least
+    ``RECORD_DROP_FLOOR_SECONDS``, sorted by name. An entry without a previous
+    time is new, not a drop."""
+    return [
+        f"{name}: {previous[name]:.2f} s -> {seconds:.2f} s"
+        for name, seconds in sorted(recorded.items())
+        if name in previous
+        and seconds < RECORD_DROP_FRACTION * previous[name]
+        and previous[name] - seconds >= RECORD_DROP_FLOOR_SECONDS
+    ]
+
+
 def recorded_test_seconds(
     column: Mapping[str, Any],
     test_seconds: Mapping[str, Mapping[str, float]],
@@ -1184,6 +1214,16 @@ def _record(arguments: argparse.Namespace) -> int:
             "`ctest -V` output of a test job"
         )
     column = entry_times.setdefault(arguments.column, {})
+    drops = large_drops(column.get("seconds", {}), seconds)
+    if drops and not arguments.accept_drops:
+        raise ValueError(
+            f"record failed - {arguments.column} drops={len(drops)}, expected no "
+            f"time below {RECORD_DROP_FRACTION:g} of its previous value: "
+            + "; ".join(drops)
+            + "; record these entries from a log of a run that ran their tests "
+            "(a run on their own target), or pass --accept-drops if they "
+            "really got cheaper"
+        )
     column["source"] = arguments.source
     column["seconds"] = dict(sorted({**column.get("seconds", {}), **seconds}.items()))
     test_seconds = slow_test_seconds_from_ctest_logs(arguments.logs)
@@ -1315,6 +1355,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     record.add_argument("--column", required=True, help="operating system, e.g. linux")
     record.add_argument("--source", required=True, help="which jobs and dates")
+    record.add_argument(
+        "--accept-drops",
+        action="store_true",
+        help=(
+            f"record times below {RECORD_DROP_FRACTION:g} of their previous "
+            "value too"
+        ),
+    )
     record.add_argument("logs", type=Path, nargs="+", help="ctest -V logs (.gz ok)")
     record.set_defaults(run=_record)
 
