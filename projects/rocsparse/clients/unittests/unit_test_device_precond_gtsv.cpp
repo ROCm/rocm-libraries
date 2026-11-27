@@ -31,6 +31,8 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include <limits>
+#include <sstream>
 #include <string>
 
 using namespace precond_ut;
@@ -724,5 +726,193 @@ TEST_F(PrecondTridiagonal, interleaved_batch_argument_validation)
         EXPECT_EQ(interleaved_solve<double>(
                       handle, alg, m, nullptr, nullptr, nullptr, nullptr, 0, 1, nullptr),
                   rocsparse_status_success);
+    }
+}
+
+// Uniform scaling of a nonsingular tridiagonal system does not change the solution,
+// but the QR kernel used to form |z|^2 and 1/|z|^2 directly. Orders 4 and 17, with
+// scales outside the square root of each format's range. A sentinel sits on either
+// side of every array the solver writes.
+namespace
+{
+    // Solves one tridiagonal system with batch count and stride 1. `x` is the solution
+    // without the sentinels, which are checked here.
+    template <typename T>
+    void solve_interleaved_padded(rocsparse_handle               handle,
+                                  rocsparse_gtsv_interleaved_alg alg,
+                                  const std::vector<T>&          dl,
+                                  const std::vector<T>&          d,
+                                  const std::vector<T>&          du,
+                                  const std::vector<T>&          rhs,
+                                  std::vector<T>&                x)
+    {
+        x.clear();
+        const rocsparse_int m = static_cast<rocsparse_int>(d.size());
+
+        device_vector<T> ddl{pad_with_sentinel(dl)}, dd{pad_with_sentinel(d)},
+            ddu{pad_with_sentinel(du)}, dx{pad_with_sentinel(rhs)};
+        ASSERT_TRUE(ddl.ptr && dd.ptr && ddu.ptr && dx.ptr);
+
+        const rocsparse_int batch_count  = 1;
+        const rocsparse_int batch_stride = 1;
+        size_t              buffer_size  = 0;
+        ASSERT_EQ(interleaved_buffer_size<T>(handle,
+                                             alg,
+                                             m,
+                                             ddl.ptr + 1,
+                                             dd.ptr + 1,
+                                             ddu.ptr + 1,
+                                             dx.ptr + 1,
+                                             batch_count,
+                                             batch_stride,
+                                             &buffer_size),
+                  rocsparse_status_success);
+        ASSERT_GT(buffer_size, 0u);
+
+        device_vector<char> buffer{buffer_size};
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(interleaved_solve<T>(handle,
+                                       alg,
+                                       m,
+                                       ddl.ptr + 1,
+                                       dd.ptr + 1,
+                                       ddu.ptr + 1,
+                                       dx.ptr + 1,
+                                       batch_count,
+                                       batch_stride,
+                                       buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const auto got = to_host(dx);
+        ASSERT_EQ(got.size(), static_cast<size_t>(m) + 2);
+        expect_padding_untouched(got);
+        x.assign(got.begin() + 1, got.end() - 1);
+    }
+
+    template <typename T>
+    void run_qr_uniform_scale(rocsparse_handle               handle,
+                              rocsparse_gtsv_interleaved_alg alg,
+                              int32_t                        m,
+                              double                         scale,
+                              bool                           zero_dl = false,
+                              bool                           zero_du = false)
+    {
+        std::ostringstream trace;
+        trace << "qr alg=" << static_cast<int>(alg) << " m=" << m << " scale=" << std::scientific
+              << scale;
+        if(zero_dl)
+            trace << " dl=0";
+        if(zero_du)
+            trace << " du=0";
+        SCOPED_TRACE(trace.str());
+
+        std::vector<T> dl(m), d(m), du(m), rhs(m), want(m);
+        for(int32_t j = 0; j < m; ++j)
+        {
+            dl[j]   = (!zero_dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
+                                           : make_value<T>(0.0);
+            d[j]    = make_value<T>(4.0 * scale, 0.3 * scale);
+            du[j]   = (!zero_du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
+                                              : make_value<T>(0.0);
+            want[j] = make_value<T>(static_cast<double>(j + 1) / 7.0,
+                                    0.2 * static_cast<double>(j + 1) / 7.0);
+        }
+        for(int32_t j = 0; j < m; ++j)
+        {
+            std::complex<double> b = to_cd(d[j]) * to_cd(want[j]);
+            if(j >= 1)
+                b += to_cd(dl[j]) * to_cd(want[j - 1]);
+            if(j + 1 < m)
+                b += to_cd(du[j]) * to_cd(want[j + 1]);
+            rhs[j] = from_cd<T>(b);
+        }
+
+        std::vector<T> x;
+        solve_interleaved_padded<T>(handle, alg, dl, d, du, rhs, x);
+        if(!x.empty())
+            expect_solution(x, want, "solution");
+    }
+
+    // A diagonal system whose last unknown is finite, but only just: H / (0.6 + 0.6i) with
+    // H + iH on the right-hand side is the real number H / 0.6. A division that adds the
+    // two products of its numerator before the final scaling overflows on the way.
+    template <typename T>
+    void run_large_quotient(rocsparse_handle               handle,
+                            rocsparse_gtsv_interleaved_alg alg,
+                            double                         half_max)
+    {
+        const std::vector<T> dl(4, make_value<T>(0.0)), du(4, make_value<T>(0.0));
+        const std::vector<T> d
+            = {make_value<T>(1.0), make_value<T>(1.0), make_value<T>(1.0), make_value<T>(0.6, 0.6)};
+        const std::vector<T> rhs  = {make_value<T>(1.0),
+                                    make_value<T>(1.0),
+                                    make_value<T>(1.0),
+                                    make_value<T>(half_max, half_max)};
+        const std::vector<T> want = {make_value<T>(1.0),
+                                     make_value<T>(1.0),
+                                     make_value<T>(1.0),
+                                     make_value<T>(half_max / 0.6)};
+
+        std::vector<T> x;
+        solve_interleaved_padded<T>(handle, alg, dl, d, du, rhs, x);
+        if(!x.empty())
+            expect_close(x, want);
+    }
+}
+
+TEST_F(PrecondTridiagonal, interleaved_qr_uniform_scale_keeps_solution)
+{
+    const rocsparse_gtsv_interleaved_alg algs[]
+        = {rocsparse_gtsv_interleaved_alg_default, rocsparse_gtsv_interleaved_alg_qr};
+    for(const auto alg : algs)
+    {
+        for(const int32_t m : {4, 17})
+        {
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0e20);
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0e-20);
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0e-25);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e20);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-20);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-25);
+
+            run_qr_uniform_scale<double>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<double>(handle, alg, m, 1.0e200);
+            run_qr_uniform_scale<double>(handle, alg, m, 1.0e-200);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e200);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e-200);
+        }
+    }
+
+    // Every subset of {dl, du} is dropped. The diagonal stays nonzero, so the system
+    // stays nonsingular and the solution is known. Bits, from low to high, are dl, du.
+    for(const auto alg : algs)
+    {
+        for(int mask = 0; mask < 4; ++mask)
+        {
+            const bool zero_dl = mask & 1;
+            const bool zero_du = mask & 2;
+            run_qr_uniform_scale<float>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<double>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
+            run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
+        }
+    }
+}
+
+TEST_F(PrecondTridiagonal, interleaved_qr_complex_division_keeps_large_finite_quotient)
+{
+    const rocsparse_gtsv_interleaved_alg algs[]
+        = {rocsparse_gtsv_interleaved_alg_default, rocsparse_gtsv_interleaved_alg_qr};
+    for(const auto alg : algs)
+    {
+        SCOPED_TRACE("alg=" + std::to_string(static_cast<int>(alg)));
+        run_large_quotient<rocsparse_float_complex>(
+            handle, alg, 0.5 * std::numeric_limits<float>::max());
+        run_large_quotient<rocsparse_double_complex>(
+            handle, alg, 0.5 * std::numeric_limits<double>::max());
     }
 }

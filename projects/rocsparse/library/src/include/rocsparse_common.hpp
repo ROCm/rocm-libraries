@@ -31,6 +31,7 @@
 #endif
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#include <type_traits>
 
 #include "rocsparse_assert.hpp"
 
@@ -606,6 +607,46 @@ namespace rocsparse
     __device__ __forceinline__ double imag(const rocsparse_double_complex& x)
     {
         return std::imag(x);
+    }
+
+    // a / b for real and complex T.
+    // A real quotient is a single division. For complex T, operator/ computes 1/|b|^2 and leaves
+    // the floating-point range when |b| is far from 1. Instead b is scaled by its larger
+    // component, so that |b|^2 lies in [1, 2], and the reciprocal of that is folded into a before
+    // the products are formed. Every intermediate then stays within about |a / b| * sqrt(2), so
+    // a finite quotient does not overflow on the way.
+    template <typename T>
+    __device__ __forceinline__ T scaled_div(T a, T b)
+    {
+        if constexpr(std::is_same<T, float>() || std::is_same<T, double>())
+        {
+            return a / b;
+        }
+        else
+        {
+            auto br = rocsparse::real(b);
+            auto bi = rocsparse::imag(b);
+
+            using real_t = decltype(br);
+
+            real_t scale = rocsparse::max(rocsparse::abs(br), rocsparse::abs(bi));
+            if(scale == static_cast<real_t>(0))
+            {
+                return a / b;
+            }
+
+            br /= scale;
+            bi /= scale;
+
+            real_t inv_denom = static_cast<real_t>(1) / rocsparse::fma(br, br, bi * bi);
+
+            // (a / scale) * conj(b / scale) / |b / scale|^2. Multiplying by inv_denom before the
+            // two products are added keeps their sum from overflowing when the quotient is finite.
+            auto ar = rocsparse::real(a) / scale * inv_denom;
+            auto ai = rocsparse::imag(a) / scale * inv_denom;
+
+            return T(rocsparse::fma(ar, br, ai * bi), rocsparse::fma(ai, br, -ar * bi));
+        }
     }
 
     __device__ __forceinline__ bool gt(const float& x, const float& y)

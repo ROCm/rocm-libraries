@@ -22,6 +22,17 @@
  *
  * ************************************************************************ */
 
+// Pentadiagonal QR. A uniform scale of the five bands and the right-hand side does
+// not change the solution, but squaring the raw entries overflows or underflows once
+// they leave the square root of the format range. These solves are the order-4
+// witness of that failure, plus order 17 so the general backsolve loop runs. The
+// result is compared to the known solution, not to a host QR that still squares the
+// entries.
+//
+// Two paths are covered:
+//  - the public routine: Householder QR for real types, Givens QR for complex types, and
+//  - the Givens kernel launched directly for all four types.
+//
 // Pentadiagonal interleaved-batch solve. The complex QR kernel used to update
 // row m - 4 unconditionally. For the smallest accepted order, m == 3, that row
 // is index -batch_stride, so the kernel wrote one value before x. Each array
@@ -30,12 +41,93 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include "../../library/src/precond/gpsv/gpsv_interleaved_batch_device.h"
+
+#include <limits>
+#include <sstream>
 #include <string>
 
 using namespace precond_ut;
 
 namespace
 {
+    // The five bands of an order m system with every entry multiplied by `scale`, a
+    // known solution, and the right-hand side A * x. Real types drop the imaginary
+    // parts.
+    template <typename T>
+    struct scaled_system_t
+    {
+        std::vector<T> ds, dl, d, du, dw, rhs, want;
+    };
+
+    // A true member drops that whole off-diagonal band. The diagonal is never dropped.
+    struct zero_bands_t
+    {
+        bool ds;
+        bool dl;
+        bool du;
+        bool dw;
+    };
+
+    template <typename T>
+    scaled_system_t<T> make_scaled_system(int32_t m, double scale, zero_bands_t zero = {})
+    {
+        scaled_system_t<T> s;
+        s.ds.resize(m);
+        s.dl.resize(m);
+        s.d.resize(m);
+        s.du.resize(m);
+        s.dw.resize(m);
+        s.rhs.resize(m);
+        s.want.resize(m);
+        for(int32_t j = 0; j < m; ++j)
+        {
+            s.ds[j]   = (!zero.ds && j >= 2) ? make_value<T>(-0.2 * scale, 0.1 * scale)
+                                             : make_value<T>(0.0);
+            s.dl[j]   = (!zero.dl && j >= 1) ? make_value<T>(-0.5 * scale, 0.2 * scale)
+                                             : make_value<T>(0.0);
+            s.d[j]    = make_value<T>(4.0 * scale, 0.3 * scale);
+            s.du[j]   = (!zero.du && j < m - 1) ? make_value<T>(0.75 * scale, -0.1 * scale)
+                                                : make_value<T>(0.0);
+            s.dw[j]   = (!zero.dw && j < m - 2) ? make_value<T>(0.3 * scale, 0.15 * scale)
+                                                : make_value<T>(0.0);
+            s.want[j] = make_value<T>(static_cast<double>(j + 1) / 7.0,
+                                      0.2 * static_cast<double>(j + 1) / 7.0);
+        }
+        for(int32_t j = 0; j < m; ++j)
+        {
+            std::complex<double> b = to_cd(s.d[j]) * to_cd(s.want[j]);
+            if(j >= 1)
+                b += to_cd(s.dl[j]) * to_cd(s.want[j - 1]);
+            if(j >= 2)
+                b += to_cd(s.ds[j]) * to_cd(s.want[j - 2]);
+            if(j + 1 < m)
+                b += to_cd(s.du[j]) * to_cd(s.want[j + 1]);
+            if(j + 2 < m)
+                b += to_cd(s.dw[j]) * to_cd(s.want[j + 2]);
+            s.rhs[j] = from_cd<T>(b);
+        }
+        return s;
+    }
+
+    template <typename T>
+    void expect_scaled_solution(const std::vector<T>& got_padded, const std::vector<T>& want)
+    {
+        ASSERT_EQ(got_padded.size(), want.size() + 2);
+        // The solver writes only the unknowns, so both sentinels must stay as they were.
+        expect_padding_untouched(got_padded);
+
+        std::vector<T> sol(got_padded.begin() + 1, got_padded.end() - 1);
+        if(!expect_finite(sol, "solution"))
+            return;
+        const double tol = is_single_precision<T> ? 1.0e-4 : 1.0e-8;
+        for(size_t j = 0; j < want.size(); ++j)
+        {
+            EXPECT_NEAR(re(sol[j]), re(want[j]), tol) << "x[" << j << "]";
+            EXPECT_NEAR(im(sol[j]), im(want[j]), tol) << "x[" << j << "]";
+        }
+    }
+
     template <typename T, typename... A>
     rocsparse_status gpsv_buffer_size(A&&... args)
     {
@@ -46,6 +138,135 @@ namespace
     rocsparse_status gpsv_solve(A&&... args)
     {
         return PRECOND_CALL(T, gpsv_interleaved_batch, std::forward<A>(args)...);
+    }
+
+    // Solves a system through the public routine. `got_padded` is x with its sentinels.
+    template <typename T>
+    void solve_public_padded(rocsparse_handle               handle,
+                             rocsparse_gpsv_interleaved_alg alg,
+                             const scaled_system_t<T>&      s,
+                             std::vector<T>&                got_padded)
+    {
+        const rocsparse_int order = static_cast<rocsparse_int>(s.d.size());
+        device_vector<T>    dds{pad_with_sentinel(s.ds)}, ddl{pad_with_sentinel(s.dl)},
+            dd{pad_with_sentinel(s.d)}, ddu{pad_with_sentinel(s.du)}, ddw{pad_with_sentinel(s.dw)},
+            dx{pad_with_sentinel(s.rhs)};
+        ASSERT_TRUE(dds.ptr && ddl.ptr && dd.ptr && ddu.ptr && ddw.ptr && dx.ptr);
+
+        const rocsparse_int batch_count  = 1;
+        const rocsparse_int batch_stride = 1;
+        size_t              buffer_size  = 0;
+        ASSERT_EQ(gpsv_buffer_size<T>(handle,
+                                      alg,
+                                      order,
+                                      dds.ptr + 1,
+                                      ddl.ptr + 1,
+                                      dd.ptr + 1,
+                                      ddu.ptr + 1,
+                                      ddw.ptr + 1,
+                                      dx.ptr + 1,
+                                      batch_count,
+                                      batch_stride,
+                                      &buffer_size),
+                  rocsparse_status_success);
+        ASSERT_GT(buffer_size, 0u);
+
+        device_vector<char> buffer{buffer_size};
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(gpsv_solve<T>(handle,
+                                alg,
+                                order,
+                                dds.ptr + 1,
+                                ddl.ptr + 1,
+                                dd.ptr + 1,
+                                ddu.ptr + 1,
+                                ddw.ptr + 1,
+                                dx.ptr + 1,
+                                batch_count,
+                                batch_stride,
+                                buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        got_padded = to_host(dx);
+    }
+
+    // Solves a system through the public routine and compares with the known solution.
+    template <typename T>
+    void solve_public(rocsparse_handle               handle,
+                      rocsparse_gpsv_interleaved_alg alg,
+                      const scaled_system_t<T>&      s)
+    {
+        std::vector<T> got_padded;
+        solve_public_padded<T>(handle, alg, s, got_padded);
+        if(!got_padded.empty())
+            expect_scaled_solution(got_padded, s.want);
+    }
+
+    // Solves the uniformly scaled system through the public routine.
+    template <typename T>
+    void run_uniform_scale(rocsparse_handle               handle,
+                           rocsparse_gpsv_interleaved_alg alg,
+                           int32_t                        m,
+                           double                         scale,
+                           zero_bands_t                   zero = {})
+    {
+        std::ostringstream trace;
+        trace << "api alg=" << static_cast<int>(alg) << " m=" << m << " scale=" << std::scientific
+              << scale;
+        if(zero.ds)
+            trace << " ds=0";
+        if(zero.dl)
+            trace << " dl=0";
+        if(zero.du)
+            trace << " du=0";
+        if(zero.dw)
+            trace << " dw=0";
+        SCOPED_TRACE(trace.str());
+
+        solve_public<T>(handle, alg, make_scaled_system<T>(m, scale, zero));
+    }
+
+    // Launches the Givens kernel directly, whatever T is.
+    template <typename T>
+    void run_givens_kernel(int32_t m, double scale)
+    {
+        std::ostringstream trace;
+        trace << "givens kernel m=" << m << " scale=" << std::scientific << scale;
+        SCOPED_TRACE(trace.str());
+
+        const auto       s = make_scaled_system<T>(m, scale);
+        device_vector<T> dds{pad_with_sentinel(s.ds)}, ddl{pad_with_sentinel(s.dl)},
+            dd{pad_with_sentinel(s.d)}, ddu{pad_with_sentinel(s.du)}, ddw{pad_with_sentinel(s.dw)},
+            dx{pad_with_sentinel(s.rhs)};
+        // The kernel reads r3 before it writes it, so both start at zero.
+        device_vector<T> dr3{std::vector<T>(m, make_value<T>(0.0))};
+        device_vector<T> dr4{std::vector<T>(m, make_value<T>(0.0))};
+        ASSERT_TRUE(dds.ptr && ddl.ptr && dd.ptr && ddu.ptr && ddw.ptr && dx.ptr && dr3.ptr
+                    && dr4.ptr);
+
+        const rocsparse_int batch_count  = 1;
+        const rocsparse_int batch_stride = 1;
+        hipLaunchKernelGGL((rocsparse::gpsv_interleaved_batch_givens_qr_kernel<128, T>),
+                           dim3(1),
+                           dim3(128),
+                           0,
+                           0,
+                           static_cast<rocsparse_int>(m),
+                           batch_count,
+                           batch_stride,
+                           dds.ptr + 1,
+                           ddl.ptr + 1,
+                           dd.ptr + 1,
+                           ddu.ptr + 1,
+                           ddw.ptr + 1,
+                           dr3.ptr,
+                           dr4.ptr,
+                           dx.ptr + 1);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        expect_scaled_solution(to_host(dx), s.want);
     }
 
     // Storage is [prefix | m * stride | suffix]. The pointer handed to the
@@ -132,7 +353,7 @@ namespace
     template <typename T>
     bool is_sentinel(T v)
     {
-        return re(v) == 77.0 && im(v) == 0.0;
+        return re(v) == padding_sentinel && im(v) == 0.0;
     }
 
     template <typename T>
@@ -172,7 +393,7 @@ namespace
         layout.prefix       = batch_stride;
 
         const size_t   n = static_cast<size_t>(layout.prefix + m * batch_stride + batch_stride);
-        std::vector<T> hds(n, make_value<T>(77.0));
+        std::vector<T> hds(n, make_value<T>(padding_sentinel));
         std::vector<T> hdl = hds, hd = hds, hdu = hds, hdw = hds, hx = hds;
         std::vector<std::vector<T>> want(batch_count);
 
@@ -233,6 +454,187 @@ namespace
                 sol[i] = got_x[static_cast<size_t>(layout.prefix + i * batch_stride + b)];
             expect_close(sol, want[b], is_single_precision<T> ? 1.0e-4 : 1.0e-10);
         }
+    }
+}
+
+class PrecondGpsvInterleaved : public HandleTest
+{
+};
+
+// Float scales of 1e-20 only reach the denormal range of the squared band entries, which
+// the unscaled real kernel still solves. 1e-25 squares to 1e-50, which flushes to zero.
+TEST_F(PrecondGpsvInterleaved, uniform_scale_keeps_solution)
+{
+    const rocsparse_gpsv_interleaved_alg algs[]
+        = {rocsparse_gpsv_interleaved_alg_default, rocsparse_gpsv_interleaved_alg_qr};
+    const int32_t orders[] = {4, 17};
+    for(const auto alg : algs)
+    {
+        for(const int32_t m : orders)
+        {
+            run_uniform_scale<float>(handle, alg, m, 1.0);
+            run_uniform_scale<float>(handle, alg, m, 1.0e20);
+            run_uniform_scale<float>(handle, alg, m, 1.0e-20);
+            run_uniform_scale<float>(handle, alg, m, 1.0e-25);
+            run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0);
+            run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e20);
+            run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-20);
+            run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-25);
+
+            run_uniform_scale<double>(handle, alg, m, 1.0);
+            run_uniform_scale<double>(handle, alg, m, 1.0e200);
+            run_uniform_scale<double>(handle, alg, m, 1.0e-200);
+            run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0);
+            run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e200);
+            run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e-200);
+        }
+    }
+
+    // Every subset of {ds, dl, du, dw} is dropped. The diagonal stays nonzero, so the
+    // system stays nonsingular and the solution is known. Bits, from low to high, are
+    // ds, dl, du, dw. ds = dl = 0 makes the first complex Givens rotation (0, 0), which
+    // used to divide by a zero hypotenuse, and skips the real Householder reflector.
+    for(const auto alg : algs)
+    {
+        for(int mask = 0; mask < 16; ++mask)
+        {
+            const zero_bands_t zero{static_cast<bool>(mask & 1),
+                                    static_cast<bool>(mask & 2),
+                                    static_cast<bool>(mask & 4),
+                                    static_cast<bool>(mask & 8)};
+
+            run_uniform_scale<float>(handle, alg, 4, 1.0, zero);
+            run_uniform_scale<double>(handle, alg, 4, 1.0, zero);
+            run_uniform_scale<rocsparse_float_complex>(handle, alg, 4, 1.0, zero);
+            run_uniform_scale<rocsparse_double_complex>(handle, alg, 4, 1.0, zero);
+        }
+    }
+}
+
+// The scales sit outside sqrt(FLT_MAX) ~ 1.8e19 and sqrt(FLT_MIN) ~ 1.1e-19 for the
+// single precision types, and outside the same limits of double for the others.
+TEST_F(PrecondGpsvInterleaved, givens_kernel_uniform_scale_keeps_solution)
+{
+    for(const int32_t m : {4, 17})
+    {
+        run_givens_kernel<float>(m, 1.0);
+        run_givens_kernel<float>(m, 1.0e20);
+        run_givens_kernel<float>(m, 1.0e-20);
+        run_givens_kernel<float>(m, 1.0e-25);
+        run_givens_kernel<rocsparse_float_complex>(m, 1.0);
+        run_givens_kernel<rocsparse_float_complex>(m, 1.0e20);
+        run_givens_kernel<rocsparse_float_complex>(m, 1.0e-20);
+        run_givens_kernel<rocsparse_float_complex>(m, 1.0e-25);
+
+        run_givens_kernel<double>(m, 1.0);
+        run_givens_kernel<double>(m, 1.0e200);
+        run_givens_kernel<double>(m, 1.0e-200);
+        run_givens_kernel<rocsparse_double_complex>(m, 1.0);
+        run_givens_kernel<rocsparse_double_complex>(m, 1.0e200);
+        run_givens_kernel<rocsparse_double_complex>(m, 1.0e-200);
+    }
+}
+
+namespace
+{
+    // The rows are on very different scales: row 0 is of order `big`, row 1 is of order
+    // `small`, and the coupling between them is `small`. A Householder reflector that
+    // is built from the squared lower coefficient of the row-0 column sees
+    // (small / big)^2, which is zero in the format, but row 1 still depends on x0.
+    // The solution is all ones.
+    template <typename T>
+    scaled_system_t<T> make_mixed_magnitude_system(double big, double small)
+    {
+        scaled_system_t<T> s;
+        s.ds = std::vector<T>(4, make_value<T>(0.0));
+        s.du = std::vector<T>(4, make_value<T>(0.0));
+        s.dw = std::vector<T>(4, make_value<T>(0.0));
+        s.dl = {make_value<T>(0.0), make_value<T>(small), make_value<T>(0.0), make_value<T>(0.0)};
+        s.d  = {
+            make_value<T>(big), make_value<T>(2.0 * small), make_value<T>(1.0), make_value<T>(1.0)};
+        s.rhs = {
+            make_value<T>(big), make_value<T>(3.0 * small), make_value<T>(1.0), make_value<T>(1.0)};
+        s.want = std::vector<T>(4, make_value<T>(1.0));
+        return s;
+    }
+
+    // A diagonal system whose last unknown is finite, but only just: H / (0.6 + 0.6i) with
+    // H + iH on the right-hand side is the real number H / 0.6. A division that adds the
+    // two products of its numerator before the final scaling overflows on the way.
+    template <typename T>
+    scaled_system_t<T> make_large_quotient_system(double half_max)
+    {
+        scaled_system_t<T> s;
+        s.ds = std::vector<T>(4, make_value<T>(0.0));
+        s.dl = std::vector<T>(4, make_value<T>(0.0));
+        s.du = std::vector<T>(4, make_value<T>(0.0));
+        s.dw = std::vector<T>(4, make_value<T>(0.0));
+        s.d = {make_value<T>(1.0), make_value<T>(1.0), make_value<T>(1.0), make_value<T>(0.6, 0.6)};
+        s.rhs  = {make_value<T>(1.0),
+                 make_value<T>(1.0),
+                 make_value<T>(1.0),
+                 make_value<T>(half_max, half_max)};
+        s.want = {make_value<T>(1.0),
+                  make_value<T>(1.0),
+                  make_value<T>(1.0),
+                  make_value<T>(half_max / 0.6)};
+        return s;
+    }
+}
+
+// Householder QR of the real routines and Givens QR of the complex ones.
+TEST_F(PrecondGpsvInterleaved, mixed_row_scales_keep_solution)
+{
+    const rocsparse_gpsv_interleaved_alg algs[]
+        = {rocsparse_gpsv_interleaved_alg_default, rocsparse_gpsv_interleaved_alg_qr};
+    for(const auto alg : algs)
+    {
+        SCOPED_TRACE("alg=" + std::to_string(static_cast<int>(alg)));
+        solve_public<float>(handle, alg, make_mixed_magnitude_system<float>(1.0e10, 1.0e-15));
+        solve_public<rocsparse_float_complex>(
+            handle, alg, make_mixed_magnitude_system<rocsparse_float_complex>(1.0e10, 1.0e-15));
+        solve_public<double>(handle, alg, make_mixed_magnitude_system<double>(1.0e100, 1.0e-100));
+        solve_public<rocsparse_double_complex>(
+            handle, alg, make_mixed_magnitude_system<rocsparse_double_complex>(1.0e100, 1.0e-100));
+    }
+}
+
+// Only the complex backsolve divides by a complex number.
+TEST_F(PrecondGpsvInterleaved, complex_division_keeps_large_finite_quotient)
+{
+    const rocsparse_gpsv_interleaved_alg algs[]
+        = {rocsparse_gpsv_interleaved_alg_default, rocsparse_gpsv_interleaved_alg_qr};
+    for(const auto alg : algs)
+    {
+        SCOPED_TRACE("alg=" + std::to_string(static_cast<int>(alg)));
+
+        std::vector<rocsparse_float_complex> got_c;
+        solve_public_padded<rocsparse_float_complex>(
+            handle,
+            alg,
+            make_large_quotient_system<rocsparse_float_complex>(
+                0.5 * std::numeric_limits<float>::max()),
+            got_c);
+        ASSERT_EQ(got_c.size(), size_t(6));
+        expect_padding_untouched(got_c);
+        expect_close(std::vector<rocsparse_float_complex>(got_c.begin() + 1, got_c.end() - 1),
+                     make_large_quotient_system<rocsparse_float_complex>(
+                         0.5 * std::numeric_limits<float>::max())
+                         .want);
+
+        std::vector<rocsparse_double_complex> got_z;
+        solve_public_padded<rocsparse_double_complex>(
+            handle,
+            alg,
+            make_large_quotient_system<rocsparse_double_complex>(
+                0.5 * std::numeric_limits<double>::max()),
+            got_z);
+        ASSERT_EQ(got_z.size(), size_t(6));
+        expect_padding_untouched(got_z);
+        expect_close(std::vector<rocsparse_double_complex>(got_z.begin() + 1, got_z.end() - 1),
+                     make_large_quotient_system<rocsparse_double_complex>(
+                         0.5 * std::numeric_limits<double>::max())
+                         .want);
     }
 }
 

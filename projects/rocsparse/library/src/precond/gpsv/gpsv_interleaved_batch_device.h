@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_givens_rotation.hpp"
 
 namespace rocsparse
 {
@@ -115,19 +116,39 @@ namespace rocsparse
                 Bp2  = B[idp2c];
             }
 
-            T v1 = dlp1;
-            T v2 = dsp2;
+            T v1   = dlp1;
+            T v2   = dsp2;
+            T diag = d[idp0];
 
-            T v1v2sq = rocsparse::fma(v1, v1, v2 * v2);
-
-            if(v1v2sq != static_cast<T>(0))
+            // The reflector depends only on the ratios of diag, v1, and v2. Divide by
+            // the largest one before squaring: v1^2 + v2^2 overflows or underflows once
+            // the bands leave the square root of the floating-point range. The squared
+            // length of the scaled values can still round to zero when v1 and v2 are tiny
+            // next to diag, so whether there is anything to eliminate is decided from
+            // the entries themselves below, not from that squared length.
+            T scale = rocsparse::max(rocsparse::abs(diag),
+                                     rocsparse::max(rocsparse::abs(v1), rocsparse::abs(v2)));
+            T sd    = diag;
+            T sv1   = v1;
+            T sv2   = v2;
+            if(scale != static_cast<T>(0))
             {
-                T diag = d[idp0];
-                T val  = rocsparse::sqrt(rocsparse::fma(diag, diag, v1v2sq));
-                T a_ii = (rocsparse::gt(diag, static_cast<T>(0))) ? diag + val : diag - val;
+                sd  = diag / scale;
+                sv1 = v1 / scale;
+                sv2 = v2 / scale;
+            }
 
-                v1 = v1 / a_ii;
-                v2 = v2 / a_ii;
+            T v1v2sq = rocsparse::fma(sv1, sv1, sv2 * sv2);
+
+            // Skipping on v1v2sq == 0 would also skip a lower coefficient that is nonzero
+            // but small next to diag. That row still has to be eliminated.
+            if(v1 != static_cast<T>(0) || v2 != static_cast<T>(0))
+            {
+                T val  = rocsparse::sqrt(rocsparse::fma(sd, sd, v1v2sq));
+                T a_ii = (rocsparse::gt(sd, static_cast<T>(0))) ? sd + val : sd - val;
+
+                v1 = sv1 / a_ii;
+                v2 = sv2 / a_ii;
 
                 T sq   = a_ii * a_ii;
                 T beta = static_cast<T>(2) * sq / (v1v2sq + sq);
@@ -218,9 +239,8 @@ namespace rocsparse
             rocsparse_int ind_k_2 = batch_stride * (i + 2) + gid;
 
             // For penta diagonal matrices, need to apply two givens rotations to remove lower and lower - 1 entries
-            T radius    = static_cast<T>(0);
-            T cos_theta = static_cast<T>(0);
-            T sin_theta = static_cast<T>(0);
+            T cos_theta;
+            T sin_theta;
 
             // Apply first Givens rotation
             // | cos  sin | |lk_1 dk_1 uk_1 wk_1 0   |
@@ -235,11 +255,7 @@ namespace rocsparse
             T wk_1 = dw[ind_k_1];
             T wk_2 = dw[ind_k_2];
 
-            radius = rocsparse::sqrt(rocsparse::abs(
-                rocsparse::fma(lk_1, rocsparse::conj(lk_1), sk_2 * rocsparse::conj(sk_2))));
-
-            cos_theta = rocsparse::conj(lk_1) / radius;
-            sin_theta = rocsparse::conj(sk_2) / radius;
+            rocsparse::givens_rotation(lk_1, sk_2, cos_theta, sin_theta);
 
             T dlk_1_new = rocsparse::fma(lk_1, cos_theta, sk_2 * sin_theta);
             T dk_1_new  = rocsparse::fma(dk_1, cos_theta, lk_2 * sin_theta);
@@ -281,10 +297,7 @@ namespace rocsparse
             T rk   = r3[batch_count * i + gid];
             T rk_1 = r3[batch_count * (i + 1) + gid];
 
-            radius    = rocsparse::sqrt(rocsparse::abs(
-                rocsparse::fma(dk, rocsparse::conj(dk), lk_1 * rocsparse::conj(lk_1))));
-            cos_theta = rocsparse::conj(dk) / radius;
-            sin_theta = rocsparse::conj(lk_1) / radius;
+            rocsparse::givens_rotation(dk, lk_1, cos_theta, sin_theta);
 
             d[ind_k]   = rocsparse::fma(dk, cos_theta, lk_1 * sin_theta);
             d[ind_k_1] = rocsparse::fma(
@@ -322,10 +335,9 @@ namespace rocsparse
         T rk   = r3[batch_count * (m - 2) + gid];
         T rk_1 = r3[batch_count * (m - 1) + gid];
 
-        T radius = rocsparse::sqrt(
-            rocsparse::abs(rocsparse::fma(dk, rocsparse::conj(dk), lk_1 * rocsparse::conj(lk_1))));
-        T cos_theta = rocsparse::conj(dk) / radius;
-        T sin_theta = rocsparse::conj(lk_1) / radius;
+        T cos_theta;
+        T sin_theta;
+        rocsparse::givens_rotation(dk, lk_1, cos_theta, sin_theta);
 
         d[batch_stride * (m - 2) + gid] = rocsparse::fma(dk, cos_theta, lk_1 * sin_theta);
         d[batch_stride * (m - 1) + gid]
@@ -350,38 +362,38 @@ namespace rocsparse
             = rocsparse::fma(-xk, rocsparse::conj(sin_theta), xk_1 * rocsparse::conj(cos_theta));
 
         // Backward substitution on upper triangular R * x = x
-        x[batch_stride * (m - 1) + gid]
-            = x[batch_stride * (m - 1) + gid] / d[batch_stride * (m - 1) + gid];
-        x[batch_stride * (m - 2) + gid]
-            = (x[batch_stride * (m - 2) + gid]
-               - du[batch_stride * (m - 2) + gid] * x[batch_stride * (m - 1) + gid])
-              / d[batch_stride * (m - 2) + gid];
+        x[batch_stride * (m - 1) + gid] = rocsparse::scaled_div(x[batch_stride * (m - 1) + gid],
+                                                                d[batch_stride * (m - 1) + gid]);
+        x[batch_stride * (m - 2) + gid] = rocsparse::scaled_div(
+            x[batch_stride * (m - 2) + gid]
+                - du[batch_stride * (m - 2) + gid] * x[batch_stride * (m - 1) + gid],
+            d[batch_stride * (m - 2) + gid]);
 
-        x[batch_stride * (m - 3) + gid]
-            = (x[batch_stride * (m - 3) + gid]
-               - du[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 2) + gid]
-               - dw[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 1) + gid])
-              / d[batch_stride * (m - 3) + gid];
+        x[batch_stride * (m - 3) + gid] = rocsparse::scaled_div(
+            x[batch_stride * (m - 3) + gid]
+                - du[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 2) + gid]
+                - dw[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 1) + gid],
+            d[batch_stride * (m - 3) + gid]);
 
         if(m >= 4)
         {
-            x[batch_stride * (m - 4) + gid]
-                = (x[batch_stride * (m - 4) + gid]
-                   - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
-                   - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
-                   - r3[batch_count * (m - 4) + gid] * x[batch_stride * (m - 1) + gid])
-                  / d[batch_stride * (m - 4) + gid];
+            x[batch_stride * (m - 4) + gid] = rocsparse::scaled_div(
+                x[batch_stride * (m - 4) + gid]
+                    - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
+                    - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
+                    - r3[batch_count * (m - 4) + gid] * x[batch_stride * (m - 1) + gid],
+                d[batch_stride * (m - 4) + gid]);
         }
 
         for(rocsparse_int i = m - 5; i >= 0; i--)
         {
-            x[batch_stride * i + gid]
-                = (x[batch_stride * i + gid]
-                   - du[batch_stride * i + gid] * x[batch_stride * (i + 1) + gid]
-                   - dw[batch_stride * i + gid] * x[batch_stride * (i + 2) + gid]
-                   - r3[batch_count * i + gid] * x[batch_stride * (i + 3) + gid]
-                   - r4[batch_count * i + gid] * x[batch_stride * (i + 4) + gid])
-                  / d[batch_stride * i + gid];
+            x[batch_stride * i + gid] = rocsparse::scaled_div(
+                x[batch_stride * i + gid]
+                    - du[batch_stride * i + gid] * x[batch_stride * (i + 1) + gid]
+                    - dw[batch_stride * i + gid] * x[batch_stride * (i + 2) + gid]
+                    - r3[batch_count * i + gid] * x[batch_stride * (i + 3) + gid]
+                    - r4[batch_count * i + gid] * x[batch_stride * (i + 4) + gid],
+                d[batch_stride * i + gid]);
         }
     }
 }
