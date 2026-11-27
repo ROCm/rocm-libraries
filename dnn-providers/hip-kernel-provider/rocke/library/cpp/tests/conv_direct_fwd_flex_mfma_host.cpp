@@ -321,6 +321,14 @@ static void test_knob_refusals(void)
     s.cs = 4;
     expect_refused("cs 4 bx 256", &s, "gfx950", "cs 4: bx 128 and bk 128 only, no c_tail");
     s = base_spec();
+    s.problem.stride = 2;
+    s.bx = 128;
+    s.bk = 128;
+    s.cs = 4;
+    s.ds = true;
+    s.wt = true;
+    expect_refused("cs 4 ds", &s, "gfx950", "ds: no cs 4");
+    s = base_spec();
     s.bx = 128;
     s.cs = 2;
     s.c_tail = true;

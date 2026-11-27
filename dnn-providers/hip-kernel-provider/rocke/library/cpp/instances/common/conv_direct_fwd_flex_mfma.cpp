@@ -346,6 +346,10 @@ std::string flex_reason(const rocke_fwd_flex_mfma_spec_t* spec0, const char* arc
     }
     if(s->ds)
     {
+        if(s->cs == 4)
+        {
+            return "ds: no cs 4 (its kernel has no dgrad phases)";
+        }
         if(p.stride < 2 || p.dil_h != 1 || p.dil_w != 1 || p.groups != 1 || p.pad_w < -1)
         {
             return "ds: a dense strided dgrad without dilation";

@@ -14711,6 +14711,13 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
     if isinstance(spec, DirectDepthwiseWgradSpec):
         return spec.grid(), (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectTransposeWeightsDgradSpec) and spec.tiled:
+        if p.cpg % 8 or p.kpg % 8:
+            # 16-byte granules: a count off a multiple of 8 would store across
+            # the next row and race with the neighbouring thread's writes.
+            raise ValueError(
+                "tiled dgrad filter transpose needs cpg and kpg to be multiples "
+                f"of 8 (got cpg={p.cpg}, kpg={p.kpg})"
+            )
         return (p.groups * p.KH * p.KW, ceil_div(p.kpg, 64), ceil_div(p.cpg, 64)), (
             256,
             1,

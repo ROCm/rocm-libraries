@@ -258,6 +258,11 @@ def _knob_specs(dtype):
 # --------------------------------------------------------------------------- CPU
 
 
+@pytest.mark.gpu
+@pytest.mark.gpu
+@pytest.mark.gpu
+@pytest.mark.gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("rid,build,row", _all_rows(), ids=[r[0] for r in _all_rows()])
 def test_rows_are_valid_and_build(rid, build, row, dtype):
@@ -354,6 +359,9 @@ def test_knob_class_reasons():
         problem=_problem(KH=2, KW=2, PAD=0), bx=128, cs=2
     )
     assert "cs 4: bx 128 and bk 128 only" in why(problem=_problem(C=256), cs=4)
+    assert "ds: no cs 4" in why(
+        problem=_problem(C=256, K=256, stride=2), bx=128, bk=128, cs=4, ds=True, wt=True
+    )
     assert "cs 4: C must be a multiple of 64 and >= 256" in why(
         bx=128, bk=128, cs=4, split_c=2
     )
@@ -431,6 +439,24 @@ def test_dgrad_through_forward_problem():
         assert (dgrad.cpg, dgrad.kpg) == (fwd.kpg, fwd.cpg), rid
         assert dgrad_4c_transposed_problem(dgrad) == fwd, rid
         assert (dgrad.Ho, dgrad.Wo) == (fwd.H, fwd.W), rid
+
+
+def test_xcd_knob_is_not_truncated_for_the_native_engine():
+    from kernels.conv.engine_bridge import conv_direct_fwd_flex_mfma_spec_to_dict
+
+    ok = FwdFlexMfmaSpec(problem=_problem(), xcd=True, sw=True)
+    assert conv_direct_fwd_flex_mfma_spec_to_dict(ok)["xcd"] == 1
+    bad = FwdFlexMfmaSpec(problem=_problem(), xcd=1.5, sw=True)
+    with pytest.raises(ValueError, match="xcd"):
+        conv_direct_fwd_flex_mfma_spec_to_dict(bad)
+
+
+def test_tiled_transpose_refuses_channels_off_a_multiple_of_8():
+    spec = DirectTransposeWeightsDgradSpec(
+        problem=_problem(C=200, K=70), runtime_channels=True, tiled=True
+    )
+    with pytest.raises(ValueError, match="multiples of 8"):
+        direct_launch_geometry(spec)
 
 
 def test_tiled_transpose_builds_and_launches_in_tiles():

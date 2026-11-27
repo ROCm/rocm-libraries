@@ -906,14 +906,15 @@ def direct_plans(
             rejected.append((identity, why))
         else:
             plans.append(plan)
-    if direction == "dgrad" and DGRAD_VIA_FWD:
+    if direction == "dgrad" and DGRAD_VIA_FWD and arch == "gfx950":
         via, via_rejected = dgrad_via_fwd_plans(cache, problem, arch)
         plans += via
         rejected += via_rejected
     return plans, rejected
 
 
-#: Serve a dense stride-1 dgrad with every cached forward kernel as well (ROCKE_DGRAD_VIA_FWD=0 turns it off).
+#: Serve a dense stride-1 dgrad with every cached forward kernel as well, on
+#: gfx950 only, where it is validated (ROCKE_DGRAD_VIA_FWD=0 turns it off).
 DGRAD_VIA_FWD = os.environ.get("ROCKE_DGRAD_VIA_FWD", "1") != "0"
 
 

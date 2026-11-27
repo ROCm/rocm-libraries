@@ -454,6 +454,8 @@ def _nxi(spec: FwdFlexMfmaSpec) -> int:
 def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | None":
     p = spec.problem
     if spec.ds:
+        if spec.cs == 4:
+            return "ds: no cs 4 (its kernel has no dgrad phases)"
         if p.stride < 2 or p.is_dilated or p.groups != 1 or p.pad_w < -1:
             return "ds: a dense strided dgrad without dilation"
         if spec.h1 and (p.H != 1 or p.KH != 1 or p.PAD != 0):
