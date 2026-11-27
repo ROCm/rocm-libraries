@@ -7838,6 +7838,10 @@ namespace TensileLite
               && !(problemType.useGradient && problemType.useBias) && !problemType.outputAmaxD;
         in.allowParallel = internalArgsSupport.dynamicParallel && splittable
                            && sizeMapping.hasHybridAssignment() && parallelStoresSupported;
+        // The same choice the static path makes (origami select_reduction).
+        in.parallelSelected
+            = in.allowParallel
+              && getSKReduction(problem, hardware) == origami::reduction_t::parallel;
         in.unevenParts = internalArgsSupport.dynamicUnevenParts;
         // Arrival counters (and per-part flags) start after the queue counters.
         const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);

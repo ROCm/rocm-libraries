@@ -391,17 +391,14 @@ namespace TensileLite
                                    in.threadsPerWorkGroup))));
         }
 
-        // Parallel with origami's thresholds (select_reduction for the tile and
-        // iteration bounds, grid_k_split_aware for the split) applied to
-        // splitCUs, not origami's full grid selection; the split is shrunk to
-        // the workspace.
+        // Parallel where the static path selects it, with origami
+        // grid_k_split_aware's split applied to splitCUs; the split is shrunk
+        // to the workspace.
         std::optional<DynamicSplit> parallelReductionSplit(DynamicSplitInputs const& in)
         {
-            const size_t itersPerTile = dynamicSplitItersPerTile(in);
-            if(!in.allowParallel
-               || in.totalTiles > in.splitCUs / StreamK::Dynamic::ParallelCUsPerTile
-               || itersPerTile < StreamK::Dynamic::ParallelMinIters)
+            if(!in.allowParallel || !in.parallelSelected)
                 return std::nullopt;
+            const size_t itersPerTile = dynamicSplitItersPerTile(in);
 
             size_t split = std::min(in.splitCUs / in.totalTiles,
                                     itersPerTile / StreamK::Dynamic::MinItersPerWI);

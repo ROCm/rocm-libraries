@@ -191,9 +191,14 @@ namespace TensileLite
                 // allowParallel: it can reduce them in parallel (PostGSU kernel). With
                 // neither, every tile stays whole unless the debug overrides ask
                 // otherwise; uniform summation order ignores overrides that split only
-                // some tiles (see isRowUniform).
+                // some tiles (see isRowUniform). parallelSelected: the reduction the
+                // static path selects for this problem
+                // (ContractionSolution::getSKReduction()) is parallel; the policy
+                // reduces in parallel only then, the debug overrides whenever
+                // allowParallel holds.
                 bool allowSplit            = true;
                 bool allowParallel         = false;
+                bool parallelSelected      = false;
                 bool uniformSummationOrder = false;
                 // InternalArgsSupport::dynamicUnevenParts: the kernel decodes parts
                 // of unequal length, so a tile splits into exactly the parts asked
@@ -212,16 +217,11 @@ namespace TensileLite
             // Split factors origami grid_k_split_aware tries for tree reduction, largest first.
             static constexpr size_t SplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
 
-            // origami select_reduction's MaxTilesForParallel and MinItersForParallel.
-            static constexpr size_t ParallelCUsPerTile = 4;
-            static constexpr size_t ParallelMinIters   = 64;
-
             /**
              * Choose the dynamic StreamK work decomposition.
              *
-             * Fewer tiles than splitCUs are split. With allowParallel, at most
-             * splitCUs / ParallelCUsPerTile tiles of at least ParallelMinIters
-             * iterations are each cut into
+             * Fewer tiles than splitCUs are split. With allowParallel and
+             * parallelSelected, each tile is cut into
              * min(splitCUs / tiles, itersPerTile / MinItersPerWI) parts that fit the
              * workspace, summed by PostGSU (parallel). Otherwise each tile is cut into
              * the largest SplitFactors entry with tiles*split <= splitCUs, at least

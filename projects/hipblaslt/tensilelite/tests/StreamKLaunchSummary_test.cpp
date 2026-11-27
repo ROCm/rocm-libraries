@@ -3225,8 +3225,9 @@ namespace
 {
     StreamK::Dynamic::SplitInputs parallelSplitInputs(size_t tiles, size_t itersPerTile)
     {
-        auto in          = dynamicSplitInputs(tiles, itersPerTile);
-        in.allowParallel = true;
+        auto in             = dynamicSplitInputs(tiles, itersPerTile);
+        in.allowParallel    = true;
+        in.parallelSelected = true;
         return in;
     }
 
@@ -3343,39 +3344,40 @@ TEST(StreamKDynamicSplitTest, ParallelWithoutTheArrivalFixup)
 
 TEST(StreamKDynamicSplitTest, ParallelOnlyWhereTheStaticPathTakesIt)
 {
-    // 64 tiles = 256 / 4: parallel, 4 parts each.
-    const auto p = StreamK::Dynamic::computeSplit(parallelSplitInputs(64, 4096));
+    // The static path's choice gates the parallel reduction, not the split's
+    // own bounds: 65 tiles of 4096 iterations, 3 parts each either way.
+    const auto p = StreamK::Dynamic::computeSplit(parallelSplitInputs(65, 4096));
     EXPECT_TRUE(p.parallel);
-    EXPECT_EQ(p.split, 4u);
+    EXPECT_EQ(p.split, 3u);
 
-    // 65 and 128 tiles: the arrival fixup with the tree factors.
-    const auto a = StreamK::Dynamic::computeSplit(parallelSplitInputs(65, 4096));
+    // Not selected: the arrival fixup with the tree factors.
+    auto in             = parallelSplitInputs(65, 4096);
+    in.parallelSelected = false;
+    const auto a        = StreamK::Dynamic::computeSplit(in);
     EXPECT_FALSE(a.parallel);
+    EXPECT_EQ(a.tiles, 65u);
     EXPECT_EQ(a.split, 3u);
-    auto       in = parallelSplitInputs(128, 4096);
-    const auto b  = StreamK::Dynamic::computeSplit(in);
-    EXPECT_FALSE(b.parallel);
-    EXPECT_EQ(b.tiles, 128u);
-    EXPECT_EQ(b.split, 2u);
+    in                  = parallelSplitInputs(1, 63);
+    in.parallelSelected = false;
+    const auto s        = StreamK::Dynamic::computeSplit(in);
+    EXPECT_FALSE(s.parallel);
+    EXPECT_EQ(s.split, 6u);
 
     // Without the arrival fixup those tiles stay whole.
     in.allowSplit = false;
     EXPECT_EQ(StreamK::Dynamic::computeSplit(in).tiles, 0u);
-
-    // Fewer than 64 iterations per tile: the arrival fixup.
-    const auto s = StreamK::Dynamic::computeSplit(parallelSplitInputs(1, 63));
-    EXPECT_FALSE(s.parallel);
-    EXPECT_EQ(s.split, 6u);
 }
 
 TEST(StreamKDynamicSplitTest, ParallelOnlyWhenEveryTileIsSplit)
 {
     // Debug overrides: every tile split -> parallel; a DP + SK mix keeps the
     // arrival fixup (the PostGSU kernel sums every tile).
-    auto in          = parallelSplitInputs(4, 262144);
-    in.overrideTiles = 4;
-    in.overrideSplit = 16;
-    auto d           = StreamK::Dynamic::computeSplit(in);
+    // They need the capability, not the static path's choice.
+    auto in             = parallelSplitInputs(4, 262144);
+    in.parallelSelected = false;
+    in.overrideTiles    = 4;
+    in.overrideSplit    = 16;
+    auto d              = StreamK::Dynamic::computeSplit(in);
     EXPECT_TRUE(d.parallel);
     EXPECT_EQ(d.tiles, 4u);
     EXPECT_EQ(d.split, 16u);
@@ -3421,6 +3423,48 @@ TEST_F(StreamKDynamicParallelSolveTest, ParallelNeedsTheCapability)
     EXPECT_TRUE(u.parallel);
     EXPECT_EQ(u.tiles, tiles);
     EXPECT_TRUE(solution->uniformSummationOrderSupported(uso, device));
+}
+
+// The policy reduces in parallel exactly where the static path does
+// (getSKReduction(), origami select_reduction): at most CUs / 4 tiles of at
+// least 64 iterations, under the k-split-aware grid selection only. Elsewhere
+// the same tiles take the arrival fixup.
+TEST_F(StreamKDynamicParallelSolveTest, ParallelFollowsGetSKReduction)
+{
+    struct Case
+    {
+        Shape  shape;
+        bool   parallel;
+        size_t split;
+    };
+    const Case cases[] = {
+        {{1024, 1024, 262144, 1}, true, 4}, // 64 tiles = 256 / 4
+        {{1664, 640, 262144, 1}, false, 3}, // 65 tiles
+        {{128, 128, 64 * 64, 1}, true, 8}, // 64 iterations
+        {{128, 128, 60 * 64, 1}, false, 6}, // 60 iterations
+    };
+    for(auto const& c : cases)
+    {
+        SCOPED_TRACE(c.shape.name());
+        auto         problem = dynamicSplitGemm(c.shape);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        EXPECT_EQ(solution->getSKReduction(problem, device) == origami::reduction_t::parallel,
+                  c.parallel);
+        const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_EQ(d.parallel, c.parallel);
+        EXPECT_EQ(d.tiles, tiles);
+        EXPECT_EQ(d.split, c.split);
+    }
+
+    // Another grid selection: getSKReduction() keeps tree, and so does the split.
+    auto other                  = device;
+    other.persistentDynamicGrid = static_cast<int>(origami::grid_selection_t::min_resources);
+    auto         problem        = dynamicSplitGemm(longKTiles(1));
+    const size_t tiles          = problem.getNumTiles(solution->sizeMapping, 1);
+    EXPECT_EQ(solution->getSKReduction(problem, other), origami::reduction_t::tree);
+    const auto d = solution->streamKDynamicDecomposition(problem, other, tiles);
+    EXPECT_FALSE(d.parallel);
+    EXPECT_EQ(d.tiles, tiles) << "still split, with the arrival fixup";
 }
 
 // The launch reports the reduction it runs -- tree for whole tiles and the
