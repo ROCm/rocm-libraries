@@ -159,17 +159,32 @@ def _device_inputs(data):
     }
 
 
-def _new_out(data):
-    """A NaN-filled output array in the data's dtype."""
-    return _device(np.full(data.q.shape, np.nan, np.float32), data.dtype)
+def _new_out(data, fill=np.nan):
+    """An output array in the data's dtype holding ``fill`` (NaN by default, so
+    an element left unwritten fails a comparison)."""
+    return _device(np.full(data.q.shape, fill, np.float32), data.dtype)
+
+
+#: The output fill of the NaN-query-row tests: finite and far from any output,
+#: so an O row the kernel does not store keeps a value the NaN check sees. A NaN
+#: fill would pass as the expected NaN.
+_FINITE_OUT_FILL = 1024.0
 
 
 def _run(
-    problem, data, *, lse, softcap, backend="3d", tuning_spec=None, **launch_options
+    problem,
+    data,
+    *,
+    lse,
+    softcap,
+    backend="3d",
+    tuning_spec=None,
+    out_fill=np.nan,
+    **launch_options,
 ):
     """Launch and return O as float32; ``lse`` is the caller's LSE array (or
-    None)."""
-    out = _new_out(data)
+    None), ``out_fill`` the output's contents before the launch."""
+    out = _new_out(data, out_fill)
     run_unified_attention_torch(
         problem=problem,
         **_device_inputs(data),
@@ -227,7 +242,7 @@ def test_split_kv_lse_nan_query_row_stays_nan(cdna3_or_4, dtype):
     problem, data = _case(q_lens, kv_lens, dtype=dtype)
     data.q[nan_token, nan_head] = np.nan
     lse = _lse_array(problem, np.inf)
-    out = _run(problem, data, lse=lse, softcap=0.0)
+    out = _run(problem, data, lse=lse, softcap=0.0, out_fill=_FINITE_OUT_FILL)
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(data.q.shape[-1]), 0.0)
     _assert_only_the_nan_row_is_nan(
         out, lse.values(), o_ref, lse_ref, (nan_token, nan_head), _assert_split_kv_o
@@ -316,7 +331,7 @@ def _case2d(q_lens, kv_lens, **kw):
     return case
 
 
-def _run2d(problem, data, *, lse, softcap, backend, tuning_spec=None):
+def _run2d(problem, data, *, lse, softcap, backend, tuning_spec=None, out_fill=np.nan):
     """One 2D launch. The split-KV runner is patched to fail, so a pass proves
     the tiled 2D path wrote O (and LSE)."""
     with mock.patch.object(au, "_run_3d_tiled", _forbid_split_kv):
@@ -327,6 +342,7 @@ def _run2d(problem, data, *, lse, softcap, backend, tuning_spec=None):
             softcap=softcap,
             backend=backend,
             tuning_spec=tuning_spec,
+            out_fill=out_fill,
         )
 
 
@@ -846,9 +862,10 @@ def test_tiled_2d_lse_with_softcap(cdna3_or_4, backend):
     _assert_2d_result(out, off, lse.values(), o_ref, lse_ref, "bf16")
 
 
-def _run2d_on_off(problem, data, *, spec_for, lse):
+def _run2d_on_off(problem, data, *, spec_for, lse, out_fill=np.nan):
     """The LSE-on launch with ``spec_for(problem)`` and the LSE-off launch with
-    ``spec_for`` of the LSE-off problem, both on the tiled 2D path."""
+    ``spec_for`` of the LSE-off problem, both on the tiled 2D path, each output
+    starting as ``out_fill``."""
     off_problem = dataclasses.replace(problem, emit_lse=False)
     out = _run2d(
         problem,
@@ -857,6 +874,7 @@ def _run2d_on_off(problem, data, *, spec_for, lse):
         softcap=0.0,
         backend="tiled",
         tuning_spec=spec_for(problem),
+        out_fill=out_fill,
     )
     off = _run2d(
         off_problem,
@@ -865,6 +883,7 @@ def _run2d_on_off(problem, data, *, spec_for, lse):
         softcap=0.0,
         backend="tiled",
         tuning_spec=spec_for(off_problem),
+        out_fill=out_fill,
     )
     return out, off
 
@@ -1027,7 +1046,11 @@ def test_2d_lse_nan_query_row_stays_nan(cdna3_or_4, branch, dtype):
     data.q[_NAN_ROW, _NAN_HEAD] = np.nan
     lse = _lse_array(problem, np.inf)
     out, off = _run2d_on_off(
-        problem, data, spec_for=lambda p: _branch_spec(p, branch), lse=lse
+        problem,
+        data,
+        spec_for=lambda p: _branch_spec(p, branch),
+        lse=lse,
+        out_fill=_FINITE_OUT_FILL,
     )
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(data.q.shape[-1]), 0.0)
     np.testing.assert_array_equal(out, off)  # NaN positions must match too
