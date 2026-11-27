@@ -886,6 +886,17 @@ hiptensorStatus_t hiptensorCreatePlanPreference(const hiptensorHandle_t    handl
                                                 hiptensorAlgo_t            algo,
                                                 hiptensorJitMode_t         jitMode)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, pref);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     *pref = new hiptensorPlanPreference();
     initPlanPreference(**pref, algo, jitMode);
 

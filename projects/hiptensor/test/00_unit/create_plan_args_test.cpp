@@ -24,9 +24,10 @@
  *
  *******************************************************************************/
 
-// Argument handling of hiptensorCreatePlan and hiptensorEstimateWorkspaceSize: null
-// arguments are rejected before anything is allocated, a null plan preference selects the
-// defaults, and a failed plan creation leaves the caller's plan handle untouched.
+// Argument handling of hiptensorCreatePlan, hiptensorEstimateWorkspaceSize and
+// hiptensorCreatePlanPreference: null arguments are rejected before anything is allocated, a
+// null plan preference selects the defaults, and a failed plan creation leaves the caller's
+// plan handle untouched.
 
 #include <vector>
 
@@ -209,15 +210,17 @@ TEST_F(CreatePlanArgsTest, FailedSelectionLeavesPlanUnchanged)
         GTEST_SKIP() << "contraction not supported on this device";
     }
     ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_NO_FATAL_FAILURE(createPreference());
 
-    // No selection algorithm has this value, so no kernel is selected.
+    // No selection algorithm has this value, so no kernel is selected. The plan cache is
+    // bypassed so that a solution cached for this problem cannot be reused.
     auto const unknownAlgo = static_cast<hiptensorAlgo_t>(0);
-    if(hiptensorCreatePlanPreference(mHandle, &mPref, unknownAlgo, HIPTENSOR_JIT_MODE_NONE)
-       != HIPTENSOR_STATUS_SUCCESS)
-    {
-        mPref = nullptr;
-        GTEST_SKIP() << "the library rejects an unknown algorithm in the preference";
-    }
+    ASSERT_EQ(
+        hiptensorPlanPreferenceSetAttribute(
+            mHandle, mPref, HIPTENSOR_PLAN_PREFERENCE_ALGO, &unknownAlgo, sizeof(unknownAlgo)),
+        HIPTENSOR_STATUS_SUCCESS)
+        << "the preference rejects an unknown algorithm; this test needs another way to force "
+           "a kernel selection failure in hiptensorCreatePlan";
     auto const cacheMode = HIPTENSOR_CACHE_MODE_NONE;
     ASSERT_EQ(
         hiptensorPlanPreferenceSetAttribute(
@@ -227,6 +230,20 @@ TEST_F(CreatePlanArgsTest, FailedSelectionLeavesPlanUnchanged)
     mPlan = kSentinelPlan;
     EXPECT_NE(hiptensorCreatePlan(mHandle, &mPlan, mOpDesc, mPref, 0), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(mPlan, kSentinelPlan);
+}
+
+// Plan creation only: kernel selection runs with the default preference.
+TEST_F(CreatePlanArgsTest, NullPreferenceCreatesContractionPlan)
+{
+    auto status = createContraction();
+    if(status == HIPTENSOR_STATUS_ARCH_MISMATCH || status == HIPTENSOR_STATUS_NOT_SUPPORTED)
+    {
+        GTEST_SKIP() << "contraction not supported on this device";
+    }
+    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+    ASSERT_EQ(hiptensorCreatePlan(mHandle, &mPlan, mOpDesc, nullptr, 0), HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_NE(mPlan, nullptr);
 }
 
 TEST_F(CreatePlanArgsTest, NullPreferenceUsesDefaults)
@@ -282,5 +299,20 @@ TEST_F(CreatePlanArgsTest, EstimateWorkspaceSizeRejectsNullArguments)
     EXPECT_EQ(workspaceSize, 1234u);
     EXPECT_EQ(hiptensorEstimateWorkspaceSize(
                   mHandle, mOpDesc, mPref, HIPTENSOR_WORKSPACE_DEFAULT, nullptr),
+              HIPTENSOR_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(CreatePlanArgsTest, CreatePlanPreferenceRejectsNullHandle)
+{
+    EXPECT_EQ(hiptensorCreatePlanPreference(
+                  nullptr, &mPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_NOT_INITIALIZED);
+    EXPECT_EQ(mPref, nullptr);
+}
+
+TEST_F(CreatePlanArgsTest, CreatePlanPreferenceRejectsNullPreference)
+{
+    EXPECT_EQ(hiptensorCreatePlanPreference(
+                  mHandle, nullptr, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
               HIPTENSOR_STATUS_NOT_INITIALIZED);
 }
