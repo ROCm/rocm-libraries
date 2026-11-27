@@ -21,6 +21,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsRmsnormPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsBatchnormInferencePack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsBatchnormTrainingPack.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHipMlopsDeterminism.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDensePersistent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
