@@ -89,16 +89,17 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorReadKernelCacheFromFile(hiptensorHan
 //! @brief Creates and initializes a tensor descriptor.
 //! @details This function allocates an instance of `hiptensorTensorDescriptor_t`. Call `hiptensorDestroyTensorDescriptor()` to free this instance.
 //! @param[in] handle An opaque handle representing the hipTensor library context.
-//! @param[out] desc A pointer to the `hiptensorTensorDescriptor_t` object to be allocated.
+//! @param[out] desc A pointer to the `hiptensorTensorDescriptor_t` object to be allocated. It is left unchanged when an error is returned.
 //! @param[in] numModes The number of modes (dimensions) for the tensor.
-//! @param[in] lens An array specifying the extent (length) of each mode; all values must be greater than zero.
-//! @param[in] strides An array where `strides[i]` is the displacement between consecutive elements in the i-th mode. If `NULL`, a generalized packed column-major memory layout is assumed (strides increase monotonically from left to right).
+//! @param[in] lens An array specifying the extent (length) of each mode; all values must be greater than zero. May be `NULL` only when `numModes` is zero.
+//! @param[in] strides An array where `strides[i]` is the displacement between consecutive elements in the i-th mode; negative strides are not supported. If `NULL`, a generalized packed column-major memory layout is assumed (strides increase monotonically from left to right).
 //! @param[in] dataType The data type of the tensor elements.
 //! @param[in] alignmentRequirement The memory alignment requirement for the tensor.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` if the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` if the handle is not initialized.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` if the handle is not initialized or `desc` is `NULL`.
 //! @retval `HIPTENSOR_STATUS_ARCH_MISMATCH` if the data type is not supported.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` if any parameters are invalid.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` if any parameters are invalid, for example `lens` is `NULL` with `numModes` greater than zero, or an extent is not positive.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` if a stride is negative.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorCreateTensorDescriptor(const hiptensorHandle_t      handle,
                                     hiptensorTensorDescriptor_t* desc,
