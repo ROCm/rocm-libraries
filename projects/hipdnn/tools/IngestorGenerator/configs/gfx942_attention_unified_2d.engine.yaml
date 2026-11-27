@@ -35,6 +35,10 @@
 # shapes (D64/D128, bf16/fp16, GQA ratios 1..16, seqlen 256..4096 and a 512 -> 4096
 # cross-length). A geometry that does not fit the 64 KiB LDS at a head size lists only the
 # other head size's cells. The shipped selection is variant_reduce's cut of this space.
+# The 1-warp narrow geometry (16 rows, 16x16 MFMA) joins at every KV tile that fits the LDS
+# (the 8x tile exceeds it at D128): a gfx942 sweep of every LDS-legal registry geometry over
+# short (seqlen_q <= 64), mid and long prefill found it the fastest kernel for most
+# short-prefill graphs of every cell, which no geometry above served.
 #
 # Production stacks: rocKE's own spec for these cells is not a geometry in that sweep space.
 # `_spec_gfx942_fp16_flash` and `_spec_gfx942_bf16_flash` (builders/common/attention_spec_builder.py)
@@ -44,11 +48,12 @@
 # No registry sweep spec combines those, so three `enumerate.also` sections pin them with
 # `spec_overrides`, each on the geometry rocKE selects: D64 (both dtypes in one section) and
 # fp16 D128 at 4 warps x 32 rows with a 64-token tile (fp16 D128 with a depth-2 ring), and
-# bf16 D128 at 2 warps x 32 rows with a single K buffer. The reduction kept no bf16 D128
-# production kernel. rocKE routes short prefill (seqlen_q <= 768) to a light narrow geometry
-# (16x16x16, 1 or 2 warps, 16 rows per warp, 64-token tile, register PV); this space has no
-# such geometry at D128. After the reduction, D64 and fp16 D128 keep a narrow kernel only in
-# their ratio-1 cells, and bf16 D128 keeps narrow kernels at ratios 1, 2, 4 and 8. The five
+# bf16 D128 at 2 warps x 32 rows with a single K buffer. The reduction keeps the production
+# stack in every cell. rocKE routes short prefill (seqlen_q <= 768) to a light narrow geometry
+# (16x16x16, 1 or 2 warps, 16 rows per warp, 64-token tile, register PV); the 1-warp narrow
+# sections below cover it at both head sizes. After the reduction every cell keeps at least
+# one 1-warp narrow kernel, and every D128 cell keeps the 2-warp x 16-row narrow at a
+# 16-token tile. The five
 # stack fields that tell a production kernel from a geometry's default kernel are KMD fields,
 # knobs and `reduction.fields.performance`, so the sweep ranks them and the catalog key never
 # collides; the rest are fixed by the stack and recorded in the kernel spec.
@@ -75,6 +80,15 @@ engine:
   - use_transposed_mask_limit
   - use_transposed_invariant_hoist
   heuristic: native
+  # Trained sort_kernel_catalog model (tflops) for gfx942, beside the native
+  # default, and the catalog it was trained on; retrain when it changes
+  # (tests/test_trained_rankers.py, README "Shipping a trained model").
+  heuristics:
+    sort_kernel_catalog:
+      gfx942:
+      - a1332ef3-1a18-4777-91d6-0f4ddc5c9e7b
+  trained_catalog_sha256:
+    gfx942: 9885ca1a3195b820f6b58433a8acabe247cc62d80c269c52f2e3e4c0a6046862
 kmd_fields:
 - name: dtype
   type: string
@@ -314,6 +328,43 @@ enumerate:
       cells: *d128_cells
       spec_fields: *spec_fields
       neutral_fields: *neutral
+    # The 1-warp narrow geometry (16x16 MFMA, 16 rows per warp) at every KV tile that fits
+    # the LDS: 1x to 8x at D64, 1x to 4x at D128 (see the header).
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t1xb_llvm}
+      fixed: *fixed
+      cells: *d64_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t2xb_llvm}
+      fixed: *fixed
+      cells: *d64_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t4xb_llvm}
+      fixed: *fixed
+      cells: *d64_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t8xb_llvm}
+      fixed: *fixed
+      cells: *d64_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t1xb_llvm}
+      fixed: *fixed
+      cells: *d128_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t2xb_llvm}
+      fixed: *fixed
+      cells: *d128_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_narrow_nw1_mw16_t4xb_llvm}
+      fixed: *fixed
+      cells: *d128_cells
+      spec_fields: *spec_fields
+      neutral_fields: *neutral
     # rocKE's production stacks (see the header). Each section's spec_overrides are the
     # fields rocKE's builder sets beyond the pinned geometry's default spec for that
     # (dtype, head size) at prefill; tests/test_registry_regeneration.py::test_g9 holds them
@@ -465,7 +516,8 @@ launch_surface:
       without one of the five codegen stack fields, or with a value outside 0/1, is
       declined too. graph_match leaves the single-token decode cells the split-KV gfx942
       engine serves to it. score() follows rocKE's route: where rocKE builds its light
-      narrow geometry (1 < seqlen_q <= 768, bf16 at every ratio, fp16 GQA) and the cell
+      narrow geometry (bf16 at every ratio, fp16 GQA), within the engine's tighter
+      1 < seqlen_q <= 64 bound (rocKE's own is 768), and the cell
       ships narrow kernels, the one nearest that geometry ranks first; otherwise rocKE's
       production stack for the cell, then the cell's default geometry, then ascending
       (tile_size, num_warps, block_m_per_warp, the MFMA flags, the codegen stack).

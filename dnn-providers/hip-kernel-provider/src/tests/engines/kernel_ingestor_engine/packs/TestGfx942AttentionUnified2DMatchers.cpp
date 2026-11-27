@@ -814,8 +814,9 @@ KernelSpec geometry(int64_t tile, int64_t warps, int64_t rows, int64_t x8 = 0, i
     return spec;
 }
 
-/// rocKE's short-prefill bound (`_enable_gfx942_small_q_narrow`: 1 < max_seqlen_q <= 768).
-constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 768;
+/// The engine's narrow-first bound (1 < max_seqlen_q <= 64), tighter than rocKE's own 768 (see
+/// Gfx942AttentionUnified2DNative.cpp, SHORT_PREFILL_MAX_SEQ_LEN_Q).
+constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 64;
 
 /// The default graph (bf16, D128, 8 query heads over 2) at @p seqLenQ over 2048 keys.
 GraphSpec prefill(int64_t seqLenQ)
@@ -1057,11 +1058,11 @@ constexpr auto HALF = data_objects::DataType::HALF;
 
 } // namespace
 
-/// Where rocKE builds its light narrow geometry (bf16 at every ratio, fp16 GQA, 1 < Sq <= 768)
-/// and the cell ships narrow kernels, the narrow kernel nearest rocKE's geometry (16 rows per
-/// warp, then the tile nearest rocKE's, then the warps nearest 1 for MHA or 2 for GQA) ranks first
-/// up to and at Sq 768; one row past it the cell's own order returns (the production stack,
-/// else the default). These are every cell of the shipped catalog where that holds.
+/// Where rocKE builds its light narrow geometry (bf16 at every ratio, fp16 GQA) and the cell
+/// ships narrow kernels, the narrow kernel nearest rocKE's geometry (16 rows per warp, then the
+/// tile nearest rocKE's, then the warps nearest 1 for MHA or 2 for GQA) ranks first up to and at
+/// the engine's bound (Sq 64); past it, mid prefill included, the cell's own order returns (the
+/// production stack, else the default).
 TEST(TestGfx942AttentionUnified2DMatchers,
      ScoreRanksTheNarrowKernelFirstWhereRockeRoutesShortPrefillToIt)
 {
@@ -1123,11 +1124,12 @@ TEST(TestGfx942AttentionUnified2DMatchers,
     };
     for(const auto& c : cases)
     {
-        for(const int64_t sq : {int64_t{2}, int64_t{128}, SHORT_PREFILL_MAX_SEQ_LEN_Q})
+        for(const int64_t sq : {int64_t{2}, int64_t{32}, SHORT_PREFILL_MAX_SEQ_LEN_Q})
         {
             EXPECT_EQ(ranking(c.cell, sq).front(), c.shortFirst) << c.cell.name << " at Sq " << sq;
         }
-        for(const int64_t sq : {SHORT_PREFILL_MAX_SEQ_LEN_Q + 1, int64_t{2048}})
+        for(const int64_t sq :
+            {SHORT_PREFILL_MAX_SEQ_LEN_Q + 1, int64_t{128}, int64_t{768}, int64_t{2048}})
         {
             EXPECT_EQ(ranking(c.cell, sq).front(), c.longFirst) << c.cell.name << " at Sq " << sq;
         }
@@ -1136,7 +1138,8 @@ TEST(TestGfx942AttentionUnified2DMatchers,
 
 /// rocKE's narrow tile is one paged-KV block at D64 and 64 tokens at D128
 /// (`_select_2d_tile_size`), so between two otherwise equal narrow kernels the D64 graph prefers
-/// the block-sized tile and the D128 graph the 64-token one.
+/// the block-sized tile and the D128 graph the 64-token one (at a short prefill, where narrow
+/// kernels rank first).
 TEST(TestGfx942AttentionUnified2DMatchers, ScoreKeysTheNarrowTileOnTheHeadSizeAsRockeDoes)
 {
     const Cell d64{
@@ -1145,7 +1148,7 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreKeysTheNarrowTileOnTheHeadSizeAs
         64,
         1,
         {cellKernel("BF16", 64, 1, 16, 1, 16, 0), cellKernel("BF16", 64, 1, 64, 1, 16, 0)}};
-    EXPECT_EQ(ranking(d64, 128).front(), "t16_nw1_mw16_x00_f00000");
+    EXPECT_EQ(ranking(d64, 32).front(), "t16_nw1_mw16_x00_f00000");
 
     const Cell d128{
         "bf16 D128 ratio 1",
@@ -1153,10 +1156,10 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreKeysTheNarrowTileOnTheHeadSizeAs
         128,
         1,
         {cellKernel("BF16", 128, 1, 16, 1, 16, 0), cellKernel("BF16", 128, 1, 64, 1, 16, 0)}};
-    EXPECT_EQ(ranking(d128, 128).front(), "t64_nw1_mw16_x00_f00000");
+    EXPECT_EQ(ranking(d128, 32).front(), "t64_nw1_mw16_x00_f00000");
 }
 
-/// Everywhere else the ranking is the same on both sides of Sq 768: in a cell that ships no
+/// Everywhere else the ranking is the same on both sides of Sq 64: in a cell that ships no
 /// narrow kernel (rocKE's short-prefill kernel is not in it) and in fp16 MHA cells, where rocKE
 /// keeps its flash stack at every Sq (`_enable_gfx942_fp16_flash`'s narrow carve-out is GQA
 /// only). The production stack ranks first wherever it ships, and D64's, which has the

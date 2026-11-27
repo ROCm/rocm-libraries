@@ -8,7 +8,10 @@
   },
   "metadata": "323ecbb7-94db-45a4-ad26-818a986a258d",
   "sort_kernel_catalog": {
-    "default": "8db17369-bc30-4ae7-b5cf-bd573b082ebe"
+    "default": "8db17369-bc30-4ae7-b5cf-bd573b082ebe",
+    "gfx942": [
+      "a1332ef3-1a18-4777-91d6-0f4ddc5c9e7b"
+    ]
   },
   "knobs": [
     "tile_size",

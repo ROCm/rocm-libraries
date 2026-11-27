@@ -116,19 +116,26 @@ struct Geometry
 
 /// The catalog's classes per head size; the first of each is every cell's default geometry.
 /// D64's production stack (ring, direct-global Q, conflict-free V stores, mask limit and
-/// hoist) rides the default's 4 x 32 geometry; fp16 D128's drops direct-global Q.
-constexpr std::array<Geometry, 3> D64_GEOMETRIES{{
+/// hoist) rides the default's 4 x 32 geometry; fp16 D128's drops direct-global Q; bf16 D128's
+/// is mask limit and hoist alone on 2 x 32 rows at KV tile 64. The 1-warp narrow kernels
+/// (16x16 MFMA, 16 rows) ship at every KV tile that fits the LDS.
+constexpr std::array<Geometry, 7> D64_GEOMETRIES{{
     {"Transposed4x32T64", 64, 4, 32, 1, 1},
     {"Production4x32T64", 64, 4, 32, 1, 1, 1, 1, 1, 1, 1},
     {"Narrow2x16T64", 64, 2, 16, 0, 0},
+    {"Narrow1x16T16", 16, 1, 16, 0, 0},
+    {"Narrow1x16T32", 32, 1, 16, 0, 0},
+    {"Narrow1x16T64", 64, 1, 16, 0, 0},
+    {"Narrow1x16T128", 128, 1, 16, 0, 0},
 }};
-constexpr std::array<Geometry, 6> D128_GEOMETRIES{{
+constexpr std::array<Geometry, 7> D128_GEOMETRIES{{
     {"Transposed2x32T32", 32, 2, 32, 1, 1},
-    {"Transposed4x32T32", 32, 4, 32, 1, 1},
-    {"Narrow4x16T32", 32, 4, 16, 0, 0},
-    {"Narrow2x32T32", 32, 2, 32, 0, 0},
     {"Narrow2x16T16", 16, 2, 16, 0, 0},
     {"Production4x32T64Ring", 64, 4, 32, 1, 1, 1, 0, 1, 1, 1},
+    {"Production2x32T64", 64, 2, 32, 1, 1, 0, 0, 0, 1, 1},
+    {"Narrow1x16T16", 16, 1, 16, 0, 0},
+    {"Narrow1x16T32", 32, 1, 16, 0, 0},
+    {"Narrow1x16T64", 64, 1, 16, 0, 0},
 }};
 
 /// A (query heads, KV heads) pair. Several forced cases use pairs no manifest cell lists,
@@ -164,31 +171,28 @@ struct ForcedClass
 };
 
 /// Every kernel class the catalog ships, forced once on a prefill shape with B > 1 and
-/// Sq != Skv; then cold cases the engine's own ranking serves. Where rocKE builds its light
-/// narrow geometry (1 < Sq <= 768, bf16 at every ratio, fp16 GQA) and the cell ships a narrow
-/// kernel, that kernel; otherwise rocKE's production stack where the catalog ships one for the
-/// cell, the default geometry where it does not (bf16 D128, whose production stack lost to the
-/// default on every sweep graph). Variant reduction kept 14 classes; the rest of the
-/// geometries have no case.
+/// Sq != Skv; then cold cases the engine's own ranking serves. With the trained rankers bound,
+/// a cold case accepts any kernel of its graph's cell. The expectations below are the native
+/// score's, which decides when the rankers were not pulled: for short prefill (1 < Sq <= 64,
+/// bf16 at every ratio, fp16 GQA) a narrow kernel; otherwise rocKE's production stack, which
+/// the catalog ships in every cell.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto BF16 = DataType::BFLOAT16;
     constexpr auto FP16 = DataType::HALF;
-    const std::array<ForcedClass, 14> forced{{
-        {64, D64_GEOMETRIES.data(), BF16, {8, 8}},
-        {64, D64_GEOMETRIES.data(), FP16, {24, 6}},
-        {64, &D64_GEOMETRIES[1], BF16, {64, 8}},
-        {64, &D64_GEOMETRIES[1], FP16, {64, 8}},
-        {64, &D64_GEOMETRIES[2], BF16, {8, 8}},
-        {64, &D64_GEOMETRIES[2], FP16, {8, 8}},
-        {128, D128_GEOMETRIES.data(), BF16, {48, 3}},
-        {128, D128_GEOMETRIES.data(), FP16, {64, 8}},
-        {128, &D128_GEOMETRIES[1], BF16, {20, 10}},
-        {128, &D128_GEOMETRIES[2], BF16, {16, 2}},
-        {128, &D128_GEOMETRIES[3], BF16, {16, 4}},
-        {128, &D128_GEOMETRIES[4], BF16, {64, 8}},
-        {128, &D128_GEOMETRIES[4], FP16, {8, 8}},
-        {128, &D128_GEOMETRIES[5], FP16, {20, 10}},
+    const std::array<ForcedClass, 24> forced{{
+        {64, D64_GEOMETRIES.data(), BF16, {8, 8}},    {64, D64_GEOMETRIES.data(), FP16, {24, 6}},
+        {64, &D64_GEOMETRIES[1], BF16, {64, 8}},      {64, &D64_GEOMETRIES[1], FP16, {64, 8}},
+        {64, &D64_GEOMETRIES[2], BF16, {16, 1}},      {64, &D64_GEOMETRIES[3], BF16, {8, 4}},
+        {64, &D64_GEOMETRIES[3], FP16, {32, 2}},      {64, &D64_GEOMETRIES[4], BF16, {8, 8}},
+        {64, &D64_GEOMETRIES[4], FP16, {16, 2}},      {64, &D64_GEOMETRIES[5], BF16, {16, 4}},
+        {64, &D64_GEOMETRIES[5], FP16, {64, 4}},      {64, &D64_GEOMETRIES[6], BF16, {32, 8}},
+        {64, &D64_GEOMETRIES[6], FP16, {12, 3}},      {128, D128_GEOMETRIES.data(), BF16, {48, 3}},
+        {128, D128_GEOMETRIES.data(), FP16, {64, 8}}, {128, &D128_GEOMETRIES[1], BF16, {64, 8}},
+        {128, &D128_GEOMETRIES[1], FP16, {8, 8}},     {128, &D128_GEOMETRIES[2], FP16, {20, 10}},
+        {128, &D128_GEOMETRIES[3], BF16, {32, 4}},    {128, &D128_GEOMETRIES[4], FP16, {32, 2}},
+        {128, &D128_GEOMETRIES[5], BF16, {16, 8}},    {128, &D128_GEOMETRIES[5], FP16, {8, 8}},
+        {128, &D128_GEOMETRIES[6], BF16, {8, 2}},     {128, &D128_GEOMETRIES[6], FP16, {24, 12}},
     }};
     std::vector<KnobCase> cases;
     for(const auto& f : forced)
@@ -217,29 +221,34 @@ std::vector<KnobCase> knobCases()
     cases.push_back({"D128_Fp16_Cold_SelectsTheProductionStack",
                      {DataType::HALF, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 512, 2048},
                      {},
-                     knobsOf(D128_GEOMETRIES[5])});
-    cases.push_back({"D128_Bf16_ShortPrefill_Cold_SelectsTheNarrowKernel",
-                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 768, 2048},
-                     {},
                      knobsOf(D128_GEOMETRIES[2])});
-    cases.push_back({"D128_Bf16_Cold_SelectsTheDefaultGeometry",
-                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 769, 2048},
+    cases.push_back({"D128_Bf16_ShortPrefill_Cold_SelectsTheNarrowKernel",
+                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 64, 2048},
                      {},
-                     knobsOf(D128_GEOMETRIES[0])});
+                     knobsOf(D128_GEOMETRIES[5])});
+    // One past the short-prefill bound: the production stack, not rocKE's 768 narrow route.
+    cases.push_back({"D128_Bf16_Cold_SelectsTheProductionStack",
+                     {DataType::BFLOAT16, 128, 64, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 1, 65, 2048},
+                     {},
+                     knobsOf(D128_GEOMETRIES[3])});
     cases.push_back({"D64_Bf16_Mha_ShortPrefill_Cold_SelectsTheNarrowKernel",
+                     {DataType::BFLOAT16, 64, 8, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 64, 1024},
+                     {},
+                     knobsOf(D64_GEOMETRIES[4])});
+    cases.push_back({"D64_Bf16_Mha_MidPrefill_Cold_SelectsTheProductionStack",
                      {DataType::BFLOAT16, 64, 8, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 768, 1024},
                      {},
-                     knobsOf(D64_GEOMETRIES[2])});
+                     knobsOf(D64_GEOMETRIES[1])});
     // rocKE keeps its fp16 flash stack for MHA at every Sq.
     cases.push_back({"D64_Fp16_Mha_ShortPrefill_Cold_SelectsTheProductionStack",
-                     {DataType::HALF, 64, 8, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 768, 1024},
+                     {DataType::HALF, 64, 8, 8, SdpaMask::BOUNDS_BOTTOM_RIGHT, 2, 64, 1024},
                      {},
                      knobsOf(D64_GEOMETRIES[1])});
     // The kernel derives its cu_q search trip count from the num_seqs kernarg.
     cases.push_back({"D128_Cold_Batch512",
                      {DataType::BFLOAT16, 128, 8, 2, SdpaMask::BOUNDS_BOTTOM_RIGHT, 512, 16, 64},
                      {},
-                     knobsOf(D128_GEOMETRIES[4])});
+                     knobsOf(D128_GEOMETRIES[6])});
     return cases;
 }
 
@@ -454,7 +463,23 @@ TEST_P(IntegrationGpuGfx942AttentionUnified2DKnobs,
             << "Captured logs:\n"
             << recorder.getRecordedLogsAsString();
     }
-    EXPECT_NE(std::find(expectedIds.begin(), expectedIds.end(), *selected), expectedIds.end())
+    // Cold: a trained ranker bound for this arch picks whichever kernel of the graph's cell it
+    // ranks fastest, so only the cell is pinned (the CPU reference below still checks the
+    // launch); one that could not rank fell back to declared kernel order, which is a failure
+    // unless the pack left the ranker out because its model.bin was never pulled. Without a
+    // trained ranker the native score decides, and the case's expected class is pinned.
+    const auto decidedBy = testCase.knobs.empty() ? detail::rankingDecidedBy(ENGINE, recorder)
+                                                  : std::optional<std::string>{};
+    if(testCase.knobs.empty())
+    {
+        testing::expectRankerDecided(decidedBy,
+                                     detail::boundRankerLeftOutAsUnpulled(ENGINE),
+                                     recorder.getRecordedLogsAsString());
+    }
+    const auto acceptedIds = decidedBy.has_value()
+                                 ? kernelIdsFor({testCase.name, testCase.shape, {}, {}})
+                                 : expectedIds;
+    EXPECT_NE(std::find(acceptedIds.begin(), acceptedIds.end(), *selected), acceptedIds.end())
         << "selected " << *selected << ". Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
