@@ -689,13 +689,12 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_DEVELOPMENT OFF)
     # The C++ engine's Python modules (rocke_engine, rocke_library_engine) let
     # the installed pytest entries run the C++ engine and compare it with the
-    # Python one; without them those tests skip. They build, and install beside
-    # the rocke package, only when the configure sets ROCKE_BUILD_PYBIND=ON (a
-    # cache option, OFF unless set), and then the build's Python must have
-    # pybind11. A pybind11 that happens to be on the build host is not picked
-    # up: TheRock sets the option once its build provides pybind11. Being a
-    # cache option, it stays OFF in a build tree first configured without it
-    # until a configure passes -DROCKE_BUILD_PYBIND=ON. Not on Windows:
+    # Python one; without them those tests skip. They are pybind11 modules and
+    # build only when the configure sets ROCKE_BUILD_PYBIND=ON (a cache option,
+    # OFF unless set), which a provider build does not: the provider build uses
+    # no pybind11, and a pybind11 that happens to be on the build host is not
+    # picked up (the binding direction: rocke/platform/dsl_docs/hipdnn_provider/
+    # plan.md). Not on Windows:
     # TheRock's test artifact does not capture .pyd modules, and the modules
     # have not been built or run there. When it builds none,
     # ROCKE_ENGINE_MODULES_ABSENT_REASON says why: the installed guard

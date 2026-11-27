@@ -46,8 +46,9 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
   (3.18+ for the `cpp/bindings` pybind module). The C++ build needs the Python
   interpreter too: it generates the engine's intrinsic arch-domain table from the
   committed JSON columns (`tools/gen_arch_domain_cpp.py`), standard library only.
-- Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
-  `pybind11` in the `dev` extra). rocKE does not depend on torch; its
+- Python deps: `pip install -r requirements.txt` (`numpy` plus the test
+  packages); building the `rocke_engine` binding also needs `pybind11`
+  (`pip install -e '.[dev]'`). rocKE does not depend on torch; its
   remaining uses are being removed (`TESTING.md`, "No torch").
 - GPU lanes need a HIP-visible device; on a shared box that may require running
   under `sudo -E` (or membership in the `video`/`render` groups).

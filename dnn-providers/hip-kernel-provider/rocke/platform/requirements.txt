@@ -19,7 +19,9 @@
 numpy>=1.24
 
 # --- building the rocke_engine pybind module (cpp/bindings) --------------------
-pybind11>=3.0
+# pybind11 is in pyproject.toml's dev extra, not here: these requirements also
+# go into the hipDNN superbuild's build Python, and a provider build uses no
+# pybind11 (ROCKE_BUILD_PYBIND stays OFF there).
 
 # --- test / dev --------------------------------------------------------------
 # pytest 9 runs subtests itself; rocke.tests.sweep_guard needs its subtest reports.

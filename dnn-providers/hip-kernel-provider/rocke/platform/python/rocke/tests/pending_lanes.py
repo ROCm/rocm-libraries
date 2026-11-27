@@ -1075,8 +1075,8 @@ PENDING: tuple[PendingTest, ...] = (
     *_waiting(
         _BUILD_VARIANT_TOOLS,
         "C++ engine parity checks that need the rocke_engine module; every case skips "
-        "without it, until TheRock's build provides pybind11 and sets "
-        "ROCKE_BUILD_PYBIND",
+        "without it, and no CI build makes it (a provider build does not set "
+        "ROCKE_BUILD_PYBIND)",
         _LIBRARY,
         "library/tests/test_selector_cpp_parity.py",
     ),
