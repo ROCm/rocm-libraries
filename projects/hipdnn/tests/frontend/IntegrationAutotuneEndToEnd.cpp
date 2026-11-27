@@ -331,6 +331,13 @@ protected:
             "HIPDNN_STALL_RECOVERY_CHILD", "1");
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter hostSync(
             "HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE", "1");
+        // Surface autotune restart-reason warnings in CI logs unless the caller already
+        // selected a log level.
+        std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> logLevel;
+        if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL").empty())
+        {
+            logLevel.emplace("HIPDNN_LOG_LEVEL", "warn");
+        }
         ASSERT_EQ(hipdnn_test_sdk::utilities::runCurrentTestInChild(), 0)
             << "recovery child failed";
     }
@@ -362,14 +369,16 @@ protected:
         config.windowSize = 3;
         config.maxIterations = 5;
         config.timedIterations = 3;
-        // Measure one healthy engine before HostSyncs so the stalled pass records a
-        // DEVICE_ONLY result before tripping the watchdog, without exposing the sweep to
-        // five extra engines' worth of Windows negative readings
-        // (https://github.com/ROCm/rocm-systems/issues/12925).
+#if defined(_WIN32)
+        // On Windows, measure one healthy engine before HostSyncs so the stalled pass
+        // records a DEVICE_ONLY result before tripping the watchdog without exposing the
+        // sweep to five extra engines' worth of Windows negative readings
+        // (https://github.com/ROCm/rocm-systems/issues/12925). Linux keeps the full
+        // seven-engine sweep.
         config.engineIdFilter
             = {hipdnn_tests::plugin_constants::engineId<AutotunePlugin>(),
                hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>()};
-
+#endif
         std::vector<AutotuneResult> results;
         const auto start = std::chrono::steady_clock::now();
         result = bundle.graph->autotune(
