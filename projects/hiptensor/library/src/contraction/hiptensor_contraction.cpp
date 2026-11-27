@@ -28,6 +28,7 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include "ck_tensor_limits.hpp"
 #include "contraction_selection.hpp"
 #include "contraction_solution.hpp"
 #include "contraction_solution_instances.hpp"
@@ -1259,6 +1260,16 @@ hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t            
     auto tDataType        = desc->mDescE->mType;
     auto intermediateDesc = buildTrinaryContractionIntermediateDescriptor(
         modeT, desc->mDescA, desc->mModeA, desc->mDescB, desc->mModeB, tDataType);
+
+    // Both steps address T, so it has the same size limit as the operation's own tensors,
+    // which hiptensorCreatePlan has checked.
+    if(auto status = hiptensor::reportCkTensorLimitViolation(
+           hiptensor::ckTensorSizeViolation(intermediateDesc, "T (A * B)"),
+           "contractionTrinaryInitPlan");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
 
     auto tBytes        = tensorByteSize(intermediateDesc);
     auto tBytesAligned = alignUp256(tBytes);

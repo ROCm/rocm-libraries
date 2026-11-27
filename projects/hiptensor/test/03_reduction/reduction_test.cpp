@@ -27,6 +27,7 @@
 
 #include <algorithm>
 
+#include "ck_tensor_limits.hpp"
 #include "common.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
@@ -462,8 +463,21 @@ namespace hiptensor
 
             resource->setupWorkspace(worksize);
 
-            hiptensorPlan_t plan;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
+            hiptensorPlan_t plan = nullptr;
+            auto planStatus      = hiptensorCreatePlan(handle, &plan, desc, planPref, worksize);
+            // No plan is created for tensors the kernels cannot address, which the bench
+            // configurations include.
+            if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descA));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descC));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descD));
+                GTEST_SKIP() << "Tensor size not supported by the kernels";
+            }
+            CHECK_HIPTENSOR_ERROR(planStatus);
 
             void*  work = resource->deviceWorkspace().get();
             double alphaValue{};

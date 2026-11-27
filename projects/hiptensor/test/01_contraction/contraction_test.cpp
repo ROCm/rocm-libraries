@@ -27,6 +27,7 @@
 
 #include <algorithm>
 
+#include "ck_tensor_limits.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 
@@ -868,7 +869,14 @@ namespace hiptensor
                 CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
                 plan = nullptr;
             }
-            CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
+            // No plan is created for tensors the kernels cannot address, which the bench
+            // configurations include. TearDown releases the rest.
+            auto planStatus = hiptensorCreatePlan(handle, &plan, desc, planPref, worksize);
+            if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
+            {
+                GTEST_SKIP() << "Tensor size not supported by the kernels";
+            }
+            CHECK_HIPTENSOR_ERROR(planStatus);
 
             auto resource = getResource();
 
