@@ -908,6 +908,22 @@ namespace TensileLite
             return internalArgsSupport.persistentLoopArgsVersion == 2;
         }
 
+        // Whether this launch packs skTiles = 0 because uniform summation order
+        // keeps a static two-tile StreamK grid below the tile count (see
+        // StreamK::Static::uniformOrderDataParallel). The grid snap, kernel-arg
+        // packers, workspace sizing, flag-region clamp and uniform-summation-order
+        // gate all call this on the final grid so they agree the launch is
+        // all data-parallel. effectiveDynamicHint is the resolved static or
+        // dynamic arm of a hybrid WorkAssignment when the caller has one; null
+        // resolves it only if needed.
+        // Spatial-cluster StreamK and handwritten custom kernels keep their own
+        // splits and always return false.
+        bool streamKUniformOrderDataParallel(Problem const&  problem,
+                                             Hardware const& hardware,
+                                             size_t          tiles,
+                                             size_t          grid,
+                                             bool const*     effectiveDynamicHint) const;
+
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
                                           PersistentLaunchSettings const& launch) const;
 

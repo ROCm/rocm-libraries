@@ -3750,7 +3750,10 @@ namespace
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
     }
 
-    TEST(RowUniformityGridSteering_pre_checkin, NonDivisorGridBelowTilesSnapsToTiles)
+    // A grid below the tile count keeps its size under uniform summation order
+    // and runs all data-parallel (skTiles == 0), so every workgroup still loops
+    // over several whole tiles instead of the launch widening to one tile each.
+    TEST(RowUniformityGridSteering_pre_checkin, NonDivisorGridBelowTilesRunsAllDataParallel)
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
@@ -3763,12 +3766,14 @@ namespace
 
         problem.setParams().setUniformSummationOrder(0);
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 10u);
+        EXPECT_FALSE(solution->streamKUniformOrderDataParallel(problem, device, tiles, 10, nullptr));
 
         problem.setParams().setUniformSummationOrder(1);
-        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles);
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 10u);
+        EXPECT_TRUE(solution->streamKUniformOrderDataParallel(problem, device, tiles, 10, nullptr));
     }
 
-    TEST(RowUniformityGridSteering_pre_checkin, DivisorGridBelowTilesSnapsToTiles)
+    TEST(RowUniformityGridSteering_pre_checkin, DivisorGridBelowTilesRunsAllDataParallel)
     {
         auto solution = uniformitySteeringSolution();
         auto device   = uniformitySteeringDevice();
@@ -3780,8 +3785,10 @@ namespace
         ASSERT_EQ(tiles, 16u);
 
         problem.setParams().setUniformSummationOrder(1);
-        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles)
-            << "mixed GridDividesTiles (g0 | T, g0 < T) must snap up to all-full";
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 8u)
+            << "g0 | T, g0 < T keeps g0 and drops the StreamK section";
+        EXPECT_TRUE(solution->streamKUniformOrderDataParallel(problem, device, tiles, 8, nullptr))
+            << "the mixed GridDividesTiles split must not be packed";
     }
 
     TEST(RowUniformityGridSteering_pre_checkin, AllPartialNonDivisorFRequiresCapability)

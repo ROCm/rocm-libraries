@@ -53,7 +53,8 @@ namespace TensileLite
              * @param itersPerTile getItersPerTile(sizeMapping), clamped to at least 1.
              * @param skGrid       Resolved StreamK grid. 0 yields an all-zero split.
              * @param skFullTiles  AMDGPU::skFullTiles (TENSILE_STREAMK_FULL_TILES).
-             * @param forceDPOnly  SizeMapping::streamKForceDPOnly != 0.
+             * @param forceDPOnly  Pack skTiles = 0: the DataParallel
+             *                     TileProcessingStrategy, or uniformOrderDataParallel().
              * @param kGranularity Iterations per indivisible K unit,
              *                     ContractionSolution::skKGranularity(). 1 leaves
              *                     the historical flat space unchanged.
@@ -65,6 +66,32 @@ namespace TensileLite
                              int    skFullTiles,
                              bool   forceDPOnly,
                              size_t kGranularity = 1);
+
+            /**
+             * Whether a StreamK launch with a static WorkAssignment runs every tile
+             * data-parallel under uniform summation order: skTiles is packed as 0,
+             * every tile is computed whole by one workgroup, and each workgroup
+             * loops over about tiles / skGrid tiles.
+             *
+             * When the grid is smaller than the tile count, the usual split mixes
+             * data-parallel tiles with StreamK tiles whose K is cut into chunks. If
+             * the grid does not divide the tile count, those chunks have different
+             * lengths from tile to tile, so tiles are not summed in the same order.
+             * If it does divide, the split is refused by isRowUniform. Packing
+             * skTiles = 0 avoids both, instead of raising the grid to one workgroup
+             * per tile, which would leave each workgroup a single tile and no
+             * persistent loop.
+             *
+             * Arithmetic only; ContractionSolution::streamKUniformOrderDataParallel()
+             * adds the kernel-level checks and is what the launch sites call. Its
+             * result selects computeSplit()'s all data-parallel packing.
+             */
+            static inline bool uniformOrderDataParallel(bool   uniformSummationOrder,
+                                                        size_t tiles,
+                                                        size_t skGrid)
+            {
+                return uniformSummationOrder && skGrid > 0 && skGrid < tiles;
+            }
 
             /**
              * Whether every output tile of a static two-tile StreamK split is folded
