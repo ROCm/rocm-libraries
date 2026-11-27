@@ -993,8 +993,8 @@ struct TransposingSolver : TransposingSolverGetSolution<Derived, Base, Problem, 
 
     bool IsDynamic() const override
     {
-        // Transposed solvers ALWAYS require workspace for transpose buffers,
-        // so they can ONLY work in Find mode (not immediate mode with workspace=0).
+        // Default for transposing solvers: not dynamic. A derived solver whose inner solver is
+        // dynamic overrides this (see ConvWinogradNHWCTransposingBase).
         return false;
     }
 

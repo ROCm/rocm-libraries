@@ -47,11 +47,8 @@ TEST_P(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
 // Every convolution solver in the Id registry (solver.cpp) must also appear in
 // one of the Find solver lists in mlo_dir_conv.cpp. A solver that is registered
 // but absent from every list is dead code: Find never enumerates it, so it never
-// gets a workspace size and can never be selected. Transposing solvers report
-// IsDynamic() == false, which excludes them from immediate mode as well, so for
-// those the Find lists are the only path in and the solver is unreachable
-// outright. This test fails on that drift instead of letting a solver ship
-// silently disabled.
+// gets a workspace size and can never be selected. This test fails on that drift
+// instead of letting a solver ship silently disabled.
 TEST_P(CPU_SolverFindListRegistry_NONE, AllRegisteredConvSolversAreFindReachable)
 {
     const auto db_ids = GetAllFindSolverDbIds();
