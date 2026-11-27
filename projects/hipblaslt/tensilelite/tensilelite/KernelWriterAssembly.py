@@ -108,7 +108,7 @@ from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgp
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from .Common.DebugInstrMask import applyDebugDisableInstrMask
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from .ir import logical_region, maybe_logical_leaf
+from .ir import logical_region, maybe_logical_leaf, sched_rocisa_view
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
@@ -22486,19 +22486,28 @@ class KernelWriterAssembly(KernelWriter):
         else:
           assert 0, "%s\nchooseGlobalRead: bad bpl %u"%(self.states.kernelName,bpl)
 
-      # buffer_load offset field is 12-bit.
-      # if offset >= 4096, use soffset instead
-      if offset >= 4096:
-        if soffset in (0, "0"):
-          mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
-          with self.allocTmpSgpr(1, tag="chooseGlobalRead_tmpSgprInfo") as tmpSgprInfo:
-            soffset = sgpr(tmpSgprInfo.idx)
-            rv.add(SMovB32(dst=soffset, src=offset, comment="large offset"))
-            bufferLoadImpl(soffset)
+      # logical-IR migration (Phase 3, [C3] non-TDM buffer-load): flip the MUBUF
+      # buffer_load emission to eager logical leaves on the logical ISA (gfx1250 +
+      # TENSILELITE_LOGICALIR_TRIAL); everywhere else it stays byte-identical rocisa.
+      # These loads carry no post-construction memToken (vmcnt-tracked into VGPR/LDS),
+      # so an eager leaf built here needs no resolve-then-flip. Subtile keeps pure
+      # rocisa because its scheduler still introspects rocisa load types.
+      _bufRegion = (contextlib.nullcontext() if self.states.kernel["UseSubtileImpl"]
+                    else logical_region("globalReadBuffer"))
+      with _bufRegion:
+        # buffer_load offset field is 12-bit.
+        # if offset >= 4096, use soffset instead
+        if offset >= 4096:
+          if soffset in (0, "0"):
+            mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+            with self.allocTmpSgpr(1, tag="chooseGlobalRead_tmpSgprInfo") as tmpSgprInfo:
+              soffset = sgpr(tmpSgprInfo.idx)
+              rv.add(SMovB32(dst=soffset, src=offset, comment="large offset"))
+              bufferLoadImpl(soffset)
+          else:
+            assert 0, "offset too large and soffset set"
         else:
-          assert 0, "offset too large and soffset set"
-      else:
-        bufferLoadImpl(soffset)
+          bufferLoadImpl(soffset)
 
       return rv
     elif tr:
@@ -23321,10 +23330,14 @@ class KernelWriterAssembly(KernelWriter):
     if scaleBDataType:
       scaleBShiftOffset = self.getGlobalShiftOffset(kernel, scaleBDataType, gwvw)
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleB", scaleBOffsetVgpr, scaleBShiftOffset, scaleBDataType, scaleBBpe, gwvw, tmpVgpr1Res, scaleBDstVgpr, 1))
-    # Count global loads (covers both buffer loads and flat loads)
+    # Count global loads (covers both buffer loads and flat loads). On gfx1250 the
+    # buffer_load may be an eager logical leaf (chooseGlobalRead's globalReadBuffer
+    # region), which is not a GlobalReadInstruction; sched_rocisa_view unwraps the
+    # leaf to its transitional rocisa clone so the count is byte-identical to the
+    # pure-rocisa pass that drives the SWaitCnt(vlcnt=0) drain below.
     vlcnt = 0
     for item in globalLoadsModule.items():
-      if isinstance(item, GlobalReadInstruction):
+      if isinstance(sched_rocisa_view(item), GlobalReadInstruction):
         vlcnt = vlcnt + 1
     module.add(globalLoadsModule)
     assert vlcnt > 0

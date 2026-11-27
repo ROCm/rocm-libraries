@@ -502,6 +502,21 @@ def maybe_logical_leaf(inst):
 # P3-8 put in place for acc->arch. No post-construction memToken on the main store
 # path (unlike ds_load), so eager flip is safe. The flat-store (GlobalStore*) path
 # (BufferStore=0) and the subtile paired-store emitters stay rocisa for now.
+#
+# The globalReadBuffer region (chooseGlobalRead, buffer branch, subtile-guarded) is
+# the [C3] non-TDM buffer-load path: the main-loop global read (globalReadDo /
+# globalReadGuardK -> chooseGlobalRead) plus setupNewTile / tail / epilogue C/beta
+# loads emit the MUBUF buffer_load opcodes below. They are MUBUFReadInstruction
+# subclasses; rocisa GlobalReadInstruction overrides *only* schedCategory() ->
+# GlobalRead (schedExactKind/schedWeight use the Instruction base, same as any
+# Other inst), so schedCategoryForOpcode gets explicit BufferLoad* -> GlobalRead
+# cases (required or the makeLogicalLeaf oracle trips and countGlobalRead
+# miscounts), while the exactKind/weight tables need no entry. The converter's
+# prefetch auto-detection (itemContainsPrefetchLoad / containsPrefetchLoad) is
+# extended to recognize a buffer-load leaf by its IF_MUBUFLoad flag so the
+# loopWithPrefetch grouping is unchanged. These loads carry no post-construction
+# memToken (vmcnt into VGPR/LDS), so eager flip is safe. The flat (GlobalLoad*) and
+# transpose (GlobalLoadTR*) read paths stay rocisa for now.
 _MIGRATED = {
     "SMovB32", "SMovB64", "SLShiftRightB32", "SLShiftLeftB32",
     "SMulI32", "SAddU32", "SAddCU32", "SSubI32", "SSubU32",
@@ -511,6 +526,8 @@ _MIGRATED = {
     "SAddU64",
     "BufferStoreB8", "BufferStoreB16", "BufferStoreB32",
     "BufferStoreB64", "BufferStoreB128", "BufferStoreD16HIB16",
+    "BufferLoadB32", "BufferLoadB64", "BufferLoadB96", "BufferLoadB128",
+    "BufferLoadD16U8", "BufferLoadD16HIU8", "BufferLoadD16B16", "BufferLoadD16HIB16",
 }
 _MIGRATE_ALL = False
 

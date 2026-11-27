@@ -159,6 +159,22 @@ static SchedCategory schedCategoryForOpcode(stinkytofu::logical::Opcode op) {
         case Logical::MXMFMA:
         case Logical::SMFMA:
             return SchedCategory::MFMA;
+        // --- global-read region ([C3] non-TDM buffer-load): every MUBUF
+        //     buffer_load -> GlobalRead, matching rocisa
+        //     GlobalReadInstruction::schedCategory() which MUBUFReadInstruction
+        //     inherits. (SMemLoad / flat GlobalLoad* are also GlobalRead in rocisa
+        //     but are not flipped to leaves yet, so they need no case here.)
+        //     GlobalReadInstruction overrides only schedCategory; schedExactKind/
+        //     schedWeight use the Instruction base, so no entry in those tables. ---
+        case Logical::BufferLoadB32:
+        case Logical::BufferLoadB64:
+        case Logical::BufferLoadB96:
+        case Logical::BufferLoadB128:
+        case Logical::BufferLoadD16U8:
+        case Logical::BufferLoadD16HIU8:
+        case Logical::BufferLoadD16B16:
+        case Logical::BufferLoadD16HIB16:
+            return SchedCategory::GlobalRead;
         default:
             // rocisa Instruction::schedCategory() base answer. GlobalRead
             // opcodes get explicit cases as their regions flip.
@@ -1564,13 +1580,24 @@ bool itemContainsPrefetchLoad(const rocisa::Item* item) {
     // loopWithPrefetch group boundary that drives software-pipeline/prefetch
     // placement; missing the leaf shifts that boundary and diverges the asm.
     // Recognize the leaf by its logical opcode, mirroring the Python seam's
-    // sched_is_tensor_load_to_lds. Extend this opcode set as the other prefetch
-    // loads (MUBUF / GLOBAL / FLAT reads) are flipped to leaves. Using the exact
-    // load opcodes (not schedCategory()==GlobalRead) avoids over-matching
-    // SMemLoad, which is GlobalRead but is not a prefetch load.
+    // sched_is_tensor_load_to_lds. The gfx1250 TDM load is TensorLoadToLds; the
+    // [C3] non-TDM path flips the MUBUF buffer_load opcodes below (kept in sync with
+    // schedCategoryForOpcode's BufferLoad* -> GlobalRead cases and ir._MIGRATED).
+    // NOTE: opcode, not is(InstFlag::IF_MUBUFLoad): createLogicalFromRocisa builds a
+    // leaf's logical node via createIR<LogicalInstruction>(opcode), which does NOT
+    // apply the tablegen per-opcode flag factory, so flags_ is empty on a converted
+    // leaf and is(IF_MUBUFLoad) would always be false. getOpcode() is reliable (it is
+    // what schedCategoryForOpcode / the makeLogicalLeaf oracle use). Extend further as
+    // GLOBAL / FLAT reads are flipped to leaves.
     if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
         namespace Logical = stinkytofu::logical;
-        return leaf->logical() && leaf->logical()->getOpcode() == Logical::TensorLoadToLds;
+        if (!leaf->logical()) return false;
+        const auto op = leaf->logical()->getOpcode();
+        return op == Logical::TensorLoadToLds || op == Logical::BufferLoadB32 ||
+               op == Logical::BufferLoadB64 || op == Logical::BufferLoadB96 ||
+               op == Logical::BufferLoadB128 || op == Logical::BufferLoadD16U8 ||
+               op == Logical::BufferLoadD16HIU8 || op == Logical::BufferLoadD16B16 ||
+               op == Logical::BufferLoadD16HIB16;
     }
     if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
         for (const auto& child : mod->itemList) {
@@ -2050,9 +2077,19 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         // logical-IR migration: a prefetch load emitted as a LogicalLeaf is not a
         // rocisa Instruction; recognize it by logical opcode so the auto-detected
         // loopWithPrefetch region is unchanged. Mirror of itemContainsPrefetchLoad
-        // in the sibling lowerer -- keep both opcode sets in sync.
-        if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item))
-            return leaf->logical() && leaf->logical()->getOpcode() == logical::TensorLoadToLds;
+        // in the sibling lowerer -- keep both opcode sets in sync (TDM
+        // TensorLoadToLds + [C3] non-TDM MUBUF buffer_load). Opcode, not
+        // is(IF_MUBUFLoad): a converted leaf's logical flags_ is empty (see the
+        // sibling for the full rationale), so the flag check would never match.
+        if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
+            if (!leaf->logical()) return false;
+            const auto op = leaf->logical()->getOpcode();
+            return op == logical::TensorLoadToLds || op == logical::BufferLoadB32 ||
+                   op == logical::BufferLoadB64 || op == logical::BufferLoadB96 ||
+                   op == logical::BufferLoadB128 || op == logical::BufferLoadD16U8 ||
+                   op == logical::BufferLoadD16HIU8 || op == logical::BufferLoadD16B16 ||
+                   op == logical::BufferLoadD16HIB16;
+        }
         if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
             for (const auto& child : mod->itemList)
                 if (containsPrefetchLoad(child.get())) return true;
