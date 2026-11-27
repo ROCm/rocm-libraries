@@ -46,12 +46,10 @@ rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle         
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     //
     // A points now to the local A_csr.
     //
     A = &A_csr;
-#endif
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
         handle,
         nrhs,
@@ -61,11 +59,7 @@ rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle         
 
         op_B,
         alpha,
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
         A,
-#else
-        &A_csr,
-#endif
         X,
         p_buffer_size_in_bytes,
         p_error));
@@ -92,12 +86,10 @@ rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle            
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     //
     // A points now to the local A_csr.
     //
     A = &A_csr;
-#endif
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(handle,
                                                                  nrhs,
@@ -108,11 +100,7 @@ rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle            
 
                                                                  op_B,
                                                                  alpha,
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
                                                                  A,
-#else
-                                                                 &A_csr,
-#endif
                                                                  X,
                                                                  p_buffer_size_in_bytes,
                                                                  p_error));

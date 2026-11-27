@@ -230,20 +230,17 @@ list(APPEND ROCSPARSE_TEST_SOURCES
   test_spsv_ell.cpp
   test_sptrsv_ell.cpp)
 
-if(BUILD_WITH_TRSM_REFACTORING)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_copy_data.cpp)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_dnmat_transpose.cpp)
-  list(APPEND ROCSPARSE_TEST_SOURCES test_sptrsm.cpp)
-endif()
+list(APPEND ROCSPARSE_TEST_SOURCES
+  test_dnmat_copy_data.cpp
+  test_dnmat_transpose.cpp
+  test_sptrsm.cpp)
 
 list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 
-if(BUILD_WITH_SPSORT)
-  list(APPEND ROCSPARSE_TEST_SOURCES
-    test_spsort_coo.cpp
-    test_spsort_csr.cpp
-    test_spsort_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_TEST_SOURCES
+  test_spsort_coo.cpp
+  test_spsort_csr.cpp
+  test_spsort_csc.cpp)
 
 list(APPEND ROCSPARSE_TEST_SOURCES
   test_sddmm_batched_ell.cpp
@@ -409,11 +406,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 rocsparse_test_listeners.cpp
   )
 
-if(BUILD_WITH_TRSM_REFACTORING)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_dnmat_copy_data.cpp)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_dnmat_transpose.cpp)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_sptrsm.cpp)
-endif()
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+  ../testings/testing_dnmat_copy_data.cpp
+  ../testings/testing_dnmat_transpose.cpp
+  ../testings/testing_sptrsm.cpp)
 
 list(APPEND ROCSPARSE_CLIENTS_TESTINGS
   ../testings/testing_spsv_ell.cpp
@@ -421,12 +417,10 @@ list(APPEND ROCSPARSE_CLIENTS_TESTINGS
 
 list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
 
-if(BUILD_WITH_SPSORT)
-  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
-    ../testings/testing_spsort_coo.cpp
-    ../testings/testing_spsort_csr.cpp
-    ../testings/testing_spsort_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+  ../testings/testing_spsort_coo.cpp
+  ../testings/testing_spsort_csr.cpp
+  ../testings/testing_spsort_csc.cpp)
 
 list(APPEND ROCSPARSE_CLIENTS_TESTINGS
   ../testings/testing_sddmm_batched_ell.cpp
