@@ -555,12 +555,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
             __syncthreads();
         }
 
-        // tol should be  8 * eps * (max diagonal or z element participating in merge)
+        // tol should be  8 * eps * (max diagonal or off diagonal element)
         maxd = lmaxd[0];
         maxz = lmaxz[0];
 
-        S tolD = 8 * eps * std::max(maxd, maxz);
-        S tolZ = 8 * eps * std::max(maxd, maxz);
+        S tolD = 8 * eps * std::max(maxd, std::abs(p));
+        S tolZ = 8 * eps * std::max(maxd, std::abs(p));
         // store tolerances in global memory
         for(I i = hipThreadIdx_x; i < sz; i += hipBlockDim_x)
         {
