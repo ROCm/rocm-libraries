@@ -825,6 +825,28 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, DivideMixedTypeFloatInputHalfDivis
     PointwiseTestHelper::runBinaryTest<float, half>(params);
 }
 
+// The matmul + bias shape of a half-precision fused graph: FLOAT matmul output, narrow bias,
+// narrow final output.
+TEST(TestPointwiseOperationsCpuGraphExecutor, AddMixedTypeFloatInputHalfBiasHalfOutput)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ADD;
+    params.in0TensorValue = 1.5f;
+    params.in1TensorValue = 0.25f;
+
+    PointwiseTestHelper::runBinaryTest<float, half, half>(params);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, AddMixedTypeFloatInputBfloat16BiasBfloat16Output)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ADD;
+    params.in0TensorValue = 1.5f;
+    params.in1TensorValue = 0.25f;
+
+    PointwiseTestHelper::runBinaryTest<float, bfloat16, bfloat16>(params);
+}
+
 TEST(TestPointwiseOperationsCpuGraphExecutor, SoftplusBackwardMixedTypeFloatDyHalfX)
 {
     PointwiseTestParams params;
