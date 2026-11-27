@@ -6,6 +6,8 @@
 // and the reloaded library must hold the same solutions and tree and select
 // the same solutions.
 
+#include "DeviceTestUtils.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -649,6 +651,17 @@ TEST(MessagePackWritingTest, FixtureRoundTripIsStable)
     auto row = outline(reloaded->library);
     EXPECT_NE(row.find("Problem[EqualityMatching"), std::string::npos) << row;
     EXPECT_NE(row.find("Equality)["), std::string::npos) << row;
+}
+
+TEST(MessagePackWritingTest, FixtureRoundTripSelectsTheSameSolutions)
+{
+    // Selection evaluates WorkgroupMappingXCCCheck, which queries the current device.
+    SKIP_IF_NO_DEVICE();
+    auto lib = loadKernelsLite();
+    if(lib == nullptr)
+        return; // loadKernelsLite() has recorded the failure
+    auto reloaded = roundTrip(*lib);
+    ASSERT_NE(reloaded, nullptr);
 
     auto hardware = mi300();
     int  selected = 0;

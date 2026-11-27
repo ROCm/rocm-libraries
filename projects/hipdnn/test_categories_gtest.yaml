@@ -27,6 +27,10 @@ test_categories:
       # measured span. FFM does not honour the stall gate: stalled timing reported
       # 100-112 ms against an expected < 5 ms.
       - "TestGpuProfilingControlDescriptor.StallGateExcludesHostSubmissionDelay"
+      # Runs autotune in a child process that waits out the 2 s stall watchdog.
+      # On FFM it does not finish within the ffm-quick lane's time limit
+      # (ROCM-33200).
+      - "IntegrationAutotuneStallRecovery.RunUntilStableDiscardsMixedTimingSweep"
     labels:
       - "ffm-quick"
       - "ffm-full"

@@ -5,6 +5,7 @@
 
 #include "DeviceContext.hpp"
 #include "TimingEvents.hpp"
+#include "DeviceTestUtils.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -17,14 +18,6 @@ using TensileLite::Client::TimingEvents;
 
 namespace
 {
-    int deviceCount()
-    {
-        int n = 0;
-        if(hipGetDeviceCount(&n) != hipSuccess)
-            return 0;
-        return n;
-    }
-
     int currentDevice()
     {
         int d = -1;
@@ -35,8 +28,7 @@ namespace
 
 TEST(ScopedDevice, SwitchesAndRestores)
 {
-    if(deviceCount() < 2)
-        GTEST_SKIP() << "needs two devices";
+    SKIP_IF_FEWER_DEVICES(2);
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
     {
         ScopedDevice guard(1);
@@ -47,8 +39,7 @@ TEST(ScopedDevice, SwitchesAndRestores)
 
 TEST(DeviceContext, StreamLivesOnItsDevice)
 {
-    if(deviceCount() < 2)
-        GTEST_SKIP() << "needs two devices";
+    SKIP_IF_FEWER_DEVICES(2);
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
     DeviceContext ctx(1, false);
     EXPECT_EQ(currentDevice(), 0);
@@ -61,8 +52,7 @@ TEST(DeviceContext, StreamLivesOnItsDevice)
 
 TEST(DeviceContext, DefaultStreamIsNull)
 {
-    if(deviceCount() < 1)
-        GTEST_SKIP() << "needs a device";
+    SKIP_IF_NO_DEVICE();
     DeviceContext ctx(0, true);
     EXPECT_EQ(ctx.stream, nullptr);
 }
@@ -76,8 +66,7 @@ TEST(TimingEvents, CountsInvocationsWithoutCards)
 
 TEST(TimingEvents, CreatesEachCardsEventsOnItsDevice)
 {
-    if(deviceCount() < 2)
-        GTEST_SKIP() << "needs two devices";
+    SKIP_IF_FEWER_DEVICES(2);
     std::vector<std::shared_ptr<DeviceContext>> devices{std::make_shared<DeviceContext>(0, false),
                                                         std::make_shared<DeviceContext>(1, false)};
     TimingEvents                                events(devices, 3, 2);

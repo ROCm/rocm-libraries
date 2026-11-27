@@ -25,6 +25,7 @@
 #include "FallbackTestUtils.hpp"
 #include "LogReporter.hpp"
 #include "SolutionIterator.hpp"
+#include "DeviceTestUtils.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::testing;
@@ -801,9 +802,7 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
 
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
 
     auto hardware = hip::GetCurrentDevice();
     ASSERT_NE(hardware, nullptr);

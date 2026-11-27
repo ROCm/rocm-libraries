@@ -10,6 +10,7 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
 #include <unordered_map>
@@ -75,6 +76,9 @@ public:
 
     size_t getWorkspaceSize(const Handle& handle) const override;
 
+    // Every kernel launch of the plan for the given number of dx elements.
+    static std::vector<KernelLaunchShape> launchShapes(int64_t numElements);
+
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
     void execute(const Handle& handle,
@@ -83,6 +87,8 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    static constexpr int64_t BLOCK_SIZE = 256;
+
     ResampleBwdParams _params;
 
     // Populated by compile()

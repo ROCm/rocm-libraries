@@ -48,10 +48,22 @@
           "reg13d_b1h1k1v1_65x65_d128_bfp16_tlw64_tolp",
           "reg13e_b1h1k1v1_65x65_d128_bfp16_tlw65_tolp",
           "reg18c_b1h1k1v1_1024x1_d128_bfp16_none_tolk1",
-          "s17q_b2h3k3v3_40x72_d192_bfp16_none_told",
           "s29q_b2h3k3v3_40x72_d128_fp16_tlw9r8_tolp",
           "s40q_b2h3k3v3_40x72_d128_bfp16_none_bshd_told",
           "s42q_b2h3k3v3_40x72_d128_bfp16_none_gradsbshd_told"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "s17q_b2h3k3v3_40x72_d192_bfp16_none_told"
         ],
         "support": {
           "gfx942": [
@@ -183,6 +195,10 @@
         "support": {
           "gfx1100": [
             "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
           ],
           "gfx90a": [
             "linux"

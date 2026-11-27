@@ -223,6 +223,54 @@ inline std::vector<T>
     return data;
 }
 
+template<typename T>
+std::vector<T>
+    generate_histogram_input(size_t items, int entropy_reduction, int lower_level, int upper_level)
+{
+    if(entropy_reduction >= 5)
+    {
+        return std::vector<T>(items, static_cast<T>((lower_level + upper_level) / 2));
+    }
+
+    const size_t max_random_size = 1024 * 1024 + 4321;
+
+    const unsigned int seed = 123;
+    engine_type        gen(seed);
+    std::vector<T>     data(items);
+    std::generate(data.begin(),
+                  data.begin() + std::min(items, max_random_size),
+                  [&]()
+                  {
+                      // Reduce enthropy by applying bitwise AND to random bits
+                      // "An Improved Supercomputer Sorting Benchmark", 1992
+                      // Kurt Thearling & Stephen Smith
+                      auto v = gen();
+                      for(int e = 0; e < entropy_reduction; ++e)
+                      {
+                          v &= gen();
+                      }
+                      return T(lower_level + v % (upper_level - lower_level));
+                  });
+    for(size_t i = max_random_size; i < items; i += max_random_size)
+    {
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
+    }
+    return data;
+}
+
+inline int get_entropy_percents(int entropy_reduction)
+{
+    switch(entropy_reduction)
+    {
+        case 0: return 100;
+        case 1: return 81;
+        case 2: return 54;
+        case 3: return 33;
+        case 4: return 20;
+        default: return 0;
+    }
+}
+
 template<typename T, typename U>
 struct is_comparable
 {

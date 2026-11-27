@@ -38,6 +38,7 @@
 
 #include <sstream>
 #include <string>
+#include "DeviceTestUtils.hpp"
 
 TEST(Predicates, ArithmeticIntensity)
 {
@@ -98,9 +99,7 @@ TEST(Predicates, WorkgroupMappingXCCCheck_DeviceQueryIsEvaluationOnly)
     // value[0] == -1 skips the check, so evaluation does not need a device either.
     EXPECT_TRUE(skipped(problem));
 
-    int        deviceCount = 0;
-    hipError_t deviceErr   = hipGetDeviceCount(&deviceCount);
-    if(deviceErr != hipSuccess || deviceCount == 0)
+    if(TensileLite::TestUtils::deviceCountOrFail() == 0)
     {
         EXPECT_THROW(checked(problem), std::runtime_error);
         return;
