@@ -79,14 +79,14 @@
  * hipkernel:RmsNormBwd, hipkernel:BatchnormInference (two packs, by the form of the node),
  * hipkernel:BatchnormTraining and hipkernel:BatchnormBackward. A fused graph is served by the
  * engine of the operation it is built around. Each family accepts exactly the graphs the
- * hand-written engine's plan builder accepts, through that builder's own validator, and
- * compiles the same embedded source with the same compile options and launches
- * (buildResampleFwdKernel(), buildLayernormBwdKernel(), buildRMSnormFwdKernel() and friends),
- * so the two serve a graph with one program. RMSnorm and batchnorm also serve the hand-written
- * builders' fused graphs: an activation after the forward (two nodes), and before the backward
- * (RMSnorm: two nodes; batchnorm: three, from the inference that produced the activation's
- * input). The hand-written engine's engine-level checks (ragged and misaligned tensors) run
- * first, here as there.
+ * hand-written engine's plan builder accepts, through that builder's own validator and launch
+ * thread-limit check, and compiles the same embedded source with the same compile options and
+ * launches (buildResampleFwdKernel(), buildLayernormBwdKernel(), buildRMSnormFwdKernel() and
+ * friends), so the two serve a graph with one program. RMSnorm and batchnorm also serve the
+ * hand-written builders' fused graphs: an activation after the forward (two nodes), and before
+ * the backward (RMSnorm: two nodes; batchnorm: three, from the inference that produced the
+ * activation's input). The hand-written engine's engine-level checks (ragged and misaligned
+ * tensors) run first, here as there.
  *
  * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
  * performance configuration their build takes (`variant`, `block_size`, `vector_size`),
@@ -163,6 +163,7 @@ std::optional<std::string_view> fusedFamilyOf(const MatchContext& context)
         rmsnorm::checkFwdActivationTensors(rmsnorm, activation, tensorMap);
         rmsnorm::RMSnormValidator(tensorMap).checkFwdActivationTensorConfigSupported(rmsnorm,
                                                                                      activation);
+        rmsnorm::checkLaunchShapesFitThreadLimit(rmsnorm, tensorMap);
         return RMSNORM_FWD;
     }
     if(first.attributesType() == data_objects::NodeAttributes::PointwiseAttributes
@@ -173,6 +174,7 @@ std::optional<std::string_view> fusedFamilyOf(const MatchContext& context)
         rmsnorm::checkBwdActivationTensors(activation, rmsnorm, tensorMap);
         rmsnorm::RMSnormValidator(tensorMap).checkBwdActivationTensorConfigSupported(activation,
                                                                                      rmsnorm);
+        rmsnorm::checkLaunchShapesFitThreadLimit(rmsnorm, tensorMap);
         return RMSNORM_BWD;
     }
     if(first.attributesType() == data_objects::NodeAttributes::BatchnormInferenceAttributes
@@ -250,9 +252,10 @@ void checkTrainingGraph(const MatchContext& context)
 
 /// The operation of the family that serves @p context's graph, or nullopt. Mirrors the
 /// hand-written plan builders' isApplicable(): fp32 compute throughout, one node of the
-/// family's attributes (or a fused graph of two or three), and the family's validator.
-/// Families are disjoint by their first node's type. @p engine names the engine asking, for
-/// the log.
+/// family's attributes (or a fused graph of two or three), the family's validator, and for
+/// Resample, Layernorm and RMSnorm the launch check that declines a grid of 2^32 threads or
+/// more. Families are disjoint by their first node's type. @p engine names the engine asking,
+/// for the log.
 std::optional<std::string_view> familyOf(const MatchContext& context, std::string_view engine)
 {
     const auto nodeCount = context.graph.nodeCount();
@@ -283,29 +286,47 @@ std::optional<std::string_view> familyOf(const MatchContext& context, std::strin
         switch(node.attributesType())
         {
         case data_objects::NodeAttributes::ResampleFwdAttributes:
-            resample::ResampleValidator(tensorMap).checkTensorConfigSupported(
-                node.attributesAs<data_objects::ResampleFwdAttributes>());
+        {
+            const auto& attributes = node.attributesAs<data_objects::ResampleFwdAttributes>();
+            resample::ResampleValidator(tensorMap).checkTensorConfigSupported(attributes);
+            resample::checkLaunchShapesFitThreadLimit(attributes, tensorMap);
             return RESAMPLE_FWD;
+        }
         case data_objects::NodeAttributes::ResampleBwdAttributes:
-            resample::ResampleValidator(tensorMap).checkBwdTensorConfigSupported(
-                node.attributesAs<data_objects::ResampleBwdAttributes>());
+        {
+            const auto& attributes = node.attributesAs<data_objects::ResampleBwdAttributes>();
+            resample::ResampleValidator(tensorMap).checkBwdTensorConfigSupported(attributes);
+            resample::checkLaunchShapesFitThreadLimit(attributes, tensorMap);
             return RESAMPLE_BWD;
+        }
         case data_objects::NodeAttributes::LayernormAttributes:
-            layernorm::LayernormValidator(tensorMap).checkTensorConfigSupported(
-                node.attributesAs<data_objects::LayernormAttributes>());
+        {
+            const auto& attributes = node.attributesAs<data_objects::LayernormAttributes>();
+            layernorm::LayernormValidator(tensorMap).checkTensorConfigSupported(attributes);
+            layernorm::checkLaunchShapesFitThreadLimit(attributes, tensorMap);
             return LAYERNORM_FWD;
+        }
         case data_objects::NodeAttributes::LayernormBackwardAttributes:
-            layernorm::LayernormValidator(tensorMap).checkTensorConfigSupported(
-                node.attributesAs<data_objects::LayernormBackwardAttributes>());
+        {
+            const auto& attributes = node.attributesAs<data_objects::LayernormBackwardAttributes>();
+            layernorm::LayernormValidator(tensorMap).checkTensorConfigSupported(attributes);
+            layernorm::checkLaunchShapesFitThreadLimit(attributes, tensorMap);
             return LAYERNORM_BWD;
+        }
         case data_objects::NodeAttributes::RMSNormAttributes:
-            rmsnorm::RMSnormValidator(tensorMap).checkFwdTensorConfigSupported(
-                node.attributesAs<data_objects::RMSNormAttributes>());
+        {
+            const auto& attributes = node.attributesAs<data_objects::RMSNormAttributes>();
+            rmsnorm::RMSnormValidator(tensorMap).checkFwdTensorConfigSupported(attributes);
+            rmsnorm::checkLaunchShapesFitThreadLimit(attributes, tensorMap);
             return RMSNORM_FWD;
+        }
         case data_objects::NodeAttributes::RMSNormBackwardAttributes:
-            rmsnorm::RMSnormValidator(tensorMap).checkBwdTensorConfigSupported(
-                node.attributesAs<data_objects::RMSNormBackwardAttributes>());
+        {
+            const auto& attributes = node.attributesAs<data_objects::RMSNormBackwardAttributes>();
+            rmsnorm::RMSnormValidator(tensorMap).checkBwdTensorConfigSupported(attributes);
+            rmsnorm::checkLaunchShapesFitThreadLimit(attributes, tensorMap);
             return RMSNORM_BWD;
+        }
         case data_objects::NodeAttributes::BatchnormInferenceAttributes:
             batchnorm::checkOneNodeOperandsNotVirtual(context.graph.getNode(0), tensorMap);
             BatchnormValidator(tensorMap).checkInferenceTensorConfigSupported(
@@ -767,8 +788,10 @@ layernorm::LayernormBwdConfig layernormBwdConfigOf(const KernelDefinition& kerne
 constexpr std::array<layernorm::LayernormBwdConfig, 2> LAYERNORM_BWD_CONFIG_ORDER
     = {{{false}, {true}}};
 
-/// Kernel-scoped, layernorm backward: the operation, and a reduction that can run the graph
-/// (isBwdConfigApplicable(), which accepts both).
+/// Kernel-scoped, layernorm backward: the operation, and a reduction whose launches fit on
+/// this device (isBwdConfigApplicable()). familyOf() has checked the main kernel and the
+/// one-pass reduction, as the hand-written builder does; the parallel reduction's grid grows
+/// with the CU count, so it is checked here, for the device and the kernel's reduction.
 bool layernormBwdKernelMatches(const MatchContext& context,
                                const BoundTokens& bound,
                                const KernelDefinition& kernel)
@@ -779,12 +802,9 @@ bool layernormBwdKernelMatches(const MatchContext& context,
     }
     try
     {
-        const auto params = layernormBwdParams(context);
-        const auto statistics
-            = params.mean() == nullptr ? std::nullopt : std::make_optional(params.mean());
-        const layernorm::ProblemDescription problem(
-            params.x(), params.scale(), statistics, layernorm::Direction::BACKWARD);
-        return layernorm::isBwdConfigApplicable(problem, layernormBwdConfigOf(kernel));
+        return layernorm::isBwdConfigApplicable(layernormBwdParams(context),
+                                                context.deviceProperties.multiProcessorCount,
+                                                layernormBwdConfigOf(kernel));
     }
     catch(const std::exception& error)
     {

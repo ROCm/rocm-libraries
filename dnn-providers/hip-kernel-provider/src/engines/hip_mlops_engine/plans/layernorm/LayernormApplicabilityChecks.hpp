@@ -80,14 +80,40 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr);
 };
 
-// Whether the backward launches can run problem with config: both scale/bias reductions
-// handle any shape (at a parallel size of 1 one thread reduces each column over every row),
-// so every config applies.
-inline bool isBwdConfigApplicable([[maybe_unused]] const ProblemDescription& problem,
-                                  [[maybe_unused]] const LayernormBwdConfig& config)
-{
-    return true;
-}
+class LayernormBwdParams;
+
+// The launch of the Layernorm forward plan for lnAttr, outerSize * stride workgroups, is not
+// empty and stays below the 2^32 threads HIP accepts. The HIP MLOps engine's builder and the
+// kernel ingestor's hipkernel:LayernormFwd both decline a graph that fails it, so neither
+// accepts a graph its build then rejects.
+//
+// Throws HipdnnPluginException with BAD_PARAM naming the launch that does not fit.
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& lnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+// The backward's graph-wide launch check, as for the forward (hipkernel:LayernormBwd): the main
+// kernel, which every config launches alike, and the one-pass scale/bias reduction. The
+// parallel reduction needs innerSize <= 4 * localSize * multiProcessorCount and sizes its grid
+// to that bound, so on any real device its launches stay far below 2^32 threads; its grid
+// depends on the device, so isBwdConfigApplicable() checks it per config.
+//
+// Throws HipdnnPluginException with BAD_PARAM naming the launch that does not fit.
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+// Whether the backward launches of config can run params on a device with
+// multiProcessorCount CUs: both scale/bias reductions handle any shape (at a parallel size of
+// 1 one thread reduces each column over every row), so a config applies when each of its
+// launches (layernormBwdLaunchShapes()) stays below the 2^32 threads HIP accepts.
+bool isBwdConfigApplicable(const LayernormBwdParams& params,
+                           int multiProcessorCount,
+                           const LayernormBwdConfig& config);
 
 // Layernorm Type Configuration ---
 

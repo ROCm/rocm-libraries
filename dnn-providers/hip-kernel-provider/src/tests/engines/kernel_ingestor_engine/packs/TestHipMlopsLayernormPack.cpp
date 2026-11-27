@@ -18,6 +18,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "tests/engines/kernel_ingestor_engine/packs/HipMlopsTestSupport.hpp"
@@ -26,14 +27,15 @@
  * @file TestHipMlopsLayernormPack.cpp
  * @brief The HIP MLOps Layernorm engines on the kernel ingestor (ALMIOPEN-3071):
  *        hipkernel:LayernormFwd and hipkernel:LayernormBwd each accept what the hand-written
- *        builder accepts in their direction, and compute forward and backward layernorm as CPU
- *        references do -- the backward on both of its launch sequences, with the graph's
- *        epsilon and with the default.
+ *        builder accepts in their direction (up to the same launch thread limit), and compute
+ *        forward and backward layernorm as CPU references do -- the backward on both of its
+ *        launch sequences, with the graph's epsilon and with the default.
  *
  *        hipkernel:LayernormBwd ships a kernel per scale/bias reduction (ALMIOPEN-3066),
- *        addressed by the knob `parallel`: the launch heuristics' reduction ranks first, the
- *        workspace follows the reduction selected, and each, pinned through the knob, computes
- *        as the reference does.
+ *        addressed by the knob `parallel`: the launch heuristics' reduction ranks first, a
+ *        reduction whose launches do not fit the device is not admitted, the workspace follows
+ *        the reduction selected, and each, pinned through the knob, computes as the reference
+ *        does.
  */
 namespace
 {
@@ -301,6 +303,30 @@ INSTANTIATE_TEST_SUITE_P(
                                   })}),
     [](const ::testing::TestParamInfo<RefusalCase>& info) { return info.param.name; });
 
+// The hand-written builder's boundary, on its graphs (TestLayernormPlanBuilder): both
+// directions launch outerSize * stride blocks of 1024 threads, so 2^22 - 1 rows fit and 2^22
+// rows reach 2^32 threads.
+TEST(TestHipMlopsLayernormGraphMatch, ServesRowCountsBelowTheThreadLimit)
+{
+    EXPECT_THAT(acceptingEngines(hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+                    {4, 1, 1, 1}, {4194303, 4, 1, 1})),
+                ::testing::ElementsAre(LAYERNORM_FWD_ENGINE.name));
+    EXPECT_THAT(acceptingEngines(hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+                    {4, 1, 1, 1}, {4194303, 4, 1, 1})),
+                ::testing::ElementsAre(LAYERNORM_BWD_ENGINE.name));
+}
+
+// Declined by the graph match, as by the hand-written builder, rather than failing at prepare.
+TEST(TestHipMlopsLayernormGraphMatch, DeclinesRowCountsAtTheThreadLimit)
+{
+    EXPECT_THAT(acceptingEngines(hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+                    {4, 1, 1, 1}, {4194304, 4, 1, 1})),
+                ::testing::IsEmpty());
+    EXPECT_THAT(acceptingEngines(hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+                    {4, 1, 1, 1}, {4194304, 4, 1, 1})),
+                ::testing::IsEmpty());
+}
+
 // ---------------------------------------------------------------------------
 // Knob: one backward kernel per scale/bias reduction
 // ---------------------------------------------------------------------------
@@ -344,8 +370,8 @@ class TestHipMlopsLayernormBwdDefault : public ::testing::TestWithParam<Reductio
 {
 };
 
-// Both reductions run any graph, so the knob always offers both; the launch heuristics'
-// choice (defaultLayernormBwdConfig()) ranks first.
+// Both reductions run any graph, so on these devices the knob offers both; the launch
+// heuristics' choice (defaultLayernormBwdConfig()) ranks first.
 TEST_P(TestHipMlopsLayernormBwdDefault, TheHeuristicsReductionRanksFirst)
 {
     for(const bool withStatistics : {true, false})
@@ -374,6 +400,30 @@ INSTANTIATE_TEST_SUITE_P(
         // A row of 20480 alone exceeds it.
         ReductionCase{"WideRowsOnePass", {2, 5, 64, 64}, 0}),
     [](const ::testing::TestParamInfo<ReductionCase>& info) { return info.param.name; });
+
+// The graph match checks the launches every reduction makes alike, as the hand-written builder
+// does; the parallel reduction's grid grows with the device. The layernorm validator caps a
+// tensor below 2^32 elements, so the widest reachable case is 2 rows of 2^31 - 1: on 4 CUs a row
+// exceeds one parallel pass and the parallel reduction launches 2^31 - 1 threads (rounded up to
+// whole blocks); on 2^22 CUs its parallel size grows to 2 and its grid rounds up to 2^32 threads,
+// so only the one-pass kernel is admitted.
+TEST(TestHipMlopsLayernormBwdKnob, AReductionReachingTheThreadLimitIsNotAdmitted)
+{
+    const auto graph = [] {
+        return hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({2147483647, 1, 1, 1},
+                                                                        {2, 2147483647, 1, 1});
+    };
+    EXPECT_THAT(knobValues(rankedKernels(LAYERNORM_BWD_ENGINE,
+                                         graph(),
+                                         devicePropertiesWithComputeUnits(COMPUTE_UNITS)),
+                           "parallel"),
+                ::testing::UnorderedElementsAre(0, 1));
+    EXPECT_THAT(
+        knobValues(
+            rankedKernels(LAYERNORM_BWD_ENGINE, graph(), devicePropertiesWithComputeUnits(1 << 22)),
+            "parallel"),
+        ::testing::ElementsAre(0));
+}
 
 /// The workspace the backward's handler reports for its kernel of reduction @p parallel on
 /// @p spec's graph, on a device of COMPUTE_UNITS CUs: what a plan of that kernel allocates.

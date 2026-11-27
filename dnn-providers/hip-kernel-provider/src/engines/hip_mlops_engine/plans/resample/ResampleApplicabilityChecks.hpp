@@ -39,4 +39,26 @@ private:
         const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& resampleBwdAttr);
 };
 
+/// The launch of the ResampleFwd plan for @p resampleAttr, one thread per y element, is not
+/// empty and stays below the 2^32 threads HIP accepts. The HIP MLOps engine's builder and the
+/// kernel ingestor's hipkernel:ResampleFwd both decline a graph that fails it, so neither
+/// accepts a graph its build then rejects.
+///
+/// @throws HipdnnPluginException with BAD_PARAM naming the launch that does not fit.
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes& resampleAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The launch of the ResampleBwd plan for @p resampleBwdAttr, one thread per dx element, is
+/// not empty and stays below the 2^32 threads HIP accepts (as for the forward).
+///
+/// @throws HipdnnPluginException with BAD_PARAM naming the launch that does not fit.
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& resampleBwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
 } // namespace hip_kernel_provider::resample

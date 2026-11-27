@@ -24,35 +24,6 @@ using namespace hip_kernel_provider::core::utils;
 namespace hip_kernel_provider::rmsnorm
 {
 
-namespace
-{
-
-bool launchShapesFitThreadLimit(
-    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const ProblemDescription problem(&findTensorAttributes(tensorMap, bwdAttr.x_tensor_uid()),
-                                     &findTensorAttributes(tensorMap, bwdAttr.scale_tensor_uid()),
-                                     Direction::BACKWARD);
-    for(const auto& shape :
-        RMSnormBwdPlan::launchShapes(problem.outerSize(), problem.stride(), problem.innerSize()))
-    {
-        if(!launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock))
-        {
-            HIPDNN_PLUGIN_LOG_INFO("RMSnorm backward kernel "
-                                   << shape.kernelName << " needs " << shape.blocks << " blocks x "
-                                   << shape.threadsPerBlock
-                                   << " threads, which reaches the 2^32 thread limit");
-            return false;
-        }
-    }
-    return true;
-}
-
-} // namespace
-
 RMSnormBwdPlanBuilder::RMSnormBwdPlanBuilder(const IKernelCompiler& kernelCompiler,
                                              const IDevicePropertyProvider& devicePropertyProvider)
     : _kernelCompiler(kernelCompiler)
@@ -110,6 +81,8 @@ bool RMSnormBwdPlanBuilder::isApplicable(
             rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
             validator.checkBwdTensorConfigSupported(
                 *node.attributes_as_RMSNormBackwardAttributes());
+            checkLaunchShapesFitThreadLimit(*node.attributes_as_RMSNormBackwardAttributes(),
+                                            opGraph.getTensorMap());
         }
         catch(const std::exception& e)
         {
@@ -117,8 +90,7 @@ bool RMSnormBwdPlanBuilder::isApplicable(
             return false;
         }
 
-        return launchShapesFitThreadLimit(*node.attributes_as_RMSNormBackwardAttributes(),
-                                          opGraph.getTensorMap());
+        return true;
     }
     case 2: // Backward fused activation (backward + activation)
     {
@@ -158,6 +130,8 @@ bool RMSnormBwdPlanBuilder::isApplicable(
             validator.checkBwdActivationTensorConfigSupported(
                 *node0.attributes_as_PointwiseAttributes(),
                 *node1.attributes_as_RMSNormBackwardAttributes());
+            checkLaunchShapesFitThreadLimit(*node1.attributes_as_RMSNormBackwardAttributes(),
+                                            opGraph.getTensorMap());
         }
         catch(const std::exception& e)
         {
@@ -165,8 +139,7 @@ bool RMSnormBwdPlanBuilder::isApplicable(
             return false;
         }
 
-        return launchShapesFitThreadLimit(
-            *opGraph.getNode(1).attributes_as_RMSNormBackwardAttributes(), opGraph.getTensorMap());
+        return true;
     }
     default:
     {

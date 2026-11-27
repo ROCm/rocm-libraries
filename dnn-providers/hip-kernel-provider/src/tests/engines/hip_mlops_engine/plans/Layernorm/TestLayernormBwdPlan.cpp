@@ -676,14 +676,30 @@ TEST(TestLayernormBwdKernelConfig, ParallelReductionAppliesToEveryShape)
 {
     // One row: the parallel reduction runs with a parallel size of 1
     const auto graph = createBwdGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
-    const ProblemDescription problem(
-        graph.params.x(), graph.params.scale(), graph.params.mean(), Direction::BACKWARD);
-    EXPECT_TRUE(isBwdConfigApplicable(problem, {true}));
-    EXPECT_TRUE(isBwdConfigApplicable(problem, {false}));
+    EXPECT_TRUE(isBwdConfigApplicable(graph.params, 60, {true}));
+    EXPECT_TRUE(isBwdConfigApplicable(graph.params, 60, {false}));
 
     const auto build = buildLayernormBwdKernel(graph.params, "gfx942", 60, {true});
     EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=1"));
     ASSERT_EQ(build.launches.size(), 3u);
+}
+
+TEST(TestLayernormBwdKernelConfig, ParallelReductionDeclinedWhenItsGridReachesThreadLimit)
+{
+    // 2^21 rows of 2^22: the main kernel launches 2^21 blocks of 1024 threads and the one-pass
+    // reduction 4096, so the graph's launches fit
+    const auto graph = createBwdGraph({4194304, 1, 1, 1}, {2097152, 4194304, 1, 1});
+    EXPECT_TRUE(isBwdConfigApplicable(graph.params, 60, {false}));
+    // On 60 CUs a row exceeds one parallel pass, so the parallel size is 1 and the reduction
+    // launches 4096 blocks as well
+    EXPECT_TRUE(isBwdConfigApplicable(graph.params, 60, {true}));
+
+    // On 2^22 CUs a pass keeps 2^34 work-items busy and the parallel size grows to 2048, bounded
+    // by the square root of the row count: 2048 * 2^22 = 2^33 threads
+    EXPECT_TRUE(isBwdConfigApplicable(graph.params, 1 << 22, {false}));
+    EXPECT_FALSE(isBwdConfigApplicable(graph.params, 1 << 22, {true}));
+    EXPECT_THROW(buildLayernormBwdKernel(graph.params, "gfx942", 1 << 22, {true}),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestLayernormBwdKernelConfig, WorkspaceFollowsTheConfig)

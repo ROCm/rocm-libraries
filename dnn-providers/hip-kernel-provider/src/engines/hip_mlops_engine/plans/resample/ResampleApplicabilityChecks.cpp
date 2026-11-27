@@ -4,11 +4,15 @@
 #include "ResampleApplicabilityChecks.hpp"
 
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResampleBwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResampleFwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/resample/ResamplePlanUtils.hpp"
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <unordered_set>
 
 namespace hip_kernel_provider::resample
@@ -33,6 +37,23 @@ bool extentProductAtMost(const std::vector<int64_t>& dims, size_t first, int64_t
         }
     }
     return true;
+}
+
+// Saturates at INT64_MAX so that an overflowing shape is declined, not wrapped.
+int64_t elementCount(const data_objects::TensorAttributes& tensor)
+{
+    int64_t count = 1;
+    for(const auto dim : *tensor.dims())
+    {
+        if(dim <= 0)
+        {
+            return 0;
+        }
+        count = count > std::numeric_limits<int64_t>::max() / dim
+                    ? std::numeric_limits<int64_t>::max()
+                    : count * dim;
+    }
+    return count;
 }
 
 } // namespace
@@ -261,6 +282,29 @@ void ResampleValidator::checkBwdTensorConfigSupported(
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleBwdAttr.index_tensor_uid());
     checkBwdTensorShapesSupported(resampleBwdAttr);
+}
+
+void checkLaunchShapesFitThreadLimit(
+    const data_objects::ResampleFwdAttributes& resampleAttr,
+    const std::unordered_map<int64_t, const data_objects::TensorAttributes*>& tensorMap)
+{
+    const auto count = elementCount(findTensorAttributes(tensorMap, resampleAttr.y_tensor_uid()));
+    for(const auto& shape : ResampleFwdPlan::launchShapes(count))
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
+}
+
+void checkLaunchShapesFitThreadLimit(
+    const data_objects::ResampleBwdAttributes& resampleBwdAttr,
+    const std::unordered_map<int64_t, const data_objects::TensorAttributes*>& tensorMap)
+{
+    const auto count
+        = elementCount(findTensorAttributes(tensorMap, resampleBwdAttr.dx_tensor_uid()));
+    for(const auto& shape : ResampleBwdPlan::launchShapes(count))
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
 }
 
 } // namespace hip_kernel_provider::resample

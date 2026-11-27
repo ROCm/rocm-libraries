@@ -11,6 +11,10 @@
 
 #include "RMSnormApplicabilityChecks.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormCommon.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormFwdPlan.hpp"
 
 using namespace hip_kernel_provider::core::utils;
 
@@ -409,6 +413,37 @@ void checkBwdActivationTensors(
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Rmsnorm backward dy input must be virtual, output tensors must be non-virtual");
+    }
+}
+
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const ProblemDescription problem(&findTensorAttributes(tensorMap, fwdAttr.x_tensor_uid()),
+                                     &findTensorAttributes(tensorMap, fwdAttr.scale_tensor_uid()),
+                                     Direction::FORWARD);
+    for(const auto& shape : RMSnormFwdPlan::launchShapes(problem.outerSize(), problem.stride()))
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
+}
+
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const ProblemDescription problem(&findTensorAttributes(tensorMap, bwdAttr.x_tensor_uid()),
+                                     &findTensorAttributes(tensorMap, bwdAttr.scale_tensor_uid()),
+                                     Direction::BACKWARD);
+    for(const auto& shape :
+        RMSnormBwdPlan::launchShapes(problem.outerSize(), problem.stride(), problem.innerSize()))
+    {
+        checkLaunchFitsThreadLimit(shape);
     }
 }
 

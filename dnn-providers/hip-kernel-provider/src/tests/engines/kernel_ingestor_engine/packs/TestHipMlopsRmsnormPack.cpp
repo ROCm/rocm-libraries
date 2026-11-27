@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "tests/engines/kernel_ingestor_engine/packs/HipMlopsTestSupport.hpp"
@@ -28,7 +29,8 @@
  * @brief The HIP MLOps RMSnorm engines on the kernel ingestor (ALMIOPEN-3072):
  *        hipkernel:RmsNormFwd and hipkernel:RmsNormBwd each accept what the hand-written
  *        builders accept in their direction -- RMSnorm alone, and fused with a ReLU after the
- *        forward or before the backward -- and compute all four as CPU references do.
+ *        forward or before the backward, up to the same launch thread limit -- and compute all
+ *        four as CPU references do.
  */
 namespace
 {
@@ -406,6 +408,57 @@ INSTANTIATE_TEST_SUITE_P(
                     edited([](auto& s) { s.activation = Activation::SIGMOID; })},
         RefusalCase{"LeakyRelu", edited([](auto& s) { s.activation = Activation::LEAKY_RELU; })}),
     [](const ::testing::TestParamInfo<RefusalCase>& info) { return info.param.name; });
+
+// ---------------------------------------------------------------------------
+// Launch thread limit
+// ---------------------------------------------------------------------------
+
+// The hand-written builders' boundary, on their graphs (TestRMSnormPlanBuilder,
+// TestRMSnormBwdPlanBuilder): a block of 256 threads per row, so 16777215 rows is 2^32 - 256
+// threads and 16777216 rows is 2^32; alone and fused.
+TEST(TestHipMlopsRmsnormGraphMatch, ServesRowCountsBelowTheThreadLimit)
+{
+    namespace graphs = hipdnn_test_sdk::utilities;
+    const std::vector<int64_t> strides = {2, 1, 1, 1};
+    const std::vector<int64_t> dims = {16777215, 2, 1, 1};
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormGraph(strides, dims)),
+                ::testing::ElementsAre(RMS_NORM_FWD_ENGINE.name));
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormActivationGraph(strides, dims)),
+                ::testing::ElementsAre(RMS_NORM_FWD_ENGINE.name));
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormBwdGraph(strides, dims)),
+                ::testing::ElementsAre(RMS_NORM_BWD_ENGINE.name));
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormBwdActivationGraph(strides, dims)),
+                ::testing::ElementsAre(RMS_NORM_BWD_ENGINE.name));
+}
+
+// Declined by the graph match, as by the hand-written builders, rather than failing at prepare.
+TEST(TestHipMlopsRmsnormGraphMatch, DeclinesRowCountsReachingTheThreadLimit)
+{
+    namespace graphs = hipdnn_test_sdk::utilities;
+    const std::vector<int64_t> strides = {2, 1, 1, 1};
+    const std::vector<int64_t> dims = {16777216, 2, 1, 1};
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormGraph(strides, dims)),
+                ::testing::IsEmpty());
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormActivationGraph(strides, dims)),
+                ::testing::IsEmpty());
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormBwdGraph(strides, dims)),
+                ::testing::IsEmpty());
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormBwdActivationGraph(strides, dims)),
+                ::testing::IsEmpty());
+}
+
+// The backward's scale/bias kernel launches ceil(inner / 256) blocks of 256 threads: with one
+// row, an inner size of 2^32 - 256 fits and 2^32 does not.
+TEST(TestHipMlopsRmsnormGraphMatch, BackwardDeclinesAnInnerSizeReachingTheThreadLimit)
+{
+    namespace graphs = hipdnn_test_sdk::utilities;
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormBwdGraph({4294967040, 256, 1, 1},
+                                                                    {1, 16777215, 256, 1})),
+                ::testing::ElementsAre(RMS_NORM_BWD_ENGINE.name));
+    EXPECT_THAT(acceptingEngines(graphs::createValidRMSNormBwdGraph({4294967296, 256, 1, 1},
+                                                                    {1, 16777216, 256, 1})),
+                ::testing::IsEmpty());
+}
 
 // ---------------------------------------------------------------------------
 // Numerics through the engine

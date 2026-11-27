@@ -17,34 +17,6 @@ using namespace hip_kernel_provider::core::utils;
 namespace hip_kernel_provider::rmsnorm
 {
 
-namespace
-{
-
-bool launchShapesFitThreadLimit(
-    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const ProblemDescription problem(&findTensorAttributes(tensorMap, fwdAttr.x_tensor_uid()),
-                                     &findTensorAttributes(tensorMap, fwdAttr.scale_tensor_uid()),
-                                     Direction::FORWARD);
-    for(const auto& shape : RMSnormFwdPlan::launchShapes(problem.outerSize(), problem.stride()))
-    {
-        if(!launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock))
-        {
-            HIPDNN_PLUGIN_LOG_INFO("RMSnorm forward kernel "
-                                   << shape.kernelName << " needs " << shape.blocks << " blocks x "
-                                   << shape.threadsPerBlock
-                                   << " threads, which reaches the 2^32 thread limit");
-            return false;
-        }
-    }
-    return true;
-}
-
-} // namespace
-
 RMSnormPlanBuilder::RMSnormPlanBuilder(const IKernelCompiler& kernelCompiler,
                                        const IDevicePropertyProvider& devicePropertyProvider)
     : _kernelCompiler(kernelCompiler)
@@ -99,6 +71,8 @@ bool RMSnormPlanBuilder::isApplicable(
         {
             rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
             validator.checkFwdTensorConfigSupported(*node.attributes_as_RMSNormAttributes());
+            checkLaunchShapesFitThreadLimit(*node.attributes_as_RMSNormAttributes(),
+                                            opGraph.getTensorMap());
         }
         catch(const std::exception& e)
         {
@@ -106,8 +80,7 @@ bool RMSnormPlanBuilder::isApplicable(
             return false;
         }
 
-        return launchShapesFitThreadLimit(*node.attributes_as_RMSNormAttributes(),
-                                          opGraph.getTensorMap());
+        return true;
     }
     case 2: // Forward fused activation (forward + activation)
     {
@@ -147,6 +120,8 @@ bool RMSnormPlanBuilder::isApplicable(
             validator.checkFwdActivationTensorConfigSupported(
                 *node0.attributes_as_RMSNormAttributes(),
                 *node1.attributes_as_PointwiseAttributes());
+            checkLaunchShapesFitThreadLimit(*node0.attributes_as_RMSNormAttributes(),
+                                            opGraph.getTensorMap());
         }
         catch(const std::exception& e)
         {
@@ -154,8 +129,7 @@ bool RMSnormPlanBuilder::isApplicable(
             return false;
         }
 
-        return launchShapesFitThreadLimit(*opGraph.getNode(0).attributes_as_RMSNormAttributes(),
-                                          opGraph.getTensorMap());
+        return true;
     }
     default:
     {

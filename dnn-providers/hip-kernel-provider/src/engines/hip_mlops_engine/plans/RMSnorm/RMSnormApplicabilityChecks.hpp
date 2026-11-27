@@ -79,4 +79,27 @@ void checkBwdActivationTensors(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
+/// The launch of the RMSnorm forward plan for @p fwdAttr, a workgroup per row, is not empty and
+/// stays below the 2^32 threads HIP accepts. The HIP MLOps engine's builder and the kernel
+/// ingestor's hipkernel:RmsNormFwd both decline a graph, alone or fused, that fails it, so
+/// neither accepts a graph its build then rejects.
+///
+/// @throws HipdnnPluginException with BAD_PARAM naming the launch that does not fit.
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The launches of the RMSnorm backward plan for @p bwdAttr, a workgroup per row and then a
+/// thread per scale element, are not empty and stay below the 2^32 threads HIP accepts (as for
+/// the forward, with hipkernel:RmsNormBwd).
+///
+/// @throws HipdnnPluginException with BAD_PARAM naming the launch that does not fit.
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
 } // namespace hip_kernel_provider::rmsnorm

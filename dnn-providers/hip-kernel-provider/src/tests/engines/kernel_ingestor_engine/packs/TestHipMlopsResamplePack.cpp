@@ -30,8 +30,9 @@
  * @file TestHipMlopsResamplePack.cpp
  * @brief The HIP MLOps Resample engines on the kernel ingestor (ALMIOPEN-3075):
  *        hipkernel:ResampleFwd and hipkernel:ResampleBwd are each offered under their own
- *        name and id, each accepts what its hand-written builder accepts and declines override
- *        shapes, and they compute forward and backward resampling as CPU references do.
+ *        name and id, each accepts what its hand-written builder accepts (up to the same
+ *        launch thread limit) and declines override shapes, and they compute forward and
+ *        backward resampling as CPU references do.
  */
 namespace
 {
@@ -70,17 +71,23 @@ struct ResampleGraph
     bool sourceVirtual = false;
     data_objects::DataType computeType = data_objects::DataType::FLOAT;
     bool twoNodes = false;
+    // The forward's x and y (the backward's dx and dy), and the window over them.
+    std::vector<int64_t> inputDims = INPUT_DIMS;
+    std::vector<int64_t> outputDims = OUTPUT_DIMS;
+    int64_t window = WINDOW;
+    int64_t stride = STRIDE;
+    int64_t pad = PAD;
 };
 
 flatbuffers::FlatBufferBuilder buildResampleGraph(const ResampleGraph& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
     // Forward reads the input shape and writes the output shape; backward the reverse.
-    const auto& sourceDims = spec.backward ? OUTPUT_DIMS : INPUT_DIMS;
-    const auto& resultDims = spec.backward ? INPUT_DIMS : OUTPUT_DIMS;
+    const auto& sourceDims = spec.backward ? spec.outputDims : spec.inputDims;
+    const auto& resultDims = spec.backward ? spec.inputDims : spec.outputDims;
     const auto sourceStrides = packedStrides(sourceDims);
     const auto resultStrides = packedStrides(resultDims);
-    const auto indexStrides = packedStrides(OUTPUT_DIMS);
+    const auto indexStrides = packedStrides(spec.outputDims);
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
@@ -104,13 +111,13 @@ flatbuffers::FlatBufferBuilder buildResampleGraph(const ResampleGraph& spec)
                                                                      nullptr,
                                                                      data_objects::DataType::INT32,
                                                                      &indexStrides,
-                                                                     &OUTPUT_DIMS,
+                                                                     &spec.outputDims,
                                                                      false));
     }
 
-    const std::vector<int64_t> pads = {PAD, PAD};
-    const std::vector<int64_t> strides = {STRIDE, STRIDE};
-    const std::vector<int64_t> window = {WINDOW, WINDOW};
+    const std::vector<int64_t> pads = {spec.pad, spec.pad};
+    const std::vector<int64_t> strides = {spec.stride, spec.stride};
+    const std::vector<int64_t> window = {spec.window, spec.window};
     const flatbuffers::Optional<int64_t> index
         = spec.withIndex ? flatbuffers::Optional<int64_t>(INDEX_UID) : flatbuffers::nullopt;
 
@@ -255,6 +262,55 @@ INSTANTIATE_TEST_SUITE_P(
                     })},
         RefusalCase{"BackwardMaxpoolWithoutIndex", edited([](auto& s) { s.backward = true; })}),
     [](const ::testing::TestParamInfo<RefusalCase>& info) { return info.param.name; });
+
+// ---------------------------------------------------------------------------
+// Launch thread limit
+// ---------------------------------------------------------------------------
+
+/// A 1x1 window at stride 1 over [1, 1, height, width]: the plan launches a thread per element
+/// of y (forward) or dx (backward), in blocks of 256. The backward averages, as maxpool needs
+/// an index.
+ResampleGraph elementwise(bool backward, int64_t height, int64_t width)
+{
+    ResampleGraph spec;
+    spec.backward = backward;
+    spec.inputDims = {1, 1, height, width};
+    spec.outputDims = spec.inputDims;
+    spec.window = 1;
+    spec.stride = 1;
+    spec.pad = 0;
+    if(backward)
+    {
+        spec.mode = data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING;
+        spec.padding = data_objects::PaddingMode::ZERO_PAD;
+    }
+    return spec;
+}
+
+// The hand-written builders' boundary (TestResamplePlanBuilder, TestResampleBwdPlanBuilder):
+// 16777215 * 256 = 2^32 - 256 elements is 2^24 - 1 blocks of 256 threads.
+TEST(TestHipMlopsResampleGraphMatch, ServesALaunchBelowTheThreadLimit)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        const auto spec = elementwise(backward, 16777215, 256);
+        EXPECT_THAT(acceptingEngines(buildResampleGraph(spec)),
+                    ::testing::ElementsAre(engineFor(spec).name));
+    }
+}
+
+// 401 * 10710641 = 2^32 - 255 elements needs 2^24 blocks, which is 2^32 threads: declined by
+// the graph match, as by the hand-written builders, rather than failing at prepare.
+TEST(TestHipMlopsResampleGraphMatch, DeclinesALaunchReachingTheThreadLimit)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        EXPECT_THAT(acceptingEngines(buildResampleGraph(elementwise(backward, 401, 10710641))),
+                    ::testing::IsEmpty());
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Numerics through the engine

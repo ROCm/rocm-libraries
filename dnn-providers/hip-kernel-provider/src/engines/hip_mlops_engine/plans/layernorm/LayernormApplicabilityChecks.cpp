@@ -16,6 +16,9 @@
 
 #include "LayernormApplicabilityChecks.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
 
 using namespace hip_kernel_provider::core::utils;
 
@@ -508,6 +511,59 @@ void LayernormValidator::checkTensorConfigSupported(
                                         toStdOptional(lnAttr.mean_tensor_uid()),
                                         bwdStatTensors);
     checkDxDataTypeSupported(lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid());
+}
+
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes& lnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto meanAttr = lnAttr.mean_tensor_uid().has_value()
+                              ? std::make_optional(tensorMap.at(lnAttr.mean_tensor_uid().value()))
+                              : std::nullopt;
+    const ProblemDescription problem(tensorMap.at(lnAttr.x_tensor_uid()),
+                                     tensorMap.at(lnAttr.scale_tensor_uid()),
+                                     meanAttr,
+                                     Direction::FORWARD);
+    for(const auto& shape : LayernormFwdPlan::launchShapes(problem.outerSize(), problem.stride()))
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
+}
+
+void checkLaunchShapesFitThreadLimit(
+    const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto meanAttr = lnAttr.mean_tensor_uid().has_value()
+                              ? std::make_optional(tensorMap.at(lnAttr.mean_tensor_uid().value()))
+                              : std::nullopt;
+    const ProblemDescription problem(tensorMap.at(lnAttr.x_tensor_uid()),
+                                     tensorMap.at(lnAttr.scale_tensor_uid()),
+                                     meanAttr,
+                                     Direction::BACKWARD);
+    for(const auto& shape : LayernormBwdPlan::launchShapes(problem.outerSize(),
+                                                           problem.innerSize(),
+                                                           problem.stride(),
+                                                           LayernormBwdParams::MAX_LOCAL_SIZE,
+                                                           /*isParallel=*/false,
+                                                           /*parallelSize=*/0))
+    {
+        checkLaunchFitsThreadLimit(shape);
+    }
+}
+
+bool isBwdConfigApplicable(const LayernormBwdParams& params,
+                           int multiProcessorCount,
+                           const LayernormBwdConfig& config)
+{
+    const auto shapes = layernormBwdLaunchShapes(params, multiProcessorCount, config);
+    return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
+        return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);
+    });
 }
 
 } // namespace hip_kernel_provider::layernorm

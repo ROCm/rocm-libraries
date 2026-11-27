@@ -128,6 +128,19 @@ ProblemDescription bwdProblem(const LayernormBwdParams& params)
     return {params.x(), params.scale(), statAttr, Direction::BACKWARD};
 }
 
+/// The partial sums per column the scale/bias reduction of @p config keeps on a device with
+/// @p multiProcessorCount CUs: parallelSize() when it splits across workgroups, else 0.
+size_t partialSumCount(const ProblemDescription& problem,
+                       int multiProcessorCount,
+                       const LayernormBwdConfig& config)
+{
+    return config.parallel ? parallelSize(multiProcessorCount,
+                                          static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE),
+                                          static_cast<size_t>(problem.innerSize()),
+                                          static_cast<size_t>(problem.outerSize()))
+                           : 0;
+}
+
 } // namespace
 
 LayernormBwdConfig defaultLayernormBwdConfig(const LayernormBwdParams& params,
@@ -196,14 +209,9 @@ LayernormKernelBuild buildLayernormBwdKernel(const LayernormBwdParams& params,
     const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
 
     const bool parallel = config.parallel;
-    const size_t partialSums = parallel ? parallelSize(multiProcessorCount,
-                                                       static_cast<size_t>(localSize),
-                                                       static_cast<size_t>(innerSize),
-                                                       static_cast<size_t>(outerSize))
-                                        : 0;
+    const size_t partialSums = partialSumCount(problem, multiProcessorCount, config);
 
-    const auto shapes = LayernormBwdPlan::launchShapes(
-        outerSize, innerSize, stride, localSize, parallel, static_cast<int64_t>(partialSums));
+    const auto shapes = layernormBwdLaunchShapes(params, multiProcessorCount, config);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
@@ -240,6 +248,20 @@ LayernormKernelBuild buildLayernormBwdKernel(const LayernormBwdParams& params,
                             static_cast<unsigned int>(align(innerSize, localSize))});
     }
     return {std::move(options), std::move(launches)};
+}
+
+std::vector<KernelLaunchShape> layernormBwdLaunchShapes(const LayernormBwdParams& params,
+                                                        int multiProcessorCount,
+                                                        const LayernormBwdConfig& config)
+{
+    const auto problem = bwdProblem(params);
+    return LayernormBwdPlan::launchShapes(
+        problem.outerSize(),
+        problem.innerSize(),
+        problem.stride(),
+        LayernormBwdParams::MAX_LOCAL_SIZE,
+        config.parallel,
+        static_cast<int64_t>(partialSumCount(problem, multiProcessorCount, config)));
 }
 
 size_t layernormBwdWorkspaceBytes(const LayernormBwdParams& params,

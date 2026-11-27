@@ -92,6 +92,13 @@ size_t layernormBwdWorkspaceBytes(const LayernormBwdParams& params,
                                   int multiProcessorCount,
                                   const LayernormBwdConfig& config);
 
+/// The launches buildLayernormBwdKernel() makes for @p params with @p config on a device with
+/// @p multiProcessorCount CUs, in execution order (LayernormBwdPlan::launchShapes() at the
+/// build's local and parallel sizes).
+std::vector<KernelLaunchShape> layernormBwdLaunchShapes(const LayernormBwdParams& params,
+                                                        int multiProcessorCount,
+                                                        const LayernormBwdConfig& config);
+
 class LayernormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:

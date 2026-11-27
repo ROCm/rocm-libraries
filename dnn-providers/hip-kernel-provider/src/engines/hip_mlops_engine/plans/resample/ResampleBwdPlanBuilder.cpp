@@ -9,55 +9,10 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <algorithm>
-#include <cstdint>
-#include <limits>
 #include <set>
 
 namespace hip_kernel_provider::resample
 {
-
-namespace
-{
-
-// Saturates at INT64_MAX so that an overflowing shape is declined, not wrapped.
-int64_t elementCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
-{
-    int64_t count = 1;
-    for(const auto dim : *tensor.dims())
-    {
-        if(dim <= 0)
-        {
-            return 0;
-        }
-        count = count > std::numeric_limits<int64_t>::max() / dim
-                    ? std::numeric_limits<int64_t>::max()
-                    : count * dim;
-    }
-    return count;
-}
-
-bool launchShapesFitThreadLimit(
-    const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& attr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const auto count = elementCount(*tensorMap.at(attr.dx_tensor_uid()));
-    for(const auto& shape : ResampleBwdPlan::launchShapes(count))
-    {
-        if(!launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock))
-        {
-            HIPDNN_PLUGIN_LOG_INFO("ResampleBwd kernel "
-                                   << shape.kernelName << " needs " << shape.blocks << " blocks x "
-                                   << shape.threadsPerBlock
-                                   << " threads, which reaches the 2^32 thread limit");
-            return false;
-        }
-    }
-    return true;
-}
-
-} // namespace
 
 ResampleBwdPlanBuilder::ResampleBwdPlanBuilder(
     const IKernelCompiler& kernelCompiler, const IDevicePropertyProvider& devicePropertyProvider)
@@ -105,6 +60,8 @@ bool ResampleBwdPlanBuilder::isApplicable(
         {
             resample::ResampleValidator validator(opGraph.getTensorMap());
             validator.checkBwdTensorConfigSupported(*node.attributes_as_ResampleBwdAttributes());
+            checkLaunchShapesFitThreadLimit(*node.attributes_as_ResampleBwdAttributes(),
+                                            opGraph.getTensorMap());
         }
         catch(const std::exception& e)
         {
@@ -112,8 +69,7 @@ bool ResampleBwdPlanBuilder::isApplicable(
             return false;
         }
 
-        return launchShapesFitThreadLimit(*node.attributes_as_ResampleBwdAttributes(),
-                                          opGraph.getTensorMap());
+        return true;
     }
     default:
     {
