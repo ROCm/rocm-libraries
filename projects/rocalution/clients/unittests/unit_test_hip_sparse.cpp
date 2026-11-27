@@ -753,8 +753,8 @@ TYPED_TEST(hip_blas_wrapper, dense_apply_is_the_product)
     }
 }
 
-// The HIP DENSE ApplyAdd is the same gemv with the scalar as alpha. The known bug, beta 0,
-// does not show when the output starts out zero.
+// The HIP DENSE ApplyAdd is the same gemv with the scalar as alpha and beta 1. A wrong beta
+// does not show when the output starts out zero, so the second call starts from -7.
 TYPED_TEST(hip_blas_wrapper, dense_apply_add_adds_the_scaled_product)
 {
     using T = typename TypeParam::value_type;
@@ -786,8 +786,6 @@ TYPED_TEST(hip_blas_wrapper, dense_apply_add_adds_the_scaled_product)
     auto out = make_vector(Backend::Accelerator, std::vector<T>(3, static_cast<T>(0)));
     A->ApplyAdd(*in, scalar, out.get());
     expect_all_near(values_of(*out), expected(std::vector<T>(3, static_cast<T>(0))), tol<T>());
-
-    KNOWN_BUG("gemv gets beta 0, so the output is overwritten");
 
     const std::vector<T> y(3, from_int<T>(-7));
     out = make_vector(Backend::Accelerator, y);
