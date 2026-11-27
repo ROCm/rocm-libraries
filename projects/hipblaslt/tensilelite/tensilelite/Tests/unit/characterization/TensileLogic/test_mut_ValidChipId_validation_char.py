@@ -132,8 +132,8 @@ def test_validate_chip_id_non_chip_arch_returns_before_device_checks(monkeypatch
         V,
         "_extractArchInfo",
         lambda filepath, validateDeviceIds=True: ArchInfo(
-            Name="gfx942",
-            Gfx="gfx942",
+            Name="gfx90a",
+            Gfx="gfx90a",
             DeviceIds={"id=74a0"},
         ),
     )
@@ -144,7 +144,7 @@ def test_validate_chip_id_non_chip_arch_returns_before_device_checks(monkeypatch
         lambda gfx, device_ids, filepath: calls.__setitem__("placement", 1),
     )
 
-    assert V._validateChipId(Path("gfx942.yaml")) is True
+    assert V._validateChipId(Path("gfx90a.yaml")) is True
     assert calls == {"verify": 0, "placement": 0}
 
 

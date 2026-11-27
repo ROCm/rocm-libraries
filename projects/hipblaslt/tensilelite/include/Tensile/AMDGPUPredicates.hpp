@@ -52,7 +52,7 @@ namespace TensileLite
         // Check whether to use PCI Chip ID predicates for the given processor
         inline bool supportsChipIdPredicate(AMDGPU::Processor processor)
         {
-            return processor == AMDGPU::Processor::gfx950;
+            return (processor == AMDGPU::Processor::gfx950 || processor == AMDGPU::Processor::gfx942);
         }
 
         // Registered chip IDs mapped to their GFX architecture
@@ -91,6 +91,8 @@ namespace TensileLite
                 {0x75b3, {0x75a0}},  // mi355x -> mi350
                 {0x75a8, {0x75a0}},  // mi350-unknown1 -> mi350
                 {0x75b8, {0x75a0}},  // mi350-unknown1 -> mi350
+                // mi325 chip IDs fall back to mi300
+                {0x74a5, {0x74a1}},  // mi325x -> mi300
             };
             return fallbacks;
         }

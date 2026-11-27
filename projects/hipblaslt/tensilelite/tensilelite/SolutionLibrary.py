@@ -427,13 +427,15 @@ class MasterSolutionLibrary:
 
         if lazyLibrary:
             if cuCount: placeholderName += "_CU" + str(cuCount)
-            # Only append the chip-id suffix on architectures whose runtime
-            # HardwarePredicate also includes the chip-id discriminator
-            # (see Hardware.HardwarePredicate.FromHardware). Otherwise the
-            # filename diverges between sibling YAMLs while their predicates
-            # remain equal, producing PredicateLibrary.merge collisions whose
-            # PlaceholderLibrary children silently drop one leaf.
-            if pciChipId and supportsChipIdPredicate(devicePart):
+            # Only append the chip-id suffix when the runtime HardwarePredicate
+            # also includes the chip-id discriminator (see
+            # Hardware.HardwarePredicate.FromHardware): the architecture must be
+            # chip-id-aware and the DeviceNames must name a supported chip, not
+            # only legacy generic IDs. Otherwise the filename diverges between
+            # sibling YAMLs while their predicates remain equal, producing
+            # PredicateLibrary.merge collisions whose PlaceholderLibrary
+            # children silently drop one leaf.
+            if pciChipId and supportsChipIdPredicate(devicePart) and pred.pciChipIds():
                 # Convert device names list to a sanitized string for filename
                 # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
                 if isinstance(pciChipId, list):

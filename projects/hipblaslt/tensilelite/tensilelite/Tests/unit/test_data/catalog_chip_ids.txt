@@ -12,4 +12,5 @@
 75b3 gfx950
 75a8 gfx950
 75b8 gfx950
+PciChipId gfx942
 PciChipId gfx950
