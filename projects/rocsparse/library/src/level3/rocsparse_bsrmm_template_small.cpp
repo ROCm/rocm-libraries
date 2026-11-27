@@ -241,7 +241,7 @@ namespace rocsparse
         bsr_val,                                                        \
         dense_B,                                                        \
         ldb,                                                            \
-        batch_count_B,                                                  \
+        batch_stride_B,                                                 \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                \
         dense_C,                                                        \
         ldc,                                                            \

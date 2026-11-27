@@ -472,4 +472,166 @@ INSTANTIATE_MIXED(
 INSTANTIATE_MIXED(
     int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 
-void testing_spmm_bsr_extra(const Arguments& arg) {}
+void testing_spmm_bsr_extra(const Arguments& arg)
+{
+    // Batched computation is not supported for BSR SpMM. Every stage must return
+    // rocsparse_status_not_implemented when the batch count of A, B, or C is not 1,
+    // whatever the block dimension, and C must be left untouched. The unbatched
+    // control checks C := alpha * A * B + beta * C on the same data.
+    //
+    // A = diag(2, 3), stored either as one 2x2 block (block_dim = 2) or as two 1x1
+    // blocks (block_dim = 1, which is forwarded to csrmm). B and C hold two 2x1
+    // column-major batches with stride 4; elements 2, 3, 6 and 7 are padding. All
+    // values are small integers, so every result is exact in single precision.
+
+    rocsparse_local_handle local_handle;
+    rocsparse_handle       handle = local_handle;
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+    const rocsparse_datatype  ttype = get_datatype<float>();
+    const rocsparse_indextype itype = get_indextype<int32_t>();
+
+    const float   alpha        = 2.0f;
+    const float   beta         = 3.0f;
+    const int64_t batch_stride = 4;
+    const int64_t size         = 2 * batch_stride;
+
+    const host_vector<float> hB    = {1, 4, 17, 17, 2, 8, 17, 17};
+    const host_vector<float> hC_in = {1, 1, 17, 17, 1, 1, 17, 17};
+
+    // C_0 = 2 * diag(2, 3) * [1, 4] + 3 * [1, 1] = [7, 27]; batch 1 is not requested.
+    const host_vector<float> hC_unbatched = {7, 27, 17, 17, 1, 1, 17, 17};
+
+    auto run_spmm = [&](int32_t                   block_dim,
+                        int32_t                   batch_count_A,
+                        int32_t                   batch_count_B,
+                        int32_t                   batch_count_C,
+                        rocsparse_status          expected_status,
+                        const host_vector<float>& hC_expected) {
+#ifdef GOOGLE_TEST
+        SCOPED_TRACE(::testing::Message()
+                     << "block_dim=" << block_dim << " batch_count(A,B,C)=(" << batch_count_A << ","
+                     << batch_count_B << "," << batch_count_C << ")");
+#endif
+        const int32_t mb   = 2 / block_dim;
+        const int32_t nnzb = mb;
+
+        const host_vector<int32_t> hrow_ptr
+            = (block_dim == 2) ? host_vector<int32_t>{0, 1} : host_vector<int32_t>{0, 1, 2};
+        const host_vector<int32_t> hcol_ind
+            = (block_dim == 2) ? host_vector<int32_t>{0} : host_vector<int32_t>{0, 1};
+        const host_vector<float> hval
+            = (block_dim == 2) ? host_vector<float>{2, 0, 0, 3} : host_vector<float>{2, 3};
+        const int64_t nnz = static_cast<int64_t>(nnzb) * block_dim * block_dim;
+
+        device_vector<int32_t> drow_ptr(mb + 1);
+        device_vector<int32_t> dcol_ind(nnzb);
+        device_vector<float>   dval(nnz);
+        device_vector<float>   dB(size);
+        device_vector<float>   dC(size);
+
+        CHECK_HIP_ERROR(hipMemcpy(
+            drow_ptr, hrow_ptr.data(), sizeof(int32_t) * (mb + 1), hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dcol_ind, hcol_ind.data(), sizeof(int32_t) * nnzb, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(float) * nnz, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dB, hB.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dC, hC_in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+
+        rocsparse_local_spmat mat_A(mb,
+                                    mb,
+                                    nnzb,
+                                    rocsparse_direction_row,
+                                    block_dim,
+                                    drow_ptr,
+                                    dcol_ind,
+                                    dval,
+                                    itype,
+                                    itype,
+                                    rocsparse_index_base_zero,
+                                    ttype,
+                                    rocsparse_format_bsr);
+        rocsparse_local_dnmat mat_B(2, 1, 2, dB, ttype, rocsparse_order_column);
+        rocsparse_local_dnmat mat_C(2, 1, 2, dC, ttype, rocsparse_order_column);
+
+        if(batch_count_A != 1)
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_strided_batch(mat_A, batch_count_A));
+        }
+        if(batch_count_B != 1)
+        {
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride));
+        }
+        if(batch_count_C != 1)
+        {
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_dnmat_set_strided_batch(mat_C, batch_count_C, batch_stride));
+        }
+
+        size_t buffer_size = 0;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmm(handle,
+                                               rocsparse_operation_none,
+                                               rocsparse_operation_none,
+                                               &alpha,
+                                               mat_A,
+                                               mat_B,
+                                               &beta,
+                                               mat_C,
+                                               ttype,
+                                               rocsparse_spmm_alg_default,
+                                               rocsparse_spmm_stage_buffer_size,
+                                               &buffer_size,
+                                               nullptr),
+                                expected_status);
+
+        device_vector<char> dbuffer(buffer_size > 0 ? buffer_size : 1);
+
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmm(handle,
+                                               rocsparse_operation_none,
+                                               rocsparse_operation_none,
+                                               &alpha,
+                                               mat_A,
+                                               mat_B,
+                                               &beta,
+                                               mat_C,
+                                               ttype,
+                                               rocsparse_spmm_alg_default,
+                                               rocsparse_spmm_stage_preprocess,
+                                               &buffer_size,
+                                               dbuffer),
+                                expected_status);
+
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmm(handle,
+                                               rocsparse_operation_none,
+                                               rocsparse_operation_none,
+                                               &alpha,
+                                               mat_A,
+                                               mat_B,
+                                               &beta,
+                                               mat_C,
+                                               ttype,
+                                               rocsparse_spmm_alg_default,
+                                               rocsparse_spmm_stage_compute,
+                                               &buffer_size,
+                                               dbuffer),
+                                expected_status);
+
+        host_vector<float> hC(size);
+        CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC, sizeof(float) * size, hipMemcpyDeviceToHost));
+
+        unit_check_general<float>(1, size, hC_expected.data(), 1, hC.data(), 1);
+    };
+
+    for(const int32_t block_dim : {1, 2})
+    {
+        run_spmm(block_dim, 1, 1, 1, rocsparse_status_success, hC_unbatched);
+
+        run_spmm(block_dim, 1, 2, 2, rocsparse_status_not_implemented, hC_in);
+        run_spmm(block_dim, 1, 1, 2, rocsparse_status_not_implemented, hC_in);
+        run_spmm(block_dim, 1, 2, 1, rocsparse_status_not_implemented, hC_in);
+        run_spmm(block_dim, 2, 1, 1, rocsparse_status_not_implemented, hC_in);
+        run_spmm(block_dim, 2, 1, 2, rocsparse_status_not_implemented, hC_in);
+        run_spmm(block_dim, 2, 2, 2, rocsparse_status_not_implemented, hC_in);
+    }
+}
