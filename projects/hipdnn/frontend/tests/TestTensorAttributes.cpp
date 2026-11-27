@@ -288,7 +288,7 @@ TEST(TestTensorAttributes, ValidateDataType)
     for(auto [dataType, errorCode] : expectedResults)
     {
         tensor.set_data_type(dataType);
-        auto result = tensor.validate();
+        const auto result = tensor.validate();
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
 }
@@ -353,7 +353,7 @@ TEST(TestTensorAttributes, SetAndGetRaggedOffset)
     EXPECT_FALSE(tensor.has_ragged_offset());
     EXPECT_EQ(tensor.get_ragged_offset(), nullptr);
 
-    auto aux = std::make_shared<TensorAttributes>();
+    const auto aux = std::make_shared<TensorAttributes>();
     aux->set_uid(99);
     tensor.set_ragged_offset(aux);
     EXPECT_TRUE(tensor.has_ragged_offset());
@@ -408,7 +408,7 @@ TEST(TestTensorAttributes, ValidateSucceedsWithDefaultAlignment)
 TEST(TestTensorAttributes, RaggedOffsetMethodChainingReturnsThis)
 {
     TensorAttributes tensor;
-    auto aux = std::make_shared<TensorAttributes>();
+    const auto aux = std::make_shared<TensorAttributes>();
     const TensorAttributes& ref = tensor.set_ragged_offset(aux);
     EXPECT_EQ(&ref, &tensor);
 
@@ -439,7 +439,7 @@ TEST(TestTensorAttributes, ValidateFailsOnRaggedOffsetMultiplierBelowOne)
     tensor.set_dim({4, 1, 1, 1});
     tensor.set_stride({1, 1, 1, 1});
     tensor.set_data_type(DataType::FLOAT);
-    auto aux = std::make_shared<TensorAttributes>();
+    const auto aux = std::make_shared<TensorAttributes>();
     tensor.set_ragged_offset(aux);
     tensor.set_ragged_offset_multiplier(0);
     EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
@@ -461,7 +461,7 @@ TEST(TestTensorAttributes, ValidateSucceedsWithMultiplierAndRaggedOffset)
     tensor.set_dim({4, 1, 1, 1});
     tensor.set_stride({1, 1, 1, 1});
     tensor.set_data_type(DataType::FLOAT);
-    auto aux = std::make_shared<TensorAttributes>();
+    const auto aux = std::make_shared<TensorAttributes>();
     tensor.set_ragged_offset(aux);
     tensor.set_ragged_offset_multiplier(512);
     EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
@@ -474,7 +474,7 @@ TEST(TestTensorAttributes, ValidateFailsOnNegativeRaggedOffsetStride)
     tensor.set_dim({4, 1, 1, 1});
     tensor.set_stride({1, 1, 1, 1});
     tensor.set_data_type(DataType::FLOAT);
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_name("offs");
     offset->set_stride({-1, 1, 1, 1});
     tensor.set_ragged_offset(offset);
@@ -492,7 +492,7 @@ TEST(TestTensorAttributes, ValidateSucceedsWithZeroStrideRaggedOffset)
     tensor.set_dim({4, 1, 1, 1});
     tensor.set_stride({1, 1, 1, 1});
     tensor.set_data_type(DataType::FLOAT);
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_name("offs");
     offset->set_stride({0, 1, 1, 1});
     tensor.set_ragged_offset(offset);
@@ -622,7 +622,7 @@ std::shared_ptr<TensorAttributes>
 
 TEST(TestTensorAttributes, LogicalEqualityDistinguishesAlignment)
 {
-    auto tensorA = makeEqualityTensor(1, "t");
+    const auto tensorA = makeEqualityTensor(1, "t");
     auto tensorB = makeEqualityTensor(1, "t");
     ASSERT_TRUE(tensorA == tensorB);
 

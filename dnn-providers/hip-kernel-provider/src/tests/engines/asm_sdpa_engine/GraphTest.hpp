@@ -36,7 +36,8 @@ inline flatbuffers::FlatBufferBuilder
     mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
                 const std::function<void(hipdnn_flatbuffers_sdk::data_objects::GraphT&)>& mutate)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
+    const auto graph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
     mutate(*graph);
     flatbuffers::FlatBufferBuilder mutated;
     mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
@@ -46,7 +47,7 @@ inline flatbuffers::FlatBufferBuilder
 inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT&
     findTensor(hipdnn_flatbuffers_sdk::data_objects::GraphT& graph, const std::string& name)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->name == name)
         {

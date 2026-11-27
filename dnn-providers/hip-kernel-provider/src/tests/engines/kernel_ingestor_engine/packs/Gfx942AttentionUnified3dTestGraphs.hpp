@@ -214,9 +214,9 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
                                                        attributesFor().Union()));
     }
 
-    auto name = builder.CreateString("gfx942_attention_unified3d_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    const auto name = builder.CreateString("gfx942_attention_unified3d_test");
+    const auto tensorsVector = builder.CreateVector(tensors);
+    const auto nodesVector = builder.CreateVector(nodes);
     data_objects::GraphBuilder graph(builder);
     graph.add_name(name);
     graph.add_tensors(tensorsVector);

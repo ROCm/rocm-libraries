@@ -12,6 +12,10 @@
 #   run fails the skip) without one. Pinned to the pre-commit hook's rev, because a formatter
 #   fixed-point check is only meaningful against the formatter that defines the style.
 #   tools/CMakeLists.txt hands the venv's copy to the suite as HIPDNN_CLANG_FORMAT.
+# clang-tidy -- the Linux lane's tidy runs (CLANG_TIDY_EXE). The single source of the clang-tidy
+#   version: the workflow reads it from here and a step fails if the CMake defaults, the
+#   Dockerfile, Building.md or tidy_changed.py name another one. Ubuntu 24.04's apt carries
+#   clang-tidy up to 20 only. The Windows lane installs it too and does not use it.
 # uhd_gen's requirements -- its pytest suites and TestUhdGenArtifact. The workflow configures
 #   with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, so a module missing here fails configure, not a
 #   silent skip. Included rather than copied so the minimums stay in one file (nested -r
@@ -25,4 +29,5 @@ jsonschema
 PyYAML
 Jinja2
 clang-format==18.1.4
+clang-tidy==23.1.4
 -r ../projects/hipdnn/tools/uhd_gen/requirements.txt

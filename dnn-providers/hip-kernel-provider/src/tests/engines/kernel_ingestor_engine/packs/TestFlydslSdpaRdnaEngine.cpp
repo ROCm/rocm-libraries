@@ -3987,9 +3987,11 @@ void expectOUnbiasedOverOneSignedValues(RdnaFamily family,
                 run(spec);
             }
             // gfx12's 16-bit dropout is aiw's alone (the prefill engine drops f32 there).
-            if((family == RdnaFamily::AIW
-                || packedArchDeviceProperties().gcnArchName.rfind("gfx12", 0) != 0)
-               && !(shapes == OneSignedShapes::AIW_REMAINDER && bf16))
+            const bool dropoutRuns
+                = family == RdnaFamily::AIW
+                  || packedArchDeviceProperties().gcnArchName.rfind("gfx12", 0) != 0;
+            const bool skippedRemainder = shapes == OneSignedShapes::AIW_REMAINDER && bf16;
+            if(dropoutRuns && !skippedRemainder)
             {
                 SCOPED_TRACE(dtype + ", dropout 0.2");
                 auto spec = base;
@@ -6325,7 +6327,7 @@ TEST(TestFlydslSdpaPackedKernelMatch, RunsPackedSequencesWithLengthsOnTheRdnaPre
     }
     // The aiw object serves either half alone (the controls).
     EXPECT_TRUE(aiwMatches(packedSpec(), makeAiwKernel("bf16", 64, 0)));
-    auto padded = paddedSpec();
+    const auto padded = paddedSpec();
     EXPECT_TRUE(aiwMatches(padded, makeAiwKernel("bf16", 64, 0)));
 }
 
@@ -6786,7 +6788,7 @@ TEST(TestFlydslSdpaDropoutKernelMatch, DropsThroughAKeyStridedMaskOnlyOnTheStrid
         auto strided = makeAiwDropoutKernel("bf16", 64, 0);
         strided.metadata[FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD] = int64_t{1};
         strided.metadata[FLYDSL_SDPA_AIW_BIAS_F32_FIELD] = f32;
-        auto contiguous = strided;
+        const auto contiguous = strided;
         strided.metadata[FLYDSL_SDPA_AIW_BIAS_KSTRIDED_FIELD] = int64_t{1};
         EXPECT_TRUE(aiwMatches(spec, strided)) << "f32 " << f32;
         EXPECT_FALSE(aiwMatches(spec, contiguous)) << "f32 " << f32;
@@ -7873,7 +7875,7 @@ TEST(TestGpuFlydslSdpaAiwDispatch, AddsASinkOfMinusInfinityToRowsNoKeyReaches)
 TEST(TestGpuFlydslSdpaRdnaDispatch, AddsASinkOfMinusInfinityToRowsNoKeyReaches)
 {
     SKIP_IF_NO_DEVICES();
-    auto spec = sinkOfMinusInfinitySpec();
+    const auto spec = sinkOfMinusInfinitySpec();
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE, true);
 }
@@ -9814,7 +9816,7 @@ void expectDropsAtAGenericTierWidth(int64_t headDim)
     {
         SCOPED_TRACE("head_dim " + std::to_string(headDim)
                      + (mask == SdpaMask::NONE ? "" : ", causal"));
-        auto spec = droppingWidthSpec(headDim, mask);
+        const auto spec = droppingWidthSpec(headDim, mask);
         expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
         for(const auto biasType : {DataType::FLOAT, DataType::HALF})
         {
@@ -9870,7 +9872,7 @@ void expectDropsAtThePaddedTiersWidths(PaddedTierSlice slice)
             }
             SCOPED_TRACE("head_dim " + std::to_string(headDim)
                          + (mask == SdpaMask::NONE ? "" : ", causal"));
-            auto spec = droppingWidthSpec(headDim, mask);
+            const auto spec = droppingWidthSpec(headDim, mask);
             expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
                 spec, F16_TOLERANCE, RdnaFamily::AIW);
             for(const auto biasType : {DataType::FLOAT, DataType::HALF})

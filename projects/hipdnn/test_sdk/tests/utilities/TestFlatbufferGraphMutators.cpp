@@ -90,20 +90,20 @@ TEST(TestFlatbufferGraphMutators, MatmulBiasActivGraphPlacesBiasInRequestedOpera
     for(const bool biasInFirstOperand : {false, true})
     {
         SCOPED_TRACE(biasInFirstOperand ? "bias in in_0" : "bias in in_1");
-        auto builder = createValidMatmulBiasActivGraph({4, 8},
-                                                       {8, 1},
-                                                       {8, 5},
-                                                       {5, 1},
-                                                       {4, 5},
-                                                       {5, 1},
-                                                       true,
-                                                       PointwiseMode::RELU_FWD,
-                                                       std::nullopt,
-                                                       std::nullopt,
-                                                       std::nullopt,
-                                                       DataType::FLOAT,
-                                                       std::nullopt,
-                                                       biasInFirstOperand);
+        const auto builder = createValidMatmulBiasActivGraph({4, 8},
+                                                             {8, 1},
+                                                             {8, 5},
+                                                             {5, 1},
+                                                             {4, 5},
+                                                             {5, 1},
+                                                             true,
+                                                             PointwiseMode::RELU_FWD,
+                                                             std::nullopt,
+                                                             std::nullopt,
+                                                             std::nullopt,
+                                                             DataType::FLOAT,
+                                                             std::nullopt,
+                                                             biasInFirstOperand);
         const auto graph = UnPackGraph(builder.GetBufferPointer());
 
         ASSERT_GE(graph->nodes.size(), 2u);
@@ -120,9 +120,9 @@ TEST(TestFlatbufferGraphMutators, MatmulBiasActivGraphPlacesBiasInRequestedOpera
 
 TEST(TestFlatbufferGraphMutators, RaggedTensorMarksFirstNonVirtualTensor)
 {
-    auto mixed = makeMixedTensorGraph();
+    const auto mixed = makeMixedTensorGraph();
 
-    auto builder = makeGraphWithRaggedTensor(pack(mixed));
+    const auto builder = makeGraphWithRaggedTensor(pack(mixed));
     const auto graph = UnPackGraph(builder.GetBufferPointer());
 
     ASSERT_EQ(graph->tensors.size(), mixed.tensors.size());
@@ -141,16 +141,16 @@ TEST(TestFlatbufferGraphMutators, RaggedTensorThrowsWhenNoTensorIsNonVirtual)
     virtualTensor->virtual_ = true;
     graph.tensors.push_back(std::move(virtualTensor));
 
-    auto builder = pack(graph);
+    const auto builder = pack(graph);
     EXPECT_THROW(makeGraphWithRaggedTensor(builder.GetBufferPointer()), std::runtime_error);
     EXPECT_THROW(makeGraphWithRaggedTensor(createEmptyValidGraph()), std::runtime_error);
 }
 
 TEST(TestFlatbufferGraphMutators, TensorAlignmentSetsOnlyFirstDeviceTensor)
 {
-    auto builder = pack(makeMixedTensorGraph());
+    const auto builder = pack(makeMixedTensorGraph());
 
-    auto realigned = makeGraphWithTensorAlignment(builder.GetBufferPointer(), 8);
+    const auto realigned = makeGraphWithTensorAlignment(builder.GetBufferPointer(), 8);
     const auto graph = UnPackGraph(realigned.GetBufferPointer());
 
     constexpr int64_t DEFAULT_ALIGNMENT = 16;
@@ -163,7 +163,7 @@ TEST(TestFlatbufferGraphMutators, TensorAlignmentSetsOnlyFirstDeviceTensor)
 
 TEST(TestFlatbufferGraphMutators, TensorAlignmentAppliesToBuiltGraph)
 {
-    auto realigned = makeGraphWithTensorAlignment(createValidMatmulGraph(), 32);
+    const auto realigned = makeGraphWithTensorAlignment(createValidMatmulGraph(), 32);
     const auto graph = UnPackGraph(realigned.GetBufferPointer());
 
     ASSERT_FALSE(graph->tensors.empty());

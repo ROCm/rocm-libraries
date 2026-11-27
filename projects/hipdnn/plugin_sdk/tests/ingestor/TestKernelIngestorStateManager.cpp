@@ -256,7 +256,7 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto criterion = scopedGraphMatcher("test.graph_criterion", &rejectCriterion);
 
-    auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    const auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     auto second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     second.id = testId(0x82);
     second.kernels = {makeKernel(testId(0x83), "second_pack_kernel", 512, "FLOAT")};
@@ -678,7 +678,7 @@ TEST(TestKernelIngestorStateManager, EveryPackOfOneEngineSharesWhatTheGraphMatch
     // land in a catalog carrying its tokens.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    auto first = makePack({});
+    const auto first = makePack({});
     KernelDescriptorPack second = makePack({});
     second.id = testId(0xB4);
     second.kernels = {makeKernel(testId(0xB5), "second_pack_kernel", 512, "FLOAT")};
@@ -788,7 +788,7 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterSeesEveryPackListingItsMatc
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto filter = scopedCandidateFilter("test.kernel", &keepLargestBlocks);
 
-    auto first = makePack({KERNEL_MATCHER_ID});
+    const auto first = makePack({KERNEL_MATCHER_ID});
     KernelDescriptorPack second = makePack({KERNEL_MATCHER_ID});
     second.id = testId(0xC2);
     second.kernels = {makeKernel(testId(0xC3), "second_pack_kernel", 512, "FLOAT")};
@@ -1398,7 +1398,7 @@ constexpr const char* ENGINE_NAME = "test.decline.engine";
 // ahead of it, arch and graph-scoped, both say plainly that the pack is out.
 TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanReportingZero)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", rejectEveryKernel);
@@ -1425,7 +1425,7 @@ TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanRepor
 // must name the engine itself for a reader attributing the decline.
 TEST(TestKernelIngestorStateManager, ReusingACachedDeclineNamesTheEngine)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", rejectEveryKernel);
@@ -1448,7 +1448,7 @@ TEST(TestKernelIngestorStateManager, ReusingACachedDeclineNamesTheEngine)
 
 TEST(TestKernelIngestorStateManager, APackAdmittingSomeKernelsStillReportsTheCount)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1468,7 +1468,7 @@ TEST(TestKernelIngestorStateManager, APackAdmittingSomeKernelsStillReportsTheCou
 // Several engines share one process log, so every applicability decline names its engine.
 TEST(TestKernelIngestorStateManager, AGraphMatchDeclineNamesTheEngine)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
@@ -1486,7 +1486,7 @@ TEST(TestKernelIngestorStateManager, AGraphMatchDeclineNamesTheEngine)
 
 TEST(TestKernelIngestorStateManager, AKernelForAnotherArchIsDeclinedUnderTheEngineName)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1634,7 +1634,7 @@ TEST(TestKernelIngestorStateManager, IndexesAKpackKernel)
 /// naming each.
 TEST(TestKernelIngestorStateManager, RejectsAnUnadaptedSourceKind)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1673,7 +1673,7 @@ TEST(TestKernelIngestorStateManager, RejectsAnUnadaptedSourceKind)
 /// must not cost the siblings it ships beside.
 TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -1793,10 +1793,10 @@ TEST(TestKernelIngestorStateManager, KeepsAKernelWhoseTwoLaunchesNameOneKernel)
 /// sibling still serves) even though the other launch is adaptable.
 TEST(TestKernelIngestorStateManager, AMultiLaunchKernelIsAdaptableOnlyIfEveryLaunchIs)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
-    auto allAdaptable
+    const auto allAdaptable
         = withLaunches(makeKernel(testId(0x8D), "all_adaptable", 64, "FLOAT"), {"decode", "merge"});
     auto oneNot
         = withLaunches(makeKernel(testId(0x8E), "one_not", 128, "FLOAT"), {"decode", "merge"});
@@ -1814,7 +1814,7 @@ TEST(TestKernelIngestorStateManager, AMultiLaunchKernelIsAdaptableOnlyIfEveryLau
 /// would reach prepare() with no `source` to read. Dropped alone -- its sibling still serves.
 TEST(TestKernelIngestorStateManager, DropsAMultiLaunchKernelUnderASingleLaunchHandler)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const auto definitions = definitionsUnderHandler(
@@ -1833,7 +1833,7 @@ TEST(TestKernelIngestorStateManager, DropsAMultiLaunchKernelUnderASingleLaunchHa
 /// The reverse: a handler that launches two stages cannot launch a kernel that has one.
 TEST(TestKernelIngestorStateManager, DropsASingleLaunchKernelUnderAMultiLaunchHandler)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const auto definitions = definitionsUnderHandler(
@@ -2227,7 +2227,7 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterNarrowsASetSharedAcrossPack
     const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
     const ScopedCandidateFilter filter("test.kernel", &keepBlockSizeAtLeast256);
 
-    auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+    const auto first = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     auto second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     second.id = testId(0x86);
     second.kernels = {makeKernel(testId(0x87), "second_pack_small", 32, "FLOAT"),
@@ -2359,7 +2359,7 @@ TEST(TestKernelIngestorStateManager, ACatalogOutlivesTheManagerThatProducedItsSh
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     auto manager = makeStateManager();
-    auto state = manager->sharedState();
+    const auto state = manager->sharedState();
     const TestGraph graph(makeGraphId(0x91));
     const auto properties = testDeviceProperties();
     const auto catalog = manager->unsortedCatalog(MatchContext{graph, 0, properties});

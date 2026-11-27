@@ -64,6 +64,8 @@ class MigratableMemory : public MigratableMemoryBase<T>
                   "DeviceAlloc must derive from IDeviceAllocator<T>");
 
 public:
+    // The overrides below are instantiated together with the class (they fill its vtable).
+    // NOLINTBEGIN(portability-template-virtual-member-function)
     explicit MigratableMemory(size_t count = 0, hipStream_t stream = nullptr)
         : _count(count)
         , _itemSize(sizeof(T))
@@ -231,6 +233,8 @@ public:
         _hostValid = false;
         _deviceValid = false;
     }
+
+    // NOLINTEND(portability-template-virtual-member-function)
 
 private:
     static void throwOnError(hipError_t err, const char* msg)

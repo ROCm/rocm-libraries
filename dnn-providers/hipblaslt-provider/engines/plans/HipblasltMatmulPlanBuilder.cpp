@@ -306,9 +306,9 @@ void checkComputeTypes(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGrap
                        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
                        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr)
 {
-    uint32_t const matmulAttrIdx = 0;
-    uint32_t const biasAttrIdx = 1;
-    uint32_t const activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
+    const uint32_t matmulAttrIdx = 0;
+    const uint32_t biasAttrIdx = 1;
+    const uint32_t activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
 
     if(graph.getNode(matmulAttrIdx).compute_data_type()
        != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
@@ -477,7 +477,7 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                             opGraph.getTensorMap());
         REJECT_IF_WORKAROUND_ISSUE_9962(handle);
 
-        MatmulPlan const plan(handle, std::move(params));
+        const MatmulPlan plan(handle, std::move(params));
         return true;
     }
     catch(const std::exception& e)
@@ -501,7 +501,7 @@ size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(
                         std::get<1>(nodeAttrs),
                         std::get<2>(nodeAttrs),
                         opGraph.getTensorMap());
-    MatmulPlan const plan(handle, std::move(params));
+    const MatmulPlan plan(handle, std::move(params));
     return plan.getWorkspaceSize(handle);
 }
 

@@ -289,7 +289,7 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::setAttribute(): data type must be set before tensor value");
 
-    auto expectedSize = getDataTypeByteSize(_data.data_type);
+    const auto expectedSize = getDataTypeByteSize(_data.data_type);
     THROW_IF_FALSE(elementCount == expectedSize,
                    HIPDNN_STATUS_BAD_PARAM,
                    "TensorDescriptor::setAttribute(): elementCount (" + std::to_string(elementCount)
@@ -396,7 +396,7 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::getAttribute(): tensor value is not set");
 
-    auto byteSize = getDataTypeByteSize(_data.data_type);
+    const auto byteSize = getDataTypeByteSize(_data.data_type);
     THROW_IF_FALSE(requestedElementCount >= byteSize,
                    HIPDNN_STATUS_BAD_PARAM,
                    "TensorDescriptor::getAttribute(): requestedElementCount ("

@@ -531,22 +531,24 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto identity = engineIdentity(set);
     auto knobs = set.engine.knobs;
-    auto predictions = std::move(set.enginePredictionsByMetric);
-    auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
+    // The two prediction maps and the graph-match symbol bind to const& parameters, so they are
+    // const and passed as they are; std::move there would not avoid a copy.
+    const auto predictions = std::move(set.enginePredictionsByMetric);
+    const auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
     auto provenance = engineBindingProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);
     auto engine = set.engine;
-    auto graphMatchSymbol = engine.graphMatchNativeSymbol;
+    const auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
         std::move(engine),
         makeStateManager<THandle>(std::move(set),
-                                  std::move(graphMatchSymbol),
+                                  graphMatchSymbol,
                                   std::move(describedBy),
                                   std::move(identity),
                                   std::move(knobs)),
         deviceResolver,
-        std::move(predictions),
-        std::move(unavailablePredictionArches),
+        predictions,
+        unavailablePredictionArches,
         std::move(selectorRevision),
         std::move(provenance));
 }

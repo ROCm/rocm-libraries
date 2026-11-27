@@ -82,7 +82,7 @@ std::vector<uint8_t> makeGraph(bool zeroDropout, bool seedAndOffset)
         add(SEED_UID, DataType::INT64, scalar);
         add(OFFSET_UID, DataType::INT64, scalar);
     }
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
@@ -185,7 +185,7 @@ TEST(TestGpuSdpaFwdPlanZeroDropout, DeclinesAProbabilityAboveZeroWithoutADump)
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graph.data(), graph.size()));
 
-    auto unpacked = UnPackGraph(graph.data());
+    const auto unpacked = UnPackGraph(graph.data());
     auto* sdpa = unpacked->nodes.front()->attributes.AsSdpaAttributes();
     ASSERT_NE(sdpa, nullptr);
     sdpa->dropout_probability = 0.1F;
@@ -212,7 +212,7 @@ Fp8Outputs runFp8OnGpu(const fp8::SdpaGraphSpec& spec)
 {
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_data_sdk::types::fp8_e4m3;
-    auto graph = fp8::makeSdpaGraph(spec);
+    const auto graph = fp8::makeSdpaGraph(spec);
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     Tensor<fp8_e4m3> q(dims);
     Tensor<fp8_e4m3> k(dims);
@@ -263,7 +263,7 @@ Fp8Outputs runFp8OnGpu(const fp8::SdpaGraphSpec& spec)
 
 bool fp8ApplicableOnGpu(const fp8::SdpaGraphSpec& spec)
 {
-    auto graph = fp8::makeSdpaGraph(spec);
+    const auto graph = fp8::makeSdpaGraph(spec);
     return hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor().isApplicable(
         graph.GetBufferPointer(), graph.GetSize());
 }

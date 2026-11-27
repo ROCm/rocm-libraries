@@ -42,33 +42,33 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BN_INF_VAR_EXT_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_BN_INF_VAR_EXT_X_DIMS)).set_stride(toVec(K_BN_INF_VAR_EXT_X_STRIDES));
 
-        auto mean = std::make_shared<TensorAttributes>();
+        const auto mean = std::make_shared<TensorAttributes>();
         mean->set_uid(K_BN_INF_VAR_EXT_MEAN_UID).set_name("mean").set_data_type(DataType::FLOAT);
         mean->set_dim(toVec(K_BN_INF_VAR_EXT_MEAN_DIMS))
             .set_stride(toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
-        auto variance = std::make_shared<TensorAttributes>();
+        const auto variance = std::make_shared<TensorAttributes>();
         variance->set_uid(K_BN_INF_VAR_EXT_VARIANCE_UID)
             .set_name("variance")
             .set_data_type(DataType::FLOAT);
         variance->set_dim(toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS))
             .set_stride(toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BN_INF_VAR_EXT_SCALE_UID).set_name("scale").set_data_type(DataType::FLOAT);
         scale->set_dim(toVec(K_BN_INF_VAR_EXT_SCALE_DIMS))
             .set_stride(toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
 
-        auto bias = std::make_shared<TensorAttributes>();
+        const auto bias = std::make_shared<TensorAttributes>();
         bias->set_uid(K_BN_INF_VAR_EXT_BIAS_UID).set_name("bias").set_data_type(DataType::FLOAT);
         bias->set_dim(toVec(K_BN_INF_VAR_EXT_BIAS_DIMS))
             .set_stride(toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
-        auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+        const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
         epsilon->set_uid(K_BN_INF_VAR_EXT_EPSILON_UID)
             .set_name("epsilon")
             .set_data_type(DataType::FLOAT)
@@ -78,7 +78,7 @@ protected:
         BatchnormInferenceAttributesVarianceExt attrs;
         attrs.set_name("test_op");
 
-        auto y = graph->batchnorm_inference_variance_ext(
+        const auto y = graph->batchnorm_inference_variance_ext(
             x, mean, variance, scale, bias, epsilon, attrs);
         y->set_uid(K_BN_INF_VAR_EXT_Y_UID).set_output(true).set_name("y");
 
@@ -92,9 +92,9 @@ protected:
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        BasicBatchnormInferenceVarianceExtRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -194,9 +194,9 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        BatchnormInferenceVarianceExtTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -238,9 +238,9 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        BatchnormInferenceVarianceExtLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -307,37 +307,37 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
        AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("BatchnormInferenceVarianceExtAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BN_INF_VAR_EXT_X_DIMS)).set_stride(toVec(K_BN_INF_VAR_EXT_X_STRIDES));
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_name("mean").set_data_type(DataType::FLOAT);
     mean->set_dim(toVec(K_BN_INF_VAR_EXT_MEAN_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
-    auto variance = std::make_shared<TensorAttributes>();
+    const auto variance = std::make_shared<TensorAttributes>();
     variance->set_name("variance").set_data_type(DataType::FLOAT);
     variance->set_dim(toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BN_INF_VAR_EXT_SCALE_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("bias").set_data_type(DataType::FLOAT);
     bias->set_dim(toVec(K_BN_INF_VAR_EXT_BIAS_DIMS))
         .set_stride(toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("epsilon")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
@@ -346,15 +346,15 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     BatchnormInferenceAttributesVarianceExt attrs;
     attrs.set_name("test_auto_uid");
 
-    auto y
+    const auto y
         = graph->batchnorm_inference_variance_ext(x, mean, variance, scale, bias, epsilon, attrs);
     y->set_output(true).set_name("y");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u);
 
     // Verify all UIDs are distinct
@@ -416,7 +416,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
 // for a batchnorm inference variance ext graph.
 TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripWithHandle)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -428,7 +428,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripW
     ASSERT_FALSE(jsonData.empty());
 
     // Deserialize from JSON with handle
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -439,7 +439,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting, JsonRoundTripW
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
 
     // Verify tensor count (x, mean, variance, scale, bias, epsilon, y = 7)
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u)
         << "Expected 7 tensors in lifted batchnorm inference variance ext graph";
 

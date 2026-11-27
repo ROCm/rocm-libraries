@@ -303,7 +303,7 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
 TEST(TestCorpusManifest, AnOriginCarryingACommaDoesNotShiftTheRow)
 {
     // `origin` is free text, so it is the column an unquoted writer would break.
-    auto entry = sdpaEntry("a", 1, 4096, "kernel", "pack.kdp.json, 6 kernels", "decode_long");
+    const auto entry = sdpaEntry("a", 1, 4096, "kernel", "pack.kdp.json, 6 kernels", "decode_long");
     const auto rows = parseCsv(corpusManifestCsv({entry}));
 
     ASSERT_EQ(rows.size(), 2u);

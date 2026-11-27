@@ -457,12 +457,14 @@ private:
         const auto& dims = grad->get_dim();
         if(!dims.empty())
         {
-            HIPDNN_RETURN_IF_NE(dims.size(),
-                                sourceDims.size(),
-                                ErrorCode::INVALID_VALUE,
-                                "SdpaBwdNode: " + gradName + " rank must equal " + sourceName
-                                    + " rank (" + std::to_string(sourceDims.size()) + "), got "
-                                    + std::to_string(dims.size()));
+            if(dims.size() != sourceDims.size())
+            {
+                std::string message = "SdpaBwdNode: ";
+                message.append(gradName).append(" rank must equal ").append(sourceName);
+                message.append(" rank (").append(std::to_string(sourceDims.size()));
+                message.append("), got ").append(std::to_string(dims.size()));
+                return {ErrorCode::INVALID_VALUE, message};
+            }
             for(size_t i = 0; i < dims.size(); ++i)
             {
                 if(dims[i] != sourceDims[i])

@@ -253,7 +253,7 @@ public:
                                    const std::vector<uint8_t>& deviceKey,
                                    RankingLookupStatus* outStatus = nullptr) const override
     {
-        auto setStatus = [outStatus](RankingLookupStatus status) {
+        const auto setStatus = [outStatus](RankingLookupStatus status) {
             if(outStatus != nullptr)
             {
                 *outStatus = status;

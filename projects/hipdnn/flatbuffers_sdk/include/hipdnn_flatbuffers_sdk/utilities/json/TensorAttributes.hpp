@@ -29,7 +29,7 @@ inline void to_json(nlohmann::json& tensorAttrJson,
     }
 
     // Serialize TensorValue union if present
-    auto valueType = tensorAttr.value_type();
+    const auto valueType = tensorAttr.value_type();
     if(valueType != data_objects::TensorValue::NONE)
     {
         tensorAttrJson["value_type"] = valueType;
@@ -73,11 +73,11 @@ template <>
 inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                const nlohmann::json& entry)
 {
-    auto uid = entry.at("uid").get<int64_t>();
-    auto name = entry.at("name").get<std::string>();
-    auto dataType = entry.at("data_type").get<data_objects::DataType>();
-    auto dims = entry.at("dims").get<std::vector<int64_t>>();
-    auto strides = entry.at("strides").get<std::vector<int64_t>>();
+    const auto uid = entry.at("uid").get<int64_t>();
+    const auto name = entry.at("name").get<std::string>();
+    const auto dataType = entry.at("data_type").get<data_objects::DataType>();
+    const auto dims = entry.at("dims").get<std::vector<int64_t>>();
+    const auto strides = entry.at("strides").get<std::vector<int64_t>>();
     const bool isVirtual = entry.at("virtual").get<bool>();
     const bool isRuntimePassByValue = entry.value("is_runtime_pass_by_value", false);
     const int64_t alignment = entry.value("alignment", INT64_C(16));
@@ -91,7 +91,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
     // Check if TensorValue union is present
     if(entry.contains("value_type"))
     {
-        auto valueType = entry.at("value_type").get<data_objects::TensorValue>();
+        const auto valueType = entry.at("value_type").get<data_objects::TensorValue>();
 
         // Deserialize value based on type
         flatbuffers::Offset<void> valueOffset;
@@ -99,56 +99,56 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
         {
         case data_objects::TensorValue::Float32Value:
         {
-            auto val = entry.at("value").get<float>();
+            const auto val = entry.at("value").get<float>();
             const data_objects::Float32Value floatVal(val);
             valueOffset = builder.CreateStruct(floatVal).Union();
             break;
         }
         case data_objects::TensorValue::Float16Value:
         {
-            auto val = entry.at("value").get<float>();
+            const auto val = entry.at("value").get<float>();
             const data_objects::Float16Value halfVal(val);
             valueOffset = builder.CreateStruct(halfVal).Union();
             break;
         }
         case data_objects::TensorValue::BFloat16Value:
         {
-            auto val = entry.at("value").get<float>();
+            const auto val = entry.at("value").get<float>();
             const data_objects::BFloat16Value bfloatVal(val);
             valueOffset = builder.CreateStruct(bfloatVal).Union();
             break;
         }
         case data_objects::TensorValue::Float8Value:
         {
-            auto val = entry.at("value").get<uint8_t>();
+            const auto val = entry.at("value").get<uint8_t>();
             const data_objects::Float8Value float8Val(val);
             valueOffset = builder.CreateStruct(float8Val).Union();
             break;
         }
         case data_objects::TensorValue::Int32Value:
         {
-            auto val = entry.at("value").get<int32_t>();
+            const auto val = entry.at("value").get<int32_t>();
             const data_objects::Int32Value intVal(val);
             valueOffset = builder.CreateStruct(intVal).Union();
             break;
         }
         case data_objects::TensorValue::Int64Value:
         {
-            auto val = entry.at("value").get<int64_t>();
+            const auto val = entry.at("value").get<int64_t>();
             const data_objects::Int64Value int64Val(val);
             valueOffset = builder.CreateStruct(int64Val).Union();
             break;
         }
         case data_objects::TensorValue::Float64Value:
         {
-            auto val = entry.at("value").get<double>();
+            const auto val = entry.at("value").get<double>();
             const data_objects::Float64Value doubleVal(val);
             valueOffset = builder.CreateStruct(doubleVal).Union();
             break;
         }
         case data_objects::TensorValue::BoolValue:
         {
-            auto val = entry.at("value").get<bool>();
+            const auto val = entry.at("value").get<bool>();
             const data_objects::BoolValue boolVal(val);
             valueOffset = builder.CreateStruct(boolVal).Union();
             break;

@@ -78,13 +78,13 @@ hipdnn_data_sdk::utilities::Tensor<T>
 
     hipdnn_data_sdk::utilities::Tensor<T> tensor(dims);
 
-    auto cols = dims.back();
+    const auto cols = dims.back();
 
     // outerDims = [batch..., rows] — everything except the last dim (cols)
-    auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
+    const auto outerDims = std::vector<int64_t>(dims.begin(), dims.end() - 1);
 
     iterateAlongDimensions(outerDims, [&](const std::vector<int64_t>& outerIndices) {
-        auto row = outerIndices.back();
+        const auto row = outerIndices.back();
         auto fullIndices = outerIndices;
         fullIndices.push_back(0);
 
@@ -110,7 +110,7 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases();
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, float, float>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
 
     auto bRowValues100 = std::vector<double>(100, 1.0);
 
@@ -143,7 +143,7 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<floa
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<float, double, float>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
 
     return {
         // K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,u)*4 + 2*4*u
@@ -161,8 +161,8 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<floa
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, float, float>>()
 {
-    auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {// K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,uFloat)*4 + 4*uHalf
             {{2, 1},
@@ -183,7 +183,7 @@ std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half
 template <>
 std::vector<MatmulToleranceTestCase> getMatmulToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     auto bRowValues100 = std::vector<double>(100, 1.0);
 
@@ -205,8 +205,8 @@ template <>
 std::vector<MatmulToleranceTestCase>
     getMatmulToleranceTestCases<TypeTriple<bfloat16, float, float>>()
 {
-    auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
-    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    const auto uFloat = static_cast<double>(std::numeric_limits<float>::epsilon());
+    const auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
 
     return {// K=1: ||A||_inf=2, ||B||_inf=2. Tol = gamma(1,uFloat)*4 + 4*uBf16
             {{2, 1},
@@ -228,7 +228,7 @@ template <>
 std::vector<MatmulToleranceTestCase>
     getMatmulToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
 
     auto bRowValues50 = std::vector<double>(50, 1.0);
 
@@ -264,7 +264,7 @@ protected:
             auto a = createTensorFromRowValues<In>(tc.aDims, tc.aRowValues);
             auto b = createTensorFromRowValues<In>(tc.bDims, tc.bRowValues);
 
-            auto tolerance = calculateMatmulTolerance<Out, In, Comp>(a, b);
+            const auto tolerance = calculateMatmulTolerance<Out, In, Comp>(a, b);
             EXPECT_NEAR(tolerance, static_cast<float>(tc.expectedTolerance), 1e-10f) << tc;
         }
     }
@@ -371,7 +371,7 @@ TEST(TestCalculateMatmulTolerance, ThrowsOnSingularity)
     // For bfloat16, epsilon = 2^-7 ≈ 7.81e-3
     // K=100: nU = 2*100*7.81e-3 = 1.562 >= 0.01 → statistical bound
     // gamma = 6 * sqrt(200) * 7.81e-3 ≈ 0.663 >= 0.5 → overflow
-    auto bRowValues100 = std::vector<double>(100, 1.0);
+    const auto bRowValues100 = std::vector<double>(100, 1.0);
     auto a = createTensorFromRowValues<bfloat16>({2, 100}, {1.0, 2.0});
     auto b = createTensorFromRowValues<bfloat16>({100, 2}, bRowValues100);
 
@@ -386,7 +386,7 @@ TEST(TestCalculateMatmulTolerance, ThrowsOnOutputOverflow)
     // A = 2x10, rows={1e5, 1e5}. ||A||_inf = 10 * 1e5 = 1e6
     // B = 10x2, all rows 1e5. ||B||_inf = 2 * 1e5 = 2e5
     // Product will exceed half max (65504)
-    auto bRowValues10 = std::vector<double>(10, 1.0e5);
+    const auto bRowValues10 = std::vector<double>(10, 1.0e5);
     auto a = createTensorFromRowValues<float>({2, 10}, {1.0e5, 1.0e5});
     auto b = createTensorFromRowValues<float>({10, 2}, bRowValues10);
 

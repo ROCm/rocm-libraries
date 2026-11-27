@@ -753,7 +753,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -762,7 +762,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -786,7 +786,7 @@ TEST(TestPointwisePlanBuilder, PlanCarriesNodeComputeType)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::HALF,
@@ -796,7 +796,7 @@ TEST(TestPointwisePlanBuilder, PlanCarriesNodeComputeType)
                                DataType::HALF>
         patient;
     ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     EXPECT_NE((dynamic_cast<PointwisePlan<hipdnn_data_sdk::types::half,
                                           hipdnn_data_sdk::types::half,
@@ -846,7 +846,7 @@ static float executeHalfAddWithCompute()
                                ComputeDataTypeEnum,
                                DataType::FLOAT>
         planBuilder;
-    auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     plan->execute(variantPack);
 
     return output->getHostValue(0, 0, 0, 0);
@@ -878,7 +878,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -887,7 +887,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -912,7 +912,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -921,7 +921,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -946,7 +946,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -955,7 +955,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -980,7 +980,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -989,7 +989,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -1014,7 +1014,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1055,7 +1055,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableBinary)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1089,7 +1089,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryGelu)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1126,7 +1126,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryGeluApproxTanh)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1163,7 +1163,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnarySwish)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1200,7 +1200,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryExp)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1209,7 +1209,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryExp)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -1237,7 +1237,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinaryDiv)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1246,7 +1246,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinaryDiv)
                                DataType::FLOAT,
                                DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, float, float>*>(builtPlan.get())
@@ -1271,7 +1271,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryExp)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1312,7 +1312,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionGenIndex)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1321,7 +1321,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionGenIndex)
                                DataType::FLOAT,
                                DataType::INT32>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<PointwisePlan<float, float, float, int32_t, float>*>(builtPlan.get())
@@ -1341,7 +1341,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableGenIndexWithoutAxisIsDeclined)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1374,7 +1374,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableGenIndex)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT,
@@ -1447,16 +1447,16 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
 
     const auto buildNode
         = [](flatbuffers::FlatBufferBuilder& fbb, PointwiseMode mode) -> const Node& {
-        auto pointwiseAttributes = CreatePointwiseAttributes(fbb,
-                                                             mode,
-                                                             flatbuffers::nullopt,
-                                                             flatbuffers::nullopt,
-                                                             flatbuffers::nullopt,
-                                                             flatbuffers::nullopt,
-                                                             1,
-                                                             flatbuffers::nullopt,
-                                                             flatbuffers::nullopt,
-                                                             2);
+        const auto pointwiseAttributes = CreatePointwiseAttributes(fbb,
+                                                                   mode,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   1,
+                                                                   flatbuffers::nullopt,
+                                                                   flatbuffers::nullopt,
+                                                                   2);
         fbb.Finish(CreateNode(fbb,
                               0,
                               DataType::FLOAT,
@@ -2662,11 +2662,11 @@ TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableShapes)
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
     const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
     const auto secondInputUid
         = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>().in_1_tensor_uid().value();
-    for(auto& tensor : graphT->tensors)
+    for(const auto& tensor : graphT->tensors)
     {
         if(tensor->uid == secondInputUid)
         {
@@ -2719,7 +2719,7 @@ TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
     const std::vector<int64_t> dims = {1, 2, 2, 2};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -2727,13 +2727,13 @@ TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_frontend::DataType::FLOAT, dims, strides);
     xAttr.set_uid(1);
-    auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     // Baked constant, runtime scalar with a default, and pure runtime scalar
-    auto baked = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(2.0f);
-    auto runtimeWithDefault = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto baked = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(2.0f);
+    const auto runtimeWithDefault = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         4.0f, hipdnn_frontend::graph::ScalarType::RUNTIME_PARAM);
-    auto pureRuntime = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto pureRuntime = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     pureRuntime->set_dim({1}).set_stride({1});
     pureRuntime->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
     baked->set_uid(2);
@@ -2749,9 +2749,9 @@ TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
 
     // added = x + baked, multiplied = added * runtimeWithDefault, out = pureRuntime - multiplied.
     // Each intermediate is also an output so every operation can be checked on its own.
-    auto added = graph->pointwise(x, baked, addAttrs);
-    auto multiplied = graph->pointwise(added, runtimeWithDefault, mulAttrs);
-    auto out = graph->pointwise(pureRuntime, multiplied, subAttrs);
+    const auto added = graph->pointwise(x, baked, addAttrs);
+    const auto multiplied = graph->pointwise(added, runtimeWithDefault, mulAttrs);
+    const auto out = graph->pointwise(pureRuntime, multiplied, subAttrs);
     int64_t outUid = 5;
     for(const auto& output : {added, multiplied, out})
     {
@@ -2762,7 +2762,7 @@ TEST(TestPointwisePlanBuilder, ScalarOperandTypes)
             .set_output(true);
     }
 
-    auto validateResult = graph->validate();
+    const auto validateResult = graph->validate();
     ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -2823,13 +2823,13 @@ TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableFirstAndThirdInputs)
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
-        auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+        const auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
         const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
         const auto& originalAttributes
             = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
         const auto editedUid = editThirdInput ? originalAttributes.in_2_tensor_uid().value()
                                               : originalAttributes.in_0_tensor_uid();
-        for(auto& tensor : graphT->tensors)
+        for(const auto& tensor : graphT->tensors)
         {
             if(tensor->uid == editedUid)
             {
@@ -2852,7 +2852,7 @@ TEST(TestPointwisePlanBuilder, ScalarOperandsOfUnaryAndTernaryNodes)
     const std::vector<int64_t> dims = {1, 1, 1, 4};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -2860,12 +2860,13 @@ TEST(TestPointwisePlanBuilder, ScalarOperandsOfUnaryAndTernaryNodes)
     auto maskAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "mask", hipdnn_frontend::DataType::BOOLEAN, dims, strides);
     maskAttr.set_uid(1);
-    auto mask = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(maskAttr));
+    const auto mask
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(maskAttr));
 
     // The unary node reads a baked scalar, and the ternary node selects between a runtime scalar
     // with a default and the unary result
-    auto absInput = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(-3.0f);
-    auto selectOnTrue = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto absInput = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(-3.0f);
+    const auto selectOnTrue = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         5.0f, hipdnn_frontend::graph::ScalarType::RUNTIME_PARAM);
     absInput->set_uid(2);
     selectOnTrue->set_uid(3);
@@ -2875,19 +2876,19 @@ TEST(TestPointwisePlanBuilder, ScalarOperandsOfUnaryAndTernaryNodes)
     hipdnn_frontend::graph::PointwiseAttributes selectAttrs;
     selectAttrs.set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
 
-    auto absOut = graph->pointwise(absInput, absAttrs);
+    const auto absOut = graph->pointwise(absInput, absAttrs);
     absOut->set_uid(4)
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim(dims)
         .set_stride(strides);
-    auto selectOut = graph->pointwise(selectOnTrue, absOut, mask, selectAttrs);
+    const auto selectOut = graph->pointwise(selectOnTrue, absOut, mask, selectAttrs);
     selectOut->set_uid(5)
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim(dims)
         .set_stride(strides)
         .set_output(true);
 
-    auto validateResult = graph->validate();
+    const auto validateResult = graph->validate();
     ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -2920,20 +2921,20 @@ TEST(TestPointwisePlanBuilder, DoubleAndInt32ScalarOperands)
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
     // FP64 scalar: 1 + 1e-12 is not representable in float
-    auto doubleGraph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto doubleGraph = std::make_shared<hipdnn_frontend::graph::Graph>();
     doubleGraph->set_io_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_compute_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_intermediate_data_type(hipdnn_frontend::DataType::DOUBLE);
     auto doubleAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_frontend::DataType::DOUBLE, dims, strides);
     doubleAttr.set_uid(1);
-    auto doubleX
+    const auto doubleX
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(doubleAttr));
-    auto doubleScalar = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(1e-12);
+    const auto doubleScalar = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(1e-12);
     doubleScalar->set_uid(2);
     hipdnn_frontend::graph::PointwiseAttributes addAttrs;
     addAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
-    auto doubleOut = doubleGraph->pointwise(doubleX, doubleScalar, addAttrs);
+    const auto doubleOut = doubleGraph->pointwise(doubleX, doubleScalar, addAttrs);
     doubleOut->set_uid(3)
         .set_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_dim(dims)
@@ -2954,17 +2955,18 @@ TEST(TestPointwisePlanBuilder, DoubleAndInt32ScalarOperands)
     EXPECT_EQ(doubleOutData.getHostValue(0, 0, 0, 1), 1.0 + 1e-12);
 
     // INT32 scalar
-    auto intGraph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto intGraph = std::make_shared<hipdnn_frontend::graph::Graph>();
     intGraph->set_io_data_type(hipdnn_frontend::DataType::INT32)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::INT32);
     auto intAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "x", hipdnn_frontend::DataType::INT32, dims, strides);
     intAttr.set_uid(1);
-    auto intX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(intAttr));
-    auto intScalar = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(int32_t{40});
+    const auto intX
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(intAttr));
+    const auto intScalar = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(int32_t{40});
     intScalar->set_uid(2);
-    auto intOut = intGraph->pointwise(intX, intScalar, addAttrs);
+    const auto intOut = intGraph->pointwise(intX, intScalar, addAttrs);
     intOut->set_uid(3)
         .set_data_type(hipdnn_frontend::DataType::INT32)
         .set_dim(dims)

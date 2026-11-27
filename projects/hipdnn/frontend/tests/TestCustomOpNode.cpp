@@ -46,8 +46,8 @@ TEST(TestCustomOpNode, GatherTensors)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op").set_inputs({input}).set_outputs({output});
@@ -68,14 +68,14 @@ TEST(TestCustomOpNode, GatherTensorsIncludesRaggedOffsetAux)
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
     // The aux tensors carry no UID; gathering them is what lets the graph assign one.
-    auto inputAux = std::make_shared<TensorAttributes>();
+    const auto inputAux = std::make_shared<TensorAttributes>();
     inputAux->set_dim({5}).set_stride({1}).set_data_type(DataType::INT32);
-    auto outputAux = std::make_shared<TensorAttributes>();
+    const auto outputAux = std::make_shared<TensorAttributes>();
     outputAux->set_dim({5}).set_stride({1}).set_data_type(DataType::INT32);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
     input->set_ragged_offset(inputAux);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
     output->set_ragged_offset(outputAux);
 
     CustomOpAttributes attr;
@@ -98,17 +98,17 @@ TEST(TestCustomOpNode, GetInputOutputTensorAttributes)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto inputA = makeTensor("input_a", 1, {2, 3}, DataType::FLOAT);
-    auto inputB = makeTensor("input_b", 2, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 3, {2, 3}, DataType::FLOAT);
+    const auto inputA = makeTensor("input_a", 1, {2, 3}, DataType::FLOAT);
+    const auto inputB = makeTensor("input_b", 2, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 3, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op").set_inputs({inputA, inputB}).set_outputs({output});
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto inputs = node.getNodeInputTensorAttributes();
-    auto outputs = node.getNodeOutputTensorAttributes();
+    const auto inputs = node.getNodeInputTensorAttributes();
+    const auto outputs = node.getNodeOutputTensorAttributes();
 
     EXPECT_EQ(inputs.size(), 2u);
     EXPECT_EQ(outputs.size(), 1u);
@@ -119,8 +119,8 @@ TEST(TestCustomOpNode, PreValidateSucceeds)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -130,7 +130,7 @@ TEST(TestCustomOpNode, PreValidateSucceeds)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
 }
 
@@ -139,11 +139,11 @@ TEST(TestCustomOpNode, PreValidateSucceedsWithMultipleInputsAndOutputs)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto inputA = makeTensor("input_a", 1, {2, 3}, DataType::FLOAT);
-    auto inputB = makeTensor("input_b", 2, {2, 3}, DataType::FLOAT);
-    auto inputC = makeTensor("input_c", 3, {2, 3}, DataType::FLOAT);
-    auto outputA = makeTensor("output_a", 4, {2, 3}, DataType::FLOAT);
-    auto outputB = makeTensor("output_b", 5, {2, 3}, DataType::FLOAT);
+    const auto inputA = makeTensor("input_a", 1, {2, 3}, DataType::FLOAT);
+    const auto inputB = makeTensor("input_b", 2, {2, 3}, DataType::FLOAT);
+    const auto inputC = makeTensor("input_c", 3, {2, 3}, DataType::FLOAT);
+    const auto outputA = makeTensor("output_a", 4, {2, 3}, DataType::FLOAT);
+    const auto outputB = makeTensor("output_b", 5, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -153,7 +153,7 @@ TEST(TestCustomOpNode, PreValidateSucceedsWithMultipleInputsAndOutputs)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
 }
 
@@ -162,14 +162,14 @@ TEST(TestCustomOpNode, PreValidateSucceedsWithNoInputs)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto output = makeTensor("output", 1, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 1, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op").set_custom_op_id("example.generator").set_outputs({output});
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
 }
 
@@ -178,7 +178,7 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullInput)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -188,7 +188,7 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullInput)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -197,7 +197,7 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullOutput)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -207,7 +207,7 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullOutput)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -216,8 +216,8 @@ TEST(TestCustomOpNode, PostValidateSucceeds)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -228,7 +228,7 @@ TEST(TestCustomOpNode, PostValidateSucceeds)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.post_validate_node();
+    const auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
 }
 
@@ -237,8 +237,8 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutCustomOpId)
     GraphAttributes graphAttrs;
     graphAttrs.set_compute_data_type(DataType::FLOAT);
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -248,7 +248,7 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutCustomOpId)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.post_validate_node();
+    const auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -256,8 +256,8 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutComputeDataType)
 {
     const GraphAttributes graphAttrs;
 
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
+    const auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
+    const auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
 
     CustomOpAttributes attr;
     attr.set_name("test_op")
@@ -267,7 +267,7 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutComputeDataType)
 
     const CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.post_validate_node();
+    const auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_NE(err.get_message().find("compute_data_type"), std::string::npos) << err.get_message();
     EXPECT_NE(err.get_message().find("Set the graph data types before adding nodes"),
@@ -281,10 +281,10 @@ TEST(TestCustomOpNode, InferPropertiesPropagatesContext)
     graphAttrs.set_compute_data_type(DataType::FLOAT);
     graphAttrs.set_io_data_type(DataType::HALF);
 
-    auto input = std::make_shared<TensorAttributes>();
+    const auto input = std::make_shared<TensorAttributes>();
     input->set_uid(1).set_dim({2, 3}).set_stride({3, 1});
 
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     output->set_uid(2).set_dim({2, 3}).set_stride({3, 1});
 
     CustomOpAttributes attr;
@@ -292,7 +292,7 @@ TEST(TestCustomOpNode, InferPropertiesPropagatesContext)
 
     CustomOpNode node(std::move(attr), graphAttrs);
 
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
     EXPECT_EQ(input->get_data_type(), DataType::HALF);
     EXPECT_EQ(output->get_data_type(), DataType::HALF);

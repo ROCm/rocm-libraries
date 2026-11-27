@@ -283,7 +283,7 @@ MxMatmulPlan::MxMatmulPlan(const HipdnnEnginePluginHandle& handle, MxMatmulParam
     hipblasLtMatmulPreference_t prefHandle;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&prefHandle));
     // Own the preference via RAII.
-    hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> const pref(
+    const hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> pref(
         prefHandle, [](hipblasLtMatmulPreference_t p) {
             LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceDestroy(p));
         });

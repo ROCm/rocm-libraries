@@ -504,7 +504,7 @@ private:
     void applyGeometryToResolved() const
     {
         const std::lock_guard<std::mutex> lock(_memo->mutex);
-        for(auto& entry : _memo->byOrdinal)
+        for(const auto& entry : _memo->byOrdinal)
         {
             applyGeometry(*entry.second.kernel);
         }
@@ -534,7 +534,8 @@ private:
     compilation::IRunnableKernel& storeResolved(int deviceOrdinal, Resolved resolved) const
     {
         requireLoaded(deviceOrdinal, resolved);
-        auto& entry = _memo->byOrdinal.emplace(deviceOrdinal, std::move(resolved)).first->second;
+        const auto& entry
+            = _memo->byOrdinal.emplace(deviceOrdinal, std::move(resolved)).first->second;
         return *entry.kernel;
     }
 

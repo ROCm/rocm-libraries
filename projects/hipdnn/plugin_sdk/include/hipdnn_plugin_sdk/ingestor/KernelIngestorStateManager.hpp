@@ -722,7 +722,7 @@ private:
 
         for(const auto& field : schema.fields)
         {
-            auto it = kernel.metadata.find(field.name);
+            const auto it = kernel.metadata.find(field.name);
 
             if(it == kernel.metadata.end())
             {
@@ -1086,7 +1086,7 @@ public:
             }
         }
 
-        auto ranking = _slots.front().heuristic->calibratedRanking(full, context, modelId);
+        const auto ranking = _slots.front().heuristic->calibratedRanking(full, context, modelId);
 
         if(key.has_value() && !ranking.empty())
         {
@@ -1586,7 +1586,7 @@ public:
     /// @throws std::runtime_error if the kernel's dispatch descriptor is unknown.
     const IKernelDispatchHandler<THandle>* dispatchHandlerFor(const KernelDefinition& kernel) const
     {
-        auto it = _dispatches.find(kernel.dispatchId);
+        const auto it = _dispatches.find(kernel.dispatchId);
         if(it == _dispatches.end())
         {
             throw std::runtime_error("kernel '" + toString(kernel.kernelId)

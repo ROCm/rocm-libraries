@@ -36,7 +36,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPaths = getPluginPaths();
+        const auto pluginPaths = getPluginPaths();
         std::vector<const char*> pathPtrs;
         pathPtrs.reserve(pluginPaths.size());
         for(const auto& p : pluginPaths)

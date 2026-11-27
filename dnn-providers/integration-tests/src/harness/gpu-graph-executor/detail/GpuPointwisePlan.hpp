@@ -279,7 +279,7 @@ public:
         }
 
         // CMP_GT is the only mode with a BOOLEAN output, and BOOLEAN output is only valid for it.
-        auto op = nodeAttributes->operation();
+        const auto op = nodeAttributes->operation();
         if(op == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT)
         {
             if(OutputDataTypeEnum != hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN)
@@ -378,7 +378,7 @@ public:
             return false;
         }
 
-        auto op = nodeAttributes->operation();
+        const auto op = nodeAttributes->operation();
 
         switch(op)
         {

@@ -39,7 +39,7 @@ struct ReluForward
     template <typename X>
     OutputType operator()(const X& x) const
     {
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         ComputeType result;
         if(xCompute <= lowerClip)
@@ -65,8 +65,9 @@ struct SigmoidForward
     OutputType operator()(const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        auto xCompute = static_cast<ComputeType>(x);
-        auto result = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-xCompute));
+        const auto xCompute = static_cast<ComputeType>(x);
+        const auto result
+            = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-xCompute));
         return static_cast<OutputType>(result);
     }
 };
@@ -78,8 +79,8 @@ struct TanhForward
     OutputType operator()(const X& x) const
     {
         using hipdnn_data_sdk::types::tanh;
-        auto xCompute = static_cast<ComputeType>(x);
-        auto result = tanh(xCompute);
+        const auto xCompute = static_cast<ComputeType>(x);
+        const auto result = tanh(xCompute);
         return static_cast<OutputType>(result);
     }
 };
@@ -101,7 +102,7 @@ struct AbsoluteValue
     OutputType operator()(const X& x) const
     {
         using hipdnn_data_sdk::types::abs;
-        auto result = abs(static_cast<ComputeType>(x));
+        const auto result = abs(static_cast<ComputeType>(x));
         return static_cast<OutputType>(result);
     }
 };
@@ -112,7 +113,7 @@ struct Negation
     template <typename X>
     OutputType operator()(const X& x) const
     {
-        auto result = -static_cast<ComputeType>(x);
+        const auto result = -static_cast<ComputeType>(x);
         return static_cast<OutputType>(result);
     }
 };
@@ -125,11 +126,11 @@ struct GeluForward
     {
         using hipdnn_data_sdk::types::erf;
         using hipdnn_data_sdk::types::sqrt;
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto xCompute = static_cast<ComputeType>(x);
         // GELU(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
         static const ComputeType s_kSqrt2 = sqrt(static_cast<ComputeType>(2));
-        auto result = static_cast<ComputeType>(0.5) * xCompute
-                      * (static_cast<ComputeType>(1) + erf(xCompute / s_kSqrt2));
+        const auto result = static_cast<ComputeType>(0.5) * xCompute
+                            * (static_cast<ComputeType>(1) + erf(xCompute / s_kSqrt2));
         return static_cast<OutputType>(result);
     }
 };
@@ -142,14 +143,14 @@ struct GeluApproxTanhForward
     {
         using hipdnn_data_sdk::types::sqrt;
         using hipdnn_data_sdk::types::tanh;
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
         static const ComputeType s_kSqrt2OverPi
             = sqrt(static_cast<ComputeType>(2) / static_cast<ComputeType>(PI));
         static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
-        auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
-        auto result = static_cast<ComputeType>(0.5) * xCompute
-                      * (static_cast<ComputeType>(1) + tanh(inner));
+        const auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
+        const auto result = static_cast<ComputeType>(0.5) * xCompute
+                            * (static_cast<ComputeType>(1) + tanh(inner));
         return static_cast<OutputType>(result);
     }
 };
@@ -168,9 +169,9 @@ struct SwishForward
     OutputType operator()(const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto xCompute = static_cast<ComputeType>(x);
         // Swish(x) = x * sigmoid(beta * x) = x / (1 + exp(-beta * x))
-        auto result = xCompute / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
+        const auto result = xCompute / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
         return static_cast<OutputType>(result);
     }
 };
@@ -298,14 +299,14 @@ struct EluForward
     template <typename X>
     OutputType operator()(const X& x) const
     {
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto xCompute = static_cast<ComputeType>(x);
         // ELU(x) = x for x > 0, alpha * expm1(x) otherwise. expm1 avoids the cancellation in
         // exp(x) - 1 for x close to zero.
-        auto result = xCompute > static_cast<ComputeType>(0)
-                          ? xCompute
-                          : alpha
-                                * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
-                                    std::expm1(static_cast<double>(xCompute)));
+        const auto result = xCompute > static_cast<ComputeType>(0)
+                                ? xCompute
+                                : alpha
+                                      * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
+                                          std::expm1(static_cast<double>(xCompute)));
         return static_cast<OutputType>(result);
     }
 };
@@ -323,7 +324,7 @@ struct SoftplusForward
     template <typename X>
     OutputType operator()(const X& x) const
     {
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto xCompute = static_cast<ComputeType>(x);
         // Softplus(x) = log1p(exp(beta * x)) / beta, evaluated in double until the final result so
         // neither exp nor the division by beta underflows in a narrower compute type. log1p avoids
         // rounding 1 + exp(...) to 1 for very negative beta * x. Fall back to x above a threshold of

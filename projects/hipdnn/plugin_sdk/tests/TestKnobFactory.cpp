@@ -10,7 +10,7 @@ TEST(TestKnobFactory, CreateIntKnob)
 {
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int64_t> options = {10, 20, 30};
-    auto knob
+    const auto knob
         = KnobFactory::createIntKnob(builder, "int_knob", "description", 10, 0, 100, 1, options);
     builder.Finish(knob);
 
@@ -40,7 +40,7 @@ TEST(TestKnobFactory, CreateIntKnobDeprecated)
 {
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int64_t> options = {};
-    auto knob = KnobFactory::createIntKnob(
+    const auto knob = KnobFactory::createIntKnob(
         builder, "deprecated_int_knob", "deprecated description", 5, 0, 10, 1, options, true);
     builder.Finish(knob);
 
@@ -54,7 +54,7 @@ TEST(TestKnobFactory, CreateIntKnobDeprecated)
 TEST(TestKnobFactory, CreateFloatKnob)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto knob
+    const auto knob
         = KnobFactory::createFloatKnob(builder, "float_knob", "description", 1.5f, 0.0f, 10.0f);
     builder.Finish(knob);
 
@@ -76,7 +76,7 @@ TEST(TestKnobFactory, CreateFloatKnob)
 TEST(TestKnobFactory, CreateFloatKnobDeprecated)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto knob = KnobFactory::createFloatKnob(
+    const auto knob = KnobFactory::createFloatKnob(
         builder, "deprecated_float_knob", "deprecated description", 0.5f, 0.0f, 1.0f, true);
     builder.Finish(knob);
 
@@ -91,7 +91,7 @@ TEST(TestKnobFactory, CreateStringKnob)
 {
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<std::string> options = {"option1", "option2"};
-    auto knob
+    const auto knob
         = KnobFactory::createStringKnob(builder, "string_knob", "description", "option1", options);
     builder.Finish(knob);
 
@@ -117,7 +117,7 @@ TEST(TestKnobFactory, CreateStringKnobDeprecated)
 {
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<std::string> options = {"a", "b"};
-    auto knob = KnobFactory::createStringKnob(
+    const auto knob = KnobFactory::createStringKnob(
         builder, "deprecated_string_knob", "deprecated description", "a", options, true);
     builder.Finish(knob);
 

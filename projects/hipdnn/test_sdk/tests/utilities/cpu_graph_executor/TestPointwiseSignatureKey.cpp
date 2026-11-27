@@ -41,7 +41,7 @@ public:
         auto fbb = std::make_unique<flatbuffers::FlatBufferBuilder>();
         const std::vector<int64_t> dims = {1};
         const std::vector<int64_t> strides = {1};
-        auto offset
+        const auto offset
             = CreateTensorAttributesDirect(*fbb, uid, "t", DataType::FLOAT, &strides, &dims);
         fbb->Finish(offset);
         _map[uid] = flatbuffers::GetRoot<TensorAttributes>(fbb->GetBufferPointer());
@@ -75,17 +75,17 @@ const Node& buildPointwiseNode(flatbuffers::FlatBufferBuilder& fbb,
                                flatbuffers::Optional<int64_t> in2Uid,
                                int64_t out0Uid)
 {
-    auto pwAttrs = CreatePointwiseAttributes(fbb,
-                                             mode,
-                                             flatbuffers::nullopt,
-                                             flatbuffers::nullopt,
-                                             flatbuffers::nullopt,
-                                             flatbuffers::nullopt,
-                                             in0Uid,
-                                             in1Uid,
-                                             in2Uid,
-                                             out0Uid);
-    auto node
+    const auto pwAttrs = CreatePointwiseAttributes(fbb,
+                                                   mode,
+                                                   flatbuffers::nullopt,
+                                                   flatbuffers::nullopt,
+                                                   flatbuffers::nullopt,
+                                                   flatbuffers::nullopt,
+                                                   in0Uid,
+                                                   in1Uid,
+                                                   in2Uid,
+                                                   out0Uid);
+    const auto node
         = CreateNode(fbb, 0, DataType::FLOAT, NodeAttributes::PointwiseAttributes, pwAttrs.Union());
     fbb.Finish(node);
     return *flatbuffers::GetRoot<Node>(fbb.GetBufferPointer());
@@ -165,8 +165,8 @@ TEST(TestPointwiseSignatureKey, HashFunction)
     const PointwiseSignatureKey key4{
         PointwiseMode::ADD, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4);
 
@@ -176,8 +176,8 @@ TEST(TestPointwiseSignatureKey, HashFunction)
     const PointwiseSignatureKey key6{
         PointwiseMode::SIGMOID_FWD, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
-    auto hash5 = key5.hashSelf();
-    auto hash6 = key6.hashSelf();
+    const auto hash5 = key5.hashSelf();
+    const auto hash6 = key6.hashSelf();
 
     EXPECT_TRUE(hash5 != hash6);
 }
@@ -231,7 +231,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -274,7 +274,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -315,7 +315,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinaryDivide)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -346,7 +346,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapComparison)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -377,7 +377,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBoolean)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -437,8 +437,8 @@ TEST(TestPointwiseSignatureKey, UnorderedSetUsage)
 
 TEST(TestPointwiseSignatureKey, DifferentOperationsAreDifferent)
 {
-    auto unaryModesBitset = hipdnn_flatbuffers_sdk::utilities::getUnaryModesBitset();
-    auto binaryModesBitset = hipdnn_flatbuffers_sdk::utilities::getBinaryModesBitset();
+    const auto unaryModesBitset = hipdnn_flatbuffers_sdk::utilities::getUnaryModesBitset();
+    const auto binaryModesBitset = hipdnn_flatbuffers_sdk::utilities::getBinaryModesBitset();
 
     // Test that all supported operations create different keys
     std::unordered_set<PointwiseSignatureKey, PointwiseSignatureKey> uniqueKeys;
@@ -449,7 +449,7 @@ TEST(TestPointwiseSignatureKey, DifferentOperationsAreDifferent)
     {
         if(unaryModesBitset.test(i))
         {
-            auto op = static_cast<PointwiseMode>(i);
+            const auto op = static_cast<PointwiseMode>(i);
             const PointwiseSignatureKey key{op, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
             uniqueKeys.insert(key);
             ++unaryCount;
@@ -462,7 +462,7 @@ TEST(TestPointwiseSignatureKey, DifferentOperationsAreDifferent)
     {
         if(binaryModesBitset.test(i))
         {
-            auto op = static_cast<PointwiseMode>(i);
+            const auto op = static_cast<PointwiseMode>(i);
             const PointwiseSignatureKey key{op, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
             uniqueKeys.insert(key);
             ++binaryCount;
@@ -585,7 +585,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnaryExp)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -691,9 +691,9 @@ TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredForFusedBiasWithHalfOp
     // A convolution with a bias add: the convolution output is a virtual fp32 tensor, the bias is
     // fp16 or bf16 and the add computes in the bias type. The key order is mode, input0, compute,
     // output, input1.
-    for(auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
+    for(const auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
     {
-        for(auto narrow : {DataType::HALF, DataType::BFLOAT16})
+        for(const auto narrow : {DataType::HALF, DataType::BFLOAT16})
         {
             const PointwiseSignatureKey key{mode, DataType::FLOAT, narrow, DataType::FLOAT, narrow};
             EXPECT_EQ(planBuilders.count(key), 1u) << key;
@@ -705,7 +705,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
 
-    for(auto input : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    for(const auto input : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
         const PointwiseSignatureKey key{
             PointwiseMode::GEN_INDEX, input, DataType::FLOAT, DataType::INT32};
@@ -734,7 +734,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForLogicalOperations)
         PointwiseMode::LOGICAL_NOT, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN};
     EXPECT_EQ(planBuilders.count(notKey), 1u) << notKey;
 
-    for(auto mode : {PointwiseMode::LOGICAL_AND, PointwiseMode::LOGICAL_OR})
+    for(const auto mode : {PointwiseMode::LOGICAL_AND, PointwiseMode::LOGICAL_OR})
     {
         const PointwiseSignatureKey key{
             mode, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN, DataType::BOOLEAN};

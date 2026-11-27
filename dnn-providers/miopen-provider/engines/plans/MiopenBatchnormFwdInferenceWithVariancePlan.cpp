@@ -128,20 +128,20 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnMiopenHandle& ha
     auto beta = static_cast<float>(0);
     const double epsilon = _inferenceParams.epsilonValue(deviceBuffers, numDeviceBuffers);
 
-    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
-    auto varianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+    const auto varianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.variance().uid(), deviceBuffers, numDeviceBuffers);
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut().has_value())
     {
-        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivation(
@@ -166,7 +166,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnMiopenHandle& ha
     }
     else
     {
-        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInference_V2(
             handle.miopenHandle,

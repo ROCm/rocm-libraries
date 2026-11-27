@@ -40,11 +40,11 @@ public:
 
 TEST(TestINode, VisitGraphSingleNode)
 {
-    auto root = std::make_shared<FakeNode>(1);
+    const auto root = std::make_shared<FakeNode>(1);
     std::vector<int> visitedValues;
 
     root->visit([&visitedValues](INode& node) {
-        auto& mockNode = static_cast<FakeNode&>(node);
+        const auto& mockNode = static_cast<FakeNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
 
@@ -58,16 +58,16 @@ TEST(TestINode, VisitGraphWithChildren)
     //       1
     //      / \
     //     2   3
-    auto root = std::make_shared<FakeNode>(1);
-    auto child1 = std::make_shared<FakeNode>(2);
-    auto child2 = std::make_shared<FakeNode>(3);
+    const auto root = std::make_shared<FakeNode>(1);
+    const auto child1 = std::make_shared<FakeNode>(2);
+    const auto child2 = std::make_shared<FakeNode>(3);
 
     root->addChild(child1);
     root->addChild(child2);
 
     std::vector<int> visitedValues;
     root->visit([&visitedValues](INode& node) {
-        auto& mockNode = static_cast<FakeNode&>(node);
+        const auto& mockNode = static_cast<FakeNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
 
@@ -88,11 +88,11 @@ TEST(TestINode, VisitGraphDeepHierarchy)
     //     3   4
     //     |
     //     5
-    auto root = std::make_shared<FakeNode>(1);
-    auto child1 = std::make_shared<FakeNode>(2);
-    auto child2 = std::make_shared<FakeNode>(3);
-    auto child3 = std::make_shared<FakeNode>(4);
-    auto child4 = std::make_shared<FakeNode>(5);
+    const auto root = std::make_shared<FakeNode>(1);
+    const auto child1 = std::make_shared<FakeNode>(2);
+    const auto child2 = std::make_shared<FakeNode>(3);
+    const auto child3 = std::make_shared<FakeNode>(4);
+    const auto child4 = std::make_shared<FakeNode>(5);
 
     root->addChild(child1);
     child1->addChild(child2);
@@ -101,7 +101,7 @@ TEST(TestINode, VisitGraphDeepHierarchy)
 
     std::vector<int> visitedValues;
     root->visit([&visitedValues](INode& node) {
-        auto& mockNode = static_cast<FakeNode&>(node);
+        const auto& mockNode = static_cast<FakeNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
 
@@ -124,11 +124,11 @@ TEST(TestINode, VisitConstGraphDeepHierarchy)
     //     3   4
     //     |
     //     5
-    auto root = std::make_shared<FakeNode>(1);
-    auto child1 = std::make_shared<FakeNode>(2);
-    auto child2 = std::make_shared<FakeNode>(3);
-    auto child3 = std::make_shared<FakeNode>(4);
-    auto child4 = std::make_shared<FakeNode>(5);
+    const auto root = std::make_shared<FakeNode>(1);
+    const auto child1 = std::make_shared<FakeNode>(2);
+    const auto child2 = std::make_shared<FakeNode>(3);
+    const auto child3 = std::make_shared<FakeNode>(4);
+    const auto child4 = std::make_shared<FakeNode>(5);
 
     root->addChild(child1);
     child1->addChild(child2);
@@ -154,8 +154,8 @@ TEST(TestINode, VisitConstGraphDeepHierarchy)
 
 TEST(TestINode, VisitGraphWithNullChildren)
 {
-    auto root = std::make_shared<FakeNode>(1);
-    auto child1 = std::make_shared<FakeNode>(2);
+    const auto root = std::make_shared<FakeNode>(1);
+    const auto child1 = std::make_shared<FakeNode>(2);
 
     root->addChild(child1);
     root->addChild(nullptr); // Add a null child
@@ -163,7 +163,7 @@ TEST(TestINode, VisitGraphWithNullChildren)
 
     std::vector<int> visitedValues;
     root->visit([&visitedValues](INode& node) {
-        auto& mockNode = static_cast<FakeNode&>(node);
+        const auto& mockNode = static_cast<FakeNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
 
@@ -177,15 +177,15 @@ TEST(TestINode, VisitGraphWithNullChildren)
 TEST(TestINode, VisitGraphReferenceOverload)
 {
     FakeNode root(1);
-    auto child1 = std::make_shared<FakeNode>(2);
-    auto child2 = std::make_shared<FakeNode>(3);
+    const auto child1 = std::make_shared<FakeNode>(2);
+    const auto child2 = std::make_shared<FakeNode>(3);
 
     root.addChild(child1);
     root.addChild(child2);
 
     std::vector<int> visitedValues;
     root.visit([&visitedValues](INode& node) {
-        auto& mockNode = static_cast<FakeNode&>(node);
+        const auto& mockNode = static_cast<FakeNode&>(node);
         visitedValues.push_back(mockNode.value);
     });
 
@@ -197,9 +197,9 @@ TEST(TestINode, VisitGraphReferenceOverload)
 
 TEST(TestINode, VisitGraphModifyNodes)
 {
-    auto root = std::make_shared<FakeNode>(1);
-    auto child1 = std::make_shared<FakeNode>(2);
-    auto child2 = std::make_shared<FakeNode>(3);
+    const auto root = std::make_shared<FakeNode>(1);
+    const auto child1 = std::make_shared<FakeNode>(2);
+    const auto child2 = std::make_shared<FakeNode>(3);
 
     root->addChild(child1);
     root->addChild(child2);
@@ -221,7 +221,7 @@ TEST(TestINode, CreateOperationReturnsError)
     std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
     std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
 
-    auto err = node.create_operation(tensorDescs, operations);
+    const auto err = node.create_operation(tensorDescs, operations);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.err_msg.find("Not implemented") != std::string::npos);

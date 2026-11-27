@@ -62,12 +62,12 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "RMSNormBackwardNode missing dscale (output) for pre-validation");
 
-        auto dyTensor = attributes.get_dy();
-        auto xTensor = attributes.get_x();
-        auto scaleTensor = attributes.get_scale();
-        auto dxTensor = attributes.get_dx();
-        auto dscaleTensor = attributes.get_dscale();
-        auto invRmsTensor = attributes.get_inv_rms();
+        const auto dyTensor = attributes.get_dy();
+        const auto xTensor = attributes.get_x();
+        const auto scaleTensor = attributes.get_scale();
+        const auto dxTensor = attributes.get_dx();
+        const auto dscaleTensor = attributes.get_dscale();
+        const auto invRmsTensor = attributes.get_inv_rms();
 
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(xTensor, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(
@@ -89,7 +89,7 @@ public:
             scaleTensor, dscaleTensor, "Input tensor (scale)", "Gradient output tensor (dscale)"));
 
         // Bias must have the same shape as scale (scale already validated above).
-        auto dbiasTensor = attributes.get_dbias();
+        const auto dbiasTensor = attributes.get_dbias();
         if(dbiasTensor)
         {
             HIPDNN_CHECK_ERROR(
@@ -131,10 +131,10 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        auto dxTensor = attributes.get_dx();
-        auto dyTensor = attributes.get_dy();
-        auto dscaleTensor = attributes.get_dscale();
-        auto scaleTensor = attributes.get_scale();
+        const auto dxTensor = attributes.get_dx();
+        const auto dyTensor = attributes.get_dy();
+        const auto dscaleTensor = attributes.get_dscale();
+        const auto scaleTensor = attributes.get_scale();
 
         // Infer dx dimensions and strides from dy (same shape)
         if(dxTensor->get_dim().empty())
@@ -155,14 +155,14 @@ public:
 
         if(dscaleTensor->get_stride().empty())
         {
-            auto strideOrder
+            const auto strideOrder
                 = hipdnn_data_sdk::utilities::extractStrideOrder(scaleTensor->get_stride());
             dscaleTensor->set_stride(
                 hipdnn_data_sdk::utilities::generateStrides(dscaleTensor->get_dim(), strideOrder));
         }
 
         // Infer dbias dimensions and strides from scale (same shape) if dbias is set
-        auto dbiasTensor = attributes.get_dbias();
+        const auto dbiasTensor = attributes.get_dbias();
         if(dbiasTensor)
         {
             if(dbiasTensor->get_dim().empty())
@@ -172,7 +172,7 @@ public:
 
             if(dbiasTensor->get_stride().empty())
             {
-                auto strideOrder
+                const auto strideOrder
                     = hipdnn_data_sdk::utilities::extractStrideOrder(scaleTensor->get_stride());
                 dbiasTensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(
                     dbiasTensor->get_dim(), strideOrder));

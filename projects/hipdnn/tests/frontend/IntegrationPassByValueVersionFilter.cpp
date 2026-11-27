@@ -91,15 +91,15 @@ protected:
         std::vector<int64_t> scaleBiasDims = dims;
         scaleBiasDims[0] = 1;
 
-        auto graph = std::make_shared<Graph>();
+        const auto graph = std::make_shared<Graph>();
         graph->set_name("PassByValueVersionFilter")
             .set_io_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
             .set_compute_data_type(DataType::FLOAT);
 
-        auto x = Graph::tensor(
+        const auto x = Graph::tensor(
             makeTensorAttributes("X", DataType::FLOAT, dims, generateStrides(dims)));
-        auto scale = Graph::tensor(makeTensorAttributes(
+        const auto scale = Graph::tensor(makeTensorAttributes(
             "scale", DataType::FLOAT, scaleBiasDims, generateStrides(scaleBiasDims)));
 
         std::shared_ptr<TensorAttributes> epsilon;
@@ -245,7 +245,7 @@ TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarFiltersToCompatiblePlug
         ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
 
         std::vector<int64_t> rankedEngineIds;
-        auto result = graph->get_ranked_engine_ids(rankedEngineIds);
+        const auto result = graph->get_ranked_engine_ids(rankedEngineIds);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), passByValueEngineId),
                   rankedEngineIds.end())
@@ -265,7 +265,7 @@ TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarFiltersToCompatiblePlug
         ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
 
         std::vector<int64_t> rankedEngineIds;
-        auto result = graph->get_ranked_engine_ids(rankedEngineIds);
+        const auto result = graph->get_ranked_engine_ids(rankedEngineIds);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), passByValueEngineId),
                   rankedEngineIds.end())

@@ -20,7 +20,7 @@ inline std::optional<hipdnn_data_sdk::utilities::Workspace<>>
     allocatePlanWorkspace(hipdnn_frontend::graph::Graph& graph, std::string& error)
 {
     int64_t workspaceSize = 0;
-    if(auto status = graph.get_workspace_size(workspaceSize); !status.is_good())
+    if(const auto status = graph.get_workspace_size(workspaceSize); !status.is_good())
     {
         error = status.get_message();
         return std::nullopt;

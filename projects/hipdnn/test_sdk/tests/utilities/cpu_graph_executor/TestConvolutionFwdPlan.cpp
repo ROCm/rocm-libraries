@@ -95,11 +95,11 @@ TEST(TestConvolutionFwdPlanBuilder, PlanConstruction)
 
     auto graphTuple = buildConvolutionFwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const ConvolutionFwdPlanBuilder<DataType::FLOAT,
@@ -108,7 +108,7 @@ TEST(TestConvolutionFwdPlanBuilder, PlanConstruction)
                                     DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<ConvolutionFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -125,11 +125,11 @@ TEST(TestConvolutionFwdPlanBuilder, IsApplicable)
 
     auto graphTuple = buildConvolutionFwdGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const ConvolutionFwdPlanBuilder<DataType::FLOAT,

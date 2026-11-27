@@ -82,7 +82,7 @@ struct IdentifiedGraph
 inline IdentifiedGraph stampGraphIdentity(const std::vector<uint8_t>& bytes,
                                           const std::string& name)
 {
-    auto object = fb::UnPackGraph(bytes.data());
+    const auto object = fb::UnPackGraph(bytes.data());
     object->name = name;
     object->id.reset();
 

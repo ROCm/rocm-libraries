@@ -420,9 +420,9 @@ static bool
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
                                  int64_t inputBytes)
 {
-    auto checkTensor = [](const char* prefix,
-                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t,
-                          int64_t elementBytes) {
+    const auto checkTensor = [](const char* prefix,
+                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t,
+                                int64_t elementBytes) {
         const auto* s = t.strides();
         bool ok = true;
         ok &= plan_utils::byteStrideFitsU32(
@@ -450,7 +450,7 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
     const int64_t seqLenKv = k.dims()->Get(SDPA_SEQ_AXIS);
 
-    auto extentFits
+    const auto extentFits
         = [&](const char* name, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
               const int64_t seqStride = t.strides()->Get(SDPA_SEQ_AXIS);
               // seqLenKv * seqStride * inputBytes <= UINT32_MAX, evaluated by division so
@@ -1037,13 +1037,13 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
         attrs, qTensor->dims()->Get(2), kTensor->dims()->Get(2), maskType));
     maskType = fwdKernelMaskType(maskType, hasEqualPerBatchLengths(*qTensor, *kTensor, group));
 
-    auto key = fwdKernelNameKey(deviceString,
-                                dataTypeId,
-                                static_cast<int>(qTensor->dims()->Get(3)),
-                                static_cast<int>(vTensor->dims()->Get(3)),
-                                maskType,
-                                getBf16ConvertMode(attrs, dataTypeId),
-                                batchMode);
+    const auto key = fwdKernelNameKey(deviceString,
+                                      dataTypeId,
+                                      static_cast<int>(qTensor->dims()->Get(3)),
+                                      static_cast<int>(vTensor->dims()->Get(3)),
+                                      maskType,
+                                      getBf16ConvertMode(attrs, dataTypeId),
+                                      batchMode);
 
     HIP_KERNEL_REJECT_IF(
         key.empty(),
@@ -1150,44 +1150,44 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     // Extract dimensions from Q tensor
     auto* qDims = qTensor->dims();
-    auto batchSize = static_cast<unsigned int>(qDims->Get(0));
-    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(headAxis));
-    auto seqLenQ = static_cast<unsigned int>(qDims->Get(seqAxis));
-    auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
+    const auto batchSize = static_cast<unsigned int>(qDims->Get(0));
+    const auto numHeadsQ = static_cast<unsigned int>(qDims->Get(headAxis));
+    const auto seqLenQ = static_cast<unsigned int>(qDims->Get(seqAxis));
+    const auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
     // Extract dimensions from K tensor
     auto* kDims = kTensor->dims();
-    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(headAxis));
-    auto seqLenKv = static_cast<unsigned int>(kDims->Get(seqAxis));
+    const auto numHeadsKv = static_cast<unsigned int>(kDims->Get(headAxis));
+    const auto seqLenKv = static_cast<unsigned int>(kDims->Get(seqAxis));
 
     // Extract dimensions from V tensor: [B, H_kv, S_kv, D_v]
     auto* vDims = vTensor->dims();
-    auto headDimV = static_cast<unsigned int>(vDims->Get(3));
+    const auto headDimV = static_cast<unsigned int>(vDims->Get(3));
 
     // Extract strides (in elements) - Q
     auto* qStrides = qTensor->strides();
-    auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
-    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(headAxis));
-    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(seqAxis));
-    auto qStrideRow = qStrideSeq; // Same as sequence stride
+    const auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
+    const auto qStrideHead = static_cast<unsigned int>(qStrides->Get(headAxis));
+    const auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(seqAxis));
+    const auto qStrideRow = qStrideSeq; // Same as sequence stride
 
     // Extract strides - K
     auto* kStrides = kTensor->strides();
-    auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
-    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(headAxis));
-    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(seqAxis));
+    const auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
+    const auto kStrideHead = static_cast<unsigned int>(kStrides->Get(headAxis));
+    const auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(seqAxis));
 
     // Extract strides - V
     auto* vStrides = vTensor->strides();
-    auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
-    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(headAxis));
-    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(seqAxis));
+    const auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
+    const auto vStrideHead = static_cast<unsigned int>(vStrides->Get(headAxis));
+    const auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(seqAxis));
 
     // Extract strides - O
     auto* oStrides = oTensor->strides();
-    auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
-    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(headAxis));
-    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(seqAxis));
+    const auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
+    const auto oStrideHead = static_cast<unsigned int>(oStrides->Get(headAxis));
+    const auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(seqAxis));
 
     hipdnn_plugin_sdk::ScalarOperand attnScale{};
     if(sdpaAttrs.scale_tensor_uid().has_value())
@@ -1297,13 +1297,13 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
-    auto kernelKey = fwdKernelNameKey(deviceString,
-                                      dataTypeId,
-                                      static_cast<int>(headDimQk),
-                                      static_cast<int>(headDimV),
-                                      params.maskType,
-                                      getBf16ConvertMode(sdpaAttrs, dataTypeId),
-                                      batchMode);
+    const auto kernelKey = fwdKernelNameKey(deviceString,
+                                            dataTypeId,
+                                            static_cast<int>(headDimQk),
+                                            static_cast<int>(headDimV),
+                                            params.maskType,
+                                            getBf16ConvertMode(sdpaAttrs, dataTypeId),
+                                            batchMode);
 
     if(kernelKey.empty())
     {
@@ -1329,7 +1329,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     // Load kernel module from kpack archive
-    auto tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
+    const auto tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 

@@ -23,7 +23,7 @@ public:
     void OnTestEnd(const testing::TestInfo& testInfo) override
     {
         // Check and clear standard HIP error state
-        auto hipError = hipGetLastError();
+        const auto hipError = hipGetLastError();
 
         // Special case: hipErrorNoDevice cannot be cleared and persists even after
         // hipGetLastError() is called. In non-GPU environments, we should not fail
@@ -34,7 +34,7 @@ public:
         }
 
         // Check and clear extended HIP error state
-        auto hipExtError = hipExtGetLastError();
+        const auto hipExtError = hipExtGetLastError();
 
         // If there were any errors, fail the test that generated them
         EXPECT_EQ(hipError, hipSuccess)

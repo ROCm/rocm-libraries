@@ -797,7 +797,7 @@ inline std::string describe(const ProblemPoint& point)
     {
         if(!text.empty())
         {
-            text += ",";
+            text += ',';
         }
         text += name + "=";
         std::visit(
@@ -1347,7 +1347,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
         if(search.targetCount > 0)
         {
-            auto found = [&]() {
+            const auto found = [&]() {
                 if(!result.problems.empty() || request.probeBudget >= search.oracleBudget)
                 {
                     return buildFeasibleShapeSet(oracle, search);
@@ -1356,7 +1356,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 // something. The full search replays the probe's walk from the memo.
                 auto probe = search;
                 probe.oracleBudget = request.probeBudget;
-                auto probed = buildFeasibleShapeSet(oracle, probe);
+                const auto probed = buildFeasibleShapeSet(oracle, probe);
                 return probed.stats.distinct == 0 ? probed : buildFeasibleShapeSet(oracle, search);
             }();
             result.stats = found.stats;
@@ -1494,7 +1494,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 // engine declines costs the probe, not the whole budget.
                 auto probe = search;
                 probe.oracleBudget = request.probeBudget;
-                auto probed = buildFeasibleShapeSet(oracle, probe);
+                const auto probed = buildFeasibleShapeSet(oracle, probe);
                 return probed.stats.distinct == 0 ? probed : buildFeasibleShapeSet(oracle, search);
             }();
             if(untried[index] && found.stats.distinct == 0)

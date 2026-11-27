@@ -17,7 +17,7 @@ namespace hipdnn_backend::heuristics
 hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(int deviceId)
 {
     hipDeviceProp_t hipProps;
-    auto status = hipGetDeviceProperties(&hipProps, deviceId);
+    const auto status = hipGetDeviceProperties(&hipProps, deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
@@ -56,7 +56,8 @@ std::vector<uint8_t>
     serializeDeviceProperties(const hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT& props)
 {
     flatbuffers::FlatBufferBuilder builder(256);
-    auto offset = hipdnn_flatbuffers_sdk::data_objects::DeviceProperties::Pack(builder, &props);
+    const auto offset
+        = hipdnn_flatbuffers_sdk::data_objects::DeviceProperties::Pack(builder, &props);
     builder.Finish(offset, "HDDP");
     return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
 }

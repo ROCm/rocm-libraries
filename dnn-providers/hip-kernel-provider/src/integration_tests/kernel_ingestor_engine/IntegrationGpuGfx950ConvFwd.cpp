@@ -107,7 +107,7 @@ std::shared_ptr<Graph>
         .set_intermediate_data_type(dtype)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim({problem.n, problem.c, problem.hi, problem.wi})
@@ -122,7 +122,7 @@ std::shared_ptr<Graph>
         .set_data_type(dtype);
     // Filter [K, C/groups, Y, X] stored channels-last (KYXC over the group's channels).
     const auto cpg = problem.c / problem.groups;
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(2)
         .set_name("W")
         .set_dim({problem.k, cpg, problem.y, problem.x})
@@ -135,7 +135,7 @@ std::shared_ptr<Graph>
         .set_stride({problem.strideH, problem.strideW})
         .set_dilation({problem.dilationH, problem.dilationW})
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
-    auto y = graph->conv_fprop(x, w, attributes);
+    const auto y = graph->conv_fprop(x, w, attributes);
     // The frontend infers output dims/strides from the channels-last input.
     y->set_uid(3).set_name("Y").set_output(true).set_data_type(dtype);
     return graph;
@@ -399,7 +399,7 @@ protected:
             ASSERT_NO_FATAL_FAILURE(recreateHandle());
             recorder.clearLogs();
 
-            auto served = buildConvGraph(variant.dtype, variant.problem);
+            const auto served = buildConvGraph(variant.dtype, variant.problem);
             ASSERT_NO_FATAL_FAILURE(buildAndCompile(*served, knobs));
             const auto kernel = ingestor::toString(pinned.front().kernelId);
             EXPECT_TRUE(recorder.hasLogContaining("served kernel " + kernel + " at rank 0"))
@@ -664,9 +664,9 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, UnbenchmarkedPlanServesACapableInstan
 {
     const auto& variant = GetParam();
     const ScopedPluginLogCapture capture(this);
-    auto& recorder = capture.recorder();
+    const auto& recorder = capture.recorder();
 
-    auto graph = buildConvGraph(variant.dtype, variant.problem);
+    const auto graph = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
     EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 41));
@@ -710,7 +710,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
     // Unbenchmarked, a depthwise direct instance ranks above every implicit-GEMM one; the
     // grouped and non-grouped direct kernels rank below them (aotScore).
     recorder.clearLogs();
-    auto unforced = buildConvGraph(variant.dtype, variant.problem);
+    const auto unforced = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*unforced, {disableBenchmarkingKnob()}));
     EXPECT_EQ(selectedKernel(recorder),
               isDepthwise(variant.problem) || variant.implicitArms == 0 ? directKernel
@@ -848,8 +848,8 @@ protected:
             return {};
         }
         const ScopedPluginLogCapture capture(this);
-        auto& recorder = capture.recorder();
-        auto graph = buildConvGraph(variant.dtype, variant.problem);
+        const auto& recorder = capture.recorder();
+        const auto graph = buildConvGraph(variant.dtype, variant.problem);
         buildAndCompile(*graph, knobs);
         if(HasFatalFailure())
         {
@@ -898,7 +898,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatalo
             continue;
         }
         recorder.clearLogs();
-        auto forced = buildConvGraph(variant.dtype, variant.problem);
+        const auto forced = buildConvGraph(variant.dtype, variant.problem);
         ASSERT_NO_FATAL_FAILURE(
             buildAndCompile(*forced, {kernelFamilyKnob(family), disableBenchmarkingKnob()}));
         EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(count) + " ("
@@ -923,8 +923,8 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference
     _candidateLimit.setValue(std::to_string(TOP_BY_SCORE));
     {
         const ScopedPluginLogCapture capture(this);
-        auto& recorder = capture.recorder();
-        auto graph = buildConvGraph(variant.dtype, variant.problem);
+        const auto& recorder = capture.recorder();
+        const auto graph = buildConvGraph(variant.dtype, variant.problem);
         ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
         EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(topCount) + " ("
                                               + std::to_string(catalog)
@@ -1018,7 +1018,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, CappedBenchmarkMatchesCpuReference)
         << recorder.getRecordedLogsAsString();
 
     recorder.clearLogs();
-    auto recreated = buildConvGraph(variant.dtype, variant.problem);
+    const auto recreated = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*recreated, {enableBenchmarkingKnob()}));
     const auto count = std::to_string(capped);
     EXPECT_TRUE(recorder.hasLogContaining("served kernel " + winner + " at rank 0"))

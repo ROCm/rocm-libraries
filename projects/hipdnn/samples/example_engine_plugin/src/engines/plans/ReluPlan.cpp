@@ -37,8 +37,8 @@ void ReluPlan::execute(const ExampleProviderHandle& handle,
                        uint32_t numDeviceBuffers,
                        void* /*workspace*/) const
 {
-    auto inputBuffer = findDeviceBuffer(_params.inputUid, deviceBuffers, numDeviceBuffers);
-    auto outputBuffer = findDeviceBuffer(_params.outputUid, deviceBuffers, numDeviceBuffers);
+    const auto inputBuffer = findDeviceBuffer(_params.inputUid, deviceBuffers, numDeviceBuffers);
+    const auto outputBuffer = findDeviceBuffer(_params.outputUid, deviceBuffers, numDeviceBuffers);
 
     auto* input = static_cast<const float*>(inputBuffer.ptr);
     auto* output = static_cast<float*>(outputBuffer.ptr);

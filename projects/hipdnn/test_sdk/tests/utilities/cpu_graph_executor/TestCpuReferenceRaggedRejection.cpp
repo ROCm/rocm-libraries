@@ -56,7 +56,7 @@ namespace
 // Validates and serializes a frontend graph.
 std::vector<uint8_t> serialize(const std::shared_ptr<hipdnn_frontend::graph::Graph>& graph)
 {
-    auto result = graph->validate();
+    const auto result = graph->validate();
     EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
     auto [serializedGraph, serErr] = graph->to_binary();
@@ -75,7 +75,7 @@ void expectRaggedTensorRejected(const std::vector<uint8_t>& serializedGraph)
         executor.isApplicable(const_cast<uint8_t*>(serializedGraph.data()), serializedGraph.size()))
         << "Baseline (non-ragged) graph should be applicable";
 
-    auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph.data());
+    const auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph.data());
     EXPECT_FALSE(executor.isApplicable(raggedGraph.GetBufferPointer(), raggedGraph.GetSize()))
         << "Graph containing a ragged tensor must be rejected";
 }
@@ -108,13 +108,13 @@ TEST(TestCpuReferenceRaggedRejection, ConvolutionWrw)
 
 TEST(TestCpuReferenceRaggedRejection, BatchnormFwdInference)
 {
-    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 {1, 3, 14, 14},
-                                                 TensorLayout::NCHW,
-                                                 true);
+    const auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       {1, 3, 14, 14},
+                                                       TensorLayout::NCHW,
+                                                       true);
     expectRaggedTensorRejected(serialize(graph));
 }
 
@@ -176,26 +176,26 @@ TEST(TestCpuReferenceRaggedRejection, Pointwise)
 
 TEST(TestCpuReferenceRaggedRejection, Layernorm)
 {
-    auto graph = buildLayernormFpropGraph(DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          DataType::FLOAT,
-                                          {1, 3, 14, 14},
-                                          2, // normalize over last 2 dims
-                                          TensorLayout::NCHW);
+    const auto graph = buildLayernormFpropGraph(DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                {1, 3, 14, 14},
+                                                2, // normalize over last 2 dims
+                                                TensorLayout::NCHW);
     expectRaggedTensorRejected(serialize(graph));
 }
 
 TEST(TestCpuReferenceRaggedRejection, RMSNormFwd)
 {
-    auto graph = buildRMSNormFwdGraph(
+    const auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, {1, 3, 14, 14}, TensorLayout::NCHW);
     expectRaggedTensorRejected(serialize(graph));
 }
 
 TEST(TestCpuReferenceRaggedRejection, RMSNormBwd)
 {
-    auto graph = buildRMSNormBwdGraph(
+    const auto graph = buildRMSNormBwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, {1, 3, 14, 14}, TensorLayout::NCHW);
     expectRaggedTensorRejected(serialize(graph));
 }

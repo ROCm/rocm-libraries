@@ -326,7 +326,7 @@ public:
 
     bool hasLogContaining(const std::string& text) const
     {
-        auto logs = LogRecording::instance(_recordingId).getRecordedLogs();
+        const auto logs = LogRecording::instance(_recordingId).getRecordedLogs();
         for(const auto& log : logs)
         {
             if(log.message.find(text) != std::string::npos)
@@ -339,7 +339,7 @@ public:
 
     bool hasLogContaining(hipdnnSeverity_t severity, const std::string& text) const
     {
-        auto logs = LogRecording::instance(_recordingId).getRecordedLogs();
+        const auto logs = LogRecording::instance(_recordingId).getRecordedLogs();
         for(const auto& log : logs)
         {
             if(log.severity == severity && log.message.find(text) != std::string::npos)
@@ -357,7 +357,7 @@ public:
 
     size_t countLogsAtLevel(hipdnnSeverity_t severity) const
     {
-        auto logs = LogRecording::instance(_recordingId).getRecordedLogs();
+        const auto logs = LogRecording::instance(_recordingId).getRecordedLogs();
         size_t count = 0;
         for(const auto& log : logs)
         {

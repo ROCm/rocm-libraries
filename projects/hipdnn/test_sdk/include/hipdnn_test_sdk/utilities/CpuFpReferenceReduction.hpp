@@ -96,13 +96,13 @@ public:
             reductionDomainStride.back() = 1;
             for(size_t i = 1; i < reductionDomainStride.size(); ++i)
             {
-                auto j = reductionDomainStride.size() - 1 - i;
+                const auto j = reductionDomainStride.size() - 1 - i;
                 reductionDomainStride[j]
                     = reductionDomainStride[j + 1] * reductionDomainShape[j + 1];
             }
         }
 
-        auto reduceFunc = [&](const std::vector<int64_t>& yIndices) {
+        const auto reduceFunc = [&](const std::vector<int64_t>& yIndices) {
             auto acc = initAccumulator<ComputeDataType>(mode);
             std::vector<int64_t> xIndices = yIndices;
 
@@ -128,11 +128,11 @@ public:
                 accumulate(acc, static_cast<ComputeDataType>(val), mode);
             }
 
-            auto result = finalize(acc, reductionDomainSize, mode);
+            const auto result = finalize(acc, reductionDomainSize, mode);
             y.setHostValue(hipdnn_test_sdk::detail::safeConvert<YDataType>(result), yIndices);
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(reduceFunc, y.dims());
         // Run on all available CPU threads
         parallelFunc(std::thread::hardware_concurrency());

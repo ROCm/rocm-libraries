@@ -80,8 +80,8 @@ hipblasComputeType_t MatmulParams::getComputeDataType(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB)
 {
-    auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
-    auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
+    const auto hipDataTypeA = hipblaslt_utils::tensorDataTypeToHipDataType(tA.dataType());
+    const auto hipDataTypeB = hipblaslt_utils::tensorDataTypeToHipDataType(tB.dataType());
     if(hipDataTypeA == hipDataTypeB && hipDataTypeA == HIP_R_16F)
     {
         return HIPBLAS_COMPUTE_32F_FAST_16F;
@@ -269,7 +269,7 @@ void MatmulParams::setEpilogue(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
     hipDataType biasDataType)
 {
-    auto epilogueParams
+    const auto epilogueParams
         = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(activAttr, _biasUid.has_value());
 
     _matmulDesc.setEpilogue(epilogueParams.epilogue);
@@ -328,7 +328,7 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
     hipblasLtMatmulPreference_t prefHandle;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&prefHandle));
     // Own the preference via RAII.
-    hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> const pref(
+    const hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> pref(
         prefHandle, [](hipblasLtMatmulPreference_t p) {
             LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceDestroy(p));
         });
@@ -372,11 +372,11 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                          uint32_t numDeviceBuffers,
                          void* workspace) const
 {
-    auto aBuffer
+    const auto aBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.a().uid(), deviceBuffers, numDeviceBuffers);
-    auto bBuffer
+    const auto bBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.b().uid(), deviceBuffers, numDeviceBuffers);
-    auto cBuffer
+    const auto cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
 
     // hipBLASLt writes per-call problem state through the descriptor and the bias pointer is
@@ -384,7 +384,7 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     HipblasltMatmulDesc desc = _params.desc().clone();
     if(_params.biasUid().has_value())
     {
-        auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
+        const auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
             _params.biasUid().value(), deviceBuffers, numDeviceBuffers);
         desc.setBiasPointer(biasBuffer.ptr);
     }

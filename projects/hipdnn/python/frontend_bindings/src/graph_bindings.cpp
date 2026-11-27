@@ -62,11 +62,11 @@ std::vector<AutotuneResult> autotunePy(graph::Graph& g,
                                        const AutotuneConfig& config,
                                        const AutotuneStorageConfig& storageConfig)
 {
-    auto handlePtr = handle.attr("get")();
+    const auto handlePtr = handle.attr("get")();
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    const auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
     void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     // Benchmarking touches no Python object: config/settings are native types, and
@@ -112,11 +112,11 @@ std::pair<std::vector<AutotuneResult>, AutotuneCacheWriteOutcome>
                               const AutotuneConfig& config,
                               const AutotuneStorageConfig& storageConfig)
 {
-    auto handlePtr = handle.attr("get")();
+    const auto handlePtr = handle.attr("get")();
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    const auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
     void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     // Same rationale as autotunePy: benchmarking touches no Python object, so the GIL
@@ -151,11 +151,11 @@ Error executePlanAtIndexPy(const graph::Graph& g,
                            const nb::object& workspace,
                            int64_t planIndex)
 {
-    auto handlePtr = handle.attr("get")();
+    const auto handlePtr = handle.attr("get")();
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    const auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
     void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
     return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
@@ -257,7 +257,7 @@ void graphBindings(nb::module_& m)
         .def(
             "build_operation_graph",
             [](graph::Graph& g, const nb::object& handle) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 return g.build_operation_graph(rawHandle);
@@ -311,7 +311,7 @@ void graphBindings(nb::module_& m)
             "get_behavior_notes_for_engine",
             [](graph::Graph& g, int64_t engineId) {
                 std::vector<BehaviorNote> notes;
-                auto err = g.get_behavior_notes_for_engine(engineId, notes);
+                const auto err = g.get_behavior_notes_for_engine(engineId, notes);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get behavior notes for engine: "
@@ -319,7 +319,7 @@ void graphBindings(nb::module_& m)
                 }
                 std::vector<BehaviorNote> knownNotes;
                 knownNotes.reserve(notes.size());
-                for(auto note : notes)
+                for(const auto note : notes)
                 {
                     if(isKnownBehaviorNote(note))
                     {
@@ -334,7 +334,7 @@ void graphBindings(nb::module_& m)
             "get_numerical_notes_for_engine",
             [](graph::Graph& g, int64_t engineId) {
                 std::vector<NumericalNote> notes;
-                auto err = g.get_numerical_notes_for_engine(engineId, notes);
+                const auto err = g.get_numerical_notes_for_engine(engineId, notes);
                 if(err.is_bad())
                 {
                     throw std::runtime_error("Failed to get numerical notes for engine: "
@@ -342,7 +342,7 @@ void graphBindings(nb::module_& m)
                 }
                 std::vector<NumericalNote> knownNotes;
                 knownNotes.reserve(notes.size());
-                for(auto note : notes)
+                for(const auto note : notes)
                 {
                     if(isKnownNumericalNote(note))
                     {
@@ -387,7 +387,7 @@ void graphBindings(nb::module_& m)
                const nb::object& handle,
                const std::vector<HeuristicMode>& modes,
                BuildPlanPolicy policy) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 return g.build(rawHandle, modes, policy);
@@ -420,7 +420,7 @@ void graphBindings(nb::module_& m)
                const nb::object& handle,
                const nb::dict& variantPack,
                const nb::object& workspace) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
@@ -444,11 +444,11 @@ void graphBindings(nb::module_& m)
                const nb::object& handle,
                const nb::dict& variantPack,
                const nb::object& workspace) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
-                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                const auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
                 void* workspacePtr = hipdnn_python::workspacePointer(workspace);
 
                 ExecutionTiming timing;
@@ -994,7 +994,7 @@ void graphBindings(nb::module_& m)
                const std::vector<int64_t>& overrideUids,
                const std::vector<std::vector<int64_t>>& overrideShapes,
                const std::vector<std::vector<int64_t>>& overrideStrides) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 
@@ -1113,7 +1113,7 @@ void graphBindings(nb::module_& m)
         .def(
             "from_json",
             [](graph::Graph& g, const nb::object& handle, const std::string& jsonStr) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 return g.deserialize(rawHandle, jsonStr);
@@ -1143,7 +1143,7 @@ void graphBindings(nb::module_& m)
         .def(
             "from_binary",
             [](graph::Graph& g, const nb::object& handle, const nb::bytes& data) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 return g.deserialize(rawHandle, hipdnn_python::bytesToVector(data));
@@ -1178,7 +1178,7 @@ void graphBindings(nb::module_& m)
         .def(
             "from_compiled_plan_binary",
             [](graph::Graph& g, const nb::object& handle, const nb::bytes& data) {
-                auto handlePtr = handle.attr("get")();
+                const auto handlePtr = handle.attr("get")();
                 // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
                 const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());

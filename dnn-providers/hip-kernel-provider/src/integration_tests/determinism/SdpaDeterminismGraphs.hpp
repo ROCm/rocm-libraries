@@ -307,7 +307,7 @@ inline DeterminismFwdGraph buildDeterminismFwdGraph(const DeterminismFwdSpec& de
     using namespace ingestor::frontend_sdpa_detail;
     const auto& spec = determinism.shape;
     const auto& dtypes = determinism.dtypes;
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name(spec.name)
         .set_io_data_type(dtypes.oType)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -315,31 +315,31 @@ inline DeterminismFwdGraph buildDeterminismFwdGraph(const DeterminismFwdSpec& de
 
     using ingestor::detail::makeSdpaTensor;
     using Layout = kernel_ingestor_engine::testing::SdpaLayout;
-    auto q = makeSdpaTensor(Q_UID,
-                            "Q",
-                            dtypes.qkvType,
-                            spec.batch,
-                            spec.queryHeads,
-                            spec.seqQ,
-                            spec.headSize,
-                            Layout::BSHD);
-    auto k = makeSdpaTensor(K_UID,
-                            "K",
-                            dtypes.qkvType,
-                            spec.batch,
-                            spec.kvHeads,
-                            spec.seqKv,
-                            spec.headSize,
-                            Layout::BSHD);
+    const auto q = makeSdpaTensor(Q_UID,
+                                  "Q",
+                                  dtypes.qkvType,
+                                  spec.batch,
+                                  spec.queryHeads,
+                                  spec.seqQ,
+                                  spec.headSize,
+                                  Layout::BSHD);
+    const auto k = makeSdpaTensor(K_UID,
+                                  "K",
+                                  dtypes.qkvType,
+                                  spec.batch,
+                                  spec.kvHeads,
+                                  spec.seqKv,
+                                  spec.headSize,
+                                  Layout::BSHD);
     const int64_t valueHeadSize = spec.valueHeadSize.value_or(spec.headSize);
-    auto v = makeSdpaTensor(V_UID,
-                            "V",
-                            dtypes.qkvType,
-                            spec.batch,
-                            spec.valueHeads.value_or(spec.kvHeads),
-                            spec.seqKv,
-                            valueHeadSize,
-                            Layout::BSHD);
+    const auto v = makeSdpaTensor(V_UID,
+                                  "V",
+                                  dtypes.qkvType,
+                                  spec.batch,
+                                  spec.valueHeads.value_or(spec.kvHeads),
+                                  spec.seqKv,
+                                  valueHeadSize,
+                                  Layout::BSHD);
 
     DeterminismFwdGraph result;
     result.sdpa.spec = spec;

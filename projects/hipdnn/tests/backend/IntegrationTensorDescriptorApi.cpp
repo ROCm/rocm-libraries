@@ -49,7 +49,7 @@ protected:
     static hipdnnBackendDescriptor_t createTensorDesc()
     {
         hipdnnBackendDescriptor_t desc = nullptr;
-        auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &desc);
+        const auto status = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &desc);
         EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
         return desc;
     }
@@ -73,8 +73,8 @@ TEST_F(IntegrationTensorDescriptorApi, SetAndGetAllAttributes)
     auto desc = createTensorDesc();
     ASSERT_NE(desc, nullptr);
 
-    auto dims = toVec(K_TENSOR_DIMS);
-    auto strides = toVec(K_TENSOR_STRIDES);
+    const auto dims = toVec(K_TENSOR_DIMS);
+    const auto strides = toVec(K_TENSOR_STRIDES);
 
     ASSERT_NO_FATAL_FAILURE(
         setAllTensorAttributes(desc, K_TENSOR_UID, "test_tensor", dims, strides));

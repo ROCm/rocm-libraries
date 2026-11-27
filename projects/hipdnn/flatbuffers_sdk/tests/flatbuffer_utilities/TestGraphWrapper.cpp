@@ -110,13 +110,13 @@ TEST(TestGraphWrapper, GetTensorMapReturnsCorrectTensors)
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
 
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
-                                                                         "test",
-                                                                         DataType::FLOAT,
-                                                                         DataType::HALF,
-                                                                         DataType::BFLOAT16,
-                                                                         &tensorAttributes,
-                                                                         &nodes);
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
+                                                                               "test",
+                                                                               DataType::FLOAT,
+                                                                               DataType::HALF,
+                                                                               DataType::BFLOAT16,
+                                                                               &tensorAttributes,
+                                                                               &nodes);
     builder.Finish(graph);
 
     auto serializedGraph = builder.Release();

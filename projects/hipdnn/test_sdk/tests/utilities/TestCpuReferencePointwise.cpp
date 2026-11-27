@@ -63,13 +63,15 @@ protected:
     /// so precision is bounded by float even when ComputeType is double.
     float getDynamicTolerance(PointwiseMode mode, float scale) const
     {
-        auto errorClass = pointwise::classifyPointwiseOp(mode);
-        auto effectiveScale = static_cast<double>(pointwise::isBoundedOutput(mode) ? 1.0f : scale);
-        auto tolerance
+        const auto errorClass = pointwise::classifyPointwiseOp(mode);
+        const auto effectiveScale
+            = static_cast<double>(pointwise::isBoundedOutput(mode) ? 1.0f : scale);
+        const auto tolerance
             = pointwise::calculatePointwiseTolerance<OutputType, Input1Type, ComputeType>(
                 effectiveScale, errorClass);
-        auto floatFloor = pointwise::calculatePointwiseTolerance<OutputType, Input1Type, float>(
-            effectiveScale, errorClass);
+        const auto floatFloor
+            = pointwise::calculatePointwiseTolerance<OutputType, Input1Type, float>(effectiveScale,
+                                                                                    errorClass);
         return std::max(tolerance, floatFloor);
     }
 
@@ -90,8 +92,8 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, TEST_VALUE_2);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, TEST_VALUE_2);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -110,8 +112,8 @@ protected:
         Tensor<OutputType> expected({1, 3, 2, 2});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -144,7 +146,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::max(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -177,7 +179,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::min(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -251,8 +253,8 @@ protected:
         CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PI);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PI);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -317,8 +319,8 @@ protected:
         CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -370,8 +372,8 @@ protected:
         CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -391,8 +393,8 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PRECISION_TEST_B);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PRECISION_TEST_B);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -419,8 +421,8 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(10)), 3);
         expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(13)), 4);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 8.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 8.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -455,14 +457,14 @@ protected:
         {
             for(int n = 0; n < 4; ++n)
             {
-                auto input1Val = static_cast<float>((m * 10) + n);
-                auto input2Val = static_cast<float>((n + 1) * 10);
+                const auto input1Val = static_cast<float>((m * 10) + n);
+                const auto input2Val = static_cast<float>((n + 1) * 10);
                 expected.setHostValue(safeTestTypeCast<OutputType>(input1Val + input2Val), m, n);
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 40.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 40.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -490,15 +492,16 @@ protected:
                 for(int h = 0; h < 4; ++h)
                 {
                     const float input1Val = TEST_VALUE_5;
-                    auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
+                    const auto input2Val
+                        = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(input1Val - input2Val), n, c, h);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -527,15 +530,16 @@ protected:
                 for(int h = 0; h < 4; ++h)
                 {
                     const float input1Val = TEST_VALUE_5;
-                    auto input2Val = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
+                    const auto input2Val
+                        = static_cast<float>(c + 1); // Channel values: 1.0, 2.0, 3.0
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(input1Val - input2Val), n, c, h);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -575,9 +579,9 @@ protected:
                     for(int w = 0; w < 2; ++w)
                     {
                         const float input1Val = TEST_VALUE_1;
-                        auto input2Val = static_cast<float>(
-                            (static_cast<float>(c) + 1.0f)
-                            * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
+                        const auto input2Val
+                            = ((static_cast<float>(c) + 1.0f)
+                               * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
@@ -585,8 +589,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -629,9 +633,9 @@ protected:
                     for(int w = 0; w < 4; ++w)
                     {
                         // input1[n,0,h,0] broadcasts to input1[n,c,h,w]
-                        auto input1Val = static_cast<float>((n * 10) + h);
+                        const auto input1Val = static_cast<float>((n * 10) + h);
                         // input2[0,c,0,w] broadcasts to input2[n,c,h,w]
-                        auto input2Val = static_cast<float>((c * 100) + w);
+                        const auto input2Val = static_cast<float>((c * 100) + w);
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, h, w);
                     }
@@ -639,8 +643,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 103.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 103.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -672,14 +676,14 @@ protected:
         {
             for(int n = 0; n < 4; ++n)
             {
-                auto input1Val = static_cast<float>((m * 10) + n);
-                auto input2Val = static_cast<float>((n + 1) * 10);
+                const auto input1Val = static_cast<float>((m * 10) + n);
+                const auto input2Val = static_cast<float>((n + 1) * 10);
                 expected.setHostValue(
                     safeTestTypeCast<OutputType>(std::max(input1Val, input2Val)), m, n);
             }
         }
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -711,14 +715,14 @@ protected:
         {
             for(int n = 0; n < 4; ++n)
             {
-                auto input1Val = static_cast<float>((m * 10) + n);
-                auto input2Val = static_cast<float>((n + 1) * 10);
+                const auto input1Val = static_cast<float>((m * 10) + n);
+                const auto input2Val = static_cast<float>((n + 1) * 10);
                 expected.setHostValue(
                     safeTestTypeCast<OutputType>(std::min(input1Val, input2Val)), m, n);
             }
         }
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -770,10 +774,10 @@ protected:
                     {
                         for(int w = 0; w < 2; ++w)
                         {
-                            auto input1Val = TEST_VALUE_2;
-                            auto input2Val = static_cast<float>(
-                                (static_cast<float>(c) + 1.0f)
-                                * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
+                            const auto input1Val = TEST_VALUE_2;
+                            const auto input2Val
+                                = ((static_cast<float>(c) + 1.0f)
+                                   * BROADCAST_MULTIPLIER_10); // Channel values: 10.0, 20.0, 30.0
                             expected.setHostValue(
                                 safeTestTypeCast<OutputType>(input1Val + input2Val), n, c, d, h, w);
                         }
@@ -782,8 +786,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -818,8 +822,8 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(TEST_VALUE_5 / TEST_VALUE_2), 0, 0, 0, 3);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -853,8 +857,8 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(TEST_VALUE_3 + TEST_VALUE_1 * TEST_VALUE_1), 0, 0, 0, 3);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -938,14 +942,14 @@ protected:
         {
             for(int n = 0; n < 4; ++n)
             {
-                auto input1Val = static_cast<float>((m * 4) + n + 4);
-                auto input2Val = static_cast<float>(n + 1);
+                const auto input1Val = static_cast<float>((m * 4) + n + 4);
+                const auto input2Val = static_cast<float>(n + 1);
                 expected.setHostValue(safeTestTypeCast<OutputType>(input1Val / input2Val), m, n);
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 12.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 12.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -964,8 +968,8 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto input1Val = static_cast<float>(((c * 4) + (h * 2) + w + 1) * 2);
-                    auto input2Val = static_cast<float>((c * 4) + (h * 2) + w + 1);
+                    const auto input1Val = static_cast<float>(((c * 4) + (h * 2) + w + 1) * 2);
+                    const auto input2Val = static_cast<float>((c * 4) + (h * 2) + w + 1);
                     input1.setHostValue(safeTestTypeCast<Input1Type>(input1Val), 0, c, h, w);
                     input2.setHostValue(safeTestTypeCast<Input2Type>(input2Val), 0, c, h, w);
                     expected.setHostValue(
@@ -977,8 +981,8 @@ protected:
         CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::DIV, output, input1, input2);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 16.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 16.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1013,8 +1017,8 @@ protected:
         CpuReferencePointwiseImpl<OutputType, double, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 12.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 12.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1063,8 +1067,8 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1141,8 +1145,8 @@ protected:
                               1,
                               1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1171,7 +1175,7 @@ protected:
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
         const float lowerClip = -TEST_VALUE_2; // -2.0
         const float upperClip = TEST_VALUE_4; // 4.0
-        auto lowerSlope = static_cast<float>(0.1);
+        const auto lowerSlope = static_cast<float>(0.1);
 
         CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::RELU_FWD, output, input, lowerClip, upperClip, lowerSlope);
@@ -1200,8 +1204,8 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1241,7 +1245,7 @@ protected:
         // Parameters: lower_clip = -2.0, upper_clip = 4.0, lower_slope = 0.1
         const float lowerClip = -TEST_VALUE_2; // -2.0
         const float upperClip = TEST_VALUE_4; // 4.0
-        auto lowerSlope = static_cast<float>(0.1);
+        const auto lowerSlope = static_cast<float>(0.1);
 
         // ReLU backward expects dy first, then x.
         CpuReferencePointwiseImpl<OutputType, double, Input2Type, Input1Type>::pointwiseCompute(
@@ -1257,8 +1261,8 @@ protected:
                 {
                     for(int w = 0; w < 2; ++w)
                     {
-                        auto inputVal = static_cast<float>(input.getHostValue(n, c, h, w));
-                        auto upstreamGradVal
+                        const auto inputVal = static_cast<float>(input.getHostValue(n, c, h, w));
+                        const auto upstreamGradVal
                             = static_cast<float>(upstreamGrad.getHostValue(n, c, h, w));
 
                         // For x <= lower_clip: local_gradient = lower_slope
@@ -1278,7 +1282,7 @@ protected:
                             localGradient = 0.0f;
                         }
 
-                        auto downstreamGrad = upstreamGradVal * localGradient;
+                        const auto downstreamGrad = upstreamGradVal * localGradient;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
                     }
@@ -1286,8 +1290,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1360,8 +1364,8 @@ protected:
                               1,
                               1); // sigmoid(1.5)
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_FWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1405,16 +1409,17 @@ protected:
                 {
                     for(int w = 0; w < 2; ++w)
                     {
-                        auto inputVal = input.getHostValue(n, c, h, w);
-                        auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
+                        const auto inputVal = input.getHostValue(n, c, h, w);
+                        const auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
                         // Compute using the template ComputeType
-                        auto xCompute = static_cast<ComputeType>(inputVal);
-                        auto dyCompute = static_cast<ComputeType>(upstreamGradVal);
-                        auto sigmoid = static_cast<ComputeType>(1)
-                                       / (static_cast<ComputeType>(1)
-                                          + hipdnn_data_sdk::types::exp(-xCompute));
-                        auto localGradient = sigmoid * (static_cast<ComputeType>(1) - sigmoid);
-                        auto downstreamGrad = dyCompute * localGradient;
+                        const auto xCompute = static_cast<ComputeType>(inputVal);
+                        const auto dyCompute = static_cast<ComputeType>(upstreamGradVal);
+                        const auto sigmoid = static_cast<ComputeType>(1)
+                                             / (static_cast<ComputeType>(1)
+                                                + hipdnn_data_sdk::types::exp(-xCompute));
+                        const auto localGradient
+                            = sigmoid * (static_cast<ComputeType>(1) - sigmoid);
+                        const auto downstreamGrad = dyCompute * localGradient;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
                     }
@@ -1422,8 +1427,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1464,8 +1469,8 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, TEST_VALUE_3);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1510,14 +1515,15 @@ protected:
                 {
                     for(int w = 0; w < 2; ++w)
                     {
-                        auto inputVal = input.getHostValue(n, c, h, w);
-                        auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
+                        const auto inputVal = input.getHostValue(n, c, h, w);
+                        const auto upstreamGradVal = upstreamGrad.getHostValue(n, c, h, w);
                         // Compute using the template ComputeType
-                        auto xCompute = static_cast<ComputeType>(inputVal);
-                        auto dyCompute = static_cast<ComputeType>(upstreamGradVal);
-                        auto tanhVal = std::tanh(xCompute);
-                        auto localGradient = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
-                        auto downstreamGrad = dyCompute * localGradient;
+                        const auto xCompute = static_cast<ComputeType>(inputVal);
+                        const auto dyCompute = static_cast<ComputeType>(upstreamGradVal);
+                        const auto tanhVal = std::tanh(xCompute);
+                        const auto localGradient
+                            = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
+                        const auto downstreamGrad = dyCompute * localGradient;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(downstreamGrad), n, c, h, w);
                     }
@@ -1525,8 +1531,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::TANH_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::TANH_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1595,8 +1601,8 @@ protected:
             1,
             1); // |-4| = 4
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ABS, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ABS, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1630,8 +1636,8 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(-TEST_VALUE_2_5), 0, 1, 1, 0); // -2.5
         expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1654,8 +1660,8 @@ protected:
             PointwiseMode::GELU_FWD, output, input);
 
         // Create expected tensor: gelu_erf(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
-        auto geluErf = [](float x) {
-            auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
+        const auto geluErf = [](float x) {
+            const auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
             ComputeType sqrt2 = hipdnn_data_sdk::types::sqrt(static_cast<ComputeType>(2));
             return static_cast<ComputeType>(0.5) * xCompute
                    * (static_cast<ComputeType>(1.0)
@@ -1703,8 +1709,8 @@ protected:
                               1,
                               1); // gelu_erf(1.5)
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::GELU_FWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1726,12 +1732,12 @@ protected:
             PointwiseMode::GELU_APPROX_TANH_FWD, output, input);
 
         // gelu_tanh(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
-        auto geluTanh = [](float x) {
-            auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
+        const auto geluTanh = [](float x) {
+            const auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
             const auto sqrt2OverPi = static_cast<ComputeType>(hipdnn_data_sdk::types::sqrt(
                 static_cast<ComputeType>(2) / static_cast<ComputeType>(PI)));
             static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
-            auto inner = sqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
+            const auto inner = sqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
             return static_cast<ComputeType>(0.5) * xCompute
                    * (static_cast<ComputeType>(1.0) + hipdnn_data_sdk::types::tanh(inner));
         };
@@ -1745,8 +1751,9 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(-TEST_VALUE_5)), 0, 1, 1, 0);
         expected.setHostValue(safeTestTypeCast<OutputType>(geluTanh(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance
+            = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_FWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1768,9 +1775,9 @@ protected:
             PointwiseMode::SWISH_FWD, output, input);
 
         // swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
-        auto swish = [](float x) {
-            auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
-            auto exp = hipdnn_data_sdk::types::exp(-xCompute);
+        const auto swish = [](float x) {
+            const auto xCompute = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(x));
+            const auto exp = hipdnn_data_sdk::types::exp(-xCompute);
             return xCompute / (static_cast<ComputeType>(1) + exp);
         };
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -1783,8 +1790,8 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(swish(-TEST_VALUE_5)), 0, 1, 1, 0);
         expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_FWD, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1811,8 +1818,8 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(1.0f), 3); // max(0, 1) = 1
         expected.setHostValue(safeTestTypeCast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, 2.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, 2.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1840,14 +1847,14 @@ protected:
         {
             for(int n = 0; n < 4; ++n)
             {
-                auto val = static_cast<float>((m - 1) + (n - 2));
+                const auto val = static_cast<float>((m - 1) + (n - 2));
                 expected.setHostValue(
                     safeTestTypeCast<OutputType>(hipdnn_data_sdk::types::abs(val)), m, n);
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ABS, 3.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ABS, 3.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1865,8 +1872,8 @@ protected:
         Tensor<OutputType> expected({2, 3, 4});
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5));
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_2_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_2_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1884,8 +1891,8 @@ protected:
         Tensor<OutputType> expected({1, 1, 1, 1});
         expected.setHostValue(safeTestTypeCast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, E);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, E);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1918,8 +1925,8 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
         expected.setHostValue(safeTestTypeCast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::IDENTITY, PI);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::IDENTITY, PI);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1950,15 +1957,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::exp(xCompute)), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1986,15 +1993,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::floor(xCompute)), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::FLOOR, PI);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::FLOOR, PI);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2032,17 +2039,18 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto result = xCompute > static_cast<ComputeType>(0)
-                                      ? xCompute
-                                      : static_cast<ComputeType>(ALPHA) * (std::exp(xCompute) - 1);
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto result
+                        = xCompute > static_cast<ComputeType>(0)
+                              ? xCompute
+                              : static_cast<ComputeType>(ALPHA) * (std::exp(xCompute) - 1);
                     expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ELU_FWD, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ELU_FWD, TEST_VALUE_3);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2082,15 +2090,16 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto dyCompute
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto dyCompute
                         = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
-                    auto cdf = static_cast<ComputeType>(0.5)
-                               * (static_cast<ComputeType>(1)
-                                  + std::erf(xCompute / std::sqrt(static_cast<ComputeType>(2))));
-                    auto pdf = std::exp(-xCompute * xCompute / static_cast<ComputeType>(2))
-                               / std::sqrt(static_cast<ComputeType>(2)
-                                           * static_cast<ComputeType>(3.14159265));
+                    const auto cdf
+                        = static_cast<ComputeType>(0.5)
+                          * (static_cast<ComputeType>(1)
+                             + std::erf(xCompute / std::sqrt(static_cast<ComputeType>(2))));
+                    const auto pdf = std::exp(-xCompute * xCompute / static_cast<ComputeType>(2))
+                                     / std::sqrt(static_cast<ComputeType>(2)
+                                                 * static_cast<ComputeType>(3.14159265));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(dyCompute * (cdf + xCompute * pdf)),
                         0,
@@ -2101,8 +2110,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::GELU_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2145,12 +2154,13 @@ protected:
                 for(int w = 0; w < 2; ++w)
                 {
                     const auto beta = static_cast<ComputeType>(BETA);
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto dyCompute
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto dyCompute
                         = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
-                    auto sigmoid = static_cast<ComputeType>(1)
-                                   / (static_cast<ComputeType>(1) + std::exp(-beta * xCompute));
-                    auto localGradient
+                    const auto sigmoid
+                        = static_cast<ComputeType>(1)
+                          / (static_cast<ComputeType>(1) + std::exp(-beta * xCompute));
+                    const auto localGradient
                         = sigmoid
                           + beta * xCompute * sigmoid * (static_cast<ComputeType>(1) - sigmoid);
                     expected.setHostValue(
@@ -2159,8 +2169,8 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2237,15 +2247,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto result = std::log(xCompute);
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto result = std::log(xCompute);
                     expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::LOG, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::LOG, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2283,17 +2293,17 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     const auto beta = static_cast<ComputeType>(BETA);
-                    auto result
+                    const auto result
                         = std::log(static_cast<ComputeType>(1) + std::exp(beta * xCompute)) / beta;
                     expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_FWD, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_FWD, TEST_VALUE_3);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2333,22 +2343,22 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto dyCompute
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto dyCompute
                         = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
                     const auto sqrt2OverPi = std::sqrt(static_cast<ComputeType>(2)
                                                        / static_cast<ComputeType>(3.14159265));
-                    auto inner
+                    const auto inner
                         = sqrt2OverPi
                           * (xCompute
                              + static_cast<ComputeType>(0.044715) * xCompute * xCompute * xCompute);
-                    auto tanhVal = std::tanh(inner);
-                    auto innerGradient
+                    const auto tanhVal = std::tanh(inner);
+                    const auto innerGradient
                         = sqrt2OverPi
                           * (static_cast<ComputeType>(1)
                              + static_cast<ComputeType>(3) * static_cast<ComputeType>(0.044715)
                                    * xCompute * xCompute);
-                    auto localGradient
+                    const auto localGradient
                         = static_cast<ComputeType>(0.5) * (static_cast<ComputeType>(1) + tanhVal)
                           + static_cast<ComputeType>(0.5) * xCompute
                                 * (static_cast<ComputeType>(1) - tanhVal * tanhVal) * innerGradient;
@@ -2358,8 +2368,9 @@ protected:
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance
+            = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2409,20 +2420,21 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto dyCompute
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto dyCompute
                         = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
-                    auto localGradient = xCompute > static_cast<ComputeType>(0)
-                                             ? static_cast<ComputeType>(1)
-                                             : static_cast<ComputeType>(ALPHA) * std::exp(xCompute);
+                    const auto localGradient
+                        = xCompute > static_cast<ComputeType>(0)
+                              ? static_cast<ComputeType>(1)
+                              : static_cast<ComputeType>(ALPHA) * std::exp(xCompute);
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(dyCompute * localGradient), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ELU_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ELU_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2451,15 +2463,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto result = std::sqrt(xCompute);
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto result = std::sqrt(xCompute);
                     expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SQRT, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SQRT, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2488,15 +2500,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto result = static_cast<ComputeType>(1) / std::sqrt(xCompute);
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto result = static_cast<ComputeType>(1) / std::sqrt(xCompute);
                     expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RSQRT, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RSQRT, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2525,15 +2537,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto result = static_cast<ComputeType>(1) / xCompute;
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto result = static_cast<ComputeType>(1) / xCompute;
                     expected.setHostValue(safeTestTypeCast<OutputType>(result), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::RECIPROCAL, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::RECIPROCAL, TEST_VALUE_5);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2562,15 +2574,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::sin(xCompute)), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SIN, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SIN, TEST_VALUE_3);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2599,15 +2611,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::tan(xCompute)), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::TAN, 20.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::TAN, 20.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2636,15 +2648,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::erf(xCompute)), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::ERF, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::ERF, TEST_VALUE_3);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2673,15 +2685,15 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::ceil(xCompute)), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::CEIL, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::CEIL, TEST_VALUE_3);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2806,20 +2818,21 @@ protected:
             {
                 for(int w = 0; w < 2; ++w)
                 {
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
-                    auto dyCompute
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto dyCompute
                         = static_cast<ComputeType>(upstreamGrad.getHostValue(0, c, h, w));
-                    auto localGradient = static_cast<ComputeType>(1)
-                                         / (static_cast<ComputeType>(1)
-                                            + std::exp(-static_cast<ComputeType>(BETA) * xCompute));
+                    const auto localGradient
+                        = static_cast<ComputeType>(1)
+                          / (static_cast<ComputeType>(1)
+                             + std::exp(-static_cast<ComputeType>(BETA) * xCompute));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(dyCompute * localGradient), 0, c, h, w);
                 }
             }
         }
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_BWD, TEST_VALUE_4);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2839,7 +2852,7 @@ protected:
                 for(int w = 0; w < 2; ++w)
                 {
                     input.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
-                    auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
+                    const auto xCompute = static_cast<ComputeType>(input.getHostValue(0, c, h, w));
                     expected.setHostValue(
                         safeTestTypeCast<OutputType>(std::exp(xCompute)), 0, c, h, w);
                     value += 1.0f;
@@ -2850,8 +2863,8 @@ protected:
         CpuReferencePointwiseImpl<OutputType, double, Input1Type>::pointwiseCompute(
             PointwiseMode::EXP, output, input);
 
-        auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 };

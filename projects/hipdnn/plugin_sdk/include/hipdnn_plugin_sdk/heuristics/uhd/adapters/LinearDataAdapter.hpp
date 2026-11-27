@@ -261,7 +261,7 @@ inline std::unique_ptr<LinearDataAdapter>
         return nullptr;
     }
 
-    auto size = file.tellg();
+    const auto size = file.tellg();
     if(size <= 0 || size > static_cast<std::streamoff>(256 * 1024 * 1024))
     {
         return nullptr;

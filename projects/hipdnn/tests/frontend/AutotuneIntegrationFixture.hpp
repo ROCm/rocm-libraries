@@ -124,13 +124,13 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_compute_data_type(DataType::FLOAT);
 
-        auto xAttr = std::make_shared<TensorAttributes>();
+        const auto xAttr = std::make_shared<TensorAttributes>();
         xAttr->set_name("X")
             .set_dim(xDims)
             .set_stride(generateStrides(xDims, TensorLayout::NCHW.strideOrder))
             .set_data_type(DataType::FLOAT);
 
-        auto wAttr = std::make_shared<TensorAttributes>();
+        const auto wAttr = std::make_shared<TensorAttributes>();
         wAttr->set_name("W")
             .set_dim(wDims)
             .set_stride(generateStrides(wDims, TensorLayout::NCHW.strideOrder))
@@ -142,7 +142,7 @@ protected:
         convAttrs.set_stride({1, 1});
         convAttrs.set_dilation({1, 1});
 
-        auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttrs);
+        const auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttrs);
         yAttr->set_output(true);
 
         bundle.graph = std::move(graph);
@@ -245,7 +245,7 @@ protected:
     {
         hipdnn_data_sdk::utilities::setEnv("HIPDNN_HEUR_CONFIG_PATH", configPath.c_str());
 
-        auto graph = hipdnn_test_sdk::utilities::buildGraphForOp(op);
+        const auto graph = hipdnn_test_sdk::utilities::buildGraphForOp(op);
 
         auto result = graph->build(_handle);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;

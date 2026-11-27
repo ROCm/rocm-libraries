@@ -328,7 +328,7 @@ std::string ResampleBwdOperationDescriptor::toString() const
                hipdnn_flatbuffers_sdk::data_objects::EnumNamePaddingMode(_data.padding_mode));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

@@ -96,11 +96,11 @@ public:
                                "LayerNormNode missing bias for pre-validation");
 
         // Get tensor references
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
-        auto scale = attributes.get_scale();
-        auto bias = attributes.get_bias();
-        auto epsilon = attributes.get_epsilon();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
+        const auto scale = attributes.get_scale();
+        const auto bias = attributes.get_bias();
+        const auto epsilon = attributes.get_epsilon();
 
         // SECTION 3: Validate Required Parameter Dimensions
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
@@ -177,7 +177,7 @@ public:
     Error infer_properties_node() override
     {
         auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto y = attributes.get_y();
 
         if(!x)
         {
@@ -211,10 +211,10 @@ public:
 
         // Infer unset scale and bias dims from x (see inferAffineDims) and their strides from
         // the stride order of x
-        auto scale = attributes.get_scale();
-        auto bias = attributes.get_bias();
+        const auto scale = attributes.get_scale();
+        const auto bias = attributes.get_bias();
 
-        auto inferAffineTensor = [&](const std::shared_ptr<TensorAttributes>& tensor) {
+        const auto inferAffineTensor = [&](const std::shared_ptr<TensorAttributes>& tensor) {
             if(!tensor || x->get_dim().empty())
             {
                 return;
@@ -229,7 +229,7 @@ public:
                 const auto& dims = tensor->get_dim();
                 if(!x->get_stride().empty() && x->get_stride().size() == dims.size())
                 {
-                    auto strideOrder
+                    const auto strideOrder
                         = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                     tensor->set_stride(
                         hipdnn_data_sdk::utilities::generateStrides(dims, strideOrder));
@@ -263,7 +263,7 @@ public:
         auto mean = attributes.get_mean();
         auto invVariance = attributes.get_inv_variance();
 
-        auto inferStatsTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
+        const auto inferStatsTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
             if(tensorToInfer && tensorToInfer->get_dim().empty() && shapesSet)
             {
                 tensorToInfer->set_dim(
@@ -275,7 +275,7 @@ public:
                 if(!x->get_stride().empty()
                    && x->get_stride().size() == tensorToInfer->get_dim().size())
                 {
-                    auto strideOrder
+                    const auto strideOrder
                         = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                     tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
                         tensorToInfer->get_dim(), strideOrder));

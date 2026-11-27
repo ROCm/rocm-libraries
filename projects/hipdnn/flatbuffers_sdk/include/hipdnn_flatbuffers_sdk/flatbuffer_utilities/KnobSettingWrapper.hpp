@@ -102,7 +102,7 @@ public:
         auto knobIdPtr = _shallowKnobSetting->knob_id();
         knobSettingT->knob_id = knobIdPtr != nullptr ? knobIdPtr->str() : "";
 
-        auto knobValueType = _shallowKnobSetting->value_type();
+        const auto knobValueType = _shallowKnobSetting->value_type();
         auto knobValuePtr = _shallowKnobSetting->value();
 
         if(knobValuePtr != nullptr)

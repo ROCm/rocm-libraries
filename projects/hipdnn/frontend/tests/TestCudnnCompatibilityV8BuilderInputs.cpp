@@ -64,7 +64,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderInputs, RngSeedTensorsCheckedBeforeNotSupp
     {
         SCOPED_TRACE(c.label);
         const BuildFailure failure = failureOf([&dims, &c] {
-            [[maybe_unused]] auto op
+            [[maybe_unused]] const auto op
                 = fe::OperationBuilder_v8(fe::DescriptorType_t::OPERATION_RNG_DESCRIPTOR)
                       .setyDesc(tensor(Y_UID, dims))
                       .setRngDesc(bernoulli())

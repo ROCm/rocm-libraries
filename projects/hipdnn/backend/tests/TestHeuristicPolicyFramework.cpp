@@ -155,10 +155,10 @@ TEST_F(TestHeuristicPolicyFramework, GetHeuristicPolicyInfoOutOfRangeFails)
 
 TEST_F(TestHeuristicPolicyFramework, HeuristicResourceManagerLoadsDefaultPolicies)
 {
-    auto heurRm = _handle->getHeuristicPluginResourceManager();
+    const auto heurRm = _handle->getHeuristicPluginResourceManager();
     ASSERT_NE(heurRm, nullptr);
 
-    auto policyInfos = heurRm->getHeuristicPolicyInfos();
+    const auto policyInfos = heurRm->getHeuristicPolicyInfos();
 
     // The StaticOrdering built-in is registered at construction time and is the
     // canonical fallback policy.

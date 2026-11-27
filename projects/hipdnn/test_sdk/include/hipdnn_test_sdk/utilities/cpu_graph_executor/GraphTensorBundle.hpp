@@ -64,7 +64,7 @@ struct GraphTensorBundle
 
     void randomizeTensor(int64_t uid, float min, float max, unsigned int seed)
     {
-        auto it = tensors.find(uid);
+        const auto it = tensors.find(uid);
         if(it == tensors.end())
         {
             throw std::runtime_error("Tensor with uid " + std::to_string(uid) + " not found");
@@ -100,7 +100,7 @@ struct GraphTensorBundle
 
     hipdnn_data_sdk::utilities::ITensor& getTensor(int64_t uid)
     {
-        auto it = tensors.find(uid);
+        const auto it = tensors.find(uid);
         if(it == tensors.end())
         {
             throw std::runtime_error(
@@ -113,7 +113,7 @@ struct GraphTensorBundle
 
     const hipdnn_data_sdk::utilities::ITensor& getTensor(int64_t uid) const
     {
-        auto it = tensors.find(uid);
+        const auto it = tensors.find(uid);
         if(it == tensors.end())
         {
             throw std::runtime_error(
@@ -131,9 +131,9 @@ struct GraphTensorBundle
 
     void sentinelFillOutputTensors()
     {
-        for(auto id : outputTensorIds)
+        for(const auto id : outputTensorIds)
         {
-            auto it = tensors.find(id);
+            const auto it = tensors.find(id);
             if(it != tensors.end())
             {
                 it->second->fillWithSentinelValue();

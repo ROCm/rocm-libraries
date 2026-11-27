@@ -50,7 +50,7 @@ protected:
         setIsolatedUserCallback(HIPDNN_SEV_OFF, LogCallbackMode::ASYNC);
 
         // Restore original log level
-        auto error = setGlobalLogLevel(_originalLogLevel);
+        const auto error = setGlobalLogLevel(_originalLogLevel);
         ASSERT_EQ(error.code, ErrorCode::OK);
     }
 
@@ -76,7 +76,7 @@ TEST_F(IntegrationFrontendUserLogging, FrontendLogsProducedOnUserCallback)
     // Register user callback through frontend API
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
 
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     // Emit frontend logs
@@ -104,7 +104,7 @@ TEST_F(IntegrationFrontendUserLogging, LogLevelControlsFrontendLogs)
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
 
     // Set to WARN level - INFO should be filtered
-    auto error = setGlobalLogLevel(HIPDNN_SEV_WARN);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_WARN);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     HIPDNN_FE_LOG_INFO("Info should be filtered");
@@ -130,7 +130,7 @@ TEST_F(IntegrationFrontendUserLogging, LogLevelOffFiltersAllLogs)
 
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
 
-    auto error = setGlobalLogLevel(HIPDNN_SEV_OFF);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_OFF);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     HIPDNN_FE_LOG_INFO("Should be filtered");
@@ -153,7 +153,7 @@ TEST_F(IntegrationFrontendUserLogging, UnregisterWithSevOffStopsCallbacks)
 
     // Set callback
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     const auto countBefore = recorder.getRecordedLogCount();
@@ -192,7 +192,7 @@ TEST_F(IntegrationFrontendUserLogging, CallbackLevelFiltersIndependently)
     registerUserCallback(HIPDNN_SEV_WARN, LogCallbackMode::ASYNC);
 
     // Set global level to INFO (allows INFO through)
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     HIPDNN_FE_LOG_INFO("Info should be filtered by callback level");
@@ -214,12 +214,12 @@ TEST_F(IntegrationFrontendUserLogging, CallbackLevelFiltersIndependently)
 // Test: Sync callback executes immediately
 TEST_F(IntegrationFrontendUserLogging, SyncCallbackExecutesImmediately)
 {
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Register callback in SYNC mode
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::SYNC);
 
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     HIPDNN_FE_LOG_INFO("Sync callback message");
@@ -237,7 +237,7 @@ TEST_F(IntegrationFrontendUserLogging, AsyncCallbackQueuesLogs)
     // Register callback in ASYNC mode
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
 
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     HIPDNN_FE_LOG_INFO("Async callback message");
@@ -258,7 +258,7 @@ TEST_F(IntegrationFrontendUserLogging, UpdateCallbackLevel)
 
     // Register callback at INFO
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     const auto countBefore = recorder.getRecordedLogCount();
@@ -295,7 +295,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
 
     // Start with SYNC mode
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::SYNC);
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     HIPDNN_FE_LOG_INFO("Sync mode message");
@@ -326,7 +326,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
 
     // Start with ASYNC mode
     registerUserCallback(HIPDNN_SEV_INFO, LogCallbackMode::ASYNC);
-    auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
+    const auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     const auto countBefore = recorder.getRecordedLogCount();
@@ -353,17 +353,17 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
 // Test: Null callback parameter is rejected
 TEST_F(IntegrationFrontendUserLogging, RejectsNullCallback)
 {
-    auto error = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, this);
+    const auto error = setUserLogCallback(nullptr, HIPDNN_SEV_INFO, LogCallbackMode::ASYNC, this);
     EXPECT_NE(error.code, ErrorCode::OK);
 }
 
 // Test: Null userHandle parameter is rejected
 TEST_F(IntegrationFrontendUserLogging, RejectsNullHandle)
 {
-    auto error = setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                    HIPDNN_SEV_INFO,
-                                    LogCallbackMode::ASYNC,
-                                    nullptr);
+    const auto error = setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                                          HIPDNN_SEV_INFO,
+                                          LogCallbackMode::ASYNC,
+                                          nullptr);
     EXPECT_NE(error.code, ErrorCode::OK);
 }
 
@@ -375,7 +375,7 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
     static std::mutex s_callbackMutex;
     static std::condition_variable s_callbackCV;
 
-    auto trackingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
+    const auto trackingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
         s_callbackCount.fetch_add(1);
         s_callbackCV.notify_all();
         // Simulate some work
@@ -435,7 +435,7 @@ TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
         std::condition_variable cv;
     };
 
-    auto countingCallback
+    const auto countingCallback
         = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
               auto* c = static_cast<CounterWithNotify*>(userHandle);
               c->count.fetch_add(1);
@@ -536,7 +536,7 @@ TEST_F(IntegrationFrontendUserLogging, GraphPlusPlanWithoutHandleDropsPlanAndWar
     ASSERT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
 
     // Finalize a plan so the serialized blob carries one.
-    auto originalGraph = hipdnn_tests::buildConvFpropGraph();
+    const auto originalGraph = hipdnn_tests::buildConvFpropGraph();
     auto result = originalGraph->build(handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -544,13 +544,13 @@ TEST_F(IntegrationFrontendUserLogging, GraphPlusPlanWithoutHandleDropsPlanAndWar
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     // Install a SYNC WARN recorder so the warning is observable immediately.
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     registerUserCallback(HIPDNN_SEV_WARN, LogCallbackMode::SYNC);
-    auto logLevelError = setGlobalLogLevel(HIPDNN_SEV_WARN);
+    const auto logLevelError = setGlobalLogLevel(HIPDNN_SEV_WARN);
     ASSERT_EQ(logLevelError.code, ErrorCode::OK);
 
     // No-handle overload: the plan must be dropped and a WARN emitted.
-    auto lifted = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    const auto lifted = std::make_shared<hipdnn_tests::TestableGraphLifting>();
     result = lifted->deserialize(data);
     EXPECT_TRUE(result.is_good()) << result.err_msg;
 

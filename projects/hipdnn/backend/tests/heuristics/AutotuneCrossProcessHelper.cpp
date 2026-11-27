@@ -36,14 +36,14 @@ std::vector<uint8_t> buildSingleTensorGraphBuffer(int64_t uid, int64_t dim)
     const std::vector<int64_t> dims{dim};
     const std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
         fb::CreateTensorAttributesDirect(builder, uid, "t", fb::DataType::FLOAT, nullptr, &dims)};
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             nullptr,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   nullptr,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -120,7 +120,7 @@ int main(int argc, char** argv)
         {
             if(i > 0)
             {
-                out += ",";
+                out += ',';
             }
             out += std::to_string(entry->order[i]);
         }

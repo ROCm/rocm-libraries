@@ -187,7 +187,7 @@ public:
         // An absent scale is 1.0 (no scaling), as in cuDNN and the dense reference.
         const float scale = attnScaleValue.value_or(1.0F);
 
-        auto defines
+        const auto defines
             = detail::buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
                 probabilityMode);
 

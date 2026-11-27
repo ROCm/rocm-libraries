@@ -75,7 +75,7 @@ struct KernelDefinition
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
-        auto it = metadata.find(field);
+        const auto it = metadata.find(field);
         if(it == metadata.end())
         {
             return std::nullopt;
@@ -88,7 +88,7 @@ struct KernelDefinition
     ///         the same terms.
     int64_t getIntMetadata(const std::string& field) const
     {
-        auto it = metadata.find(field);
+        const auto it = metadata.find(field);
         if(it == metadata.end())
         {
             throw std::out_of_range("kernel '" + toString(kernelId) + "' has no metadata field '"
@@ -105,7 +105,7 @@ struct KernelDefinition
 
     const std::string& getStringMetadata(const std::string& field) const
     {
-        auto it = metadata.find(field);
+        const auto it = metadata.find(field);
         if(it == metadata.end())
         {
             throw std::out_of_range("kernel '" + toString(kernelId) + "' has no metadata field '"
@@ -122,7 +122,7 @@ struct KernelDefinition
 
     const std::vector<int64_t>& getIntListMetadata(const std::string& field) const
     {
-        auto it = metadata.find(field);
+        const auto it = metadata.find(field);
         if(it == metadata.end())
         {
             throw std::out_of_range("kernel '" + toString(kernelId) + "' has no metadata field '"

@@ -247,7 +247,7 @@ protected:
 
 TEST_F(TestEngineHeuristicDescriptor, CreateEngineHeuristicDescriptor)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     ASSERT_NE(heur, nullptr);
     ASSERT_FALSE(heur->isFinalized());
     ASSERT_EQ(heur->getType(), HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
@@ -255,7 +255,7 @@ TEST_F(TestEngineHeuristicDescriptor, CreateEngineHeuristicDescriptor)
 
 TEST_F(TestEngineHeuristicDescriptor, SetEngineHeuristicDescriptorGraph)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     EXPECT_CALL(*getMockGraphBadType(), isFinalized()).Times(1);
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(false)).WillOnce(Return(true));
@@ -310,7 +310,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetEngineHeuristicDescriptorGraph)
 
 TEST_F(TestEngineHeuristicDescriptor, SetEngineHeuristicDescriptorHeurMode)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_FALLBACK;
     auto unsupportedMode = static_cast<hipdnnBackendHeurMode_t>(999);
 
@@ -342,7 +342,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetEngineHeuristicDescriptorHeurMode)
 
 TEST_F(TestEngineHeuristicDescriptor, SetEngineHeuristicDescriptorUnsupportedAttr)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     int32_t dummy = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -352,7 +352,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetEngineHeuristicDescriptorUnsupportedAtt
 
 TEST_F(TestGpuEngineHeuristicDescriptor, SetAttrOnFinalizedEngineHeuristicDescriptor)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     makeEngineHeuristicFinalized();
 
     ASSERT_THROW_HIPDNN_STATUS(heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
@@ -364,7 +364,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, SetAttrOnFinalizedEngineHeuristicDescri
 
 TEST_F(TestEngineHeuristicDescriptor, FinalizeEngineHeuristicDescriptor)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds)
         .Times(AnyNumber()); //Uninteresting call
 
@@ -381,7 +381,7 @@ TEST_F(TestEngineHeuristicDescriptor, FinalizeEngineHeuristicDescriptor)
 
 TEST_F(TestEngineHeuristicDescriptor, FinalizeEngineHeuristicDescriptorReverseOrder)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds)
         .Times(AnyNumber()); //Uninteresting call
 
@@ -398,7 +398,7 @@ TEST_F(TestEngineHeuristicDescriptor, FinalizeEngineHeuristicDescriptorReverseOr
 
 TEST_F(TestEngineHeuristicDescriptor, GetAttrOnUnfinalizedEngineHeuristicDescriptor)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     hipdnnBackendDescriptor_t dummyGraph = nullptr;
 
     ASSERT_THROW_HIPDNN_STATUS(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
@@ -411,7 +411,7 @@ TEST_F(TestEngineHeuristicDescriptor, GetAttrOnUnfinalizedEngineHeuristicDescrip
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorUnsupportedAttr)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     hipdnnBackendHeurMode_t dummy;
 
     makeEngineHeuristicFinalized();
@@ -423,7 +423,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorUnsupported
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorGraph)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     ScopedDescriptor graph;
     ScopedDescriptor graph2;
 
@@ -466,7 +466,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorGraph)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorEngineConfigs)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     makeEngineHeuristicFinalized();
 
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillRepeatedly(Return(true));
@@ -499,7 +499,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorEngineConfi
     }
     std::vector<hipdnnBackendDescriptor_t> configs;
     configs.reserve(ownedConfigs.size());
-    for(auto& owned : ownedConfigs)
+    for(const auto& owned : ownedConfigs)
     {
         configs.push_back(owned.get());
     }
@@ -529,7 +529,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorEngineConfi
 
 TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsRejectsNegativeCount)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     const bool findFirst = true;
     ASSERT_NO_THROW(heur->setAttribute(
         HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
@@ -556,7 +556,7 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsRejectsNegativeCount)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsWithNullConfig)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     makeEngineHeuristicFinalized();
 
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillRepeatedly(Return(true));
@@ -575,7 +575,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsWithNullConfig)
 
     std::vector<hipdnnBackendDescriptor_t> configs;
     configs.reserve(ownedConfigs.size());
-    for(auto& owned : ownedConfigs)
+    for(const auto& owned : ownedConfigs)
     {
         configs.push_back(owned.get());
     }
@@ -592,7 +592,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsWithNullConfig)
 
 TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsWithNoEngineIds)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode();
 
@@ -608,7 +608,7 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsWithNoEngineIds)
     }
     std::vector<hipdnnBackendDescriptor_t> configs;
     configs.reserve(ownedConfigs.size());
-    for(auto& owned : ownedConfigs)
+    for(const auto& owned : ownedConfigs)
     {
         configs.push_back(owned.get());
     }
@@ -624,7 +624,7 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsWithNoEngineIds)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsRequestMoreThanAvailable)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     makeEngineHeuristicFinalized();
 
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillRepeatedly(Return(true));
@@ -643,7 +643,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsRequestMoreThanAvailabl
     }
     std::vector<hipdnnBackendDescriptor_t> configs;
     configs.reserve(ownedConfigs.size());
-    for(auto& owned : ownedConfigs)
+    for(const auto& owned : ownedConfigs)
     {
         configs.push_back(owned.get());
     }
@@ -659,7 +659,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsRequestMoreThanAvailabl
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsCountOnly)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     makeEngineHeuristicFinalized();
 
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillRepeatedly(Return(true));
@@ -672,7 +672,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineConfigsCountOnly)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorHeurMode)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     hipdnnBackendHeurMode_t mode = HIPDNN_HEUR_MODE_FALLBACK;
 
     makeEngineHeuristicFinalized();
@@ -703,15 +703,15 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetEngineHeuristicDescriptorHeurMode)
 
 TEST_F(TestEngineHeuristicDescriptor, GetGraphThrowsIfNotFinalized)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(heur->getGraph(), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetGraphReturnsPointerIfFinalized)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     makeEngineHeuristicFinalized();
-    auto graphPtr = heur->getGraph();
+    const auto graphPtr = heur->getGraph();
     ASSERT_NE(graphPtr, nullptr);
     ASSERT_EQ(static_cast<const IBackendDescriptor*>(graphPtr.get()),
               static_cast<const IBackendDescriptor*>(getMockGraph().get()));
@@ -719,7 +719,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetGraphReturnsPointerIfFinalized)
 
 TEST_F(TestEngineHeuristicDescriptor, SetFindFirst)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     bool findFirst = true;
     ASSERT_NO_THROW(heur->setAttribute(
         HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
@@ -727,7 +727,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetFindFirst)
 
 TEST_F(TestEngineHeuristicDescriptor, SetFindFirstInvalidType)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     bool findFirst = true;
     ASSERT_THROW_HIPDNN_STATUS(
         heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_INT64, 1, &findFirst),
@@ -736,7 +736,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetFindFirstInvalidType)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetFindFirstAfterFinalize)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     bool findFirst = true;
     ASSERT_NO_THROW(heur->setAttribute(
         HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
@@ -757,7 +757,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetFindFirstAfterFinalize)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithFindFirstPassesToPluginManager)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     bool findFirst = true;
     ASSERT_NO_THROW(heur->setAttribute(
         HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT, HIPDNN_TYPE_BOOLEAN, 1, &findFirst));
@@ -773,7 +773,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithFindFirstPassesToPluginMana
 
 TEST_F(TestEngineHeuristicDescriptor, SetPolicyOrderValid)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     const std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("Policy1"),
@@ -789,7 +789,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetPolicyOrderValid)
 
 TEST_F(TestEngineHeuristicDescriptor, SetPolicyOrderInvalidType)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     const char dummy = '\0';
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -799,7 +799,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetPolicyOrderInvalidType)
 
 TEST_F(TestEngineHeuristicDescriptor, SetPolicyOrderNullPointer)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(
         heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 1, nullptr),
@@ -817,7 +817,7 @@ protected:
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
             "HIPDNN_HEUR_POLICY_ORDER", "");
 
-        auto heur = getEngineHeuristicDescriptor();
+        const auto heur = getEngineHeuristicDescriptor();
         setGraph();
         setHeuristicMode(mode);
         EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
@@ -868,7 +868,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, PolicyOrderAttributeOverridesTheModeLis
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
         "HIPDNN_HEUR_POLICY_ORDER", "");
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode(HIPDNN_HEUR_MODE_A);
 
@@ -900,7 +900,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, PolicyOrderAttributeOverridesTheModeLis
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderCountOnly)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     // Caller-provided policy list is preserved verbatim; nothing is prepended.
     const std::vector<int64_t> policyIds = {
@@ -926,7 +926,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderCountOnly)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderInvalidType)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode();
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
@@ -943,7 +943,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderInvalidType)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderNullPointer)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     const std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
@@ -968,7 +968,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderNullPointer)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderNegativeRequestedCount)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     const std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
@@ -995,7 +995,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderNegativeRequestedCount)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderBufferTooSmall)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     // The caller-supplied list is stored verbatim; no dedup, no prepend.
     const int64_t firstId
@@ -1025,7 +1025,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderBufferTooSmall)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderRoundTrip)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     // The descriptor stores the caller-supplied list verbatim, including
     // duplicates and unknown policies — nothing is prepended or dedup'd.
@@ -1065,7 +1065,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderRoundTrip)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithAllPoliciesFailing)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode();
 
@@ -1083,7 +1083,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithAllPoliciesFailing)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithPolicyThrowingException)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode();
 
@@ -1106,7 +1106,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithSetDevicePropertiesThrowing
     // setDeviceProperties failure for a plugin must disable that plugin's slots
     // (mirroring the policy loop's fail-soft contract). With the only available
     // policy disabled, finalize falls through to the "no policy succeeded" throw.
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode();
 
@@ -1132,7 +1132,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor,
         = hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering");
 
     auto failingHandle = reinterpret_cast<hipdnnHeuristicHandle_t>(0xABCD);
-    auto failingPlugin = std::make_shared<NiceMock<MockHeuristicPlugin>>();
+    const auto failingPlugin = std::make_shared<NiceMock<MockHeuristicPlugin>>();
 
     // Wire the failing policy to a distinct plugin/handle. Registering after
     // setupMockHeuristicPlugin's catch-all (LIFO match) routes failingPolicyId
@@ -1146,7 +1146,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor,
         .WillRepeatedly(Throw(
             HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Mock setDeviceProperties failure")));
 
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     // Failing policy first, then StaticOrdering. The failing slot is disabled
     // by setDeviceProperties throwing; StaticOrdering succeeds.
@@ -1168,7 +1168,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor,
 
 TEST_F(TestEngineHeuristicDescriptor, ToStringBeforeFinalize)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     const std::string str = heur->toString();
     ASSERT_NE(str.find("EngineHeuristicDescriptor"), std::string::npos);
     ASSERT_NE(str.find("unset"), std::string::npos);
@@ -1176,7 +1176,7 @@ TEST_F(TestEngineHeuristicDescriptor, ToStringBeforeFinalize)
 
 TEST_F(TestEngineHeuristicDescriptor, ToStringAfterSetHeurMode)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setHeuristicMode();
     const std::string str = heur->toString();
     ASSERT_NE(str.find("EngineHeuristicDescriptor"), std::string::npos);
@@ -1185,7 +1185,7 @@ TEST_F(TestEngineHeuristicDescriptor, ToStringAfterSetHeurMode)
 
 TEST_F(TestEngineHeuristicDescriptor, ToStringAfterSetGraph)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     const std::string str = heur->toString();
     ASSERT_NE(str.find("graph="), std::string::npos);
@@ -1194,7 +1194,7 @@ TEST_F(TestEngineHeuristicDescriptor, ToStringAfterSetGraph)
 
 TEST_F(TestEngineHeuristicDescriptor, ToStringWithPolicyOrder)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     const std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("Policy1"),
@@ -1218,7 +1218,7 @@ TEST_F(TestEngineHeuristicDescriptor, ToStringWithPolicyOrder)
 
 TEST_F(TestEngineHeuristicDescriptor, SetEmptyPolicyOrder)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     // Setting an empty policy order is allowed at the attribute level; finalize()
     // would later fail because no policy can be selected, but that is exercised by
@@ -1229,7 +1229,7 @@ TEST_F(TestEngineHeuristicDescriptor, SetEmptyPolicyOrder)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderNullElementCount)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     const std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
@@ -1257,7 +1257,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderNullElementCount)
 
 TEST_F(TestGpuEngineHeuristicDescriptor, MultipleSetPolicyOrderCalls)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     // First set
     {
@@ -1320,7 +1320,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EnvironmentVariablePolicyOrderIsRespect
     {
         SCOPED_TRACE(static_cast<int>(mode));
         _engineHeuristicWrapper = createDescriptor<EngineHeuristicDescriptor>();
-        auto heur = getEngineHeuristicDescriptor();
+        const auto heur = getEngineHeuristicDescriptor();
         setGraph();
         setHeuristicMode(mode);
 
@@ -1337,7 +1337,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EnvironmentPolicyOrderTakesPrecedenceOv
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
         "HIPDNN_HEUR_POLICY_ORDER", "SelectionHeuristic::StaticOrdering");
 
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     const std::vector<int64_t> descriptorOrder = {
         hipdnn_data_sdk::utilities::policyNameToId("Vendor::Unregistered"),
@@ -1369,7 +1369,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EnvironmentPolicyOrderAcceptsRawIds)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
         "HIPDNN_HEUR_POLICY_ORDER", envValue);
 
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setGraph();
     setHeuristicMode();
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
@@ -1388,7 +1388,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, FinalizeWithEmptyPolicyListThrows)
     // Empty policy list reaches the "no policy succeeded" path via a different
     // route from FinalizeWithAllPoliciesFailing: the outer loop never executes
     // because there are no slots to try. Both paths must produce the same throw.
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
 
     ASSERT_NO_THROW(
         heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 0, nullptr));
@@ -1436,7 +1436,7 @@ TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenD
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
             "HIPDNN_HEUR_RANKING_METRIC", env);
         _engineHeuristicWrapper = createDescriptor<EngineHeuristicDescriptor>();
-        auto heur = getEngineHeuristicDescriptor();
+        const auto heur = getEngineHeuristicDescriptor();
         if(attribute != nullptr)
         {
             setRankingMetric(*heur, attribute);
@@ -1457,7 +1457,7 @@ TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenD
 // Refused at set (RFC 0019 §4.4).
 TEST_F(TestEngineHeuristicDescriptor, UnregisteredRankingMetricAttributeIsRejected)
 {
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(setRankingMetric(*heur, "flops"), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -1466,7 +1466,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EveryResultConfigCarriesTheRankingMetri
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
         "HIPDNN_HEUR_RANKING_METRIC", "");
-    auto heur = getEngineHeuristicDescriptor();
+    const auto heur = getEngineHeuristicDescriptor();
     setRankingMetric(*heur, "time");
     makeEngineHeuristicFinalized();
 
@@ -1567,7 +1567,7 @@ protected:
         _serializedGraph = graphBuilder.Release();
         const hipdnnPluginConstData_t graphBytes{_serializedGraph.data(), _serializedGraph.size()};
 
-        auto heur = getEngineHeuristicDescriptor();
+        const auto heur = getEngineHeuristicDescriptor();
         setRankingMetric(*heur, "time");
         setGraph();
         setHeuristicMode(viaMode.value_or(HIPDNN_HEUR_MODE_FALLBACK));

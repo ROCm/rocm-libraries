@@ -229,7 +229,7 @@ inline std::pair<Error, Knob> Knob::tryCreate(std::string knobIdStr,
         = constraint != nullptr ? std::move(constraint) : std::make_shared<EmptyConstraint>();
 
     const KnobSetting defaultSetting(knob._knobId, knob._defaultValue);
-    auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
+    const auto validationError = knob._constraint->validateKnobSetting(defaultSetting);
     if(validationError.code != ErrorCode::OK)
     {
         return {{ErrorCode::INVALID_VALUE,

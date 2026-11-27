@@ -30,7 +30,7 @@ inline bool isValidLogLevel(const std::string& level)
  */
 inline bool isLoggingEnabled()
 {
-    auto logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+    const auto logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
     return detail::stringToSeverityOrOff(logLevel) != HIPDNN_SEV_OFF;
 }
 

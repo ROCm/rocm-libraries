@@ -124,12 +124,12 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildBackwardGraph(GraphKind kind
             .set_data_type(type);
         return tensor;
     };
-    auto q = makeTensor(1, "Q", dataType, dims, io);
-    auto k = makeTensor(2, "K", dataType, dims, io);
-    auto v = makeTensor(3, "V", dataType, dims, io);
-    auto o = makeTensor(4, "O", dataType, dims, oStrides);
-    auto dO = makeTensor(5, "dO", dataType, dims, io);
-    auto stats = makeTensor(6, "LSE", DataType::FLOAT, statsDims, statsStrides);
+    const auto q = makeTensor(1, "Q", dataType, dims, io);
+    const auto k = makeTensor(2, "K", dataType, dims, io);
+    const auto v = makeTensor(3, "V", dataType, dims, io);
+    const auto o = makeTensor(4, "O", dataType, dims, oStrides);
+    const auto dO = makeTensor(5, "dO", dataType, dims, io);
+    const auto stats = makeTensor(6, "LSE", DataType::FLOAT, statsDims, statsStrides);
 
     SdpaBackwardAttributes attributes;
     attributes.set_name(graph->get_name());
@@ -179,7 +179,7 @@ public:
                          << _arch;
         }
 
-        auto graph
+        const auto graph
             = _row.kind == GraphKind::FORWARD ? buildForwardGraph() : buildBackwardGraph(_row.kind);
         graph->deselect_numeric_notes({hipdnn_frontend::NumericalNote::NONDETERMINISTIC});
         auto result = graph->validate();

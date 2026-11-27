@@ -73,7 +73,7 @@ std::vector<Version> randomVersions(size_t numberGenerated, unsigned int seed = 
 std::vector<std::pair<Version, Version>> randomVersionCartesianProduct(size_t numberGenerated,
                                                                        unsigned int seed = 0)
 {
-    auto versions = randomVersions(15, seed);
+    const auto versions = randomVersions(15, seed);
     std::vector<std::pair<Version, Version>> versionCartesianProducts;
     versionCartesianProducts.reserve(numberGenerated * numberGenerated);
 
@@ -91,12 +91,12 @@ std::vector<std::pair<Version, Version>> randomVersionCartesianProduct(size_t nu
 
 TEST(TestVersionUtils, VersionTupleEquals)
 {
-    auto versionProduct = randomVersionCartesianProduct(8);
+    const auto versionProduct = randomVersionCartesianProduct(8);
 
     for(auto [version0, version1] : versionProduct)
     {
-        auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
-        auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
+        const auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
+        const auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
         EXPECT_EQ(version0 == version1, tuple0 == tuple1)
             << "Version 0 = " << version0.str() << " Version 1 = " << version1.str();
     }
@@ -104,12 +104,12 @@ TEST(TestVersionUtils, VersionTupleEquals)
 
 TEST(TestVersionUtils, VersionTupleNotEqual)
 {
-    auto versionProduct = randomVersionCartesianProduct(8);
+    const auto versionProduct = randomVersionCartesianProduct(8);
 
     for(auto [version0, version1] : versionProduct)
     {
-        auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
-        auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
+        const auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
+        const auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
         EXPECT_EQ(version0 != version1, tuple0 != tuple1)
             << "Version 0 = " << version0.str() << " Version 1 = " << version1.str();
     }
@@ -117,12 +117,12 @@ TEST(TestVersionUtils, VersionTupleNotEqual)
 
 TEST(TestVersionUtils, VersionTupleLessThan)
 {
-    auto versionProduct = randomVersionCartesianProduct(8);
+    const auto versionProduct = randomVersionCartesianProduct(8);
 
     for(auto [version0, version1] : versionProduct)
     {
-        auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
-        auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
+        const auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
+        const auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
         EXPECT_EQ(version0 < version1, tuple0 < tuple1)
             << "Version 0 = " << version0.str() << " Version 1 = " << version1.str();
     }
@@ -130,12 +130,12 @@ TEST(TestVersionUtils, VersionTupleLessThan)
 
 TEST(TestVersionUtils, VersionTupleLessThanOrEquals)
 {
-    auto versionProduct = randomVersionCartesianProduct(8);
+    const auto versionProduct = randomVersionCartesianProduct(8);
 
     for(auto [version0, version1] : versionProduct)
     {
-        auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
-        auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
+        const auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
+        const auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
         EXPECT_EQ(version0 <= version1, tuple0 <= tuple1)
             << "Version 0 = " << version0.str() << " Version 1 = " << version1.str();
     }
@@ -143,12 +143,12 @@ TEST(TestVersionUtils, VersionTupleLessThanOrEquals)
 
 TEST(TestVersionUtils, VersionTupleGreaterThan)
 {
-    auto versionProduct = randomVersionCartesianProduct(8);
+    const auto versionProduct = randomVersionCartesianProduct(8);
 
     for(auto [version0, version1] : versionProduct)
     {
-        auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
-        auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
+        const auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
+        const auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
         EXPECT_EQ(version0 > version1, tuple0 > tuple1)
             << "Version 0 = " << version0.str() << " Version 1 = " << version1.str();
     }
@@ -156,12 +156,12 @@ TEST(TestVersionUtils, VersionTupleGreaterThan)
 
 TEST(TestVersionUtils, VersionTupleGreaterThanOrEquals)
 {
-    auto versionProduct = randomVersionCartesianProduct(8);
+    const auto versionProduct = randomVersionCartesianProduct(8);
 
     for(auto [version0, version1] : versionProduct)
     {
-        auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
-        auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
+        const auto tuple0 = std::make_tuple(version0.major, version0.minor, version0.patch);
+        const auto tuple1 = std::make_tuple(version1.major, version1.minor, version1.patch);
         EXPECT_EQ(version0 >= version1, tuple0 >= tuple1)
             << "Version 0 = " << version0.str() << " Version 1 = " << version1.str();
     }

@@ -98,7 +98,7 @@ inline auto to<data_objects::SdpaAttributes>(flatbuffers::FlatBufferBuilder& bui
     auto& attributes = entry.at("attributes");
 
     // Lenient read: serialized graphs written before cu_seq_len existed omit these keys.
-    auto optionalInput = [&inputs](const char* key) -> std::optional<int64_t> {
+    const auto optionalInput = [&inputs](const char* key) -> std::optional<int64_t> {
         return inputs.contains(key) ? inputs.at(key).get<std::optional<int64_t>>()
                                     : std::optional<int64_t>{};
     };

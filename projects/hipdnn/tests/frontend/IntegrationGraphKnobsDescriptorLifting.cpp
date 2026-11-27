@@ -35,18 +35,18 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_name("X").set_dim({2, 3, 4, 4}).set_stride({48, 16, 4, 1});
 
         PointwiseAttributes attrs;
         attrs.set_mode(PointwiseMode::RELU_FWD);
-        auto y = graph.pointwise(x, attrs);
+        const auto y = graph.pointwise(x, attrs);
         y->set_name("Y");
 
-        auto validateResult = graph.validate();
+        const auto validateResult = graph.validate();
         EXPECT_TRUE(validateResult.is_good()) << validateResult.get_message();
 
-        auto result = graph.build_operation_graph(_handle);
+        const auto result = graph.build_operation_graph(_handle);
         EXPECT_TRUE(result.is_good()) << result.get_message();
 
         return graph;
@@ -54,7 +54,7 @@ protected:
 
     static const Knob* findKnob(const std::vector<Knob>& knobs, const std::string& knobId)
     {
-        auto it = std::find_if(
+        const auto it = std::find_if(
             knobs.begin(), knobs.end(), [&](const Knob& knob) { return knob.knobId() == knobId; });
         return it == knobs.end() ? nullptr : &(*it);
     }
@@ -67,7 +67,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, KnobsPluginHasExpectedKnobs)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     ASSERT_EQ(knobs.size(), 5u);
@@ -157,7 +157,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, EngineBKnobs)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     {
@@ -211,7 +211,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, EngineWithNoKnobs)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_TRUE(knobs.empty())
@@ -225,11 +225,11 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, IntConstraintWithZeroMin)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // test.int_knob has min=0, max=100, step=10
-    auto it = std::find_if(
+    const auto it = std::find_if(
         knobs.begin(), knobs.end(), [](const Knob& k) { return k.knobId() == "test.int_knob"; });
     ASSERT_NE(it, knobs.end());
 
@@ -248,11 +248,11 @@ TEST_F(IntegrationGraphKnobsDescriptorLifting, FloatConstraintWithZeroMin)
     auto graph = createAndBuildSimpleGraph();
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine_via_descriptors(engineId, knobs);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // test.float_knob has min=0.0, max=1.0
-    auto it = std::find_if(
+    const auto it = std::find_if(
         knobs.begin(), knobs.end(), [](const Knob& k) { return k.knobId() == "test.float_knob"; });
     ASSERT_NE(it, knobs.end());
 

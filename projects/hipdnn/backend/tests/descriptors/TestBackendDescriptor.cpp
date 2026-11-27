@@ -14,40 +14,42 @@ using namespace hipdnn_backend;
 
 TEST(TestBackendDescriptor, PackAndUnpackDescriptorWorks)
 {
-    auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
+    const auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
 
     const ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
     ASSERT_NE(packed.get(), nullptr);
 
-    auto unpacked = HipdnnBackendDescriptor::unpackDescriptor<MockDescriptor<EngineDescriptor>>(
-        packed.get(), HIPDNN_STATUS_INTERNAL_ERROR, "fail");
+    const auto unpacked
+        = HipdnnBackendDescriptor::unpackDescriptor<MockDescriptor<EngineDescriptor>>(
+            packed.get(), HIPDNN_STATUS_INTERNAL_ERROR, "fail");
     ASSERT_EQ(unpacked.get(), mockPtr.get());
     ASSERT_EQ(unpacked->getType(), HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 }
 
 TEST(TestBackendDescriptor, AsDescriptorCastsCorrectly)
 {
-    auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
+    const auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
     const ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
 
-    auto result = packed.get()->asDescriptor<MockDescriptor<EngineDescriptor>>();
+    const auto result = packed.get()->asDescriptor<MockDescriptor<EngineDescriptor>>();
     ASSERT_EQ(result.get(), mockPtr.get());
 }
 
 TEST(TestBackendDescriptor, UnpackDescriptorFromArrayWorks)
 {
-    auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
+    const auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
     ScopedDescriptor packed(HipdnnBackendDescriptor::packDescriptor(mockPtr));
 
     auto* arrayOfElements = static_cast<void*>(&packed.descriptor);
-    auto unpacked = HipdnnBackendDescriptor::unpackDescriptor<MockDescriptor<EngineDescriptor>>(
-        arrayOfElements, HIPDNN_STATUS_INTERNAL_ERROR, "fail");
+    const auto unpacked
+        = HipdnnBackendDescriptor::unpackDescriptor<MockDescriptor<EngineDescriptor>>(
+            arrayOfElements, HIPDNN_STATUS_INTERNAL_ERROR, "fail");
     ASSERT_EQ(unpacked.get(), mockPtr.get());
 }
 
 TEST(TestBackendDescriptor, PackDescriptorToArrayWorks)
 {
-    auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
+    const auto mockPtr = std::make_shared<MockDescriptor<EngineDescriptor>>();
     hipdnnBackendDescriptor_t desc = nullptr;
     auto* arrayOfElements = static_cast<void*>(&desc);
     HipdnnBackendDescriptor::packDescriptor(mockPtr, arrayOfElements);

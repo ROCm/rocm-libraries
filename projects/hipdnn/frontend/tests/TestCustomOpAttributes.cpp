@@ -58,13 +58,13 @@ TEST(TestCustomOpAttributes, SettersAndGetters)
 
 TEST(TestCustomOpAttributes, InputsAndOutputs)
 {
-    auto inputA = std::make_shared<TensorAttributes>();
+    const auto inputA = std::make_shared<TensorAttributes>();
     inputA->set_name("input_a").set_uid(1);
 
-    auto inputB = std::make_shared<TensorAttributes>();
+    const auto inputB = std::make_shared<TensorAttributes>();
     inputB->set_name("input_b").set_uid(2);
 
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     output->set_name("output").set_uid(3);
 
     CustomOpAttributes attr;
@@ -93,16 +93,16 @@ TEST(TestCustomOpAttributes, FillFromContext)
     graphAttrs.set_compute_data_type(DataType::FLOAT);
     graphAttrs.set_io_data_type(DataType::HALF);
 
-    auto inputA = std::make_shared<TensorAttributes>();
+    const auto inputA = std::make_shared<TensorAttributes>();
     inputA->set_uid(1).set_dim({2, 3}).set_stride({3, 1});
 
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     output->set_uid(2).set_dim({2, 3}).set_stride({3, 1});
 
     CustomOpAttributes attr;
     attr.set_inputs({inputA}).set_outputs({output});
 
-    auto err = attr.fill_from_context(graphAttrs);
+    const auto err = attr.fill_from_context(graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     EXPECT_EQ(attr.get_compute_data_type(), DataType::FLOAT);
 
@@ -119,7 +119,7 @@ TEST(TestCustomOpAttributes, FillFromContextPreservesExplicitComputeType)
     CustomOpAttributes attr;
     attr.set_compute_data_type(DataType::HALF);
 
-    auto err = attr.fill_from_context(graphAttrs);
+    const auto err = attr.fill_from_context(graphAttrs);
     EXPECT_EQ(err.code, ErrorCode::OK);
     EXPECT_EQ(attr.get_compute_data_type(), DataType::HALF);
 }
@@ -193,7 +193,7 @@ TEST(TestCustomOpAttributes, EqualityTreatsNullEntriesPositionally)
     EXPECT_TRUE(lhs.logicallyEquals(rhs));
     EXPECT_TRUE(lhs == rhs);
 
-    auto nonNull = makeEqualityAttributes();
+    const auto nonNull = makeEqualityAttributes();
     EXPECT_FALSE(lhs.logicallyEquals(nonNull));
     EXPECT_FALSE(nonNull.logicallyEquals(lhs));
     EXPECT_FALSE(lhs == nonNull);

@@ -99,12 +99,12 @@ std::shared_ptr<Graph> buildPointwiseAddGraph()
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto a = makeScalarTensor(1, "A");
-    auto b = makeScalarTensor(2, "B");
+    const auto a = makeScalarTensor(1, "A");
+    const auto b = makeScalarTensor(2, "B");
 
     PointwiseAttributes attrs;
     attrs.set_name("packed_pointwise").set_mode(PointwiseMode::ADD);
-    auto c = graph->pointwise(a, b, attrs);
+    const auto c = graph->pointwise(a, b, attrs);
     c->set_uid(3).set_name("C").set_output(true).set_data_type(DataType::FLOAT);
 
     return graph;
@@ -302,7 +302,7 @@ protected:
                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first,
                                    DEFAULT_MIN,
@@ -364,7 +364,7 @@ protected:
         _stream = selectedStream;
         ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
 
-        auto graph = buildPointwiseAddGraph();
+        const auto graph = buildPointwiseAddGraph();
         ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
 
         GraphVerificationContext context(*graph);
@@ -506,7 +506,7 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     // BuildPlanPolicy::ALL below attempts every ranked plan, so the packaged engine reads
     // the corrupt bytes and fails at whatever rank it holds, and the shipped engine is
     // still there to serve. A pin would decide the outcome instead of observing it.
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
 
     auto result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -528,7 +528,7 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     // The diagnostics are the deliverable here as much as the fallback is: a failure the
     // engine swallows silently is indistinguishable from one that never happened.
     const ScopedPluginLogCapture capture(this, HIPDNN_SEV_WARN);
-    auto& recorder = capture.recorder();
+    const auto& recorder = capture.recorder();
 
     result = graph->build_plans(BuildPlanPolicy::ALL);
 

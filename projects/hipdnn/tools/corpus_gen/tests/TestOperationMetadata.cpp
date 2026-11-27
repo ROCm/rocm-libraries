@@ -294,7 +294,7 @@ TEST(TestOperationMetadata, ExpressesAConvolutionsOutputExtent)
 TEST(TestOperationMetadata, ANestedExpressionsVariablesAreStillChecked)
 {
     // §4.4 check 2 must see variables nested inside an expression.
-    auto broken = nlohmann::json::parse(R"({
+    const auto broken = nlohmann::json::parse(R"({
       "schema_version": "1.0",
       "operation": "conv_fwd",
       "parameters": { "H": { "type": "int64" } },

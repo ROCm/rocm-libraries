@@ -23,7 +23,7 @@ using namespace hip_kernel_provider::rmsnorm;
 
 TEST(TestRMSnormBwdParams, ConstructsFromSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -35,7 +35,7 @@ TEST(TestRMSnormBwdParams, ConstructsFromSingleNodeGraph)
 
 TEST(TestRMSnormBwdParams, ConstructsFromDoubleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -49,8 +49,8 @@ TEST(TestRMSnormBwdParams, ConstructsFromDoubleNodeGraph)
 
 TEST(TestRMSnormBwdParams, ConstructsFromUnaryIdentityGraph)
 {
-    auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
-    auto nativeGraph
+    const auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    const auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
     auto* activation = nativeGraph->nodes[0]->attributes.AsPointwiseAttributes();
     activation->operation = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY;
@@ -71,7 +71,7 @@ TEST(TestRMSnormBwdParams, ConstructsFromUnaryIdentityGraph)
 
 TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -94,7 +94,7 @@ TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForSing
 
 TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForDoubleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -119,7 +119,7 @@ TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForDoub
 
 TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -140,7 +140,7 @@ TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForSingleNodeGraph)
 
 TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForDoubleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -164,7 +164,7 @@ TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForDoubleNodeGraph)
 
 TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -187,7 +187,7 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForSingleNodeGra
 
 TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForDoubleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -212,7 +212,7 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForDoubleNodeGra
 
 TEST(TestRMSnormBwdParams, IsMoveConstructibleForSingleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -228,7 +228,7 @@ TEST(TestRMSnormBwdParams, IsMoveConstructibleForSingleNodeGraph)
 
 TEST(TestRMSnormBwdParams, IsMoveConstructibleForDoubleNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -343,7 +343,7 @@ std::pair<std::unique_ptr<MockKernelCompiler>, std::unique_ptr<std::vector<std::
         });
 
     auto [fbb, plan] = createPlanFromGraph(strides, dims, true, inputDataType);
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(*mockCompiler, deviceProps);
 
@@ -387,7 +387,7 @@ std::pair<std::unique_ptr<MockKernelCompiler>, std::unique_ptr<std::vector<std::
         });
 
     auto [fbb, plan] = createFusedActivationPlanFromGraph(strides, dims, true, inputDataType);
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     plan.compile(*mockCompiler, deviceProps);
 
@@ -451,7 +451,7 @@ TEST(TestRMSnormBwdPlanFp32, CompileSetsCorrectDefinesForSingleNodeGraph)
 {
     auto [mockCompiler, capturedOptions] = setupMockCompileChain();
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -473,7 +473,7 @@ TEST(TestRMSnormBwdPlanFp32, CompileSetsCorrectDefinesForDoubleNodeGraph)
 {
     auto [mockCompiler, capturedOptions] = setupFusedActivationMockCompileChain();
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -498,7 +498,7 @@ TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefinesForSingleNodeGraph)
                                 {1, 3, 224, 224},
                                 hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -523,7 +523,7 @@ TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefinesForDoubleNodeGraph)
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -548,7 +548,7 @@ TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForSingleNodeGraph)
                                 {1, 3, 224, 224},
                                 hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -573,7 +573,7 @@ TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForDoubleNodeGraph)
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -595,7 +595,7 @@ TEST(TestRMSnormBwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForSingl
 {
     auto [mockCompiler, capturedOptions] = setupMockCompileChain({150528, 1, 672, 3});
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -618,7 +618,7 @@ TEST(TestRMSnormBwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForDoubl
     auto [mockCompiler, capturedOptions]
         = setupFusedActivationMockCompileChain({150528, 1, 672, 3});
 
-    auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
+    const auto hasOption = [&, &opts = capturedOptions](const std::string& opt) {
         return std::find(opts->begin(), opts->end(), opt) != opts->end();
     };
 
@@ -641,8 +641,8 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForSingleNodeGrap
     const MockKernelCompiler mockCompiler;
 
     // Number of workgroups exeeds UINT32_MAX
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({4, 4, 2, 1},
-                                                                          {UINT32_MAX, 1, 2, 2});
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -652,7 +652,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForSingleNodeGrap
     RMSnormBwdParams params(attr, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -662,7 +662,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForDoubleNodeGrap
     const MockKernelCompiler mockCompiler;
 
     // Number of workgroups exeeds UINT32_MAX
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -675,7 +675,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForDoubleNodeGrap
     RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -685,7 +685,7 @@ TEST(TestRMSnormBwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
     const MockKernelCompiler mockCompiler;
 
     // 2^24 workgroups of 256 threads is 2^32 threads
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -696,7 +696,7 @@ TEST(TestRMSnormBwdPlan, CompileWithBlockCountReachingThreadLimitThrows)
     RMSnormBwdParams params(attr, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -707,8 +707,8 @@ TEST(TestRMSnormBwdPlan, CompileWithScaleBiasBlockCountReachingThreadLimitThrows
 
     // One row keeps the data kernel at one workgroup. The scale/bias kernel needs
     // 2^24 workgroups of 256 threads, which is 2^32 threads.
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({4294967296, 256, 1, 1},
-                                                                          {1, 16777216, 256, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        {4294967296, 256, 1, 1}, {1, 16777216, 256, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -718,7 +718,7 @@ TEST(TestRMSnormBwdPlan, CompileWithScaleBiasBlockCountReachingThreadLimitThrows
     RMSnormBwdParams params(attr, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -728,7 +728,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForSingleNodeGraph
     const MockKernelCompiler mockCompiler;
 
     // 3D tensor is not supported
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph({12, 4, 1}, {1, 3, 4}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -739,7 +739,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForSingleNodeGraph
     RMSnormBwdParams params(attr, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -749,7 +749,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForDoubleNodeGraph
     const MockKernelCompiler mockCompiler;
 
     // 3D tensor is not supported
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {12, 4, 1}, {1, 3, 4}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -762,7 +762,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForDoubleNodeGraph
     RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
     RMSnormBwdPlan plan(std::move(params));
 
-    auto deviceProps = createTestDeviceProps();
+    const auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

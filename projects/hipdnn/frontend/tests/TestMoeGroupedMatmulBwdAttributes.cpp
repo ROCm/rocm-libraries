@@ -17,16 +17,16 @@ TEST(TestMoeGroupedMatmulBwdAttributes, CreateMoeGroupedMatmulBwdAttributes)
     MoeGroupedMatmulBwdAttributes attrs;
 
     // Set all tensors
-    auto doutputTensor = std::make_shared<TensorAttributes>();
+    const auto doutputTensor = std::make_shared<TensorAttributes>();
     doutputTensor->set_uid(1910);
     attrs.set_doutput(doutputTensor);
-    auto tokenTensor = std::make_shared<TensorAttributes>();
+    const auto tokenTensor = std::make_shared<TensorAttributes>();
     tokenTensor->set_uid(1911);
     attrs.set_token(tokenTensor);
-    auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
+    const auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
     firstTokenOffsetTensor->set_uid(1912);
     attrs.set_first_token_offset(firstTokenOffsetTensor);
-    auto dweightTensor = std::make_shared<TensorAttributes>();
+    const auto dweightTensor = std::make_shared<TensorAttributes>();
     dweightTensor->set_uid(1913);
     attrs.set_dweight(dweightTensor);
 
@@ -76,7 +76,7 @@ TEST(TestMoeGroupedMatmulBwdAttributes, SetDoutputMove)
     EXPECT_EQ(doutputTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_doutput();
+    const auto retrievedTensor = attrs.get_doutput();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -98,7 +98,7 @@ TEST(TestMoeGroupedMatmulBwdAttributes, SetTokenMove)
     EXPECT_EQ(tokenTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_token();
+    const auto retrievedTensor = attrs.get_token();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -120,7 +120,7 @@ TEST(TestMoeGroupedMatmulBwdAttributes, SetFirstTokenOffsetMove)
     EXPECT_EQ(firstTokenOffsetTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_first_token_offset();
+    const auto retrievedTensor = attrs.get_first_token_offset();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -142,7 +142,7 @@ TEST(TestMoeGroupedMatmulBwdAttributes, SetDweightMove)
     EXPECT_EQ(dweightTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_dweight();
+    const auto retrievedTensor = attrs.get_dweight();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -151,13 +151,13 @@ TEST(TestMoeGroupedMatmulBwdAttributes, SetTensorsConstRef)
     MoeGroupedMatmulBwdAttributes attrs;
 
     // Create tensors
-    auto doutputTensor = std::make_shared<TensorAttributes>();
+    const auto doutputTensor = std::make_shared<TensorAttributes>();
     doutputTensor->set_uid(1910).set_name("DoutputConstRef");
-    auto tokenTensor = std::make_shared<TensorAttributes>();
+    const auto tokenTensor = std::make_shared<TensorAttributes>();
     tokenTensor->set_uid(1911).set_name("TokenConstRef");
-    auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
+    const auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
     firstTokenOffsetTensor->set_uid(1912).set_name("FirstTokenOffsetConstRef");
-    auto dweightTensor = std::make_shared<TensorAttributes>();
+    const auto dweightTensor = std::make_shared<TensorAttributes>();
     dweightTensor->set_uid(1913).set_name("DweightConstRef");
 
     // Set using const reference (copy)
@@ -178,22 +178,22 @@ TEST(TestMoeGroupedMatmulBwdAttributes, LogicalAndStrictEquality)
     MoeGroupedMatmulBwdAttributes attr1;
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto doutput1 = std::make_shared<TensorAttributes>();
+    const auto doutput1 = std::make_shared<TensorAttributes>();
     doutput1->set_uid(1).set_name("Doutput").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_doutput(doutput1);
 
-    auto token1 = std::make_shared<TensorAttributes>();
+    const auto token1 = std::make_shared<TensorAttributes>();
     token1->set_uid(2).set_name("Token").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_token(token1);
 
     MoeGroupedMatmulBwdAttributes attr2;
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto doutput2 = std::make_shared<TensorAttributes>();
+    const auto doutput2 = std::make_shared<TensorAttributes>();
     doutput2->set_uid(1).set_name("Doutput").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_doutput(doutput2);
 
-    auto token2 = std::make_shared<TensorAttributes>();
+    const auto token2 = std::make_shared<TensorAttributes>();
     token2->set_uid(2).set_name("Token").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_token(token2);
 
@@ -203,7 +203,7 @@ TEST(TestMoeGroupedMatmulBwdAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchDoutput = std::make_shared<TensorAttributes>();
+    const auto structuralMismatchDoutput = std::make_shared<TensorAttributes>();
     structuralMismatchDoutput->set_uid(99).set_name("MismatchedDoutput");
     attr2.set_doutput(structuralMismatchDoutput);
 
@@ -216,7 +216,7 @@ TEST(TestMoeGroupedMatmulBwdAttributes, LogicalAndStrictEquality)
     // driven entirely by the base class's tensor/metadata comparison.
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchDoutput = std::make_shared<TensorAttributes>();
+    const auto logicalMatchDoutput = std::make_shared<TensorAttributes>();
     logicalMatchDoutput
         ->set_uid(555) // Diverges from attr1's doutput1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's doutput1 ("Doutput")

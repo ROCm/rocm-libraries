@@ -22,7 +22,7 @@ inline unsigned int getGlobalTestSeed()
     // whitespace, trailing characters, out of range) also selects the default.
     constexpr unsigned int DEFAULT_SEED = 1;
 
-    auto seedStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
+    const auto seedStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
 
     if(seedStr.empty())
     {

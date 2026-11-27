@@ -454,37 +454,37 @@ inline FrontendSdpaGraph buildFrontendSdpaGraph(const FrontendSdpaSpec& spec)
 {
     using hipdnn_frontend::DataType;
     using namespace frontend_sdpa_detail;
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name(spec.name)
         .set_io_data_type(spec.dataType)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto q = detail::makeSdpaTensor(Q_UID,
-                                    "Q",
-                                    spec.dataType,
-                                    spec.batch,
-                                    spec.queryHeads,
-                                    spec.seqQ,
-                                    spec.headSize,
-                                    SdpaLayout::BSHD);
-    auto k = detail::makeSdpaTensor(K_UID,
-                                    "K",
-                                    spec.dataType,
-                                    spec.batch,
-                                    spec.kvHeads,
-                                    spec.seqKv,
-                                    spec.headSize,
-                                    SdpaLayout::BSHD);
+    const auto q = detail::makeSdpaTensor(Q_UID,
+                                          "Q",
+                                          spec.dataType,
+                                          spec.batch,
+                                          spec.queryHeads,
+                                          spec.seqQ,
+                                          spec.headSize,
+                                          SdpaLayout::BSHD);
+    const auto k = detail::makeSdpaTensor(K_UID,
+                                          "K",
+                                          spec.dataType,
+                                          spec.batch,
+                                          spec.kvHeads,
+                                          spec.seqKv,
+                                          spec.headSize,
+                                          SdpaLayout::BSHD);
     const int64_t valueHeadSize = spec.valueHeadSize.value_or(spec.headSize);
-    auto v = detail::makeSdpaTensor(V_UID,
-                                    "V",
-                                    spec.dataType,
-                                    spec.batch,
-                                    spec.valueHeads.value_or(spec.kvHeads),
-                                    spec.seqKv,
-                                    valueHeadSize,
-                                    SdpaLayout::BSHD);
+    const auto v = detail::makeSdpaTensor(V_UID,
+                                          "V",
+                                          spec.dataType,
+                                          spec.batch,
+                                          spec.valueHeads.value_or(spec.kvHeads),
+                                          spec.seqKv,
+                                          valueHeadSize,
+                                          SdpaLayout::BSHD);
 
     FrontendSdpaGraph result;
     result.spec = spec;

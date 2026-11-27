@@ -424,7 +424,7 @@ TEST(TestMlpDataAdapter, ArchitecturesComeFromTheArtifact)
 TEST(TestMlpDataAdapter, TheDeclaredModelHashIsVerifiedBeforeTheBytesAreRead)
 {
     const auto bytes = fixtureBytes();
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     EXPECT_EQ(
         MlpDataAdapter::loadFromBuffer(
@@ -444,7 +444,7 @@ TEST(TestMlpDataAdapter, TheDeclaredModelHashIsVerifiedBeforeTheBytesAreRead)
 TEST(TestMlpDataAdapter, AFeaturesHashOtherThanTheDescriptorsIsRefused)
 {
     const auto bytes = fixtureBytes();
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     EXPECT_EQ(MlpDataAdapter::loadFromBuffer(
                   bytes.data(), bytes.size(), "sha256:fedcba9876543210", TEST_METRIC),
@@ -456,7 +456,7 @@ TEST(TestMlpDataAdapter, AFeaturesHashOtherThanTheDescriptorsIsRefused)
 TEST(TestMlpDataAdapter, AMetricOtherThanTheDescriptorsIsRefused)
 {
     const auto bytes = fixtureBytes();
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     // The fixture predicts the log of tflops; a UHD scoring time must not load it.
     EXPECT_EQ(MlpDataAdapter::loadFromBuffer(bytes.data(), bytes.size(), TEST_HASH, "time"),
@@ -586,7 +586,7 @@ TEST(TestMlpDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneError
     for(const auto& refusal : refusals)
     {
         SCOPED_TRACE(refusal.name);
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         EXPECT_EQ(loadTiny(refusal.edit), nullptr);
         EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
@@ -623,7 +623,7 @@ TEST(TestMlpDataAdapter, AnEmptyNetworkListAndAnEmptyLayerListAreRefusedWithOneE
             ASSERT_TRUE(written->networks()->Get(0)->layers()->empty());
         }
 
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         EXPECT_EQ(MlpDataAdapter::loadFromBuffer(
                       fbb.GetBufferPointer(), fbb.GetSize(), TEST_HASH, TEST_METRIC),

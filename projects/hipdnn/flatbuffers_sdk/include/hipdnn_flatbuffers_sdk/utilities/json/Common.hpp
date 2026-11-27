@@ -58,7 +58,7 @@ void to_json(nlohmann::json& vectorList, const Vector<T>* vec)
         return;
     }
 
-    for(auto v : *vec)
+    for(const auto v : *vec)
     {
         vectorList.push_back(v);
     }

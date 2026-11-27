@@ -288,7 +288,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(
         const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
         checkBatchnormFwdTrainingStatisticsSupported(bnAttr, opGraph.nodeCount() == 2);
 
-        auto hasFloatComputeDataType = [](const auto& node) {
+        const auto hasFloatComputeDataType = [](const auto& node) {
             return node->computeDataType() == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         };
 

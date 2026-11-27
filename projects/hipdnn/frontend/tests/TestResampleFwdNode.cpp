@@ -33,11 +33,11 @@ Error inferYFromX8x8(const std::vector<int64_t>& window,
                      const std::vector<int64_t>& postPadding = {0, 0})
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 8, 8});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
     attr.set_pre_padding(prePadding);
@@ -57,11 +57,11 @@ Error inferYFromX8x8(const std::vector<int64_t>& window,
 ResampleFwdAttributes makeX8x8Attributes()
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 8, 8});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({1, 3, 4, 4});
     attr.set_y(yTensor);
 
@@ -108,26 +108,26 @@ TEST(TestResampleFwdNode, ResampleFwdProperties)
     attr.set_y(std::make_shared<TensorAttributes>());
     attr.set_index(std::make_shared<TensorAttributes>());
 
-    auto inputTensor = attr.get_x();
+    const auto inputTensor = attr.get_x();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = attr.get_y();
+    const auto outputTensor = attr.get_y();
     outputTensor->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto indexTensor = attr.get_index();
+    const auto indexTensor = attr.get_index();
     indexTensor->set_uid(3).set_name("IndexTensor");
 
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
 
     EXPECT_EQ(error.code, ErrorCode::OK);
     EXPECT_EQ(outputTensor->get_dim(), (std::vector<int64_t>{1, 2, 3, 4}));
@@ -141,15 +141,15 @@ TEST(TestResampleFwdNode, PreValidateNode)
 {
     ResampleFwdAttributes attr;
 
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
     attr.set_y(yTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_data_type(hipdnn_frontend::DataType::INT32);
     attr.set_index(indexTensor);
     attr.set_generate_index(true);
@@ -159,7 +159,7 @@ TEST(TestResampleFwdNode, PreValidateNode)
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -194,11 +194,11 @@ TEST(TestResampleFwdNode, PreValidateNodeMissingValues)
 TEST(TestResampleFwdNode, MissingIndexTensor)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
     attr.set_y(yTensor);
     attr.set_padding_mode(PaddingMode::ZERO_PAD);
@@ -212,7 +212,7 @@ TEST(TestResampleFwdNode, MissingIndexTensor)
         attrCopy.set_resample_mode(ResampleMode::MAXPOOL);
         const ResampleFwdNode node(std::move(attrCopy), graphAttributes);
 
-        auto error = node.pre_validate_node();
+        const auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::OK);
     }
 
@@ -222,7 +222,7 @@ TEST(TestResampleFwdNode, MissingIndexTensor)
         attrCopy.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
         const ResampleFwdNode node(std::move(attrCopy), graphAttributes);
 
-        auto error = node.pre_validate_node();
+        const auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::OK);
     }
 
@@ -233,7 +233,7 @@ TEST(TestResampleFwdNode, MissingIndexTensor)
         attrCopy.set_resample_mode(ResampleMode::MAXPOOL);
         const ResampleFwdNode node(std::move(attrCopy), graphAttributes);
 
-        auto error = node.pre_validate_node();
+        const auto error = node.pre_validate_node();
         EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     }
 }
@@ -245,25 +245,25 @@ TEST(TestResampleFwdNode, InvalidIndexType)
     attr.set_y(std::make_shared<TensorAttributes>());
     attr.set_resample_mode(ResampleMode::MAXPOOL);
     attr.set_padding_mode(PaddingMode::ZERO_PAD);
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr.set_index(indexTensor);
 
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestResampleFwdNode, InvalidXDim)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 32});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64, 32, 32});
     attr.set_y(yTensor);
     attr.set_resample_mode(ResampleMode::MAXPOOL);
@@ -272,18 +272,18 @@ TEST(TestResampleFwdNode, InvalidXDim)
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestResampleFwdNode, InvalidYDim)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 32, 32, 32});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 64});
     attr.set_y(yTensor);
     attr.set_resample_mode(ResampleMode::MAXPOOL);
@@ -292,21 +292,21 @@ TEST(TestResampleFwdNode, InvalidYDim)
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestResampleFwdNode, InferYDim3D)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 32});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     attr.set_index(indexTensor);
 
     attr.set_pre_padding(std::vector<int64_t>{1});
@@ -316,7 +316,7 @@ TEST(TestResampleFwdNode, InferYDim3D)
 
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 16}));
@@ -326,14 +326,14 @@ TEST(TestResampleFwdNode, InferYDim3D)
 TEST(TestResampleFwdNode, InferDim4D)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 32, 32});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     attr.set_index(indexTensor);
 
     attr.set_pre_padding(std::vector<int64_t>{1, 1});
@@ -343,7 +343,7 @@ TEST(TestResampleFwdNode, InferDim4D)
 
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 16, 16}));
@@ -353,14 +353,14 @@ TEST(TestResampleFwdNode, InferDim4D)
 TEST(TestResampleFwdNode, InferDim5D)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 16, 16, 16});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     attr.set_index(indexTensor);
 
     attr.set_pre_padding(std::vector<int64_t>{2, 2, 2});
@@ -371,7 +371,7 @@ TEST(TestResampleFwdNode, InferDim5D)
     const GraphAttributes graphAttributes;
 
     ResampleFwdNode node(std::move(attr), graphAttributes);
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 7, 7, 7}));
@@ -381,7 +381,7 @@ TEST(TestResampleFwdNode, InferDim5D)
 TEST(TestResampleFwdNode, InferRejectsZeroStride)
 {
     std::vector<int64_t> yDims;
-    auto error = inferYFromX8x8({2, 2}, {0, 0}, yDims);
+    const auto error = inferYFromX8x8({2, 2}, {0, 0}, yDims);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(yDims.empty());
 }
@@ -389,7 +389,7 @@ TEST(TestResampleFwdNode, InferRejectsZeroStride)
 TEST(TestResampleFwdNode, InferRejectsEmptyWindow)
 {
     std::vector<int64_t> yDims;
-    auto error = inferYFromX8x8({}, {2, 2}, yDims);
+    const auto error = inferYFromX8x8({}, {2, 2}, yDims);
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(yDims.empty());
 }
@@ -397,7 +397,7 @@ TEST(TestResampleFwdNode, InferRejectsEmptyWindow)
 TEST(TestResampleFwdNode, InferRejectsWindowShorterThanSpatialRank)
 {
     std::vector<int64_t> yDims;
-    auto error = inferYFromX8x8({2}, {2, 2}, yDims);
+    const auto error = inferYFromX8x8({2}, {2, 2}, yDims);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(yDims.empty());
 }
@@ -406,7 +406,7 @@ TEST(TestResampleFwdNode, InferTruncatesOutputExtentAsCudnn)
 {
     // (8 - 9) / 2 + 1 = 1: a window wider than the padded input by less than the stride
     std::vector<int64_t> yDims;
-    auto error = inferYFromX8x8({9, 9}, {2, 2}, yDims);
+    const auto error = inferYFromX8x8({9, 9}, {2, 2}, yDims);
     EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     EXPECT_EQ(yDims, (std::vector<int64_t>{1, 3, 1, 1}));
 }
@@ -415,7 +415,7 @@ TEST(TestResampleFwdNode, InferRejectsOutputExtentBelowOne)
 {
     // (8 - 11) / 2 + 1 = 0
     std::vector<int64_t> yDims;
-    auto error = inferYFromX8x8({11, 11}, {2, 2}, yDims);
+    const auto error = inferYFromX8x8({11, 11}, {2, 2}, yDims);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(yDims.empty());
 }
@@ -423,11 +423,11 @@ TEST(TestResampleFwdNode, InferRejectsOutputExtentBelowOne)
 TEST(TestResampleFwdNode, PreValidateRejectsWindowShorterThanSpatialRankWithYSet)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 8, 8});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({1, 3, 4, 4});
     attr.set_y(yTensor);
 
@@ -441,18 +441,18 @@ TEST(TestResampleFwdNode, PreValidateRejectsWindowShorterThanSpatialRankWithYSet
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestResampleFwdNode, PreValidateAcceptsWindowWiderThanPaddedInputWithYSet)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 8, 8});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({1, 3, 1, 1});
     attr.set_y(yTensor);
 
@@ -466,7 +466,7 @@ TEST(TestResampleFwdNode, PreValidateAcceptsWindowWiderThanPaddedInputWithYSet)
     const GraphAttributes graphAttributes;
     const ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
 }
 
@@ -502,7 +502,7 @@ TEST(TestResampleFwdNode, PreValidateRejectsPaddingCountMismatch)
 
 TEST(TestResampleFwdNode, PreValidateRejectsStrideCountMismatch)
 {
-    auto error = preValidateX8x8({2, 2}, {2, 2, 2}, {0, 0}, {0, 0});
+    const auto error = preValidateX8x8({2, 2}, {2, 2, 2}, {0, 0}, {0, 0});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -511,7 +511,7 @@ TEST(TestResampleFwdNode, PreValidateRejectsUnsetPaddingMode)
     auto attr = makeX8x8Attributes();
     attr.set_padding_mode(PaddingMode::NOT_SET);
 
-    auto error = preValidate(std::move(attr));
+    const auto error = preValidate(std::move(attr));
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET) << error.err_msg;
 }
 
@@ -523,7 +523,7 @@ TEST(TestResampleFwdNode, PreValidateAcceptsExactlyTheResampleModesLoweringMaps)
         auto attr = makeX8x8Attributes();
         attr.set_resample_mode(mode);
 
-        auto error = preValidate(std::move(attr));
+        const auto error = preValidate(std::move(attr));
         const auto expected
             = toBackendResampleMode(mode).has_value() ? ErrorCode::OK : ErrorCode::INVALID_VALUE;
         EXPECT_EQ(error.code, expected) << "resample mode " << raw << ": " << error.err_msg;
@@ -538,7 +538,7 @@ TEST(TestResampleFwdNode, PreValidateAcceptsExactlyThePaddingModesLoweringMaps)
         auto attr = makeX8x8Attributes();
         attr.set_padding_mode(mode);
 
-        auto error = preValidate(std::move(attr));
+        const auto error = preValidate(std::move(attr));
         // NOT_SET has a backend value but is rejected as missing: padding_mode has no default
         auto expected
             = toBackendPaddingMode(mode).has_value() ? ErrorCode::OK : ErrorCode::INVALID_VALUE;
@@ -559,7 +559,7 @@ TEST(TestResampleFwdNode, PreValidateAcceptsGenerateIndexForAvgpool)
         auto attr = makeX8x8Attributes();
         attr.set_resample_mode(mode).set_generate_index(true);
 
-        auto error = preValidate(std::move(attr));
+        const auto error = preValidate(std::move(attr));
         EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     }
 }
@@ -569,7 +569,7 @@ TEST(TestResampleFwdNode, InferRejectsPaddingOverflow)
     // 8 + pre_padding + post_padding exceeds int64; wrapped, it gives a y extent of 5
     constexpr int64_t K_MAX = std::numeric_limits<int64_t>::max();
     std::vector<int64_t> yDims;
-    auto error = inferYFromX8x8({2, 2}, {1, 1}, yDims, {K_MAX, 0}, {K_MAX, 0});
+    const auto error = inferYFromX8x8({2, 2}, {1, 1}, yDims, {K_MAX, 0}, {K_MAX, 0});
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(error.err_msg.find("overflows int64"), std::string::npos) << error.err_msg;
     EXPECT_TRUE(yDims.empty());
@@ -579,7 +579,7 @@ TEST(TestResampleFwdNode, InferRejectsXWithoutDims)
 {
     ResampleFwdAttributes attr;
     attr.set_x(std::make_shared<TensorAttributes>());
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
     attr.set_pre_padding(std::vector<int64_t>{0, 0});
@@ -590,7 +590,7 @@ TEST(TestResampleFwdNode, InferRejectsXWithoutDims)
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(yTensor->get_dim().empty());
 }
@@ -599,16 +599,16 @@ TEST(TestResampleFwdNode, InferRejectsXRankBelowThree)
 {
     // No resample parameters are set: the rank check must reject x before they are read
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 32});
     attr.set_x(xTensor);
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(yTensor->get_dim().empty());
 }
@@ -616,10 +616,10 @@ TEST(TestResampleFwdNode, InferRejectsXRankBelowThree)
 TEST(TestResampleFwdNode, InferRejectsEmptyPrePadding)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 8, 8});
     attr.set_x(xTensor);
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     attr.set_y(yTensor);
 
     attr.set_post_padding(std::vector<int64_t>{0, 0});
@@ -629,7 +629,7 @@ TEST(TestResampleFwdNode, InferRejectsEmptyPrePadding)
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_TRUE(yTensor->get_dim().empty());
 }
@@ -637,20 +637,20 @@ TEST(TestResampleFwdNode, InferRejectsEmptyPrePadding)
 TEST(TestResampleFwdNode, InferStride)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 3, 7, 5});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({2, 3, 3, 2});
     attr.set_y(yTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     attr.set_index(indexTensor);
 
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     // Stride should default to channel last
@@ -661,21 +661,21 @@ TEST(TestResampleFwdNode, InferStride)
 TEST(TestResampleFwdNode, InferStrideFromX)
 {
     ResampleFwdAttributes attr;
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     // NCHW
     xTensor->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1});
     attr.set_x(xTensor);
 
-    auto yTensor = std::make_shared<TensorAttributes>();
+    const auto yTensor = std::make_shared<TensorAttributes>();
     yTensor->set_dim({1, 3, 16, 16});
     attr.set_y(yTensor);
 
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     attr.set_index(indexTensor);
 
     const GraphAttributes graphAttributes;
     ResampleFwdNode node(std::move(attr), graphAttributes);
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{768, 256, 16, 1}));
@@ -786,7 +786,7 @@ TEST_F(TestResampleFwdNodeCreateOperation, AvgpoolLowersGenerateIndexFalse)
         auto attr = makeLowerableX8x8Attributes();
         attr.set_resample_mode(mode).set_generate_index(true);
 
-        auto error = preValidateAndCreateOperation(std::move(attr));
+        const auto error = preValidateAndCreateOperation(std::move(attr));
         ASSERT_TRUE(error.is_good()) << error.get_message();
         EXPECT_EQ(_sentGenerateIndex, std::vector<bool>{false});
     }
@@ -795,7 +795,7 @@ TEST_F(TestResampleFwdNodeCreateOperation, AvgpoolLowersGenerateIndexFalse)
 TEST_F(TestResampleFwdNodeCreateOperation, MaxpoolWithIndexLowersGenerateIndexTrue)
 {
     auto attr = makeLowerableX8x8Attributes();
-    auto indexTensor = std::make_shared<TensorAttributes>();
+    const auto indexTensor = std::make_shared<TensorAttributes>();
     indexTensor->set_uid(3)
         .set_name("Index")
         .set_data_type(DataType::INT32)
@@ -804,7 +804,7 @@ TEST_F(TestResampleFwdNodeCreateOperation, MaxpoolWithIndexLowersGenerateIndexTr
     attr.set_index(indexTensor);
     attr.set_resample_mode(ResampleMode::MAXPOOL).set_generate_index(true);
 
-    auto error = preValidateAndCreateOperation(std::move(attr));
+    const auto error = preValidateAndCreateOperation(std::move(attr));
     ASSERT_TRUE(error.is_good()) << error.get_message();
     EXPECT_EQ(_sentGenerateIndex, std::vector<bool>{true});
 }

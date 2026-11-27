@@ -182,23 +182,23 @@ TEST(TestVariantPackBuilder, PutsARuntimeScalarInHostMemoryAndPlansNoSlotForABak
     Graph graph;
     const auto x = vectorTensor(1, "X");
 
-    auto runtimeScale = std::make_shared<TensorAttributes>();
+    const auto runtimeScale = std::make_shared<TensorAttributes>();
     runtimeScale->set_uid(2).set_name("scale").set_dim({1}).set_stride({1}).set_data_type(
         DataType::FLOAT);
     runtimeScale->set_as_runtime_parameter();
 
-    auto constant = std::make_shared<TensorAttributes>(2.0F);
+    const auto constant = std::make_shared<TensorAttributes>(2.0F);
     constant->set_uid(3).set_name("constant");
 
-    auto withDefault = std::make_shared<TensorAttributes>(
+    const auto withDefault = std::make_shared<TensorAttributes>(
         3.0F, hipdnn_frontend::graph::ScalarType::RUNTIME_PARAM);
     withDefault->set_uid(4).set_name("with_default");
 
-    auto scaled = multiply(graph, x, runtimeScale);
+    const auto scaled = multiply(graph, x, runtimeScale);
     scaled->set_uid(5).set_is_virtual(true);
-    auto doubled = multiply(graph, scaled, constant);
+    const auto doubled = multiply(graph, scaled, constant);
     doubled->set_uid(6).set_is_virtual(true);
-    auto y = multiply(graph, doubled, withDefault);
+    const auto y = multiply(graph, doubled, withDefault);
     y->set_uid(7).set_name("Y").set_dim({4}).set_stride({1}).set_data_type(DataType::FLOAT);
     y->set_output(true);
 

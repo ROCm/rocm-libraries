@@ -116,8 +116,8 @@ protected:
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -127,11 +127,11 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -140,7 +140,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::MoeGroupedMatmulAttributes);
-    auto desc = std::static_pointer_cast<MoeGroupedMatmulOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<MoeGroupedMatmulOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -165,8 +165,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -182,7 +182,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, PreservesNONEMode)
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().mode, MoeGroupedMatmulMode::NONE);
 }
@@ -243,7 +243,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, PreservesGATHERMode)
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().mode, MoeGroupedMatmulMode::GATHER);
 }
@@ -301,7 +301,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, PreservesSCATTERMode)
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().mode, MoeGroupedMatmulMode::SCATTER);
 }
@@ -364,8 +364,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, RejectsAboveMaximumTopKInSCATTERMo
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getTokenDesc(), nullptr);
     EXPECT_EQ(desc->getTokenDesc()->getData().uid, K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID);
@@ -385,8 +385,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getTokenDesc(), _tensorMap[K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID]);
     EXPECT_EQ(desc->getWeightDesc(), _tensorMap[K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID]);
@@ -399,8 +399,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getTokenDesc(), nullptr);
     EXPECT_EQ(desc->getTokenDesc()->getData().uid, K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID);
@@ -444,7 +444,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SetsTensorReferencesWithFullValues
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingTokenTensor)
 {
     _tensorMap.erase(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -453,7 +453,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingTokenTensor)
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingWeightTensor)
 {
     _tensorMap.erase(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -462,7 +462,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingWeightTensor)
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingFirstTokenOffsetTensor)
 {
     _tensorMap.erase(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -471,7 +471,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingFirstTokenOffsetTe
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWithMissingOutputTensor)
 {
     _tensorMap.erase(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -489,7 +489,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -513,7 +513,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SucceedsWithOnlyRequiredTensors)
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWhenOptionalTokenIndexUidSetButTensorMissing)
 {
     _tensorMap.erase(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -522,7 +522,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWhenOptionalTokenIndexUidSetB
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWhenOptionalTokenKsUidSetButTensorMissing)
 {
     _tensorMap.erase(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -530,8 +530,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWhenOptionalTokenKsUidSetButT
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
@@ -545,8 +545,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, GetTensorDescriptorsReturnsAllTens
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -567,8 +567,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -700,7 +700,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_moegroupedmatmul_1";
 
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -715,8 +715,8 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -728,7 +728,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap);
     const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

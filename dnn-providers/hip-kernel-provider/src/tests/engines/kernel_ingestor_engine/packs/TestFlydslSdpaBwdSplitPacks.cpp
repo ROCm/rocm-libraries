@@ -598,10 +598,17 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     // companion built from the gfx11 kernel). A bias row built without the dBias store carries none.
                     const bool storesDb = hasBias && storeDb != 0;
                     const auto reduce = text("reduce_symbol");
-                    const char* storedSymbol = dtype == "fp32" ? content().reduceSymbolFp32
-                                               : integer("bias_f32") == 1
-                                                   ? content().reduceSymbolF32Bias16Bit
-                                                   : content().reduceSymbol16Bit;
+                    const auto storedSymbol = [&]() -> const char* {
+                        if(dtype == "fp32")
+                        {
+                            return content().reduceSymbolFp32;
+                        }
+                        if(integer("bias_f32") == 1)
+                        {
+                            return content().reduceSymbolF32Bias16Bit;
+                        }
+                        return content().reduceSymbol16Bit;
+                    }();
                     const std::string expectedSymbol
                         = !storesDb ? std::string() : std::string(storedSymbol);
                     EXPECT_EQ(reduce, expectedSymbol) << kernel.name;
@@ -1440,9 +1447,17 @@ std::optional<ManifestHashes> tryLoadManifestHashes(const char* content)
 /// rows whose priorities differ.
 TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelNames)
 {
-    const std::string tableArch = arch() == "gfx950"              ? "gfx950"
-                                  : arch().rfind("gfx11", 0) == 0 ? "gfx11-generic"
-                                                                  : arch();
+    const std::string tableArch = [&]() -> std::string {
+        if(arch() == "gfx950")
+        {
+            return "gfx950";
+        }
+        if(arch().rfind("gfx11", 0) == 0)
+        {
+            return "gfx11-generic";
+        }
+        return arch();
+    }();
     const auto rows = loadProbeRows();
     const auto installed = installedKernels(loadedSet(ENGINE_NAME));
     const auto hashes = tryLoadManifestHashes(tableArch.c_str());

@@ -410,7 +410,7 @@ inline DeterminismRow forwardRow(RowMeta meta, DeterminismFwdSpec spec)
     row.meta = std::move(meta);
     row.direction = Direction::FORWARD;
     row.build = [spec = std::move(spec)](const DeterminismRow& self) {
-        auto built = buildDeterminismFwdGraph(spec);
+        const auto built = buildDeterminismFwdGraph(spec);
         return prepareForward(built.sdpa, spec.dtypes.oType, built.descales, spec.descales, self);
     };
     return row;
@@ -479,7 +479,7 @@ inline std::string deriveBackwardOutputs(const DeterminismBwdSpec& spec,
     forward.withStats = true;
     forward.scale = spec.scale;
 
-    auto built = ingestor::buildFrontendSdpaGraph(forward);
+    const auto built = ingestor::buildFrontendSdpaGraph(forward);
     auto result = built.graph->validate();
     if(result.code != hipdnn_frontend::ErrorCode::OK)
     {
@@ -617,7 +617,7 @@ inline PreparedGraph prepareBackward(const DeterminismBwdSpec& spec)
     using namespace hipdnn_frontend::graph;
     using kernel_ingestor_engine::testing::sdpaStrides;
 
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     graph->set_name(spec.name)
         .set_io_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT)
@@ -640,12 +640,12 @@ inline PreparedGraph prepareBackward(const DeterminismBwdSpec& spec)
     const std::vector<int64_t> statsDims = {spec.batch, spec.queryHeads, spec.seqQ, 1};
     const std::vector<int64_t> statsStrides = {spec.queryHeads * spec.seqQ, spec.seqQ, 1, 1};
 
-    auto q = makeTensor(bwd_uid::Q, "Q", spec.dataType, qDims, qStrides);
-    auto k = makeTensor(bwd_uid::K, "K", spec.dataType, kDims, kStrides);
-    auto v = makeTensor(bwd_uid::V, "V", spec.dataType, kDims, kStrides);
-    auto o = makeTensor(bwd_uid::O, "O", spec.dataType, qDims, qStrides);
-    auto dO = makeTensor(bwd_uid::DO, "dO", spec.dataType, qDims, qStrides);
-    auto stats = makeTensor(bwd_uid::STATS, "LSE", DataType::FLOAT, statsDims, statsStrides);
+    const auto q = makeTensor(bwd_uid::Q, "Q", spec.dataType, qDims, qStrides);
+    const auto k = makeTensor(bwd_uid::K, "K", spec.dataType, kDims, kStrides);
+    const auto v = makeTensor(bwd_uid::V, "V", spec.dataType, kDims, kStrides);
+    const auto o = makeTensor(bwd_uid::O, "O", spec.dataType, qDims, qStrides);
+    const auto dO = makeTensor(bwd_uid::DO, "dO", spec.dataType, qDims, qStrides);
+    const auto stats = makeTensor(bwd_uid::STATS, "LSE", DataType::FLOAT, statsDims, statsStrides);
 
     SdpaBackwardAttributes attributes;
     attributes.set_name(spec.name);
@@ -992,7 +992,7 @@ private:
         ASSERT_NO_FATAL_FAILURE(fillInputs(prepared, planned, tensors));
 
         int64_t workspaceSize = 0;
-        auto result = prepared.graph->get_workspace_size(workspaceSize);
+        const auto result = prepared.graph->get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0);
         const auto workspaceBytes = static_cast<size_t>(workspaceSize);
@@ -1200,7 +1200,7 @@ inline bool registerRows(const std::vector<DeterminismRow>& rows)
         registeredDeterminismRows().push_back(
             {row.meta.engine, row.meta.archs, row.meta.disposition});
         std::string key = suite;
-        key += ".";
+        key += '.';
         key += test;
         if(!s_registered.insert(key).second)
         {

@@ -58,13 +58,13 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor = createShallowTensor<InputDataType>(
+        const auto shallowXTensor = createShallowTensor<InputDataType>(
             _params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
+        const auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
+        const auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
         utilities::CpuFpReferenceBlockScaleQuantize::
@@ -136,9 +136,7 @@ public:
         const auto& tensorMap = graph.getTensorMap();
 
         const auto blockSize = nodeAttributes->block_size();
-        const auto axis = nodeAttributes->axis()
-                              ? std::make_optional(nodeAttributes->axis().value())
-                              : std::nullopt;
+        const auto axis = nodeAttributes->axis();
 
         BlockScaleQuantizeParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
                                         *tensorMap.at(nodeAttributes->y_tensor_uid()),

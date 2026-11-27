@@ -59,10 +59,10 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
     using hipdnn_frontend::graph::SdpaAttributes;
     using hipdnn_frontend::graph::TensorAttributes;
 
-    auto makeAttr = [](const std::string& name,
-                       DataType dataType,
-                       const std::vector<int64_t>& dims,
-                       int64_t uid) {
+    const auto makeAttr = [](const std::string& name,
+                             DataType dataType,
+                             const std::vector<int64_t>& dims,
+                             int64_t uid) {
         auto attr = std::make_shared<TensorAttributes>();
         attr->set_name(name)
             .set_data_type(dataType)
@@ -78,9 +78,9 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto qAttr = makeAttr("Q", inputDataType, qDims, 1);
-    auto kAttr = makeAttr("K", inputDataType, kDims, 2);
-    auto vAttr = makeAttr("V", inputDataType, vDims, 3);
+    const auto qAttr = makeAttr("Q", inputDataType, qDims, 1);
+    const auto kAttr = makeAttr("K", inputDataType, kDims, 2);
+    const auto vAttr = makeAttr("V", inputDataType, vDims, 3);
 
     SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("SdpaFwdDescale");
@@ -126,15 +126,16 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
     using hipdnn_frontend::graph::SdpaAttributes;
     using hipdnn_frontend::graph::TensorAttributes;
 
-    auto makeAttr = [](const std::string& name, const std::vector<int64_t>& dims, int64_t uid) {
-        auto attr = std::make_shared<TensorAttributes>();
-        attr->set_name(name)
-            .set_data_type(DataType::FLOAT)
-            .set_dim(dims)
-            .set_stride(generateStrides(dims))
-            .set_uid(uid);
-        return attr;
-    };
+    const auto makeAttr
+        = [](const std::string& name, const std::vector<int64_t>& dims, int64_t uid) {
+              auto attr = std::make_shared<TensorAttributes>();
+              attr->set_name(name)
+                  .set_data_type(DataType::FLOAT)
+                  .set_dim(dims)
+                  .set_stride(generateStrides(dims))
+                  .set_uid(uid);
+              return attr;
+          };
 
     auto graph = std::make_shared<Graph>();
     graph->set_name("SdpaFwdSinkTest");
@@ -285,20 +286,20 @@ flatbuffers::FlatBufferBuilder
             builder, extra.uid, extra.name, extra.dataType, &extraStrides.back(), &extra.dims));
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(builder,
-                                   "SdpaFwdRejectGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "SdpaFwdRejectGraph",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
     return builder;
 }
@@ -317,7 +318,7 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
     SdpaFwdTensorBundle<float> directTensorBundle(qDims, kDims, vDims, seed);
 
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle, DataType::FLOAT);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -376,8 +377,8 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithRuntimeScaleFromPack)
                                         /*alibiMask=*/false,
                                         /*generateStats=*/false,
                                         /*runtimeScaleHostPtr=*/&scaleHostValue);
-    auto& graph = std::get<0>(graphTuple);
-    auto& variantPack = std::get<1>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
+    const auto& variantPack = std::get<1>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -387,7 +388,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithRuntimeScaleFromPack)
 
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         builder;
-    auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     builtPlan->execute(variantPack);
 
     // Direct reference with the same explicit scale value.
@@ -416,7 +417,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
     SdpaFwdTensorBundle<float> directTensorBundle(qDims, kDims, vDims, seed);
 
     auto graphTuple = buildSdpaFwdGraph(planTensorBundle, DataType::FLOAT, /*causalMask=*/true);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -488,7 +489,7 @@ TEST(TestSdpaFwdPlanBuilder, ExecutePlanWithAsymmetricWindow)
                                         /*leftBound=*/LEFT_BOUND,
                                         /*rightBound=*/RIGHT_BOUND,
                                         hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -498,7 +499,7 @@ TEST(TestSdpaFwdPlanBuilder, ExecutePlanWithAsymmetricWindow)
     // extraction is exercised (this is where the original bug lived).
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
-    auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     std::unordered_map<int64_t, void*> variantPack;
@@ -536,7 +537,7 @@ TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
     SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims, /*seed=*/1);
 
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -544,7 +545,7 @@ TEST(TestSdpaFwdPlanBuilder, PlanConstruction)
 
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
-    auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<SdpaFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -560,7 +561,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicable)
     SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims, /*seed=*/1);
 
     auto graphTuple = buildSdpaFwdGraph(tensorBundle, DataType::FLOAT);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -603,7 +604,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsAlibiMask)
                                         /*rightBound=*/std::nullopt,
                                         hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
                                         /*alibiMask=*/true);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -635,7 +636,7 @@ TEST_P(TestSdpaFwdPlanPaddingApplicability, MatchesContract)
     const auto& p = GetParam();
     SdpaAttributesT attrs;
     attrs.padding_mask = p.paddingMask;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs, std::nullopt, p.seqLens);
+    const auto graphBuilder = makeRawSdpaFwdGraph(attrs, std::nullopt, p.seqLens);
 
     CpuReferenceGraphExecutor executor;
     EXPECT_EQ(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()),
@@ -667,7 +668,7 @@ TEST(TestSdpaFwdPlanPadding, ExecuteMatchesDirectReference)
 {
     SdpaAttributesT attrs;
     attrs.padding_mask = true;
-    auto graphBuilder
+    const auto graphBuilder
         = makeRawSdpaFwdGraph(attrs, std::nullopt, RawSeqLenSpec{DataType::INT32, {1, 1, 1, 1}});
 
     const std::vector<int64_t> dims = {1, 2, 4, 8};
@@ -844,20 +845,20 @@ flatbuffers::FlatBufferBuilder makeRawPagedSdpaFwdGraph(const RawPagedGraphSpec&
             scaleDims);
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(builder,
-                                   "SdpaFwdPagedGraph",
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "SdpaFwdPagedGraph",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
     builder.Finish(graph);
     return builder;
 }
@@ -877,7 +878,7 @@ class TestSdpaFwdPlanPagedApplicability : public TestWithParam<PagedApplicabilit
 
 TEST_P(TestSdpaFwdPlanPagedApplicability, MatchesContract)
 {
-    auto graphBuilder = makeRawPagedSdpaFwdGraph(GetParam().spec);
+    const auto graphBuilder = makeRawPagedSdpaFwdGraph(GetParam().spec);
     CpuReferenceGraphExecutor executor;
     EXPECT_EQ(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()),
               GetParam().applicable);
@@ -989,7 +990,7 @@ INSTANTIATE_TEST_SUITE_P(
 // padded reference directly.
 TEST(TestSdpaFwdPlanPaged, ExecuteMatchesGatherThenDense)
 {
-    auto graphBuilder = makeRawPagedSdpaFwdGraph({});
+    const auto graphBuilder = makeRawPagedSdpaFwdGraph({});
 
     hipdnn_data_sdk::utilities::Tensor<float> q({2, 2, 3, 8});
     hipdnn_data_sdk::utilities::Tensor<float> kCache({5, 2, 2, 8});
@@ -1024,8 +1025,8 @@ TEST(TestSdpaFwdPlanPaged, ExecuteMatchesGatherThenDense)
     CpuReferenceGraphExecutor executor;
     executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
 
-    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
-    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
+    const auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
+    const auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
     hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward(
@@ -1043,7 +1044,7 @@ TEST(TestSdpaFwdPlanPaged, ExecuteMatchesGatherThenDense)
 // runs, and equals the gathered dense reference with the same mask.
 TEST(TestSdpaFwdPlanPaged, DropoutMaskOverPagedKvMatchesGatherThenDense)
 {
-    auto graphBuilder = makeRawPagedSdpaFwdGraph(pagedWithDropoutMask(6));
+    const auto graphBuilder = makeRawPagedSdpaFwdGraph(pagedWithDropoutMask(6));
 
     hipdnn_data_sdk::utilities::Tensor<float> q({2, 2, 3, 8});
     hipdnn_data_sdk::utilities::Tensor<float> kCache({5, 2, 2, 8});
@@ -1097,8 +1098,8 @@ TEST(TestSdpaFwdPlanPaged, DropoutMaskOverPagedKvMatchesGatherThenDense)
     ASSERT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
     executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
 
-    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
-    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
+    const auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
+    const auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
     hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward(q,
@@ -1131,18 +1132,18 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
     constexpr auto F32 = hipdnn_frontend::DataType::FLOAT;
     constexpr auto I32 = hipdnn_frontend::DataType::INT32;
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("SdpaFwdPagedFrontend")
         .set_io_data_type(F32)
         .set_compute_data_type(F32)
         .set_intermediate_data_type(F32);
-    auto q = tensorAttr(1, "Q", F32, {2, 2, 3, 8});
-    auto k = tensorAttr(2, "K", F32, {5, 2, 2, 8});
-    auto v = tensorAttr(3, "V", F32, {5, 2, 2, 8});
-    auto seqQ = tensorAttr(6, "SeqLenQ", I32, {2, 1, 1, 1});
-    auto seqKv = tensorAttr(7, "SeqLenKv", I32, {2, 1, 1, 1});
-    auto tableK = tensorAttr(8, "PageTableK", I32, {2, 1, 3, 1});
-    auto tableV = tensorAttr(9, "PageTableV", I32, {2, 1, 3, 1});
+    const auto q = tensorAttr(1, "Q", F32, {2, 2, 3, 8});
+    const auto k = tensorAttr(2, "K", F32, {5, 2, 2, 8});
+    const auto v = tensorAttr(3, "V", F32, {5, 2, 2, 8});
+    const auto seqQ = tensorAttr(6, "SeqLenQ", I32, {2, 1, 1, 1});
+    const auto seqKv = tensorAttr(7, "SeqLenKv", I32, {2, 1, 1, 1});
+    const auto tableK = tensorAttr(8, "PageTableK", I32, {2, 1, 3, 1});
+    const auto tableV = tensorAttr(9, "PageTableV", I32, {2, 1, 3, 1});
 
     hipdnn_frontend::graph::SdpaAttributes attrs;
     attrs.set_name("SdpaFwdPaged")
@@ -1159,7 +1160,7 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
         .set_stride(hipdnn_data_sdk::utilities::generateStrides({2, 2, 3, 8}));
     o->set_is_virtual(false);
 
-    auto validateErr = graph->validate();
+    const auto validateErr = graph->validate();
     ASSERT_TRUE(validateErr.is_good()) << validateErr.get_message();
     auto [bin, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -1196,8 +1197,8 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
     ASSERT_TRUE(executor.isApplicable(bin.data(), bin.size()));
     executor.execute(bin.data(), bin.size(), variantPack);
 
-    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
-    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
+    const auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, 6);
+    const auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, 6);
     hipdnn_data_sdk::utilities::Tensor<float> oRef({2, 2, 3, 8});
     const hipdnn_data_sdk::utilities::TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward(
@@ -1219,7 +1220,7 @@ TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
         SdpaAttributesT attrs;
         attrs.left_bound = left;
         attrs.right_bound = 0;
-        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
         const auto* node = GetGraph(graphBuilder.GetBufferPointer())->nodes()->Get(0);
         return extractDiagonalBandParams(*node->attributes_as_SdpaAttributes(), "test");
     };
@@ -1236,7 +1237,7 @@ TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
     const auto applicable = [](DataType type, const std::vector<int64_t>& dims) {
         SdpaAttributesT attrs;
         attrs.sink_token_tensor_uid = 10;
-        auto graphBuilder
+        const auto graphBuilder
             = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, RawSinkSpec{type, dims});
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -1252,7 +1253,7 @@ TEST(TestSdpaFwdPlanSink, DanglingSinkUidIsNotApplicable)
 {
     SdpaAttributesT attrs;
     attrs.sink_token_tensor_uid = 60;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+    const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
     const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -1270,7 +1271,7 @@ TEST(TestSdpaFwdPlanSink, FrontendGraphExecutesLikeTheDirectReference)
     const std::vector<int64_t> lseDims = {1, 4, 8, 1};
     const float attnScale = 0.25F;
 
-    auto graph = buildSinkSdpaFwdGraph(qDims, kDims, vDims, attnScale);
+    const auto graph = buildSinkSdpaFwdGraph(qDims, kDims, vDims, attnScale);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -1282,7 +1283,7 @@ TEST(TestSdpaFwdPlanSink, FrontendGraphExecutesLikeTheDirectReference)
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
     ASSERT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
-    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const unsigned int seed = getGlobalTestSeed();
     Tensor<float> q(qDims);
@@ -1338,7 +1339,7 @@ TEST(TestSdpaFwdPlanSink, FrontendGraphExecutesLikeTheDirectReference)
 TEST(TestSdpaFwdPlanDropout, Applicability)
 {
     const auto applicable = [](SdpaAttributesT attrs, const std::vector<RawExtraTensor>& extras) {
-        auto graphBuilder
+        const auto graphBuilder
             = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -1389,7 +1390,7 @@ TEST_P(TestSdpaFwdPlanDropoutFields, MatchesContract)
     std::vector<RawExtraTensor> extras = {{20, "DropoutMask", DataType::FLOAT, {1, 2, 4, 4}},
                                           {21, "DropoutScale", DataType::FLOAT, {1}}};
     GetParam().apply(attrs, extras);
-    auto graphBuilder
+    const auto graphBuilder
         = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
 
     CpuReferenceGraphExecutor executor;
@@ -1449,12 +1450,13 @@ TEST(TestSdpaFwdPlanDropout, ExecuteMatchesDirectReference)
     SdpaAttributesT attrs;
     attrs.dropout_mask_tensor_uid = 20;
     attrs.dropout_scale_tensor_uid = 21;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs,
-                                            std::nullopt,
-                                            std::nullopt,
-                                            std::nullopt,
-                                            {{20, "DropoutMask", DataType::FLOAT, {1, 2, 4, 4}},
-                                             {21, "DropoutScale", DataType::FLOAT, {1}}});
+    const auto graphBuilder
+        = makeRawSdpaFwdGraph(attrs,
+                              std::nullopt,
+                              std::nullopt,
+                              std::nullopt,
+                              {{20, "DropoutMask", DataType::FLOAT, {1, 2, 4, 4}},
+                               {21, "DropoutScale", DataType::FLOAT, {1}}});
 
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     hipdnn_data_sdk::utilities::Tensor<float> q(dims);
@@ -1496,7 +1498,7 @@ TEST(TestSdpaFwdPlanDropout, ExecuteMatchesDirectReference)
 TEST(TestSdpaFwdPlanDropout, PhiloxNeedsRngDump)
 {
     const auto applicable = [](SdpaAttributesT attrs, const std::vector<RawExtraTensor>& extras) {
-        auto graphBuilder
+        const auto graphBuilder
             = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -1530,13 +1532,13 @@ TEST(TestSdpaFwdPlanDropout, PhiloxWithRngDumpUsesDumpedMask)
     attrs.seed_tensor_uid = 23;
     attrs.offset_tensor_uid = 24;
     attrs.rng_dump_tensor_uid = 22;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs,
-                                            std::nullopt,
-                                            std::nullopt,
-                                            std::nullopt,
-                                            {{23, "Seed", DataType::INT64, {1}},
-                                             {24, "Offset", DataType::INT64, {1}},
-                                             {22, "RngDump", DataType::FLOAT, {1, 2, 4, 4}}});
+    const auto graphBuilder = makeRawSdpaFwdGraph(attrs,
+                                                  std::nullopt,
+                                                  std::nullopt,
+                                                  std::nullopt,
+                                                  {{23, "Seed", DataType::INT64, {1}},
+                                                   {24, "Offset", DataType::INT64, {1}},
+                                                   {22, "RngDump", DataType::FLOAT, {1, 2, 4, 4}}});
 
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     hipdnn_data_sdk::utilities::Tensor<float> q(dims);
@@ -1597,7 +1599,7 @@ TEST(TestSdpaFwdPlanRowStats, ApplicabilityRequiresFloatOutputs)
         {
             extras.push_back({50, "stat", type, {1, 2, 4, 1}});
         }
-        auto graphBuilder
+        const auto graphBuilder
             = makeRawSdpaFwdGraph(attrs, std::nullopt, std::nullopt, std::nullopt, extras);
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -1616,7 +1618,7 @@ TEST(TestSdpaFwdPlanAlibi, ApplicableOnlyWithTopLeftCausal)
 {
     const auto applicable = [](SdpaAttributesT attrs) {
         attrs.alibi_mask = true;
-        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     };
@@ -1645,13 +1647,13 @@ TEST(TestSdpaFwdPlanRowStats, ExecuteWritesMaxAndSumExpConsistentWithLse)
     attrs.max_tensor_uid = 50;
     attrs.sum_exp_tensor_uid = 51;
     attrs.right_bound = 0;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs,
-                                            std::nullopt,
-                                            std::nullopt,
-                                            std::nullopt,
-                                            {{49, "lse", DataType::FLOAT, {1, 2, 4, 1}},
-                                             {50, "max", DataType::FLOAT, {1, 2, 4, 1}},
-                                             {51, "sum_exp", DataType::FLOAT, {1, 2, 4, 1}}});
+    const auto graphBuilder = makeRawSdpaFwdGraph(attrs,
+                                                  std::nullopt,
+                                                  std::nullopt,
+                                                  std::nullopt,
+                                                  {{49, "lse", DataType::FLOAT, {1, 2, 4, 1}},
+                                                   {50, "max", DataType::FLOAT, {1, 2, 4, 1}},
+                                                   {51, "sum_exp", DataType::FLOAT, {1, 2, 4, 1}}});
 
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     hipdnn_data_sdk::utilities::Tensor<float> q(dims);
@@ -1706,7 +1708,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
 
     // Control: the same graph without cu_seq_len is accepted, so the reject below declines it.
     {
-        auto baseline = makeRawSdpaFwdGraph(SdpaAttributesT{});
+        const auto baseline = makeRawSdpaFwdGraph(SdpaAttributesT{});
         const GraphWrapper baselineWrapper(baseline.GetBufferPointer(), baseline.GetSize());
         ASSERT_TRUE(
             planBuilder.isApplicable(baselineWrapper.getNode(0), baselineWrapper.getTensorMap()));
@@ -1723,7 +1725,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
         {
             attrs.cu_seq_len_q_tensor_uid = 52;
         }
-        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
         const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
         EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
@@ -1751,7 +1753,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
                                         hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
                                         /*alibiMask=*/false,
                                         /*generateStats=*/true);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto& variantPack = std::get<1>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -1765,7 +1767,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
         planBuilder;
     EXPECT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     auto* concretePlan = dynamic_cast<SdpaFwdPlan<float, float, float, float>*>(builtPlan.get());
     ASSERT_NE(concretePlan, nullptr);
 
@@ -1815,7 +1817,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
     auto deprecatedGraphTuple = buildSdpaFwdGraph(deprecatedBundle,
                                                   DataType::FLOAT,
                                                   /*causalMask=*/true);
-    auto& deprecatedGraph = std::get<0>(deprecatedGraphTuple);
+    const auto& deprecatedGraph = std::get<0>(deprecatedGraphTuple);
     auto [depBin, depErr] = deprecatedGraph->to_binary();
     ASSERT_TRUE(depErr.is_good()) << depErr.get_message();
     const GraphWrapper depWrapper(depBin.data(), depBin.size());
@@ -1828,7 +1830,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
                                                 /*leftBound=*/-1,
                                                 /*rightBound=*/0,
                                                 hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
-    auto& explicitGraph = std::get<0>(explicitGraphTuple);
+    const auto& explicitGraph = std::get<0>(explicitGraphTuple);
     auto [expBin, expErr] = explicitGraph->to_binary();
     ASSERT_TRUE(expErr.is_good()) << expErr.get_message();
     const GraphWrapper expWrapper(expBin.data(), expBin.size());
@@ -1838,7 +1840,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
 
     // Execute deprecated-path plan
     {
-        auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
         const auto* attrs = depWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = deprecatedBundle.qTensor.memory().hostData();
@@ -1850,7 +1852,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
 
     // Execute explicit-bounds plan
     {
-        auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
         const auto* attrs = expWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = explicitBundle.qTensor.memory().hostData();
@@ -1892,7 +1894,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
                                                   /*leftBound=*/std::nullopt,
                                                   /*rightBound=*/std::nullopt,
                                                   hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
-    auto& deprecatedGraph = std::get<0>(deprecatedGraphTuple);
+    const auto& deprecatedGraph = std::get<0>(deprecatedGraphTuple);
     auto [depBin, depErr] = deprecatedGraph->to_binary();
     ASSERT_TRUE(depErr.is_good()) << depErr.get_message();
     const GraphWrapper depWrapper(depBin.data(), depBin.size());
@@ -1905,7 +1907,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
                                                 /*leftBound=*/-1,
                                                 /*rightBound=*/0,
                                                 hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT);
-    auto& explicitGraph = std::get<0>(explicitGraphTuple);
+    const auto& explicitGraph = std::get<0>(explicitGraphTuple);
     auto [expBin, expErr] = explicitGraph->to_binary();
     ASSERT_TRUE(expErr.is_good()) << expErr.get_message();
     const GraphWrapper expWrapper(expBin.data(), expBin.size());
@@ -1915,7 +1917,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
 
     // Execute deprecated-path plan
     {
-        auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
         const auto* attrs = depWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = deprecatedBundle.qTensor.memory().hostData();
@@ -1927,7 +1929,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
 
     // Execute explicit-bounds plan
     {
-        auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
         const auto* attrs = expWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = explicitBundle.qTensor.memory().hostData();
@@ -1977,8 +1979,8 @@ void executeSdpaFwdPlan(SdpaFwdTensorBundle<float>& bundle, const MaskSpelling& 
                                         mask.leftBound,
                                         mask.rightBound,
                                         mask.alignment);
-    auto& graph = std::get<0>(graphTuple);
-    auto& variantPack = std::get<1>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
+    const auto& variantPack = std::get<1>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2054,11 +2056,11 @@ TEST(TestSdpaFwdPlanBuilder, BothDeprecatedCausalMasksThrow)
                                         DataType::FLOAT,
                                         /*causalMask=*/true,
                                         /*causalMaskBottomRight=*/false);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
     auto* attrs = graphT->nodes.front()->attributes.AsSdpaAttributes();
     ASSERT_NE(attrs, nullptr);
     attrs->causal_mask_bottom_right = true;
@@ -2084,12 +2086,12 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
         fp8Builder;
 
     {
-        auto graph = buildDescaleSdpaFwdGraph(dims,
-                                              dims,
-                                              dims,
-                                              hipdnn_frontend::DataType::FP8_E4M3,
-                                              hipdnn_frontend::DataType::BFLOAT16,
-                                              /*withDescale=*/false);
+        const auto graph = buildDescaleSdpaFwdGraph(dims,
+                                                    dims,
+                                                    dims,
+                                                    hipdnn_frontend::DataType::FP8_E4M3,
+                                                    hipdnn_frontend::DataType::BFLOAT16,
+                                                    /*withDescale=*/false);
         auto [bin, err] = graph->to_binary();
         ASSERT_TRUE(err.is_good()) << err.get_message();
         const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2098,12 +2100,12 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
     }
 
     {
-        auto graph = buildDescaleSdpaFwdGraph(dims,
-                                              dims,
-                                              dims,
-                                              hipdnn_frontend::DataType::FP8_E4M3,
-                                              hipdnn_frontend::DataType::BFLOAT16,
-                                              /*withDescale=*/true);
+        const auto graph = buildDescaleSdpaFwdGraph(dims,
+                                                    dims,
+                                                    dims,
+                                                    hipdnn_frontend::DataType::FP8_E4M3,
+                                                    hipdnn_frontend::DataType::BFLOAT16,
+                                                    /*withDescale=*/true);
         auto [bin, err] = graph->to_binary();
         ASSERT_TRUE(err.is_good()) << err.get_message();
         const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2116,12 +2118,12 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsDescaleForNonFp8)
 {
     // Non-FP8 inputs must not carry descales; the dispatcher rejects such graphs.
     const std::vector<int64_t> dims = {1, 2, 4, 8};
-    auto graph = buildDescaleSdpaFwdGraph(dims,
-                                          dims,
-                                          dims,
-                                          hipdnn_frontend::DataType::FLOAT,
-                                          hipdnn_frontend::DataType::FLOAT,
-                                          /*withDescale=*/true);
+    const auto graph = buildDescaleSdpaFwdGraph(dims,
+                                                dims,
+                                                dims,
+                                                hipdnn_frontend::DataType::FLOAT,
+                                                hipdnn_frontend::DataType::FLOAT,
+                                                /*withDescale=*/true);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2135,14 +2137,14 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsDescaleForNonFp8)
 TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsNonFloatDescale)
 {
     const std::vector<int64_t> dims = {1, 2, 4, 8};
-    auto graph = buildDescaleSdpaFwdGraph(dims,
-                                          dims,
-                                          dims,
-                                          hipdnn_frontend::DataType::FP8_E4M3,
-                                          hipdnn_frontend::DataType::BFLOAT16,
-                                          /*withDescale=*/true,
-                                          /*withDescaleS=*/false,
-                                          hipdnn_frontend::DataType::HALF);
+    const auto graph = buildDescaleSdpaFwdGraph(dims,
+                                                dims,
+                                                dims,
+                                                hipdnn_frontend::DataType::FP8_E4M3,
+                                                hipdnn_frontend::DataType::BFLOAT16,
+                                                /*withDescale=*/true,
+                                                /*withDescaleS=*/false,
+                                                hipdnn_frontend::DataType::HALF);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2159,13 +2161,13 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithSoftmaxDescale)
     // cuDNN sdpa_fp8 pairs descale_s with scale_s, so an fp8 graph that carries descale_s
     // without scale_s must be declined even though q/k/v descales are present.
     const std::vector<int64_t> dims = {1, 2, 4, 8};
-    auto graph = buildDescaleSdpaFwdGraph(dims,
-                                          dims,
-                                          dims,
-                                          hipdnn_frontend::DataType::FP8_E4M3,
-                                          hipdnn_frontend::DataType::BFLOAT16,
-                                          /*withDescale=*/true,
-                                          /*withDescaleS=*/true);
+    const auto graph = buildDescaleSdpaFwdGraph(dims,
+                                                dims,
+                                                dims,
+                                                hipdnn_frontend::DataType::FP8_E4M3,
+                                                hipdnn_frontend::DataType::BFLOAT16,
+                                                /*withDescale=*/true,
+                                                /*withDescaleS=*/true);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2185,7 +2187,7 @@ TEST(TestSdpaFwdPlanBuilder, Fp8ScalingApplicabilityGatesEveryField)
 {
     namespace graphs = hipdnn_test_sdk::utilities::sdpa_graph_test;
     const auto applicable = [](const auto& builder, const graphs::SdpaGraphSpec& spec) {
-        auto graphBuilder = graphs::makeSdpaGraph(spec);
+        const auto graphBuilder = graphs::makeSdpaGraph(spec);
         const GraphWrapper wrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap());
     };
@@ -2263,7 +2265,7 @@ TEST(TestSdpaFwdPlanBuilder, BlockMaskApplicabilityGatesEveryField)
                              DataType::BFLOAT16>
         bf16;
     const auto applicable = [&bf16](const graphs::SdpaGraphSpec& spec) {
-        auto graphBuilder = graphs::makeSdpaGraph(spec);
+        const auto graphBuilder = graphs::makeSdpaGraph(spec);
         const GraphWrapper wrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return bf16.isApplicable(wrapper.getNode(0), wrapper.getTensorMap());
     };
@@ -2303,7 +2305,7 @@ TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
     Tensor<bfloat16> oTensor(dims);
 
     // Deterministic, exactly-representable fp8 values (small multiples of 1/4).
-    auto fillPattern = [&](Tensor<fp8_e4m3>& t, int64_t phase) {
+    const auto fillPattern = [&](Tensor<fp8_e4m3>& t, int64_t phase) {
         int64_t flat = 0;
         for(int64_t b = 0; b < batch; ++b)
         {
@@ -2332,12 +2334,12 @@ TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
     descaleK.fillWithValue(0.5f);
     descaleV.fillWithValue(1.5f);
 
-    auto graph = buildDescaleSdpaFwdGraph(dims,
-                                          dims,
-                                          dims,
-                                          hipdnn_frontend::DataType::FP8_E4M3,
-                                          hipdnn_frontend::DataType::BFLOAT16,
-                                          /*withDescale=*/true);
+    const auto graph = buildDescaleSdpaFwdGraph(dims,
+                                                dims,
+                                                dims,
+                                                hipdnn_frontend::DataType::FP8_E4M3,
+                                                hipdnn_frontend::DataType::BFLOAT16,
+                                                /*withDescale=*/true);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
     const GraphWrapper wrapper(bin.data(), bin.size());
@@ -2348,7 +2350,7 @@ TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
                              DataType::BFLOAT16>
         planBuilder;
     ASSERT_TRUE(planBuilder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()));
-    auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
 
     const auto* nodeAttributes = wrapper.getNode(0).attributes_as_SdpaAttributes();
     std::unordered_map<int64_t, void*> variantPack;
@@ -2497,7 +2499,7 @@ TEST(TestSdpaFwdPlanMask, UnsupportedMaskDtypeHasNoPlan)
 
 TEST(TestSdpaFwdPlanMask, MaskTensorWithUnsetDtypeIsNotApplicable)
 {
-    auto graphBuilder = makeRawSdpaFwdGraph(SdpaAttributesT{}, DataType::UNSET);
+    const auto graphBuilder = makeRawSdpaFwdGraph(SdpaAttributesT{}, DataType::UNSET);
 
     CpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -2509,7 +2511,7 @@ TEST(TestSdpaFwdPlanMask, DanglingMaskUidIsNotApplicable)
 {
     SdpaAttributesT attrs;
     attrs.attn_mask_tensor_uid = 99;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+    const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
 
     CpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
@@ -2565,7 +2567,7 @@ TEST(TestSdpaFwdPlanScale, OrdinaryScaleTensorMatchesBakedScale)
 {
     SdpaAttributesT tensorScaleAttrs;
     tensorScaleAttrs.scale_tensor_uid = 20;
-    auto tensorScaleGraph
+    const auto tensorScaleGraph
         = makeRawSdpaFwdGraph(tensorScaleAttrs,
                               std::nullopt,
                               std::nullopt,
@@ -2573,7 +2575,7 @@ TEST(TestSdpaFwdPlanScale, OrdinaryScaleTensorMatchesBakedScale)
                               {RawExtraTensor{20, "Scale", DataType::FLOAT, {1, 1, 1, 1}}});
     SdpaAttributesT bakedScaleAttrs;
     bakedScaleAttrs.attn_scale_value = 0.5F;
-    auto bakedScaleGraph = makeRawSdpaFwdGraph(bakedScaleAttrs);
+    const auto bakedScaleGraph = makeRawSdpaFwdGraph(bakedScaleAttrs);
 
     CpuReferenceGraphExecutor executor;
     ASSERT_TRUE(
@@ -2621,11 +2623,11 @@ TEST(TestSdpaFwdPlanScale, ScaleTensorMustBeOneFloatElement)
     {
         SdpaAttributesT attrs;
         attrs.scale_tensor_uid = 20;
-        auto graph = makeRawSdpaFwdGraph(attrs,
-                                         std::nullopt,
-                                         std::nullopt,
-                                         std::nullopt,
-                                         {RawExtraTensor{20, "Scale", dataType, dims}});
+        const auto graph = makeRawSdpaFwdGraph(attrs,
+                                               std::nullopt,
+                                               std::nullopt,
+                                               std::nullopt,
+                                               {RawExtraTensor{20, "Scale", dataType, dims}});
         EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()))
             << "scale " << EnumNameDataType(dataType) << " with " << dims.back() << " elements";
     }
@@ -2642,7 +2644,7 @@ TEST(TestSdpaFwdPlanScale, NonFiniteBakedScaleIsDeclined)
     {
         SdpaAttributesT attrs;
         attrs.attn_scale_value = value;
-        auto graph = makeRawSdpaFwdGraph(attrs);
+        const auto graph = makeRawSdpaFwdGraph(attrs);
         EXPECT_EQ(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()),
                   std::isfinite(value))
             << "attn_scale_value " << value;
@@ -2672,7 +2674,7 @@ TEST(TestSdpaFwdPlanDescale, ScalarDescalesMatchTensorDescales)
         SdpaGraphSpec spec;
         spec.descaleStorage = storage;
         spec.bakedDescale = 0.5F;
-        auto graph = makeSdpaGraph(spec);
+        const auto graph = makeSdpaGraph(spec);
         ASSERT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
         std::unordered_map<int64_t, void*> pack = {{Q, q.memory().hostData()},
                                                    {K, k.memory().hostData()},
@@ -2707,10 +2709,10 @@ TEST(TestSdpaFwdPlanDescale, MultiElementPassByValueDescaleIsDeclined)
     CpuReferenceGraphExecutor executor;
     SdpaGraphSpec spec;
     spec.descaleKDims = {1, 2, 1, 1};
-    auto tensorGraph = makeSdpaGraph(spec);
+    const auto tensorGraph = makeSdpaGraph(spec);
     EXPECT_TRUE(executor.isApplicable(tensorGraph.GetBufferPointer(), tensorGraph.GetSize()));
     spec.descaleStorage = OperandStorage::RUNTIME_PASS_BY_VALUE;
-    auto passByValueGraph = makeSdpaGraph(spec);
+    const auto passByValueGraph = makeSdpaGraph(spec);
     EXPECT_FALSE(
         executor.isApplicable(passByValueGraph.GetBufferPointer(), passByValueGraph.GetSize()));
 }

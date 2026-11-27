@@ -36,9 +36,9 @@ public:
 
     Error pre_validate_node() const override
     {
-        auto x = attributes.get_x();
-        auto dy = attributes.get_dy();
-        auto dw = attributes.get_dw();
+        const auto x = attributes.get_x();
+        const auto dy = attributes.get_dy();
+        const auto dw = attributes.get_dw();
 
         HIPDNN_RETURN_IF_FALSE(x,
                                ErrorCode::ATTRIBUTE_NOT_SET,
@@ -97,7 +97,7 @@ public:
             dyDims[0],
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor batch size must match dy tensor batch size");
-        auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
+        const auto spatialDims = dyDims.size() - 2; // N & C dimensions aren't spatial
 
         HIPDNN_RETURN_IF_TRUE(dwDims.empty(),
                               ErrorCode::ATTRIBUTE_NOT_SET,
@@ -143,7 +143,7 @@ public:
                             "tensor input channels");
 
         // xDims[1] / dwDims[1] is group count
-        auto groupCount = xDims[1] / dwDims[1];
+        const auto groupCount = xDims[1] / dwDims[1];
         HIPDNN_RETURN_IF_NE(dwDims[0] % groupCount,
                             0,
                             ErrorCode::INVALID_VALUE,
@@ -202,7 +202,7 @@ public:
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionWgradNode: Post-padding must be non-negative");
 
-            auto spatialIdx = i + 2;
+            const auto spatialIdx = i + 2;
             const int64_t xDim = xDims[spatialIdx];
             const int64_t dyDim = dyDims[spatialIdx];
             const int64_t kernelDim = dwDims[spatialIdx];
@@ -244,9 +244,9 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto dy = attributes.get_dy();
-        auto dw = attributes.get_dw();
+        const auto x = attributes.get_x();
+        const auto dy = attributes.get_dy();
+        const auto dw = attributes.get_dw();
 
         // Repeated checks from pre_validate_node for cases where this is called standalone
         HIPDNN_RETURN_IF_FALSE(x,
@@ -286,10 +286,11 @@ public:
                 "ConvolutionWgradNode: Stride dimension mismatch between x and dw tensors");
 
             // Extract stride order from x tensor and apply to dw tensor
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
+            const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
 
             // Generate dw strides using the extracted stride order and dw dimensions
-            auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(dwDimsFinal, strideOrder);
+            const auto dwStrides
+                = hipdnn_data_sdk::utilities::generateStrides(dwDimsFinal, strideOrder);
 
             dw->set_stride(dwStrides);
         }

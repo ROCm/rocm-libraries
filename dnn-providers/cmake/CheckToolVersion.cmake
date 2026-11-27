@@ -6,7 +6,7 @@ if(NOT EXPECTED_CLANG_FORMAT_VERSION)
     set(EXPECTED_CLANG_FORMAT_VERSION "18")
 endif()
 if(NOT EXPECTED_CLANG_TIDY_VERSION)
-    set(EXPECTED_CLANG_TIDY_VERSION "20")
+    set(EXPECTED_CLANG_TIDY_VERSION "23")
 endif()
 if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
@@ -110,9 +110,11 @@ endfunction()
 # Optional keyword arguments:
 #   ALLOW_MISMATCH - If present, a version mismatch issues a warning but the tool is still
 #                   used. By default, a version mismatch disables the tool.
+#   HINT_DIR - A directory searched, with no other path, before everything else. A tool found
+#             there wins over one earlier on PATH.
 # ~~~
 function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ERROR_LEVEL)
-    cmake_parse_arguments(PARSE_ARGV 5 _CHECK_TOOL_VERSION "ALLOW_MISMATCH" "" "")
+    cmake_parse_arguments(PARSE_ARGV 5 _CHECK_TOOL_VERSION "ALLOW_MISMATCH" "HINT_DIR" "")
     # Build version-specific paths if LLVM_TOOL_HINTS is set
     set(SEARCH_HINTS)
     if(DEFINED LLVM_TOOL_HINTS)
@@ -122,9 +124,14 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
         endforeach()
     endif()
 
+    # ${TOOL_NAME}.py: the clang-tidy PyPI wheel installs run-clang-tidy as run-clang-tidy.py.
+    set(_tool_names ${TOOL_NAME}-${EXPECTED_VERSION} ${TOOL_NAME} ${TOOL_NAME}.py)
+    if(_CHECK_TOOL_VERSION_HINT_DIR)
+        find_program(${OUTPUT_VAR} NAMES ${_tool_names} PATHS "${_CHECK_TOOL_VERSION_HINT_DIR}" NO_DEFAULT_PATH)
+    endif()
     find_program(
-        ${OUTPUT_VAR} NAMES ${TOOL_NAME}-${EXPECTED_VERSION} ${TOOL_NAME} HINTS ${SEARCH_HINTS}
-        PATHS ${LLVM_TOOL_PATHS}
+        ${OUTPUT_VAR} NAMES ${_tool_names}
+        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
     )
 
     if(NOT ${OUTPUT_VAR})
@@ -207,9 +214,16 @@ function(findAndCheckClangTidy)
     # Export to parent scope
     set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE} PARENT_SCOPE)
 
+    # run-clang-tidy must come from the same installation as the version-checked clang-tidy, so
+    # -DCLANG_TIDY_EXE=<path> alone is enough to find the matching run-clang-tidy.
+    set(_run_clang_tidy_hint_arg "")
+    if(CLANG_TIDY_EXE)
+        get_filename_component(_clang_tidy_dir "${CLANG_TIDY_EXE}" DIRECTORY)
+        set(_run_clang_tidy_hint_arg HINT_DIR "${_clang_tidy_dir}")
+    endif()
     findandchecktool(
         RUN_CLANG_TIDY_EXE "run-clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "SKIP_VERSION_CHECK"
-        VERBOSE
+        VERBOSE ${_run_clang_tidy_hint_arg}
     )
 
     if(RUN_CLANG_TIDY_EXE)

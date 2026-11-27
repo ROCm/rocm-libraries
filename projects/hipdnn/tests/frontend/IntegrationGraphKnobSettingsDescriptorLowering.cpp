@@ -85,10 +85,10 @@ protected:
         // then find the knobs plugin by name. This ensures we dlopen the same
         // library instance (plugins are loaded with RTLD_LOCAL).
         std::vector<std::filesystem::path> loadedPaths;
-        auto pathResult = getLoadedEnginePluginPaths(_handle, loadedPaths);
+        const auto pathResult = getLoadedEnginePluginPaths(_handle, loadedPaths);
         ASSERT_TRUE(pathResult.is_good()) << pathResult.get_message();
 
-        auto it = std::find_if(loadedPaths.begin(), loadedPaths.end(), [](const auto& path) {
+        const auto it = std::find_if(loadedPaths.begin(), loadedPaths.end(), [](const auto& path) {
             return path.string().find(TEST_KNOBS_PLUGIN_NAME) != std::string::npos;
         });
         ASSERT_NE(it, loadedPaths.end())
@@ -119,12 +119,12 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_name("X").set_dim({2, 3, 4, 4}).set_stride({48, 16, 4, 1});
 
         PointwiseAttributes attrs;
         attrs.set_mode(PointwiseMode::RELU_FWD);
-        auto y = graph.pointwise(x, attrs);
+        const auto y = graph.pointwise(x, attrs);
         y->set_name("Y");
 
         auto result = graph.validate();
@@ -146,7 +146,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithIntKnob)
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.int_knob", int64_t{80})};
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -158,7 +158,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithFloatKnob
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.float_knob", 0.75)};
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -171,7 +171,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithStringKno
     const std::vector<KnobSetting> settings
         = {KnobSetting("test.string_knob", std::string("accurate"))};
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -186,7 +186,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithMultipleK
            KnobSetting("test.float_knob", 0.75),
            KnobSetting("test.string_knob", std::string("accurate"))};
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -199,7 +199,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithSharedKno
     const std::vector<KnobSetting> settings
         = {KnobSetting("test.shared.deterministic", int64_t{1})};
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -211,7 +211,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecate
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.deprecated_knob", int64_t{5})};
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -223,7 +223,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnob
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings;
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -236,7 +236,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanFiltersUnsupp
     const std::vector<KnobSetting> settings = {KnobSetting("nonexistent.knob", int64_t{42})};
     const std::vector<KnobSetting> expectedSettings;
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, expectedSettings));
 }

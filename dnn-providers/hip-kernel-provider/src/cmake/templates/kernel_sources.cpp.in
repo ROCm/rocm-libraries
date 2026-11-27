@@ -25,7 +25,7 @@
     std::string_view getKernelSrc(const char* name)
     {
         const auto& map = getKernelMap();
-        auto it = map.find(name);
+        const auto it = map.find(name);
         if(it == map.end())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(

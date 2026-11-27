@@ -100,11 +100,11 @@ TEST(TestCudnnShimUtils, ReshapeAttributesRoundTripsMode)
 TEST(TestCudnnShimUtils, ReshapeNodeStaysUnsupportedDespiteModeSetter)
 {
     fe::graph::Graph graph;
-    auto input = graph.tensor(fe::graph::Tensor_attributes{}
-                                  .set_dim({1, 2, 3})
-                                  .set_stride({6, 3, 1})
-                                  .set_data_type(fe::DataType_t::FLOAT)
-                                  .set_uid(1));
+    const auto input = graph.tensor(fe::graph::Tensor_attributes{}
+                                        .set_dim({1, 2, 3})
+                                        .set_stride({6, 3, 1})
+                                        .set_data_type(fe::DataType_t::FLOAT)
+                                        .set_uid(1));
 
     graph.reshape(input,
                   fe::graph::Reshape_attributes{}.set_reshape_mode(fe::ReshapeMode_t::LOGICAL));
@@ -154,11 +154,11 @@ TEST(TestCudnnShimUtils, ConcatenateAttributesRoundTripAxisAndInPlaceIndex)
 TEST(TestCudnnShimUtils, AdaLayernormAttributesRoundTripPhaseAndEpsilon)
 {
     fe::graph::Graph graph;
-    auto epsilon = graph.tensor(fe::graph::Tensor_attributes{}
-                                    .set_dim({1, 1, 1})
-                                    .set_stride({1, 1, 1})
-                                    .set_data_type(fe::DataType_t::FLOAT)
-                                    .set_uid(1));
+    const auto epsilon = graph.tensor(fe::graph::Tensor_attributes{}
+                                          .set_dim({1, 1, 1})
+                                          .set_stride({1, 1, 1})
+                                          .set_data_type(fe::DataType_t::FLOAT)
+                                          .set_uid(1));
 
     fe::graph::AdaLayernorm_attributes attributes;
 
@@ -188,8 +188,8 @@ TEST(TestCudnnShimUtils, BnFinalizeAttributesRoundTripPreviousRunningStats)
 TEST(TestCudnnShimUtils, AdaLayernormBackwardAttributesRoundTripSavedStats)
 {
     fe::graph::Graph graph;
-    auto mean = graph.tensor(fe::graph::Tensor_attributes{}.set_uid(1));
-    auto invVariance = graph.tensor(fe::graph::Tensor_attributes{}.set_uid(2));
+    const auto mean = graph.tensor(fe::graph::Tensor_attributes{}.set_uid(1));
+    const auto invVariance = graph.tensor(fe::graph::Tensor_attributes{}.set_uid(2));
 
     fe::graph::AdaLayernorm_backward_attributes attributes;
     attributes.set_saved_mean_and_inv_variance(mean, invVariance);

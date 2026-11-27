@@ -167,7 +167,7 @@ struct GpuReferenceGraphExecutor::Impl
     {
         try
         {
-            auto key = buildSignatureKey(node, tensorMap);
+            const auto key = buildSignatureKey(node, tensorMap);
             const auto& builder = planRegistry.getPlanBuilder(key);
             return builder.isApplicable(node, tensorMap);
         }
@@ -179,7 +179,7 @@ struct GpuReferenceGraphExecutor::Impl
 
     bool isApplicableAsIs(void* graphBuffer, size_t size)
     {
-        auto graphWrap
+        const auto graphWrap
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                 graphBuffer, size);
 
@@ -226,7 +226,7 @@ struct GpuReferenceGraphExecutor::Impl
                      size_t size,
                      const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto graphWrap
+        const auto graphWrap
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                 graphBuffer, size);
 
@@ -243,7 +243,7 @@ struct GpuReferenceGraphExecutor::Impl
         const auto variantPackWithVirtualTensors = populateVariantPackWithMissingVirtualTensors(
             variantPack, graphWrap.getTensorMap(), virtualTensors);
 
-        for(auto& executor : planExecutors)
+        for(const auto& executor : planExecutors)
         {
             executor->execute(variantPackWithVirtualTensors);
         }
@@ -372,7 +372,7 @@ struct GpuReferenceGraphExecutor::Impl
         buildPlanForNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_flatbuffers_sdk::data_objects::Node& node)
     {
-        auto key = buildSignatureKey(node, graph.getTensorMap());
+        const auto key = buildSignatureKey(node, graph.getTensorMap());
 
         const auto& planBuilder = planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))

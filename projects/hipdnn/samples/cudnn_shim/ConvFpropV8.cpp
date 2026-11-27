@@ -136,7 +136,7 @@ OverheadResult
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    auto timeBatch = [&ok](auto& arm) {
+    const auto timeBatch = [&ok](auto& arm) {
         HIP_CHECK(hipDeviceSynchronize());
         const Clock::time_point start = Clock::now();
         for(int i = 0; i < BATCH; ++i)
@@ -208,7 +208,7 @@ bool concurrentPlanBuild(cudnnHandle_t handle,
     std::array<std::optional<fe::ExecutionPlan>, 2> plans;
     std::array<std::string, 2> errors;
     std::atomic<int> arrived{0};
-    auto build = [&](size_t slot) {
+    const auto build = [&](size_t slot) {
         try
         {
             arrived.fetch_add(1);

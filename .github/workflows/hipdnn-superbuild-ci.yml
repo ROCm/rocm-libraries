@@ -364,6 +364,9 @@ jobs:
       # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
       # than a TheRock family name. A lane that needs a family name will need its own variable.
       GPU_TARGET: gfx942
+      # clang-tidy comes from the PyPI wheel pinned in .github/requirements-hipdnn-superbuild-ci.txt
+      # (installed into the venv in "Install Python dependencies"), which is the one place to
+      # change to upgrade it; the major version is handed to CMake as EXPECTED_CLANG_TIDY_VERSION.
     steps:
       - name: Runner health status
         run: |
@@ -410,9 +413,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build ccache
-          # clang-tidy-20 comes from Ubuntu's noble-updates archive rather than
-          # apt.llvm.org, whose intermittent outages failed this step.
-          sudo apt-get install -y clang-tidy-20 clang-tools-20
 
       - name: Install ROCm wheels
         run: |
@@ -556,6 +556,23 @@ jobs:
       - name: Install Python dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
+          CLANG_TIDY_VERSION=$(sed -n 's/^clang-tidy==//p' .github/requirements-hipdnn-superbuild-ci.txt)
+          test -n "$CLANG_TIDY_VERSION" || { echo "no clang-tidy pin in the requirements file" >&2; exit 1; }
+          # The other places that name the version must agree with the pin.
+          major="${CLANG_TIDY_VERSION%%.*}"
+          for f in projects/hipdnn/cmake/CheckToolVersion.cmake dnn-providers/cmake/CheckToolVersion.cmake; do
+            grep -qF "set(EXPECTED_CLANG_TIDY_VERSION \"$major\")" "$f" \
+              || { echo "::error file=$f::EXPECTED_CLANG_TIDY_VERSION default is not $major" >&2; exit 1; }
+          done
+          grep -qF "ARG CLANG_TIDY_VERSION=$CLANG_TIDY_VERSION" projects/hipdnn/dockerfiles/Dockerfile.ubuntu24 \
+            || { echo "::error file=projects/hipdnn/dockerfiles/Dockerfile.ubuntu24::CLANG_TIDY_VERSION is not $CLANG_TIDY_VERSION" >&2; exit 1; }
+          grep -qF "clang-tidy==$CLANG_TIDY_VERSION" projects/hipdnn/docs/Building.md \
+            || { echo "::error file=projects/hipdnn/docs/Building.md::does not name clang-tidy==$CLANG_TIDY_VERSION" >&2; exit 1; }
+          grep -qF "clang-tidy-$major" projects/hipdnn/tools/ai/skills/hipdnn-tidy/scripts/tidy_changed.py \
+            || { echo "::error file=projects/hipdnn/tools/ai/skills/hipdnn-tidy/scripts/tidy_changed.py::does not search clang-tidy-$major" >&2; exit 1; }
+          echo "CLANG_TIDY_VERSION=$CLANG_TIDY_VERSION" >> "$GITHUB_ENV"
+          echo "CLANG_TIDY_EXE=$VENV_PATH/bin/clang-tidy" >> "$GITHUB_ENV"
+          "$VENV_PATH/bin/clang-tidy" --version
 
       - name: Configure superbuild
         run: |
@@ -576,7 +593,9 @@ jobs:
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
-            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
+            -DEXPECTED_CLANG_TIDY_VERSION="${CLANG_TIDY_VERSION%%.*}" \
+            -DCLANG_TIDY_EXE="$CLANG_TIDY_EXE" \
+            -DCMAKE_CXX_CLANG_TIDY="$CLANG_TIDY_EXE;--allow-no-checks" \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \

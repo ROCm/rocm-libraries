@@ -53,7 +53,7 @@ Graph makeGraph(const UnhappyBnLayoutCase& tc)
 
     auto xAttr = makeTensorAttributes(
         "X", DataType::FLOAT, dims, generateStrides(dims, tc.layoutX.strideOrder));
-    auto x = std::make_shared<TensorAttributes>(std::move(xAttr));
+    const auto x = std::make_shared<TensorAttributes>(std::move(xAttr));
 
     auto meanAttr = makeTensorAttributes(
         "mean", DataType::FLOAT, cDims, generateStrides(cDims, tc.layoutParam.strideOrder));
@@ -64,13 +64,13 @@ Graph makeGraph(const UnhappyBnLayoutCase& tc)
     auto biasAttr = makeTensorAttributes(
         "bias", DataType::FLOAT, cDims, generateStrides(cDims, tc.layoutParam.strideOrder));
 
-    auto mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
-    auto invVar = std::make_shared<TensorAttributes>(std::move(invVarAttr));
-    auto scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
-    auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
+    const auto mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
+    const auto invVar = std::make_shared<TensorAttributes>(std::move(invVarAttr));
+    const auto scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
+    const auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
     const BatchnormInferenceAttributes bn;
-    auto y = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
+    const auto y = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
     y->set_output(true);
 
     return g;
@@ -90,7 +90,7 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -122,7 +122,7 @@ TEST_P(IntegrationGpuBatchnormUnhappyLayouts, RejectsUnsupportedLayouts)
     const auto& tc = GetParam();
     auto g = makeGraph(tc);
 
-    auto result = g.build(_handle);
+    const auto result = g.build(_handle);
 
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED) << "err_msg: " << result.err_msg;
 

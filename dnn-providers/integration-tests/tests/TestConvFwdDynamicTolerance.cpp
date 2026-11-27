@@ -479,7 +479,7 @@ TEST(TestConvFwdDynamicTolerance, WeightsWithAZeroDimensionAreNotModeled)
 {
     GraphSpec spec;
     spec.wDims = {32, 0, 3, 3};
-    auto in = defaultInputs(GraphSpec{}); // a tensor cannot have a zero dimension
+    const auto in = defaultInputs(GraphSpec{}); // a tensor cannot have a zero dimension
     EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
@@ -1215,7 +1215,7 @@ TEST(TestConvFwdDynamicTolerance, BakedScaleThatIsNotAFiniteNumberIsNotModeled)
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     spec.bakedScale = std::numeric_limits<float>::quiet_NaN();
-    auto in = defaultInputs(spec);
+    const auto in = defaultInputs(spec);
     EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 

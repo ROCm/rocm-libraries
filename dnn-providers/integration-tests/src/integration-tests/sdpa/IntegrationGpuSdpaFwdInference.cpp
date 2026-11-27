@@ -141,14 +141,14 @@ public:
 
         const auto& strideOrder
             = tc.bshdLayout ? TensorLayout::BSHD.strideOrder : TensorLayout::BHSD.strideOrder;
-        auto makeIo = [&](const std::string& name, const std::vector<int64_t>& dims) {
+        const auto makeIo = [&](const std::string& name, const std::vector<int64_t>& dims) {
             return std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
                 name, ioType, dims, generateStrides(dims, strideOrder)));
         };
 
-        auto q = makeIo("Q", qDims);
-        auto k = makeIo("K", kDims);
-        auto v = makeIo("V", vDims);
+        const auto q = makeIo("Q", qDims);
+        const auto k = makeIo("K", kDims);
+        const auto v = makeIo("V", vDims);
 
         graph::SdpaAttributes sdpaAttrs;
         const float attnScale
@@ -167,13 +167,13 @@ public:
         auto [o, stats] = graphObj.sdpa(q, k, v, sdpaAttrs);
         o->set_output(true);
 
-        auto validateResult = graphObj.validate();
+        const auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
         {
             throw std::runtime_error("Failed to validate graph: " + validateResult.get_message());
         }
 
-        auto buildResult = graphObj.build_operation_graph(handle);
+        const auto buildResult = graphObj.build_operation_graph(handle);
         if(buildResult.is_bad())
         {
             throw std::runtime_error("Failed to build operation graph: "

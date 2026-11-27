@@ -136,7 +136,7 @@ protected:
             bool useManualUids,
             bool useNegativeScale)
     {
-        auto graph = std::make_shared<Graph>();
+        const auto graph = std::make_shared<Graph>();
         graph->set_name(graphName)
             .set_io_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)

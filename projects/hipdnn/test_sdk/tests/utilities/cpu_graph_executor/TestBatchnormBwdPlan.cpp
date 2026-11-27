@@ -85,11 +85,11 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     //   dy: [-0.1, 0.1], x: [-1.0, 1.0], scale: [-0.1, 0.1]
     const auto nhw = dims[0] * dims[2] * dims[3];
 
-    auto dbiasTol
+    const auto dbiasTol
         = batchnorm::calculateBatchnormBackwardDbiasTolerance<float, float>(-0.1, 0.1, nhw);
-    auto dscaleTol = batchnorm::calculateBatchnormBackwardDscaleTolerance<float, float>(
+    const auto dscaleTol = batchnorm::calculateBatchnormBackwardDscaleTolerance<float, float>(
         -0.1, 0.1, -1.0, 1.0, nhw);
-    auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
+    const auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
         -0.1, 0.1, -1.0, 1.0, -0.1, 0.1, nhw);
 
     const CpuFpReferenceValidation<float> dxValidation(dxTol, dxTol);
@@ -111,11 +111,11 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
     auto graphTuple = buildBatchnormBwdGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const BatchnormBwdPlanBuilder<DataType::FLOAT,
@@ -126,7 +126,7 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
                                   DataType::FLOAT>
         bwdPlanBuilder;
 
-    auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float, float>*>(builtPlan.get())
@@ -174,11 +174,11 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
     //   dy: [-0.1, 0.1], x: [-1.0, 1.0], scale: [-0.1, 0.1]
     const auto nhw = dims[0] * dims[2] * dims[3];
 
-    auto dbiasTol
+    const auto dbiasTol
         = batchnorm::calculateBatchnormBackwardDbiasTolerance<float, float>(-0.1, 0.1, nhw);
-    auto dscaleTol = batchnorm::calculateBatchnormBackwardDscaleTolerance<float, float>(
+    const auto dscaleTol = batchnorm::calculateBatchnormBackwardDscaleTolerance<float, float>(
         -0.1, 0.1, -1.0, 1.0, nhw);
-    auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
+    const auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
         -0.1, 0.1, -1.0, 1.0, -0.1, 0.1, nhw);
 
     const CpuFpReferenceValidation<float> dxValidation(dxTol, dxTol);
@@ -200,11 +200,11 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
     auto graphTuple = buildBatchnormBwdGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const BatchnormBwdPlanBuilder<DataType::FLOAT,

@@ -147,7 +147,7 @@ inline std::set<std::filesystem::path>
 inline std::filesystem::path canonicalDirectory(const std::filesystem::path& path)
 {
     std::error_code error;
-    auto canonical = std::filesystem::canonical(path, error);
+    const auto canonical = std::filesystem::canonical(path, error);
     return error ? path.lexically_normal() : canonical;
 }
 
@@ -333,7 +333,7 @@ inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
     {
         if(!suite.empty())
         {
-            suite += "_";
+            suite += '_';
         }
         suite += sanitizeForGtest(segment.string());
     }
@@ -827,10 +827,10 @@ inline BundleDiscoveryResult
     const auto sweepDirs = detail::sweepRootsIn(listing);
     detail::warnOnEmptyLeafFolders(listing, sweepDirs);
 
-    auto registerBundle = [&](DiscoveredBundle bundle) {
+    const auto registerBundle = [&](DiscoveredBundle bundle) {
         const auto fullName = bundle.fullName();
         const auto diagnosticPath = bundle.diagnosticPath();
-        auto it = nameToPath.find(fullName);
+        const auto it = nameToPath.find(fullName);
         if(it != nameToPath.end())
         {
             throw std::runtime_error("Bundle name collision: '" + fullName

@@ -125,7 +125,7 @@ void KnobDescriptor::finalize()
     {
     case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
     {
-        auto defaultVal = _defaultValue.AsIntValue()->value;
+        const auto defaultVal = _defaultValue.AsIntValue()->value;
         if(_minValueInt.has_value())
         {
             THROW_IF_TRUE(defaultVal < *_minValueInt,
@@ -164,7 +164,7 @@ void KnobDescriptor::finalize()
     }
     case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
     {
-        auto defaultVal = _defaultValue.AsFloatValue()->value;
+        const auto defaultVal = _defaultValue.AsFloatValue()->value;
         if(_minValueDouble.has_value())
         {
             THROW_IF_TRUE(defaultVal < *_minValueDouble,

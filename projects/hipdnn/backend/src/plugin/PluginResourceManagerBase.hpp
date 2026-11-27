@@ -193,7 +193,8 @@ public:
     {
         const std::lock_guard<std::mutex> lock(Derived::getMutex());
 
-        auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
+        const auto newPathsSet
+            = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
         auto& config = Derived::getConfig();
 
         if(config.paths == newPathsSet && config.mode == loadingMode)
@@ -252,7 +253,7 @@ public:
 
         case HIPDNN_PLUGIN_UNLOAD_LAZY:
             // If plugins are already loaded, keep them alive by storing in persistent pointer
-            if(auto pm = Derived::getWeakPtr().lock())
+            if(const auto pm = Derived::getWeakPtr().lock())
             {
                 Derived::getPersistentPtr() = pm;
             }
@@ -335,7 +336,7 @@ void PluginResourceManagerBase<Derived, PluginManagerType, PluginType>::setPlugi
     hipdnnSeverity_t level)
 {
     const std::lock_guard<std::mutex> lock(Derived::getMutex());
-    auto pm = Derived::getWeakPtr().lock();
+    const auto pm = Derived::getWeakPtr().lock();
     if(!pm)
     {
         return; // No plugins loaded yet
@@ -370,7 +371,7 @@ std::shared_ptr<PluginManagerType>
     auto pm = Derived::getWeakPtr().lock();
     if(!pm)
     {
-        auto& config = Derived::getConfig();
+        const auto& config = Derived::getConfig();
         pm = createLoadedPluginManager(config);
         Derived::getWeakPtr() = pm;
 

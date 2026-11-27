@@ -72,7 +72,7 @@ void GraphDescriptor::finalize()
     {
         if(logging::GraphLogger::isEnabled())
         {
-            auto serialized = getSerializedGraph();
+            const auto serialized = getSerializedGraph();
             logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
                                            serialized.size);
         }
@@ -135,8 +135,8 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
     std::function<void(const std::shared_ptr<TensorDescriptor>&)> collect
         = [&](const std::shared_ptr<TensorDescriptor>& tensorDesc) {
-              auto uid = tensorDesc->getData().uid;
-              auto it = seenTensors.find(uid);
+              const auto uid = tensorDesc->getData().uid;
+              const auto it = seenTensors.find(uid);
               if(it != seenTensors.end())
               {
                   THROW_IF_FALSE(it->second.get() == tensorDesc.get(),
@@ -323,7 +323,7 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
 {
     checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, "GraphDescriptor::getAttribute()");
 
-    auto count = static_cast<int64_t>(_operations.size());
+    const auto count = static_cast<int64_t>(_operations.size());
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -352,7 +352,7 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            int64_t* elementCount,
                                            void* arrayOfElements) const
 {
-    auto flatbufferOptional = _preferredEngineId;
+    const auto flatbufferOptional = _preferredEngineId;
     getOptionalScalar<HIPDNN_TYPE_INT64>(flatbufferOptional,
                                          attributeType,
                                          requestedElementCount,
@@ -489,7 +489,7 @@ void relinkRaggedOffsets(
             continue;
         }
 
-        auto it = tensorMap.find(raggedUid.value());
+        const auto it = tensorMap.find(raggedUid.value());
         THROW_IF_TRUE(it == tensorMap.end(),
                       HIPDNN_STATUS_BAD_PARAM,
                       "GraphDescriptor::deserializeGraph: tensor UID " + std::to_string(uid)
@@ -534,7 +534,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
         graphId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
     }
 
-    auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
+    const auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
     relinkRaggedOffsets(tensorMap);
     std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
     unpacked.reserve(graph->nodes.size());
@@ -572,7 +572,7 @@ void GraphDescriptor::buildSerializedGraph()
         return;
     }
 
-    auto graph = buildGraphFromOperations();
+    const auto graph = buildGraphFromOperations();
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");
@@ -606,7 +606,7 @@ std::string GraphDescriptor::getSerializedJsonGraph() const
     // JSON is reconstructed from the cached binary buffer on each call
     // (binary -> FlatBuffer unpack -> JSON serialize). The JSON representation
     // is not cached because this path is not performance-critical.
-    auto data = getSerializedGraph();
+    const auto data = getSerializedGraph();
 
     auto* graph = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
         static_cast<const uint8_t*>(data.ptr));
@@ -627,7 +627,7 @@ void GraphDescriptor::createFromJsonGraph(GraphDescriptor& desc,
 
     try
     {
-        auto j = nlohmann::json::parse(jsonGraph, jsonGraph + jsonByteSize);
+        const auto j = nlohmann::json::parse(jsonGraph, jsonGraph + jsonByteSize);
 
         flatbuffers::FlatBufferBuilder builder;
         builder.Finish(

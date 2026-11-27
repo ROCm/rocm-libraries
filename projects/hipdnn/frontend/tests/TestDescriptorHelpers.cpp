@@ -234,9 +234,9 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescCreatesNewDescriptor)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
     EXPECT_TRUE(tensorDescs.find(K_DEFAULT_TENSOR_UID) != tensorDescs.end());
@@ -256,10 +256,10 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescPropagatesCustomAlignment)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_alignment(K_ALIGNMENT);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good());
 }
 
@@ -278,10 +278,10 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescPropagatesCustomRaggedOffsetMultip
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_ragged_offset_multiplier(K_MULTIPLIER);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good());
 }
 
@@ -301,10 +301,10 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescOmitsRaggedOffsetMultiplierForDefa
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     ASSERT_EQ(tensor->get_ragged_offset_multiplier(), DEFAULT_RAGGED_OFFSET_MULTIPLIER);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good());
 }
 
@@ -323,10 +323,10 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescOmitsByteAlignmentForDefaultAlignm
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     ASSERT_EQ(tensor->get_alignment(), DEFAULT_TENSOR_ALIGNMENT);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
 }
 
@@ -340,15 +340,15 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescDeduplicatesByUid)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
     // First call creates the descriptor
-    auto err1 = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err1 = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err1.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
 
     // Second call with same UID reuses existing -- no additional mock calls expected
-    auto err2 = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err2 = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err2.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
@@ -359,9 +359,9 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnCreateError)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -378,7 +378,7 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrVecSucceeds)
 
     const std::vector<int64_t> values = {1, 2, 3};
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrVec(
+    const auto err = setDescriptorAttrVec(
         desc, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, values, "test vec");
     EXPECT_TRUE(err.is_good());
 }
@@ -390,7 +390,7 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrVecReturnsErrorOnFailure)
 
     const std::vector<int64_t> values = {1, 2};
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrVec(
+    const auto err = setDescriptorAttrVec(
         desc, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, values, "test vec");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -409,11 +409,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarSucceeds)
 
     const hipdnnConvolutionMode_t value = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrScalar(desc,
-                                       HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                       HIPDNN_TYPE_CONVOLUTION_MODE,
-                                       value,
-                                       "test scalar");
+    const auto err = setDescriptorAttrScalar(desc,
+                                             HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                             HIPDNN_TYPE_CONVOLUTION_MODE,
+                                             value,
+                                             "test scalar");
     EXPECT_TRUE(err.is_good());
 }
 
@@ -428,8 +428,8 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefSucceeds)
 
     // Create a tensor desc map with an entry
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    auto ensureErr = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto ensureErr = createOrFindTensorDesc(tensorDescs, tensor);
     ASSERT_TRUE(ensureErr.is_good());
 
     // Expect the tensor ref to be set with BACKEND_DESCRIPTOR type
@@ -440,11 +440,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefSucceeds)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrTensorRef(desc,
-                                          HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
-                                          K_DEFAULT_TENSOR_UID,
-                                          tensorDescs,
-                                          "test tensor ref");
+    const auto err = setDescriptorAttrTensorRef(desc,
+                                                HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                                K_DEFAULT_TENSOR_UID,
+                                                tensorDescs,
+                                                "test tensor ref");
     EXPECT_TRUE(err.is_good());
 }
 
@@ -453,7 +453,7 @@ TEST_F(TestDescriptorHelpers, FinalizeDescriptorSucceeds)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = finalizeDescriptor(desc, "test descriptor");
+    const auto err = finalizeDescriptor(desc, "test descriptor");
     EXPECT_TRUE(err.is_good());
 }
 
@@ -462,7 +462,7 @@ TEST_F(TestDescriptorHelpers, FinalizeDescriptorReturnsErrorOnFailure)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = finalizeDescriptor(desc, "test descriptor");
+    const auto err = finalizeDescriptor(desc, "test descriptor");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -474,11 +474,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarReturnsErrorOnFailure)
 
     const hipdnnConvolutionMode_t value = HIPDNN_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrScalar(desc,
-                                       HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                       HIPDNN_TYPE_CONVOLUTION_MODE,
-                                       value,
-                                       "test scalar");
+    const auto err = setDescriptorAttrScalar(desc,
+                                             HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                             HIPDNN_TYPE_CONVOLUTION_MODE,
+                                             value,
+                                             "test scalar");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -488,8 +488,8 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefReturnsErrorOnFailure)
     expectAllBackendCallsSucceed();
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    auto ensureErr = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto ensureErr = createOrFindTensorDesc(tensorDescs, tensor);
     ASSERT_TRUE(ensureErr.is_good());
 
     // Override the mock to fail on the next setAttribute call
@@ -497,11 +497,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefReturnsErrorOnFailure)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrTensorRef(desc,
-                                          HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
-                                          K_DEFAULT_TENSOR_UID,
-                                          tensorDescs,
-                                          "test tensor ref");
+    const auto err = setDescriptorAttrTensorRef(desc,
+                                                HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                                K_DEFAULT_TENSOR_UID,
+                                                tensorDescs,
+                                                "test tensor ref");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -512,11 +512,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefReturnsErrorOnMissingUid
     hipdnnBackendDescriptor_t desc = nullptr;
 
     // UID does not exist in the map
-    auto err = setDescriptorAttrTensorRef(desc,
-                                          HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
-                                          K_MISSING_TENSOR_UID,
-                                          tensorDescs,
-                                          "missing uid");
+    const auto err = setDescriptorAttrTensorRef(desc,
+                                                HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                                K_MISSING_TENSOR_UID,
+                                                tensorDescs,
+                                                "missing uid");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.err_msg.find(std::to_string(K_MISSING_TENSOR_UID)) != std::string::npos);
@@ -540,10 +540,10 @@ TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefCreatesAndSetsDescriptor)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     hipdnnBackendDescriptor_t desc = nullptr;
 
-    auto err = ensureAndSetTensorRef(
+    const auto err = ensureAndSetTensorRef(
         desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensor, tensorDescs, "conv X");
     EXPECT_TRUE(err.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
@@ -559,10 +559,10 @@ TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefReusesExistingDescriptor)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
     // First call creates the descriptor
-    auto createErr = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto createErr = createOrFindTensorDesc(tensorDescs, tensor);
     ASSERT_TRUE(createErr.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
 
@@ -574,7 +574,7 @@ TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefReusesExistingDescriptor)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = ensureAndSetTensorRef(
+    const auto err = ensureAndSetTensorRef(
         desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, tensor, tensorDescs, "conv W");
     EXPECT_TRUE(err.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
@@ -586,10 +586,10 @@ TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefPropagatesCreateError)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     hipdnnBackendDescriptor_t desc = nullptr;
 
-    auto err = ensureAndSetTensorRef(
+    const auto err = ensureAndSetTensorRef(
         desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensor, tensorDescs, "conv X");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -613,10 +613,10 @@ TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefPropagatesSetAttributeError)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     hipdnnBackendDescriptor_t desc = nullptr;
 
-    auto err = ensureAndSetTensorRef(
+    const auto err = ensureAndSetTensorRef(
         desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensor, tensorDescs, "conv X");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -636,9 +636,9 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnSetAttribute)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(tensorDescs.empty());
@@ -655,9 +655,9 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnFinalize)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(tensorDescs.empty());
@@ -704,10 +704,10 @@ TYPED_TEST(DescriptorHelpersPassByValueTyped, EnsureTensorDescSetsPassByValue)
     EXPECT_CALL(*this->_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = this->makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = this->makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(tensorValue);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
@@ -731,9 +731,9 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescOmitsPassByValueAttributeForNonPbv
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    const auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    const auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
 }
 
@@ -766,7 +766,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorInt64)
 
     const hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
     ScopedHipdnnBackendDescriptor desc;
-    auto err = createKnobSettingDescriptor(setting, desc);
+    const auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
     EXPECT_TRUE(desc.valid());
 }
@@ -795,7 +795,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorDouble)
 
     const hipdnn_frontend::KnobSetting setting("double_knob", 3.14);
     ScopedHipdnnBackendDescriptor desc;
-    auto err = createKnobSettingDescriptor(setting, desc);
+    const auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
     EXPECT_TRUE(desc.valid());
 }
@@ -824,7 +824,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorString)
 
     const hipdnn_frontend::KnobSetting setting("str_knob", std::string("my_value"));
     ScopedHipdnnBackendDescriptor desc;
-    auto err = createKnobSettingDescriptor(setting, desc);
+    const auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
     EXPECT_TRUE(desc.valid());
 }
@@ -836,7 +836,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnCreate)
 
     const hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
     ScopedHipdnnBackendDescriptor desc;
-    auto err = createKnobSettingDescriptor(setting, desc);
+    const auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -851,7 +851,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnSetAttribute)
 
     const hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
     ScopedHipdnnBackendDescriptor desc;
-    auto err = createKnobSettingDescriptor(setting, desc);
+    const auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -867,7 +867,7 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnFinalize)
 
     const hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
     ScopedHipdnnBackendDescriptor desc;
-    auto err = createKnobSettingDescriptor(setting, desc);
+    const auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -1067,7 +1067,7 @@ protected:
 TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantFloatSurvives)
 {
     constexpr float K_VALUE = 3.5f;
-    auto in = makeScalar(1, DataType::FLOAT);
+    const auto in = makeScalar(1, DataType::FLOAT);
     in->set_compile_time_constant(K_VALUE);
 
     const auto out = roundTrip(in);
@@ -1082,7 +1082,7 @@ TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantFloatSurvives)
 TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantInt64Survives)
 {
     constexpr int64_t K_VALUE = -987654321012LL;
-    auto in = makeScalar(2, DataType::INT64);
+    const auto in = makeScalar(2, DataType::INT64);
     in->set_compile_time_constant(K_VALUE);
 
     const auto out = roundTrip(in);
@@ -1097,7 +1097,7 @@ TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantInt64Survives)
 TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantBoolSurvives)
 {
     constexpr bool K_VALUE = true;
-    auto in = makeScalar(3, DataType::BOOLEAN);
+    const auto in = makeScalar(3, DataType::BOOLEAN);
     in->set_compile_time_constant(K_VALUE);
 
     const auto out = roundTrip(in);
@@ -1115,7 +1115,7 @@ TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantBoolSurvives)
 TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultFloatSurvives)
 {
     constexpr float K_VALUE = 1.25f;
-    auto in = makeScalar(4, DataType::FLOAT);
+    const auto in = makeScalar(4, DataType::FLOAT);
     in->set_value(K_VALUE);
     in->set_is_pass_by_value(true); // value + runtime flag == runtime-with-default
 
@@ -1131,7 +1131,7 @@ TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultFloatSurvives)
 TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultInt64Survives)
 {
     constexpr int64_t K_VALUE = 42424242424242LL;
-    auto in = makeScalar(5, DataType::INT64);
+    const auto in = makeScalar(5, DataType::INT64);
     in->set_value(K_VALUE);
     in->set_is_pass_by_value(true);
 
@@ -1147,7 +1147,7 @@ TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultInt64Survives)
 TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultBoolSurvives)
 {
     constexpr bool K_VALUE = true;
-    auto in = makeScalar(6, DataType::BOOLEAN);
+    const auto in = makeScalar(6, DataType::BOOLEAN);
     in->set_value(K_VALUE);
     in->set_is_pass_by_value(true);
 
@@ -1175,7 +1175,7 @@ TYPED_TEST_SUITE(DescriptorHelpersRoundTripTyped, PassByValueScalarTypes, );
 TYPED_TEST(DescriptorHelpersRoundTripTyped, CompileTimeConstantSurvives)
 {
     const TypeParam value = passByValueTestScalar<TypeParam>();
-    auto in = std::make_shared<TensorAttributes>(value, ScalarType::COMPILE_TIME_CONST);
+    const auto in = std::make_shared<TensorAttributes>(value, ScalarType::COMPILE_TIME_CONST);
     in->set_uid(101);
 
     const auto out = this->roundTrip(in);
@@ -1190,7 +1190,7 @@ TYPED_TEST(DescriptorHelpersRoundTripTyped, CompileTimeConstantSurvives)
 TYPED_TEST(DescriptorHelpersRoundTripTyped, RuntimeWithDefaultSurvives)
 {
     const TypeParam value = passByValueTestScalar<TypeParam>();
-    auto in = std::make_shared<TensorAttributes>(value, ScalarType::RUNTIME_PARAM);
+    const auto in = std::make_shared<TensorAttributes>(value, ScalarType::RUNTIME_PARAM);
     in->set_uid(102);
 
     const auto out = this->roundTrip(in);
@@ -1207,7 +1207,7 @@ TYPED_TEST(DescriptorHelpersRoundTripTyped, RuntimeWithDefaultSurvives)
 
 TEST_F(TestDescriptorHelpersRoundTrip, RuntimeUserSuppliedHasFlagNoValue)
 {
-    auto in = makeScalar(7, DataType::FLOAT);
+    const auto in = makeScalar(7, DataType::FLOAT);
     in->set_as_runtime_parameter(); // clears value, sets flag
     in->set_dim({1}).set_stride({1}); // set_as_runtime_parameter left dims intact; keep scalar
 
@@ -1282,7 +1282,7 @@ TEST_F(TestDescriptorHelpersRoundTrip, UnpackToleratesNotSupportedRuntimeFlagFro
         .WillByDefault(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     constexpr float K_VALUE = 4.25f;
-    auto in = makeScalar(1, DataType::FLOAT);
+    const auto in = makeScalar(1, DataType::FLOAT);
     in->set_compile_time_constant(K_VALUE);
 
     const auto out = roundTrip(in);
@@ -1298,23 +1298,23 @@ TEST_F(TestDescriptorHelpersRoundTrip, MixedScalarTensorsRoundTripIndependently)
 {
     // Compile-time const float.
     constexpr float K_CT_FLOAT = 2.5f;
-    auto ctFloat = makeScalar(10, DataType::FLOAT);
+    const auto ctFloat = makeScalar(10, DataType::FLOAT);
     ctFloat->set_compile_time_constant(K_CT_FLOAT);
 
     // Runtime-with-default int64.
     constexpr int64_t K_RT_INT = 123456789LL;
-    auto rtInt = makeScalar(11, DataType::INT64);
+    const auto rtInt = makeScalar(11, DataType::INT64);
     rtInt->set_value(K_RT_INT);
     rtInt->set_is_pass_by_value(true);
 
     // Runtime user-supplied bool (flag only, no value).
-    auto rtBool = makeScalar(12, DataType::BOOLEAN);
+    const auto rtBool = makeScalar(12, DataType::BOOLEAN);
     rtBool->set_as_runtime_parameter();
     rtBool->set_dim({1}).set_stride({1});
 
     // Compile-time const bool.
     constexpr bool K_CT_BOOL = true;
-    auto ctBool = makeScalar(13, DataType::BOOLEAN);
+    const auto ctBool = makeScalar(13, DataType::BOOLEAN);
     ctBool->set_compile_time_constant(K_CT_BOOL);
 
     // Pack all four into one shared descriptor map, then unpack each descriptor.

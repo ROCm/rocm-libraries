@@ -141,7 +141,7 @@ void GpuFpReferenceSdpaRagged::launchSdpaRaggedFwd(const RaggedLaunchTensors& te
     args.rightBound = static_cast<long long>(rightBound);
     args.topLeftAlignment = topLeftAlignment ? 1 : 0;
 
-    auto totalElements = batch * seqMaxQ * numHeads * headDimV;
+    const auto totalElements = batch * seqMaxQ * numHeads * headDimV;
     detail::launchKernelForElements(kernel.function(), totalElements, &args, sizeof(args));
 }
 

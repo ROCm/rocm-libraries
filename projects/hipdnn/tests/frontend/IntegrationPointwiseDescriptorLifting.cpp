@@ -36,17 +36,17 @@ class IntegrationPointwiseDescriptorLifting : public IntegrationTestFixture
 // and graph-level data types.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseBinaryAddRoundTripViaCApi)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseAddLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
     in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -54,10 +54,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseBinaryAddRoundTripViaCApi
     pwAttrs.set_name("add_op");
     pwAttrs.set_mode(PointwiseMode::ADD);
 
-    auto out0 = graph->pointwise(in0, in1, pwAttrs);
+    const auto out0 = graph->pointwise(in0, in1, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -103,13 +103,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseBinaryAddRoundTripViaCApi
 // lowers, lifts, and verifies mode + activation parameters.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseUnaryReluScalarsPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseReluLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -124,10 +124,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseUnaryReluScalarsPreserved
     pwAttrs.set_relu_upper_clip(K_UPPER_CLIP);
     pwAttrs.set_relu_lower_clip_slope(K_LOWER_CLIP_SLOPE);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -149,7 +149,7 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseUnaryReluScalarsPreserved
     EXPECT_FLOAT_EQ(pwNode->attributes.get_relu_lower_clip_slope().value(), K_LOWER_CLIP_SLOPE);
 
     // Verify tensor UIDs
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 2u);
     EXPECT_NE(tensorMap.count(K_PW_TENSOR_IN0_UID), 0u);
     EXPECT_NE(tensorMap.count(K_PW_TENSOR_OUT0_UID), 0u);
@@ -159,21 +159,21 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseUnaryReluScalarsPreserved
 // and verifies all three inputs and the output are correctly reconstructed.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTernarySelectRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseTernaryLiftingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
     in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in2 = std::make_shared<TensorAttributes>();
+    const auto in2 = std::make_shared<TensorAttributes>();
     in2->set_uid(K_PW_TENSOR_IN2_UID).set_name("IN2").set_data_type(DataType::FLOAT);
     in2->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -181,10 +181,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTernarySelectRoundTrip)
     pwAttrs.set_name("select_op");
     pwAttrs.set_mode(PointwiseMode::BINARY_SELECT);
 
-    auto out0 = graph->pointwise(in0, in1, in2, pwAttrs);
+    const auto out0 = graph->pointwise(in0, in1, in2, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -229,17 +229,17 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTernarySelectRoundTrip)
 // pointwise operation survives the FlatBuffer-direct deserialization path.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseLiftWithoutFinalization)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseFlatBufferLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
     in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -247,10 +247,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseLiftWithoutFinalization)
     pwAttrs.set_name("mul_op");
     pwAttrs.set_mode(PointwiseMode::MUL);
 
-    auto out0 = graph->pointwise(in0, in1, pwAttrs);
+    const auto out0 = graph->pointwise(in0, in1, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraphWithoutFinalization(*graph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*graph);
     ASSERT_NE(liftedGraph, nullptr);
 
     EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
@@ -272,13 +272,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseLiftWithoutFinalization)
 // pointwise node attributes after lifting.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTensorSharingPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseTensorSharingTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -286,10 +286,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTensorSharingPreserved)
     pwAttrs.set_name("relu_op");
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -308,13 +308,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseTensorSharingPreserved)
 // lowers, lifts, and verifies the scalar survives the round trip.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSwishBetaPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseSwishBetaLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -323,10 +323,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSwishBetaPreserved)
     pwAttrs.set_mode(PointwiseMode::SWISH_FWD);
     pwAttrs.set_swish_beta(0.5F);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -345,13 +345,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSwishBetaPreserved)
 // lowers, lifts, and verifies the scalar survives the round trip.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseEluAlphaPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseEluAlphaLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -360,10 +360,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseEluAlphaPreserved)
     pwAttrs.set_mode(PointwiseMode::ELU_FWD);
     pwAttrs.set_elu_alpha(1.0F);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -382,13 +382,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseEluAlphaPreserved)
 // lowers, lifts, and verifies the scalar survives the round trip.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSoftplusBetaPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseSoftplusBetaLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -397,10 +397,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSoftplusBetaPreserved)
     pwAttrs.set_mode(PointwiseMode::SOFTPLUS_FWD);
     pwAttrs.set_softplus_beta(2.0F);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -419,13 +419,13 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseSoftplusBetaPreserved)
 // lowers, lifts, and verifies the scalar survives the round trip.
 TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseGenIndexAxisPreserved)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("PointwiseGenIndexAxisLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
     in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
@@ -434,10 +434,10 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseGenIndexAxisPreserved)
     pwAttrs.set_mode(PointwiseMode::GEN_INDEX);
     pwAttrs.set_axis(2);
 
-    auto out0 = graph->pointwise(in0, pwAttrs);
+    const auto out0 = graph->pointwise(in0, pwAttrs);
     out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -456,18 +456,18 @@ TEST_F(IntegrationPointwiseDescriptorLifting, PointwiseGenIndexAxisPreserved)
 // lifts back, and verifies both operation nodes and the shared virtual tensor.
 TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("ConvReluFusionTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
     // Conv fprop inputs
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
@@ -480,17 +480,17 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     // Conv output y is a virtual intermediate — no UID, not an output
-    auto y = graph->conv_fprop(x, w, convAttrs);
+    const auto y = graph->conv_fprop(x, w, convAttrs);
 
     // Pointwise RELU on the conv output
     PointwiseAttributes reluAttrs;
     reluAttrs.set_name("relu_activation");
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto reluOut = graph->pointwise(y, reluAttrs);
+    const auto reluOut = graph->pointwise(y, reluAttrs);
     reluOut->set_uid(K_PW_RELU_OUT_UID).set_output(true).set_name("relu_out");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify 2 operation nodes
@@ -516,14 +516,14 @@ TEST_F(IntegrationPointwiseDescriptorLifting, ConvFpropReluFusionRoundTrip)
     EXPECT_EQ(pwNode->attributes.get_name(), "relu_activation");
 
     // Verify tensor sharing: conv output and relu input share the same TensorAttributes
-    auto convY = convNode->attributes.get_y();
-    auto reluIn0 = pwNode->attributes.get_input_0();
+    const auto convY = convNode->attributes.get_y();
+    const auto reluIn0 = pwNode->attributes.get_input_0();
     EXPECT_EQ(convY.get(), reluIn0.get())
         << "Conv output and relu input should share the same "
            "TensorAttributes object"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor map contains external tensors (X, W, relu_out) plus the virtual intermediate
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u) << "X tensor not found";
     EXPECT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u) << "W tensor not found";
     EXPECT_NE(tensorMap.count(K_PW_RELU_OUT_UID), 0u) << "relu_out tensor not found";

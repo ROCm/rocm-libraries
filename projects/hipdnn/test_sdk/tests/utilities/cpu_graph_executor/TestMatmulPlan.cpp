@@ -67,7 +67,7 @@ TEST_F(TestMatmulPlan, ExecutePlan)
 
     patient.execute(variantPack);
 
-    auto tolerance
+    const auto tolerance
         = hipdnn_test_sdk::utilities::matmul::calculateMatmulTolerance<float, float, float>(
             planTensorBundle.aTensor, planTensorBundle.bTensor);
 
@@ -86,7 +86,7 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
 
     auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -150,7 +150,7 @@ TEST(TestMatmulPlanBuilder, BuildNodePlan)
 
         auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -170,7 +170,7 @@ TEST(TestMatmulPlanBuilder, BuildNodePlan)
                                                    1,
                                                    TensorLayout::NCHW);
 
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         const GraphWrapper graphWrap(serializedGraph.data(), serializedGraph.size());
@@ -188,7 +188,7 @@ TEST(TestMatmulPlanBuilder, PlanConstruction)
 
     auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -197,7 +197,7 @@ TEST(TestMatmulPlanBuilder, PlanConstruction)
     const MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<MatmulPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;

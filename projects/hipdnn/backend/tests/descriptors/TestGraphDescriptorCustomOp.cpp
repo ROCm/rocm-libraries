@@ -41,7 +41,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                             const std::string& name = "")
 {
     auto wrapper = createDescriptor<CustomOpOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<CustomOpOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<CustomOpOperationDescriptor>();
 
     std::array<HipdnnBackendDescriptor*, 2> inputs = {input0, input1};
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT,
@@ -91,7 +91,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -129,8 +129,8 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
                                       hipdnnBackendAttributeName_t tensorSideAttr,
                                       TestGraphDescriptorCustomOp& fixture)
 {
-    auto wrapper = createDescriptor<CustomOpOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<CustomOpOperationDescriptor>();
+    const auto wrapper = createDescriptor<CustomOpOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<CustomOpOperationDescriptor>();
 
     std::array<HipdnnBackendDescriptor*, 1> tensors = {tensorDesc};
     desc->setAttribute(tensorSideAttr,
@@ -153,7 +153,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
 
     EXPECT_NO_THROW(desc->finalize());
 
-    auto graphDesc = fixture.getDescriptor();
+    const auto graphDesc = fixture.getDescriptor();
     fixture.setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
@@ -163,7 +163,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
                                             static_cast<const void*>(ops.data())));
     EXPECT_NO_THROW(graphDesc->finalize());
 
-    auto serialized = graphDesc->getSerializedGraph();
+    const auto serialized = graphDesc->getSerializedGraph();
     EXPECT_NE(serialized.ptr, nullptr);
     EXPECT_GT(serialized.size, 0UL);
 
@@ -174,17 +174,18 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
 
 TEST_F(TestGraphDescriptorCustomOp, BuildFromSingleCustomOpOperation)
 {
-    auto input0Desc = createFinalizedTensor(
+    const auto input0Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_0, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto input1Desc = createFinalizedTensor(
+    const auto input1Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_1, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
-                                             toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                             toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+    const auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
+                                                   toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                   toVec(K_CUSTOM_OP_TENSOR_STRIDES));
 
-    auto customOp = createFinalizedCustomOp(input0Desc.get(), input1Desc.get(), output0Desc.get());
+    const auto customOp
+        = createFinalizedCustomOp(input0Desc.get(), input1Desc.get(), output0Desc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {customOp.get()};
@@ -194,14 +195,14 @@ TEST_F(TestGraphDescriptorCustomOp, BuildFromSingleCustomOpOperation)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -223,10 +224,10 @@ TEST_F(TestGraphDescriptorCustomOp, BuildFromSingleCustomOpOperation)
 
 TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroInputTensors)
 {
-    auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
-                                             toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                             toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto graphT = buildAndSerializeZeroPortCustomOp(
+    const auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
+                                                   toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                   toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+    const auto graphT = buildAndSerializeZeroPortCustomOp(
         output0Desc.get(), HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT, *this);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -239,9 +240,9 @@ TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroInputTensors)
 
 TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroOutputTensors)
 {
-    auto input0Desc = createFinalizedTensor(
+    const auto input0Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_0, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto graphT = buildAndSerializeZeroPortCustomOp(
+    const auto graphT = buildAndSerializeZeroPortCustomOp(
         input0Desc.get(), HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT, *this);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -254,23 +255,23 @@ TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroOutputTensors)
 
 TEST_F(TestGraphDescriptorCustomOp, ComputeDataTypePreserved)
 {
-    auto input0Desc = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_0,
-                                            toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                            toVec(K_CUSTOM_OP_TENSOR_STRIDES),
-                                            HIPDNN_DATA_HALF);
-    auto input1Desc = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_1,
-                                            toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                            toVec(K_CUSTOM_OP_TENSOR_STRIDES),
-                                            HIPDNN_DATA_HALF);
-    auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
-                                             toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                             toVec(K_CUSTOM_OP_TENSOR_STRIDES),
-                                             HIPDNN_DATA_HALF);
+    const auto input0Desc = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_0,
+                                                  toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                  toVec(K_CUSTOM_OP_TENSOR_STRIDES),
+                                                  HIPDNN_DATA_HALF);
+    const auto input1Desc = createFinalizedTensor(K_CUSTOM_OP_INPUT_UID_1,
+                                                  toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                  toVec(K_CUSTOM_OP_TENSOR_STRIDES),
+                                                  HIPDNN_DATA_HALF);
+    const auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
+                                                   toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                   toVec(K_CUSTOM_OP_TENSOR_STRIDES),
+                                                   HIPDNN_DATA_HALF);
 
-    auto customOp = createFinalizedCustomOp(
+    const auto customOp = createFinalizedCustomOp(
         input0Desc.get(), input1Desc.get(), output0Desc.get(), HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {customOp.get()};
@@ -280,8 +281,8 @@ TEST_F(TestGraphDescriptorCustomOp, ComputeDataTypePreserved)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -296,18 +297,18 @@ TEST_F(TestGraphDescriptorCustomOp, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorCustomOp, OperationNamePreservedInGraph)
 {
-    auto input0Desc = createFinalizedTensor(
+    const auto input0Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_0, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto input1Desc = createFinalizedTensor(
+    const auto input1Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_1, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
-                                             toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                             toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+    const auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
+                                                   toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                   toVec(K_CUSTOM_OP_TENSOR_STRIDES));
 
-    auto customOp = createFinalizedCustomOp(
+    const auto customOp = createFinalizedCustomOp(
         input0Desc.get(), input1Desc.get(), output0Desc.get(), HIPDNN_DATA_FLOAT, "test_custom_op");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {customOp.get()};
@@ -317,8 +318,8 @@ TEST_F(TestGraphDescriptorCustomOp, OperationNamePreservedInGraph)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "test_custom_op");
@@ -326,21 +327,21 @@ TEST_F(TestGraphDescriptorCustomOp, OperationNamePreservedInGraph)
 
 TEST_F(TestGraphDescriptorCustomOp, OperationNameRoundTripThroughLifting)
 {
-    auto input0Desc = createFinalizedTensor(
+    const auto input0Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_0, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto input1Desc = createFinalizedTensor(
+    const auto input1Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_1, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
-                                             toVec(K_CUSTOM_OP_TENSOR_DIMS),
-                                             toVec(K_CUSTOM_OP_TENSOR_STRIDES));
+    const auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
+                                                   toVec(K_CUSTOM_OP_TENSOR_DIMS),
+                                                   toVec(K_CUSTOM_OP_TENSOR_STRIDES));
 
-    auto customOp = createFinalizedCustomOp(input0Desc.get(),
-                                            input1Desc.get(),
-                                            output0Desc.get(),
-                                            HIPDNN_DATA_FLOAT,
-                                            "lift_custom_name");
+    const auto customOp = createFinalizedCustomOp(input0Desc.get(),
+                                                  input1Desc.get(),
+                                                  output0Desc.get(),
+                                                  HIPDNN_DATA_FLOAT,
+                                                  "lift_custom_name");
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {customOp.get()};
@@ -351,20 +352,20 @@ TEST_F(TestGraphDescriptorCustomOp, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     // Serialize and deserialize via FlatBuffer
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
-    auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
+    const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
-    auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
+    const auto rebuilt = NodeFactory::createOperationFromNode(*graphT->nodes[0], tensorMap);
     ASSERT_NE(rebuilt, nullptr);
 
     auto* graphOp = rebuilt->asGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
-    auto rebuiltNode = graphOp->buildNode();
+    const auto rebuiltNode = graphOp->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "lift_custom_name");
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::CustomOpAttributes);

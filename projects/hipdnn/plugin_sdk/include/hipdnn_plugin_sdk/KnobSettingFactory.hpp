@@ -18,9 +18,9 @@ public:
                                                             int64_t value)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto knobIdOffset = builder.CreateString(knobId);
-        auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
-        auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
+        const auto knobIdOffset = builder.CreateString(knobId);
+        const auto intValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+        const auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
             builder,
             knobIdOffset,
             hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue,
@@ -33,9 +33,10 @@ public:
                                                               double value)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto knobIdOffset = builder.CreateString(knobId);
-        auto floatValue = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, value);
-        auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
+        const auto knobIdOffset = builder.CreateString(knobId);
+        const auto floatValue
+            = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, value);
+        const auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
             builder,
             knobIdOffset,
             hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue,
@@ -48,11 +49,11 @@ public:
                                                                const std::string& value)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto knobIdOffset = builder.CreateString(knobId);
-        auto strValueOffset = builder.CreateString(value);
-        auto stringValue
+        const auto knobIdOffset = builder.CreateString(knobId);
+        const auto strValueOffset = builder.CreateString(value);
+        const auto stringValue
             = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strValueOffset);
-        auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
+        const auto knobSetting = hipdnn_flatbuffers_sdk::data_objects::CreateKnobSetting(
             builder,
             knobIdOffset,
             hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue,

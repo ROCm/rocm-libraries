@@ -29,7 +29,7 @@ TEST(TestResampleFwdSignatureKey, EqualityAndHash)
 
 TEST(TestResampleFwdSignatureKey, CreateFromNodeWithoutIndex)
 {
-    auto builder = createValidResampleFwdGraph();
+    const auto builder = createValidResampleFwdGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleFwdSignatureKey key(graph.getNode(0), graph.getTensorMap());
@@ -42,7 +42,7 @@ TEST(TestResampleFwdSignatureKey, CreateFromNodeWithoutIndex)
 
 TEST(TestResampleFwdSignatureKey, CreateFromNodeWithIndex)
 {
-    auto builder = createValidResampleFwdGraph(true);
+    const auto builder = createValidResampleFwdGraph(true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleFwdSignatureKey key(graph.getNode(0), graph.getTensorMap());

@@ -67,10 +67,10 @@ TEST(TestRMSNormFwdSignatureKey, HashFunction)
     const RMSNormFwdSignatureKey key6{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
-    auto hash5 = key5.hashSelf();
-    auto hash6 = key6.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
+    const auto hash5 = key5.hashSelf();
+    const auto hash6 = key6.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5 && hash3 != hash6
                 && hash4 != hash6 && hash5 != hash6);
@@ -94,11 +94,11 @@ TEST(TestRMSNormFwdSignatureKey, CreateFromNodeAndTensorMap)
     const RMSNormFwdSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     const std::vector<int64_t> dims = {1, 2, 1, 1};
-    auto graph = buildRMSNormFwdGraph(
+    const auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const RMSNormFwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());

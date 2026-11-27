@@ -194,7 +194,7 @@ inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
                                 LogCallbackMode mode,
                                 hipdnnUserLogCallbackHandle_t userHandle)
 {
-    auto status = detail::hipdnnBackend()->setUserLogCallbackExt(
+    const auto status = detail::hipdnnBackend()->setUserLogCallbackExt(
         callback, minLevel, static_cast<hipdnnLogCallbackMode_t>(mode), userHandle);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
@@ -214,7 +214,7 @@ inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
  */
 inline Error setGlobalLogLevel(hipdnnSeverity_t level)
 {
-    auto status = detail::hipdnnBackend()->backendSetGlobalLogLevelExt(level);
+    const auto status = detail::hipdnnBackend()->backendSetGlobalLogLevelExt(level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return detail::backendLoggingError("Failed to set global log level");
@@ -233,7 +233,7 @@ inline Error setGlobalLogLevel(hipdnnSeverity_t level)
  */
 inline Error getGlobalLogLevel(hipdnnSeverity_t& level)
 {
-    auto status = detail::hipdnnBackend()->backendGetGlobalLogLevelExt(&level);
+    const auto status = detail::hipdnnBackend()->backendGetGlobalLogLevelExt(&level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to get global log level"};

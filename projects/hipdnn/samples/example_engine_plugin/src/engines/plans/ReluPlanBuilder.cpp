@@ -98,13 +98,13 @@ void ReluPlanBuilder::buildPlan(
             "Expected PointwiseAttributes on node 0 but found null");
     }
 
-    auto inputUid = attrs->in_0_tensor_uid();
-    auto outputUid = attrs->out_0_tensor_uid();
+    const auto inputUid = attrs->in_0_tensor_uid();
+    const auto outputUid = attrs->out_0_tensor_uid();
 
     // Extract tensor dimensions from the graph's TensorAttributes
     const auto& tensorMap = opGraph.getTensorMap();
 
-    auto inputIt = tensorMap.find(inputUid);
+    const auto inputIt = tensorMap.find(inputUid);
     if(inputIt == tensorMap.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

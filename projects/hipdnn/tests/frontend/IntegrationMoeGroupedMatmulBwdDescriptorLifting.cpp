@@ -67,28 +67,28 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dOutput = std::make_shared<TensorAttributes>();
+        const auto dOutput = std::make_shared<TensorAttributes>();
         dOutput->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID)
             .set_name("doutput")
             .set_data_type(DataType::FLOAT);
         dOutput->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES));
 
-        auto token = std::make_shared<TensorAttributes>();
+        const auto token = std::make_shared<TensorAttributes>();
         token->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID)
             .set_name("token")
             .set_data_type(DataType::FLOAT);
         token->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES));
 
-        auto firstTokenOffset = std::make_shared<TensorAttributes>();
+        const auto firstTokenOffset = std::make_shared<TensorAttributes>();
         firstTokenOffset->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID)
             .set_name("first_token_offset")
             .set_data_type(DataType::INT32);
         firstTokenOffset->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
 
-        auto dweight
+        const auto dweight
             = graph->moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, std::move(attrs));
         dweight->set_uid(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID)
             .set_output(true)
@@ -111,9 +111,9 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, BasicMoeGroupedMatmulBwdRoundTrip)
 {
-    auto originalGraph = buildGraph(createAttributes());
+    const auto originalGraph = buildGraph(createAttributes());
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -194,9 +194,9 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, BasicMoeGroupedMatmulBwd
 // Verifies an operation-level compute type survives descriptor lifting.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, OperationComputeDataTypeSurvivesLifting)
 {
-    auto originalGraph = buildGraph(createAttributes(DataType::HALF));
+    const auto originalGraph = buildGraph(createAttributes(DataType::HALF));
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -211,7 +211,7 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, OperationComputeDataType
 // are no mode variants to loop over.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, JsonRoundTripsBasicScenario)
 {
-    auto originalGraph = buildGraph(createAttributes());
+    const auto originalGraph = buildGraph(createAttributes());
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -221,7 +221,7 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, JsonRoundTripsBasicScena
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     ASSERT_FALSE(jsonData.empty());
 
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -238,9 +238,9 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, JsonRoundTripsBasicScena
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, MoeGroupedMatmulBwdTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph(createAttributes());
+    const auto originalGraph = buildGraph(createAttributes());
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -277,9 +277,9 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, MoeGroupedMatmulBwdTenso
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, MoeGroupedMatmulBwdLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph(createAttributes());
+    const auto originalGraph = buildGraph(createAttributes());
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -333,23 +333,23 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, MoeGroupedMatmulBwdLiftW
 // distinct and survive the round-trip.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("MoeGroupedMatmulBwdAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto dOutput = std::make_shared<TensorAttributes>();
+    const auto dOutput = std::make_shared<TensorAttributes>();
     dOutput->set_name("doutput").set_data_type(DataType::FLOAT);
     dOutput->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_DIMS))
         .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_STRIDES));
 
-    auto token = std::make_shared<TensorAttributes>();
+    const auto token = std::make_shared<TensorAttributes>();
     token->set_name("token").set_data_type(DataType::FLOAT);
     token->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_DIMS))
         .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_STRIDES));
 
-    auto firstTokenOffset = std::make_shared<TensorAttributes>();
+    const auto firstTokenOffset = std::make_shared<TensorAttributes>();
     firstTokenOffset->set_name("first_token_offset").set_data_type(DataType::INT32);
     firstTokenOffset->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_DIMS))
         .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
@@ -357,16 +357,16 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, AutoAssignedUidsPreserve
     MoeGroupedMatmulBwdAttributes attrs;
     attrs.set_name("test_auto_uid");
 
-    auto dweight = graph->moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attrs);
+    const auto dweight = graph->moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attrs);
     dweight->set_output(true).set_name("dweight");
     dweight->set_dim(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_DIMS))
         .set_stride(toVec(K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_STRIDES));
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 4u);
 
     // Verify all UIDs are positive and distinct
@@ -429,9 +429,9 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, AutoAssignedUidsPreserve
 // verifies the column-major strides survive the lifting round-trip.
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, InferredDweightStridesSurviveRoundTrip)
 {
-    auto originalGraph = buildGraph(createAttributes(), DweightSetup::STRIDE_INFERRED);
+    const auto originalGraph = buildGraph(createAttributes(), DweightSetup::STRIDE_INFERRED);
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -455,9 +455,10 @@ TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting, InferredDweightStridesSu
 TEST_F(IntegrationMoeGroupedMatmulBwdDescriptorLifting,
        InferredDweightDimsAndStridesSurviveRoundTrip)
 {
-    auto originalGraph = buildGraph(createAttributes(), DweightSetup::DIMS_AND_STRIDE_INFERRED);
+    const auto originalGraph
+        = buildGraph(createAttributes(), DweightSetup::DIMS_AND_STRIDE_INFERRED);
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();

@@ -48,7 +48,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& builder,
         nodes.push_back(CreateNodeDirect(builder, "n", DataType::FLOAT, attr, 0));
     }
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return fb::GraphWrapper(builder.GetBufferPointer(), builder.GetSize());
@@ -67,14 +67,14 @@ constexpr float kFallback = 1e-3f;
 TEST(TestToleranceResolver, SingleConvFwdMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kConvFwdFp32);
 }
 
 TEST(TestToleranceResolver, SingleConvFwdOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
 }
 
@@ -84,7 +84,7 @@ TEST(TestToleranceResolver, SingleConvFwdOutputOpTolerance)
 TEST(TestToleranceResolver, BnInferenceConvFwdMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(
+    const auto w = buildGraph(
         b,
         {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kBnInferenceFp32);
@@ -93,7 +93,7 @@ TEST(TestToleranceResolver, BnInferenceConvFwdMaxAcrossNodes)
 TEST(TestToleranceResolver, BnInferenceConvFwdOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(
+    const auto w = buildGraph(
         b,
         {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
@@ -104,14 +104,14 @@ TEST(TestToleranceResolver, BnInferenceConvFwdOutputOpTolerance)
 TEST(TestToleranceResolver, AllPointwiseMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kPointwiseFp32);
 }
 
 TEST(TestToleranceResolver, AllPointwiseOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kPointwiseFp32);
 }
 
@@ -120,14 +120,14 @@ TEST(TestToleranceResolver, AllPointwiseOutputOpTolerance)
 TEST(TestToleranceResolver, EmptyGraphMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {});
+    const auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
 TEST(TestToleranceResolver, EmptyGraphOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {});
+    const auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 
@@ -136,14 +136,14 @@ TEST(TestToleranceResolver, EmptyGraphOutputOpTolerance)
 TEST(TestToleranceResolver, UnknownOpMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::NONE});
+    const auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
 TEST(TestToleranceResolver, UnknownOpOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::NONE});
+    const auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 
@@ -224,7 +224,7 @@ protected:
         refTensor.setHostValue(reference, 0);
         outTensor.setHostValue(output, 0);
 
-        auto selection = hipdnn_integration_tests::bundle::makeValidator(
+        const auto selection = hipdnn_integration_tests::bundle::makeValidator(
             Format::DATA_TYPE,
             "O",
             hipdnn_integration_tests::bundle::ComparisonTolerance::allClose(tolerance.atol,
@@ -268,7 +268,7 @@ TYPED_TEST(TestToleranceResolverFp8, ResolvesToOneStepOfTheFormat)
             {NodeAttributes::NONE},
             {}})
     {
-        auto w = buildGraph(b, nodes);
+        const auto w = buildGraph(b, nodes);
         for(const auto policy :
             {tol::TolerancePolicy::MAX_ACROSS_NODES, tol::TolerancePolicy::OUTPUT_OP_TOLERANCE})
         {
@@ -291,7 +291,7 @@ TYPED_TEST(TestToleranceResolverFp8, OneStepPassesAndTwoStepsFail)
     using Format = typename TestFixture::Format;
 
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::SdpaAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::SdpaAttributes});
     const auto tolerance = tol::defaultTolerance(w, Format::DATA_TYPE);
 
     const T one(1.0f);
@@ -330,7 +330,7 @@ TYPED_TEST(TestToleranceResolverFp8, OneStepPassesAndTwoStepsFail)
 TEST(TestToleranceResolver, NonFp8OutputsUsePerOpValueForAtolAndRtol)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto sdpa = buildGraph(b, {NodeAttributes::SdpaAttributes});
+    const auto sdpa = buildGraph(b, {NodeAttributes::SdpaAttributes});
     for(const auto& [dataType, expected] :
         std::vector<std::pair<DataType, float>>{{DataType::FLOAT, 1e-5f},
                                                 {DataType::HALF, 1e-2f},
@@ -346,7 +346,7 @@ TEST(TestToleranceResolver, NonFp8OutputsUsePerOpValueForAtolAndRtol)
     }
 
     flatbuffers::FlatBufferBuilder bnConvBuilder;
-    auto bnConv = buildGraph(
+    const auto bnConv = buildGraph(
         bnConvBuilder,
         {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     const auto maxValue

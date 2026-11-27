@@ -10,7 +10,7 @@ using namespace miopen_plugin;
 
 TEST(TestBatchnormFwdTrainingParams, InitializesRequiredTensorsFromValidGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -29,7 +29,7 @@ TEST(TestBatchnormFwdTrainingParams, InitializesRequiredTensorsFromValidGraph)
 
 TEST(TestBatchnormFwdTrainingParams, ExtractsEpsilonValueCorrectly)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -45,7 +45,7 @@ TEST(TestBatchnormFwdTrainingParams, ExtractsEpsilonValueCorrectly)
 
 TEST(TestBatchnormFwdTrainingParams, HandlesMeanVariancePresent)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {1, 3, 14, 14}, {1, 3, 14, 14}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -63,7 +63,7 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVariancePresent)
 
 TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {1, 3, 14, 14}, {1, 3, 14, 14}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -80,7 +80,7 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
 // A virtual saved pair that nothing consumes is "saved statistics not requested".
 TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
 {
-    auto savedBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto savedBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper savedGraph(
         savedBuilder.GetBufferPointer(), savedBuilder.GetSize());
     const auto* savedAttrs = savedGraph.getNode(0).attributes_as_BatchnormAttributes();
@@ -88,10 +88,10 @@ TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
     const BatchnormFwdTrainingParams savedParams(*savedAttrs, savedGraph.getTensorMap());
     EXPECT_TRUE(savedParams.hasSaveMeanVariance());
 
-    auto virtualBuilder = hipdnn_test_sdk::utilities::mutateGraph(
+    const auto virtualBuilder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
         [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == "mean" || tensor->name == "inv_variance")
                 {
@@ -109,7 +109,7 @@ TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
 
 TEST(TestBatchnormFwdTrainingParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

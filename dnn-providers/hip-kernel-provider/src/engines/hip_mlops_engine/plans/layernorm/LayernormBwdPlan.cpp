@@ -138,7 +138,8 @@ std::vector<KernelLaunchShape> LayernormBwdPlan::launchShapes(int64_t outerSize,
 
 size_t LayernormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
-    auto deviceProperties = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+    const auto deviceProperties
+        = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
 
     // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
     const bool parallel = isParallel(deviceProperties,

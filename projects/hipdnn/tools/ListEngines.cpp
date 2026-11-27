@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
             paths.push_back(dir.c_str());
         }
 
-        auto status = hipdnnSetEnginePluginPaths_ext(
+        const auto status = hipdnnSetEnginePluginPaths_ext(
             paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
         if(status != HIPDNN_STATUS_SUCCESS)
         {

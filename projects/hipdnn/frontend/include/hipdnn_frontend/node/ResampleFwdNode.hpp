@@ -68,13 +68,13 @@ public:
         }
 
         // Validate tensor ranks if dimensions are already set
-        auto x = attributes.get_x();
+        const auto x = attributes.get_x();
         if(!x->get_dim().empty() && x->get_dim().size() < 3)
         {
             return {ErrorCode::INVALID_VALUE,
                     "ResampleFwdNode input X must have at least rank 3 (N, C, spatial...)"};
         }
-        auto y = attributes.get_y();
+        const auto y = attributes.get_y();
         if(!y->get_dim().empty() && y->get_dim().size() < 3)
         {
             return {ErrorCode::INVALID_VALUE,
@@ -92,7 +92,7 @@ public:
                                                               attributes.get_post_padding()));
         }
 
-        if(auto index = attributes.get_index())
+        if(const auto index = attributes.get_index())
         {
             switch(index->get_data_type())
             {
@@ -110,8 +110,8 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         HIPDNN_RETURN_IF_FALSE(
             x, ErrorCode::ATTRIBUTE_NOT_SET, "ResampleFwdNode missing x for setting properties");
@@ -156,12 +156,12 @@ public:
             // wider than the padded input by less than the stride still yields one element
             for(size_t i = 2; i < xDims.size(); ++i)
             {
-                auto spatialIdx = i - 2;
-                auto inputSize = xDims[i];
-                auto prePad = prePadding[spatialIdx];
-                auto postPad = postPadding[spatialIdx];
-                auto strideVal = strideVec[spatialIdx];
-                auto windowVal = windowVec[spatialIdx];
+                const auto spatialIdx = i - 2;
+                const auto inputSize = xDims[i];
+                const auto prePad = prePadding[spatialIdx];
+                const auto postPad = postPadding[spatialIdx];
+                const auto strideVal = strideVec[spatialIdx];
+                const auto windowVal = windowVec[spatialIdx];
                 int64_t numerator = 0;
                 HIPDNN_CHECK_ERROR(detail::checkedPaddedNumerator("ResampleFwdNode",
                                                                   spatialIdx,
@@ -194,7 +194,7 @@ public:
             auto& xStrides = x->get_stride();
             if(!xStrides.empty())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
+                const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
                 y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims, strideOrder));
             }
             else
@@ -204,7 +204,7 @@ public:
             }
         }
 
-        auto index = attributes.get_index();
+        const auto index = attributes.get_index();
         if(index)
         {
             if(index->get_dim().empty())

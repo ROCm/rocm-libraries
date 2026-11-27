@@ -328,7 +328,7 @@ TEST(TestPluginManager, WarnsWhenConfiguredPathsYieldNoPlugins)
     const ScopedDirectory tempDir(hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
                                   / "temp_plugin_dir_without_plugins");
 
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_backend::test_utilities::ScopedBackendWarningCapture capture;
 
     TestPluginManager pluginManager;
@@ -340,7 +340,7 @@ TEST(TestPluginManager, WarnsWhenConfiguredPathsYieldNoPlugins)
 
 TEST(TestPluginManager, NoWarningWhenNoPathsAreConfigured)
 {
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_backend::test_utilities::ScopedBackendWarningCapture capture;
 
     TestPluginManager pluginManager;
@@ -461,7 +461,7 @@ TEST(TestPluginCore, GetPluginSearchPathsWithEnvVar)
 
     const std::set<std::filesystem::path> defaultPaths = {"/default/path1", "/default/path2"};
 
-    auto result = TestPluginManager::getPluginSearchPaths(envVarName, defaultPaths);
+    const auto result = TestPluginManager::getPluginSearchPaths(envVarName, defaultPaths);
 
     ASSERT_EQ(result.size(), 1);
     EXPECT_EQ(result.begin()->string(), testPath);
@@ -473,7 +473,7 @@ TEST(TestPluginCore, GetPluginSearchPathsWithoutEnvVar)
 
     const std::set<std::filesystem::path> defaultPaths = {"/default/path1", "/default/path2"};
 
-    auto result = TestPluginManager::getPluginSearchPaths(envVarName, defaultPaths);
+    const auto result = TestPluginManager::getPluginSearchPaths(envVarName, defaultPaths);
 
     ASSERT_EQ(result.size(), 2);
     EXPECT_EQ(result, defaultPaths);
@@ -488,7 +488,7 @@ TEST(TestPluginCore, GetPluginSearchPathsWithEmptyEnvVar)
     const std::set<std::filesystem::path> defaultPaths
         = {"/default/path1", "/default/path2", "/default/path3"};
 
-    auto result = TestPluginManager::getPluginSearchPaths(envVarName, defaultPaths);
+    const auto result = TestPluginManager::getPluginSearchPaths(envVarName, defaultPaths);
 
     ASSERT_EQ(result.size(), 3);
     EXPECT_EQ(result, defaultPaths);

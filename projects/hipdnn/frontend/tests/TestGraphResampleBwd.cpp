@@ -19,7 +19,7 @@ TEST(TestGraphResampleBwd, BuildGraph)
         .set_intermediate_data_type(DataType::FLOAT);
 
     // Create input tensors
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::FLOAT);
 
     // Create attributes
@@ -33,7 +33,7 @@ TEST(TestGraphResampleBwd, BuildGraph)
     attributes.set_padding_mode(PaddingMode::ZERO_PAD);
 
     // Call graph method
-    auto dx = graph.resample_bwd(dy, attributes);
+    const auto dx = graph.resample_bwd(dy, attributes);
 
     // Verify returned tensor is non-null
     ASSERT_NE(dx, nullptr);
@@ -41,7 +41,7 @@ TEST(TestGraphResampleBwd, BuildGraph)
     EXPECT_TRUE(dx->get_is_virtual());
 
     // Verify graph validates successfully
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -52,10 +52,10 @@ TEST(TestGraphResampleBwd, BuildGraphWithIndex)
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::FLOAT);
 
-    auto index = std::make_shared<TensorAttributes>();
+    const auto index = std::make_shared<TensorAttributes>();
     index->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::INT32);
 
     ResampleBwdAttributes attributes;
@@ -67,12 +67,12 @@ TEST(TestGraphResampleBwd, BuildGraphWithIndex)
     attributes.set_resample_mode(ResampleMode::MAXPOOL);
     attributes.set_padding_mode(PaddingMode::ZERO_PAD);
 
-    auto dx = graph.resample_bwd(dy, attributes, index);
+    const auto dx = graph.resample_bwd(dy, attributes, index);
 
     ASSERT_NE(dx, nullptr);
     EXPECT_EQ(dx->get_name(), "ResampleBwdNode::DX");
     EXPECT_EQ(index->get_name(), "ResampleBwdNode::INDEX");
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }

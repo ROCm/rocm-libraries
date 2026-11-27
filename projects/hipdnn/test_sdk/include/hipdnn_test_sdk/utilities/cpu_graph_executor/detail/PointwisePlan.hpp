@@ -116,9 +116,10 @@ public:
 private:
     void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
+        const auto shallowIn0Tensor
+            = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
-        auto shallowOut0Tensor = createShallowTensor<OutputType>(
+        const auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(_params.mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
@@ -138,7 +139,7 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor
+            const auto shallowIn1Tensor
                 = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
 
             utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
@@ -155,9 +156,9 @@ private:
                         "Ternary pointwise operation requires in1 and in2 tensors");
                 }
 
-                auto shallowIn1Tensor
+                const auto shallowIn1Tensor
                     = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
-                auto shallowIn2Tensor
+                const auto shallowIn2Tensor
                     = bindOperandOrScalar<Input2Type>(_params.in2Tensor.value(), variantPack);
 
                 utilities::CpuReferencePointwiseImpl<
@@ -184,9 +185,10 @@ private:
 
     void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
+        const auto shallowIn0Tensor
+            = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
-        auto shallowOut0Tensor = createShallowTensor<OutputType>(
+        const auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
@@ -209,7 +211,7 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor
+            const auto shallowIn1Tensor
                 = bindOperandOrScalar<Input1Type>(_params.in1Tensor.value(), variantPack);
 
             utilities::CpuReferencePointwiseImpl<OutputType, ComputeType, Input0Type, Input1Type>::
@@ -265,7 +267,7 @@ public:
         }
 
         // Check that the operation is implemented
-        auto mode = nodeAttributes->operation();
+        const auto mode = nodeAttributes->operation();
         bool isImplemented = false;
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(mode))
         {

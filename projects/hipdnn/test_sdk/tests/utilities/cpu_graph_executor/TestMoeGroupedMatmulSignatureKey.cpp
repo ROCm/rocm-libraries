@@ -96,7 +96,7 @@ TEST(TestMoeGroupedMatmulSignatureKey, CreateFromNodeAndTensorMap)
     auto graphTuple = buildMoeGroupedMatmulGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 

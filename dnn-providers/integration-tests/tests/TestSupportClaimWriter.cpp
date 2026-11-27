@@ -62,7 +62,7 @@ TEST(TestSupportClaimWriter, SingleGraphWriteCreatesNewSidecar)
     const auto sidecarPath = dir.path() / "Small.support.json";
     ASSERT_TRUE(std::filesystem::exists(sidecarPath));
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
 }
@@ -114,7 +114,7 @@ TEST(TestSupportClaimWriter, UnobservedEngineBlockIsPreserved)
 
     writeObservedSupportClaims(observations);
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("OTHER_ENGINE", "gfx90a", "linux"));
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
@@ -140,7 +140,7 @@ TEST(TestSupportClaimWriter, EmptyObservationsLeaveExistingSidecarUntouched)
     EXPECT_EQ(summary.filesWritten, 0u);
     EXPECT_EQ(summary.filesUnchanged, 0u);
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
 }
@@ -168,7 +168,7 @@ TEST(TestSupportClaimWriter, DeclineLeavesCheckedInClaimIntact)
 
     const auto summary = writeObservedSupportClaims(observations);
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
 
@@ -196,7 +196,7 @@ TEST(TestSupportClaimWriter, DeclineIsInertWhileSiblingSupportIsRecorded)
 
     writeObservedSupportClaims(observations);
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "windows"));
@@ -220,7 +220,7 @@ TEST(TestSupportClaimWriter, MultipleEngineObservationsInOneSidecar)
     writeObservedSupportClaims(observations);
 
     const auto sidecarPath = dir.path() / "Small.support.json";
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
     EXPECT_TRUE(claims.isClaimed("HIP_KERNEL_ENGINE", "gfx942", "linux"));
@@ -247,7 +247,7 @@ TEST(TestSupportClaimWriter, SweepWriteCreatesNewSidecar)
     const auto sidecarPath = dir.path() / "support.json";
     ASSERT_TRUE(std::filesystem::exists(sidecarPath));
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSweepSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("case_a", "MIOPEN_ENGINE", "gfx942", "linux"));
     EXPECT_TRUE(claims.isClaimed("case_b", "MIOPEN_ENGINE", "gfx942", "linux"));
@@ -373,7 +373,7 @@ TEST(TestSupportClaimWriter, SweepUnobservedEngineBlockIsPreserved)
 
     writeObservedSupportClaims(observations);
 
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSweepSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("case_x", "OTHER_ENGINE", "gfx90a", "linux"));
     EXPECT_TRUE(claims.isClaimed("case_a", "MIOPEN_ENGINE", "gfx942", "linux"));
@@ -402,7 +402,7 @@ TEST(TestSupportClaimWriter, OutputIsCanonicalJson)
     EXPECT_EQ(content.back(), '\n');
 
     // Re-serializing the parsed JSON with the same canonical format yields identical bytes
-    auto json = nlohmann::json::parse(content);
+    const auto json = nlohmann::json::parse(content);
     EXPECT_EQ(dumpCanonical(json), content);
 }
 

@@ -31,7 +31,7 @@ public:
     {
         initializeRegistry();
 
-        auto it = _registry.find(key);
+        const auto it = _registry.find(key);
         if(it != _registry.end())
         {
             return *it->second;

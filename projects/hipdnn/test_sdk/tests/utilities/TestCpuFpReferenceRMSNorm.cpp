@@ -103,7 +103,7 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdSanityValidationNchw)
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedOutput[0], tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 0), expectedOutput[1], tolerance);
@@ -137,7 +137,7 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdWithInvRms)
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon, &invRmsTensor);
 
-    auto tolerance = 1e-5;
+    const auto tolerance = 1e-5;
 
     EXPECT_NEAR(
         static_cast<double>(invRmsTensor.getHostValue(0, 0, 0, 0)), invRmsExpected, tolerance);
@@ -267,7 +267,7 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdConstantInput)
     const double invRms = 1.0 / std::sqrt(c * c + epsilon);
     const double expectedY = c * invRms * 2.0;
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedY, tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), expectedY, tolerance);
@@ -319,7 +319,7 @@ TEST(TestCpuFpReferenceRMSNorm, RMSNormFwdWithBias)
     const float expectedC0 = 2.0f + 0.5f; // 2.5
     const float expectedC1 = 3.0f + -1.0f; // 2.0
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
     // Channel 0 outputs
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedC0, tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), expectedC0, tolerance);
@@ -381,7 +381,7 @@ TEST(TestCpuFpReferenceRMSNorm, RMSNormFwdBiasIsOptional)
     CpuFpReferenceRMSNorm::forward(
         inputTensor, scaleTensor, outputNullBias, epsilon, noInvRms2, noBias);
 
-    auto tolerance = 1e-6f;
+    const auto tolerance = 1e-6f;
     EXPECT_NEAR(
         outputNoBias.getHostValue(0, 0, 0, 0), outputNullBias.getHostValue(0, 0, 0, 0), tolerance);
     EXPECT_NEAR(
@@ -443,7 +443,7 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdScaleNormAxis2)
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     // y[n, c, h, w] = scale[0, 0, h, w] * x[n, c, h, w] * invRms[n, c, 0, 0]
 
@@ -517,7 +517,7 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdScaleNormAxis3)
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     // y[n, c, h, w] = scale[0, 0, 0, w] * x[n, c, h, w] * invRms[n, c, h, 0]
 

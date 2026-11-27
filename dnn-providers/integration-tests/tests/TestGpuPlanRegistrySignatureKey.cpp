@@ -31,19 +31,19 @@ GpuPlanRegistrySignatureKey
     const std::vector<int64_t> dims = {4, 8, 2, 2};
     const std::vector<int64_t> strides = generateStrides(dims);
 
-    auto graphBuilder = createMatmulGraph(A_UID,
-                                          B_UID,
-                                          C_UID,
-                                          dims,
-                                          strides,
-                                          dims,
-                                          strides,
-                                          dims,
-                                          strides,
-                                          aType,
-                                          bType,
-                                          cType,
-                                          computeType);
+    const auto graphBuilder = createMatmulGraph(A_UID,
+                                                B_UID,
+                                                C_UID,
+                                                dims,
+                                                strides,
+                                                dims,
+                                                strides,
+                                                dims,
+                                                strides,
+                                                aType,
+                                                bType,
+                                                cType,
+                                                computeType);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
@@ -53,7 +53,7 @@ GpuPlanRegistrySignatureKey
 // Builds a batchnorm inference key from a real flatbuffer node and tensor map.
 GpuPlanRegistrySignatureKey makeBatchnormInferenceKey(DataType inputType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
         {48, 16, 4, 1}, {2, 3, 4, 4}, inputType);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());

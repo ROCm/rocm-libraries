@@ -41,17 +41,17 @@ Graph makeGraph(const UnhappyBnActivationCase& tc)
     const std::vector<int64_t> cDims = getDerivedShape(dims);
 
     // Input
-    auto x = std::make_shared<TensorAttributes>(
+    const auto x = std::make_shared<TensorAttributes>(
         makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
 
     // BN parameters
-    auto mean = std::make_shared<TensorAttributes>(
+    const auto mean = std::make_shared<TensorAttributes>(
         makeTensorAttributes("mean", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto invVar = std::make_shared<TensorAttributes>(
+    const auto invVar = std::make_shared<TensorAttributes>(
         makeTensorAttributes("inv_variance", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto scale = std::make_shared<TensorAttributes>(
+    const auto scale = std::make_shared<TensorAttributes>(
         makeTensorAttributes("scale", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto bias = std::make_shared<TensorAttributes>(
+    const auto bias = std::make_shared<TensorAttributes>(
         makeTensorAttributes("bias", DataType::FLOAT, cDims, generateStrides(cDims)));
 
     std::shared_ptr<TensorAttributes> bnOut;
@@ -65,7 +65,7 @@ Graph makeGraph(const UnhappyBnActivationCase& tc)
     else
     {
         // Backward BatchNorm
-        auto dY = std::make_shared<TensorAttributes>(
+        const auto dY = std::make_shared<TensorAttributes>(
             makeTensorAttributes("dY", DataType::FLOAT, dims, generateStrides(dims)));
 
         const BatchnormBackwardAttributes bn;
@@ -84,7 +84,7 @@ Graph makeGraph(const UnhappyBnActivationCase& tc)
         pw.set_relu_lower_clip_slope(0.01f);
     }
 
-    auto z = g.pointwise(bnOut, pw);
+    const auto z = g.pointwise(bnOut, pw);
     z->set_output(true);
 
     return g;
@@ -106,7 +106,7 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
 
         const std::string pluginPathStr = pluginPath.string();
@@ -143,7 +143,7 @@ TEST_P(IntegrationGpuBatchnormUnhappyActivation, RejectsUnsupportedActivations)
     const auto& tc = GetParam();
 
     auto graph = makeGraph(tc);
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
 
     // Must fail
     EXPECT_NE(result.code, ErrorCode::OK) << "Unexpected success. err_msg: " << result.err_msg;
@@ -179,32 +179,32 @@ TEST_F(IntegrationGpuBatchnormUnhappyActivation, AcceptsReluForwardFusion)
     const std::vector<int64_t> cDims = getDerivedShape(dims);
 
     // Input
-    auto x = std::make_shared<TensorAttributes>(
+    const auto x = std::make_shared<TensorAttributes>(
         makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
 
     // BN parameters
-    auto mean = std::make_shared<TensorAttributes>(
+    const auto mean = std::make_shared<TensorAttributes>(
         makeTensorAttributes("mean", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto invVar = std::make_shared<TensorAttributes>(
+    const auto invVar = std::make_shared<TensorAttributes>(
         makeTensorAttributes("inv_variance", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto scale = std::make_shared<TensorAttributes>(
+    const auto scale = std::make_shared<TensorAttributes>(
         makeTensorAttributes("scale", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto bias = std::make_shared<TensorAttributes>(
+    const auto bias = std::make_shared<TensorAttributes>(
         makeTensorAttributes("bias", DataType::FLOAT, cDims, generateStrides(cDims)));
 
     // Forward BatchNorm
     const BatchnormInferenceAttributes bn;
-    auto bnOut = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
+    const auto bnOut = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
 
     // ReLU activation (supported fusion)
     PointwiseAttributes pw;
     pw.set_mode(PointwiseMode::RELU_FWD);
 
-    auto z = g.pointwise(bnOut, pw);
+    const auto z = g.pointwise(bnOut, pw);
     z->set_output(true);
 
     // Build graph
-    auto result = g.build(_handle);
+    const auto result = g.build(_handle);
 
     // Must succeed
     EXPECT_EQ(result.code, ErrorCode::OK)

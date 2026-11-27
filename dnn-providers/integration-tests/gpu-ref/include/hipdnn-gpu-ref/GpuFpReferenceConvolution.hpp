@@ -137,7 +137,7 @@ public:
             gradX.dims(), w.dims(), gradY.dims(), convStrides, dilations, prePadding, postPadding);
 
         const auto nDims = gradX.dims().size();
-        auto defines
+        const auto defines
             = detail::buildConvDefines<DxDataType, WDataType, DyDataType, ComputeDataType>();
 
         auto* dxPtr = gradX.memory().deviceData();
@@ -250,7 +250,7 @@ public:
             x.dims(), gradW.dims(), gradY.dims(), convStrides, dilations, prePadding, postPadding);
 
         const auto nDims = x.dims().size();
-        auto defines
+        const auto defines
             = detail::buildConvDefines<XDataType, DwDataType, DyDataType, ComputeDataType>();
 
         auto* xPtr = x.memory().deviceData();
@@ -350,7 +350,7 @@ private:
         validateInput(xDims, wDims, yDims, convStrides, dilations, prePadding, postPadding);
 
         const auto nDims = xDims.size();
-        auto defines
+        const auto defines
             = detail::buildConvDefines<XDataType, WDataType, YDataType, ComputeDataType>(useTf32);
 
         // Only prePadding is passed to the kernel. Post-padding is implicitly

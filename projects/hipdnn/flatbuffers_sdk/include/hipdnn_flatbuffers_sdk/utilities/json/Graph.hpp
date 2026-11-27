@@ -75,7 +75,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
 {
-    auto type = node.attributes_type();
+    const auto type = node.attributes_type();
 
     switch(type)
     {
@@ -197,8 +197,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
                                    const nlohmann::json& entry)
 {
     auto type = entry.at("type").get<data_objects::NodeAttributes>();
-    auto name = entry.at("name").get<std::string>();
-    auto computeDataType = entry.at("compute_data_type").get<data_objects::DataType>();
+    const auto name = entry.at("name").get<std::string>();
+    const auto computeDataType = entry.at("compute_data_type").get<data_objects::DataType>();
 
     const flatbuffers::Offset<void> node = [&]() {
         switch(type)
@@ -271,10 +271,10 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
     using namespace data_objects;
     using namespace flatbuffers;
 
-    auto name = entry.at("name").get<std::string>();
-    auto computeType = entry.at("compute_data_type").get<data_objects::DataType>();
-    auto ioType = entry.at("io_data_type").get<data_objects::DataType>();
-    auto intermediateType = entry.at("intermediate_data_type").get<data_objects::DataType>();
+    const auto name = entry.at("name").get<std::string>();
+    const auto computeType = entry.at("compute_data_type").get<data_objects::DataType>();
+    const auto ioType = entry.at("io_data_type").get<data_objects::DataType>();
+    const auto intermediateType = entry.at("intermediate_data_type").get<data_objects::DataType>();
 
     flatbuffers::Optional<int64_t> preferredEngineId = flatbuffers::nullopt;
     if(entry.contains("preferred_engine_id"))
@@ -305,8 +305,8 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
         minRequiredEngineApiVersion = &parsedMinRequiredEngineApiVersion;
     }
 
-    auto nodes = toVector<Node>(builder, entry.at("nodes"));
-    auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
+    const auto nodes = toVector<Node>(builder, entry.at("nodes"));
+    const auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
     return data_objects::CreateGraphDirect(builder,
                                            name.c_str(),
                                            computeType,

@@ -265,7 +265,7 @@ TEST_F(TestErrorPaths, NotApplicableAndCapabilityErrorTypeRelationships)
 // ReferenceCapabilityError so the harness skips instead of failing.
 TEST_F(TestErrorPaths, CpuAdapterTranslatesNotApplicableToCapabilityError)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
     const std::unordered_map<int64_t, void*> variantPack;
     CpuReferenceGraphExecutorAdapter adapter;
 

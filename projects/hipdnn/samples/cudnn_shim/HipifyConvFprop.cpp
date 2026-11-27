@@ -143,17 +143,17 @@ int main(int argc, char** argv)
         fe::graph::Graph graph;
         graph.set_io_data_type(fe::DataType_t::FLOAT).set_compute_data_type(fe::DataType_t::FLOAT);
 
-        auto x = graph.tensor(fe::graph::Tensor_attributes()
-                                  .set_name("image")
-                                  .set_dim({n, c, h, w})
-                                  .set_stride({c * h * w, h * w, w, 1}));
+        const auto x = graph.tensor(fe::graph::Tensor_attributes()
+                                        .set_name("image")
+                                        .set_dim({n, c, h, w})
+                                        .set_stride({c * h * w, h * w, w, 1}));
 
-        auto filter = graph.tensor(fe::graph::Tensor_attributes()
-                                       .set_name("filter")
-                                       .set_dim({k, c, r, s})
-                                       .set_stride({c * r * s, r * s, s, 1}));
+        const auto filter = graph.tensor(fe::graph::Tensor_attributes()
+                                             .set_name("filter")
+                                             .set_dim({k, c, r, s})
+                                             .set_stride({c * r * s, r * s, s, 1}));
 
-        auto y = graph.conv_fprop(
+        const auto y = graph.conv_fprop(
             x,
             filter,
             fe::graph::Conv_fprop_attributes().set_padding({0, 0}).set_stride({1, 1}).set_dilation(

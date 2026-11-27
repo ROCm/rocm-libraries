@@ -97,8 +97,8 @@ protected:
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -108,11 +108,11 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, CreatesValidFinalizedDescriptor
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -121,7 +121,7 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::MoeGroupedMatmulBwdAttributes);
-    auto desc = std::static_pointer_cast<MoeGroupedMatmulBwdOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<MoeGroupedMatmulBwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -140,16 +140,16 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDoutputDesc(), nullptr);
     EXPECT_EQ(desc->getDoutputDesc()->getData().uid, K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID);
@@ -164,8 +164,8 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getDoutputDesc(), _tensorMap[K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID]);
     EXPECT_EQ(desc->getTokenDesc(), _tensorMap[K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID]);
@@ -176,8 +176,8 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDoutputDesc(), nullptr);
     EXPECT_EQ(desc->getDoutputDesc()->getData().uid, K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID);
@@ -227,7 +227,7 @@ class TestMoeGroupedMatmulBwdOperationFromNodeMissingTensor
 TEST_P(TestMoeGroupedMatmulBwdOperationFromNodeMissingTensor, FromNodeFails)
 {
     _tensorMap.erase(GetParam().uid);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -245,8 +245,8 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
@@ -258,8 +258,8 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, GetTensorDescriptorsReturnsAllT
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -277,8 +277,8 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify compute type
     hipdnnDataType_t computeType = {};
@@ -369,7 +369,7 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_moegroupedmatmulbwd_1";
 
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -384,8 +384,8 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -397,7 +397,7 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap);
     const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

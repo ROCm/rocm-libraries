@@ -26,12 +26,12 @@ protected:
                                                  DataType meanVarianceDataType)
     {
         const std::vector<int64_t> dims = {2, 3, 4, 4};
-        auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
-                                                     scaleBiasDataType,
-                                                     meanVarianceDataType,
-                                                     meanVarianceDataType,
-                                                     dims,
-                                                     TensorLayout::NCHW);
+        const auto graph = buildBatchnormFwdInferenceGraph(inputDataType,
+                                                           scaleBiasDataType,
+                                                           meanVarianceDataType,
+                                                           meanVarianceDataType,
+                                                           dims,
+                                                           TensorLayout::NCHW);
 
         auto [serializedGraph, serErr] = graph->to_binary();
         if(serErr.is_bad())
@@ -49,7 +49,7 @@ private:
 
 TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -66,13 +66,13 @@ TEST_F(TestGraphTensorBundle, ConstructorCreatesAllNonVirtualTensors)
 TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
 {
     const std::vector<int64_t> dims = {2, 3, 4, 4};
-    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 DataType::FLOAT,
-                                                 dims,
-                                                 TensorLayout::NCHW,
-                                                 true);
+    const auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       DataType::FLOAT,
+                                                       dims,
+                                                       TensorLayout::NCHW,
+                                                       true);
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -100,14 +100,14 @@ TEST_F(TestGraphTensorBundle, ConstructorSkipsVirtualTensors)
 
 TEST_F(TestGraphTensorBundle, RandomizeTensorSucceeds)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
 
     // Get the first tensor UID
     ASSERT_FALSE(bundle.tensors.empty());
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
 
     // Randomize should not throw
     EXPECT_NO_THROW(bundle.randomizeTensor(firstUid, -1.0f, 1.0f, 42));
@@ -115,7 +115,7 @@ TEST_F(TestGraphTensorBundle, RandomizeTensorSucceeds)
 
 TEST_F(TestGraphTensorBundle, RandomizeTensorThrowsForInvalidUid)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -126,7 +126,7 @@ TEST_F(TestGraphTensorBundle, RandomizeTensorThrowsForInvalidUid)
 
 TEST_F(TestGraphTensorBundle, ToVariantPackReturnsCorrectMapping)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -144,7 +144,7 @@ TEST_F(TestGraphTensorBundle, ToVariantPackReturnsCorrectMapping)
 
 TEST_F(TestGraphTensorBundle, ConstructorHandlesDifferentDataTypes)
 {
-    auto graphWrapper = buildTestGraph(DataType::HALF, DataType::HALF, DataType::HALF);
+    const auto graphWrapper = buildTestGraph(DataType::HALF, DataType::HALF, DataType::HALF);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     const GraphTensorBundle bundle(tensorMap);
@@ -154,7 +154,8 @@ TEST_F(TestGraphTensorBundle, ConstructorHandlesDifferentDataTypes)
 
 TEST_F(TestGraphTensorBundle, ConstructorHandlesBFloat16DataTypes)
 {
-    auto graphWrapper = buildTestGraph(DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+    const auto graphWrapper
+        = buildTestGraph(DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     const GraphTensorBundle bundle(tensorMap);
@@ -164,7 +165,7 @@ TEST_F(TestGraphTensorBundle, ConstructorHandlesBFloat16DataTypes)
 
 TEST_F(TestGraphTensorBundle, TensorsHaveCorrectDimensions)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     const GraphTensorBundle bundle(tensorMap);
@@ -186,7 +187,7 @@ TEST_F(TestGraphTensorBundle, ToDeviceVariantPackReturnsCorrectMapping)
 {
     // Only this test in the suite touches device memory: rawDeviceData() lazily hipMallocs.
     SKIP_IF_NO_DEVICES();
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -278,21 +279,21 @@ TEST(TestGraphTensorBundleStandalone, AddTensorRejectsDuplicateUidAndLeavesRunti
 
 TEST_F(TestGraphTensorBundle, GetTensorReturnsCorrectTensor)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
 
     ASSERT_FALSE(bundle.tensors.empty());
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
 
-    auto& tensor = bundle.getTensor(firstUid);
+    const auto& tensor = bundle.getTensor(firstUid);
     EXPECT_EQ(&tensor, bundle.tensors.at(firstUid).get());
 }
 
 TEST_F(TestGraphTensorBundle, GetTensorThrowsForInvalidUid)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -303,13 +304,13 @@ TEST_F(TestGraphTensorBundle, GetTensorThrowsForInvalidUid)
 
 TEST_F(TestGraphTensorBundle, GetTensorConstReturnsCorrectTensor)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
 
     ASSERT_FALSE(bundle.tensors.empty());
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
 
     const auto& constBundle = bundle;
     const auto& tensor = constBundle.getTensor(firstUid);
@@ -318,7 +319,7 @@ TEST_F(TestGraphTensorBundle, GetTensorConstReturnsCorrectTensor)
 
 TEST_F(TestGraphTensorBundle, GetTensorConstThrowsForInvalidUid)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     const GraphTensorBundle bundle(tensorMap);
@@ -330,7 +331,7 @@ TEST_F(TestGraphTensorBundle, GetTensorConstThrowsForInvalidUid)
 
 TEST_F(TestGraphTensorBundle, IsOutputReturnsTrueForOutputTensors)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -338,9 +339,9 @@ TEST_F(TestGraphTensorBundle, IsOutputReturnsTrueForOutputTensors)
     // Manually mark some tensors as outputs
     ASSERT_GE(bundle.tensors.size(), 2U);
     auto it = bundle.tensors.begin();
-    auto firstUid = it->first;
+    const auto firstUid = it->first;
     ++it;
-    auto secondUid = it->first;
+    const auto secondUid = it->first;
 
     bundle.outputTensorIds.insert(firstUid);
     bundle.outputTensorIds.insert(secondUid);
@@ -360,7 +361,7 @@ TEST_F(TestGraphTensorBundle, IsOutputReturnsTrueForOutputTensors)
 
 TEST_F(TestGraphTensorBundle, IsOutputReturnsFalseWhenNoOutputsSet)
 {
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     const GraphTensorBundle bundle(tensorMap);
@@ -375,7 +376,7 @@ TEST_F(TestGraphTensorBundle, SentinelFillOutputTensorsFillsOnlyOutputs)
 {
     using hipdnn_data_sdk::types::isnan;
 
-    auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    const auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
     auto& tensorMap = graphWrapper->getTensorMap();
 
     GraphTensorBundle bundle(tensorMap);
@@ -387,7 +388,7 @@ TEST_F(TestGraphTensorBundle, SentinelFillOutputTensorsFillsOnlyOutputs)
     }
 
     // Mark one tensor as output and sentinel-fill
-    auto firstUid = bundle.tensors.begin()->first;
+    const auto firstUid = bundle.tensors.begin()->first;
     bundle.outputTensorIds.insert(firstUid);
     bundle.sentinelFillOutputTensors();
 

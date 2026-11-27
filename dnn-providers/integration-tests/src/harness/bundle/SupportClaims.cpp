@@ -269,7 +269,7 @@ SweepSupportClaims parseSweepSupportClaimsJson(const nlohmann::json& json, std::
                         message += caseId;
                         message += "' claimed twice for engine '";
                         message += engine;
-                        message += "'";
+                        message += '\'';
                         throw std::runtime_error(withSource(source, message));
                     }
                     group.cases.push_back(std::move(caseId));

@@ -25,7 +25,7 @@ flatbuffers::FlatBufferBuilder createPointwiseAttributesBuilder(
     flatbuffers::Optional<float> softplusBeta = flatbuffers::nullopt)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         mode,
         reluLowerClip,
@@ -47,7 +47,7 @@ flatbuffers::FlatBufferBuilder createPointwiseAttributesBuilder(
 
 TEST(TestMiopenActivationDescriptor, CreatesStandardRelu)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -70,7 +70,7 @@ TEST(TestMiopenActivationDescriptor, CreatesStandardRelu)
 
 TEST(TestMiopenActivationDescriptor, CreatesStandardReluBwd)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -91,7 +91,7 @@ TEST(TestMiopenActivationDescriptor, CreatesStandardReluBwd)
 TEST(TestMiopenActivationDescriptor, CreatesClippedRelu)
 {
     const float upperClip = 6.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         upperClip);
@@ -115,7 +115,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClippedRelu)
 TEST(TestMiopenActivationDescriptor, CreatesLeakyRelu)
 {
     const float slope = 0.01f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -141,7 +141,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
 {
     const float lowerClip = 1.0f;
     const float upperClip = 6.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip, upperClip);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -164,7 +164,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
 TEST(TestMiopenActivationDescriptor, CreatesClampFromLowerClipOnly)
 {
     const float lowerClip = 0.5f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -186,7 +186,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClampFromLowerClipOnly)
 
 TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -206,7 +206,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
 
 TEST(TestMiopenActivationDescriptor, CreatesSigmoidBwd)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_BWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -226,7 +226,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidBwd)
 
 TEST(TestMiopenActivationDescriptor, CreatesTanhFwd)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -248,7 +248,7 @@ TEST(TestMiopenActivationDescriptor, CreatesTanhFwd)
 
 TEST(TestMiopenActivationDescriptor, CreatesTanhBwd)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -269,7 +269,7 @@ TEST(TestMiopenActivationDescriptor, CreatesTanhBwd)
 TEST(TestMiopenActivationDescriptor, CreatesEluWithCustomAlpha)
 {
     const float eluAlpha = 2.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -294,7 +294,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithCustomAlpha)
 
 TEST(TestMiopenActivationDescriptor, CreatesEluWithDefaultAlpha)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -315,7 +315,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithDefaultAlpha)
 
 TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -335,7 +335,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
 
 TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -356,7 +356,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
 TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
 {
     const float softplusBeta = 1.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -382,7 +382,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
 TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
 {
     const float softplusBeta = 2.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD,
         flatbuffers::nullopt,
         flatbuffers::nullopt,
@@ -399,7 +399,7 @@ TEST(TestMiopenActivationDescriptor, ThrowsOnSoftplusWithInvalidBeta)
 
 TEST(TestMiopenActivationDescriptor, CreatesAbs)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -419,7 +419,7 @@ TEST(TestMiopenActivationDescriptor, CreatesAbs)
 
 TEST(TestMiopenActivationDescriptor, CreatesIdentity)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -439,7 +439,7 @@ TEST(TestMiopenActivationDescriptor, CreatesIdentity)
 
 TEST(TestMiopenActivationDescriptor, ThrowsOnUnsupportedMode)
 {
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -454,7 +454,7 @@ TEST(TestMiopenActivationDescriptor, ClampTakesPrecedenceOverClippedRelu)
     // When both lower and upper clips are present, should use CLAMP, not CLIPPED_RELU
     const float lowerClip = -1.0f;
     const float upperClip = 6.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD, lowerClip, upperClip);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
@@ -478,7 +478,7 @@ TEST(TestMiopenActivationDescriptor, UpperClipWithoutLowerUsesClippedRelu)
 {
     // Only upper clip present should use CLIPPED_RELU, not CLAMP
     const float upperClip = 6.0f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt,
         upperClip);

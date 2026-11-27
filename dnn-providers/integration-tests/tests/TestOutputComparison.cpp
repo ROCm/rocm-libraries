@@ -154,7 +154,7 @@ ComparisonTolerance exactMatchingInfinities()
 std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedFloatTensor(float value)
 {
     const std::vector<int32_t> offsets = {0, 30, 75};
-    auto offsetTensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<int32_t>>(
+    const auto offsetTensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<int32_t>>(
         std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
     for(size_t i = 0; i < offsets.size(); ++i)
     {
@@ -360,8 +360,8 @@ TEST(TestOutputComparison, MatchingTensorReportsNothing)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
-    auto expected = floatTensor(attrs, 3.5f);
-    auto actual = floatTensor(attrs, 3.5f);
+    const auto expected = floatTensor(attrs, 3.5f);
+    const auto actual = floatTensor(attrs, 3.5f);
 
     EXPECT_FALSE(compareTensor(
                      K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "Bundle: b")
@@ -375,8 +375,8 @@ TEST(TestOutputComparison, MismatchCarriesTheUidLabelAndDiff)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
-    auto expected = floatTensor(attrs, 3.5f);
-    auto actual = floatTensor(attrs, 9.25f);
+    const auto expected = floatTensor(attrs, 3.5f);
+    const auto actual = floatTensor(attrs, 9.25f);
 
     const auto mismatch = compareTensor(
         K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "Bundle: my-bundle");
@@ -399,8 +399,8 @@ TEST(TestOutputComparison, ToleranceDecidesWhetherADifferenceMatters)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
-    auto expected = floatTensor(attrs, 1.0f);
-    auto actual = floatTensor(attrs, 1.01f);
+    const auto expected = floatTensor(attrs, 1.0f);
+    const auto actual = floatTensor(attrs, 1.01f);
 
     EXPECT_TRUE(
         compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
@@ -562,8 +562,8 @@ void checkRmsAcceptsANearZeroElementThatAllcloseRejects(ValidationSite site)
 
     // Middle element is 5 orders of magnitude below the tensor scale and drifts by 1e-4:
     // negligible against the tensor, unbounded against itself.
-    auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
-    auto actual = floatTensor3(attrs, 1000.0f, 0.0011f, -1000.0f);
+    const auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
+    const auto actual = floatTensor3(attrs, 1000.0f, 0.0011f, -1000.0f);
 
     EXPECT_TRUE(compareTensor(K_UID_B,
                               attrs,
@@ -608,8 +608,8 @@ void checkRmsStillRejectsDriftLargeAgainstTheTensorScale(ValidationSite site)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
-    auto actual = floatTensor3(attrs, 1000.0f, 0.001f, -900.0f);
+    const auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
+    const auto actual = floatTensor3(attrs, 1000.0f, 0.001f, -900.0f);
 
     EXPECT_TRUE(compareTensor(K_UID_B,
                               attrs,
@@ -644,8 +644,8 @@ void checkRmsFailureReportsItsThresholdNotAtolRtol(ValidationSite site)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
-    auto actual = floatTensor3(attrs, 1000.0f, 0.001f, -900.0f);
+    const auto expected = floatTensor3(attrs, 1000.0f, 0.001f, -1000.0f);
+    const auto actual = floatTensor3(attrs, 1000.0f, 0.001f, -900.0f);
 
     const auto mismatch = compareTensor(
         K_UID_B, attrs, *expected, *actual, ComparisonTolerance::rms(K_RMS_THRESHOLD), site, "b");
@@ -774,8 +774,8 @@ void checkRmsOnAnUnsupportedDataTypeIsReportedNotThrown(ValidationSite site)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
 
-    auto expected = intTensor(attrs, 7);
-    auto actual = intTensor(attrs, 7);
+    const auto expected = intTensor(attrs, 7);
+    const auto actual = intTensor(attrs, 7);
 
     std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
     ASSERT_NO_THROW(mismatch = compareTensor(K_UID_INT,
@@ -819,9 +819,9 @@ void checkAllcloseStillGradesIntegerOutputs(ValidationSite site)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
 
-    auto expected = intTensor(attrs, 7);
-    auto matching = intTensor(attrs, 7);
-    auto drifted = intTensor(attrs, 9);
+    const auto expected = intTensor(attrs, 7);
+    const auto matching = intTensor(attrs, 7);
+    const auto drifted = intTensor(attrs, 9);
 
     EXPECT_FALSE(
         compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), site, "b").has_value());
@@ -854,8 +854,8 @@ void checkUnwrittenIntegerOutputFailsEvenWhenBothSidesMatch(ValidationSite site)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
 
-    auto expected = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
-    auto actual = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    const auto expected = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    const auto actual = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
     expected->fillWithSentinelValue();
     actual->fillWithSentinelValue();
 
@@ -908,8 +908,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteComparesTheValuesLeftOnTheDevice)
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
     // Host copies agree; device copies disagree.
-    auto expected = floatTensor(attrs, 3.5f);
-    auto actual = floatTensor(attrs, 3.5f);
+    const auto expected = floatTensor(attrs, 3.5f);
+    const auto actual = floatTensor(attrs, 3.5f);
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, 3.5f));
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, 9.25f));
 
@@ -932,8 +932,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteAcceptsMatchingDeviceValues)
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
     // Host copies disagree; device copies agree.
-    auto expected = floatTensor(attrs, 3.5f);
-    auto actual = floatTensor(attrs, 9.25f);
+    const auto expected = floatTensor(attrs, 3.5f);
+    const auto actual = floatTensor(attrs, 9.25f);
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, 1.0f));
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, 1.0f));
 
@@ -958,8 +958,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteMatchesSameSignedInfinities)
     {
         for(const float inf : {-K_INF, K_INF})
         {
-            auto expected = floatTensor3(attrs, inf, 1.0f, inf);
-            auto actual = floatTensor3(attrs, inf, 1.0f, inf);
+            const auto expected = floatTensor3(attrs, inf, 1.0f, inf);
+            const auto actual = floatTensor3(attrs, inf, 1.0f, inf);
             EXPECT_FALSE(
                 compareTensor(
                     K_UID_B, attrs, *expected, *actual, tolerance, ValidationSite::DEVICE, "b")
@@ -972,8 +972,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteMatchesSameSignedInfinities)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfWrapper{halfBuffer.data(),
                                                                                  halfBuffer.size()};
     const auto& halfAttrs = *halfWrapper.getTensorMap().at(K_UID_STATS);
-    auto expected = floatTensor(halfAttrs, -K_INF);
-    auto actual = floatTensor(halfAttrs, -K_INF);
+    const auto expected = floatTensor(halfAttrs, -K_INF);
+    const auto actual = floatTensor(halfAttrs, -K_INF);
     EXPECT_FALSE(
         compareTensor(
             K_UID_STATS, halfAttrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b")
@@ -1008,8 +1008,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteStillRejectsWhatTheHostRejects)
     {
         for(const auto& tolerance : {exact(), exactMatchingInfinities()})
         {
-            auto expected = floatTensor3(attrs, c.expected0, 1.0f, 2.0f);
-            auto actual = floatTensor3(attrs, c.actual0, c.actual1, 2.0f);
+            const auto expected = floatTensor3(attrs, c.expected0, 1.0f, 2.0f);
+            const auto actual = floatTensor3(attrs, c.actual0, c.actual1, 2.0f);
             EXPECT_TRUE(
                 compareTensor(
                     K_UID_B, attrs, *expected, *actual, tolerance, ValidationSite::DEVICE, "b")
@@ -1018,8 +1018,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteStillRejectsWhatTheHostRejects)
         }
     }
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
-    auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
+    const auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
+    const auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
     EXPECT_FALSE(compareTensor(K_UID_B,
                                attrs,
                                *expected,
@@ -1042,8 +1042,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteInfinityMatchReadsTheDeviceValues)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
-    auto differingOnDevice = floatTensor(attrs, -K_INF);
-    auto differingOnDeviceToo = floatTensor(attrs, -K_INF);
+    const auto differingOnDevice = floatTensor(attrs, -K_INF);
+    const auto differingOnDeviceToo = floatTensor(attrs, -K_INF);
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*differingOnDevice, 1.0f));
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*differingOnDeviceToo, 9.25f));
     EXPECT_TRUE(compareTensor(K_UID_A,
@@ -1056,8 +1056,8 @@ TEST(TestGpuOutputComparisonDevice, DeviceSiteInfinityMatchReadsTheDeviceValues)
                     .has_value())
         << "the device values differ; only the stale host fill holds matching infinities";
 
-    auto expected = floatTensor(attrs, 3.5f);
-    auto actual = floatTensor(attrs, 9.25f);
+    const auto expected = floatTensor(attrs, 3.5f);
+    const auto actual = floatTensor(attrs, 9.25f);
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, -K_INF));
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, -K_INF));
     EXPECT_FALSE(
@@ -1080,8 +1080,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesAcceptsSameSignedInfinities
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
-    auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    const auto expected = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
+    const auto actual = floatTensor3(attrs, -K_INF, 1.0f, -K_INF);
 
     EXPECT_FALSE(compareTensor(K_UID_B,
                                attrs,
@@ -1106,8 +1106,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsOppositeSignedI
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
-    auto actual = floatTensor3(attrs, K_INF, 1.0f, 1.0f);
+    const auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
+    const auto actual = floatTensor3(attrs, K_INF, 1.0f, 1.0f);
 
     EXPECT_TRUE(compareTensor(K_UID_B,
                               attrs,
@@ -1127,8 +1127,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsNaN)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
-    auto actual = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+    const auto expected = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
+    const auto actual = floatTensor3(attrs, K_NAN, 1.0f, 1.0f);
 
     EXPECT_TRUE(compareTensor(K_UID_B,
                               attrs,
@@ -1148,8 +1148,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsFiniteVersusInf
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
-    auto actual = floatTensor3(attrs, -1e30f, 1.0f, 1.0f);
+    const auto expected = floatTensor3(attrs, -K_INF, 1.0f, 1.0f);
+    const auto actual = floatTensor3(attrs, -1e30f, 1.0f, 1.0f);
 
     EXPECT_TRUE(compareTensor(K_UID_B,
                               attrs,
@@ -1169,8 +1169,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsBy
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
-    auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
+    const auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
+    const auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
 
     EXPECT_TRUE(compareTensor(K_UID_B,
                               attrs,
@@ -1240,8 +1240,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsRe
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_INT);
 
-    auto expected = intTensor(attrs, 7);
-    auto actual = intTensor(attrs, 7);
+    const auto expected = intTensor(attrs, 7);
+    const auto actual = intTensor(attrs, 7);
 
     std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
     ASSERT_NO_THROW(mismatch = compareTensor(K_UID_INT,
@@ -1297,8 +1297,8 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesFailureStillReportsAtolRtol
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_B);
 
-    auto expected = floatTensor3(attrs, 1.0f, 2.0f, 3.0f);
-    auto actual = floatTensor3(attrs, 1.0f, 2.5f, 3.0f);
+    const auto expected = floatTensor3(attrs, 1.0f, 2.0f, 3.0f);
+    const auto actual = floatTensor3(attrs, 1.0f, 2.5f, 3.0f);
 
     const auto mismatch
         = compareTensor(K_UID_B,
@@ -1329,9 +1329,9 @@ TEST(TestOutputComparison, RaggedStatsCompareWithinEachStorageLayout)
     for(const auto& layout : {fixtures::raggedSdpaHeadTokenStatsCase().stats,
                               fixtures::raggedSdpaTokenHeadStatsCase().stats})
     {
-        auto expected = raggedLogicalTensor(layout);
-        auto same = raggedLogicalTensor(layout);
-        auto different = raggedLogicalTensor(layout, /*perturb=*/true);
+        const auto expected = raggedLogicalTensor(layout);
+        const auto same = raggedLogicalTensor(layout);
+        const auto different = raggedLogicalTensor(layout, /*perturb=*/true);
 
         EXPECT_FALSE(
             compareTensor(K_UID_A, attrs, *expected, *same, exact(), ValidationSite::HOST, "b")
@@ -1341,8 +1341,8 @@ TEST(TestOutputComparison, RaggedStatsCompareWithinEachStorageLayout)
                 .has_value());
     }
 
-    auto headToken = raggedLogicalTensor(fixtures::raggedSdpaHeadTokenStatsCase().stats);
-    auto tokenHead = raggedLogicalTensor(fixtures::raggedSdpaTokenHeadStatsCase().stats);
+    const auto headToken = raggedLogicalTensor(fixtures::raggedSdpaHeadTokenStatsCase().stats);
+    const auto tokenHead = raggedLogicalTensor(fixtures::raggedSdpaTokenHeadStatsCase().stats);
     const auto mismatch
         = compareTensor(K_UID_A, attrs, *headToken, *tokenHead, exact(), ValidationSite::HOST, "b");
     ASSERT_TRUE(mismatch.has_value());
@@ -1361,9 +1361,9 @@ TEST(TestOutputComparison, RaggedHeadMajorOutputCompares)
 
     const auto layout = fixtures::raggedSdpaHeadMajorCase().qkvo;
 
-    auto expected = raggedLogicalTensor(layout);
-    auto same = raggedLogicalTensor(layout);
-    auto different = raggedLogicalTensor(layout, /*perturb=*/true);
+    const auto expected = raggedLogicalTensor(layout);
+    const auto same = raggedLogicalTensor(layout);
+    const auto different = raggedLogicalTensor(layout, /*perturb=*/true);
 
     EXPECT_FALSE(compareTensor(K_UID_A, attrs, *expected, *same, exact(), ValidationSite::HOST, "b")
                      .has_value());
@@ -1381,8 +1381,8 @@ TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
-    auto expected = raggedFloatTensor(3.5f);
-    auto actual = raggedFloatTensor(3.5f);
+    const auto expected = raggedFloatTensor(3.5f);
+    const auto actual = raggedFloatTensor(3.5f);
 
     EXPECT_FALSE(
         compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
@@ -1408,8 +1408,8 @@ TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLength)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
 
     EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
     EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
@@ -1427,8 +1427,8 @@ TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLengthHalf)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
 
     EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
     EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
@@ -1442,8 +1442,8 @@ TEST(TestOutputComparison, LiveRowMismatchStillFails)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 0, 0}) = 99.0f;
 
     const auto mismatches = compareStats(wrapper, expected, actual, statsLiveRows(lengths));
@@ -1460,8 +1460,8 @@ TEST(TestOutputComparison, LiveRowPositionPastTheLengthIsNotCompared)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 2, 0}) = 99.0f;
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({1, 0, 0, 0}) = -K_INF;
 
@@ -1477,8 +1477,8 @@ TEST(TestOutputComparison, LiveRowAllZeroLengthsFailsBecauseNoElementIsCompared)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {0, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
 
     EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).size(), 1u);
 }
@@ -1490,9 +1490,9 @@ TEST(TestOutputComparison, LiveRowTokenMajorStridesCompare)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {3, 2};
 
-    auto expected = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
-    auto same = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
-    auto different = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto same = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto different = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*different).getHostValue({1, 2, 1, 0}) = 99.0f;
 
     EXPECT_TRUE(compareStats(wrapper, expected, same, statsLiveRows(lengths)).empty());
@@ -1507,8 +1507,8 @@ TEST(TestOutputComparison, LiveRowOutputOnDeviceIsReportedNotThrown)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
 
     std::vector<hipdnn_integration_tests::bundle::TensorMismatch> mismatches;
     ASSERT_NO_THROW(mismatches = compareStats(
@@ -1525,8 +1525,8 @@ TEST(TestOutputComparison, LiveRowEntryThatDoesNotFitTheOutputThrows)
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
                                                                              buffer.size()};
-    auto expected = liveRowStats(K_STATS_STRIDES, {1, 0});
-    auto actual = liveRowStats(K_STATS_STRIDES, {1, 0});
+    const auto expected = liveRowStats(K_STATS_STRIDES, {1, 0});
+    const auto actual = liveRowStats(K_STATS_STRIDES, {1, 0});
 
     EXPECT_THROW(compareStats(wrapper, expected, actual, statsLiveRows({1})),
                  std::invalid_argument);
@@ -1939,16 +1939,16 @@ TEST(TestOutputComparison, HostAllcloseMatchesOnlySameSignedInfinities)
     for(const auto& pair : K_INFINITY_PAIRS)
     {
         SCOPED_TRACE(pair.name);
-        auto expected = floatTensor3(attrs, pair.expected, 1.0f, 2.0f);
-        auto actual = floatTensor3(attrs, pair.actual, 1.0f, 2.0f);
+        const auto expected = floatTensor3(attrs, pair.expected, 1.0f, 2.0f);
+        const auto actual = floatTensor3(attrs, pair.actual, 1.0f, 2.0f);
         EXPECT_EQ(
             compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
                 .has_value(),
             !pair.matches);
     }
 
-    auto nanExpected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
-    auto nanActual = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    const auto nanExpected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    const auto nanActual = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
     EXPECT_TRUE(
         compareTensor(K_UID_B, attrs, *nanExpected, *nanActual, exact(), ValidationSite::HOST, "b")
             .has_value())
@@ -1967,8 +1967,8 @@ TEST(TestOutputComparison, LiveRowHostAllcloseMatchesOnlySameSignedInfinities)
     for(const auto& pair : K_INFINITY_PAIRS)
     {
         SCOPED_TRACE(pair.name);
-        auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-        auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+        const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+        const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
         hipdnn_data_sdk::utilities::TensorView<float>(*expected).getHostValue({0, 1, 1, 0})
             = pair.expected;
         hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 1, 0})
@@ -1977,8 +1977,8 @@ TEST(TestOutputComparison, LiveRowHostAllcloseMatchesOnlySameSignedInfinities)
                   pair.matches);
     }
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 1, 0}) = K_NAN;
     EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).size(), 1u)
         << "a NaN in a live position of the actual output fails";

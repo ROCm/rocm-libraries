@@ -78,12 +78,12 @@ public:
                                        params.softplusBeta,
                                        params.axis);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
 
         tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
@@ -119,12 +119,12 @@ public:
                                         params.eluAlpha,
                                         params.softplusBeta);
 
-        auto result = graph->validate();
+        const auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
 
         tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
@@ -521,7 +521,7 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
     Tensor<float> dx(tensorDims);
     Tensor<float> dalpha(alphaDims);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PreluBackwardComposedGraph");
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -529,52 +529,53 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
 
     ComposedGraphTensorFactory tensors;
 
-    auto dyTensor = tensors.makeInput("dy", tensorDims);
-    auto xTensor = tensors.makeInput("x", tensorDims);
-    auto alphaTensor = tensors.makeInput("alpha", alphaDims);
-    auto zeroTensor = tensors.makeInput("zero", scalarDims);
+    const auto dyTensor = tensors.makeInput("dy", tensorDims);
+    const auto xTensor = tensors.makeInput("x", tensorDims);
+    const auto alphaTensor = tensors.makeInput("alpha", alphaDims);
+    const auto zeroTensor = tensors.makeInput("zero", scalarDims);
 
     hipdnn_frontend::graph::PointwiseAttributes compareAttrs;
     compareAttrs.set_name("positive_mask").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
-    auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
+    const auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
     tensors.configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyXAlphaAttrs;
     multiplyXAlphaAttrs.set_name("x_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
+    const auto xTimesAlpha = graph->pointwise(xTensor, alphaTensor, multiplyXAlphaAttrs);
     tensors.configureOutput(xTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes ySelectAttrs;
     ySelectAttrs.set_name("y_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
+    const auto yTensor = graph->pointwise(xTensor, xTimesAlpha, positiveMask, ySelectAttrs);
     tensors.configureOutput(yTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     yTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyAlphaAttrs;
     multiplyAlphaAttrs.set_name("dy_times_alpha").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto dyTimesAlpha = graph->pointwise(dyTensor, alphaTensor, multiplyAlphaAttrs);
+    const auto dyTimesAlpha = graph->pointwise(dyTensor, alphaTensor, multiplyAlphaAttrs);
     tensors.configureOutput(dyTimesAlpha, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes dxSelectAttrs;
     dxSelectAttrs.set_name("dx_select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto dxTensor = graph->pointwise(dyTensor, dyTimesAlpha, positiveMask, dxSelectAttrs);
+    const auto dxTensor = graph->pointwise(dyTensor, dyTimesAlpha, positiveMask, dxSelectAttrs);
     tensors.configureOutput(dxTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     dxTensor->set_output(true);
 
     hipdnn_frontend::graph::PointwiseAttributes multiplyXAttrs;
     multiplyXAttrs.set_name("dy_times_x").set_mode(hipdnn_frontend::PointwiseMode::MUL);
-    auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
+    const auto dyTimesX = graph->pointwise(dyTensor, xTensor, multiplyXAttrs);
     tensors.configureOutput(dyTimesX, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes dalphaSelectAttrs;
     dalphaSelectAttrs.set_name("dalpha_select")
         .set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto dalphaTerms = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
+    const auto dalphaTerms
+        = graph->pointwise(zeroTensor, dyTimesX, positiveMask, dalphaSelectAttrs);
     tensors.configureOutput(dalphaTerms, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::ReductionAttributes reduceAttrs;
     reduceAttrs.set_name("dalpha_reduce").set_mode(hipdnn_frontend::ReductionMode::ADD);
-    auto dalphaTensor = graph->reduction(dalphaTerms, reduceAttrs);
+    const auto dalphaTensor = graph->reduction(dalphaTerms, reduceAttrs);
     tensors.configureOutput(dalphaTensor, hipdnn_frontend::DataType::FLOAT, alphaDims);
     dalphaTensor->set_output(true);
 
@@ -990,7 +991,7 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, ExpReciprocalDivideComposedGraph)
     Tensor<float> zero(scalarDims);
     Tensor<float> selected(tensorDims);
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ExpReciprocalDivideComposedGraph");
     graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -998,39 +999,39 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, ExpReciprocalDivideComposedGraph)
 
     ComposedGraphTensorFactory tensors;
 
-    auto xTensor = tensors.makeInput("x", tensorDims);
-    auto zeroTensor = tensors.makeInput("zero", scalarDims);
+    const auto xTensor = tensors.makeInput("x", tensorDims);
+    const auto zeroTensor = tensors.makeInput("zero", scalarDims);
 
     hipdnn_frontend::graph::PointwiseAttributes expAttrs;
     expAttrs.set_name("exp").set_mode(hipdnn_frontend::PointwiseMode::EXP);
-    auto expTensor = graph->pointwise(xTensor, expAttrs);
+    const auto expTensor = graph->pointwise(xTensor, expAttrs);
     tensors.configureOutput(expTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes reciprocalAttrs;
     reciprocalAttrs.set_name("reciprocal").set_mode(hipdnn_frontend::PointwiseMode::RECIPROCAL);
-    auto reciprocalTensor = graph->pointwise(expTensor, reciprocalAttrs);
+    const auto reciprocalTensor = graph->pointwise(expTensor, reciprocalAttrs);
     tensors.configureOutput(reciprocalTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     // exp(-x) / exp(x) = exp(-2x)
     hipdnn_frontend::graph::PointwiseAttributes divideAttrs;
     divideAttrs.set_name("divide").set_mode(hipdnn_frontend::PointwiseMode::DIV);
-    auto quotientTensor = graph->pointwise(reciprocalTensor, expTensor, divideAttrs);
+    const auto quotientTensor = graph->pointwise(reciprocalTensor, expTensor, divideAttrs);
     tensors.configureOutput(quotientTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes compareAttrs;
     compareAttrs.set_name("positive").set_mode(hipdnn_frontend::PointwiseMode::CMP_GT);
-    auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
+    const auto positiveMask = graph->pointwise(xTensor, zeroTensor, compareAttrs);
     tensors.configureOutput(positiveMask, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     hipdnn_frontend::graph::PointwiseAttributes notAttrs;
     notAttrs.set_name("non_positive").set_mode(hipdnn_frontend::PointwiseMode::LOGICAL_NOT);
-    auto nonPositiveTensor = graph->pointwise(positiveMask, notAttrs);
+    const auto nonPositiveTensor = graph->pointwise(positiveMask, notAttrs);
     tensors.configureOutput(nonPositiveTensor, hipdnn_frontend::DataType::BOOLEAN, tensorDims);
 
     // exp(-2x) where x <= 0, exp(x) otherwise
     hipdnn_frontend::graph::PointwiseAttributes selectAttrs;
     selectAttrs.set_name("select").set_mode(hipdnn_frontend::PointwiseMode::BINARY_SELECT);
-    auto selectedTensor
+    const auto selectedTensor
         = graph->pointwise(quotientTensor, expTensor, nonPositiveTensor, selectAttrs);
     tensors.configureOutput(selectedTensor, hipdnn_frontend::DataType::FLOAT, tensorDims);
     selectedTensor->set_output(true);

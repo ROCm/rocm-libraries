@@ -97,7 +97,7 @@ protected:
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -106,7 +106,7 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
         {588, 196, 14, 1},
         {1, 3, 14, 14},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -120,7 +120,7 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabled
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -135,8 +135,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)
 // threads, so the largest accepted outer size is 2^22 - 1.
 TEST_F(TestLayernormPlanBuilder, IsApplicableFpropAcceptsOuterSizeBelowThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
-                                                                              {4194303, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+        {4, 1, 1, 1}, {4194303, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -145,8 +145,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableFpropAcceptsOuterSizeBelowThreadLim
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableFpropDeclinesOuterSizeAtThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
-                                                                              {4194304, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+        {4, 1, 1, 1}, {4194304, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -155,8 +155,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableFpropDeclinesOuterSizeAtThreadLimit
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableBpropAcceptsOuterSizeBelowThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
-                                                                            {4194303, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {4, 1, 1, 1}, {4194303, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -165,8 +165,8 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableBpropAcceptsOuterSizeBelowThreadLim
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableBpropDeclinesOuterSizeAtThreadLimit)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
-                                                                            {4194304, 4, 1, 1});
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        {4, 1, 1, 1}, {4194304, 4, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -209,9 +209,9 @@ TEST_P(TestLayernormFusionPlanBuilder, DeclinesIdentityReluAndLeakyReluFusion)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     const auto& testCase = GetParam();
-    auto original
+    const auto original
         = testCase.isBwd ? createValidLayernormBwdGraph() : createValidLayernormFpropGraph();
-    auto nativeGraph = UnPackGraph(original.GetBufferPointer());
+    const auto nativeGraph = UnPackGraph(original.GetBufferPointer());
     auto& normNode = *nativeGraph->nodes[0];
     const auto intermediateUid
         = testCase.isBwd ? normNode.attributes.AsLayernormBackwardAttributes()->dy_tensor_uid
@@ -276,7 +276,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_F(TestLayernormPlanBuilder, IsNotApplicableForBatchnormGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -285,7 +285,7 @@ TEST_F(TestLayernormPlanBuilder, IsNotApplicableForBatchnormGraph)
 
 TEST_F(TestLayernormPlanBuilder, IsNotApplicableForNonF32ComputeType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -304,7 +304,7 @@ TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleFpropNode)
 {
     setupFpropMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -317,7 +317,7 @@ TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleBpropNode)
 {
     setupBpropMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -332,7 +332,7 @@ TEST_F(TestLayernormPlanBuilder, BuildPlanSetsPlanForSingleBpropNode)
 
 TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeFpropReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -344,7 +344,7 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropReturnsZero)
 {
     SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
 
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -357,10 +357,10 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropParallelReturnsNonzero)
     SKIP_IF_NO_DEVICES(); // Backward branch of getMaxWorkspaceSize requires a device
 
     // The answer is dependent on the number of multiprocessors
-    auto multiProcessorCount = static_cast<int64_t>(
+    const auto multiProcessorCount = static_cast<int64_t>(
         hip_kernel_provider_common::getDeviceProperties(_dummyHandle.getStream())
             .multiProcessorCount);
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
         {3072 * multiProcessorCount, 1024 * multiProcessorCount, 32, 1},
         {4, 3, 32 * multiProcessorCount, 32});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -378,9 +378,9 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropWithoutOptionalTensorsR
 
     const std::vector<int64_t> strides{150528, 50176, 224, 1};
     const std::vector<int64_t> dims{2, 3, 224, 224};
-    auto builderWithStats = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+    const auto builderWithStats = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
         strides, dims, true, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    auto builderWithoutStats = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+    const auto builderWithoutStats = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
         strides, dims, false, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWithStats(
         builderWithStats.GetBufferPointer(), builderWithStats.GetSize());
@@ -402,21 +402,21 @@ TEST_F(TestLayernormPlanBuilder, GetMaxWorkspaceSizeBpropWithoutOptionalTensorsR
 
 TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmptyFprop)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
 TEST_F(TestLayernormPlanBuilder, GetCustomKnobsReturnsEmptyBprop)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
@@ -441,8 +441,8 @@ TEST_F(TestLayernormPlanBuilder, ElementCountAtTheKernelIndexLimit)
             SCOPED_TRACE(columns);
             const std::vector<int64_t> dims{1, 1, 1, columns};
             const std::vector<int64_t> strides{columns, columns, columns, 1};
-            auto builder = backward ? createValidLayernormBwdGraph(strides, dims)
-                                    : createValidLayernormFpropGraph(strides, dims);
+            const auto builder = backward ? createValidLayernormBwdGraph(strides, dims)
+                                          : createValidLayernormFpropGraph(strides, dims);
             const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
             EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), expected);
         }
@@ -461,11 +461,11 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAVirtualKernelBuffer)
         {
             SCOPED_TRACE(direction);
             SCOPED_TRACE(name);
-            auto builder
+            const auto builder
                 = mutateGraph(direction == "forward" ? createValidLayernormFpropGraph()
                                                      : createValidLayernormBwdGraph(),
                               [&name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                                  for(auto& tensor : graph.tensors)
+                                  for(const auto& tensor : graph.tensors)
                                   {
                                       if(tensor->name == name)
                                       {
@@ -497,15 +497,15 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
         };
 
         {
-            auto builder = base();
+            const auto builder = base();
             const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
             ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
         }
         {
-            auto builder
+            const auto builder
                 = mutateGraph(base(), [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                       const auto uid = epsilonUid(graph);
-                      for(auto& tensor : graph.tensors)
+                      for(const auto& tensor : graph.tensors)
                       {
                           if(tensor->uid == uid)
                           {
@@ -517,7 +517,7 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
             EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph)) << "valueless epsilon";
         }
         {
-            auto builder
+            const auto builder
                 = mutateGraph(base(), [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                       auto* node = graph.nodes.at(0).get();
                       if(backward)
@@ -541,18 +541,18 @@ TEST_F(TestLayernormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
     for(const bool backward : {false, true})
     {
         SCOPED_TRACE(backward ? "backward" : "forward");
-        auto builder = mutateGraph(backward ? createValidLayernormBwdGraph()
-                                            : createValidLayernormFpropGraph(),
-                                   [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                                       for(auto& tensor : graph.tensors)
-                                       {
-                                           if(tensor->name == "epsilon")
-                                           {
-                                               tensor->value.Reset();
-                                               tensor->is_runtime_pass_by_value = true;
-                                           }
-                                       }
-                                   });
+        const auto builder = mutateGraph(backward ? createValidLayernormBwdGraph()
+                                                  : createValidLayernormFpropGraph(),
+                                         [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                                             for(const auto& tensor : graph.tensors)
+                                             {
+                                                 if(tensor->name == "epsilon")
+                                                 {
+                                                     tensor->value.Reset();
+                                                     tensor->is_runtime_pass_by_value = true;
+                                                 }
+                                             }
+                                         });
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
     }

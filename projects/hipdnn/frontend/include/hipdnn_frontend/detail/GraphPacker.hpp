@@ -85,7 +85,7 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
     // Set preferred engine ID if specified
     if(preferredEngineId.has_value())
     {
-        auto engineId = preferredEngineId.value();
+        const auto engineId = preferredEngineId.value();
         HIPDNN_CHECK_ERROR(
             setDescriptorAttrScalar(graphDesc.get(),
                                     HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT,

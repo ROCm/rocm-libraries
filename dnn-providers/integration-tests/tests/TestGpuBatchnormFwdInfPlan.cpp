@@ -60,7 +60,7 @@ flatbuffers::FlatBufferBuilder
                                                    &channelOnlyStrides,
                                                    &channelOnlyDims));
 
-    auto attrs = CreateBatchnormInferenceAttributes(
+    const auto attrs = CreateBatchnormInferenceAttributes(
         builder, xUid, meanUid, invVarianceUid, scaleUid, biasUid, yUid);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -68,7 +68,7 @@ flatbuffers::FlatBufferBuilder
                                      computeDataType,
                                      NodeAttributes::BatchnormInferenceAttributes,
                                      attrs.Union()));
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "batchnormInf_Graph", computeDataType, ioDataType, ioDataType, &tensors, &nodes);
     builder.Finish(graph);
     return builder;
@@ -78,8 +78,8 @@ flatbuffers::FlatBufferBuilder
 
 TEST(TestGpuBatchnormFwdInfPlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfPlanBuilder<DataType::FLOAT,
@@ -89,7 +89,7 @@ TEST(TestGpuBatchnormFwdInfPlanBuilder, PlanConstruction)
                                         DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuBatchnormFwdInfPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -99,8 +99,8 @@ TEST(TestGpuBatchnormFwdInfPlanBuilder, PlanConstruction)
 
 TEST(TestGpuBatchnormFwdInfPlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfPlanBuilder<DataType::FLOAT,
@@ -128,8 +128,8 @@ TEST(TestGpuBatchnormFwdInfPlanBuilder, IsApplicable)
 
 TEST(TestGpuBatchnormFwdInfPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfPlanBuilder<DataType::FLOAT,
@@ -144,8 +144,8 @@ TEST(TestGpuBatchnormFwdInfPlanBuilder, BuildNodePlanThrowsForWrongAttributesTyp
 
 TEST(TestGpuBatchnormFwdInfPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormFwdInfPlanBuilder<DataType::FLOAT,
@@ -175,10 +175,10 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     const auto perChannelDims = getDerivedShape(dims); // {1, C, 1, 1}
     const auto perChannelStrides = generateStrides(perChannelDims, layout.strideOrder);
 
-    auto ioDataType = nativeTypeToDataType<IOType>();
-    auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
-    auto meanInvVarianceDataType = nativeTypeToDataType<MeanVarType>();
-    auto computeDataType = nativeTypeToDataType<ComputeType>();
+    const auto ioDataType = nativeTypeToDataType<IOType>();
+    const auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+    const auto meanInvVarianceDataType = nativeTypeToDataType<MeanVarType>();
+    const auto computeDataType = nativeTypeToDataType<ComputeType>();
 
     constexpr int64_t X_UID = 1;
     constexpr int64_t Y_UID = 2;
@@ -187,22 +187,22 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     constexpr int64_t MEAN_UID = 5;
     constexpr int64_t INV_VARIANCE_UID = 6;
 
-    auto graphBuilder = createValidBatchnormInferenceGraph(X_UID,
-                                                           Y_UID,
-                                                           SCALE_UID,
-                                                           BIAS_UID,
-                                                           MEAN_UID,
-                                                           INV_VARIANCE_UID,
-                                                           dims,
-                                                           perChannelDims,
-                                                           ioStrides,
-                                                           perChannelStrides,
-                                                           ioDataType,
-                                                           scaleBiasDataType,
-                                                           meanInvVarianceDataType,
-                                                           computeDataType);
+    const auto graphBuilder = createValidBatchnormInferenceGraph(X_UID,
+                                                                 Y_UID,
+                                                                 SCALE_UID,
+                                                                 BIAS_UID,
+                                                                 MEAN_UID,
+                                                                 INV_VARIANCE_UID,
+                                                                 dims,
+                                                                 perChannelDims,
+                                                                 ioStrides,
+                                                                 perChannelStrides,
+                                                                 ioDataType,
+                                                                 scaleBiasDataType,
+                                                                 meanInvVarianceDataType,
+                                                                 computeDataType);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const auto* nodeAttributes = graphWrap.getNode(0).attributes_as_BatchnormInferenceAttributes();

@@ -68,8 +68,8 @@ TEST_F(TestObserveSupportOnly, BuildErrorReturnsEmpty)
         _mocks.dependencies(testing_support::hostPolicy()));
     harness.setBundle(nullptr, "fake/bundle.json", singleGraphClaimLocator("fake/bundle.json"));
 
-    auto session = testing_support::buildErrorSession("from_binary failed");
-    auto observations = harness.observeSupportOnly(session, {ENGINE_A, ENGINE_B});
+    const auto session = testing_support::buildErrorSession("from_binary failed");
+    const auto observations = harness.observeSupportOnly(session, {ENGINE_A, ENGINE_B});
 
     EXPECT_TRUE(observations.empty());
 }
@@ -80,8 +80,8 @@ TEST_F(TestObserveSupportOnly, UnresolvedQueryReturnsEmpty)
         _mocks.dependencies(testing_support::hostPolicy()));
     harness.setBundle(nullptr, "fake/bundle.json", singleGraphClaimLocator("fake/bundle.json"));
 
-    auto session = unresolvedSession();
-    auto observations = harness.observeSupportOnly(session, {ENGINE_A, ENGINE_B});
+    const auto session = unresolvedSession();
+    const auto observations = harness.observeSupportOnly(session, {ENGINE_A, ENGINE_B});
 
     EXPECT_TRUE(observations.empty());
 }
@@ -92,7 +92,7 @@ TEST_F(TestObserveSupportOnly, ResolvedQueryRecordsAllEngines)
         _mocks.dependencies(testing_support::hostPolicy()));
     harness.setBundle(nullptr, "fake/bundle.json", singleGraphClaimLocator("fake/bundle.json"));
 
-    auto session = resolvedSession({ENGINE_A_ID});
+    const auto session = resolvedSession({ENGINE_A_ID});
     auto observations = harness.observeSupportOnly(session, {ENGINE_A, ENGINE_B});
 
     ASSERT_EQ(observations.size(), 2u);
@@ -108,7 +108,7 @@ TEST_F(TestObserveSupportOnly, ModeCNarrowsToSelectedEngine)
                                                  ENGINE_A);
     harness.setBundle(nullptr, "fake/bundle.json", singleGraphClaimLocator("fake/bundle.json"));
 
-    auto session = resolvedSession({ENGINE_A_ID});
+    const auto session = resolvedSession({ENGINE_A_ID});
     auto observations = harness.observeSupportOnly(session, {ENGINE_A, ENGINE_B});
 
     ASSERT_EQ(observations.size(), 1u);
@@ -122,7 +122,7 @@ TEST_F(TestObserveSupportOnly, CarriesArchAndPlatformFromPolicy)
         _mocks.dependencies(testing_support::hostPolicy()));
     harness.setBundle(nullptr, "fake/bundle.json", singleGraphClaimLocator("fake/bundle.json"));
 
-    auto session = resolvedSession({});
+    const auto session = resolvedSession({});
     auto observations = harness.observeSupportOnly(session, {ENGINE_A});
 
     ASSERT_EQ(observations.size(), 1u);
@@ -239,7 +239,7 @@ TEST_F(TestSkipsBeforeObservation, ArchGuardSkipIsCounted)
     HarnessMocks mocks;
     IntegrationBundleVerificationHarness harness(mocks.dependencies(hostPolicy()), ENGINE_A);
 
-    auto guarded = bundle();
+    const auto guarded = bundle();
     guarded->metadata.gpuArchitecture = "gfx1100"; // hostPolicy() runs gfx942
     harness.setBundle(guarded, _tempDir / "Bundle");
 
@@ -263,7 +263,7 @@ TEST_F(TestSkipsBeforeObservation, VramGuardSkipIsCounted)
     HarnessMocks mocks;
     IntegrationBundleVerificationHarness harness(mocks.dependencies(policy), ENGINE_A);
 
-    auto guarded = bundle();
+    const auto guarded = bundle();
     guarded->metadata.minimumVramMb = 16000;
     harness.setBundle(guarded, _tempDir / "Bundle");
 

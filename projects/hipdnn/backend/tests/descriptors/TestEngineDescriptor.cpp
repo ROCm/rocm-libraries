@@ -132,7 +132,7 @@ public:
     /// Two-call read of HIPDNN_ATTR_ENGINE_NAME_EXT: count, then value.
     std::string getEngineName() const
     {
-        auto engine = getEngineDescriptor();
+        const auto engine = getEngineDescriptor();
 
         int64_t elementCount = 0;
         EXPECT_NO_THROW(engine->getAttribute(
@@ -188,8 +188,8 @@ protected:
                                                  const std::vector<int32_t>& behaviorNotes)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto behaviorNotesVector = builder.CreateVector(behaviorNotes);
-        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        const auto behaviorNotesVector = builder.CreateVector(behaviorNotes);
+        const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
             builder, engineId, 0, behaviorNotesVector);
         builder.Finish(engineDetails);
         _engineDetailsBuffer = builder.Release();
@@ -203,7 +203,7 @@ protected:
         int64_t engineId, const std::optional<std::vector<int32_t>>& numericalNotes)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
             builder,
             engineId,
             nullptr,
@@ -219,7 +219,7 @@ protected:
     void serializeEngineDetailsWithName(int64_t engineId, const char* name)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
             builder, engineId, nullptr, nullptr, name);
         builder.Finish(engineDetails);
         _engineDetailsBuffer = builder.Release();
@@ -239,7 +239,7 @@ protected:
 
 TEST_F(TestEngineDescriptor, CreateEngineDescriptor)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     ASSERT_NE(engine, nullptr);
     ASSERT_FALSE(engine->isFinalized());
     ASSERT_EQ(engine->getType(), HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
@@ -247,7 +247,7 @@ TEST_F(TestEngineDescriptor, CreateEngineDescriptor)
 
 TEST_F(TestEngineDescriptor, SetEngineDescriptorGraph)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     EXPECT_CALL(*getMockGraphBadType(), isFinalized()).Times(1);
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -298,7 +298,7 @@ TEST_F(TestEngineDescriptor, SetEngineDescriptorGraph)
 
 TEST_F(TestEngineDescriptor, SetEngineDescriptorGlobalId)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     int64_t gidx = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -320,7 +320,7 @@ TEST_F(TestEngineDescriptor, SetEngineDescriptorGlobalId)
 
 TEST_F(TestEngineDescriptor, SetAttrOnFinalizedEngineDescriptor)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
 
     ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
@@ -332,7 +332,7 @@ TEST_F(TestEngineDescriptor, SetAttrOnFinalizedEngineDescriptor)
 
 TEST_F(TestEngineDescriptor, FinalizeEngineDescriptor)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(engine->finalize(), HIPDNN_STATUS_BAD_PARAM);
 
     makeEngineFinalized();
@@ -342,7 +342,7 @@ TEST_F(TestEngineDescriptor, FinalizeEngineDescriptor)
 
 TEST_F(TestEngineDescriptor, GetAttrOnUnfinalizedEngineDescriptor)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     hipdnnBackendDescriptor_t dummyGraph = nullptr;
 
     ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
@@ -355,7 +355,7 @@ TEST_F(TestEngineDescriptor, GetAttrOnUnfinalizedEngineDescriptor)
 
 TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     int32_t dummy;
 
     makeEngineFinalized();
@@ -368,7 +368,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
 
 TEST_F(TestEngineDescriptor, GetBehaviorNotesCountWithNoNotes)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
@@ -384,7 +384,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotes)
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = 0;
@@ -411,7 +411,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotesWithoutElementCount)
         0,
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     std::vector<hipdnnBackendBehaviorNote_t> notes(2);
@@ -430,7 +430,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesNullOutputReturnsCount)
         0,
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
@@ -445,7 +445,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesZeroRequestedWithOutputReturnsCount
         0,
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
@@ -458,7 +458,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesZeroRequestedWithOutputReturnsCount
 
 TEST_F(TestEngineDescriptor, GetBehaviorNotesCountQueryRequiresElementCount)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -469,7 +469,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesCountQueryRequiresElementCount)
 
 TEST_F(TestEngineDescriptor, GetBehaviorNotesInvalidType)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
 
     int64_t noteCount = 0;
@@ -485,7 +485,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesInsufficientOutputCount)
         0,
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
@@ -501,7 +501,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownBehaviorNote)
     constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
     serializeEngineDetailsWithBehaviorNotes(0, {UNKNOWN_NOTE});
 
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
@@ -515,7 +515,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownBehaviorNote)
 TEST_F(TestEngineDescriptor, GetNumericalNotesAbsentFieldReportsNondeterministic)
 {
     // Default fixture buffer carries no numerical_notes field.
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TENSOR_CORE;
@@ -529,7 +529,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesAbsentFieldReportsNondeterministic
 TEST_F(TestEngineDescriptor, GetNumericalNotesExplicitEmptyListReportsNoNotes)
 {
     serializeEngineDetailsWithNumericalNotes(0, std::vector<int32_t>{});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
@@ -545,7 +545,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesReturnsNotes)
         std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD,
                              HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS,
                              HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = 0;
@@ -570,7 +570,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesWithoutElementCount)
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     std::vector<hipdnnBackendNumericalNote_t> notes(2);
@@ -587,7 +587,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesZeroRequestedWithOutputReturnsCoun
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT;
@@ -602,7 +602,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesNullOutputWithRequestedCountReturn
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
@@ -617,7 +617,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesAcceptsZeroValuedNote)
     static_assert(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE == 0);
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{static_cast<int32_t>(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_FFT;
@@ -630,7 +630,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesAcceptsZeroValuedNote)
 
 TEST_F(TestEngineDescriptor, GetNumericalNotesCountQueryRequiresElementCount)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -641,7 +641,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesCountQueryRequiresElementCount)
 
 TEST_F(TestEngineDescriptor, GetNumericalNotesInvalidType)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
 
     int64_t noteCount = 0;
@@ -655,7 +655,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesInsufficientOutputCount)
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT;
@@ -673,7 +673,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownNumericalNote)
     constexpr hipdnnBackendNumericalNote_t UNKNOWN_NOTE = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT + 1;
     serializeEngineDetailsWithNumericalNotes(0, std::vector<int32_t>{UNKNOWN_NOTE});
 
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_WINOGRAD;
@@ -686,7 +686,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownNumericalNote)
 
 TEST_F(TestEngineDescriptor, SetNumericalNotesIsNotSupported)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_WINOGRAD;
     ASSERT_THROW_HIPDNN_STATUS(
         engine->setAttribute(
@@ -722,7 +722,7 @@ TEST_F(TestEngineDescriptor, FinalizeQueriesOnlyThePinnedEngineApplicability)
 /// The owning plugin's applicability failure reaches the caller unchanged.
 TEST_F(TestEngineDescriptor, FinalizePropagatesOwningPluginApplicabilityError)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     setGraph();
     setGlobalIndex(ENGINE_ID);
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
@@ -750,7 +750,7 @@ TEST_F(TestEngineDescriptor, FinalizePropagatesOwningPluginApplicabilityError)
 /// A pinned engine that is simply not applicable to the graph is still a bad parameter.
 TEST_F(TestEngineDescriptor, FinalizeRejectsPinnedEngineThatIsNotApplicable)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     setGraph();
     setGlobalIndex(ENGINE_ID);
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
@@ -765,7 +765,7 @@ TEST_F(TestEngineDescriptor, FinalizeRejectsPinnedEngineThatIsNotApplicable)
 
 TEST_F(TestEngineDescriptor, HeuristicResultMaterializesWithoutSelectorOrMetadataQueries)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
     EXPECT_CALL(*getMockGraph(), getHandle()).Times(0);
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _)).Times(0);
@@ -780,7 +780,7 @@ TEST_F(TestEngineDescriptor, HeuristicResultMaterializesWithoutSelectorOrMetadat
 
 TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPartialNotes)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
     engine->initializeHeuristicResult(getMockGraph(), ENGINE_ID);
     serializeEngineDetailsWithBehaviorNotes(ENGINE_ID,
@@ -821,7 +821,7 @@ TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPart
 
 TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPartialNumericalNotes)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
     engine->initializeHeuristicResult(getMockGraph(), ENGINE_ID);
     serializeEngineDetailsWithNumericalNotes(
@@ -862,7 +862,7 @@ TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPart
 
 TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     ScopedDescriptor graph;
     ScopedDescriptor graph2;
 
@@ -905,7 +905,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)
 
 TEST_F(TestEngineDescriptor, GetEngineDescriptorGlobalId)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     int64_t gidx = -1;
 
     makeEngineFinalized();
@@ -936,15 +936,15 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorGlobalId)
 
 TEST_F(TestEngineDescriptor, GetGraphThrowsIfNotFinalized)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(engine->getGraph(), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST_F(TestEngineDescriptor, GetGraphReturnsPointerIfFinalized)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
-    auto graphPtr = engine->getGraph();
+    const auto graphPtr = engine->getGraph();
     ASSERT_NE(graphPtr, nullptr);
     ASSERT_EQ(static_cast<const IBackendDescriptor*>(graphPtr.get()),
               static_cast<const IBackendDescriptor*>(getMockGraph().get()));
@@ -952,15 +952,15 @@ TEST_F(TestEngineDescriptor, GetGraphReturnsPointerIfFinalized)
 
 TEST_F(TestEngineDescriptor, GetEngineIdThrowsIfNotFinalized)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(engine->getEngineId(), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST_F(TestEngineDescriptor, GetEngineIdReturnsValueIfFinalized)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
-    auto engineId = engine->getEngineId();
+    const auto engineId = engine->getEngineId();
     ASSERT_EQ(engineId, 0);
 }
 
@@ -1072,7 +1072,7 @@ TEST_F(TestEngineDescriptor, ReadingTheNameFailsBeforeResolutionWhenEngineDetail
 
 TEST_F(TestEngineDescriptor, GetEngineNameInvalidType)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t elementCount = 0;
@@ -1084,7 +1084,7 @@ TEST_F(TestEngineDescriptor, GetEngineNameInvalidType)
 
 TEST_F(TestEngineDescriptor, GetEngineNameNotFinalized)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1095,7 +1095,7 @@ TEST_F(TestEngineDescriptor, GetEngineNameNotFinalized)
 
 TEST_F(TestEngineDescriptor, SetEngineNameIsRejected)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     const char* name = "USER_SUPPLIED_ENGINE";
 
     ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_NAME_EXT,
@@ -1137,14 +1137,15 @@ protected:
         std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
         for(size_t i = 0; i < knobCount; ++i)
         {
-            auto knobIdStr = builder.CreateString("test_knob_" + std::to_string(i));
-            auto description = builder.CreateString("Test knob description " + std::to_string(i));
+            const auto knobIdStr = builder.CreateString("test_knob_" + std::to_string(i));
+            const auto description
+                = builder.CreateString("Test knob description " + std::to_string(i));
 
             // Create a default int value
-            auto defaultValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(
+            const auto defaultValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(
                 builder, static_cast<int64_t>(i * 10));
 
-            auto knob = hipdnn_flatbuffers_sdk::data_objects::CreateKnob(
+            const auto knob = hipdnn_flatbuffers_sdk::data_objects::CreateKnob(
                 builder,
                 knobIdStr,
                 description,
@@ -1153,8 +1154,8 @@ protected:
             knobOffsets.push_back(knob);
         }
 
-        auto knobsVector = builder.CreateVector(knobOffsets);
-        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        const auto knobsVector = builder.CreateVector(knobOffsets);
+        const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
             builder, engineId, knobsVector);
         builder.Finish(engineDetails);
 
@@ -1177,7 +1178,7 @@ protected:
 
 TEST_F(TestEngineDescriptor, GetKnobInfoCountWithNoKnobs)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t knobCount = -1;
@@ -1191,7 +1192,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoCountWithNoKnobs)
 
 TEST_F(TestEngineDescriptor, GetKnobInfoInvalidType)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
 
     int64_t knobCount = 0;
@@ -1203,7 +1204,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoInvalidType)
 
 TEST_F(TestEngineDescriptor, GetKnobInfoNotFinalized)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
 
     int64_t knobCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
@@ -1216,7 +1217,7 @@ TEST_F(TestEngineDescriptor, GetKnobInfoNotFinalized)
 
 TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoCountWithKnobs)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedWithKnobs();
 
     int64_t knobCount = -1;
@@ -1230,7 +1231,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoCountWithKnobs)
 
 TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedWithKnobs();
 
     // First, get the count
@@ -1271,7 +1272,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
 
 TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedWithKnobs();
 
     int64_t returnedCount = 0;
@@ -1285,7 +1286,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
 
 TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoRejectsNegativeRequestedCount)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedWithKnobs();
 
     const hipdnnBackendFlatbufferData_t sentinel{reinterpret_cast<const void*>(0x1), 7};
@@ -1325,7 +1326,7 @@ std::unique_ptr<HipdnnBackendDescriptor> createFinalizedKnobChoice(const std::st
                                                                    int64_t value)
 {
     auto wrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
-    auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
+    const auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                        HIPDNN_TYPE_CHAR,
                        static_cast<int64_t>(knobId.size()),
@@ -1339,10 +1340,10 @@ std::unique_ptr<HipdnnBackendDescriptor> createFinalizedKnobChoice(const std::st
 
 TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedOnce)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     const int64_t offset = 7;
     const int64_t limit = 3;
-    auto knobWrapper = createFinalizedKnobChoice("tile", 128);
+    const auto knobWrapper = createFinalizedKnobChoice("tile", 128);
     auto* knobPtr = knobWrapper.get();
 
     expectFinalizeCalls(ENGINE_ID);
@@ -1404,7 +1405,7 @@ TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedO
 
 TEST_F(TestEngineDescriptor, EnumerationDeclineIsNotSupportedRatherThanAnEmptyPage)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
 
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
@@ -1428,7 +1429,7 @@ TEST_F(TestEngineDescriptor, EnumerationDeclineIsNotSupportedRatherThanAnEmptyPa
 
 TEST_F(TestEngineDescriptor, CandidatePageBoundsRejectNonProgressingOrUnboundedRequests)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     for(const int64_t limit : {int64_t{0}, int64_t{10001}})
     {
         ASSERT_THROW_HIPDNN_STATUS(
@@ -1463,8 +1464,8 @@ TEST_F(TestEngineDescriptor, CandidatePageBoundsRejectNonProgressingOrUnboundedR
 
 TEST_F(TestEngineDescriptor, CandidateScopeRequiresFinalizedKnobChoices)
 {
-    auto engine = getEngineDescriptor();
-    auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    const auto engine = getEngineDescriptor();
+    const auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
     auto* knobPtr = knobWrapper.get();
     ASSERT_THROW_HIPDNN_STATUS(
         engine->setAttribute(
@@ -1475,7 +1476,7 @@ TEST_F(TestEngineDescriptor, CandidateScopeRequiresFinalizedKnobChoices)
 TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindEvaluateFlagAndMetric)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     const int64_t evaluate = 0;
 
     expectFinalizeCalls(ENGINE_ID);

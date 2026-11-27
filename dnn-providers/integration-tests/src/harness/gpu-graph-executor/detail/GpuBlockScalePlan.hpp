@@ -127,8 +127,7 @@ public:
         const std::vector<int64_t> xDims(x.dims()->begin(), x.dims()->end());
         const std::vector<int64_t> yDims(y.dims()->begin(), y.dims()->end());
         const std::vector<int64_t> scaleDims(scale.dims()->begin(), scale.dims()->end());
-        const auto axis
-            = attributes->axis() ? std::make_optional(attributes->axis().value()) : std::nullopt;
+        const auto axis = attributes->axis();
         return !hipdnn_gpu_ref::GpuFpReferenceBlockScale::checkQuantize(
                    xDims, yDims, scaleDims, attributes->block_size(), axis)
                && !anyOperandIsRuntimePassByValue(tensorMap,
@@ -147,15 +146,14 @@ public:
             throw std::runtime_error("Node attributes are not BlockScaleQuantizeAttributes");
         }
         const auto& tensors = graph.getTensorMap();
-        GpuBlockScaleQuantizeParams params{
-            hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensors.at(attributes->x_tensor_uid())),
-            hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensors.at(attributes->y_tensor_uid())),
-            hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensors.at(attributes->scale_tensor_uid())),
-            attributes->block_size(),
-            attributes->axis() ? std::make_optional(attributes->axis().value()) : std::nullopt};
+        GpuBlockScaleQuantizeParams params{hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                               *tensors.at(attributes->x_tensor_uid())),
+                                           hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                               *tensors.at(attributes->y_tensor_uid())),
+                                           hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                               *tensors.at(attributes->scale_tensor_uid())),
+                                           attributes->block_size(),
+                                           attributes->axis()};
         using XType = hipdnn_test_sdk::utilities::DataTypeToNative<XEnum>;
         using YType = hipdnn_test_sdk::utilities::DataTypeToNative<YEnum>;
         using ScaleType = hipdnn_test_sdk::utilities::DataTypeToNative<ScaleEnum>;

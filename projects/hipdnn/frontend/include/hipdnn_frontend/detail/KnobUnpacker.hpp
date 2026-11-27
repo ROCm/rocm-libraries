@@ -121,7 +121,7 @@ namespace hipdnn_frontend::detail
     std::vector<std::string> validValuesList;
     {
         int64_t count = 0;
-        auto countStatus
+        const auto countStatus
             = hipdnnBackend()->backendGetAttribute(knobDesc,
                                                    HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                                    HIPDNN_TYPE_CHAR,
@@ -140,7 +140,7 @@ namespace hipdnn_frontend::detail
         {
             std::vector<char> buffer(static_cast<size_t>(count));
             int64_t actualCount = 0;
-            auto getStatus
+            const auto getStatus
                 = hipdnnBackend()->backendGetAttribute(knobDesc,
                                                        HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_STRING,
                                                        HIPDNN_TYPE_CHAR,
@@ -199,7 +199,7 @@ namespace hipdnn_frontend::detail
     // Read knob ID — cannot use HIPDNN_FE_TRY because we need knobId
     // for the empty-check immediately after.
     std::string knobId;
-    auto err
+    const auto err
         = getDescriptorAttrString(knobDesc, HIPDNN_ATTR_KNOB_INFO_TYPE, knobId, "knob info ID");
     if(err.is_bad())
     {

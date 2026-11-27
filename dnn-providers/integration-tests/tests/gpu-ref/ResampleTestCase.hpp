@@ -124,7 +124,7 @@ void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual,
                     float tolerance)
 {
-    auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, 0.0f);
+    const auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, 0.0f);
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 
@@ -137,7 +137,7 @@ template <typename T,
 void assertAllExact(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual)
 {
-    auto validator = hipdnn_gpu_ref::GpuIntReferenceValidation<T>();
+    const auto validator = hipdnn_gpu_ref::GpuIntReferenceValidation<T>();
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 

@@ -40,21 +40,24 @@ template <>
 inline auto to<data_objects::ResampleFwdAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                     const nlohmann::json& entry)
 {
-    auto xUid = entry.at("x_tensor_uid").get<int64_t>();
-    auto yUid = entry.at("y_tensor_uid").get<int64_t>();
-    auto indexUid
+    const auto xUid = entry.at("x_tensor_uid").get<int64_t>();
+    const auto yUid = entry.at("y_tensor_uid").get<int64_t>();
+    const auto indexUid
         = entry.contains("index_tensor_uid")
               ? ::flatbuffers::Optional<int64_t>(entry.at("index_tensor_uid").get<int64_t>())
               : ::flatbuffers::nullopt;
-    auto prePadding = builder.CreateVector(entry.at("pre_padding").get<std::vector<int64_t>>());
-    auto postPadding = builder.CreateVector(entry.at("post_padding").get<std::vector<int64_t>>());
-    auto stride = builder.CreateVector(entry.at("stride").get<std::vector<int64_t>>());
-    auto window = builder.CreateVector(entry.at("window").get<std::vector<int64_t>>());
-    auto resampleMode = entry.at("resample_mode").get<data_objects::ResampleMode>();
-    auto paddingMode = entry.at("padding_mode").get<data_objects::PaddingMode>();
-    auto generateIndex = entry.contains("generate_index")
-                             ? ::flatbuffers::Optional<bool>(entry.at("generate_index").get<bool>())
-                             : ::flatbuffers::nullopt;
+    const auto prePadding
+        = builder.CreateVector(entry.at("pre_padding").get<std::vector<int64_t>>());
+    const auto postPadding
+        = builder.CreateVector(entry.at("post_padding").get<std::vector<int64_t>>());
+    const auto stride = builder.CreateVector(entry.at("stride").get<std::vector<int64_t>>());
+    const auto window = builder.CreateVector(entry.at("window").get<std::vector<int64_t>>());
+    const auto resampleMode = entry.at("resample_mode").get<data_objects::ResampleMode>();
+    const auto paddingMode = entry.at("padding_mode").get<data_objects::PaddingMode>();
+    const auto generateIndex
+        = entry.contains("generate_index")
+              ? ::flatbuffers::Optional<bool>(entry.at("generate_index").get<bool>())
+              : ::flatbuffers::nullopt;
 
     return data_objects::CreateResampleFwdAttributes(builder,
                                                      xUid,

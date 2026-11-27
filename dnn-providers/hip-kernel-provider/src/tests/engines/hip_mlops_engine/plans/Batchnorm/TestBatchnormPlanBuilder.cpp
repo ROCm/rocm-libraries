@@ -67,7 +67,7 @@ protected:
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -76,7 +76,7 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidBwdGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -85,7 +85,7 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidBwdGraph)
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidFwdTrainingGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -94,7 +94,7 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidFwdTrainingGraph
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {588, 196, 14, 1},
         {1, 3, 14, 14},
         /*withMeanVariance=*/true,
@@ -107,7 +107,7 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabled
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -120,7 +120,7 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)
 
 TEST_F(TestBatchnormPlanBuilder, IsNotApplicableForBatchnormGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -129,7 +129,7 @@ TEST_F(TestBatchnormPlanBuilder, IsNotApplicableForBatchnormGraph)
 
 TEST_F(TestBatchnormPlanBuilder, OneNodeGraphNotApplicableForNonF32ComputeType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -142,11 +142,12 @@ TEST_F(TestBatchnormPlanBuilder, OneNodeGraphNotApplicableForNonF32ComputeType)
 
 TEST_F(TestBatchnormPlanBuilder, TwoNodeGraphNotApplicableForNonF32ComputeType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph(
-        {150528, 50176, 224, 1},
-        {1, 3, 224, 224},
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph(
+            {150528, 50176, 224, 1},
+            {1, 3, 224, 224},
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -155,7 +156,7 @@ TEST_F(TestBatchnormPlanBuilder, TwoNodeGraphNotApplicableForNonF32ComputeType)
 
 TEST_F(TestBatchnormPlanBuilder, ThreeNodeGraphNotApplicableForNonF32ComputeType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         false,
@@ -175,7 +176,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -188,7 +189,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeBwd)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -201,7 +202,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeFwdTraining)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -214,7 +215,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedBackwardGraph)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -225,7 +226,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedBackwardGraph)
 
 TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -235,7 +236,7 @@ TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 
 TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZeroForFwdTrainingGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -249,21 +250,21 @@ TEST_F(TestBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsZeroForFwdTrainingGra
 
 TEST_F(TestBatchnormPlanBuilder, GetCustomKnobsReturnsEmpty)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
 TEST_F(TestBatchnormPlanBuilder, GetCustomKnobsReturnsEmptyForFwdTrainingGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
@@ -374,7 +375,7 @@ flatbuffers::FlatBufferBuilder
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
-    auto bnormAttributes
+    const auto bnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
             builder,
             xUid,
@@ -393,7 +394,7 @@ flatbuffers::FlatBufferBuilder
             BatchnormInferenceAttributesVarianceExt,
         bnormAttributes.Union()));
 
-    auto activAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto activAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt, // relu_lower_clip
@@ -412,7 +413,7 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         activAttributes.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -570,15 +571,16 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormFwdActivGraph(bool xTensorV
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributes(
-        builder,
-        xUid, // x_tensor_uid
-        meanUid, // mean_tensor_uid
-        varUid, // inv_variance_tensor_uid
-        scaleUid, // scale_tensor_uid
-        biasUid, // bias_tensor_uid
-        yBnUid // y_tensor_uid (BN_Y - virtual)
-    );
+    const auto bnInfAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributes(
+            builder,
+            xUid, // x_tensor_uid
+            meanUid, // mean_tensor_uid
+            varUid, // inv_variance_tensor_uid
+            scaleUid, // scale_tensor_uid
+            biasUid, // bias_tensor_uid
+            yBnUid // y_tensor_uid (BN_Y - virtual)
+        );
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm",
@@ -586,7 +588,7 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormFwdActivGraph(bool xTensorV
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
-    auto activAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto activAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         flatbuffers::nullopt, // relu_lower_clip
@@ -605,7 +607,7 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormFwdActivGraph(bool xTensorV
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         activAttributes.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -754,15 +756,16 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormBwdActivGraph(bool xTensorV
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributes(
-        builder,
-        1, // x_tensor_uid
-        0, // mean_tensor_uid
-        0, // inv_variance_tensor_uid
-        2, // scale_tensor_uid
-        3, // bias_tensor_uid
-        10 // y_tensor_uid (BN_Y - virtual)
-    );
+    const auto bnInfAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormInferenceAttributes(
+            builder,
+            1, // x_tensor_uid
+            0, // mean_tensor_uid
+            0, // inv_variance_tensor_uid
+            2, // scale_tensor_uid
+            3, // bias_tensor_uid
+            10 // y_tensor_uid (BN_Y - virtual)
+        );
 
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
@@ -772,18 +775,19 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormBwdActivGraph(bool xTensorV
         bnInfAttributes.Union()));
 
     // Node 1: Pointwise (RELU_BWD)
-    auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
-        builder,
-        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
-        std::nullopt, // relu_lower_clip
-        std::nullopt, // relu_upper_clip
-        std::nullopt, // relu_lower_clip_slope
-        flatbuffers::nullopt, // axis_tensor_uid
-        6, // in_0_tensor_uid (dy)
-        flatbuffers::Optional<int64_t>(10), // in_1_tensor_uid (BN_Y)
-        flatbuffers::nullopt, // in_2_tensor_uid
-        11 // out_0_tensor_uid (DX_drelu - virtual)
-    );
+    const auto pointwiseAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+            builder,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+            std::nullopt, // relu_lower_clip
+            std::nullopt, // relu_upper_clip
+            std::nullopt, // relu_lower_clip_slope
+            flatbuffers::nullopt, // axis_tensor_uid
+            6, // in_0_tensor_uid (dy)
+            flatbuffers::Optional<int64_t>(10), // in_1_tensor_uid (BN_Y)
+            flatbuffers::nullopt, // in_2_tensor_uid
+            11 // out_0_tensor_uid (DX_drelu - virtual)
+        );
 
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
@@ -793,19 +797,20 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormBwdActivGraph(bool xTensorV
         pointwiseAttributes.Union()));
 
     // Node 2: Batchnorm Backward
-    auto bnBwdAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormBackwardAttributes(
-        builder,
-        11, // dy_tensor_uid (DX_drelu)
-        1, // x_tensor_uid
-        flatbuffers::nullopt, // mean_tensor_uid
+    const auto bnBwdAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormBackwardAttributes(
+            builder,
+            11, // dy_tensor_uid (DX_drelu)
+            1, // x_tensor_uid
+            flatbuffers::nullopt, // mean_tensor_uid
 
-        flatbuffers::nullopt, // inv_variance_tensor_uid
-        2, // scale_tensor_uid
-        flatbuffers::Offset<flatbuffers::Vector<int64_t>>(), // peer_stats_tensor_uid
-        7, // dx_tensor_uid
-        8, // dscale_tensor_uid
-        9 // dbias_tensor_uid
-    );
+            flatbuffers::nullopt, // inv_variance_tensor_uid
+            2, // scale_tensor_uid
+            flatbuffers::Offset<flatbuffers::Vector<int64_t>>(), // peer_stats_tensor_uid
+            7, // dx_tensor_uid
+            8, // dscale_tensor_uid
+            9 // dbias_tensor_uid
+        );
 
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
@@ -814,7 +819,7 @@ flatbuffers::FlatBufferBuilder createInvalidBatchnormBwdActivGraph(bool xTensorV
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttributes.Union()));
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -885,7 +890,7 @@ std::ostream& operator<<(std::ostream& os, const TrainingGraphMutation& value)
 
 TensorAttributesT& tensorByUid(GraphT& graph, int64_t uid)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->uid == uid)
         {
@@ -915,7 +920,7 @@ void makeScalarRuntime(GraphT& graph, int64_t scalarUid)
 flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(GraphT&)>& mutate
                                                     = nullptr)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    const auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {588, 196, 14, 1},
         {1, 3, 14, 14},
         /*withMeanVariance=*/true,
@@ -949,7 +954,7 @@ flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(Gra
 flatbuffers::FlatBufferBuilder
     noRunningStatsTrainingGraph(const std::function<void(GraphT&)>& mutate)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    const auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {588, 196, 14, 1}, {1, 3, 14, 14}, /*withMeanVariance=*/true);
     return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
 }
@@ -1013,7 +1018,7 @@ protected:
 
 TEST_F(TestBatchnormTrainingGraphDecline, CompleteRunningStatsGraphIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph();
+    const auto builder = mutatedTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1023,7 +1028,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, CompleteRunningStatsGraphIsAcceptedByB
 
 TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph([](GraphT& g) {
+    const auto builder = mutatedTrainingGraph([](GraphT& g) {
         batchnormAttrs(g).mean_tensor_uid.reset();
         batchnormAttrs(g).inv_variance_tensor_uid.reset();
     });
@@ -1036,7 +1041,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedB
 
 TEST_F(TestBatchnormTrainingGraphDecline, BothSavedStatisticsVirtualIsAcceptedByBothBuilders)
 {
-    auto builder = noRunningStatsTrainingGraph([](GraphT& g) {
+    const auto builder = noRunningStatsTrainingGraph([](GraphT& g) {
         tensorByUid(g, 6).virtual_ = true;
         tensorByUid(g, 7).virtual_ = true;
     });
@@ -1049,7 +1054,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, BothSavedStatisticsVirtualIsAcceptedBy
 
 TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedMeanVirtualIsDeclinedByBothBuilders)
 {
-    auto builder
+    const auto builder
         = noRunningStatsTrainingGraph([](GraphT& g) { tensorByUid(g, 6).virtual_ = true; });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1060,7 +1065,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedMeanVirtualIsDeclinedByBothBu
 
 TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedInvVarianceVirtualIsDeclinedByBothBuilders)
 {
-    auto builder
+    const auto builder
         = noRunningStatsTrainingGraph([](GraphT& g) { tensorByUid(g, 7).virtual_ = true; });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1071,7 +1076,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedInvVarianceVirtualIsDeclinedB
 
 TEST_F(TestBatchnormTrainingGraphDecline, RuntimeEpsilonGraphIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph(
+    const auto builder = mutatedTrainingGraph(
         [](GraphT& g) { makeScalarRuntime(g, batchnormAttrs(g).epsilon_tensor_uid); });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1082,7 +1087,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, RuntimeEpsilonGraphIsAcceptedByBothBui
 
 TEST_F(TestBatchnormTrainingGraphDecline, RuntimeMomentumGraphIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph(
+    const auto builder = mutatedTrainingGraph(
         [](GraphT& g) { makeScalarRuntime(g, *batchnormAttrs(g).momentum_tensor_uid); });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1093,7 +1098,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, RuntimeMomentumGraphIsAcceptedByBothBu
 
 TEST_P(TestBatchnormTrainingGraphDecline, BothBuildersDecline)
 {
-    auto builder = mutatedTrainingGraph(GetParam().mutate);
+    const auto builder = mutatedTrainingGraph(GetParam().mutate);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1156,7 +1161,8 @@ protected:
 
     bool isApplicable(const std::function<void(GraphT&)>& mutate)
     {
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(GetParam().makeGraph(), mutate);
+        const auto builder
+            = hipdnn_test_sdk::utilities::mutateGraph(GetParam().makeGraph(), mutate);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
         return _batchnormBuilder.isApplicable(_dummyHandle, graph);
@@ -1296,7 +1302,7 @@ protected:
 
 TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
 {
-    auto builder = GetParam().makeGraph();
+    const auto builder = GetParam().makeGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1305,10 +1311,10 @@ TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
 
 TEST_P(TestBatchnormOneNodeVirtualOperand, VirtualOperandIsNotApplicable)
 {
-    auto base = GetParam().makeGraph();
-    auto mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
+    const auto base = GetParam().makeGraph();
+    const auto mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
         const int64_t uid = GetParam().operandUid(graph);
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->uid == uid)
             {
@@ -1341,7 +1347,7 @@ using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
 
 TensorAttributesT& tensorNamed(GraphT& graph, const std::string& name)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->name == name)
         {
@@ -1410,7 +1416,7 @@ TEST_F(TestBatchnormPlanBuilder, ElementCountAtTheKernelIndexLimit)
 TEST_F(TestBatchnormPlanBuilder, DeclinesRunningStatisticsThatAreNotSavedStatisticShaped)
 {
     {
-        auto builder = createTrainingGraphWithRunningStats();
+        const auto builder = createTrainingGraphWithRunningStats();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
         ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -1431,7 +1437,7 @@ TEST_F(TestBatchnormPlanBuilder, DeclinesRunningStatisticsThatAreNotSavedStatist
         {
             const auto& mutate = mutation.second;
             SCOPED_TRACE(std::string(name) + " " + mutation.first);
-            auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
                 createTrainingGraphWithRunningStats(),
                 [&](GraphT& graph) { mutate(tensorNamed(graph, name)); });
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -1440,7 +1446,7 @@ TEST_F(TestBatchnormPlanBuilder, DeclinesRunningStatisticsThatAreNotSavedStatist
         }
     }
 
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+    const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         createTrainingGraphWithRunningStats(), [](GraphT& graph) {
             graph.nodes.at(0)->attributes.AsBatchnormAttributes()->momentum_tensor_uid = 9999;
         });

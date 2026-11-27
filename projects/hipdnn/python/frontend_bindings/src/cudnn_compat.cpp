@@ -116,7 +116,7 @@ hipdnnHandle_t rawHandleOrNull(const nb::handle& handle)
     {
         return nullptr;
     }
-    auto handlePtr = handle.attr("get")();
+    const auto handlePtr = handle.attr("get")();
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
 }

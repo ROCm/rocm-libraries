@@ -176,12 +176,12 @@ std::shared_ptr<Graph> buildPointwiseGraph(PointwiseMode mode)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto a = makeScalarTensor(1, "A");
-    auto b = makeScalarTensor(2, "B");
+    const auto a = makeScalarTensor(1, "A");
+    const auto b = makeScalarTensor(2, "B");
 
     PointwiseAttributes attrs;
     attrs.set_name("pointwise").set_mode(mode);
-    auto c = graph->pointwise(a, b, attrs);
+    const auto c = graph->pointwise(a, b, attrs);
     c->set_uid(3).set_name("C").set_output(true).set_data_type(DataType::FLOAT);
 
     return graph;
@@ -213,14 +213,14 @@ std::shared_ptr<Graph> buildConvFwdGraph()
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim({1, 2, 4, 4})
         .set_stride({32, 16, 4, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(2)
         .set_name("W")
         .set_dim({3, 2, 3, 3})
@@ -234,7 +234,7 @@ std::shared_ptr<Graph> buildConvFwdGraph()
         .set_dilation({1, 1})
         .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
-    auto y = graph->conv_fprop(x, w, attrs);
+    const auto y = graph->conv_fprop(x, w, attrs);
     y->set_uid(3).set_name("Y").set_output(true).set_data_type(DataType::FLOAT);
 
     return graph;
@@ -249,17 +249,17 @@ std::shared_ptr<Graph> buildUnsupportedGraph()
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto a = makeScalarTensor(1, "A");
-    auto b = makeScalarTensor(2, "B");
+    const auto a = makeScalarTensor(1, "A");
+    const auto b = makeScalarTensor(2, "B");
 
     PointwiseAttributes attrs1;
     attrs1.set_name("add_1").set_mode(PointwiseMode::ADD);
-    auto intermediate = graph->pointwise(a, b, attrs1);
+    const auto intermediate = graph->pointwise(a, b, attrs1);
     intermediate->set_uid(4).set_name("Intermediate").set_data_type(DataType::FLOAT);
 
     PointwiseAttributes attrs2;
     attrs2.set_name("add_2").set_mode(PointwiseMode::ADD);
-    auto c = graph->pointwise(intermediate, b, attrs2);
+    const auto c = graph->pointwise(intermediate, b, attrs2);
     c->set_uid(3).set_name("C").set_output(true).set_data_type(DataType::FLOAT);
 
     return graph;
@@ -324,7 +324,7 @@ protected:
                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first,
                                    DEFAULT_MIN,
@@ -425,7 +425,7 @@ TEST(IntegrationGpuKernelIngestorDirectAbi, SelfRegistersAllEngineIds)
 
 TEST_F(IntegrationGpuKernelIngestor, AcceptsTheGraphItsDescriptorsDescribe)
 {
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
 
     auto result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -440,7 +440,7 @@ TEST_F(IntegrationGpuKernelIngestor, AcceptsTheGraphItsDescriptorsDescribe)
 
 TEST_F(IntegrationGpuKernelIngestor, DeclinesATwoNodeGraph)
 {
-    auto graph = buildUnsupportedGraph();
+    const auto graph = buildUnsupportedGraph();
 
     auto result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -455,7 +455,7 @@ TEST_F(IntegrationGpuKernelIngestor, DeclinesATwoNodeGraph)
 
 TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
 {
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
 
     auto result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -494,12 +494,12 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
 
 TEST_F(IntegrationGpuKernelIngestor, ReportsTheMaximumWorkspaceAcrossSurvivingKernels)
 {
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
     buildAndCompile(*graph);
 
     // A max across the catalog, not one kernel's value.
     int64_t workspaceSize = 0;
-    auto result = graph->get_workspace_size(workspaceSize);
+    const auto result = graph->get_workspace_size(workspaceSize);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     EXPECT_EQ(workspaceSize, EXPECTED_WORKSPACE_BYTES);
 }
@@ -509,7 +509,7 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 {
     const auto& testCase = GetParam();
 
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
     buildAndCompile(*graph);
     GraphVerificationContext context(*graph);
     registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
@@ -536,9 +536,9 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
     const ScopedPluginLogCapture capture(this);
-    auto& recorder = capture.recorder();
+    const auto& recorder = capture.recorder();
 
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
 
     std::vector<KnobSetting> knobSettings;
     knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
@@ -584,13 +584,13 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)
 {
-    auto graphA = buildPointwiseAddGraph();
+    const auto graphA = buildPointwiseAddGraph();
     buildAndCompile(*graphA);
     GraphVerificationContext contextA(*graphA);
     registerValidatorsForOutputs(contextA, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(contextA, 0);
 
-    auto graphB = buildPointwiseAddGraph();
+    const auto graphB = buildPointwiseAddGraph();
     buildAndCompile(*graphB);
     GraphVerificationContext contextB(*graphB);
     registerValidatorsForOutputs(contextB, POINTWISE_TOLERANCE_EPSILONS);
@@ -605,17 +605,17 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
 // claims it, with nothing above the packs aware any of them exist.
 TEST_F(IntegrationGpuKernelIngestor, ResolvesEveryPointwiseOperationToTheOneEngine)
 {
-    auto addGraph = buildPointwiseAddGraph();
+    const auto addGraph = buildPointwiseAddGraph();
     ASSERT_EQ(addGraph->build_operation_graph(_handle).code, ErrorCode::OK);
     std::vector<int64_t> addEngines;
     ASSERT_EQ(addGraph->get_ranked_engine_ids(addEngines).code, ErrorCode::OK);
 
-    auto mulGraph = buildPointwiseMulGraph();
+    const auto mulGraph = buildPointwiseMulGraph();
     ASSERT_EQ(mulGraph->build_operation_graph(_handle).code, ErrorCode::OK);
     std::vector<int64_t> mulEngines;
     ASSERT_EQ(mulGraph->get_ranked_engine_ids(mulEngines).code, ErrorCode::OK);
 
-    auto subGraph = buildPointwiseSubGraph();
+    const auto subGraph = buildPointwiseSubGraph();
     ASSERT_EQ(subGraph->build_operation_graph(_handle).code, ErrorCode::OK);
     std::vector<int64_t> subEngines;
     ASSERT_EQ(subGraph->get_ranked_engine_ids(subEngines).code, ErrorCode::OK);
@@ -633,7 +633,7 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesEveryPointwiseOperationToTheOneEngi
 // against the CPU reference catches an operand swap in the third pack's binding.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
 {
-    auto graph = buildPointwiseSubGraph();
+    const auto graph = buildPointwiseSubGraph();
     buildAndCompile(*graph, engineId());
 
     GraphVerificationContext context(*graph);
@@ -645,14 +645,14 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
 // only the CPU reference catches the engine reaching the wrong pack's kernel.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDifferentPacks)
 {
-    auto addGraph = buildPointwiseAddGraph();
+    const auto addGraph = buildPointwiseAddGraph();
     buildAndCompile(*addGraph, engineId());
     GraphVerificationContext addContext(*addGraph);
     registerValidatorsForOutputs(addContext, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(addContext, 0);
 
     // Same engine id: the pack is chosen by the operation matcher, not by the caller.
-    auto mulGraph = buildPointwiseMulGraph();
+    const auto mulGraph = buildPointwiseMulGraph();
     buildAndCompile(*mulGraph, engineId());
     GraphVerificationContext mulContext(*mulGraph);
     registerValidatorsForOutputs(mulContext, POINTWISE_TOLERANCE_EPSILONS);
@@ -668,13 +668,13 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDif
 // another's -- a failure mode that only exists once one descriptor set serves several.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
 {
-    auto addGraph = buildPointwiseAddGraph();
+    const auto addGraph = buildPointwiseAddGraph();
     buildAndCompile(*addGraph, engineId());
     GraphVerificationContext addContext(*addGraph);
     registerValidatorsForOutputs(addContext, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(addContext, 0);
 
-    auto subGraph = buildPointwiseSubGraph();
+    const auto subGraph = buildPointwiseSubGraph();
     buildAndCompile(*subGraph, engineId());
     GraphVerificationContext subContext(*subGraph);
     registerValidatorsForOutputs(subContext, POINTWISE_TOLERANCE_EPSILONS);
@@ -691,7 +691,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
 // or a wrong accumulation order in the naive kernel.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
 {
-    auto graph = buildConvFwdGraph();
+    const auto graph = buildConvFwdGraph();
     buildAndCompile(*graph, convEngineId());
 
     // C*R*S = 2*3*3: every output element is an 18-term sum, and GPU and CPU accumulate
@@ -706,12 +706,12 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
 // pointwise operation lands on the one engine.
 TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotThePointwiseOne)
 {
-    auto convGraph = buildConvFwdGraph();
+    const auto convGraph = buildConvFwdGraph();
     ASSERT_EQ(convGraph->build_operation_graph(_handle).code, ErrorCode::OK);
     std::vector<int64_t> convEngines;
     ASSERT_EQ(convGraph->get_ranked_engine_ids(convEngines).code, ErrorCode::OK);
 
-    auto pointwiseGraph = buildPointwiseAddGraph();
+    const auto pointwiseGraph = buildPointwiseAddGraph();
     ASSERT_EQ(pointwiseGraph->build_operation_graph(_handle).code, ErrorCode::OK);
     std::vector<int64_t> pointwiseEngines;
     ASSERT_EQ(pointwiseGraph->get_ranked_engine_ids(pointwiseEngines).code, ErrorCode::OK);
@@ -807,7 +807,7 @@ protected:
             originalPlanBytes = std::move(planSave.first);
         }
         const auto expectPlanBytesUnchanged = [&](const Graph& loadedGraph) {
-            auto planSave = loadedGraph.to_compiled_plan_binary();
+            const auto planSave = loadedGraph.to_compiled_plan_binary();
             ASSERT_EQ(planSave.second.code, ErrorCode::OK) << planSave.second.err_msg;
             EXPECT_EQ(planSave.first, originalPlanBytes)
                 << "the plan cut out of the container differs from the original plan bytes";
@@ -925,7 +925,7 @@ protected:
     // Builds the convolution graph with the ConvFwd engine and saves its plan only.
     void saveAConvFwdPlanOnly(std::vector<uint8_t>& saved)
     {
-        auto graph = buildConvFwdGraph();
+        const auto graph = buildConvFwdGraph();
         ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, convEngineId()));
         auto save = detail::saveInForm(*graph, SaveForm::PLAN_ONLY);
         ASSERT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
@@ -936,7 +936,7 @@ protected:
 TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
        RefusesToSaveABenchmarkingPlanBeforeItsFirstExecute)
 {
-    auto graph = buildPointwiseAddGraph();
+    const auto graph = buildPointwiseAddGraph();
     std::vector<KnobSetting> knobSettings;
     knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
     {
@@ -993,7 +993,7 @@ TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
         const size_t middleOfCode = codeOffset + (codeSize / 2);
         copy.at(middleOfCode) = static_cast<uint8_t>(copy.at(middleOfCode) ^ 0xFFU);
 
-        auto loaded = std::make_shared<Graph>();
+        const auto loaded = std::make_shared<Graph>();
         const auto result = detail::loadInForm(*loaded, _handle, copy, SaveForm::PLAN_ONLY);
         expectPluginRefusal(
             result, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "ingestor plan data is damaged");
@@ -1013,7 +1013,7 @@ TEST_F(IntegrationGpuKernelIngestorSaveLoadRefusals,
         const auto otherMajor = static_cast<uint16_t>(major + 1);
         writeLittleEndianU16(copy, payloadOffset + INGESTOR_PLAN_FORMAT_MAJOR_OFFSET, otherMajor);
 
-        auto loaded = std::make_shared<Graph>();
+        const auto loaded = std::make_shared<Graph>();
         const auto result = detail::loadInForm(*loaded, _handle, copy, SaveForm::PLAN_ONLY);
         expectPluginRefusal(result,
                             HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,

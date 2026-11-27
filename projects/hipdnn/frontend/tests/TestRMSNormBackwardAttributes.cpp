@@ -19,7 +19,7 @@ TEST(TestRMSNormBackwardAttributes, CreateRMSNormBackwardAttributes)
     RMSNormBackwardAttributes attrs;
 
     // Set all tensors
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(70)
         .set_name("dyTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -27,7 +27,7 @@ TEST(TestRMSNormBackwardAttributes, CreateRMSNormBackwardAttributes)
         .set_stride({5, 6, 7, 8});
 
     attrs.set_dy(dyTensor);
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(71)
         .set_name("xTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -35,7 +35,7 @@ TEST(TestRMSNormBackwardAttributes, CreateRMSNormBackwardAttributes)
         .set_stride({5, 6, 7, 8});
     attrs.set_x(xTensor);
 
-    auto scaleTensor = std::make_shared<TensorAttributes>();
+    const auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_uid(72)
         .set_name("scaleTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -43,7 +43,7 @@ TEST(TestRMSNormBackwardAttributes, CreateRMSNormBackwardAttributes)
         .set_stride({5, 6, 7, 8});
     attrs.set_scale(scaleTensor);
 
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(74)
         .set_name("dxTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -51,7 +51,7 @@ TEST(TestRMSNormBackwardAttributes, CreateRMSNormBackwardAttributes)
         .set_stride({5, 6, 7, 8});
     attrs.set_dx(dxTensor);
 
-    auto dScaleTensor = std::make_shared<TensorAttributes>();
+    const auto dScaleTensor = std::make_shared<TensorAttributes>();
     dScaleTensor->set_uid(75)
         .set_name("dScaleTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -59,7 +59,7 @@ TEST(TestRMSNormBackwardAttributes, CreateRMSNormBackwardAttributes)
         .set_stride({5, 6, 7, 8});
     attrs.set_dscale(dScaleTensor);
 
-    auto invRMSTensor = std::make_shared<TensorAttributes>();
+    const auto invRMSTensor = std::make_shared<TensorAttributes>();
     invRMSTensor->set_uid(76)
         .set_name("invRMSTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -166,7 +166,7 @@ TEST(TestRMSNormBackwardAttributes, SetDyMove)
     EXPECT_EQ(dyTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_dy();
+    const auto retrievedTensor = attrs.get_dy();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -186,7 +186,7 @@ TEST(TestRMSNormBackwardAttributes, SetXMove)
     EXPECT_EQ(xTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_x();
+    const auto retrievedTensor = attrs.get_x();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -208,7 +208,7 @@ TEST(TestRMSNormBackwardAttributes, SetScaleMove)
     EXPECT_EQ(scaleTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_scale();
+    const auto retrievedTensor = attrs.get_scale();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -228,7 +228,7 @@ TEST(TestRMSNormBackwardAttributes, SetDxMove)
     EXPECT_EQ(dxTensor, nullptr);
 
     // The moved tensor should be accessible through the getter
-    auto retrievedTensor = attrs.get_dx();
+    const auto retrievedTensor = attrs.get_dx();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -237,13 +237,13 @@ TEST(TestRMSNormBackwardAttributes, SetTensorsConstRef)
     RMSNormBackwardAttributes attrs;
 
     // Create tensors
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(70).set_name("DyConstRef");
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(71).set_name("XConstRef");
-    auto scaleTensor = std::make_shared<TensorAttributes>();
+    const auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_uid(72).set_name("ScaleConstRef");
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(74).set_name("DxConstRef");
 
     // Set using const reference (copy)
@@ -265,31 +265,31 @@ TEST(TestRMSNormBackwardAttributes, LogicalAndStrictEquality)
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_compute_dbias(true);
 
-    auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dy1->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dy(dy1);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale1->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_scale(scale1);
 
-    auto invRms1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invRms1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invRms1->set_uid(4).set_name("InvRms").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_inv_rms(invRms1);
 
-    auto dx1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dx1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dx1->set_uid(5).set_name("DX").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dx(dx1);
 
-    auto dscale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dscale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dscale1->set_uid(6).set_name("DScale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dscale(dscale1);
 
-    auto dbias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dbias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dbias1->set_uid(7).set_name("DBias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dbias(dbias1);
 
@@ -297,31 +297,31 @@ TEST(TestRMSNormBackwardAttributes, LogicalAndStrictEquality)
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_compute_dbias(true);
 
-    auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dy2->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dy(dy2);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale2->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_scale(scale2);
 
-    auto invRms2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invRms2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invRms2->set_uid(4).set_name("InvRms").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_inv_rms(invRms2);
 
-    auto dx2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dx2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dx2->set_uid(5).set_name("DX").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dx(dx2);
 
-    auto dscale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dscale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dscale2->set_uid(6).set_name("DScale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dscale(dscale2);
 
-    auto dbias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dbias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dbias2->set_uid(7).set_name("DBias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dbias(dbias2);
 
@@ -331,7 +331,7 @@ TEST(TestRMSNormBackwardAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchDy->set_uid(99).set_name("MismatchedDY");
     attr2.set_dy(structuralMismatchDy);
 
@@ -356,7 +356,7 @@ TEST(TestRMSNormBackwardAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(aliasAttr1.logicallyEquals(aliasAttr2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchDy
         ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("DY")

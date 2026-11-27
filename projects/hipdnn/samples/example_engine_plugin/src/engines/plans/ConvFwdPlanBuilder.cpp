@@ -112,9 +112,9 @@ void ConvFwdPlanBuilder::buildPlan(
             "Expected ConvolutionFwdAttributes on node 0 but found null");
     }
 
-    auto inputUid = attrs->x_tensor_uid();
-    auto weightUid = attrs->w_tensor_uid();
-    auto outputUid = attrs->y_tensor_uid();
+    const auto inputUid = attrs->x_tensor_uid();
+    const auto weightUid = attrs->w_tensor_uid();
+    const auto outputUid = attrs->y_tensor_uid();
 
     // Get block size from execution settings
     const auto& settings = executionContext.executionSettings();
@@ -124,7 +124,7 @@ void ConvFwdPlanBuilder::buildPlan(
     const auto& tensorMap = opGraph.getTensorMap();
 
     // Input tensor (N, C, H, W)
-    auto inputIt = tensorMap.find(inputUid);
+    const auto inputIt = tensorMap.find(inputUid);
     if(inputIt == tensorMap.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -138,7 +138,7 @@ void ConvFwdPlanBuilder::buildPlan(
     }
 
     // Weight tensor (K, C, R, S)
-    auto weightIt = tensorMap.find(weightUid);
+    const auto weightIt = tensorMap.find(weightUid);
     if(weightIt == tensorMap.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -152,7 +152,7 @@ void ConvFwdPlanBuilder::buildPlan(
     }
 
     // Output tensor (N, K, outH, outW)
-    auto outputIt = tensorMap.find(outputUid);
+    const auto outputIt = tensorMap.find(outputUid);
     if(outputIt == tensorMap.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -166,13 +166,13 @@ void ConvFwdPlanBuilder::buildPlan(
     }
 
     // NCHW layout: dims[0]=N, dims[1]=C, dims[2]=H, dims[3]=W
-    auto n = inputDims->Get(0);
-    auto c = inputDims->Get(1);
-    auto h = inputDims->Get(2);
-    auto w = inputDims->Get(3);
-    auto k = weightDims->Get(0);
-    auto r = weightDims->Get(2);
-    auto s = weightDims->Get(3);
+    const auto n = inputDims->Get(0);
+    const auto c = inputDims->Get(1);
+    const auto h = inputDims->Get(2);
+    const auto w = inputDims->Get(3);
+    const auto k = weightDims->Get(0);
+    const auto r = weightDims->Get(2);
+    const auto s = weightDims->Get(3);
 
     // Padding and stride from convolution attributes
     int64_t padH = 0;
@@ -192,8 +192,8 @@ void ConvFwdPlanBuilder::buildPlan(
         strideW = attrs->stride()->Get(1);
     }
 
-    auto outH = outputDims->Get(2);
-    auto outW = outputDims->Get(3);
+    const auto outH = outputDims->Get(2);
+    const auto outW = outputDims->Get(3);
 
     const ConvFwdParams params{inputUid,
                                weightUid,

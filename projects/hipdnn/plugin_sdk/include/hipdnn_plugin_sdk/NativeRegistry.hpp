@@ -43,7 +43,7 @@ public:
         auto& self = instance();
         const std::lock_guard<std::mutex> lock(self._mutex);
 
-        auto it = self._symbols.find(symbol);
+        const auto it = self._symbols.find(symbol);
         if(it == self._symbols.end())
         {
             throw std::runtime_error("unresolved native symbol '" + symbol + "'"
@@ -59,7 +59,7 @@ public:
         auto& self = instance();
         const std::lock_guard<std::mutex> lock(self._mutex);
 
-        auto it = self._symbols.find(symbol);
+        const auto it = self._symbols.find(symbol);
         return it == self._symbols.end() ? T{} : it->second;
     }
 
@@ -69,7 +69,7 @@ public:
         auto& self = instance();
         const std::lock_guard<std::mutex> lock(self._mutex);
 
-        auto it = self._symbols.find(symbol);
+        const auto it = self._symbols.find(symbol);
         if(it == self._symbols.end())
         {
             self._symbols.emplace(symbol, implementation);

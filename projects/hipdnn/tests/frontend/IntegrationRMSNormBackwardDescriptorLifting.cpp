@@ -43,24 +43,24 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_RMSNORMBACKWARD_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS))
             .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_RMSNORMBACKWARD_TENSOR_X_UID).set_name("x").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
             .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_RMSNORMBACKWARD_TENSOR_SCALE_UID)
             .set_name("scale")
             .set_data_type(DataType::FLOAT);
         scale->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
 
-        auto invRms = std::make_shared<TensorAttributes>();
+        const auto invRms = std::make_shared<TensorAttributes>();
         invRms->set_uid(K_RMSNORMBACKWARD_TENSOR_INV_RMS_UID)
             .set_name("inv_rms")
             .set_data_type(DataType::FLOAT);
@@ -94,8 +94,8 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationRMSNormBackwardDescriptorLifting, BasicRMSNormBackwardRoundTrip)
 {
-    auto graph = buildGraph(true);
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto graph = buildGraph(true);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -198,8 +198,8 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, BasicRMSNormBackwardRoundTri
 
 TEST_F(IntegrationRMSNormBackwardDescriptorLifting, BasicRMSNormBackwardNoDBiasRoundTrip)
 {
-    auto graph = buildGraph(false);
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto graph = buildGraph(false);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -296,9 +296,9 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, BasicRMSNormBackwardNoDBiasR
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph(true);
+    const auto originalGraph = buildGraph(true);
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -341,8 +341,8 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardTensorSharing
 // all fields survive the FlatBuffer-direct path.
 TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph(true);
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto originalGraph = buildGraph(true);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -419,28 +419,28 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, RMSNormBackwardLiftWithoutFi
 // distinct and survive the round-trip.
 TEST_F(IntegrationRMSNormBackwardDescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("RMSNormBackwardAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("dy").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_DY_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_DY_STRIDES));
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("x").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_X_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_SCALE_STRIDES));
 
-    auto invRms = std::make_shared<TensorAttributes>();
+    const auto invRms = std::make_shared<TensorAttributes>();
     invRms->set_name("inv_rms").set_data_type(DataType::FLOAT);
     invRms->set_dim(toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_DIMS))
         .set_stride(toVec(K_RMSNORMBACKWARD_TENSOR_INV_RMS_STRIDES));
@@ -463,11 +463,11 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, AutoAssignedUidsPreservedInL
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u);
 
     // Verify all UIDs are non-negative and distinct
@@ -539,7 +539,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, AutoAssignedUidsPreservedInL
 // for a batchnorm inference graph.
 TEST_F(IntegrationRMSNormBackwardDescriptorLifting, JsonRoundTripWithHandle)
 {
-    auto originalGraph = buildGraph(true);
+    const auto originalGraph = buildGraph(true);
 
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -551,7 +551,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, JsonRoundTripWithHandle)
     ASSERT_FALSE(jsonData.empty());
 
     // Deserialize from JSON with handle
-    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    const auto liftedGraph = std::make_shared<TestableGraphLifting>();
     result = liftedGraph->deserialize(_handle, jsonData);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -562,7 +562,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLifting, JsonRoundTripWithHandle)
     EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
 
     // Verify tensor count
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 7u) << "Expected 6 tensors in lifted batchnorm inference graph";
 
     // Verify tensors

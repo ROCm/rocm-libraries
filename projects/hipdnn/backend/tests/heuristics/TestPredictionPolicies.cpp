@@ -428,7 +428,7 @@ void capturePredictionLog(hipdnnSeverity_t /*severity*/, const char* message)
 
 TEST_F(TestPredictionPolicies, DeclineNamesTheMetricAndTheLevelsAsked)
 {
-    auto abi = hipdnn_backend::heuristics::prediction::populateFunctionTable();
+    const auto abi = hipdnn_backend::heuristics::prediction::populateFunctionTable();
     std::vector<std::string> lines;
     gPredictionLogLines = &lines;
     ASSERT_EQ(abi.setLoggingCallback(&capturePredictionLog), HIPDNN_PLUGIN_STATUS_SUCCESS);
@@ -521,7 +521,7 @@ TEST(TestPredictionPolicyBoundary, RejectsMalformedOrForeignConfigFromPlugin)
               *result = {MALFORMED.data(), MALFORMED.size()};
               return HIPDNN_PLUGIN_STATUS_SUCCESS;
           };
-    auto malformedPlugin = HeuristicPlugin::createBuiltIn(functions, "malformed-config-test");
+    const auto malformedPlugin = HeuristicPlugin::createBuiltIn(functions, "malformed-config-test");
     EXPECT_THROW(malformedPlugin->getEngineConfig(nullptr, 1), hipdnn_backend::HipdnnException);
     functions.policyGetEngineConfig
         = [](hipdnnHeuristicPolicyDescriptor_t, int64_t, hipdnnPluginConstData_t* result) {
@@ -534,7 +534,7 @@ TEST(TestPredictionPolicyBoundary, RejectsMalformedOrForeignConfigFromPlugin)
               *result = {s_bytes.data(), s_bytes.size()};
               return HIPDNN_PLUGIN_STATUS_SUCCESS;
           };
-    auto foreignPlugin = HeuristicPlugin::createBuiltIn(functions, "foreign-config-test");
+    const auto foreignPlugin = HeuristicPlugin::createBuiltIn(functions, "foreign-config-test");
     EXPECT_THROW(foreignPlugin->getEngineConfig(nullptr, 1), hipdnn_backend::HipdnnException);
 }
 } // namespace

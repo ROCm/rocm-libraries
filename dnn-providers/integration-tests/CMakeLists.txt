@@ -68,7 +68,8 @@ else()
 endif()
 
 include(GNUInstallDirs)
-include(ClangTidy)
+# Explicit path: in a superbuild a plain include() would load the shared cmake/modules copy.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangTidy.cmake)
 include(ClangCheck)
 include(Sanitizers)
 include(WindowsDllStaging)

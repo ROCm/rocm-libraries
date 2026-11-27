@@ -30,7 +30,7 @@ inline hipdnn_frontend::AutotuneResult benchmarkGraph(hipdnn_frontend::graph::Gr
     hipdnn_frontend::AutotuneResult failed;
 
     int64_t engineId = -1;
-    if(auto status = graph.get_execution_plan_engine_id(engineId); !status.is_good())
+    if(const auto status = graph.get_execution_plan_engine_id(engineId); !status.is_good())
     {
         failed.errorMessage = status.get_message();
         return failed;

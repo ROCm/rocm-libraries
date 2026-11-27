@@ -43,11 +43,11 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto dy = std::make_shared<TensorAttributes>();
+        const auto dy = std::make_shared<TensorAttributes>();
         dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
-        auto index = std::make_shared<TensorAttributes>();
+        const auto index = std::make_shared<TensorAttributes>();
         index->set_uid(K_TENSOR_INDEX_UID).set_name("index").set_data_type(DataType::INT32);
         index->set_dim(toVec(K_TENSOR_INDEX_DIMS)).set_stride(toVec(K_TENSOR_INDEX_STRIDES));
 
@@ -59,7 +59,7 @@ protected:
         attrs.set_stride(toVec(K_STRIDE));
         attrs.set_window(toVec(K_WINDOW));
 
-        auto dx = graph->resample_bwd(dy, attrs, index);
+        const auto dx = graph->resample_bwd(dy, attrs, index);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
         dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
@@ -72,9 +72,9 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationResampleBwdDescriptorLifting, BasicResampleBwdRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -139,9 +139,9 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, BasicResampleBwdRoundTrip)
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -168,9 +168,9 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdTensorSharingPreserve
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -220,13 +220,13 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdLiftWithoutFinalizati
 // distinct and survive the round-trip.
 TEST_F(IntegrationResampleBwdDescriptorLifting, AutoAssignedUidsPreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("ResampleBwdAutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_name("dy").set_data_type(DataType::FLOAT);
     dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
@@ -238,15 +238,15 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, AutoAssignedUidsPreservedInLifti
     attrs.set_stride(toVec(K_STRIDE));
     attrs.set_window(toVec(K_WINDOW));
 
-    auto dx = graph->resample_bwd(dy, attrs);
+    const auto dx = graph->resample_bwd(dy, attrs);
     dx->set_output(true).set_name("dx");
     dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify the tensor map has the expected number of tensors
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 2u);
 
     // Verify all UIDs are distinct. Auto-assignment starts from 0, so UID 0 is valid.

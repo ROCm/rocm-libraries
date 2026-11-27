@@ -125,7 +125,7 @@ TEST(TestAutotuneTypes, CartesianProductEmptyAxes)
     const std::vector<KnobSweepAxis> axes;
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     // Cartesian product of zero sets is one empty tuple
     ASSERT_EQ(result.size(), 1u);
@@ -137,7 +137,7 @@ TEST(TestAutotuneTypes, CartesianProductSingleAxis)
     const std::vector<KnobSweepAxis> axes = {{"SPLIT_K", {int64_t{1}, int64_t{2}, int64_t{4}}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     ASSERT_EQ(result.size(), 3u);
 
@@ -155,7 +155,7 @@ TEST(TestAutotuneTypes, CartesianProductTwoAxes)
         = {{"SPLIT_K", {int64_t{1}, int64_t{2}}}, {"TILE_SIZE", {int64_t{64}, int64_t{128}}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     ASSERT_EQ(result.size(), 4u);
 
@@ -173,7 +173,7 @@ TEST(TestAutotuneTypes, CartesianProductThreeAxesCorrectCount)
                                              {"C", {int64_t{100}, int64_t{200}, int64_t{300}}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     // 3 * 2 * 3 = 18
     EXPECT_EQ(result.size(), 18u);
@@ -186,7 +186,7 @@ TEST(TestAutotuneTypes, CartesianProductEmptyAxisProducesEmptyResult)
     };
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     EXPECT_TRUE(result.empty());
 }
@@ -211,7 +211,7 @@ TEST(TestAutotuneTypes, CartesianProductErrorAtLimit)
     const std::vector<KnobSweepAxis> axes = {{"A", values101}, {"B", values100}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(result.empty());
 }
@@ -229,7 +229,7 @@ TEST(TestAutotuneTypes, CartesianProductAtExactLimit)
     const std::vector<KnobSweepAxis> axes = {{"A", values100}, {"B", values100}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     EXPECT_EQ(result.size(), 10000u);
 }
@@ -241,7 +241,7 @@ TEST(TestAutotuneTypes, CartesianProductPreservesMixedValueTypesAndAxisOrder)
                                              {"STRING_AXIS", {std::string("fast")}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     ASSERT_EQ(result.size(), 1u);
@@ -272,7 +272,7 @@ TEST(TestAutotuneTypes, CartesianProductAboveWarningThresholdStillProducesAllCom
     const std::vector<KnobSweepAxis> axes = {{"A", values40}, {"B", values30}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::detail::computeCartesianProduct(axes, result);
+    const auto error = autotune::detail::computeCartesianProduct(axes, result);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     ASSERT_EQ(result.size(), 1200u);

@@ -397,7 +397,7 @@ protected:
         // S_q == S_kv and D_qk == D_v), which collapses the softmax to the identity and
         // leaves dQ and dK near zero. UIDs match between the GPU and CPU bundles, so both
         // still hold identical inputs.
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first,
                                    _minVal,
@@ -468,7 +468,8 @@ protected:
 
         // O has Q's batch, heads and sequence with V's head dim
         const auto oDims = testCase.oDims();
-        auto oStrides = testCase.oStrides.empty() ? generateStrides(oDims) : testCase.oStrides;
+        const auto oStrides
+            = testCase.oStrides.empty() ? generateStrides(oDims) : testCase.oStrides;
 
         // dO has same dims as O, and O's strides unless the test case sets its own
         const auto& doDims = oDims;
@@ -477,36 +478,36 @@ protected:
         // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides
         const std::vector<int64_t> statsDims
             = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2], 1};
-        auto statsStrides = generateStrides(statsDims);
+        const auto statsStrides = generateStrides(statsDims);
 
         Graph graph;
         graph.set_io_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto q = std::make_shared<TensorAttributes>();
+        const auto q = std::make_shared<TensorAttributes>();
         q->set_dim(testCase.qDims)
             .set_stride(testCase.qStrides)
             .set_data_type(getDataTypeEnumFromType<DataType>());
 
-        auto k = std::make_shared<TensorAttributes>();
+        const auto k = std::make_shared<TensorAttributes>();
         k->set_dim(testCase.kDims)
             .set_stride(testCase.kStrides)
             .set_data_type(getDataTypeEnumFromType<DataType>());
 
-        auto v = std::make_shared<TensorAttributes>();
+        const auto v = std::make_shared<TensorAttributes>();
         v->set_dim(testCase.vDims)
             .set_stride(testCase.vStrides)
             .set_data_type(getDataTypeEnumFromType<DataType>());
 
-        auto o = std::make_shared<TensorAttributes>();
+        const auto o = std::make_shared<TensorAttributes>();
         o->set_dim(oDims).set_stride(oStrides).set_data_type(getDataTypeEnumFromType<DataType>());
 
-        auto dO = std::make_shared<TensorAttributes>();
+        const auto dO = std::make_shared<TensorAttributes>();
         dO->set_dim(doDims).set_stride(doStrides).set_data_type(
             getDataTypeEnumFromType<DataType>());
 
-        auto stats = std::make_shared<TensorAttributes>();
+        const auto stats = std::make_shared<TensorAttributes>();
         stats->set_dim(statsDims)
             .set_stride(statsStrides)
             .set_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -542,7 +543,7 @@ protected:
         dk->set_output(true).set_data_type(getDataTypeEnumFromType<DataType>());
         dv->set_output(true).set_data_type(getDataTypeEnumFromType<DataType>());
 
-        auto validationResult = graph.validate();
+        const auto validationResult = graph.validate();
         EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
         // Store tensor attribute pointers — NOT UIDs.  UIDs are assigned by

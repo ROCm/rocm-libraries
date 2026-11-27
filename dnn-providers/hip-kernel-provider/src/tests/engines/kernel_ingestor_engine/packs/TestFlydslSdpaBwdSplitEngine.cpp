@@ -2096,7 +2096,7 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlerRefusesARowThatNamesAReduceKern
 
 TEST(TestFlydslSdpaBwdSplitDispatch, EveryDqRowIsMultiLaunchSoASingleLaunchRowIsRefused)
 {
-    auto single = makeRow(Slot::DQ, plainRow());
+    const auto single = makeRow(Slot::DQ, plainRow());
     const auto failure = prepareFailure(splitSymbols(Slot::DQ), baseSpec(), single);
     EXPECT_TRUE(contains(failure, "is a single-launch kernel, so it has no launch 'dq'"))
         << failure;

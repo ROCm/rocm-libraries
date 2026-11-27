@@ -61,7 +61,7 @@ protected:
 
 TEST_F(ExampleProviderContainerTest, GetEngineManager_HasAllEngines)
 {
-    auto& manager = _container->getEngineManager();
+    const auto& manager = _container->getEngineManager();
     const auto ids = manager.getAllEngineIds();
     // The EngineManager should have 2 engines registered
     EXPECT_EQ(ids.size(), 2u);

@@ -234,7 +234,7 @@ TEST_F(TestSupportClaimEnforcement, NonFullBundleStillQueriesClaims)
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
                                                      VerificationMode::AUTO, ClaimMode::ENFORCE)),
                                                  makeEngineUnderTest());
-    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
     drive(harness, bundle, &results);
 
@@ -505,7 +505,7 @@ TEST_F(TestSupportClaimEnforcement, BuildableBundleConfirmsAtItsOwnDepth)
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
                                                      VerificationMode::AUTO, ClaimMode::ENFORCE)),
                                                  makeEngineUnderTest());
-    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
     drive(harness, bundle, &results);
 
@@ -536,7 +536,7 @@ TEST_F(TestSupportClaimEnforcement, UnreachedEnforcementRungStaysAccepted)
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
                                                      VerificationMode::AUTO, ClaimMode::ENFORCE)),
                                                  makeEngineUnderTest());
-    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
     drive(harness, bundle, &results);
 
@@ -792,7 +792,7 @@ TEST_F(TestSupportClaimEnforcement, ArchSkippedBundleStillCountsAsSelected)
                                                      VerificationMode::AUTO, ClaimMode::ENFORCE)),
                                                  makeEngineUnderTest());
 
-    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     // hostPolicy() is on gfx942; golden data stamped gfx90a is not portable here.
     bundle->metadata.gpuArchitecture = "gfx90a";
 

@@ -384,7 +384,7 @@ std::string refusal(const Builder::SplitLeafSpec& tree,
                     const std::vector<double>& table = {0.5, 1.5},
                     std::optional<fb::RealArray> tableTag = std::nullopt)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     Builder builder;
     builder.setNumFeatures(2).setFeaturesHash(HASH).setThresholdTable(table).addSplitLeafTree(tree);

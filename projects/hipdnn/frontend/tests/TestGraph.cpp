@@ -109,8 +109,7 @@ public:
     /// Inject a dummy entry into _planSpecs (simulates add_engine_*() having run).
     void injectDummyPlanSpec()
     {
-        // Fully-qualified to work around clang-tidy-20 name resolution difference
-        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        autotune::detail::PlanSpec spec;
         spec.engineId = 0;
         _planSpecs.push_back(std::move(spec));
     }
@@ -123,8 +122,7 @@ public:
     /// Inject a plan spec with specific engine ID and workspace size.
     void injectPlanSpec(int64_t engineId, int64_t workspaceSize)
     {
-        // Fully-qualified to work around clang-tidy-20 name resolution difference
-        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        autotune::detail::PlanSpec spec;
         spec.engineId = engineId;
         spec.workspaceSize = workspaceSize;
         _planSpecs.push_back(std::move(spec));
@@ -134,7 +132,7 @@ public:
     /// EXHAUSTIVE priming loop runs (and can fail) for this engine.
     void injectPlanSpec(int64_t engineId, int64_t workspaceSize, bool supportsExhaustive)
     {
-        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        autotune::detail::PlanSpec spec;
         spec.engineId = engineId;
         spec.workspaceSize = workspaceSize;
         spec.supportsExhaustive = supportsExhaustive;
@@ -396,14 +394,14 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph,
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_name("X").set_dim({1, 2, 3, 4});
     x->set_stride({5, 6, 7, 8});
     x->set_data_type(DataType::FLOAT);
 
     if(withRaggedOffset)
     {
-        auto raggedOffset = std::make_shared<TensorAttributes>();
+        const auto raggedOffset = std::make_shared<TensorAttributes>();
         raggedOffset->set_uid(10)
             .set_name("RaggedOffset")
             .set_dim({2, 1, 1, 1})
@@ -412,28 +410,28 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph,
         x->set_ragged_offset(raggedOffset);
     }
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
         .set_name("Mean")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5)
         .set_name("Bias")
         .set_data_type(DataType::FLOAT)
@@ -866,16 +864,16 @@ TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes attributes;
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph.pointwise(in0, attributes);
+    const auto out0 = graph.pointwise(in0, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
 
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
@@ -885,7 +883,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineFailsBeforeGraphFinalized)
     const Graph graph;
     std::vector<BehaviorNote> notes = {BehaviorNote::RUNTIME_COMPILATION};
 
-    auto result = graph.get_behavior_notes_for_engine(0, notes);
+    const auto result = graph.get_behavior_notes_for_engine(0, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -930,7 +928,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineReturnsNotes)
         });
 
     std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(notes.size(), 3u);
@@ -952,7 +950,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesCountQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -984,7 +982,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEnginePropagatesNoteQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1029,7 +1027,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineDropsUnknownNotes)
         });
 
     std::vector<BehaviorNote> notes;
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     // The note this frontend does not recognize is dropped rather than
@@ -1076,7 +1074,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsMismatchedReturnedNoteCount)
         });
 
     std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1103,7 +1101,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineRejectsNegativeNoteCount)
         });
 
     std::vector<BehaviorNote> notes = {BehaviorNote::RUNTIME_COMPILATION};
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1130,7 +1128,7 @@ TEST_F(TestGraph, GetBehaviorNotesForEngineClearsOutputWhenNoNotes)
         });
 
     std::vector<BehaviorNote> notes = {BehaviorNote::SUPPORTS_GRAPH_CAPTURE};
-    auto result = graph.get_behavior_notes_for_engine(7, notes);
+    const auto result = graph.get_behavior_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(notes.empty());
@@ -1141,7 +1139,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineFailsBeforeGraphFinalized)
     const Graph graph;
     std::vector<NumericalNote> notes = {NumericalNote::NONDETERMINISTIC};
 
-    auto result = graph.get_numerical_notes_for_engine(0, notes);
+    const auto result = graph.get_numerical_notes_for_engine(0, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -1186,7 +1184,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineReturnsNotes)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(notes.size(), 2u);
@@ -1234,7 +1232,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineDropsUnknownNotes)
         });
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     // The note this frontend does not recognize is dropped rather than
@@ -1258,7 +1256,7 @@ TEST_F(TestGraph, GetNumericalNotesForEnginePropagatesCountQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1291,7 +1289,7 @@ TEST_F(TestGraph, GetNumericalNotesForEnginePropagatesNoteQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1335,7 +1333,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineRejectsMismatchedReturnedNoteCount)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1363,7 +1361,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineClearsOutputWhenNoNotes)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(notes.empty());
@@ -1386,7 +1384,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineMapsNotSupportedCountQueryToNondeter
         .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(notes, std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC});
@@ -1422,7 +1420,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineMapsNotSupportedNoteQueryToNondeterm
         .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(notes, std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC});
@@ -1442,7 +1440,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineOtherCountQueryStatusIsBackendError)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(notes.empty());
@@ -1475,7 +1473,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineOtherNoteQueryStatusIsBackendError)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(notes.empty());
@@ -1503,7 +1501,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineRejectsNegativeNoteCount)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(notes.empty());
@@ -1514,7 +1512,7 @@ TEST_F(TestGraph, SerializeCompiledPlanRejectsMissingExecutionPlan)
     const Graph graph;
     std::vector<uint8_t> data{1, 2, 3};
 
-    auto result = graph.serialize_compiled_plan(data);
+    const auto result = graph.serialize_compiled_plan(data);
 
     EXPECT_FALSE(result.is_good());
 }
@@ -1540,7 +1538,7 @@ TEST_F(TestGraph, SerializeCompiledPlanPropagatesSizeQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize_compiled_plan(data);
+    const auto result = graph.serialize_compiled_plan(data);
 
     EXPECT_FALSE(result.is_good());
 }
@@ -1569,7 +1567,7 @@ TEST_F(TestGraph, SerializeCompiledPlanRejectsZeroLengthPlan)
         });
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize_compiled_plan(data);
+    const auto result = graph.serialize_compiled_plan(data);
 
     EXPECT_FALSE(result.is_good());
 }
@@ -1600,7 +1598,7 @@ TEST_F(TestGraph, SerializeCompiledPlanPropagatesSerializationFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize_compiled_plan(data);
+    const auto result = graph.serialize_compiled_plan(data);
 
     EXPECT_FALSE(result.is_good());
 }
@@ -1655,7 +1653,7 @@ TEST_F(TestGraph, DeserializeCompiledPlanPropagatesBackendFailure)
                     _handle, _, serializedPlan.data(), serializedPlan.size()))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
-    auto result = graph.deserialize_compiled_plan(_handle, serializedPlan);
+    const auto result = graph.deserialize_compiled_plan(_handle, serializedPlan);
 
     EXPECT_FALSE(result.is_good());
 }
@@ -1679,7 +1677,7 @@ TEST_F(TestGraph, DeserializeCompiledPlanClearsFrontendGraphState)
                 return HIPDNN_STATUS_SUCCESS;
             });
 
-    auto result = graph.from_compiled_plan_binary(_handle, serializedPlan);
+    const auto result = graph.from_compiled_plan_binary(_handle, serializedPlan);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(graph.getPrivateGraphSubnodes().empty());
@@ -1833,7 +1831,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
     EXPECT_CALL(*_mockBackend, backendExecute(_handle, executionPlan, variantPackDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto result = graph.execute(
+    const auto result = graph.execute(
         _handle, variantPack, workspace, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -1895,7 +1893,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteEmptyOverridesUsesLegacyVariantPackAttr
     EXPECT_CALL(*_mockBackend, backendExecute(_handle, executionPlan, variantPackDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto result
+    const auto result
         = graph.execute(_handle, variantPack, workspace, emptyUids, emptyShapes, emptyStrides);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -1928,7 +1926,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectsStructuralValidationBeforeBacken
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
         .Times(0);
 
-    auto result = graph.execute(
+    const auto result = graph.execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -1976,7 +1974,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecutePropagatesOverrideAttributeFailure)
     EXPECT_CALL(*_mockBackend, backendFinalize(variantPackDesc)).Times(0);
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
 
-    auto result = graph.execute(
+    const auto result = graph.execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -2044,7 +2042,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectedWhenOverrideShapeDisabled)
         .Times(0);
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
 
-    auto result = graph.execute(
+    const auto result = graph.execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.get_message();
@@ -2060,16 +2058,16 @@ TEST_F(TestGraph, ValidateUnsetNodeComputeTypeSetGraphComputeType)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes attributes;
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph.pointwise(in0, attributes);
+    const auto out0 = graph.pointwise(in0, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
 
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
@@ -2083,16 +2081,16 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeUnsetGraphIoType)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::NOT_SET);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
 
     PointwiseAttributes attributes;
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph.pointwise(in0, attributes);
+    const auto out0 = graph.pointwise(in0, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
 
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
@@ -2106,7 +2104,7 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeUnsetGraphIntermediateType)
         .set_intermediate_data_type(DataType::NOT_SET)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
     in0->set_is_virtual(true);
 
@@ -2114,9 +2112,9 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeUnsetGraphIntermediateType)
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph.pointwise(in0, attributes);
+    const auto out0 = graph.pointwise(in0, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
 
     EXPECT_FALSE(validationResult.is_good()) << validationResult.get_message();
 }
@@ -2130,9 +2128,9 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeSetGraphDataTypes)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::NOT_SET);
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
     in1->set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8})
         .set_data_type(DataType::NOT_SET)
@@ -2142,9 +2140,9 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeSetGraphDataTypes)
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto out0 = graph.pointwise(in0, in1, attributes);
+    const auto out0 = graph.pointwise(in0, in1, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
 
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
@@ -2160,7 +2158,7 @@ static std::shared_ptr<TensorAttributes>
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_name("X").set_dim({4, 4}).set_stride({4, 1});
     x->set_ragged_offset(raggedOffset);
 
@@ -2171,14 +2169,14 @@ static std::shared_ptr<TensorAttributes>
     attributes.set_name("Add");
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto y = graph.pointwise(x, b, attributes);
+    const auto y = graph.pointwise(x, b, attributes);
     y->set_uid(3).set_name("Y").set_output(true);
     return b;
 }
 
 TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7)
         .set_name("RaggedOffset")
         .set_data_type(DataType::INT32)
@@ -2186,7 +2184,7 @@ TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
         .set_stride({1});
 
     Graph graph;
-    auto b = createRaggedPointwiseGraph(graph, raggedOffset);
+    const auto b = createRaggedPointwiseGraph(graph, raggedOffset);
     b->set_uid(7);
 
     const auto result = graph.validate();
@@ -2203,7 +2201,7 @@ TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
 // (floating-point) I/O type, so an unset data type is an error.
 TEST_F(TestGraph, ValidateRejectsRaggedAuxWithoutDataType)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
 
     Graph graph;
@@ -2221,7 +2219,7 @@ TEST_F(TestGraph, ValidateRejectsRaggedAuxWithoutDataType)
 
 TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7).set_name("RaggedOffset").set_data_type(DataType::INT32);
 
     Graph graph;
@@ -2234,7 +2232,7 @@ TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
 
 TEST_F(TestGraph, ValidateAcceptsInt64RaggedAux)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7)
         .set_name("RaggedOffset")
         .set_data_type(DataType::INT64)
@@ -2251,7 +2249,7 @@ TEST_F(TestGraph, ValidateAcceptsInt64RaggedAux)
 // Every gathered tensor's ragged-offset tensor is validated, not only those of graph inputs.
 TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxOnNodeOutput)
 {
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
 
     Graph graph;
@@ -2279,26 +2277,26 @@ TEST_F(TestGraph, ValidateCoversPeerStatRaggedAux)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputX")
         .set_dim({1, 64, 32, 32})
         .set_stride({65536, 1024, 32, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2).set_name("ScaleTensor").set_dim({64}).set_stride({1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3).set_name("BiasTensor").set_dim({64}).set_stride({1});
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(4).set_name("Epsilon");
 
-    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    const auto peerStatOffset = std::make_shared<TensorAttributes>();
     peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
 
-    auto peerStat = std::make_shared<TensorAttributes>();
+    const auto peerStat = std::make_shared<TensorAttributes>();
     peerStat->set_uid(20)
         .set_name("PeerStat")
         .set_dim({1, 64, 1, 1})
@@ -2340,7 +2338,7 @@ TEST_F(TestGraph, SetAndGetAttributes)
     EXPECT_EQ(graph.get_intermediate_data_type(), DataType::HALF);
     EXPECT_EQ(graph.get_io_data_type(), DataType::FLOAT);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2352,19 +2350,19 @@ TEST_F(TestGraph, BatchnormNodeCreation)
         .set_intermediate_data_type(DataType::FLOAT);
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
     x->set_name("BatchnormNode::X");
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("BatchnormNode::SCALE").set_dim(derivedDims).set_stride(derivedStrides);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("BatchnormNode::BIAS").set_dim(derivedDims).set_stride(derivedStrides);
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("BatchnormNode::EPSILON").set_value(0.001f);
 
     BatchnormAttributes attributes;
@@ -2386,7 +2384,7 @@ TEST_F(TestGraph, BatchnormNodeCreation)
     EXPECT_FALSE(nextRunningMean);
     EXPECT_FALSE(nextRunningVariance);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2398,13 +2396,13 @@ TEST_F(TestGraph, BatchnormBackwardNodeCreation)
         .set_intermediate_data_type(DataType::FLOAT);
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto dy = std::make_shared<TensorAttributes>();
-    auto x = std::make_shared<TensorAttributes>();
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
 
     dy->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
     x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
@@ -2424,7 +2422,7 @@ TEST_F(TestGraph, BatchnormBackwardNodeCreation)
     EXPECT_EQ(dbias->get_name(), "BatchnormBackwardNode::DBIAS");
     EXPECT_TRUE(dbias->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2436,23 +2434,23 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
         .set_intermediate_data_type(DataType::FLOAT);
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1, 2, 1, 1});
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_dim({1, 2, 1, 1});
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 2, 1, 1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({1, 2, 1, 1});
 
     mean->set_dim(derivedDims).set_stride(derivedStrides);
@@ -2463,12 +2461,12 @@ TEST_F(TestGraph, BatchnormInferenceNodeCreation)
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
 
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
 
     EXPECT_EQ(y->get_name(), "BatchnormNode::Y");
     EXPECT_TRUE(y->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2480,23 +2478,23 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
         .set_intermediate_data_type(DataType::FLOAT);
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1, 2, 1, 1});
 
-    auto variance = std::make_shared<TensorAttributes>();
+    const auto variance = std::make_shared<TensorAttributes>();
     variance->set_dim({1, 2, 1, 1});
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 2, 1, 1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({1, 2, 1, 1});
 
     mean->set_dim(derivedDims).set_stride(derivedStrides);
@@ -2504,19 +2502,19 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     scale->set_dim(derivedDims).set_stride(derivedStrides);
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
 
-    auto y = graph.batchnorm_inference_variance_ext(
+    const auto y = graph.batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, attributes);
 
     EXPECT_EQ(y->get_name(), "BatchnormNodeVariance::Y");
     EXPECT_TRUE(y->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2527,19 +2525,19 @@ TEST_F(TestGraph, PointwiseNodeCreationSingleInput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes attributes;
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto out0 = graph.pointwise(in0, attributes);
+    const auto out0 = graph.pointwise(in0, attributes);
 
     EXPECT_EQ(out0->get_name(), "PointwiseNode::OUT_0");
     EXPECT_TRUE(out0->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2550,8 +2548,8 @@ TEST_F(TestGraph, PointwiseNodeCreationTwoInputs)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
 
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     in1->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
@@ -2560,12 +2558,12 @@ TEST_F(TestGraph, PointwiseNodeCreationTwoInputs)
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto out0 = graph.pointwise(in0, in1, attributes);
+    const auto out0 = graph.pointwise(in0, in1, attributes);
 
     EXPECT_EQ(out0->get_name(), "PointwiseNode::OUT_0");
     EXPECT_TRUE(out0->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2576,9 +2574,9 @@ TEST_F(TestGraph, PointwiseNodeCreationThreeInputs)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
-    auto in1 = std::make_shared<TensorAttributes>();
-    auto in2 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
+    const auto in2 = std::make_shared<TensorAttributes>();
 
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     in1->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
@@ -2588,12 +2586,12 @@ TEST_F(TestGraph, PointwiseNodeCreationThreeInputs)
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::BINARY_SELECT);
 
-    auto out0 = graph.pointwise(in0, in1, in2, attributes);
+    const auto out0 = graph.pointwise(in0, in1, in2, attributes);
 
     EXPECT_EQ(out0->get_name(), "PointwiseNode::OUT_0");
     EXPECT_TRUE(out0->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2604,10 +2602,10 @@ TEST_F(TestGraph, ConvolutionFwdNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
 
     ConvFpropAttributes attributes;
@@ -2617,12 +2615,12 @@ TEST_F(TestGraph, ConvolutionFwdNodeCreation)
     attributes.set_stride({1, 1});
     attributes.set_dilation({1, 1});
 
-    auto y = graph.conv_fprop(x, w, attributes);
+    const auto y = graph.conv_fprop(x, w, attributes);
 
     EXPECT_EQ(y->get_name(), "ConvolutionFpropNode::Y");
     EXPECT_TRUE(y->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2633,10 +2631,10 @@ TEST_F(TestGraph, ConvolutionDgradNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
 
     ConvDgradAttributes attributes;
@@ -2646,13 +2644,13 @@ TEST_F(TestGraph, ConvolutionDgradNodeCreation)
     attributes.set_stride({1, 1});
     attributes.set_dilation({1, 1});
 
-    auto dx = graph.conv_dgrad(dy, w, attributes);
+    const auto dx = graph.conv_dgrad(dy, w, attributes);
     dx->set_dim({1, 3, 32, 32});
 
     EXPECT_EQ(dx->get_name(), "ConvolutionDgradNode::DX");
     EXPECT_TRUE(dx->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2663,10 +2661,10 @@ TEST_F(TestGraph, ConvolutionDgradValidationFailsWithMissingDxDim)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
 
     ConvDgradAttributes attributes;
@@ -2678,7 +2676,7 @@ TEST_F(TestGraph, ConvolutionDgradValidationFailsWithMissingDxDim)
 
     graph.conv_dgrad(dy, w, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_FALSE(validationResult.is_good());
     EXPECT_EQ(validationResult.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
@@ -2690,10 +2688,10 @@ TEST_F(TestGraph, ConvolutionWgradNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     ConvWgradAttributes attributes;
@@ -2703,13 +2701,13 @@ TEST_F(TestGraph, ConvolutionWgradNodeCreation)
     attributes.set_stride({1, 1});
     attributes.set_dilation({1, 1});
 
-    auto dw = graph.conv_wgrad(dy, x, attributes);
+    const auto dw = graph.conv_wgrad(dy, x, attributes);
     dw->set_dim({64, 3, 3, 3});
 
     EXPECT_EQ(dw->get_name(), "ConvolutionWgradNode::DW");
     EXPECT_TRUE(dw->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2720,10 +2718,10 @@ TEST_F(TestGraph, ConvolutionWgradValidationFailsWithMissingDwDim)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
     ConvWgradAttributes attributes;
@@ -2735,7 +2733,7 @@ TEST_F(TestGraph, ConvolutionWgradValidationFailsWithMissingDwDim)
 
     graph.conv_wgrad(dy, x, attributes);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_FALSE(validationResult.is_good());
     EXPECT_EQ(validationResult.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
@@ -2747,21 +2745,21 @@ TEST_F(TestGraph, MatmulNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
 
     MatmulAttributes attributes;
     attributes.set_name("MatmulNode");
 
-    auto c = graph.matmul(a, b, attributes);
+    const auto c = graph.matmul(a, b, attributes);
 
     EXPECT_EQ(c->get_name(), "MatmulNode::C");
     EXPECT_TRUE(c->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2772,16 +2770,16 @@ TEST_F(TestGraph, LayernormNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({2, 6, 4}).set_stride({24, 4, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("Epsilon").set_value(1e-5f);
 
     LayernormAttributes attributes;
@@ -2797,7 +2795,7 @@ TEST_F(TestGraph, LayernormNodeCreation)
     EXPECT_EQ(mean, nullptr);
     EXPECT_EQ(invVariance, nullptr);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2808,13 +2806,13 @@ TEST_F(TestGraph, RMSNormNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("RMSNormNode");
@@ -2828,7 +2826,7 @@ TEST_F(TestGraph, RMSNormNodeCreation)
     EXPECT_EQ(invRms->get_name(), "RMSNormNode::INV_RMS");
     EXPECT_TRUE(invRms->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2839,16 +2837,16 @@ TEST_F(TestGraph, RMSNormNodeCreationWithBias)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
 
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("RMSNormWithBias");
@@ -2861,7 +2859,7 @@ TEST_F(TestGraph, RMSNormNodeCreationWithBias)
     EXPECT_EQ(y->get_name(), "RMSNormWithBias::Y");
     EXPECT_TRUE(y->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2873,16 +2871,16 @@ TEST_F(TestGraph, RMSNormBackwardNodeCreation)
         .set_intermediate_data_type(DataType::FLOAT);
 
     // Create input tensors
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto invRms = std::make_shared<TensorAttributes>();
+    const auto invRms = std::make_shared<TensorAttributes>();
     invRms->set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_data_type(DataType::FLOAT);
 
     // Create attributes (default: no dbias)
@@ -2902,7 +2900,7 @@ TEST_F(TestGraph, RMSNormBackwardNodeCreation)
     EXPECT_EQ(dbias, nullptr);
 
     // Verify graph validates successfully
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2913,7 +2911,7 @@ TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
 
     ResampleFwdAttributes attributes;
@@ -2931,7 +2929,7 @@ TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
     EXPECT_TRUE(y->get_is_virtual());
     EXPECT_EQ(index, nullptr);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -2942,7 +2940,7 @@ TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
 
     ResampleFwdAttributes attributes;
@@ -2963,7 +2961,7 @@ TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
     EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
     EXPECT_TRUE(index->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
     EXPECT_EQ(index->get_dim(), y->get_dim());
     EXPECT_EQ(index->get_stride(), y->get_stride());
@@ -2976,7 +2974,7 @@ TEST_F(TestGraph, ResampleFwdPreservesLegacyNoIndexApi)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
 
     ResampleFwdAttributes attributes;
@@ -2989,12 +2987,12 @@ TEST_F(TestGraph, ResampleFwdPreservesLegacyNoIndexApi)
         .set_window({2, 2})
         .set_generate_index(true);
 
-    auto y = graph.resample_fwd(x, attributes);
+    const auto y = graph.resample_fwd(x, attributes);
 
     EXPECT_EQ(y->get_name(), "LegacyResampleNode::Y");
     EXPECT_TRUE(y->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
     ASSERT_EQ(graph.getPrivateGraphSubnodes().size(), 1);
     EXPECT_EQ(graph.getPrivateGraphSubnodes().front()->getNodeOutputTensorAttributes().size(), 1);
@@ -3007,16 +3005,16 @@ TEST_F(TestGraph, RMSNormBackwardNodeCreationWithDbias)
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto dy = std::make_shared<TensorAttributes>();
+    const auto dy = std::make_shared<TensorAttributes>();
     dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto invRms = std::make_shared<TensorAttributes>();
+    const auto invRms = std::make_shared<TensorAttributes>();
     invRms->set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_data_type(DataType::FLOAT);
 
     RMSNormBackwardAttributes attributes;
@@ -3028,7 +3026,7 @@ TEST_F(TestGraph, RMSNormBackwardNodeCreationWithDbias)
     EXPECT_EQ(dbias->get_name(), "RMSNormBackwardNode::DBIAS");
     EXPECT_TRUE(dbias->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -3039,16 +3037,16 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({2, 6, 4}).set_stride({24, 4, 1}).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("Epsilon").set_value(1e-5f);
 
     LayernormAttributes attributes;
@@ -3066,7 +3064,7 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
     ASSERT_NE(invVariance, nullptr);
     EXPECT_EQ(invVariance->get_name(), "LayernormNodeTraining::INV_VARIANCE");
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -3081,7 +3079,7 @@ TEST_F(TestGraph, TensorGraphAttributes)
         .set_is_virtual(false)
         .set_dim({1, 2, 3, 4});
 
-    auto tensor = Graph::tensor(attributes);
+    const auto tensor = Graph::tensor(attributes);
 
     EXPECT_EQ(tensor->get_data_type(), DataType::FLOAT);
     EXPECT_FALSE(tensor->get_is_virtual());
@@ -3094,15 +3092,15 @@ TEST_F(TestGraph, TensorGraphAttributes)
 // Test graph.tensorLike()
 TEST_F(TestGraph, TensorLikeGraphAttributes)
 {
-    auto tensor = Graph::tensor(TensorAttributes()
-                                    .set_name("TestTensor")
-                                    .set_uid(100)
-                                    .set_dim({1, 2, 3, 4})
-                                    .set_stride({5, 6, 7, 8})
-                                    .set_is_virtual(false)
-                                    .set_data_type(DataType::FLOAT));
+    const auto tensor = Graph::tensor(TensorAttributes()
+                                          .set_name("TestTensor")
+                                          .set_uid(100)
+                                          .set_dim({1, 2, 3, 4})
+                                          .set_stride({5, 6, 7, 8})
+                                          .set_is_virtual(false)
+                                          .set_data_type(DataType::FLOAT));
 
-    auto tensorLike = Graph::tensor_like(tensor, "TensorLike");
+    const auto tensorLike = Graph::tensor_like(tensor, "TensorLike");
 
     EXPECT_EQ(tensorLike->get_data_type(), DataType::FLOAT);
     EXPECT_FALSE(tensorLike->get_is_virtual());
@@ -3113,7 +3111,7 @@ TEST_F(TestGraph, TensorLikeGraphAttributes)
 
     EXPECT_NE(tensorLike, tensor);
 
-    auto tensorLikeNoName = Graph::tensor_like(tensorLike);
+    const auto tensorLikeNoName = Graph::tensor_like(tensorLike);
     EXPECT_EQ(tensorLikeNoName->get_name(), "");
 
     EXPECT_EQ(tensor->get_name(), "TestTensor");
@@ -3125,7 +3123,7 @@ TEST_F(TestGraph, WillCorrectlyBuildOperationGraphDescriptor)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
 
     // Allow descriptor-path setAttribute calls (ops, data types, name, etc.)
@@ -3144,7 +3142,7 @@ TEST_F(TestGraph, WillCorrectlyBuildOperationGraphDescriptor)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.build_operation_graph(_handle);
+    const auto result = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result.is_good());
 }
 
@@ -3154,13 +3152,13 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenNodeFails)
     GraphTestUtils graph;
     graph.set_name("FailTest").set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_FPROP_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(K_FPROP_TENSOR_X_DIMS))
         .set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_FPROP_TENSOR_W_UID)
         .set_name("W")
         .set_data_type(DataType::FLOAT)
@@ -3182,7 +3180,7 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenNodeFails)
         .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
-    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    const auto result = graph.build_operation_graph_via_descriptors(_handle);
     EXPECT_TRUE(result.is_bad());
     // validate() now runs inside build_operation_graph_via_descriptors(), catching
     // the missing output tensor before descriptor creation is attempted
@@ -3198,13 +3196,13 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_FPROP_TENSOR_X_UID)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(toVec(K_FPROP_TENSOR_X_DIMS))
         .set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_FPROP_TENSOR_W_UID)
         .set_name("W")
         .set_data_type(DataType::FLOAT)
@@ -3239,7 +3237,7 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
-    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    const auto result = graph.build_operation_graph_via_descriptors(_handle);
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -3249,7 +3247,7 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsOnEmptyGraph)
     GraphTestUtils graph;
     graph.set_name("EmptyGraph").set_compute_data_type(DataType::FLOAT);
 
-    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    const auto result = graph.build_operation_graph_via_descriptors(_handle);
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
@@ -3258,7 +3256,7 @@ TEST_F(TestGraph, CreatingExecutionPlansFailsWithNoGraph)
 {
     Graph graph;
 
-    auto result = graph.create_execution_plans({HeuristicMode::FALLBACK});
+    const auto result = graph.create_execution_plans({HeuristicMode::FALLBACK});
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.get_message(),
               "Graph has not been built, build the operation graph first. Cannot create "
@@ -3276,7 +3274,7 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
     {
         backendModes.push_back(toBackendType(mode));
     }
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
 
     graph.build_operation_graph(_handle);
@@ -3401,7 +3399,7 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto execPlanResult = graph.create_execution_plans(heurModes);
+    const auto execPlanResult = graph.create_execution_plans(heurModes);
     EXPECT_TRUE(execPlanResult.is_good());
 }
 
@@ -3416,7 +3414,7 @@ TEST_F(TestGraph, PreferredEngineIdSelectsSpecificConfig)
     {
         backendModes.push_back(toBackendType(mode));
     }
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
 
     // Set preferred engine ID
@@ -3593,7 +3591,7 @@ TEST_F(TestGraph, PreferredEngineIdSelectsSpecificConfig)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto execPlanResult = graph.create_execution_plans(heurModes);
+    const auto execPlanResult = graph.create_execution_plans(heurModes);
     EXPECT_TRUE(execPlanResult.is_good());
 }
 
@@ -3608,7 +3606,7 @@ TEST_F(TestGraph, PreferredEngineIdFallsBackToTopConfig)
     {
         backendModes.push_back(toBackendType(mode));
     }
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
 
     // Set preferred engine ID that doesn't exist
@@ -3785,7 +3783,7 @@ TEST_F(TestGraph, PreferredEngineIdFallsBackToTopConfig)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto execPlanResult = graph.create_execution_plans(heurModes);
+    const auto execPlanResult = graph.create_execution_plans(heurModes);
     EXPECT_TRUE(execPlanResult.is_good());
 }
 
@@ -3793,12 +3791,12 @@ TEST_F(TestGraph, CheckSupportFailsIfNoExecutionPlanCreated)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
 
     graph.build_operation_graph(_handle);
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.get_message(), "Execution plan descriptor is not created or invalid.");
 }
@@ -3807,7 +3805,7 @@ TEST_F(TestGraph, CheckSupportSucceedsWhenExecutionPlanCreated)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
     graph.build_operation_graph(_handle);
 
@@ -3908,7 +3906,7 @@ TEST_F(TestGraph, CheckSupportSucceedsWhenExecutionPlanCreated)
     const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     graph.create_execution_plans(heurModes);
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good());
     EXPECT_EQ(result.get_message(), "");
 }
@@ -3917,7 +3915,7 @@ TEST_F(TestGraph, ExecutionPlanisFinalizedAfterBuildPlans)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
     graph.build_operation_graph(_handle);
 
@@ -4034,7 +4032,7 @@ TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWithNoPlan)
 {
     const Graph graph;
     int64_t engineId = -1;
-    auto result = graph.get_execution_plan_engine_id(engineId);
+    const auto result = graph.get_execution_plan_engine_id(engineId);
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(engineId, -1);
 }
@@ -4047,7 +4045,7 @@ TEST_F(TestGraph, GetExecutionPlanEngineIdReturnsSelectedEngine)
     graph.setSelectedEngineId(4242);
 
     int64_t engineId = -1;
-    auto result = graph.get_execution_plan_engine_id(engineId);
+    const auto result = graph.get_execution_plan_engine_id(engineId);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(engineId, 4242);
 }
@@ -4056,7 +4054,7 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
     graph.build_operation_graph(_handle);
 
@@ -4176,7 +4174,7 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
         });
 
     int64_t workspaceSizeResult = 0;
-    auto result = graph.get_workspace_size(workspaceSizeResult);
+    const auto result = graph.get_workspace_size(workspaceSizeResult);
 
     EXPECT_TRUE(result.is_good());
     EXPECT_EQ(workspaceSizeResult, workspaceSize);
@@ -4193,7 +4191,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     Graph graph;
     graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
 
-    auto tensor = std::make_shared<TensorAttributes>();
+    const auto tensor = std::make_shared<TensorAttributes>();
     tensor->set_uid(42)
         .set_name("InputTensor")
         .set_dim({1, 2, 3, 4})
@@ -4203,9 +4201,9 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     PointwiseAttributes pointwiseAttributes;
     pointwiseAttributes.set_name("PointwiseNode");
     pointwiseAttributes.set_mode(PointwiseMode::RELU_FWD);
-    auto outTensor = graph.pointwise(tensor, pointwiseAttributes);
+    const auto outTensor = graph.pointwise(tensor, pointwiseAttributes);
     outTensor->set_data_type(DataType::FLOAT).set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8});
-    auto valResult = graph.validate();
+    const auto valResult = graph.validate();
     ASSERT_TRUE(valResult.is_good()) << valResult.get_message();
 
     // Allow descriptor-path calls (tensor/op/graph descriptors, setAttribute, finalize)
@@ -4343,16 +4341,16 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
         });
 
     // Prepare variant pack and workspace for execute
-    auto tensor1 = std::make_shared<TensorAttributes>();
+    const auto tensor1 = std::make_shared<TensorAttributes>();
     tensor1->set_uid(42);
 
-    auto tensor2 = std::make_shared<TensorAttributes>();
+    const auto tensor2 = std::make_shared<TensorAttributes>();
     tensor2->set_uid(22);
 
-    auto tensor3 = std::make_shared<TensorAttributes>();
+    const auto tensor3 = std::make_shared<TensorAttributes>();
     tensor3->set_uid(33);
 
-    auto tensor4 = std::make_shared<TensorAttributes>();
+    const auto tensor4 = std::make_shared<TensorAttributes>();
     tensor4->set_uid(1);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -4393,7 +4391,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
             for(int i = 0; i < 4; i++)
             {
                 auto targetValue = dataPtrs[i];
-                auto it = std::find_if(
+                const auto it = std::find_if(
                     variantPack.begin(), variantPack.end(), [&targetValue](const auto& pair) {
                         return pair.second == targetValue;
                     });
@@ -4443,25 +4441,25 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     // Run the full sequence
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good());
 
     const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
-    auto planResult = graph.create_execution_plans(heurModes);
+    const auto planResult = graph.create_execution_plans(heurModes);
     EXPECT_TRUE(planResult.is_good());
 
-    auto supportResult = graph.check_support();
+    const auto supportResult = graph.check_support();
     EXPECT_TRUE(supportResult.is_good());
 
-    auto buildPlansResult = graph.build_plans();
+    const auto buildPlansResult = graph.build_plans();
     EXPECT_TRUE(buildPlansResult.is_good());
 
     int64_t workspaceSize = 0;
-    auto wsResult = graph.get_workspace_size(workspaceSize);
+    const auto wsResult = graph.get_workspace_size(workspaceSize);
     EXPECT_TRUE(wsResult.is_good());
     EXPECT_EQ(workspaceSize, expectedWorkspaceSize);
 
-    auto execResult = graph.execute(_handle, variantPackForExec, workspace);
+    const auto execResult = graph.execute(_handle, variantPackForExec, workspace);
     EXPECT_TRUE(execResult.is_good());
 }
 
@@ -4469,22 +4467,22 @@ TEST_F(TestGraph, TopologicalSortSucceedsOnNormalGraph)
 {
     GraphTestUtils graph;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
-    auto invVariance = std::make_shared<TensorAttributes>();
-    auto scale = std::make_shared<TensorAttributes>();
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
 
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
-    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+    const auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
 
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
-    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+    const auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
 
     EXPECT_TRUE(graph.topologicallySortGraph().is_good());
 }
@@ -4493,31 +4491,31 @@ TEST_F(TestGraph, TopologicalSortFailsWithOrphanedNode)
 {
     GraphTestUtils graph;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
-    auto invVariance = std::make_shared<TensorAttributes>();
-    auto scale = std::make_shared<TensorAttributes>();
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
 
     // Connected nodes
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
-    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+    const auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
 
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
-    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+    const auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
 
     // Orphaned node (not connected to the main graph)
-    auto x2 = std::make_shared<TensorAttributes>();
+    const auto x2 = std::make_shared<TensorAttributes>();
     x2->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x2->set_uid(2);
     BatchnormInferenceAttributes attributes3;
     attributes3.set_name("BatchnormNode3");
-    auto y3 = graph.batchnorm_inference(x2, mean, invVariance, scale, bias, attributes3);
+    const auto y3 = graph.batchnorm_inference(x2, mean, invVariance, scale, bias, attributes3);
 
     EXPECT_FALSE(graph.topologicallySortGraph().is_good());
 }
@@ -4526,22 +4524,22 @@ TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
 {
     GraphTestUtils graph;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
-    auto invVariance = std::make_shared<TensorAttributes>();
-    auto scale = std::make_shared<TensorAttributes>();
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
 
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
-    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+    const auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
 
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
-    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+    const auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
 
     // Introduce a cycle: set x of the first node to y2
     auto& subNodes = graph.getPrivateGraphSubnodes();
@@ -4559,61 +4557,61 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     graph.set_intermediate_data_type(DataType::HALF);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4});
     x->set_stride({5, 6, 7, 8});
     x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1, 2, 1, 1});
     mean->set_stride({2, 1, 1, 1});
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_dim({1, 2, 1, 1});
     invVariance->set_stride({2, 1, 1, 1});
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 2, 1, 1});
     scale->set_stride({2, 1, 1, 1});
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({1, 2, 1, 1});
     bias->set_stride({2, 1, 1, 1});
 
     // Node 0: batchnorm1
     BatchnormInferenceAttributes bnAttrs1;
     bnAttrs1.set_name("batchnorm1");
-    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs1);
+    const auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs1);
 
-    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(x->get_dim());
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(x->get_dim());
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     // Node 1: pointwise1 (depends on batchnorm1)
     PointwiseAttributes pwAttrs1;
     pwAttrs1.set_name("pointwise1");
     pwAttrs1.set_mode(PointwiseMode::RELU_FWD);
-    auto out1 = graph.pointwise(y1, pwAttrs1);
+    const auto out1 = graph.pointwise(y1, pwAttrs1);
 
     // Node 2: pointwise2 (depends on batchnorm1)
     PointwiseAttributes pwAttrs2;
     pwAttrs2.set_name("pointwise2");
     pwAttrs2.set_mode(PointwiseMode::RELU_FWD);
-    auto out2 = graph.pointwise(y1, pwAttrs2);
+    const auto out2 = graph.pointwise(y1, pwAttrs2);
 
     //Node 3 Create a combined input by using ADD pointwise
     PointwiseAttributes pwAdd;
     pwAdd.set_name("add");
     pwAdd.set_mode(PointwiseMode::ADD);
-    auto combined = graph.pointwise(out1, out2, pwAdd);
+    const auto combined = graph.pointwise(out1, out2, pwAdd);
 
     // Node 4: batchnorm2 (depends on both pointwise1 and pointwise2)
     BatchnormInferenceAttributes bnAttrs2;
     bnAttrs2.set_name("batchnorm2");
-    auto y2 = graph.batchnorm_inference(combined, mean, invVariance, scale, bias, bnAttrs2);
+    const auto y2 = graph.batchnorm_inference(combined, mean, invVariance, scale, bias, bnAttrs2);
 
     // Node 5: pointwise3 (final node)
     PointwiseAttributes pwAttrs3;
     pwAttrs3.set_name("pointwise3");
     pwAttrs3.set_mode(PointwiseMode::RELU_FWD);
-    auto out3 = graph.pointwise(y2, pwAttrs3);
+    const auto out3 = graph.pointwise(y2, pwAttrs3);
 
     auto sortedSubnodesDueToGraphConstructionOrderCopy = graph.getPrivateGraphSubnodes();
 
@@ -4635,7 +4633,7 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     }
     EXPECT_TRUE(notSortedAnymore);
 
-    auto result = graph.validate();
+    const auto result = graph.validate();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
     ASSERT_EQ(subNodes.size(), sortedSubnodesDueToGraphConstructionOrderCopy.size());
@@ -4666,31 +4664,31 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
     graph.set_intermediate_data_type(DataType::HALF);
     graph.set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4});
     x->set_stride({5, 6, 7, 8});
     x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
 
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
-    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+    const auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
 
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
-    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+    const auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
 
-    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(x->get_dim());
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(x->get_dim());
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
     //validate graph is good.
     auto result = graph.validate();
@@ -4711,48 +4709,48 @@ TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
 TEST_F(TestGraph, CheckNoDuplicateTensorIdsPassesWithNoDuplicates)
 {
     GraphTestUtils graph;
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2);
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3);
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5);
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
 
-    auto result = graph.checkNoDuplicateTensorIds();
+    const auto result = graph.checkNoDuplicateTensorIds();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
 TEST_F(TestGraph, CheckNoDuplicateTensorIdsFailsWithDuplicates)
 {
     GraphTestUtils graph;
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2);
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(2); // Duplicate UID
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(3);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3); // Duplicate UID
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
 
-    auto result = graph.checkNoDuplicateTensorIds();
+    const auto result = graph.checkNoDuplicateTensorIds();
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(result.get_message().find("Duplicate tensor UIDs") != std::string::npos);
@@ -4764,32 +4762,32 @@ TEST_F(TestGraph, CheckNoDuplicateTensorIdsPassesWithReusedTensors)
 {
     GraphTestUtils graph;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     // These tensors will be reused across multiple batchnorm nodes
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2);
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3);
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5);
 
     // Node 1: Uses mean, invVariance, scale, bias
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
-    auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
+    const auto y1 = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes1);
 
     // Node 2: REUSES the same mean, invVariance, scale, bias tensors
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
-    auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
+    const auto y2 = graph.batchnorm_inference(y1, mean, invVariance, scale, bias, attributes2);
 
     // Should pass - same tensor objects being reused is fine
-    auto result = graph.checkNoDuplicateTensorIds();
+    const auto result = graph.checkNoDuplicateTensorIds();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -4797,40 +4795,40 @@ TEST_F(TestGraph, CheckNoDuplicateTensorIdsFailsWithReusedUidsOnDifferentTensors
 {
     GraphTestUtils graph;
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     // Node 1 tensors
-    auto mean1 = std::make_shared<TensorAttributes>();
+    const auto mean1 = std::make_shared<TensorAttributes>();
     mean1->set_uid(2);
-    auto invVariance1 = std::make_shared<TensorAttributes>();
+    const auto invVariance1 = std::make_shared<TensorAttributes>();
     invVariance1->set_uid(3);
-    auto scale1 = std::make_shared<TensorAttributes>();
+    const auto scale1 = std::make_shared<TensorAttributes>();
     scale1->set_uid(4);
-    auto bias1 = std::make_shared<TensorAttributes>();
+    const auto bias1 = std::make_shared<TensorAttributes>();
     bias1->set_uid(5);
 
     BatchnormInferenceAttributes attributes1;
     attributes1.set_name("BatchnormNode1");
-    auto y1 = graph.batchnorm_inference(x, mean1, invVariance1, scale1, bias1, attributes1);
+    const auto y1 = graph.batchnorm_inference(x, mean1, invVariance1, scale1, bias1, attributes1);
 
     // Node 2 tensors - DIFFERENT objects but SAME UIDs
-    auto mean2 = std::make_shared<TensorAttributes>();
+    const auto mean2 = std::make_shared<TensorAttributes>();
     mean2->set_uid(2); // Same UID as mean1 but different object
-    auto invVariance2 = std::make_shared<TensorAttributes>();
+    const auto invVariance2 = std::make_shared<TensorAttributes>();
     invVariance2->set_uid(3); // Same UID as invVariance1 but different object
-    auto scale2 = std::make_shared<TensorAttributes>();
+    const auto scale2 = std::make_shared<TensorAttributes>();
     scale2->set_uid(4); // Same UID as scale1 but different object
-    auto bias2 = std::make_shared<TensorAttributes>();
+    const auto bias2 = std::make_shared<TensorAttributes>();
     bias2->set_uid(5); // Same UID as bias1 but different object
 
     BatchnormInferenceAttributes attributes2;
     attributes2.set_name("BatchnormNode2");
-    auto y2 = graph.batchnorm_inference(y1, mean2, invVariance2, scale2, bias2, attributes2);
+    const auto y2 = graph.batchnorm_inference(y1, mean2, invVariance2, scale2, bias2, attributes2);
 
     // Should fail - different tensor objects with same UIDs
-    auto result = graph.checkNoDuplicateTensorIds();
+    const auto result = graph.checkNoDuplicateTensorIds();
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(result.get_message().find("Duplicate tensor UIDs") != std::string::npos);
@@ -4839,25 +4837,25 @@ TEST_F(TestGraph, CheckNoDuplicateTensorIdsFailsWithReusedUidsOnDifferentTensors
 TEST_F(TestGraph, CheckTensorUidsSetPassesWhenAllUidsSet)
 {
     GraphTestUtils graph;
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2);
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3);
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5);
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
     y->set_uid(6);
 
-    auto result = graph.checkTensorUidsSet();
+    const auto result = graph.checkTensorUidsSet();
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(result.code, ErrorCode::OK);
 }
@@ -4865,23 +4863,23 @@ TEST_F(TestGraph, CheckTensorUidsSetPassesWhenAllUidsSet)
 TEST_F(TestGraph, CheckTensorUidsSetFailsWhenUidMissing)
 {
     GraphTestUtils graph;
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_name("X").set_uid(1);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_name("Mean");
-    auto invVariance = std::make_shared<TensorAttributes>();
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4);
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5);
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
 
-    auto result = graph.checkTensorUidsSet();
+    const auto result = graph.checkTensorUidsSet();
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET);
     EXPECT_NE(result.get_message().find("Tensors without UIDs"), std::string::npos)
@@ -4897,21 +4895,21 @@ TEST_F(TestGraph, BuildOperationGraphAllMissingTensorUids)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
 
     // Before build_operation_graph, UIDs should not be set
     EXPECT_FALSE(x->has_uid());
@@ -4921,9 +4919,9 @@ TEST_F(TestGraph, BuildOperationGraphAllMissingTensorUids)
     EXPECT_FALSE(bias->has_uid());
     EXPECT_FALSE(y->has_uid());
 
-    auto validateResult = graph.validate();
+    const auto validateResult = graph.validate();
     ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     // After build_operation_graph, all UIDs should be populated
@@ -4953,29 +4951,29 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     x->set_uid(100); // Pre-set UID
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     mean->set_uid(200); // Pre-set UID
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     invVariance->set_uid(300); // Pre-set UID
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     scale->set_uid(400); // Pre-set UID
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_data_type(DataType::FLOAT).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
     // bias does not have a UID set
 
     BatchnormInferenceAttributes attributes;
     attributes.set_name("BatchnormNode");
-    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    const auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
     y->set_uid(500); // Pre-set UID
 
     EXPECT_TRUE(x->has_uid());
@@ -4991,7 +4989,7 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_EQ(y->get_uid(), 500);
 
     ASSERT_TRUE(graph.validate().is_good());
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     // After build_operation_graph, bias should have a UID
@@ -5054,7 +5052,7 @@ TEST_F(TestGraph, AssignedTensorUidsFollowNodeOrder)
     Graph graph;
     createUnsetUidPointwiseChain(graph, 8);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     // Nodes in the order they were added; per node its inputs, then its outputs.
@@ -5100,7 +5098,7 @@ static std::vector<std::map<std::string, int64_t>>
         graphs.push_back(std::make_unique<Graph>());
         createGraph(*graphs.back());
 
-        auto buildResult = graphs.back()->build_operation_graph(handle);
+        const auto buildResult = graphs.back()->build_operation_graph(handle);
         EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
         uidsPerBuild.push_back(tensorUidsByName(*graphs.back()));
     }
@@ -5133,25 +5131,25 @@ static void createUnsetUidMultiOperandGraph(Graph& graph)
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
     const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_name("B").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes addAttributes;
     addAttributes.set_name("Add");
     addAttributes.set_mode(PointwiseMode::ADD);
-    auto t = graph.pointwise(x, b, addAttributes);
+    const auto t = graph.pointwise(x, b, addAttributes);
     t->set_name("T");
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_name("Epsilon");
 
     BatchnormAttributes bnAttributes;
@@ -5199,7 +5197,7 @@ TEST_F(TestGraph, GetTensorsByUidReturnsMap)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(42)
         .set_name("X")
         .set_dim({1, 2, 3, 4})
@@ -5209,7 +5207,7 @@ TEST_F(TestGraph, GetTensorsByUidReturnsMap)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_name("PointwiseNode");
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    auto y = graph.pointwise(x, pwAttrs);
+    const auto y = graph.pointwise(x, pwAttrs);
     y->set_uid(99);
 
     // Get tensor map by UID
@@ -5218,19 +5216,19 @@ TEST_F(TestGraph, GetTensorsByUidReturnsMap)
     // Map contains expected tensors
     EXPECT_EQ(tensorsByUid.size(), 2);
 
-    auto itX = tensorsByUid.find(42);
+    const auto itX = tensorsByUid.find(42);
     ASSERT_NE(itX, tensorsByUid.end());
     EXPECT_EQ(itX->second->get_uid(), 42);
     EXPECT_EQ(itX->second->get_name(), "X");
     EXPECT_EQ(itX->second, x);
 
-    auto itY = tensorsByUid.find(99);
+    const auto itY = tensorsByUid.find(99);
     ASSERT_NE(itY, tensorsByUid.end());
     EXPECT_EQ(itY->second->get_uid(), 99);
     EXPECT_EQ(itY->second, y);
 
     // Non-existent UID not found in map
-    auto notFound = tensorsByUid.find(999);
+    const auto notFound = tensorsByUid.find(999);
     EXPECT_EQ(notFound, tensorsByUid.end());
 }
 
@@ -5241,7 +5239,7 @@ TEST_F(TestGraph, GetTensorsByNameReturnsMap)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputTensor")
         .set_dim({1, 2, 3, 4})
@@ -5251,7 +5249,7 @@ TEST_F(TestGraph, GetTensorsByNameReturnsMap)
     PointwiseAttributes pwAttrs;
     pwAttrs.set_name("PointwiseNode");
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
-    auto y = graph.pointwise(x, pwAttrs);
+    const auto y = graph.pointwise(x, pwAttrs);
 
     // Get tensor map by name
     auto tensorsByName = graph.getTensorsByName();
@@ -5259,18 +5257,18 @@ TEST_F(TestGraph, GetTensorsByNameReturnsMap)
     // Map contains expected tensors
     EXPECT_EQ(tensorsByName.size(), 2);
 
-    auto itX = tensorsByName.find("InputTensor");
+    const auto itX = tensorsByName.find("InputTensor");
     ASSERT_NE(itX, tensorsByName.end());
     EXPECT_EQ(itX->second->get_name(), "InputTensor");
     EXPECT_EQ(itX->second, x);
 
     // Output tensor has auto-generated name
-    auto itY = tensorsByName.find("PointwiseNode::OUT_0");
+    const auto itY = tensorsByName.find("PointwiseNode::OUT_0");
     ASSERT_NE(itY, tensorsByName.end());
     EXPECT_EQ(itY->second, y);
 
     // Non-existent name not found in map
-    auto notFound = tensorsByName.find("NonExistentTensor");
+    const auto notFound = tensorsByName.find("NonExistentTensor");
     EXPECT_EQ(notFound, tensorsByName.end());
 }
 
@@ -5281,35 +5279,35 @@ TEST_F(TestGraph, GetTensorsByUidAndNameIncludePeerStatTensors)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("InputX")
         .set_dim({1, 64, 32, 32})
         .set_stride({65536, 1024, 32, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2)
         .set_name("ScaleTensor")
         .set_dim({64})
         .set_stride({1})
         .set_data_type(DataType::FLOAT);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3)
         .set_name("BiasTensor")
         .set_dim({64})
         .set_stride({1})
         .set_data_type(DataType::FLOAT);
 
-    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    const auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(4);
 
     // Create peer stat tensors (these go in the separate peer_stats vector, not outputs)
-    auto peerStat1 = std::make_shared<TensorAttributes>();
+    const auto peerStat1 = std::make_shared<TensorAttributes>();
     peerStat1->set_uid(20).set_name("PeerStat1");
 
-    auto peerStat2 = std::make_shared<TensorAttributes>();
+    const auto peerStat2 = std::make_shared<TensorAttributes>();
     peerStat2->set_uid(21).set_name("PeerStat2");
 
     BatchnormAttributes bnAttrs;
@@ -5397,35 +5395,35 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsRankedList)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim({1, 2, 3, 4})
         .set_stride({24, 12, 4, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
         .set_name("Mean")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5)
         .set_name("Bias")
         .set_data_type(DataType::FLOAT)
@@ -5623,7 +5621,7 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsRankedList)
         });
 
     std::vector<int64_t> rankedEngineIds;
-    auto result = graph.get_ranked_engine_ids(rankedEngineIds);
+    const auto result = graph.get_ranked_engine_ids(rankedEngineIds);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(rankedEngineIds.size(), 3);
@@ -5643,35 +5641,35 @@ TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
         .set_io_data_type(DataType::FLOAT);
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
         .set_name("Mean")
         .set_data_type(DataType::FLOAT)
         .set_dim(derivedDims)
         .set_stride(derivedStrides);
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
         .set_dim(derivedDims)
         .set_stride(derivedStrides);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT)
         .set_dim(derivedDims)
         .set_stride(derivedStrides);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5)
         .set_name("Bias")
         .set_data_type(DataType::FLOAT)
@@ -5820,7 +5818,7 @@ TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -5833,7 +5831,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtFailsWithoutGraphBuilt)
     std::vector<KnobSetting> settings;
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.get_message(),
               "Graph has not been built, build the operation graph first. Cannot create "
@@ -5852,7 +5850,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
     EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).Times(AnyNumber());
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good());
 
     // Mock engine descriptor creation
@@ -5925,7 +5923,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
 
     // Empty settings - should not call backendSetAttribute for knobs
     const std::vector<KnobSetting> settings;
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -5939,7 +5937,7 @@ TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes attributes;
@@ -5947,7 +5945,7 @@ TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
     attributes.set_mode(PointwiseMode::RELU_FWD);
     graph.pointwise(in0, attributes);
 
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
     EXPECT_FALSE(result.is_good());
 }
 
@@ -5972,7 +5970,7 @@ static void
     // Helper lambdas for mock attribute patterns
 
     // Mock string attribute: size-query + data-read
-    auto mockString = [&](hipdnnBackendAttributeName_t attrName, const std::string& value) {
+    const auto mockString = [&](hipdnnBackendAttributeName_t attrName, const std::string& value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_CHAR, 0, _, nullptr))
             .WillOnce(DoAll(SetArgPointee<4>(static_cast<int64_t>(value.size() + 1)),
@@ -5997,7 +5995,7 @@ static void
     };
 
     // Mock scalar attribute: single get call with typed value
-    auto mockScalarInt64 = [&](hipdnnBackendAttributeName_t attrName, int64_t value) {
+    const auto mockScalarInt64 = [&](hipdnnBackendAttributeName_t attrName, int64_t value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_INT64, 1, _, NotNull()))
             .WillOnce(DoAll(Invoke([value](hipdnnBackendDescriptor_t,
@@ -6009,7 +6007,7 @@ static void
                             Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockScalarDouble = [&](hipdnnBackendAttributeName_t attrName, double value) {
+    const auto mockScalarDouble = [&](hipdnnBackendAttributeName_t attrName, double value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_DOUBLE, 1, _, NotNull()))
             .WillOnce(DoAll(Invoke([value](hipdnnBackendDescriptor_t,
@@ -6021,7 +6019,7 @@ static void
                             Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockScalarBool = [&](hipdnnBackendAttributeName_t attrName, bool value) {
+    const auto mockScalarBool = [&](hipdnnBackendAttributeName_t attrName, bool value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_BOOLEAN, 1, _, NotNull()))
             .WillOnce(DoAll(Invoke([value](hipdnnBackendDescriptor_t,
@@ -6034,14 +6032,14 @@ static void
     };
 
     // Mock optional scalar absent (count query returns 0)
-    auto mockOptAbsent = [&](hipdnnBackendAttributeName_t attrName,
-                             hipdnnBackendAttributeType_t attrType) {
+    const auto mockOptAbsent = [&](hipdnnBackendAttributeName_t attrName,
+                                   hipdnnBackendAttributeType_t attrType) {
         EXPECT_CALL(*mockBackend, backendGetAttribute(knobDesc, attrName, attrType, 0, _, nullptr))
             .WillOnce(DoAll(SetArgPointee<4>(0), Return(HIPDNN_STATUS_SUCCESS)));
     };
 
     // Mock empty vector attribute (count query returns 0)
-    auto mockEmptyVec = [&](hipdnnBackendAttributeName_t attrName) {
+    const auto mockEmptyVec = [&](hipdnnBackendAttributeName_t attrName) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_INT64, 0, _, nullptr))
             .WillOnce(DoAll(SetArgPointee<4>(0), Return(HIPDNN_STATUS_SUCCESS)));
@@ -6062,7 +6060,7 @@ static void
     // 5. Default value and constraint fields, dispatched on type
     if(valueType == HIPDNN_TYPE_INT64)
     {
-        auto intVal = std::get<int64_t>(defaultValue);
+        const auto intVal = std::get<int64_t>(defaultValue);
         mockScalarInt64(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, intVal);
 
         // No constraints (all absent)
@@ -6073,7 +6071,7 @@ static void
     }
     else if(valueType == HIPDNN_TYPE_DOUBLE)
     {
-        auto doubleVal = std::get<double>(defaultValue);
+        const auto doubleVal = std::get<double>(defaultValue);
         mockScalarDouble(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, doubleVal);
 
         // No constraints (all absent)
@@ -6082,7 +6080,7 @@ static void
     }
     else if(valueType == HIPDNN_TYPE_CHAR)
     {
-        auto strVal = std::get<std::string>(defaultValue);
+        const auto strVal = std::get<std::string>(defaultValue);
         mockString(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, strVal);
 
         // No string max length
@@ -6116,7 +6114,7 @@ static hipdnnBackendDescriptor_t
     EXPECT_CALL(*mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(*mockBackend, backendFinalize(_)).Times(AnyNumber());
 
-    auto buildResult = graph.build_operation_graph(handle);
+    const auto buildResult = graph.build_operation_graph(handle);
     EXPECT_TRUE(buildResult.is_good());
 
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE001);
@@ -6150,7 +6148,7 @@ static void
                       hipdnnBackendDescriptor_t engineDesc,
                       const std::vector<hipdnnBackendDescriptor_t>& fakeKnobDescs)
 {
-    auto count = static_cast<int64_t>(fakeKnobDescs.size());
+    const auto count = static_cast<int64_t>(fakeKnobDescs.size());
 
     EXPECT_CALL(*mockBackend,
                 backendGetAttribute(engineDesc,
@@ -6202,7 +6200,7 @@ TEST_F(TestGraph, GetKnobsForEngineFailsWhenGraphNotBuilt)
 
     const int64_t engineId = 42;
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(engineId, knobs);
     EXPECT_FALSE(result.is_good());
     EXPECT_NE(result.get_message().find("Graph has not been built"), std::string::npos);
 }
@@ -6218,7 +6216,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsEmptyVectorWhenNoKnobs)
 
     const int64_t engineId = 42;
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(engineId, knobs);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(knobs.empty());
 }
@@ -6252,7 +6250,7 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
 
     const int64_t engineId = 42;
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(engineId, knobs);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(knobs.size(), 2u);
     EXPECT_EQ(knobs[0].knobId(), "tile_size");
@@ -6280,7 +6278,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesDeprecatedKnobs)
 
     const int64_t engineId = 42;
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(engineId, knobs);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(knobs.size(), 1u);
     EXPECT_EQ(knobs[0].knobId(), "old_tile_size");
@@ -6446,7 +6444,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
 
     const int64_t engineId = 42;
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(engineId, knobs);
+    const auto result = graph.get_knobs_for_engine(engineId, knobs);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(knobs.size(), 1u);
     EXPECT_EQ(knobs[0].knobId(), "algorithm");
@@ -6498,7 +6496,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
 
     const int64_t engineId = 42;
     std::unordered_map<KnobType_t, Knob> knobMap;
-    auto result = graph.get_knob_lookup_for_engine(engineId, knobMap);
+    const auto result = graph.get_knob_lookup_for_engine(engineId, knobMap);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(knobMap.size(), 2u);
     EXPECT_NE(knobMap.find("split_k"), knobMap.end());
@@ -6517,7 +6515,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsEmptyMapWhenNoKnobs)
 
     const int64_t engineId = 42;
     std::unordered_map<KnobType_t, Knob> knobMap;
-    auto result = graph.get_knob_lookup_for_engine(engineId, knobMap);
+    const auto result = graph.get_knob_lookup_for_engine(engineId, knobMap);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(knobMap.empty());
 }
@@ -6551,7 +6549,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineClearsPreExistingEntries)
     ASSERT_NE(knobMap.find("stale_knob"), knobMap.end());
 
     const int64_t engineId = 42;
-    auto result = graph.get_knob_lookup_for_engine(engineId, knobMap);
+    const auto result = graph.get_knob_lookup_for_engine(engineId, knobMap);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
     // Old entry should be gone, only new knob present
@@ -6648,7 +6646,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     std::vector<KnobSetting> settings;
     settings.emplace_back("tile_size", int64_t{512});
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -6732,7 +6730,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
     settings.emplace_back("supported_knob", int64_t{200});
     settings.emplace_back("unsupported_knob", int64_t{999});
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -6815,7 +6813,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithDeprecatedKnob)
     std::vector<KnobSetting> settings;
     settings.emplace_back("legacy_tile_size", int64_t{128});
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -6903,7 +6901,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
     std::vector<KnobSetting> settings;
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -7009,7 +7007,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
     settings.emplace_back("performance.threads", static_cast<int64_t>(8));
 
-    auto result = graph.create_execution_plan_ext(engineId, settings);
+    const auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -7057,7 +7055,7 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesCountMismatch)
         });
 
     std::vector<Knob> knobs;
-    auto result = graph.get_knobs_for_engine(42, knobs);
+    const auto result = graph.get_knobs_for_engine(42, knobs);
 
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -7071,13 +7069,13 @@ TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_dim({1, 3, 32, 32})
         .set_stride({3072, 1024, 32, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(2).set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
 
     ConvFpropAttributes convAttr;
@@ -7114,7 +7112,7 @@ TEST_F(TestGraph, SetPreferredEngineIdByName)
     graph.set_preferred_engine_id_ext(testEngineName);
 
     // Verify it was converted to the correct ID
-    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    const auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
     EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
     EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
 }
@@ -7160,7 +7158,7 @@ TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
     Graph graph;
 
     const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
-    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    const auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
 
     // Set by ID first
     graph.set_preferred_engine_id_ext(std::optional<int64_t>(999));
@@ -7196,14 +7194,14 @@ TEST_F(TestGraph, MethodChaining)
     Graph graph;
 
     const char* testEngineName = "TEST_ENGINE_FOR_CHAINING";
-    auto expectedEngineId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    const auto expectedEngineId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
 
     // Test that all setters return reference to self for chaining
     auto& ref1 = graph.set_name("ChainedGraph");
     auto& ref2 = ref1.set_compute_data_type(DataType::FLOAT);
     auto& ref3 = ref2.set_intermediate_data_type(DataType::HALF);
     auto& ref4 = ref3.set_io_data_type(DataType::BFLOAT16);
-    auto& ref5 = ref4.set_preferred_engine_id_ext(12345);
+    const auto& ref5 = ref4.set_preferred_engine_id_ext(12345);
 
     // All references should point to the same object
     EXPECT_EQ(&graph, &ref1);
@@ -7221,7 +7219,7 @@ TEST_F(TestGraph, MethodChaining)
     EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), 12345);
 
     // Test chaining with string overload
-    auto& ref6 = graph.set_preferred_engine_id_ext(testEngineName);
+    const auto& ref6 = graph.set_preferred_engine_id_ext(testEngineName);
     EXPECT_EQ(&graph, &ref6);
     EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
     EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedEngineId);
@@ -7242,7 +7240,7 @@ TEST_F(TestGraph, GetRankedEngineIdsFailsWhenHeuristicCreationFails)
     EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).Times(AnyNumber());
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good());
 
     // Mock heuristic descriptor creation
@@ -7270,7 +7268,7 @@ TEST_F(TestGraph, GetRankedEngineIdsFailsWhenHeuristicCreationFails)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<int64_t> rankedEngineIds;
-    auto result = graph.get_ranked_engine_ids(rankedEngineIds);
+    const auto result = graph.get_ranked_engine_ids(rankedEngineIds);
 
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -7331,11 +7329,11 @@ TEST_F(TestGraph, MoveConstructionWithNodes)
         .set_io_data_type(DataType::FLOAT);
 
     // Add a batchnorm node to the graph
-    auto y = createBasicBatchnormGraph(originalGraph);
+    const auto y = createBasicBatchnormGraph(originalGraph);
     EXPECT_NE(y, nullptr);
 
     // Get tensor count before move
-    auto tensorsBeforeMove = originalGraph.getTensorsByName();
+    const auto tensorsBeforeMove = originalGraph.getTensorsByName();
     const size_t tensorCountBeforeMove = tensorsBeforeMove.size();
     EXPECT_GT(tensorCountBeforeMove, 0);
 
@@ -7343,7 +7341,7 @@ TEST_F(TestGraph, MoveConstructionWithNodes)
     const Graph movedGraph(std::move(originalGraph));
 
     // Verify moved graph has the nodes
-    auto tensorsAfterMove = movedGraph.getTensorsByName();
+    const auto tensorsAfterMove = movedGraph.getTensorsByName();
     EXPECT_EQ(tensorsAfterMove.size(), tensorCountBeforeMove);
 
     // Verify graph name was moved
@@ -7359,11 +7357,11 @@ TEST_F(TestGraph, MoveAssignmentWithNodes)
         .set_io_data_type(DataType::FLOAT);
 
     // Add a batchnorm node to the graph
-    auto y = createBasicBatchnormGraph(originalGraph);
+    const auto y = createBasicBatchnormGraph(originalGraph);
     EXPECT_NE(y, nullptr);
 
     // Get tensor count before move
-    auto tensorsBeforeMove = originalGraph.getTensorsByName();
+    const auto tensorsBeforeMove = originalGraph.getTensorsByName();
     const size_t tensorCountBeforeMove = tensorsBeforeMove.size();
     EXPECT_GT(tensorCountBeforeMove, 0);
 
@@ -7374,7 +7372,7 @@ TEST_F(TestGraph, MoveAssignmentWithNodes)
     movedGraph = std::move(originalGraph);
 
     // Verify moved graph has the nodes
-    auto tensorsAfterMove = movedGraph.getTensorsByName();
+    const auto tensorsAfterMove = movedGraph.getTensorsByName();
     EXPECT_EQ(tensorsAfterMove.size(), tensorCountBeforeMove);
 
     // Verify graph name was moved
@@ -7425,13 +7423,13 @@ TEST_F(TestGraph, SdpaFwdNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
     SdpaAttributes attributes;
@@ -7443,7 +7441,7 @@ TEST_F(TestGraph, SdpaFwdNodeCreation)
     EXPECT_TRUE(o->get_is_virtual());
     EXPECT_EQ(stats, nullptr);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -7454,13 +7452,13 @@ TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
     SdpaAttributes attributes;
@@ -7475,7 +7473,7 @@ TEST_F(TestGraph, SdpaFwdNodeCreationWithStats)
     EXPECT_EQ(stats->get_name(), "SdpaNodeStats::STATS");
     EXPECT_TRUE(stats->get_is_virtual());
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -7486,13 +7484,13 @@ TEST_F(TestGraph, SdpaFwdValidateFailsNegativeStrideOnK)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, -64, 1}).set_data_type(DataType::FLOAT);
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
     SdpaAttributes attributes;
@@ -7513,16 +7511,16 @@ TEST_F(TestGraph, SdpaFwdValidateSucceedsWithZeroStrideBias)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias")
         .set_dim({2, 8, 16, 32})
         .set_stride({0, 0, 32, 1})
@@ -7546,10 +7544,10 @@ TEST_F(TestGraph, CustomOpNodeCreation)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto inputA = std::make_shared<TensorAttributes>();
+    const auto inputA = std::make_shared<TensorAttributes>();
     inputA->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto inputB = std::make_shared<TensorAttributes>();
+    const auto inputB = std::make_shared<TensorAttributes>();
     inputB->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
     CustomOpAttributes attributes;
@@ -7567,7 +7565,7 @@ TEST_F(TestGraph, CustomOpNodeCreation)
     outputs[0]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
     outputs[1]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
@@ -7578,7 +7576,7 @@ TEST_F(TestGraph, CustomOpValidateFailsWithNullInput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto validInput = std::make_shared<TensorAttributes>();
+    const auto validInput = std::make_shared<TensorAttributes>();
     validInput->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
     CustomOpAttributes attributes;
@@ -7589,7 +7587,7 @@ TEST_F(TestGraph, CustomOpValidateFailsWithNullInput)
     outputs[0]->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
     // This must return an error, not crash
-    auto err = graph.validate();
+    const auto err = graph.validate();
     EXPECT_FALSE(err.is_good());
 }
 
@@ -7600,8 +7598,8 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphInput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
 
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     in1->set_name("in1")
@@ -7628,15 +7626,15 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnIntermediateTensor)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
 
     MatmulAttributes matmulAttributes;
     matmulAttributes.set_name("MatmulNode");
-    auto c = graph.matmul(a, b, matmulAttributes);
+    const auto c = graph.matmul(a, b, matmulAttributes);
 
     PointwiseAttributes reluAttributes;
     reluAttributes.set_name("ReluNode");
@@ -7658,8 +7656,8 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphOutput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
 
     in0->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
     in1->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
@@ -7668,7 +7666,7 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphOutput)
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto out0 = graph.pointwise(in0, in1, attributes);
+    const auto out0 = graph.pointwise(in0, in1, attributes);
     out0->set_is_virtual(false);
     out0->set_stride({24, 12, 4, -1});
 
@@ -7685,10 +7683,10 @@ TEST_F(TestGraph, CustomOpValidateFailsNegativeStrideOnOutput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto inputA = std::make_shared<TensorAttributes>();
+    const auto inputA = std::make_shared<TensorAttributes>();
     inputA->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto inputB = std::make_shared<TensorAttributes>();
+    const auto inputB = std::make_shared<TensorAttributes>();
     inputB->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
     CustomOpAttributes attributes;
@@ -7713,8 +7711,8 @@ TEST_F(TestGraph, ValidateSucceedsWithZeroStrideBroadcastInput)
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT);
 
-        auto in0 = std::make_shared<TensorAttributes>();
-        auto in1 = std::make_shared<TensorAttributes>();
+        const auto in0 = std::make_shared<TensorAttributes>();
+        const auto in1 = std::make_shared<TensorAttributes>();
 
         in0->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
         in1->set_dim({1, 2, 3, 4}).set_stride({0, 0, 0, 1}).set_data_type(DataType::FLOAT);
@@ -7735,10 +7733,10 @@ TEST_F(TestGraph, ValidateSucceedsWithZeroStrideBroadcastInput)
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT);
 
-        auto a = std::make_shared<TensorAttributes>();
+        const auto a = std::make_shared<TensorAttributes>();
         a->set_dim({2, 4, 8}).set_stride({32, 8, 1}).set_data_type(DataType::FLOAT);
 
-        auto b = std::make_shared<TensorAttributes>();
+        const auto b = std::make_shared<TensorAttributes>();
         b->set_dim({2, 8, 5}).set_stride({0, 5, 1}).set_data_type(DataType::FLOAT);
 
         MatmulAttributes attributes;
@@ -7758,13 +7756,13 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnRaggedOffset)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_name("RaggedOffset")
         .set_dim({2, 1, 1, 1})
         .set_stride({-1, 1, 1, 1})
         .set_data_type(DataType::INT64);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X")
         .set_dim({2, 3, 4, 5})
         .set_stride({60, 20, 5, 1})
@@ -7863,7 +7861,7 @@ TEST_P(TestGraphNullTensorArg, BuilderAcceptsNullAndValidateReportsAttributeNotS
         .set_intermediate_data_type(DataType::FLOAT);
     param.build(graph, param.nullArg);
 
-    auto result = graph.validate();
+    const auto result = graph.validate();
     EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
 
     // The same node with every tensor argument set validates, so the error above comes from
@@ -7874,7 +7872,7 @@ TEST_P(TestGraphNullTensorArg, BuilderAcceptsNullAndValidateReportsAttributeNotS
         .set_intermediate_data_type(DataType::FLOAT);
     param.build(control, ALL_TENSOR_ARGS);
 
-    auto controlResult = control.validate();
+    const auto controlResult = control.validate();
     EXPECT_TRUE(controlResult.is_good()) << controlResult.get_message();
 }
 
@@ -7885,7 +7883,7 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
     std::vector<NullTensorArgParam> params;
 
     addNullTensorArgRows(params, "Layernorm", {"X", "Scale", "Bias"}, [](Graph& g, int nullArg) {
-        auto epsilon = std::make_shared<TensorAttributes>();
+        const auto epsilon = std::make_shared<TensorAttributes>();
         epsilon->set_value(1e-5f);
         LayernormAttributes attributes;
         attributes.set_forward_phase(NormFwdPhase::INFERENCE);
@@ -7935,7 +7933,7 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
     addNullTensorArgRows(params, "Reduction", {"X"}, [](Graph& g, int nullArg) {
         ReductionAttributes attributes;
         attributes.set_mode(ReductionMode::ADD);
-        auto y = g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}), attributes);
+        const auto y = g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}), attributes);
         y->set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1});
     });
 
@@ -8026,9 +8024,9 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
         attributes.set_post_padding({1, 1});
         attributes.set_stride({1, 1});
         attributes.set_dilation({1, 1});
-        auto dx = g.conv_dgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
-                               tensorOrNull(1, nullArg, {64, 3, 3, 3}),
-                               attributes);
+        const auto dx = g.conv_dgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                                     tensorOrNull(1, nullArg, {64, 3, 3, 3}),
+                                     attributes);
         dx->set_dim({1, 3, 32, 32});
     });
 
@@ -8038,9 +8036,9 @@ static std::vector<NullTensorArgParam> getNullTensorArgParams()
         attributes.set_post_padding({1, 1});
         attributes.set_stride({1, 1});
         attributes.set_dilation({1, 1});
-        auto dw = g.conv_wgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
-                               tensorOrNull(1, nullArg, {1, 3, 32, 32}),
-                               attributes);
+        const auto dw = g.conv_wgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                                     tensorOrNull(1, nullArg, {1, 3, 32, 32}),
+                                     attributes);
         dw->set_dim({64, 3, 3, 3});
     });
 
@@ -8112,7 +8110,7 @@ TEST_F(TestGraph, IsSupportedReturnsTrueWhenEnginesAvailable)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -8169,7 +8167,7 @@ TEST_F(TestGraph, IsSupportedReturnsFalseWhenNoEngines)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
 }
@@ -8223,7 +8221,7 @@ TEST_F(TestGraph, BuildReturnsGraphNotSupportedWhenNoEngines)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
 }
@@ -8237,7 +8235,7 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsGraphNotSupportedWhenNoEngines)
 
     // Pre-build the graph so get_ranked_engine_ids() proceeds past the
     // "graph not built" guard.
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     // Allow descriptor-path calls (tensor/op/graph descriptors, setAttribute, finalize)
@@ -8285,7 +8283,7 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsGraphNotSupportedWhenNoEngines)
         });
 
     std::vector<int64_t> rankedEngineIds;
-    auto result = graph.get_ranked_engine_ids(rankedEngineIds);
+    const auto result = graph.get_ranked_engine_ids(rankedEngineIds);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
 }
@@ -8299,7 +8297,7 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsGraphNotSupportedWhenRetrievedCountZe
 
     // Pre-build the graph so get_ranked_engine_ids() proceeds past the
     // "graph not built" guard.
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
 
     // Allow descriptor-path calls (tensor/op/graph descriptors, setAttribute, finalize)
@@ -8367,7 +8365,7 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsGraphNotSupportedWhenRetrievedCountZe
         });
 
     std::vector<int64_t> rankedEngineIds;
-    auto result = graph.get_ranked_engine_ids(rankedEngineIds);
+    const auto result = graph.get_ranked_engine_ids(rankedEngineIds);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
 }
@@ -8551,7 +8549,7 @@ TEST_F(TestGraph, IsSupportedAutoBuildsGraphIfNotBuilt)
         });
 
     // Call is_supported_ext without calling build_operation_graph first
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -8563,7 +8561,7 @@ TEST_F(TestGraph, IsSupportedSkipsBuildIfAlreadyBuilt)
 
     // Pre-build the graph
     graph.validate();
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good());
 
     // Now call is_supported_ext — it should skip validate+build_operation_graph
@@ -8607,7 +8605,7 @@ TEST_F(TestGraph, IsSupportedSkipsBuildIfAlreadyBuilt)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -8621,7 +8619,7 @@ TEST_F(TestGraph, IsSupportedPropagatesValidationErrors)
         .set_intermediate_data_type(DataType::HALF)
         .set_io_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
 
     PointwiseAttributes attributes;
@@ -8631,7 +8629,7 @@ TEST_F(TestGraph, IsSupportedPropagatesValidationErrors)
     graph.pointwise(in0, attributes);
 
     // is_supported_ext should propagate the validation error
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_FALSE(result.is_good());
 }
 
@@ -8664,7 +8662,7 @@ TEST_F(TestGraph, AutoLowerCreatesDescriptorForConstSerialize)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.serialize(data);
+    const auto result = graph.serialize(data);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
     // Now const serialize should succeed because descriptor exists from auto-lower
@@ -8680,11 +8678,11 @@ TEST_F(TestGraph, BuildOperationGraphReLowersExistingDescriptor)
     createBasicBatchnormGraph(graph);
 
     // First build
-    auto result1 = graph.build_operation_graph(_handle);
+    const auto result1 = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result1.is_good()) << result1.get_message();
 
     // Second build — should succeed and replace the existing descriptor
-    auto result2 = graph.build_operation_graph(_handle);
+    const auto result2 = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result2.is_good()) << result2.get_message();
 }
 
@@ -8699,7 +8697,7 @@ TEST_F(TestGraph, ConstBinarySerializeFailsWithoutLoweredDescriptor)
 
     std::vector<uint8_t> data;
     const auto& constGraph = graph;
-    auto result = constGraph.serialize(data);
+    const auto result = constGraph.serialize(data);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -8725,7 +8723,7 @@ TEST_F(TestGraph, NonConstBinarySerializeAutoLowersWhenNeeded)
         });
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize(data);
+    const auto result = graph.serialize(data);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(data.size(), 16u);
@@ -8752,12 +8750,12 @@ TEST_F(TestGraph, BinarySerializePreservesExistingDescriptor)
         });
 
     std::vector<uint8_t> data1;
-    auto result1 = graph.serialize(data1);
+    const auto result1 = graph.serialize(data1);
     EXPECT_TRUE(result1.is_good()) << result1.get_message();
     EXPECT_EQ(data1.size(), 8u);
 
     std::vector<uint8_t> data2;
-    auto result2 = graph.serialize(data2);
+    const auto result2 = graph.serialize(data2);
     EXPECT_TRUE(result2.is_good()) << result2.get_message();
     EXPECT_EQ(data2.size(), 8u);
     EXPECT_EQ(data1, data2);
@@ -8773,7 +8771,7 @@ TEST_F(TestGraph, BinaryDeserializeFailsWhenBackendFails)
         .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     const std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04};
-    auto result = graph.deserialize(_handle, data);
+    const auto result = graph.deserialize(_handle, data);
     EXPECT_TRUE(result.is_bad());
 }
 
@@ -8822,10 +8820,10 @@ TEST_F(TestGraph, BuildClearsExistingDescriptorFromSerialize)
         });
 
     std::vector<uint8_t> data;
-    auto serializeResult = graph.serialize(data);
+    const auto serializeResult = graph.serialize(data);
     EXPECT_TRUE(serializeResult.is_good()) << serializeResult.get_message();
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 }
 
@@ -8839,7 +8837,7 @@ TEST_F(TestGraph, BinaryDeserializeEmptyData)
         .WillByDefault(Return(HIPDNN_STATUS_BAD_PARAM));
 
     const std::vector<uint8_t> emptyData;
-    auto result = graph.deserialize(_handle, emptyData);
+    const auto result = graph.deserialize(_handle, emptyData);
     EXPECT_TRUE(result.is_bad());
 }
 
@@ -8854,7 +8852,7 @@ TEST_F(TestGraph, ConstJsonSerializeFailsWithoutLoweredDescriptor)
 
     std::string jsonData;
     const auto& constGraph = graph;
-    auto result = constGraph.serialize(jsonData);
+    const auto result = constGraph.serialize(jsonData);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -8870,7 +8868,7 @@ TEST_F(TestGraph, NonConstJsonSerializeAutoLowersWhenNeeded)
         .WillByDefault(
             [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
                 const char* fakeJson = R"({"test": true})";
-                auto len = std::strlen(fakeJson) + 1; // include null terminator
+                const auto len = std::strlen(fakeJson) + 1; // include null terminator
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
@@ -8880,7 +8878,7 @@ TEST_F(TestGraph, NonConstJsonSerializeAutoLowersWhenNeeded)
             });
 
     std::string jsonData;
-    auto result = graph.serialize(jsonData);
+    const auto result = graph.serialize(jsonData);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(jsonData, R"({"test": true})");
@@ -8899,7 +8897,7 @@ TEST_F(TestGraph, JsonDeserializeFailsWhenBackendFails)
         .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     const std::string jsonData = R"({"graph": "test"})";
-    auto result = graph.deserialize(_handle, jsonData);
+    const auto result = graph.deserialize(_handle, jsonData);
     EXPECT_TRUE(result.is_bad());
 }
 
@@ -8937,7 +8935,7 @@ TEST_F(TestGraph, JsonDeserializeEmptyString)
         .WillByDefault(Return(HIPDNN_STATUS_BAD_PARAM));
 
     const std::string emptyJson;
-    auto result = graph.deserialize(_handle, emptyJson);
+    const auto result = graph.deserialize(_handle, emptyJson);
     EXPECT_TRUE(result.is_bad());
 }
 
@@ -8951,7 +8949,7 @@ TEST_F(TestGraph, JsonDeserializeInvalidJson)
         .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     const std::string invalidJson = R"({not valid json})";
-    auto result = graph.deserialize(_handle, invalidJson);
+    const auto result = graph.deserialize(_handle, invalidJson);
     EXPECT_TRUE(result.is_bad());
 }
 
@@ -9020,7 +9018,7 @@ TEST_F(TestGraph, ToJsonReturnsDataAndSuccess)
         .WillByDefault(
             [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
                 const char* fakeJson = R"({"test": true})";
-                auto len = std::strlen(fakeJson) + 1;
+                const auto len = std::strlen(fakeJson) + 1;
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
@@ -9044,7 +9042,7 @@ TEST_F(TestGraph, ToJsonConstReturnsDataAndSuccess)
         .WillByDefault(
             [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
                 const char* fakeJson = R"({"test": true})";
-                auto len = std::strlen(fakeJson) + 1;
+                const auto len = std::strlen(fakeJson) + 1;
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
@@ -9088,7 +9086,7 @@ TEST_F(TestGraph, DeserializeBinaryHandleLess)
         });
 
     std::vector<uint8_t> data;
-    auto serResult = graph.serialize(data);
+    const auto serResult = graph.serialize(data);
     ASSERT_TRUE(serResult.is_good()) << serResult.get_message();
     ASSERT_EQ(data.size(), 8u);
 
@@ -9104,7 +9102,7 @@ TEST_F(TestGraph, DeserializeBinaryHandleLess)
         });
 
     Graph graph2;
-    auto result = graph2.deserialize(data);
+    const auto result = graph2.deserialize(data);
 
     EXPECT_EQ(capturedData, data);
     EXPECT_TRUE(result.is_bad());
@@ -9121,7 +9119,7 @@ TEST_F(TestGraph, DeserializeStringHandleLess)
         .WillByDefault(
             [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
                 const char* fakeJson = R"({"test": true})";
-                auto len = std::strlen(fakeJson) + 1;
+                const auto len = std::strlen(fakeJson) + 1;
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
@@ -9131,7 +9129,7 @@ TEST_F(TestGraph, DeserializeStringHandleLess)
             });
 
     std::string jsonData;
-    auto serResult = graph.serialize(jsonData);
+    const auto serResult = graph.serialize(jsonData);
     ASSERT_TRUE(serResult.is_good()) << serResult.get_message();
     ASSERT_FALSE(jsonData.empty());
 
@@ -9146,7 +9144,7 @@ TEST_F(TestGraph, DeserializeStringHandleLess)
         });
 
     Graph graph2;
-    auto result = graph2.deserialize(jsonData);
+    const auto result = graph2.deserialize(jsonData);
 
     EXPECT_EQ(capturedJson, jsonData);
     EXPECT_TRUE(result.is_bad());
@@ -9163,11 +9161,11 @@ TEST_F(TestGraph, DeserializeHandleLessThenBuild)
         .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     const std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04};
-    auto desResult = graph.deserialize(data);
+    const auto desResult = graph.deserialize(data);
     EXPECT_TRUE(desResult.is_bad());
 
     // The graph should still be buildable via the normal path
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
 }
 
@@ -9188,7 +9186,7 @@ TEST_F(TestGraph, DeserializeBinaryHandleLessSuccess)
         });
 
     const std::vector<uint8_t> data = {0x01, 0x02, 0x03};
-    auto result = graph.deserialize(data);
+    const auto result = graph.deserialize(data);
     // Deserialization itself succeeds, but unpacking the graph descriptor fails
     // because backendGetAttribute is not fully mocked for the graph structure.
     EXPECT_TRUE(result.is_bad());
@@ -9208,7 +9206,7 @@ TEST_F(TestGraph, DeserializeStringHandleLessSuccess)
         });
 
     const std::string jsonData = R"({"graph": "test"})";
-    auto result = graph.deserialize(jsonData);
+    const auto result = graph.deserialize(jsonData);
     // Deserialization itself succeeds, but unpacking the graph descriptor fails
     // because backendGetAttribute is not fully mocked for the graph structure.
     EXPECT_TRUE(result.is_bad());
@@ -9234,7 +9232,7 @@ TEST_F(TestGraph, SerializeToJsonObject)
         .WillByDefault(
             [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
                 const char* fakeJson = R"({"operations": [{"type": "batchnorm"}]})";
-                auto len = std::strlen(fakeJson) + 1;
+                const auto len = std::strlen(fakeJson) + 1;
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
@@ -9245,7 +9243,7 @@ TEST_F(TestGraph, SerializeToJsonObject)
 
     // Auto-lower (non-const serialize), then serialize to json object
     nlohmann::json j;
-    auto result = graph.serialize(j);
+    const auto result = graph.serialize(j);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_FALSE(j.empty());
@@ -9262,7 +9260,7 @@ TEST_F(TestGraph, SerializeToJsonObjectAutoLower)
         .WillByDefault(
             [](hipdnnBackendDescriptor_t, size_t requestedSize, size_t* graphByteSize, char* data) {
                 const char* fakeJson = R"({"graph": "auto-lowered"})";
-                auto len = std::strlen(fakeJson) + 1;
+                const auto len = std::strlen(fakeJson) + 1;
                 *graphByteSize = len;
                 if(data != nullptr && requestedSize >= len)
                 {
@@ -9273,7 +9271,7 @@ TEST_F(TestGraph, SerializeToJsonObjectAutoLower)
 
     // Graph is not lowered — non-const serialize(nlohmann::json&) should auto-lower
     nlohmann::json j;
-    auto result = graph.serialize(j);
+    const auto result = graph.serialize(j);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_FALSE(j.empty());
@@ -9297,7 +9295,7 @@ TEST_F(TestGraph, DeserializeFromJsonObjectHandleLess)
         });
 
     const nlohmann::json j = {{"operations", nlohmann::json::array()}};
-    auto result = graph.deserialize(j);
+    const auto result = graph.deserialize(j);
 
     // The nlohmann::json is serialized via dump() before forwarding
     EXPECT_EQ(capturedJson, j.dump());
@@ -9320,7 +9318,7 @@ TEST_F(TestGraph, DeserializeFromJsonObjectWithHandle)
         });
 
     const nlohmann::json j = {{"graph", "test"}, {"operations", nlohmann::json::array()}};
-    auto result = graph.deserialize(_handle, j);
+    const auto result = graph.deserialize(_handle, j);
 
     EXPECT_EQ(capturedJson, j.dump());
     EXPECT_TRUE(result.is_bad());
@@ -9416,14 +9414,14 @@ static void createConvReluFusionGraph(Graph& graph)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim({1, 3, 32, 32})
         .set_stride({3072, 1024, 32, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(2)
         .set_name("W")
         .set_dim({64, 3, 3, 3})
@@ -9437,13 +9435,13 @@ static void createConvReluFusionGraph(Graph& graph)
     convAttrs.set_stride({1, 1});
     convAttrs.set_dilation({1, 1});
 
-    auto convOut = graph.conv_fprop(x, w, convAttrs);
+    const auto convOut = graph.conv_fprop(x, w, convAttrs);
 
     PointwiseAttributes reluAttrs;
     reluAttrs.set_name("Relu");
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto y = graph.pointwise(convOut, reluAttrs);
+    const auto y = graph.pointwise(convOut, reluAttrs);
     y->set_output(true).set_uid(3);
 }
 
@@ -9455,14 +9453,14 @@ static void createPointwiseChainGraph(Graph& graph)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim({2, 4, 16, 16})
         .set_stride({1024, 256, 16, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_uid(2)
         .set_name("B")
         .set_dim({2, 4, 16, 16})
@@ -9473,13 +9471,13 @@ static void createPointwiseChainGraph(Graph& graph)
     reluAttrs.set_name("Relu");
     reluAttrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto activated = graph.pointwise(x, reluAttrs);
+    const auto activated = graph.pointwise(x, reluAttrs);
 
     PointwiseAttributes addAttrs;
     addAttrs.set_name("Add");
     addAttrs.set_mode(PointwiseMode::ADD);
 
-    auto y = graph.pointwise(activated, b, addAttrs);
+    const auto y = graph.pointwise(activated, b, addAttrs);
     y->set_output(true).set_uid(3);
 }
 
@@ -9491,35 +9489,35 @@ static void createDiamondGraph(Graph& graph)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim({1, 2, 8, 8})
         .set_stride({128, 64, 8, 1})
         .set_data_type(DataType::FLOAT);
 
-    auto mean = std::make_shared<TensorAttributes>();
+    const auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
         .set_name("Mean")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto invVariance = std::make_shared<TensorAttributes>();
+    const auto invVariance = std::make_shared<TensorAttributes>();
     invVariance->set_uid(3)
         .set_name("InvVariance")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(4)
         .set_name("Scale")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 1, 1})
         .set_stride({2, 1, 1, 1});
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(5)
         .set_name("Bias")
         .set_data_type(DataType::FLOAT)
@@ -9529,23 +9527,23 @@ static void createDiamondGraph(Graph& graph)
     BatchnormInferenceAttributes bnAttrs;
     bnAttrs.set_name("BN");
 
-    auto bnOut = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
+    const auto bnOut = graph.batchnorm_inference(x, mean, invVariance, scale, bias, bnAttrs);
 
     PointwiseAttributes relu1Attrs;
     relu1Attrs.set_name("Relu1");
     relu1Attrs.set_mode(PointwiseMode::RELU_FWD);
-    auto branch1 = graph.pointwise(bnOut, relu1Attrs);
+    const auto branch1 = graph.pointwise(bnOut, relu1Attrs);
 
     PointwiseAttributes relu2Attrs;
     relu2Attrs.set_name("Relu2");
     relu2Attrs.set_mode(PointwiseMode::RELU_FWD);
-    auto branch2 = graph.pointwise(bnOut, relu2Attrs);
+    const auto branch2 = graph.pointwise(bnOut, relu2Attrs);
 
     PointwiseAttributes addAttrs;
     addAttrs.set_name("Add");
     addAttrs.set_mode(PointwiseMode::ADD);
 
-    auto y = graph.pointwise(branch1, branch2, addAttrs);
+    const auto y = graph.pointwise(branch1, branch2, addAttrs);
     y->set_output(true).set_uid(6);
 }
 
@@ -9613,7 +9611,7 @@ TEST_P(TestGraphSerializationRoundTrip, BinarySerializeDeserializeForwardsData)
 
     // Deserialize via from_binary
     Graph graph2;
-    auto desErr = graph2.from_binary(_handle, data);
+    const auto desErr = graph2.from_binary(_handle, data);
 
     // The data should be forwarded correctly to the backend even if unpack fails
     EXPECT_EQ(capturedData, fakeSerializedData);
@@ -9636,7 +9634,7 @@ TEST_P(TestGraphSerializationRoundTrip, JsonSerializeDeserializeForwardsData)
                                      size_t requestedSize,
                                      size_t* graphByteSize,
                                      char* data) {
-            auto len = std::strlen(fakeJsonStr) + 1;
+            const auto len = std::strlen(fakeJsonStr) + 1;
             *graphByteSize = len;
             if(data != nullptr && requestedSize >= len)
             {
@@ -9663,7 +9661,7 @@ TEST_P(TestGraphSerializationRoundTrip, JsonSerializeDeserializeForwardsData)
 
     // Deserialize via from_json
     Graph graph2;
-    auto desErr = graph2.from_json(_handle, jsonData);
+    const auto desErr = graph2.from_json(_handle, jsonData);
 
     // The data should be forwarded correctly to the backend even if unpack fails
     EXPECT_EQ(capturedJson, jsonData);
@@ -9733,7 +9731,7 @@ TEST_F(TestGraph, SinglePlanPathProducesVectorOfSizeOne)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
     graph.build_operation_graph(_handle);
 
@@ -9842,7 +9840,7 @@ TEST_F(TestGraph, SinglePlanPathProducesVectorOfSizeOne)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto execPlanResult = graph.create_execution_plans({HeuristicMode::FALLBACK});
+    const auto execPlanResult = graph.create_execution_plans({HeuristicMode::FALLBACK});
     ASSERT_TRUE(execPlanResult.is_good());
 
     // Verify vector model invariants
@@ -9858,7 +9856,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtProducesVectorOfSizeOne)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
     graph.build_operation_graph(_handle);
 
@@ -9909,7 +9907,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtProducesVectorOfSizeOne)
                 return HIPDNN_STATUS_SUCCESS;
             });
 
-    auto result = graph.create_execution_plan_ext(engineId, {});
+    const auto result = graph.create_execution_plan_ext(engineId, {});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // Verify vector model invariants after create_execution_plan_ext
@@ -9925,7 +9923,7 @@ TEST_F(TestGraph, CompilePlanFromSpecProducesValidPlan)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    const auto tensorAttributes = createBasicBatchnormGraph(graph);
     ASSERT_TRUE(graph.validate().is_good());
     graph.build_operation_graph(_handle);
 
@@ -9980,7 +9978,7 @@ TEST_F(TestGraph, CompilePlanFromSpecProducesValidPlan)
     EXPECT_EQ(graph.getCompiledPlansCount(), 0u);
 
     hipdnn_frontend::GraphTestUtils::CompiledPlan plan;
-    auto result = graph.compilePlanFromSpec(engineId, {}, plan);
+    const auto result = graph.compilePlanFromSpec(engineId, {}, plan);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // Verify the compiled plan has valid descriptors and metadata
@@ -10012,7 +10010,7 @@ TEST_F(TestGraph, DeserializeCompiledPlanUsesVectorModel)
             });
 
     const std::vector<uint8_t> fakeData = {0x01, 0x02};
-    auto result = graph.deserialize_compiled_plan(_handle, fakeData);
+    const auto result = graph.deserialize_compiled_plan(_handle, fakeData);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // Verify vector model
@@ -10031,7 +10029,7 @@ TEST_F(TestGraph, CreateExecutionPlansRejectsAfterAddEngine)
 {
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyPlanSpec();
-    auto result = graph.create_execution_plans({HeuristicMode::FALLBACK});
+    const auto result = graph.create_execution_plans({HeuristicMode::FALLBACK});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10039,7 +10037,7 @@ TEST_F(TestGraph, BuildRejectsAfterAddEngine)
 {
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyPlanSpec();
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10048,7 +10046,7 @@ TEST_F(TestGraph, AddEngineConfigsRejectsAfterCreateExecutionPlans)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
     const std::vector<EngineConfigInfo> configs = {{42, "", {}, false, 0}};
-    auto result = graph.add_engine_configs(configs);
+    const auto result = graph.add_engine_configs(configs);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10056,7 +10054,7 @@ TEST_F(TestGraph, AddAllEnginesRejectsAfterCreateExecutionPlans)
 {
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
-    auto result = graph.add_all_engines();
+    const auto result = graph.add_all_engines();
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10101,7 +10099,7 @@ TEST_F(TestGraph, GetPlanNameAtIndexValid)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
     std::string name;
-    auto result = graph.get_plan_name_at_index(_handle, 0, name);
+    const auto result = graph.get_plan_name_at_index(_handle, 0, name);
     EXPECT_TRUE(result.is_good());
     EXPECT_EQ(name, "0x0000000000000000");
 }
@@ -10110,7 +10108,7 @@ TEST_F(TestGraph, GetPlanNameAtIndexOutOfBounds)
 {
     const hipdnn_frontend::GraphTestUtils graph;
     std::string name;
-    auto result = graph.get_plan_name_at_index(_handle, 0, name);
+    const auto result = graph.get_plan_name_at_index(_handle, 0, name);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10118,7 +10116,7 @@ TEST_F(TestGraph, ExecutePlanAtIndexOutOfBounds)
 {
     const hipdnn_frontend::GraphTestUtils graph;
     const std::unordered_map<int64_t, void*> variantPack;
-    auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, 0);
+    const auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, 0);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10127,7 +10125,7 @@ TEST_F(TestGraph, ExecutePlanAtIndexNegativeIndex)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
     const std::unordered_map<int64_t, void*> variantPack;
-    auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, -1);
+    const auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, -1);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10136,7 +10134,7 @@ TEST_F(TestGraph, ExecutePlanAtIndexUncompiledPlan)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
     const std::unordered_map<int64_t, void*> variantPack;
-    auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, 0);
+    const auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, 0);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10149,7 +10147,7 @@ TEST_F(TestGraph, GetAutotuneWorkspaceSizeReturnsZeroWhenEmpty)
 TEST_F(TestGraph, BuildPlanAtIndexOutOfBounds)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -10249,7 +10247,7 @@ TEST_F(TestGraph, TimedExecuteReportsDeviceOnlyWhenStallUsed)
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
@@ -10270,7 +10268,7 @@ TEST_F(TestGraph, TimedExecuteReportsUnstalledWhenStallDeclined)
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(timing.quality, TimingQuality::UNSTALLED);
@@ -10291,7 +10289,7 @@ TEST_F(TestGraph, TimedExecuteAcceptsZeroElapsed)
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
@@ -10315,7 +10313,7 @@ TEST_F(TestGraph, TimedExecuteReportsInvalidOnNegativeElapsedWithExactlyOneExecu
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
@@ -10339,7 +10337,7 @@ TEST_F(TestGraph, TimedExecuteRejectsNaNElapsed)
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
@@ -10362,7 +10360,7 @@ TEST_F(TestGraph, TimedExecuteReportsInvalidOnWatchdogTimeoutWithExactlyOneExecu
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     // Execution completed; only the measurement is invalid.
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -10394,7 +10392,7 @@ TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
@@ -10411,7 +10409,7 @@ TEST_F(TestGraph, TimedExecuteRejectsNoActivePlanAndResetsTiming)
     timing.elapsedMs = 99.0f;
     timing.quality = TimingQuality::DEVICE_ONLY;
 
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
@@ -10427,7 +10425,7 @@ TEST_F(TestGraph, TimedExecuteRejectsBarredActivePlanWithoutExecuting)
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
@@ -10445,7 +10443,7 @@ TEST_F(TestGraph, TimedExecuteTensorMapRejectsNullTensor)
     const std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup
         = {{nullptr, reinterpret_cast<void*>(0x1)}};
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("uid"), std::string::npos) << result.err_msg;
@@ -10469,7 +10467,7 @@ TEST_F(TestGraph, TimedExecuteTensorMapPacksVariantPackAndReportsTiming)
     const std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup
         = {{tensor, reinterpret_cast<void*>(0x1234)}};
     ExecutionTiming timing;
-    auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
+    const auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
@@ -10488,7 +10486,7 @@ TEST_F(TestGraph, DeselectWorkspacePlanSpecPath)
     graph.injectPlanSpec(2, 1024);
     graph.injectPlanSpec(3, 2048);
 
-    auto& ref = graph.deselect_workspace_greater_than(1024);
+    const auto& ref = graph.deselect_workspace_greater_than(1024);
     EXPECT_EQ(&ref, &graph);
     EXPECT_EQ(graph.getPlanSpecsCount(), 3u);
     EXPECT_EQ(graph.getMaxWorkspaceAllowed(), 1024);
@@ -10501,7 +10499,7 @@ TEST_F(TestGraph, DeselectWorkspaceCompiledPlanPath)
     graph.injectCompiledPlan(2, 1024);
     graph.injectCompiledPlan(3, 2048);
 
-    auto& ref = graph.deselect_workspace_greater_than(1024);
+    const auto& ref = graph.deselect_workspace_greater_than(1024);
     EXPECT_EQ(&ref, &graph);
     EXPECT_EQ(graph.getCompiledPlansCount(), 3u);
     EXPECT_EQ(graph.getMaxWorkspaceAllowed(), 1024);
@@ -10531,7 +10529,7 @@ TEST_F(TestGraph, DeselectWorkspaceRemovesNone)
 TEST_F(TestGraph, DeselectWorkspaceNoOp)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    auto& ref = graph.deselect_workspace_greater_than(100);
+    const auto& ref = graph.deselect_workspace_greater_than(100);
     EXPECT_EQ(&ref, &graph);
 }
 
@@ -10561,10 +10559,10 @@ TEST_F(TestGraph, DeselectEnginesPlanSpecPath)
     graph.injectPlanSpec(HIPBLASLT_ENGINE_ID, 0);
     graph.injectPlanSpec(HIP_MLOPS_ENGINE_ID, 0);
 
-    auto& ref = graph.deselect_engines({"MIOPEN_ENGINE"});
+    const auto& ref = graph.deselect_engines({"MIOPEN_ENGINE"});
     EXPECT_EQ(&ref, &graph);
     EXPECT_EQ(graph.getPlanSpecsCount(), 3u);
-    auto barredIds = graph.getBarredEngineIds();
+    const auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds.count(MIOPEN_ENGINE_ID), 1u);
 }
 
@@ -10581,7 +10579,7 @@ TEST_F(TestGraph, DeselectEnginesCompiledPlanPath)
 
     graph.deselect_engines({"MIOPEN_ENGINE"});
     EXPECT_EQ(graph.getCompiledPlansCount(), 3u);
-    auto barredIds = graph.getBarredEngineIds();
+    const auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds.count(MIOPEN_ENGINE_ID), 1u);
 }
 
@@ -10600,7 +10598,7 @@ TEST_F(TestGraph, DeselectEnginesUnregisteredNameIsHashed)
     graph.deselect_engines({unregisteredName});
     EXPECT_EQ(graph.getPlanSpecsCount(), 2u);
 
-    auto barredIds = graph.getBarredEngineIds();
+    const auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(unregisteredName)), 1u);
 }
 
@@ -10616,7 +10614,7 @@ TEST_F(TestGraph, DeselectEnginesHexIdSpellingBarsThatEngine)
 
     graph.deselect_engines({hexSpelling});
 
-    auto barredIds = graph.getBarredEngineIds();
+    const auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds.count(unnamedEngineId), 1u);
     EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(hexSpelling)), 0u);
 }
@@ -10626,7 +10624,7 @@ TEST_F(TestGraph, DeselectEnginesEmptyList)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectPlanSpec(1, 0);
 
-    auto& ref = graph.deselect_engines(std::vector<std::string>{});
+    const auto& ref = graph.deselect_engines(std::vector<std::string>{});
     EXPECT_EQ(&ref, &graph);
     EXPECT_EQ(graph.getPlanSpecsCount(), 1u);
 }
@@ -10634,7 +10632,7 @@ TEST_F(TestGraph, DeselectEnginesEmptyList)
 TEST_F(TestGraph, DeselectEnginesNoOp)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    auto& ref = graph.deselect_engines({"MIOPEN_ENGINE"});
+    const auto& ref = graph.deselect_engines({"MIOPEN_ENGINE"});
     EXPECT_EQ(&ref, &graph);
 }
 
@@ -10792,7 +10790,7 @@ static void mockKnobInfoQueryRepeated(
     hipdnnBackendDescriptor_t engineDesc,
     const std::vector<hipdnnBackendDescriptor_t>& fakeKnobDescs)
 {
-    auto count = static_cast<int64_t>(fakeKnobDescs.size());
+    const auto count = static_cast<int64_t>(fakeKnobDescs.size());
 
     EXPECT_CALL(*mockBackend,
                 backendGetAttribute(engineDesc,
@@ -10852,7 +10850,7 @@ static void setupKnobDescriptorMockRepeated(
     std::optional<int64_t> maxValue = std::nullopt)
 {
     // Mock string attribute (size-query + data-read), repeatable
-    auto mockString = [&](hipdnnBackendAttributeName_t attrName, const std::string& value) {
+    const auto mockString = [&](hipdnnBackendAttributeName_t attrName, const std::string& value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_CHAR, 0, _, nullptr))
             .WillRepeatedly(DoAll(SetArgPointee<4>(static_cast<int64_t>(value.size() + 1)),
@@ -10876,7 +10874,7 @@ static void setupKnobDescriptorMockRepeated(
                 Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockScalarInt64 = [&](hipdnnBackendAttributeName_t attrName, int64_t value) {
+    const auto mockScalarInt64 = [&](hipdnnBackendAttributeName_t attrName, int64_t value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_INT64, 1, _, NotNull()))
             .WillRepeatedly(
@@ -10889,7 +10887,7 @@ static void setupKnobDescriptorMockRepeated(
                       Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockScalarBool = [&](hipdnnBackendAttributeName_t attrName, bool value) {
+    const auto mockScalarBool = [&](hipdnnBackendAttributeName_t attrName, bool value) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_BOOLEAN, 1, _, NotNull()))
             .WillRepeatedly(DoAll(Invoke([value](hipdnnBackendDescriptor_t,
@@ -10901,15 +10899,15 @@ static void setupKnobDescriptorMockRepeated(
                                   Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockOptAbsent = [&](hipdnnBackendAttributeName_t attrName,
-                             hipdnnBackendAttributeType_t attrType) {
+    const auto mockOptAbsent = [&](hipdnnBackendAttributeName_t attrName,
+                                   hipdnnBackendAttributeType_t attrType) {
         EXPECT_CALL(*mockBackend, backendGetAttribute(knobDesc, attrName, attrType, 0, _, nullptr))
             .WillRepeatedly(DoAll(SetArgPointee<4>(0), Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockOptPresent = [&](hipdnnBackendAttributeName_t attrName,
-                              hipdnnBackendAttributeType_t attrType,
-                              int64_t value) {
+    const auto mockOptPresent = [&](hipdnnBackendAttributeName_t attrName,
+                                    hipdnnBackendAttributeType_t attrType,
+                                    int64_t value) {
         // Count query returns 1 (present)
         EXPECT_CALL(*mockBackend, backendGetAttribute(knobDesc, attrName, attrType, 0, _, nullptr))
             .WillRepeatedly(DoAll(SetArgPointee<4>(1), Return(HIPDNN_STATUS_SUCCESS)));
@@ -10926,7 +10924,7 @@ static void setupKnobDescriptorMockRepeated(
                       Return(HIPDNN_STATUS_SUCCESS)));
     };
 
-    auto mockEmptyVec = [&](hipdnnBackendAttributeName_t attrName) {
+    const auto mockEmptyVec = [&](hipdnnBackendAttributeName_t attrName) {
         EXPECT_CALL(*mockBackend,
                     backendGetAttribute(knobDesc, attrName, HIPDNN_TYPE_INT64, 0, _, nullptr))
             .WillRepeatedly(DoAll(SetArgPointee<4>(0), Return(HIPDNN_STATUS_SUCCESS)));
@@ -10947,7 +10945,7 @@ static void setupKnobDescriptorMockRepeated(
     // Default value and constraints (only int64 supported in this helper)
     if(valueType == HIPDNN_TYPE_INT64)
     {
-        auto intVal = std::get<int64_t>(defaultValue);
+        const auto intVal = std::get<int64_t>(defaultValue);
         mockScalarInt64(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, intVal);
 
         if(minValue.has_value())
@@ -10990,7 +10988,7 @@ static hipdnnBackendDescriptor_t buildGraphAndMockEngineRepeated(
     EXPECT_CALL(*mockBackend, backendFinalize(_)).Times(AnyNumber());
     EXPECT_CALL(*mockBackend, backendGetAttribute(_, _, _, _, _, _)).Times(AnyNumber());
 
-    auto buildResult = graph.build_operation_graph(handle);
+    const auto buildResult = graph.build_operation_graph(handle);
     EXPECT_TRUE(buildResult.is_good());
 
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE001);
@@ -11040,7 +11038,7 @@ TEST_F(TestGraph, AddEngineRejectsInvalidKnobName)
                                     KnobValueVariant{int64_t{256}});
 
     const int64_t engineId = 42;
-    auto result = graph.add_engine(engineId, {KnobSetting("nonexistent_knob", int64_t{1})});
+    const auto result = graph.add_engine(engineId, {KnobSetting("nonexistent_knob", int64_t{1})});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("nonexistent_knob"), std::string::npos)
         << "Error message should mention the invalid knob name: " << result.err_msg;
@@ -11067,7 +11065,7 @@ TEST_F(TestGraph, AddEngineRejectsOutOfRangeKnobValue)
                                     int64_t{512});
 
     const int64_t engineId = 42;
-    auto result = graph.add_engine(engineId, {KnobSetting("tile_size", int64_t{9999})});
+    const auto result = graph.add_engine(engineId, {KnobSetting("tile_size", int64_t{9999})});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("tile_size"), std::string::npos)
         << "Error message should mention the knob name: " << result.err_msg;
@@ -11091,7 +11089,7 @@ TEST_F(TestGraph, AddEngineAcceptsValidKnobSettings)
                                     KnobValueVariant{int64_t{256}});
 
     const int64_t engineId = 42;
-    auto result = graph.add_engine(engineId, {KnobSetting("tile_size", int64_t{256})});
+    const auto result = graph.add_engine(engineId, {KnobSetting("tile_size", int64_t{256})});
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -11292,7 +11290,7 @@ TEST_F(TestGraph, AddEngineEstimateWarnsWhenBenchmarkingQueryFails)
     const auto state
         = mockEngineConfigWorkspace(_mockBackend, 100, 500, /*failFinalizeWithKnobs=*/true);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto result = graph.add_engine(42, {});
 
@@ -11328,7 +11326,7 @@ TEST_F(TestGraph, AddEngineSweepRejectsInvalidAxisKnob)
     sweepSpec.engineId = engineId;
     sweepSpec.axes = {axis};
 
-    auto result = graph.add_engine_sweep({sweepSpec});
+    const auto result = graph.add_engine_sweep({sweepSpec});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("nonexistent_knob"), std::string::npos)
         << "Error message should mention the invalid knob name: " << result.err_msg;
@@ -11373,7 +11371,7 @@ TEST_F(TestGraph, AddEngineSweepDropsEmptyValuesAxisAndKeepsOthers)
     sweepSpec.engineId = 42;
     sweepSpec.axes = {tileAxis, warpsAxis};
 
-    auto result = graph.add_engine_sweep({sweepSpec});
+    const auto result = graph.add_engine_sweep({sweepSpec});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     // One spec per tile value; the engine's sweep is NOT eliminated.
@@ -11423,7 +11421,7 @@ TEST_F(TestGraph, AddEngineSweepSoleEmptyValuesAxisYieldsFixedSettingsSpec)
     sweepSpec.axes = {warpsAxis};
     sweepSpec.fixedSettings = {{"tile_size", KnobValueVariant{int64_t{32}}}};
 
-    auto result = graph.add_engine_sweep({sweepSpec});
+    const auto result = graph.add_engine_sweep({sweepSpec});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto settings = graph.getPlanSpecKnobSettings();
@@ -11461,7 +11459,7 @@ TEST_F(TestGraph, AddEngineSweepEmptyValuesAxisFixedSettingsConflictResolvesToFi
     sweepSpec.axes = {warpsAxis};
     sweepSpec.fixedSettings = {{"warps", KnobValueVariant{int64_t{8}}}};
 
-    auto result = graph.add_engine_sweep({sweepSpec});
+    const auto result = graph.add_engine_sweep({sweepSpec});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto settings = graph.getPlanSpecKnobSettings();
@@ -11500,7 +11498,7 @@ TEST_F(TestGraph, AddEngineSweepStripsBenchmarkingKnobFromAxis)
     sweepSpec.engineId = 42;
     sweepSpec.axes = {tileAxis, benchmarkingAxis};
 
-    auto result = graph.add_engine_sweep({sweepSpec});
+    const auto result = graph.add_engine_sweep({sweepSpec});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto settings = graph.getPlanSpecKnobSettings();
@@ -11556,7 +11554,7 @@ TEST_F(TestGraph, AddEngineSweepStripsBenchmarkingKnobFromFixedSettings)
         = {{autotune::detail::BENCHMARKING_KNOB_NAME, KnobValueVariant{int64_t{1}}},
            {"tile_size", KnobValueVariant{int64_t{32}}}};
 
-    auto result = graph.add_engine_sweep({sweepSpec});
+    const auto result = graph.add_engine_sweep({sweepSpec});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto settings = graph.getPlanSpecKnobSettings();
@@ -11615,7 +11613,7 @@ TEST_F(TestGraph, GetWorkspaceSizePlanAtIndexErrorOverloadZeroWorkspace)
     graph.injectCompiledPlan(1, 0);
 
     int64_t size = -1;
-    auto result = graph.get_workspace_size_plan_at_index(0, size);
+    const auto result = graph.get_workspace_size_plan_at_index(0, size);
     EXPECT_TRUE(result.is_good());
     EXPECT_EQ(size, 0); // Valid: workspace size is 0, distinguishable from error
 }
@@ -11636,7 +11634,7 @@ TEST_F(TestGraph, WindowSizeValidationOnlyForRunUntilStable)
         config.strategy = AutotuneStrategy::FIXED_AVERAGE;
         config.windowSize = 1; // Would fail if validation were unconditional
 
-        auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
+        const auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
         // Should fail at a later check (null handle), not at windowSize
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
             << "Expected windowSize validation to be skipped for FIXED_AVERAGE, "
@@ -11652,7 +11650,7 @@ TEST_F(TestGraph, WindowSizeValidationOnlyForRunUntilStable)
         config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
         config.windowSize = 1;
 
-        auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
+        const auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
         EXPECT_NE(result.err_msg.find("windowSize"), std::string::npos)
             << "Error message should mention windowSize: " << result.err_msg;
@@ -11796,7 +11794,7 @@ TEST_F(TestGraph, StabilityThresholdValidationOnlyForRunUntilStable)
         config.timedIterations = 1;
         config.stabilityThreshold = 0.0f; // Would fail if validation were unconditional
 
-        auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
+        const auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
         // Should fail at a later check (null handle), not at stabilityThreshold
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
             << "Expected stabilityThreshold validation to be skipped for FIXED_AVERAGE, "
@@ -11812,7 +11810,7 @@ TEST_F(TestGraph, StabilityThresholdValidationOnlyForRunUntilStable)
         config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
         config.stabilityThreshold = 0.0f;
 
-        auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
+        const auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
         EXPECT_NE(result.err_msg.find("stabilityThreshold"), std::string::npos)
             << "Error message should mention stabilityThreshold: " << result.err_msg;
@@ -11854,7 +11852,7 @@ TEST_F(TestGraph, AutotuneRejectsMissingTensorUids)
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
 
     graph.injectDummyPlanSpec();
@@ -11879,7 +11877,7 @@ TEST_F(TestGraph, AutotuneAcceptsCompleteVariantPack)
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
 
     graph.injectDummyPlanSpec();
@@ -11907,7 +11905,7 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
 
     graph.injectDummyPlanSpec();
@@ -11939,17 +11937,17 @@ static void createBatchnormGraphWithEpsilon(Graph& graph,
         .set_intermediate_data_type(DataType::FLOAT);
 
     const std::vector<int64_t> dims = {1, 2, 3, 4};
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2).set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_uid(3).set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
 
     BatchnormAttributes attributes;
@@ -11971,11 +11969,11 @@ TEST_F(TestGraph, AutotuneDoesNotRequireUidsForCompileTimeConstantScalars)
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F);
     createBatchnormGraphWithEpsilon(graph, epsilon);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
     ASSERT_TRUE(epsilon->get_has_compile_time_constant());
 
@@ -11997,11 +11995,11 @@ TEST_F(TestGraph, AutotuneDoesNotRequireUidsForRuntimeDefaultScalars)
 
     // set_value() clears the runtime flag, so set the flag after it;
     // set_as_runtime_parameter() would clear the value instead.
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5F).set_is_pass_by_value(true);
     createBatchnormGraphWithEpsilon(graph, epsilon);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
     ASSERT_TRUE(epsilon->get_pass_by_value().has_value());
     ASSERT_FALSE(epsilon->get_has_compile_time_constant());
@@ -12023,7 +12021,7 @@ TEST_F(TestGraph, AutotuneStillRequiresUidsForRuntimeUserSuppliedScalars)
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(4)
         .set_name("Epsilon")
         .set_dim({1})
@@ -12032,7 +12030,7 @@ TEST_F(TestGraph, AutotuneStillRequiresUidsForRuntimeUserSuppliedScalars)
         .set_is_pass_by_value(true);
     createBatchnormGraphWithEpsilon(graph, epsilon);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << "build_operation_graph failed: " << buildResult.err_msg;
     ASSERT_TRUE(epsilon->get_is_pass_by_value());
     ASSERT_FALSE(epsilon->get_has_compile_time_constant());
@@ -12058,7 +12056,7 @@ TEST_F(TestGraph, AddEnginesCreatesMultiplePlanSpecs)
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // Mock engine knob queries so add_engine() validation passes
@@ -12076,7 +12074,7 @@ TEST_F(TestGraph, AddEnginesCreatesMultiplePlanSpecs)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto result = graph.add_engines({MIOPEN_ENGINE_ID, HIPBLASLT_ENGINE_ID});
+    const auto result = graph.add_engines({MIOPEN_ENGINE_ID, HIPBLASLT_ENGINE_ID});
     EXPECT_TRUE(result.is_good()) << result.err_msg;
     EXPECT_EQ(graph.getPlanSpecsCount(), 2u);
 }
@@ -12086,14 +12084,14 @@ TEST_F(TestGraph, AddEnginesReturnsErrorOnInvalidId)
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
 
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // Let the engine knob query fail for all engines to simulate invalid IDs
     ON_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_KNOB_INFO, _, _, _, _))
         .WillByDefault(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
-    auto result = graph.add_engines({99999});
+    const auto result = graph.add_engines({99999});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -12101,7 +12099,7 @@ TEST_F(TestGraph, AddEnginesMutualExclusionGuard)
 {
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectDummyCompiledPlan();
-    auto result = graph.add_engines({1, 2});
+    const auto result = graph.add_engines({1, 2});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("add_engines()"), std::string::npos)
         << "Error message should mention add_engines(): " << result.err_msg;
@@ -12110,7 +12108,7 @@ TEST_F(TestGraph, AddEnginesMutualExclusionGuard)
 TEST_F(TestGraph, AddEnginesEmptyInputReturnsError)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    auto result = graph.add_engines({});
+    const auto result = graph.add_engines({});
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
@@ -12126,10 +12124,10 @@ TEST_F(TestGraph, DeselectEnginesByIdRemovesFromPlanSpecs)
     graph.injectPlanSpec(20, 0);
     graph.injectPlanSpec(30, 0);
 
-    auto& ref = graph.deselect_engines(std::vector<int64_t>{10, 30});
+    const auto& ref = graph.deselect_engines(std::vector<int64_t>{10, 30});
     EXPECT_EQ(&ref, &graph);
     EXPECT_EQ(graph.getPlanSpecsCount(), 3u);
-    auto barredIds = graph.getBarredEngineIds();
+    const auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds, (std::unordered_set<int64_t>{10, 30}));
 }
 
@@ -12142,7 +12140,7 @@ TEST_F(TestGraph, DeselectEnginesByIdRemovesFromCompiledPlans)
 
     graph.deselect_engines(std::vector<int64_t>{20});
     EXPECT_EQ(graph.getCompiledPlansCount(), 3u);
-    auto barredIds = graph.getBarredEngineIds();
+    const auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds, (std::unordered_set<int64_t>{20}));
 }
 
@@ -12151,7 +12149,7 @@ TEST_F(TestGraph, DeselectEnginesByIdEmptyVector)
     hipdnn_frontend::GraphTestUtils graph;
     graph.injectPlanSpec(1, 0);
 
-    auto& ref = graph.deselect_engines(std::vector<int64_t>{});
+    const auto& ref = graph.deselect_engines(std::vector<int64_t>{});
     EXPECT_EQ(&ref, &graph);
     EXPECT_EQ(graph.getPlanSpecsCount(), 1u);
 }
@@ -12165,7 +12163,7 @@ TEST_F(TestGraph, Tier3AutotuneRequiresCompiledPlans)
     hipdnn_frontend::GraphTestUtils graph;
     // No compiled plans injected - should fail with "No autotuning candidates"
     std::unordered_map<int64_t, void*> pack = {{0, reinterpret_cast<void*>(0x1)}};
-    auto result = graph.autotune(_handle, pack, nullptr, nullptr);
+    const auto result = graph.autotune(_handle, pack, nullptr, nullptr);
     EXPECT_TRUE(result.is_bad());
 }
 
@@ -12184,7 +12182,7 @@ TEST_F(TestGraph, AutotuneTier1RejectsPlanSpecs)
     const std::unordered_map<int64_t, void*> emptyPack;
     const AutotuneConfig config;
 
-    auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
+    const auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("compiled-plan path only"), std::string::npos)
         << "Error should mention compiled-plan path: " << result.err_msg;
@@ -12198,7 +12196,7 @@ TEST_F(TestGraph, AutotuneTier1AcceptsCompiledPlans)
     const std::unordered_map<int64_t, void*> dummyPack = {{1, reinterpret_cast<void*>(0x1)}};
     const AutotuneConfig config;
 
-    auto result = graph.autotune(nullptr, dummyPack, nullptr, config);
+    const auto result = graph.autotune(nullptr, dummyPack, nullptr, config);
     // Should fail at handle validation, NOT at the plan-spec guard
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("handle"), std::string::npos)
@@ -12214,7 +12212,7 @@ TEST_F(TestGraph, AutotuneTier2AcceptsPlanSpecs)
     const AutotuneConfig config;
 
     // The general overload accepts workspaceSize
-    auto result = graph.autotune(nullptr, dummyPack, nullptr, int64_t{1024}, config);
+    const auto result = graph.autotune(nullptr, dummyPack, nullptr, int64_t{1024}, config);
     // Should fail at handle validation, NOT at plan-spec guard
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("handle"), std::string::npos)
@@ -12229,7 +12227,7 @@ TEST_F(TestGraph, AutotuneTier2RejectsNegativeWorkspaceSize)
     const std::unordered_map<int64_t, void*> dummyPack = {{1, reinterpret_cast<void*>(0x1)}};
 
     // Negative workspaceSize must be rejected at the general-overload entry point
-    auto result = graph.autotune(nullptr, dummyPack, nullptr, int64_t{-1});
+    const auto result = graph.autotune(nullptr, dummyPack, nullptr, int64_t{-1});
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("workspaceSize"), std::string::npos)
         << "Error should mention workspaceSize: " << result.err_msg;
@@ -12243,7 +12241,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceRejectsEmptyCompiledPlans)
 {
     hipdnn_frontend::GraphTestUtils graph;
     // No create_execution_plans() - _compiledPlans is empty.
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("create_execution_plans()"), std::string::npos)
         << "Error should mention create_execution_plans(): " << result.err_msg;
@@ -12252,7 +12250,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceRejectsEmptyCompiledPlans)
 TEST_F(TestGraph, BuildPlansAllRejectsEmptyCompiledPlans)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -12279,7 +12277,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceActivePlanFailureFallsBackToNextPlan
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/128);
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12301,7 +12299,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceCandidateFailureContinuesToLaterPlan
     mockPlanFinalize(20, HIPDNN_STATUS_ALLOC_FAILED, Exactly(1), "out of device memory");
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12323,7 +12321,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailReturnsAggregatedError)
     mockPlanFinalize(20, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost 20");
     mockPlanFinalize(30, HIPDNN_STATUS_ALLOC_FAILED, Exactly(1), "out of device memory 30");
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(result.err_msg.rfind("Failed to finalize any execution plan "
@@ -12369,7 +12367,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsOk
     mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(0), "already finalized");
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12391,7 +12389,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailMessageListsAlreadyBarre
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "failure of engine 30");
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: "), std::string::npos) << result.err_msg;
@@ -12416,7 +12414,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSinglePlanFailureReturnsPlanCreation
 
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: "), std::string::npos) << result.err_msg;
@@ -12445,7 +12443,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsDeselectedEngine)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12469,7 +12467,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsCandidateOverEngineConf
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/50);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12492,7 +12490,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackAcceptsCandidateAtWorkspaceL
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/100);
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12514,7 +12512,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsAlreadyBarredCandidate)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12537,7 +12535,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceTopPlanOverEngineConfigWorkspaceBuil
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12562,7 +12560,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFailureFallsBackFromT
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/32);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12589,7 +12587,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFallbackWalkSkipsFail
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "engine 10 failed");
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/32);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12625,7 +12623,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSetAttributeFailureFallsBackToNextPl
                                     _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12648,7 +12646,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSetAttributeFailureOnEveryPlanNamesT
         .Times(2)
         .WillRepeatedly(Return(HIPDNN_STATUS_BAD_PARAM));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: Failed to set the engine config on execution plan"),
@@ -12682,7 +12680,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWorkspaceQueryFailureFallsBackToNext
                                     _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12701,7 +12699,7 @@ TEST_F(TestGraph, BuildPlansAllSkipsPlanWithOtherFailure)
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12746,7 +12744,7 @@ TEST_F(TestGraph, BuildPlansAllFinalizesAPlanWithACachedWorkspaceThatWasNeverFin
 
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12761,7 +12759,7 @@ TEST_F(TestGraph, BuildPlanAtIndexFinalizesAPlanWithACachedWorkspaceThatWasNever
 
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12788,7 +12786,7 @@ TEST_F(TestGraph, BuildPlansAllDeselectNondeterministicBarsReportingEngine)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -12811,7 +12809,7 @@ TEST_F(TestGraph, BuildPlansAllSelectKeepsOnlyEnginesReportingEverySelectedNote)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -12834,7 +12832,7 @@ TEST_F(TestGraph, BuildPlansAllNoteFiltersOfBothFamiliesBarEngineFailingEither)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12850,7 +12848,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceDeselectedTopPlanBuildsNextSurvivor)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12870,7 +12868,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceNoteFilteredTopPlanBuildsNextSurvivo
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -12888,7 +12886,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAlreadyBarredTopPlanBuildsNextSurviv
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -12907,7 +12905,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWalkSkipsFilteredCandidateAfterFinal
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -12929,9 +12927,9 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectsPlanFinalizedOverLim
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     // The call succeeds, so the WARN is the only sign of the plugin contract breach.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine 10"));
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -12950,9 +12948,9 @@ TEST_F(TestGraph, BuildPlansWarnsWhenPlanWorkspaceExceedsEngineConfigWithoutLimi
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     // With no limit the plan is never rejected; the WARN is the only sign of the breach.
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -12972,9 +12970,9 @@ TEST_F(TestGraph, BuildPlansReadsNoEngineConfigWorkspaceWhenWarnLoggingIsOff)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(_engineConfigWorkspaceReads.empty());
@@ -12990,9 +12988,9 @@ TEST_F(TestGraph, BuildPlansPlanOverEngineConfigWithinLimitLogsExactlyOneWarn)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/80);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -13010,9 +13008,9 @@ TEST_F(TestGraph, BuildPlansPlanOverLimitLogsOnlyTheRejectionWarn)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1u) << recorder.getRecordedLogsAsString();
@@ -13027,9 +13025,9 @@ TEST_F(TestGraph, BuildPlansCompliantPlanLogsNoWorkspaceWarn)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/50);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_engineConfigWorkspaceReads.size(), 1u);
@@ -13044,9 +13042,9 @@ TEST_F(TestGraph, BuildPlansReadsNoEngineConfigWorkspaceWhenLogLevelIsError)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     // WARN is below the ERROR level, so the comparison neither queries the plugin nor logs.
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -13062,9 +13060,9 @@ TEST_F(TestGraph, BuildPlansWithUnreadableEngineConfigWorkspaceAndNoLimitBuildsW
     _unreadableWorkspaceEngines.insert(10);
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     // The read is attempted, fails, and skips the comparison; the plan still builds.
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -13097,12 +13095,12 @@ TEST_F(TestGraph, AutotunePlanSpecWarnsWhenBenchmarkedPlanWorkspaceExceedsEngine
         });
     mockSuccessfulBenchmarkExecution();
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
@@ -13137,14 +13135,14 @@ TEST_F(TestGraph, AutotunePlanSpecWarnsWhenPrimingPlanWorkspaceExceedsEngineConf
         });
     mockSuccessfulBenchmarkExecution();
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    auto result
+    const auto result
         = graph.autotune(_handle, variantPack, workspace, int64_t{100000}, config, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
@@ -13168,7 +13166,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectingEveryPlanReturnsNo
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: finalized workspace 500 exceeds limit 100 "
@@ -13196,7 +13194,7 @@ TEST_F(TestGraph, BuildPlansAllSafetyNetRejectsPlanFinalizedOverLimit)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
@@ -13214,7 +13212,7 @@ TEST_F(TestGraph, BuildPlansAllSafetyNetRejectingEveryPlanReturnsNoSurvivorCode)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 100"), std::string::npos)
@@ -13234,7 +13232,7 @@ TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverLimit)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 100"), std::string::npos)
@@ -13255,7 +13253,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAfterBuildReturnsOkAndIgnoresNewFilt
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -13271,7 +13269,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceOnDeserializedPlanReturnsOk)
 
     // The deserialized plan was finalized at load and has no engine config; a build call
     // succeeds and leaves it active.
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
 }
@@ -13296,7 +13294,7 @@ TEST_F(TestGraph, CheckSupportAfterBuildMarksNothingAndKeepsActivePlanExecutable
     expectActivePlanExecutable(graph, 16);
 
     graph.deselect_engines(std::vector<int64_t>{10, 20});
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -13314,7 +13312,7 @@ TEST_F(TestGraph, DeselectEnginesNameThenIdBarsOnlyTheIdEngine)
     graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(10)});
     graph.deselect_engines(std::vector<int64_t>{20});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13331,7 +13329,7 @@ TEST_F(TestGraph, DeselectEnginesIdThenNameBarsOnlyTheNamedEngine)
     graph.deselect_engines(std::vector<int64_t>{10});
     graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(20)});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13348,7 +13346,7 @@ TEST_F(TestGraph, DeselectEnginesEmptyNameListClearsTheFilterBeforeAnyEvaluation
     graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(10)});
     graph.deselect_engines(std::vector<std::string>{});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13365,7 +13363,7 @@ TEST_F(TestGraph, DeselectEnginesEmptyListClearsTheFilterBeforeAnyEvaluation)
     graph.deselect_engines(std::vector<int64_t>{10});
     graph.deselect_engines(std::vector<int64_t>{});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13405,7 +13403,7 @@ TEST_F(TestGraph, BuildPlansAllAfterHeuristicsChoiceBuildsOnlyTheOtherPlans)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -13426,7 +13424,7 @@ TEST_F(TestGraph, BuildPlansAllAfterAllFinalizesNoPlanAgain)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 8);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -13442,9 +13440,10 @@ TEST_F(TestGraph, AutotuneAfterBuildReportsFilteredActivePlanBarredWithoutMarkin
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 8);
     graph.deselect_engines(std::vector<int64_t>{10, 20});
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
+    const auto result
+        = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
 
     // Nothing is benchmarkable. The finalized active plan is reported barred but not marked;
     // the other plan is marked.
@@ -13473,7 +13472,7 @@ TEST_F(TestGraph, BuildPlansAllAfterBuildLeavesFilteredActivePlanActiveAndUnbarr
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -13490,7 +13489,7 @@ TEST_F(TestGraph, BuildPlansAllAfterBuildWithEveryPlanFilteredSucceedsAndKeepsTh
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     // A built plan exists after the call, so it succeeds; the filtered active plan is logged
     // as skipped, not marked, and stays executable.
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -13508,7 +13507,7 @@ TEST_F(TestGraph, BuildPlanAtIndexOnFilteredActivePlanReturnsNoSurvivorCodeAndKe
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13528,7 +13527,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWithoutFilterTouchesOnlyTopPlanAndRe
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(_numericalNoteReads.empty());
@@ -13542,7 +13541,7 @@ TEST_F(TestGraph, CheckSupportNoSurvivorListsEverySkipReason)
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     expectNoSurvivorMessage(result.err_msg);
@@ -13555,7 +13554,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceNoSurvivorListsEverySkipReason)
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     expectNoSurvivorMessage(result.err_msg);
@@ -13570,7 +13569,7 @@ TEST_F(TestGraph, BuildPlansAllNoSurvivorListsEverySkipReason)
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     expectNoSurvivorMessage(result.err_msg);
@@ -13590,7 +13589,7 @@ TEST_F(TestGraph, BuildPlanAtIndexNoSurvivorNamesTheSkipReasonOfItsIndex)
                                               "workspace 500 exceeds limit 100"};
     for(size_t index = 0; index < reasons.size(); ++index)
     {
-        auto result = graph.build_plan_at_index(static_cast<int64_t>(index));
+        const auto result = graph.build_plan_at_index(static_cast<int64_t>(index));
         ASSERT_TRUE(result.is_bad());
         EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
         EXPECT_NE(result.err_msg.find(reasons[index]), std::string::npos) << result.err_msg;
@@ -13603,9 +13602,10 @@ TEST_F(TestGraph, AutotuneNoSurvivorReturnsInvalidValueWithEveryPlanReportedBarr
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
+    const auto result
+        = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     ASSERT_EQ(results.size(), 4u);
@@ -13626,7 +13626,7 @@ TEST_F(TestGraph, BuildPlansAllWithoutFilterAndEveryFinalizeFailingKeepsBackendE
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
     mockPlanFinalize(20, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -13642,13 +13642,13 @@ TEST_F(TestGraph, BuildPlanAtIndexDeselectedEngineReturnsNoSurvivorCode)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/8);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto removed = graph.build_plan_at_index(1);
+    const auto removed = graph.build_plan_at_index(1);
     ASSERT_TRUE(removed.is_bad());
     EXPECT_EQ(removed.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
 
-    auto kept = graph.build_plan_at_index(0);
+    const auto kept = graph.build_plan_at_index(0);
     EXPECT_TRUE(kept.is_good()) << kept.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
 }
@@ -13666,7 +13666,7 @@ TEST_F(TestGraph, BuildPlanAtIndexNoteFilteredEngineReadsNotesOfTheIndexedEngine
         mockPlanFinalize(engineId, HIPDNN_STATUS_SUCCESS, Exactly(0));
     }
 
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{20}));
@@ -13684,7 +13684,7 @@ TEST_F(TestGraph, BuildPlanAtIndexOverEngineConfigWorkspaceLimitReturnsNoSurvivo
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(_engineConfigWorkspaceReads, (std::vector<int64_t>{20}));
@@ -13700,7 +13700,7 @@ TEST_F(TestGraph, BuildPlanAtIndexAfterBuildPlansAllReturnsNoSurvivorCodeForNewF
     ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::ALL).is_good());
 
     graph.deselect_engines(std::vector<int64_t>{20});
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
@@ -13716,7 +13716,7 @@ TEST_F(TestGraph, CheckSupportWithLowerSurvivingPlanReturnsOk)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
 }
@@ -13728,7 +13728,7 @@ TEST_F(TestGraph, CheckSupportFailsWhenDeselectEnginesBarsEveryPlan)
     prepareFilterGraph(graph, {10, 20});
     graph.deselect_engines(std::vector<int64_t>{10, 20});
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
 }
@@ -13742,7 +13742,7 @@ TEST_F(TestGraph, CheckSupportFailsWhenEveryEngineConfigWorkspaceExceedsLimit)
     _engineConfigWorkspace[10] = 500;
     _engineConfigWorkspace[20] = 600;
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: workspace 500 exceeds limit 100"), std::string::npos)
@@ -13760,7 +13760,7 @@ TEST_F(TestGraph, CheckSupportFailsWhenDeselectEnginesBarsTheOnlyNoteSurvivor)
     graph.select_numeric_notes({NumericalNote::TENSOR_CORE});
     graph.deselect_engines(std::vector<int64_t>{20});
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: numerical note filter"), std::string::npos)
@@ -13778,7 +13778,7 @@ TEST_F(TestGraph, CheckSupportSkipsPlanWithUnreadableWorkspaceAndPassesOnNextPla
     _unreadableWorkspaceEngines.insert(10);
     _engineConfigWorkspace[20] = 50;
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -13790,7 +13790,7 @@ TEST_F(TestGraph, CheckSupportWithOnlyCandidateUnreadableWorkspaceReturnsNoSurvi
     graph.deselect_workspace_greater_than(100);
     _unreadableWorkspaceEngines.insert(10);
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("workspace unknown"), std::string::npos) << result.err_msg;
@@ -13808,7 +13808,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWalksPastPlanWithUnreadableWorkspace
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
@@ -13823,7 +13823,7 @@ TEST_F(TestGraph, BuildPlanAtIndexOnPlanWithUnreadableWorkspaceReturnsNoSurvivor
     _unreadableWorkspaceEngines.insert(10);
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("workspace unknown"), std::string::npos) << result.err_msg;
@@ -13837,7 +13837,7 @@ TEST_F(TestGraph, CheckSupportWithOnlyStickyBarredPlanSetEvaluatesInsteadOfRetur
     graph.setPlanBarredForTest(0);
 
     // The active plan is barred, yet plan 20 passes, so the graph is supported.
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -13848,7 +13848,7 @@ TEST_F(TestGraph, CheckSupportWithNoFilterIsUnchangedAndReadsNothing)
     prepareFilterGraph(graph, {10, 20});
     _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(_numericalNoteReads.empty());
     EXPECT_TRUE(_behaviorNoteReads.empty());
@@ -13871,7 +13871,7 @@ TEST_F(TestGraph, CheckSupportPassImpliesBuildPlansHeuristicsChoiceSucceeds)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
     ASSERT_TRUE(graph.check_support().is_good());
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
 }
@@ -13891,7 +13891,7 @@ TEST_F(TestGraph, FiltersSetBeforeCreateExecutionPlansApplyToTheCreatedPlans)
 
     ASSERT_TRUE(graph.create_execution_plans().is_good());
     EXPECT_TRUE(graph.check_support().is_good());
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 40);
@@ -13912,7 +13912,7 @@ TEST_F(TestGraph, FiltersSetBeforeBuildApplyToThePlansItCreates)
     graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
     graph.deselect_workspace_greater_than(100);
 
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 40);
@@ -13927,7 +13927,7 @@ TEST_F(TestGraph, FiltersSurviveASecondCreateExecutionPlans)
 
     ASSERT_TRUE(graph.create_execution_plans().is_good());
     ASSERT_TRUE(graph.create_execution_plans().is_good());
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
@@ -14160,11 +14160,11 @@ TEST_F(TestGraph, CreateExecutionPlanExtOnEngineRemovedByFilterFailsCheckSupport
 
     ASSERT_TRUE(graph.create_execution_plan_ext(10, {}).is_good());
 
-    auto supported = graph.check_support();
+    const auto supported = graph.check_support();
     ASSERT_TRUE(supported.is_bad());
     EXPECT_EQ(supported.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
 
-    auto built = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto built = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(built.is_bad());
     EXPECT_EQ(built.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
@@ -14178,10 +14178,10 @@ TEST_F(TestGraph, AutotuneWithNoteFilterSetAfterPlansCreatedReportsNoteFilteredP
     _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
     graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -14201,10 +14201,10 @@ TEST_F(TestGraph, AutotuneWithDeselectedEngineSetAfterPlansCreatedReportsPlanBar
     prepareFilterGraph(graph, {10, 20}, /*workspaceSize=*/512);
     graph.deselect_engines(std::vector<int64_t>{20});
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -14232,12 +14232,12 @@ TEST_F(TestGraph, AutotunePlanSpecNoteFilteredSpecIsReportedBarredBeforeFinalize
 
     mockSuccessfulBenchmarkExecution();
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    auto result
+    const auto result
         = graph.autotune(_handle, variantPack, workspace, int64_t{100000}, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -14270,10 +14270,10 @@ TEST_F(TestGraph, AutotunePlanSpecJudgesTheLimitByTheCompiledEngineConfigNotTheE
 
     mockSuccessfulBenchmarkExecution();
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -14318,10 +14318,10 @@ TEST_F(TestGraph, AutotunePlanSpecSafetyNetBarsPlanFinalizedOverLimitDespiteItsC
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -14346,10 +14346,10 @@ TEST_F(TestGraph, AutotunePlanSpecAtZeroLimitBarsSpecWithConfigWorkspaceAndBench
     graph.deselect_workspace_greater_than(0);
 
     mockSuccessfulBenchmarkExecution();
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -14392,10 +14392,10 @@ TEST_F(TestGraph, AutotunePlanSpecSafetyNetBarsPlanFinalizedOverAZeroLimitDespit
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -14417,10 +14417,10 @@ TEST_F(TestGraph, AutotunePlanSpecWithFailedNoteReadReturnsTheErrorAndBenchmarks
     _failingNoteEngines.insert(61);
 
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     ASSERT_TRUE(result.is_bad());
@@ -14440,7 +14440,7 @@ TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverAZeroLimit)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 0"), std::string::npos)
@@ -14458,7 +14458,7 @@ TEST_F(TestGraph, AutotunePlanSpecWithUnreadableEngineConfigWorkspaceReportsSpec
     graph.deselect_workspace_greater_than(1000);
 
     mockSuccessfulBenchmarkExecution();
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     graph.autotune(
@@ -14479,10 +14479,10 @@ TEST_F(TestGraph, AutotuneWithFailedNoteReadReturnsTheErrorAndBenchmarksNothing)
     _failingNoteEngines.insert(10);
 
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
 
     ASSERT_TRUE(result.is_bad());
@@ -14520,7 +14520,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFailedNoteReadReturnsErrorAndReadsAg
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto failed = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto failed = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(failed.is_bad());
     EXPECT_EQ(failed.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_NE(failed.err_msg.find("numerical note"), std::string::npos) << failed.err_msg;
@@ -14530,7 +14530,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFailedNoteReadReturnsErrorAndReadsAg
     // The failed read was not cached: a retry reads again, and now succeeds.
     _failingNoteEngines.clear();
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
-    auto retried = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto retried = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(retried.is_good()) << retried.get_message();
     EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10, 10}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -14548,7 +14548,7 @@ TEST_F(TestGraph, BuildPlansAllFailedNoteReadOnSecondEngineFinalizesNoPlanAndRet
 
     // Every note is read before any plan is finalized, so the failing read leaves nothing
     // half-built.
-    auto failed = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto failed = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(failed.is_bad());
     EXPECT_EQ(failed.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
@@ -14557,7 +14557,7 @@ TEST_F(TestGraph, BuildPlansAllFailedNoteReadOnSecondEngineFinalizesNoPlanAndRet
     _failingNoteEngines.clear();
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
-    auto retried = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto retried = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(retried.is_good()) << retried.get_message();
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
 }
@@ -14613,7 +14613,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFailingNoteFilterIsRe
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -14637,7 +14637,7 @@ TEST_F(TestGraph, DeserializedPlanIsNeverFilteredByCheckSupportOrExecute)
     EXPECT_TRUE(graph.check_support().is_good());
     EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
     auto variantPack = testVariantPack();
-    auto result = graph.execute(_handle, variantPack, nullptr);
+    const auto result = graph.execute(_handle, variantPack, nullptr);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -14654,7 +14654,7 @@ TEST_F(TestGraph, BuildPlansAllOnDeserializedPlanSucceedsWithoutFinalizingIt)
                 backendSetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, _, _, _))
         .Times(0);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
 }
@@ -14674,7 +14674,7 @@ TEST_F(TestGraph, DeselectBehaviorNotesAppendsEveryCallAndEmptyCallIsNoOp)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
@@ -14691,13 +14691,13 @@ TEST_F(TestGraph, WorkspaceLimitZeroKeepsOnlyEnginesWithNoWorkspace)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/0);
 
-    auto removed = graph.build_plan_at_index(0);
+    const auto removed = graph.build_plan_at_index(0);
     ASSERT_TRUE(removed.is_bad());
     EXPECT_EQ(removed.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(removed.err_msg.find("workspace 1 exceeds limit 0"), std::string::npos)
         << removed.err_msg;
 
-    auto kept = graph.build_plan_at_index(1);
+    const auto kept = graph.build_plan_at_index(1);
     EXPECT_TRUE(kept.is_good()) << kept.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
 }
@@ -14711,7 +14711,7 @@ TEST_F(TestGraph, CheckSupportWithWorkspaceLimitZeroFiltersOnlyPlansWithWorkspac
     hipdnn_frontend::GraphTestUtils withWorkspace;
     prepareFilterGraph(withWorkspace, {10});
     withWorkspace.deselect_workspace_greater_than(0);
-    auto filtered = withWorkspace.check_support();
+    const auto filtered = withWorkspace.check_support();
     ASSERT_TRUE(filtered.is_bad());
     EXPECT_EQ(filtered.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(filtered.err_msg.find("workspace 1 exceeds limit 0"), std::string::npos)
@@ -14720,7 +14720,7 @@ TEST_F(TestGraph, CheckSupportWithWorkspaceLimitZeroFiltersOnlyPlansWithWorkspac
     hipdnn_frontend::GraphTestUtils withoutWorkspace;
     prepareFilterGraph(withoutWorkspace, {20});
     withoutWorkspace.deselect_workspace_greater_than(0);
-    auto kept = withoutWorkspace.check_support();
+    const auto kept = withoutWorkspace.check_support();
     EXPECT_TRUE(kept.is_good()) << kept.get_message();
 }
 
@@ -14736,7 +14736,7 @@ TEST_F(TestGraph, AutotuneAllPlansExceedWorkspace)
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // Compiled-plan path: two plans whose cached workspace exceeds the
@@ -14752,7 +14752,7 @@ TEST_F(TestGraph, AutotuneAllPlansExceedWorkspace)
                                                      {5, reinterpret_cast<void*>(0x5)}};
 
     std::vector<AutotuneResult> results;
-    auto result
+    const auto result
         = graph.autotune(_handle, pack, nullptr, int64_t{1024}, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -14772,7 +14772,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // Compiled-plan path: all candidates are barred (e.g. by deselect_engines()).
@@ -14789,7 +14789,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
                                                      {5, reinterpret_cast<void*>(0x5)}};
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, nullptr, AutotuneConfig{}, {}, &results);
+    const auto result = graph.autotune(_handle, pack, nullptr, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("deselected"), std::string::npos) << result.err_msg;
@@ -14806,7 +14806,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
     // Index-stability: plans remain, and a barred index returns "is barred"
     // (NOT out-of-bounds).
     EXPECT_EQ(graph.get_execution_plan_count(), candidateCount);
-    auto execResult = graph.execute_plan_at_index(_handle, pack, nullptr, 0);
+    const auto execResult = graph.execute_plan_at_index(_handle, pack, nullptr, 0);
     EXPECT_EQ(execResult.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(execResult.err_msg.find("is barred"), std::string::npos) << execResult.err_msg;
 }
@@ -14821,7 +14821,7 @@ TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // One benchmarkable plan (non-barred, within the limit) keeps the plan map
@@ -14843,7 +14843,8 @@ TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
     void* workspace = reinterpret_cast<void*>(0x1000);
     const int64_t workspaceLimit = 1024;
     const AutotuneConfig config;
-    auto result = graph.autotune(_handle, pack, workspace, workspaceLimit, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, workspaceLimit, config, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -14870,7 +14871,7 @@ TEST_F(TestGraph, AutotuneMixedBarredAndWorkspaceCeilingReportsCompositionAndSur
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
     createBasicBatchnormGraph(graph);
-    auto buildResult = graph.build_operation_graph(_handle);
+    const auto buildResult = graph.build_operation_graph(_handle);
     ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
 
     // This single test exercises all four compiled-plan non-benchmarked
@@ -14921,7 +14922,7 @@ TEST_F(TestGraph, AutotuneMixedBarredAndWorkspaceCeilingReportsCompositionAndSur
     config.engineIdFilter = {10, 11, 12, 20, 21};
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, nullptr, int64_t{1024}, config, {}, &results);
+    const auto result = graph.autotune(_handle, pack, nullptr, int64_t{1024}, config, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("3 deselected"), std::string::npos) << result.err_msg;
@@ -15005,9 +15006,9 @@ TEST_F(TestGraph, AutotunePlanSpecFinalizeFailuresReportedInCompositionSummary)
     auto execPlanDescA = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF01);
     auto execPlanDescB = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF02);
     auto execPlanDescC = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF03);
-    auto execPlanHandles = std::make_shared<std::vector<hipdnnBackendDescriptor_t>>(
+    const auto execPlanHandles = std::make_shared<std::vector<hipdnnBackendDescriptor_t>>(
         std::vector<hipdnnBackendDescriptor_t>{execPlanDescA, execPlanDescB, execPlanDescC});
-    auto execPlanCreateIdx = std::make_shared<size_t>(0);
+    const auto execPlanCreateIdx = std::make_shared<size_t>(0);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .Times(AnyNumber())
         .WillRepeatedly([execPlanHandles, execPlanCreateIdx](
@@ -15059,7 +15060,8 @@ TEST_F(TestGraph, AutotunePlanSpecFinalizeFailuresReportedInCompositionSummary)
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, maxWorkspaceSize, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, maxWorkspaceSize, config, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("0 deselected"), std::string::npos) << result.err_msg;
@@ -15142,7 +15144,8 @@ TEST_F(TestGraph, AutotunePlanSpecExhaustiveFinalizeFailureRetainsPrimingReason)
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
     EXPECT_NE(result.err_msg.find("1 failed to finalize"), std::string::npos) << result.err_msg;
@@ -15270,7 +15273,8 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
     // barred (not workspace-skipped).
     const int64_t runtimeCeiling = 100000;
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
 
     // The fitting plan succeeded, so autotune returns OK.
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -15278,7 +15282,7 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
     // Winner plus three barred specs.
     ASSERT_EQ(results.size(), 4u);
 
-    auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
+    const auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
         for(const auto& r : results)
         {
             if(r.engineId == engineId)
@@ -15392,7 +15396,8 @@ TEST_F(TestGraph, AutotunePlanSpecCompileFailuresReportedInCompositionSummary)
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
 
     // The only candidate failed to compile, so no plan is benchmarkable and the
     // composition summary surfaces the compile-failed count.
@@ -15455,7 +15460,8 @@ TEST_F(TestGraph, AutotunePlanSpecExhaustiveCompileFailureRetainsPrimingReason)
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
     EXPECT_NE(result.err_msg.find("1 failed to compile"), std::string::npos) << result.err_msg;
@@ -15521,7 +15527,7 @@ TEST_F(TestGraph, AutotunePlanSpecExhaustivePrimingSucceedsRealCompileFailsRetai
             });
 
     // Per-compile flag: set when this compile applies the benchmarking knob.
-    auto sawBenchmarkingKnob = std::make_shared<bool>(false);
+    const auto sawBenchmarkingKnob = std::make_shared<bool>(false);
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
         .Times(AnyNumber())
@@ -15581,7 +15587,8 @@ TEST_F(TestGraph, AutotunePlanSpecExhaustivePrimingSucceedsRealCompileFailsRetai
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
 
     // The engine-config finalize is part of compilePlanFromSpec, so failing it
     // fails the REAL compile (not the later execution-plan finalize): the spec
@@ -15651,14 +15658,15 @@ TEST_F(TestGraph, AutotunePlanSpecEngineIdFilterExcludedReported)
 
     std::vector<AutotuneResult> results;
     const int64_t runtimeCeiling = 100000;
-    auto result = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Winner plus one filtered spec.
     ASSERT_EQ(results.size(), 2u);
 
-    auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
+    const auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
         for(const auto& r : results)
         {
             if(r.engineId == engineId)
@@ -15719,7 +15727,7 @@ TEST_F(TestGraph, AutotuneCompiledPlanEngineIdFilterExcludedReported)
     config.engineIdFilter = {999}; // no compiled plan has this engine ID
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("3 excluded by engineIdFilter"), std::string::npos)
@@ -15773,7 +15781,7 @@ TEST_F(TestGraph, RankAndSelectWinnerDefaultRankingByMinTime)
 
     size_t activePlanIndex = 99;
     const AutotuneConfig config;
-    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+    const auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
         results, config, activePlanIndex);
 
     ASSERT_TRUE(err.is_good()) << err.err_msg;
@@ -15796,7 +15804,7 @@ TEST_F(TestGraph, RankAndSelectWinnerFailedEnginesRankAfterSucceeded)
 
     size_t activePlanIndex = 99;
     const AutotuneConfig config;
-    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+    const auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
         results, config, activePlanIndex);
 
     ASSERT_TRUE(err.is_good()) << err.err_msg;
@@ -15857,7 +15865,7 @@ TEST_F(TestGraph, RankAndSelectWinnerCustomRankingFnChangesWinnerThroughProducti
     };
 
     size_t activePlanIndex = 99;
-    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+    const auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
         results, config, activePlanIndex);
 
     ASSERT_TRUE(err.is_good()) << err.err_msg;
@@ -15902,7 +15910,7 @@ TEST_F(TestGraph, RankAndSelectWinnerContiguousRanksSucceededTimeOrderFailedMinu
 
     size_t activePlanIndex = 99;
     const AutotuneConfig config;
-    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+    const auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
         results, config, activePlanIndex);
 
     ASSERT_TRUE(err.is_good()) << err.err_msg;
@@ -15935,7 +15943,7 @@ TEST_F(TestGraph, RankAndSelectWinnerAllFailedReturnsBackendErrorWithPinnedMessa
 
     size_t activePlanIndex = 99;
     const AutotuneConfig config;
-    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+    const auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
         results, config, activePlanIndex);
 
     EXPECT_FALSE(err.is_good());
@@ -15992,7 +16000,7 @@ TEST_F(TestGraph, AddEngineStripsBenchmarkingKnobFromPlanSpec)
                                     HIPDNN_TYPE_INT64,
                                     KnobValueVariant{int64_t{256}});
 
-    auto result = graph.add_engine(
+    const auto result = graph.add_engine(
         42,
         {KnobSetting("tile_size", int64_t{256}),
          KnobSetting(hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1})});
@@ -16016,7 +16024,7 @@ TEST_F(TestGraph, GetEstimatedMaxWorkspaceReturnsMaxOfPlanSpecs)
     graph.injectPlanSpec(3, 200);
 
     int64_t maxWs = -1;
-    auto result = graph.get_estimated_max_workspace_size(maxWs);
+    const auto result = graph.get_estimated_max_workspace_size(maxWs);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
     EXPECT_EQ(maxWs, 500);
 }
@@ -16067,7 +16075,8 @@ TEST_F(TestGraph, EngineIdFilterSelectsSubset)
 
         std::vector<AutotuneResult> results;
         // The compiled-plan overload with a null workspace pointer.
-        auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
+        const auto result
+            = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
 
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
         EXPECT_NE(result.err_msg.find("workspace pointer is null"), std::string::npos)
@@ -16091,7 +16100,8 @@ TEST_F(TestGraph, EngineIdFilterSelectsSubset)
         config.engineIdFilter = {999}; // no compiled plan has this engine ID
 
         std::vector<AutotuneResult> results;
-        auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
+        const auto result
+            = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
 
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
         EXPECT_NE(result.err_msg.find("No execution plans were benchmarkable"), std::string::npos)
@@ -16135,7 +16145,7 @@ TEST_F(TestGraph, EngineVariantToKnobSettings)
     // The benchmarking knob must be dropped by the production conversion.
     variant.knobSettings[hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME] = int64_t{1};
 
-    auto result = graph.add_engine_variants({variant});
+    const auto result = graph.add_engine_variants({variant});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto settings = graph.getPlanSpecKnobSettings();
@@ -16236,7 +16246,7 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
 
     std::vector<AutotuneResult> results;
     // The general plan-spec overload with maxWorkspaceSize=0 (all plans exceed it).
-    auto result
+    const auto result
         = graph.autotune(_handle, pack, /*workspace=*/nullptr, int64_t{0}, config, {}, &results);
 
     // Early-returns at the workspace guard (priming already ran and captured).
@@ -16352,7 +16362,8 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
 
     std::vector<AutotuneResult> results;
     // The general plan-spec overload with the binding workspace limit.
-    auto result = graph.autotune(_handle, pack, workspace, maxWorkspaceSize, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, maxWorkspaceSize, config, {}, &results);
 
     // The fitting plan succeeded, so autotune returns OK.
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -16361,7 +16372,7 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
     // grown plan.
     ASSERT_EQ(results.size(), 2u);
 
-    auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
+    const auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
         for(const auto& r : results)
         {
             if(r.engineId == engineId)
@@ -16667,7 +16678,7 @@ TEST_F(TestGraph, SerializeNoPlanUsesGraphSerializerByteIdentical)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeGraphBytes);
@@ -16731,7 +16742,7 @@ TEST_F(TestGraph, SerializeWithPlanUsesComboContainerApi)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
@@ -16778,7 +16789,7 @@ TEST_F(TestGraph, SerializeWithUnfinalizedPlanUsesGraphSerializer)
         .Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeGraphBytes);
@@ -16802,7 +16813,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtResetsActivePlanSerializationState)
     setupEngineWithNoKnobs(*_mockBackend);
 
     const int64_t engineId = -2;
-    auto result = graph.create_execution_plan_ext(engineId, {});
+    const auto result = graph.create_execution_plan_ext(engineId, {});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getCompiledPlansCount(), 1u);
@@ -16818,7 +16829,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtResetsActivePlanSerializationState)
     expectGraphOnlySerialization(*_mockBackend, fakeGraphBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeGraphBytes);
 }
@@ -16848,7 +16859,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtBuildPlansSerializesComboContainer)
     expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
 }
@@ -16863,7 +16874,7 @@ TEST_F(TestGraph, BuildPlansAllMarksFirstSuccessfulPlanSerializable)
     graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/-1, /*barred=*/false);
     graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/-1, /*barred=*/false);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -16875,7 +16886,7 @@ TEST_F(TestGraph, BuildPlansAllMarksFirstSuccessfulPlanSerializable)
     expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
 }
@@ -16890,7 +16901,7 @@ TEST_F(TestGraph, BuildPlanAtIndexUpdatesSerializableActivePlan)
     graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/-1, /*barred=*/false);
     graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/-1, /*barred=*/false);
 
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -16902,7 +16913,7 @@ TEST_F(TestGraph, BuildPlanAtIndexUpdatesSerializableActivePlan)
     expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
 }
@@ -16931,7 +16942,7 @@ TEST_F(TestGraph, CompiledPlanAutotuneWinnerUpdatesSerializableActivePlan)
                                                             {3, reinterpret_cast<void*>(0x3)},
                                                             {4, reinterpret_cast<void*>(0x4)},
                                                             {5, reinterpret_cast<void*>(0x5)}};
-    auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(results.size(), 2u);
     // Compiled-plan path never primes, so every result (including the benchmarked
@@ -16951,7 +16962,7 @@ TEST_F(TestGraph, CompiledPlanAutotuneWinnerUpdatesSerializableActivePlan)
     expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
 }
@@ -16998,7 +17009,7 @@ TEST_F(TestGraph, CompiledPlanAutotuneFailurePreservesActivePlanState)
     expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
 }
@@ -17102,7 +17113,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerLastWhenTheWinnerIsNotTheLastTimedPla
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -17151,7 +17162,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerChosenByACustomRankingFunction)
     };
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -17197,7 +17208,7 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedFinalWinnerExecuteAndKeepsTheW
     storageConfig.filePath = storagePath;
 
     std::vector<AutotuneResult> results;
-    auto result
+    const auto result
         = graph.autotune(_handle, testVariantPack(), nullptr, config, storageConfig, &results);
     const bool storageWritten = std::filesystem::exists(storagePath);
     std::filesystem::remove(storagePath);
@@ -17240,7 +17251,7 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedSyncAfterTheFinalWinnerExecute
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
 
     ASSERT_EQ(recorder.executedPlans.size(), 3u);
     EXPECT_TRUE(result.is_bad());
@@ -17324,7 +17335,7 @@ TEST_F(TestGraph, AutotuneRestartsUnstalledOnceThenLaterCallCanStallAgain)
                                                             {3, reinterpret_cast<void*>(0x3)},
                                                             {4, reinterpret_cast<void*>(0x4)},
                                                             {5, reinterpret_cast<void*>(0x5)}};
-    auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(results.size(), 2u);
 
@@ -17345,7 +17356,8 @@ TEST_F(TestGraph, AutotuneRestartsUnstalledOnceThenLaterCallCanStallAgain)
     // carried over.
 
     std::vector<AutotuneResult> secondResults;
-    auto secondResult = graph.autotune(_handle, variantPack, nullptr, config, {}, &secondResults);
+    const auto secondResult
+        = graph.autotune(_handle, variantPack, nullptr, config, {}, &secondResults);
     ASSERT_TRUE(secondResult.is_good()) << secondResult.get_message();
     ASSERT_EQ(secondResults.size(), 2u);
     EXPECT_EQ(stallArmCount, 1 + 2 * config.timedIterations);
@@ -17426,7 +17438,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerAfterAStalledRestartPass)
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(stallArmCount, 1);
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -17505,7 +17517,7 @@ TEST_F(TestGraph, ExhaustiveSweepExecutesTheWinnerLast)
 
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotuneExhaustiveSweep(
+    const auto result = graph.autotuneExhaustiveSweep(
         _handle, testVariantPack(), workspace, int64_t{1024}, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
@@ -17603,7 +17615,7 @@ TEST_F(TestGraph, ExhaustiveSweepReturnsTheErrorOfAFailedFinalWinnerExecuteAndCa
 
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotuneExhaustiveSweep(
+    const auto result = graph.autotuneExhaustiveSweep(
         _handle, testVariantPack(), workspace, int64_t{1024}, config, storageConfig, &results);
     const bool storageWritten = std::filesystem::exists(storagePath);
     std::filesystem::remove(storagePath);
@@ -17685,7 +17697,7 @@ std::vector<AutotuneResult> autotuneTwoCompiledPlans(GraphTestUtils& graph,
                                                             {3, reinterpret_cast<void*>(0x3)},
                                                             {4, reinterpret_cast<void*>(0x4)},
                                                             {5, reinterpret_cast<void*>(0x5)}};
-    auto result = graph.autotune(handle, variantPack, nullptr, config, {}, &results);
+    const auto result = graph.autotune(handle, variantPack, nullptr, config, {}, &results);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     return results;
 }
@@ -17773,7 +17785,7 @@ TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
     EngineConfigInfo engineB;
     engineB.engineId = -3;
     engineB.estimatedWorkspaceSize = 0;
-    auto addResult = graph.add_engine_configs({engineA, engineB});
+    const auto addResult = graph.add_engine_configs({engineA, engineB});
     ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
 
     AutotuneConfig config;
@@ -17790,7 +17802,7 @@ TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
                                                             {3, reinterpret_cast<void*>(0x3)},
                                                             {4, reinterpret_cast<void*>(0x4)},
                                                             {5, reinterpret_cast<void*>(0x5)}};
-    auto result = graph.autotune(_handle, variantPack, nullptr, 0, config, {}, &results);
+    const auto result = graph.autotune(_handle, variantPack, nullptr, 0, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(results.size(), 2u);
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -17803,7 +17815,7 @@ TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
     expectComboContainerSerialization(*_mockBackend, fakeContainerBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
 }
@@ -17833,7 +17845,7 @@ TEST_F(TestGraph, PlanSpecAutotuneFailureLeavesCompiledPlanUnfinalized)
     EngineConfigInfo engine;
     engine.engineId = -2;
     engine.estimatedWorkspaceSize = 1024;
-    auto addResult = graph.add_engine_configs({engine});
+    const auto addResult = graph.add_engine_configs({engine});
     ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
 
     AutotuneConfig config;
@@ -17848,7 +17860,7 @@ TEST_F(TestGraph, PlanSpecAutotuneFailureLeavesCompiledPlanUnfinalized)
                                                             {4, reinterpret_cast<void*>(0x4)},
                                                             {5, reinterpret_cast<void*>(0x5)}};
 
-    auto result = graph.autotune(_handle, variantPack, nullptr, 2048, config, {}, &results);
+    const auto result = graph.autotune(_handle, variantPack, nullptr, 2048, config, {}, &results);
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -17862,7 +17874,7 @@ TEST_F(TestGraph, PlanSpecAutotuneFailureLeavesCompiledPlanUnfinalized)
     expectGraphOnlySerialization(*_mockBackend, fakeGraphBytes);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeGraphBytes);
 }
@@ -17878,7 +17890,7 @@ TEST_F(TestGraph, SerializeCompiledPlanRejectsUnfinalizedActivePlan)
     EXPECT_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(_, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize_compiled_plan(data);
+    const auto err = graph.serialize_compiled_plan(data);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
 }
@@ -17935,7 +17947,7 @@ TEST_F(TestGraph, SerializeWithPlanRejectsZeroLengthCombo)
         .Times(0);
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize(data);
+    const auto result = graph.serialize(data);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_NE(result.get_message().find("zero-length binary graph and plan"), std::string::npos)
@@ -17982,7 +17994,7 @@ TEST_F(TestGraph, SerializePropagatesComboSizeQueryFailure)
         .WillByDefault(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize(data);
+    const auto result = graph.serialize(data);
 
     EXPECT_TRUE(result.is_bad());
 }
@@ -18038,7 +18050,7 @@ TEST_F(TestGraph, SerializePropagatesComboFillFailure)
         });
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize(data);
+    const auto result = graph.serialize(data);
 
     EXPECT_TRUE(result.is_bad());
 }
@@ -18079,7 +18091,7 @@ TEST_F(TestGraph, SerializeWithPlanButNoSelectedEngineFallsBackToGraphOnly)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     // Output is the bare-graph bytes: the graph-only path was taken.
@@ -18110,7 +18122,7 @@ TEST_F(TestGraph, SerializeGraphOnlyRejectsZeroLengthGraphAfterPlanFallback)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto result = graph.serialize(data);
+    const auto result = graph.serialize(data);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_NE(result.get_message().find("zero-length binary graph"), std::string::npos)
@@ -18176,7 +18188,7 @@ TEST_F(TestGraph, SerializeWithPlanQueriesEngineAndUsesComboWhenSupported)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, combo);
 }
@@ -18224,7 +18236,7 @@ TEST_F(TestGraph, SerializeWithPlanQueriesEngineAndUsesGraphOnlyWhenUnsupported)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, bare);
 }
@@ -18267,7 +18279,7 @@ TEST_F(TestGraph, SerializeWithPlanBehaviorNoteQueryFailureFallsBackToGraphOnly)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
 
     std::vector<uint8_t> data;
-    auto err = graph.serialize(data);
+    const auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, bare);
 }
@@ -18295,7 +18307,7 @@ TEST_F(TestGraph, DeserializeNoPlanLeavesExecutionPlanNull)
 
     const std::vector<uint8_t> data = {0x10, 0x11, 0x12, 0x13};
     GraphTestUtils graph2;
-    auto result = graph2.deserialize(_handle, data);
+    const auto result = graph2.deserialize(_handle, data);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_FALSE(graph2.hasExecutionPlan());
@@ -18362,7 +18374,7 @@ TEST_F(TestGraph, DeserializeWithPlanFlagAndHandleAttachesPlan)
         });
 
     GraphTestUtils graph2;
-    auto result = graph2.deserialize(_handle, data);
+    const auto result = graph2.deserialize(_handle, data);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(graph2.hasExecutionPlan());
@@ -18439,7 +18451,7 @@ TEST_F(TestGraph, DeserializeAttachWithEngineIdQueryFailureSerializesGraphOnly)
     EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
 
     std::vector<uint8_t> out;
-    auto err = graph2.serialize(out);
+    const auto err = graph2.serialize(out);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(out, fakeGraphBytes);
 }
@@ -18468,7 +18480,7 @@ TEST_F(TestGraph, DeserializeWithPlanFlagNoHandleDropsPlanAndWarns)
 
     const std::vector<uint8_t> data = {0x30, 0x31, 0x32, 0x33};
     GraphTestUtils graph2;
-    auto result = graph2.deserialize(data);
+    const auto result = graph2.deserialize(data);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_FALSE(graph2.hasExecutionPlan());
@@ -18491,7 +18503,7 @@ TEST_F(TestGraph, DeserializePropagatesContentsQueryFailure)
 
     const std::vector<uint8_t> data = {0x40, 0x41, 0x42, 0x43};
     GraphTestUtils graph2;
-    auto result = graph2.deserialize(_handle, data);
+    const auto result = graph2.deserialize(_handle, data);
 
     EXPECT_TRUE(result.is_bad());
 }
@@ -18520,7 +18532,7 @@ TEST_F(TestGraph, DeserializePropagatesPlanDeserializeFailure)
 
     const std::vector<uint8_t> data = {0x50, 0x51, 0x52, 0x53};
     GraphTestUtils graph2;
-    auto result = graph2.deserialize(_handle, data);
+    const auto result = graph2.deserialize(_handle, data);
 
     EXPECT_TRUE(result.is_bad());
 }
@@ -18548,7 +18560,7 @@ TEST_F(TestGraph, DeserializeLegacyBareGraphBlobReconstructsGraphNoPlan)
 
     const std::vector<uint8_t> data = {0xBB, 0xBB, 0xBB, 0xBB};
     GraphTestUtils graph2;
-    auto result = graph2.deserialize(_handle, data);
+    const auto result = graph2.deserialize(_handle, data);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_FALSE(graph2.getPrivateGraphSubnodes().empty());
@@ -18990,7 +19002,7 @@ TEST_F(TestGraph, GraphRankingMetricReachesExplicitEngineConfigs)
         .WillOnce(captureStringAttribute(metric));
 
     setupEngineWithNoKnobs(*_mockBackend);
-    auto result = graph.create_execution_plan_ext(42, {});
+    const auto result = graph.create_execution_plan_ext(42, {});
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(metric, "time");
 }

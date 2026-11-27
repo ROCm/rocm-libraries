@@ -107,12 +107,13 @@ protected:
         xTensor.fillWithValue(1.0f);
         scaleTensor.fillWithValue(1.0f);
 
-        auto x = Graph::tensor(makeTensorAttributes("X", DataType::FLOAT, xTensor));
-        auto scale = Graph::tensor(makeTensorAttributes("scale", DataType::FLOAT, scaleTensor));
+        const auto x = Graph::tensor(makeTensorAttributes("X", DataType::FLOAT, xTensor));
+        const auto scale
+            = Graph::tensor(makeTensorAttributes("scale", DataType::FLOAT, scaleTensor));
 
         // Pure runtime-user-supplied epsilon: runtime flag set, no baked value,
         // so the provider MUST read it from device_buffers at execute.
-        auto epsilon = std::make_shared<TensorAttributes>();
+        const auto epsilon = std::make_shared<TensorAttributes>();
         epsilon->set_name("epsilon")
             .set_dim({1})
             .set_stride({1})
@@ -213,10 +214,10 @@ TEST_F(IntegrationPassByValueDelivery, MissingRuntimeScalarFailsExecute)
     xTensor.fillWithValue(1.0f);
     scaleTensor.fillWithValue(1.0f);
 
-    auto x = Graph::tensor(makeTensorAttributes("X", DataType::FLOAT, xTensor));
-    auto scale = Graph::tensor(makeTensorAttributes("scale", DataType::FLOAT, scaleTensor));
+    const auto x = Graph::tensor(makeTensorAttributes("X", DataType::FLOAT, xTensor));
+    const auto scale = Graph::tensor(makeTensorAttributes("scale", DataType::FLOAT, scaleTensor));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("epsilon")
         .set_dim({1})
         .set_stride({1})
@@ -292,20 +293,20 @@ std::shared_ptr<hipdnn_tests::TestableGraphLifting> buildRuntimeEpsilonGraph()
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_data_type(DataType::FLOAT)
         .set_dim(dims)
         .set_stride({192, 64, 8, 1});
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2)
         .set_name("scale")
         .set_data_type(DataType::FLOAT)
         .set_dim(scaleDims)
         .set_stride({64, 64, 8, 1});
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(3)
         .set_name("epsilon")
         .set_dim({1})
@@ -335,9 +336,9 @@ std::shared_ptr<hipdnn_tests::TestableGraphLifting> buildRuntimeEpsilonGraph()
 // getters, not just that the backend's internal flatbuffer round-trips.
 TEST_F(IntegrationPassByValueLiftRoundTrip, PreservesRuntimeClassification)
 {
-    auto originalGraph = buildRuntimeEpsilonGraph();
+    const auto originalGraph = buildRuntimeEpsilonGraph();
 
-    auto liftedGraph = hipdnn_tests::liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = hipdnn_tests::liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -355,13 +356,13 @@ TEST_F(IntegrationPassByValueLiftRoundTrip, PreservesRuntimeClassification)
 // two states rather than always reporting one.
 TEST_F(IntegrationPassByValueLiftRoundTrip, PreservesCompileTimeConstant)
 {
-    auto graph = buildRuntimeEpsilonGraph();
+    const auto graph = buildRuntimeEpsilonGraph();
     // Overwrite epsilon with a baked compile-time constant instead.
     auto tensorMap = graph->getTensorsByUid();
     ASSERT_NE(tensorMap.count(3), 0u);
     tensorMap[3]->set_value(1e-5f);
 
-    auto liftedGraph = hipdnn_tests::liftGraphWithoutFinalization(*graph);
+    const auto liftedGraph = hipdnn_tests::liftGraphWithoutFinalization(*graph);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto liftedTensorMap = liftedGraph->getTensorsByUid();

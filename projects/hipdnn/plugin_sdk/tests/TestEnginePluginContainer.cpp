@@ -75,7 +75,7 @@ TEST(TestSharedContainerManager, CreatesContainerOnFirstCall)
 
     EXPECT_EQ(TestContainer::instanceCount, 0);
 
-    auto container = manager.getOrCreate();
+    const auto container = manager.getOrCreate();
     EXPECT_NE(container, nullptr);
     EXPECT_EQ(TestContainer::instanceCount, 1);
 }
@@ -85,8 +85,8 @@ TEST(TestSharedContainerManager, ReturnsSameContainerOnSubsequentCalls)
     TestContainer::instanceCount = 0;
     SharedContainerManager<TestContainer> manager;
 
-    auto container1 = manager.getOrCreate();
-    auto container2 = manager.getOrCreate();
+    const auto container1 = manager.getOrCreate();
+    const auto container2 = manager.getOrCreate();
 
     EXPECT_EQ(container1.get(), container2.get());
     EXPECT_EQ(TestContainer::instanceCount, 1);
@@ -98,7 +98,7 @@ TEST(TestSharedContainerManager, RecreatesContainerAfterAllReferencesDropped)
     SharedContainerManager<TestContainer> manager;
 
     {
-        auto container = manager.getOrCreate();
+        const auto container = manager.getOrCreate();
         EXPECT_EQ(TestContainer::instanceCount, 1);
     }
 
@@ -106,7 +106,7 @@ TEST(TestSharedContainerManager, RecreatesContainerAfterAllReferencesDropped)
     EXPECT_EQ(TestContainer::instanceCount, 0);
 
     // Getting again should create a new one
-    auto newContainer = manager.getOrCreate();
+    const auto newContainer = manager.getOrCreate();
     EXPECT_EQ(TestContainer::instanceCount, 1);
 }
 
@@ -125,7 +125,7 @@ TEST(TestSharedContainerManager, ThreadSafeCreation)
     for(int i = 0; i < K_NUM_THREADS; ++i)
     {
         threads.emplace_back([&]() {
-            auto container = manager.getOrCreate();
+            const auto container = manager.getOrCreate();
             const std::lock_guard<std::mutex> lock(containersMutex);
             containers.push_back(container);
         });

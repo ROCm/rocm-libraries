@@ -31,7 +31,7 @@ protected:
 TEST(TestConvFwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid convolution graph
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -65,16 +65,16 @@ TEST(TestConvFwdParams, PadsOneDimensionalGraphToTwoDimensions)
     const std::vector<int64_t> convStrides = {1};
     const std::vector<int64_t> convDilation = {1};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -116,16 +116,16 @@ TEST(TestConvFwdParams, PadsOneDimensionalChannelsLastGraphWithChannelStride)
     const std::vector<int64_t> convStrides = {1};
     const std::vector<int64_t> convDilation = {1};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -160,16 +160,16 @@ TEST(TestConvFwdParams, ThrowsOnAssymetricPadding)
     const std::vector<int64_t> convPostPadding = {1, 1};
     const std::vector<int64_t> convStrides = {1, 1};
     const std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -195,16 +195,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPostPaddingVectorSize)
     const std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
     const std::vector<int64_t> convStrides = {1, 1};
     const std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -231,16 +231,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidPaddingVectorsSize)
     const std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
     const std::vector<int64_t> convStrides = {1, 1};
     const std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -266,16 +266,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidStrideVectorSize)
     const std::vector<int64_t> convPostPadding = {0, 0};
     const std::vector<int64_t> convStrides = {1}; // Invalid strides vector size
     const std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -301,16 +301,16 @@ TEST(TestConvFwdParams, ThrowsOnInvalidDilationVectorSize)
     const std::vector<int64_t> convPostPadding = {0, 0};
     const std::vector<int64_t> convStrides = {1, 1};
     const std::vector<int64_t> convDilation = {1}; // Invalid dilation vector size
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -327,7 +327,7 @@ TEST(TestConvFwdParams, ThrowsOnInvalidDilationVectorSize)
 TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid convolution graph
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -346,7 +346,7 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
 
 TEST_F(TestGpuConvFwdPlan, BenchmarkingSelectsNormalFindMode)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     auto* attrs = graph.getNode(0).attributes_as_ConvolutionFwdAttributes();
@@ -369,16 +369,16 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
     const std::vector<int64_t> convPostPadding = {0, 0};
     const std::vector<int64_t> convStrides = {1, 1};
     const std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                       xStrides,
-                                                                       wDims,
-                                                                       wStrides,
-                                                                       yDims,
-                                                                       yStrides,
-                                                                       convPrePadding,
-                                                                       convPostPadding,
-                                                                       convStrides,
-                                                                       convDilation);
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                             xStrides,
+                                                                             wDims,
+                                                                             wStrides,
+                                                                             yDims,
+                                                                             yStrides,
+                                                                             convPrePadding,
+                                                                             convPostPadding,
+                                                                             convStrides,
+                                                                             convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -398,7 +398,7 @@ TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
 
 TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -418,7 +418,7 @@ TEST_F(TestGpuConvFwdPlan, PlanUsesDefaultWorkspaceSizeWhenNoLimitSet)
 
 TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -441,7 +441,7 @@ TEST_F(TestGpuConvFwdPlan, PlanUsesKnobLimitOverDefault)
 TEST(TestConvFwdParams, AcceptsDeterministicEnabledFlag)
 {
     // Create a valid convolution graph
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

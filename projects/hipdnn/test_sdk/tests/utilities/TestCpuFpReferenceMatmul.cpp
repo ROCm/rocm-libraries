@@ -73,7 +73,7 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, 1);
         auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -95,7 +95,7 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
                                                    1,
                                                    TensorLayout::NCHW);
 
-        auto& graph = std::get<0>(graphTuple);
+        const auto& graph = std::get<0>(graphTuple);
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -109,8 +109,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateInput)
 {
     // Rank mismatching
     {
-        auto tensorA = createTensor<float>({2, 2, 3});
-        auto tensorB = createTensor<float>({3, 4});
+        const auto tensorA = createTensor<float>({2, 2, 3});
+        const auto tensorB = createTensor<float>({3, 4});
         auto tensorC = createTensor<float>({2, 2, 4});
 
         EXPECT_THROW(
@@ -120,8 +120,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateInput)
 
     // Rank less than 2
     {
-        auto tensorA = createTensor<float>({3});
-        auto tensorB = createTensor<float>({3});
+        const auto tensorA = createTensor<float>({3});
+        const auto tensorB = createTensor<float>({3});
         auto tensorC = createTensor<float>({3});
 
         EXPECT_THROW(
@@ -131,8 +131,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateInput)
 
     // Mismatched K dimensions
     {
-        auto tensorA = createTensor<float>({2, 2, 5});
-        auto tensorB = createTensor<float>({2, 2, 5});
+        const auto tensorA = createTensor<float>({2, 2, 5});
+        const auto tensorB = createTensor<float>({2, 2, 5});
         auto tensorC = createTensor<float>({2, 2, 2});
 
         EXPECT_THROW(
@@ -142,8 +142,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateInput)
 
     // Incorrect output shape
     {
-        auto tensorA = createTensor<float>({2, 3, 5});
-        auto tensorB = createTensor<float>({2, 5, 4});
+        const auto tensorA = createTensor<float>({2, 3, 5});
+        const auto tensorB = createTensor<float>({2, 5, 4});
         auto tensorC = createTensor<float>({2, 4, 3});
 
         EXPECT_THROW(
@@ -156,8 +156,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateBroadcastableBatchDims)
 {
     // Correct case
     {
-        auto tensorA = createTensor<float>({2, 1, 2, 3});
-        auto tensorB = createTensor<float>({1, 2, 3, 4});
+        const auto tensorA = createTensor<float>({2, 1, 2, 3});
+        const auto tensorB = createTensor<float>({1, 2, 3, 4});
         auto tensorC = createTensor<float>({2, 2, 2, 4});
 
         EXPECT_NO_THROW(
@@ -166,8 +166,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateBroadcastableBatchDims)
 
     // Non-divisible batch dims
     {
-        auto tensorA = createTensor<float>({2, 2, 2, 3});
-        auto tensorB = createTensor<float>({3, 2, 3, 4});
+        const auto tensorA = createTensor<float>({2, 2, 2, 3});
+        const auto tensorB = createTensor<float>({3, 2, 3, 4});
         auto tensorC = createTensor<float>({2, 2, 3, 4});
 
         EXPECT_THROW(
@@ -177,8 +177,8 @@ TEST_F(TestCpuFpReferenceMatmul, ValidateBroadcastableBatchDims)
 
     // Incorrect output batch dims
     {
-        auto tensorA = createTensor<float>({2, 1, 2, 3});
-        auto tensorB = createTensor<float>({1, 2, 3, 4});
+        const auto tensorA = createTensor<float>({2, 1, 2, 3});
+        const auto tensorB = createTensor<float>({1, 2, 3, 4});
         auto tensorC = createTensor<float>({1, 1, 2, 4});
 
         EXPECT_THROW(

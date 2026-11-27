@@ -303,7 +303,7 @@ TEST(TestFp8E4M3, SignedZeroSupported)
 TEST(TestFp8E4M3, NegateZeroProducesNegativeZero)
 {
     // OCP E4M3 supports -0; negating +0 flips the sign bit -> 0x80 (-0).
-    auto val = -fp8_e4m3(0.0f);
+    const auto val = -fp8_e4m3(0.0f);
     EXPECT_EQ(val.data, static_cast<uint8_t>(0x80));
     EXPECT_EQ(static_cast<float>(val), -0.0f);
     EXPECT_FALSE(isnan(val));
@@ -312,13 +312,13 @@ TEST(TestFp8E4M3, NegateZeroProducesNegativeZero)
 TEST(TestFp8E4M3, NegateNanProducesNan)
 {
     // OCP E4M3: negating NaN flips the sign bit; both 0x7F and 0xFF are valid NaN.
-    auto posNan = fp8_e4m3::from_bits(0x7F);
-    auto negNan = -posNan;
+    const auto posNan = fp8_e4m3::from_bits(0x7F);
+    const auto negNan = -posNan;
     EXPECT_EQ(negNan.data, static_cast<uint8_t>(0xFF));
     EXPECT_TRUE(isnan(negNan));
 
-    auto fromNeg = fp8_e4m3::from_bits(0xFF);
-    auto backToPos = -fromNeg;
+    const auto fromNeg = fp8_e4m3::from_bits(0xFF);
+    const auto backToPos = -fromNeg;
     EXPECT_EQ(backToPos.data, static_cast<uint8_t>(0x7F));
     EXPECT_TRUE(isnan(backToPos));
 }
@@ -326,16 +326,16 @@ TEST(TestFp8E4M3, NegateNanProducesNan)
 TEST(TestFp8E4M3, DualNanEncoding)
 {
     // Float NaN preserves sign on conversion: positive NaN -> 0x7F, negative -> 0xFF.
-    auto v = fp8_e4m3(std::numeric_limits<float>::quiet_NaN());
+    const auto v = fp8_e4m3(std::numeric_limits<float>::quiet_NaN());
     EXPECT_EQ(v.data, static_cast<uint8_t>(0x7F));
     EXPECT_TRUE(isnan(v));
 
-    auto vNeg = fp8_e4m3(-std::numeric_limits<float>::quiet_NaN());
+    const auto vNeg = fp8_e4m3(-std::numeric_limits<float>::quiet_NaN());
     EXPECT_EQ(vNeg.data, static_cast<uint8_t>(0xFF));
     EXPECT_TRUE(isnan(vNeg));
 
     // Signaling NaN: OCP E4M3 has no SNaN distinction, also maps to 0x7F.
-    auto vs = fp8_e4m3(std::numeric_limits<float>::signaling_NaN());
+    const auto vs = fp8_e4m3(std::numeric_limits<float>::signaling_NaN());
     EXPECT_EQ(vs.data, static_cast<uint8_t>(0x7F));
     EXPECT_TRUE(isnan(vs));
 

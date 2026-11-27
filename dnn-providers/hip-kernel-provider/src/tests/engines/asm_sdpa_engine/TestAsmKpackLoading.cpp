@@ -92,8 +92,8 @@ std::string kpackDir()
     //   <prefix>/bin/<exe> → <prefix>/<ASM_KPACK_INSTALL_DIR>
     if(const std::string_view installDir{ASM_KPACK_INSTALL_DIR}; !installDir.empty())
     {
-        auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / ".."
-                         / std::string(installDir);
+        const auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / ".."
+                               / std::string(installDir);
         std::error_code ec;
         if(std::filesystem::is_directory(candidate, ec))
         {
@@ -255,7 +255,7 @@ TEST(TestAsmKpackLoading, EveryRegistryRowResolvesInItsArchive)
 
 TEST(TestAsmKpackLoading, MissingTocKeyReturnsError)
 {
-    auto path = kpackPath("gfx942");
+    const auto path = kpackPath("gfx942");
     if(!std::filesystem::exists(path))
     {
         GTEST_SKIP() << "gfx942 archive not found at " << path;

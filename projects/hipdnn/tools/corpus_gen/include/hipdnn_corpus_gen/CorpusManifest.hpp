@@ -49,7 +49,7 @@ inline std::string asCsvField(const std::string& text)
         }
         quoted += character;
     }
-    quoted += "\"";
+    quoted += '"';
     return quoted;
 }
 
@@ -310,7 +310,7 @@ inline std::string corpusManifestCsv(const std::vector<ManifestEntry>& entries)
         }
         text += "," + std::to_string(entry.bytes);
         text += "," + detail::asCsvField(entry.file);
-        text += "\n";
+        text += '\n';
     }
     return text;
 }

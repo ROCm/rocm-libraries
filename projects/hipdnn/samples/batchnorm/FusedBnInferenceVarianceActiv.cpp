@@ -25,8 +25,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 {
     using OutputType = InputType;
 
-    auto inputType = getDataTypeEnumFromType<InputType>();
-    auto computeType = getDataTypeEnumFromType<ComputeType>();
+    const auto inputType = getDataTypeEnumFromType<InputType>();
+    const auto computeType = getDataTypeEnumFromType<ComputeType>();
 
     std::cout << "Running batch normalization inference with variance + ReLU activation graph "
               << inputType << " [" << layout << "]"
@@ -34,12 +34,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << (config.useRuntimePassByValue ? " [runtime-pass-by-value]" : "") << "...\n";
 
     // Input dimensions
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(computeType)
         .set_compute_data_type(computeType);
@@ -76,7 +76,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto bnAttributes = graph::BatchnormInferenceAttributesVarianceExt();
     bnAttributes.set_name("bn_inference_variance_ext_node");
 
-    auto y = graph->batchnorm_inference_variance_ext(
+    const auto y = graph->batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, bnAttributes);
 
     // Step 2: Pointwise ReLU Activation
@@ -138,7 +138,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto activatedYHostPtr = activatedYTensor.memory().hostData();
 
-    auto runCpuValidation = [&]() -> bool {
+    const auto runCpuValidation = [&]() -> bool {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
 
         // Create reference tensor
@@ -168,10 +168,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<
-            OutputType>();
+        const auto tolerance
+            = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<
+                OutputType>();
 
-        auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(
+        const auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(
             tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
@@ -234,7 +235,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv, SampleType::BN_WITH_PASS_BY_VALUE);
+        const auto config = parseCommandLineArgs(argc, argv, SampleType::BN_WITH_PASS_BY_VALUE);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

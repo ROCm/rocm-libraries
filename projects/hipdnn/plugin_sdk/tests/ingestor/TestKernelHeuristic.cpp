@@ -633,7 +633,7 @@ TEST(TestIngestorKernelHeuristic, WarnsNamingTheEngineWhenNoHeuristicIsSupplied)
     // The warning is the whole point of allowing a missing UHD: it is what separates an
     // engine that meant to declare its order from one still waiting on a model. An
     // unnamed warning cannot tell an operator which engine to go look at.
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
     const auto heuristic = makeKernelHeuristic(std::nullopt, "engine 'test:unranked'");
@@ -763,7 +763,7 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerDegradesInsteadOfFailingTheRequ
 TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
 {
     // Silent degradation would hide that the engine ranks on declared order (RFC 0019 §12).
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const TestGraph graph;

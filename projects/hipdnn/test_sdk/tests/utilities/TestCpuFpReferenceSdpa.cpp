@@ -1538,7 +1538,7 @@ static void checkGradient(Tensor<float>& input,
 {
     Tensor<float> numericalGrad(shape);
     numericalGradient(input, numericalGrad, eps, fwdLoss);
-    auto result = compareGradients(analyticalGrad, numericalGrad, relTol, absTol);
+    const auto result = compareGradients(analyticalGrad, numericalGrad, relTol, absTol);
     EXPECT_EQ(result.failCount, 0) << label << " grad check failed: maxRelErr=" << result.maxRelErr
                                    << ", maxAbsErr=" << result.maxAbsErr;
 }
@@ -1573,7 +1573,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, MHA)
     Tensor<float> dV({BATCH, HEADS, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o);
         return computeDotProductLoss(dO, o);
     };
@@ -1613,7 +1613,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQA)
     Tensor<float> dV({BATCH, HEADS_KV, SEQ_KV, HEAD_DIM_V});
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o);
         return computeDotProductLoss(dO, o);
     };
@@ -1655,7 +1655,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, CausalMask)
     CpuFpReferenceSdpa::backward(
         q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
         return computeDotProductLoss(dO, o);
@@ -1697,7 +1697,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, CustomScale)
     CpuFpReferenceSdpa::backward(
         q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setScale(customScale));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setScale(customScale));
         return computeDotProductLoss(dO, o);
     };
@@ -1743,7 +1743,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, AdditiveMask)
     CpuFpReferenceSdpa::backward(
         q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setMask(&mask));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(q, k, v, o, SdpaFwdOptions<float>{}.setMask(&mask));
         return computeDotProductLoss(dO, o);
     };
@@ -1810,7 +1810,7 @@ TEST_P(TestCpuFpReferenceSdpaGradCheckDBias, MatchesFiniteDifferences)
         SdpaBwdOptions<float>{}.setScale(SCALE).setMask(&mask).setDBias(&dBias).setBand(
             -1, 0, false));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -2152,7 +2152,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, ExplicitMaskDropout)
                                      .setBand(-1, 0, false)
                                      .setDropout(&keepMask, dropoutScale, KEEP));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         fwd();
         return computeDotProductLoss(dO, o);
     };
@@ -2345,7 +2345,7 @@ TEST_P(TestCpuFpReferenceSdpaScoreModGradCheck, MatchesFiniteDifferences)
                                      .setSoftcap(c.softcap)
                                      .setAlibi(c.alibi));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         fwd();
         return computeDotProductLoss(dO, o);
     };
@@ -2397,7 +2397,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQACausalMask)
     CpuFpReferenceSdpa::backward(
         q, k, v, o, dO, dQ, dK, dV, SdpaBwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(-1, 0, true));
         return computeDotProductLoss(dO, o);
@@ -2728,7 +2728,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, BottomRightCausalMask)
         dV,
         SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -2791,7 +2791,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskSymmetricTopLeft)
         dV,
         SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -2854,7 +2854,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskAsymmetricBottomRight)
         dV,
         SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -2917,7 +2917,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, WindowMaskLargerSq)
         dV,
         SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -2981,7 +2981,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQABottomRightCausalMask)
         dV,
         SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -3045,7 +3045,7 @@ TEST(TestCpuFpReferenceSdpaGradCheck, GQAWindowMask)
         dV,
         SdpaBwdOptions<float>{}.setMask(noMask).setBand(LEFT_BOUND, RIGHT_BOUND, TOP_ANCHORED));
 
-    auto fwdLoss = [&]() -> double {
+    const auto fwdLoss = [&]() -> double {
         CpuFpReferenceSdpa::forward(
             q,
             k,
@@ -3521,7 +3521,7 @@ TEST(TestCpuFpReferenceSdpaFp8, RejectsMismatchedRank4DescaleShape)
     v.fillWithValue(safeTestTypeCast<fp8_e4m3>(0.5f));
 
     const TensorBase<float>* noMask = nullptr;
-    auto runWith = [&](const TensorBase<float>* descaleQ) {
+    const auto runWith = [&](const TensorBase<float>* descaleQ) {
         CpuFpReferenceSdpa::forward<fp8_e4m3, fp8_e4m3, fp8_e4m3, bfloat16, float>(
             q,
             k,

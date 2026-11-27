@@ -134,7 +134,7 @@ std::vector<uint8_t> withSeqLens(const std::vector<uint8_t>& graph)
 std::vector<uint8_t> withAuxStrides(const std::vector<uint8_t>& graph, int64_t stride)
 {
     return editGraph(graph, [&](GraphT& g) {
-        for(auto& attrs : g.tensors)
+        for(const auto& attrs : g.tensors)
         {
             if(attrs->uid == Q_OFFSETS || attrs->uid == KV_OFFSETS || attrs->uid == SEQ_Q
                || attrs->uid == SEQ_KV)
@@ -310,7 +310,7 @@ TEST(TestGpuRaggedSdpaDensifyDevice, AuxOffTheBatchAxisIsNotApplicable)
         });
     };
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpu;
-    auto applicable
+    const auto applicable
         = [&](std::vector<uint8_t> graph) { return gpu.isApplicable(graph.data(), graph.size()); };
     const auto withLens = withSeqLens(raggedGraph(false, true));
     EXPECT_TRUE(applicable(withLens));

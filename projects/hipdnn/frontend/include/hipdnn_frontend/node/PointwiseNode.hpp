@@ -58,7 +58,7 @@ public:
 
     Error infer_properties_node() override
     {
-        auto out = attributes.get_output_0();
+        const auto out = attributes.get_output_0();
         if(!out)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
@@ -72,7 +72,8 @@ public:
         std::vector<std::shared_ptr<TensorAttributes>> inputs;
         for(size_t slot = 0; slot < K_MAX_INPUT_COUNT; ++slot)
         {
-            auto it = attributes.inputs.find(static_cast<PointwiseAttributes::InputNames>(slot));
+            const auto it
+                = attributes.inputs.find(static_cast<PointwiseAttributes::InputNames>(slot));
             if(it == attributes.inputs.end())
             {
                 continue;
@@ -216,7 +217,8 @@ private:
 
         for(size_t slot = 0; slot < usedInputCount; ++slot)
         {
-            auto it = attributes.inputs.find(static_cast<PointwiseAttributes::InputNames>(slot));
+            const auto it
+                = attributes.inputs.find(static_cast<PointwiseAttributes::InputNames>(slot));
             if(it == attributes.inputs.end())
             {
                 return {ErrorCode::INVALID_VALUE,
@@ -237,7 +239,7 @@ private:
     // order. Axes the output has beyond IN_0's rank are leading and outermost.
     void inferVirtualOutputStride(TensorAttributes& out) const
     {
-        auto in0 = attributes.get_input_0();
+        const auto in0 = attributes.get_input_0();
         const auto& outDims = out.get_dim();
         if(!in0 || in0->get_stride().empty() || in0->get_stride().size() > outDims.size())
         {
@@ -262,7 +264,7 @@ private:
 
     Error checkInputsAndOutputsAreBroadcastCompatible() const
     {
-        auto output = attributes.get_output_0();
+        const auto output = attributes.get_output_0();
         if(output && !output->get_dim().empty())
         {
             const auto& outputDims = output->get_dim();

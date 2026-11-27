@@ -24,28 +24,28 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
 {
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("MoeGroupedMatmulBwdTest");
     graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType))
         .set_compute_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType))
         .set_intermediate_data_type(
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
 
-    auto doutputAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto doutputAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "DOUTPUT",
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
             bundle.doutputTensor));
     doutputAttr->set_uid(1);
 
-    auto tokenAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto tokenAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "TOKEN",
             hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
             bundle.tokenTensor));
     tokenAttr->set_uid(2);
 
-    auto firstTokenOffsetAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto firstTokenOffsetAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "FIRST_TOKEN_OFFSET", hipdnn_frontend::DataType::INT32, bundle.firstTokenOffsetTensor));
     firstTokenOffsetAttr->set_uid(3);
@@ -54,7 +54,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     moeBwdAttrs.set_name("MoeGroupedMatmulBwd_test");
     moeBwdAttrs.set_compute_data_type(graph->get_compute_data_type());
 
-    auto dweightAttr
+    const auto dweightAttr
         = graph->moe_grouped_matmul_bwd(doutputAttr, tokenAttr, firstTokenOffsetAttr, moeBwdAttrs);
     if(!dweightAttr->has_uid())
     {
@@ -70,7 +70,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     // the graph has to describe the memory the variant pack wires in.
     dweightAttr->set_stride(bundle.dweightTensor.strides());
 
-    auto variantPack
+    const auto variantPack
         = bundle.createVariantPack(*doutputAttr, *tokenAttr, *firstTokenOffsetAttr, *dweightAttr);
 
     return std::make_tuple(graph, variantPack);

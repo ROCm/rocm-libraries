@@ -660,7 +660,7 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     const detail::SelectedKernelReport report(ENGINE, testCase.name, capture);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     const auto settings
@@ -714,7 +714,7 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
     const ScopedPluginLogCapture capture(this);
     const auto& recorder = capture.recorder();
 
-    auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
+    const auto sdpa = detail::buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
     std::vector<Knob> knobs;
@@ -843,7 +843,7 @@ protected:
         const ScopedPluginLogCapture capture(this);
         ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(this->_handle, this->_stream));
 
-        auto loaded = std::make_shared<Graph>();
+        const auto loaded = std::make_shared<Graph>();
         result = detail::loadInForm(*loaded, this->_handle, saved, form);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 

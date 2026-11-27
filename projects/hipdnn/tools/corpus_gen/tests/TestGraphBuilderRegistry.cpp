@@ -187,7 +187,7 @@ TEST(TestGraphBuilderRegistry, ArgumentsAreMatchedByNameNotByPosition)
 {
     // §4.2's example declares dims before strides, but the builder takes (strides, dims, ...);
     // positional dispatch would swap them and still build.
-    auto reordered = nlohmann::json::parse(R"({
+    const auto reordered = nlohmann::json::parse(R"({
       "schema_version": "1.0",
       "operation": "matmul",
       "parameters": { "M": { "type": "int64" }, "N": { "type": "int64" },
@@ -228,7 +228,7 @@ TEST(TestGraphBuilderRegistry, ArgumentsAreMatchedByNameNotByPosition)
 TEST(TestGraphBuilderRegistry, NamesTheBuilderItCannotFind)
 {
     // §4.4 check 5: the error must name the missing builder.
-    auto unknown = nlohmann::json::parse(R"({
+    const auto unknown = nlohmann::json::parse(R"({
       "schema_version": "1.0", "operation": "x",
       "parameters": { "M": { "type": "int64" } },
       "stratification_axis": "working_set", "regimes": {},
@@ -280,7 +280,7 @@ TEST(TestGraphBuilderRegistry, AMoeModeThatNeedsIndexTensorsIsRefusedByName)
 TEST(TestGraphBuilderRegistry, DeclinesAnIncompleteDeclaration)
 {
     // Adapters must not fill in what the declaration omits.
-    auto partial = nlohmann::json::parse(R"({
+    const auto partial = nlohmann::json::parse(R"({
       "schema_version": "1.0", "operation": "matmul",
       "parameters": { "M": { "type": "int64" }, "K": { "type": "int64" } },
       "stratification_axis": "arithmetic_intensity", "regimes": {},

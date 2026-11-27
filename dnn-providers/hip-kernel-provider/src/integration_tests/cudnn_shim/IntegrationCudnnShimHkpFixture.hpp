@@ -33,7 +33,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};

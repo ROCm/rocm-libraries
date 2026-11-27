@@ -1095,7 +1095,7 @@ TEST(TestIngestorWinnerCacheStateManager, AVersionMismatchedShardIsDeclinedAndLo
         out << "not-the-version-this-build-writes\n";
     }
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const auto manager = makeNamedStateManager("test:VersionMismatch");
 

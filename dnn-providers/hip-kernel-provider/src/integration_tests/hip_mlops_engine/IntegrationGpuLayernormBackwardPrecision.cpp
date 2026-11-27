@@ -69,7 +69,7 @@ protected:
         int deviceId = 0;
         ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -185,17 +185,17 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
         graphObj.set_preferred_engine_id_ext(HIP_MLOPS_ENGINE_ID);
 
-        auto dyAttr = std::make_shared<TensorAttributes>(
+        const auto dyAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("dy", hipdnn_frontend::DataType::FLOAT, dims, dataStrides));
-        auto xAttr = std::make_shared<TensorAttributes>(
+        const auto xAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("x", hipdnn_frontend::DataType::FLOAT, dims, dataStrides));
-        auto scaleAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto scaleAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "scale", hipdnn_frontend::DataType::FLOAT, scaleDims, scaleStrides));
-        auto meanAttr = std::make_shared<TensorAttributes>(
+        const auto meanAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("mean", hipdnn_frontend::DataType::FLOAT, statDims, statStrides));
-        auto invVarianceAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
+        const auto invVarianceAttr = std::make_shared<TensorAttributes>(makeTensorAttributes(
             "inv_variance", hipdnn_frontend::DataType::FLOAT, statDims, statStrides));
-        auto epsilonAttr = std::make_shared<TensorAttributes>();
+        const auto epsilonAttr = std::make_shared<TensorAttributes>();
         epsilonAttr->set_name("epsilon")
             .set_dim({1})
             .set_stride({1})

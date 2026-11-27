@@ -103,8 +103,8 @@ public:
                 "beta", // default value
                 {"alpha", "beta", "gamma"})); // valid values
 
-            auto knobsVector = builder.CreateVector(knobOffsets);
-            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            const auto knobsVector = builder.CreateVector(knobOffsets);
+            const auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, getInstance()->getEngineId(), knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
@@ -145,8 +145,8 @@ public:
             // Validate knob types
             for(const auto& knobSetting : configWrapper.knobSettingWrappers())
             {
-                auto knobId = knobSetting->knobId();
-                auto valueType = knobSetting->valueType();
+                const auto knobId = knobSetting->knobId();
+                const auto valueType = knobSetting->valueType();
 
                 // Match against known knobs and validate type
                 if(knobId == "constraint.int_knob")

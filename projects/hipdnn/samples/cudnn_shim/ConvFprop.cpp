@@ -48,23 +48,23 @@ int main(int argc, char** argv)
         graph.set_io_data_type(cudnn_frontend::DataType_t::HALF)
             .set_compute_data_type(cudnn_frontend::DataType_t::FLOAT);
 
-        auto x = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                  .set_name("image")
-                                  .set_dim({n, c, h, w})
-                                  .set_stride({c * h * w, 1, c * w, c})
-                                  .set_uid(1));
-        auto weight = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                       .set_name("filter")
-                                       .set_dim({k, c, r, s})
-                                       .set_stride({c * r * s, 1, c * s, c})
-                                       .set_uid(2));
+        const auto x = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                        .set_name("image")
+                                        .set_dim({n, c, h, w})
+                                        .set_stride({c * h * w, 1, c * w, c})
+                                        .set_uid(1));
+        const auto weight = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                             .set_name("filter")
+                                             .set_dim({k, c, r, s})
+                                             .set_stride({c * r * s, 1, c * s, c})
+                                             .set_uid(2));
 
-        auto y = graph.conv_fprop(x,
-                                  weight,
-                                  cudnn_frontend::graph::Conv_fprop_attributes{}
-                                      .set_padding({0, 0})
-                                      .set_stride({1, 1})
-                                      .set_dilation({1, 1}));
+        const auto y = graph.conv_fprop(x,
+                                        weight,
+                                        cudnn_frontend::graph::Conv_fprop_attributes{}
+                                            .set_padding({0, 0})
+                                            .set_stride({1, 1})
+                                            .set_dilation({1, 1}));
         y->set_output(true).set_uid(3);
 
         if(auto error = graph.validate(); error.is_bad())

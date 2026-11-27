@@ -102,8 +102,8 @@ bool isSupportedSdpaAlibi(const SdpaAttributesType& nodeAttributes)
 }
 
 /// The raw pointer an options setter takes, or nullptr. (Calling get() inline inside the
-/// templated options chains trips clang-tidy-20's readability-redundant-smartptr-get, a false
-/// positive in dependent calls.)
+/// templated options chains trips clang-tidy's readability-redundant-smartptr-get, a false
+/// positive in dependent calls that clang-tidy 23 still reports.)
 template <typename T>
 T* rawPointer(const std::unique_ptr<T>& owner)
 {
@@ -609,14 +609,14 @@ bool isSdpaZeroProbabilityDropout(
     return sdpaDropoutSeedOffsetPresent(attrs, tensorMap);
 }
 
-#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
-    do                                              \
-    {                                               \
-        auto it = (tensor_map).find((tensor_uid));  \
-        if(it == (tensor_map).end())                \
-        {                                           \
-            return false;                           \
-        }                                           \
+#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid)      \
+    do                                                   \
+    {                                                    \
+        const auto it = (tensor_map).find((tensor_uid)); \
+        if(it == (tensor_map).end())                     \
+        {                                                \
+            return false;                                \
+        }                                                \
     } while(0)
 
 #define CHECK_TENSOR_TYPE(tensor_map, tensor_uid, datatype_enum) \

@@ -118,13 +118,13 @@ protected:
 TEST_F(IntegrationGraphVerificationContext, NewGraphCannotBorrowPreviousRegistration)
 {
     Graph previous;
-    auto previousOutput = makePointwise(previous, DataType::FLOAT);
+    const auto previousOutput = makePointwise(previous, DataType::FLOAT);
     GraphVerificationContext previousContext(previous);
     registerValidator(previousContext, previousOutput, 1.0f);
     ASSERT_NO_FATAL_FAILURE(verifyGraph(previousContext, 0));
 
     Graph current;
-    auto currentOutput = makePointwise(current, DataType::FLOAT);
+    const auto currentOutput = makePointwise(current, DataType::FLOAT);
     GraphVerificationContext currentContext(current);
     expectVerificationFailure([&] { verifyGraph(currentContext, 0); });
     // Two initializations per verification call; the cpu parity in initializeBundle holds
@@ -139,12 +139,12 @@ TEST_F(IntegrationGraphVerificationContext, NewGraphCannotBorrowPreviousRegistra
 TEST_F(IntegrationGraphVerificationContext, FutureGraphCannotReplaceCurrentComparator)
 {
     Graph current;
-    auto currentOutput = makePointwise(current, DataType::FLOAT);
+    const auto currentOutput = makePointwise(current, DataType::FLOAT);
     GraphVerificationContext currentContext(current);
     registerValidator(currentContext, currentOutput, 0.0f);
 
     Graph future;
-    auto futureOutput = makePointwise(future, DataType::HALF);
+    const auto futureOutput = makePointwise(future, DataType::HALF);
     GraphVerificationContext futureContext(future);
     registerValidator(futureContext, futureOutput, 0.0f);
     ASSERT_NO_FATAL_FAILURE(verifyGraph(currentContext, 0));

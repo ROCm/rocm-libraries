@@ -81,7 +81,7 @@ TEST(TestGraphAttributes, MethodChaining)
     auto& ref1 = graphAttributes.set_name("ChainedGraph");
     auto& ref2 = ref1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     auto& ref3 = ref2.set_intermediate_data_type(hipdnn_frontend::DataType::HALF);
-    auto& ref4 = ref3.set_io_data_type(hipdnn_frontend::DataType::BFLOAT16);
+    const auto& ref4 = ref3.set_io_data_type(hipdnn_frontend::DataType::BFLOAT16);
 
     // All references should point to the same object
     EXPECT_EQ(&graphAttributes, &ref1);

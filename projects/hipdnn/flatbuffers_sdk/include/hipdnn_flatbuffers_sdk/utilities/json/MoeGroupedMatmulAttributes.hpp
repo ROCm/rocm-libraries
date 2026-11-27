@@ -46,11 +46,11 @@ inline auto to<data_objects::MoeGroupedMatmulAttributes>(flatbuffers::FlatBuffer
 {
     const auto& inputs = entry.at("inputs");
     const auto& outputs = entry.at("outputs");
-    auto tokenIndexUid
+    const auto tokenIndexUid
         = inputs.contains("token_index_tensor_uid")
               ? ::flatbuffers::Optional<int64_t>(inputs.at("token_index_tensor_uid").get<int64_t>())
               : ::flatbuffers::nullopt;
-    auto tokenKsUid
+    const auto tokenKsUid
         = inputs.contains("token_ks_tensor_uid")
               ? ::flatbuffers::Optional<int64_t>(inputs.at("token_ks_tensor_uid").get<int64_t>())
               : ::flatbuffers::nullopt;

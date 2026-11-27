@@ -11,7 +11,8 @@ using namespace miopen_plugin;
 TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid batchnorm graph with variance
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -43,7 +44,7 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
      InitializesAllTensorsFromValidGraphWithActivation)
 {
     // Create a valid batchnorm graph with variance and activation
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());

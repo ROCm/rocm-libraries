@@ -257,7 +257,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                       "ProfilingControlDescriptor::setAttribute(START): "
                       "Start has already been recorded.");
 
-        auto status = hipEventRecord(_startEvent.get(), _stream);
+        const auto status = hipEventRecord(_startEvent.get(), _stream);
         THROW_IF_NE(status,
                     hipSuccess,
                     HIPDNN_STATUS_INTERNAL_ERROR,
@@ -289,7 +289,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                       "ProfilingControlDescriptor::setAttribute(STOP): "
                       "Stop has already been recorded.");
 
-        auto status = hipEventRecord(_stopEvent.get(), _stream);
+        const auto status = hipEventRecord(_stopEvent.get(), _stream);
         THROW_IF_NE(status,
                     hipSuccess,
                     HIPDNN_STATUS_INTERNAL_ERROR,
@@ -317,7 +317,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
         // (START, STOP) where the value is also unused (the action is the
         // setAttribute call itself).
         // Device-wide sync (as opposed to stream-sync) is intentional.
-        auto status = hipDeviceSynchronize();
+        const auto status = hipDeviceSynchronize();
         THROW_IF_NE(status,
                     hipSuccess,
                     HIPDNN_STATUS_INTERNAL_ERROR,
@@ -528,7 +528,7 @@ std::string ProfilingControlDescriptor::toString() const
     {
         str += fmt::format(", elapsedMs={}", _elapsedMs);
     }
-    str += "}";
+    str += '}';
     return str;
 }
 

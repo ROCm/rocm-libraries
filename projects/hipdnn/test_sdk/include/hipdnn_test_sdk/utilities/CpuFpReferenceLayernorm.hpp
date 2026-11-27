@@ -156,7 +156,7 @@ public:
 
         const auto normElementCount = xNormOffsets.size();
 
-        auto layernormFpropFunc = [&](const std::vector<int64_t>& batchIndices) {
+        const auto layernormFpropFunc = [&](const std::vector<int64_t>& batchIndices) {
             const int64_t xBatchOffset = hipdnn_test_sdk::detail::flatOffset(
                 batchIndices.data(), xStrides.data(), batchDimCount);
             const int64_t yBatchOffset = hipdnn_test_sdk::detail::flatOffset(
@@ -169,9 +169,9 @@ public:
             // Pass 2: normalize and apply scale/bias
             for(size_t element = 0; element < normElementCount; ++element)
             {
-                auto xVal
+                const auto xVal
                     = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
-                auto xHat = (xVal - batchMean) * invStd;
+                const auto xHat = (xVal - batchMean) * invStd;
 
                 ComputeDataType yVal = xHat;
                 if(scaleBase != nullptr)
@@ -202,7 +202,7 @@ public:
         };
 
         // Parallelize over batch dimensions
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(layernormFpropFunc, batchExtents);
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -366,7 +366,7 @@ public:
         const auto batchRowMajorStrides = hipdnn_data_sdk::utilities::generateStrides(batchExtents);
 
         // Pass 1: backward values
-        auto layernormBpropValuesFunc = [&](const std::vector<int64_t>& batchIndices) {
+        const auto layernormBpropValuesFunc = [&](const std::vector<int64_t>& batchIndices) {
             const int64_t dyBatchOffset = hipdnn_test_sdk::detail::flatOffset(
                 batchIndices.data(), dyStrides.data(), batchDimCount);
             const int64_t xBatchOffset = hipdnn_test_sdk::detail::flatOffset(
@@ -398,27 +398,29 @@ public:
             auto sumDyScale = static_cast<ComputeDataType>(0.0);
             for(size_t element = 0; element < normElementCount; ++element)
             {
-                auto dyVal
+                const auto dyVal
                     = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
-                auto scaleVal = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
-                auto xVal
+                const auto scaleVal
+                    = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
+                const auto xVal
                     = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
 
                 sumDyScaleXc += dyVal * scaleVal * (xVal - meanVal);
                 sumDyScale += dyVal * scaleVal;
             }
 
-            auto a = rstdVal * rstdVal * rstdVal * sumDyScaleXc
-                     / static_cast<ComputeDataType>(normalizedDimsSize);
-            auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize);
+            const auto a = rstdVal * rstdVal * rstdVal * sumDyScaleXc
+                           / static_cast<ComputeDataType>(normalizedDimsSize);
+            const auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize);
             for(size_t element = 0; element < normElementCount; ++element)
             {
-                auto dyVal
+                const auto dyVal
                     = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
-                auto scaleVal = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
-                auto xVal
+                const auto scaleVal
+                    = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
+                const auto xVal
                     = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
-                auto dxVal = rstdVal * dyVal * scaleVal - a * (xVal - meanVal) - b;
+                const auto dxVal = rstdVal * dyVal * scaleVal - a * (xVal - meanVal) - b;
                 dxBase[dxBatchOffset + dxNormOffsets[element]] = static_cast<DxDataType>(dxVal);
             }
         };
@@ -426,7 +428,7 @@ public:
         // Pass 2: backward weights
         const int64_t* dscaleStrides = trailingStrides(dscale, normCount);
         const int64_t* dbiasStrides = trailingStrides(dbias, normCount);
-        auto layernormBpropWeightsFunc = [&](const std::vector<int64_t>& normIndices) {
+        const auto layernormBpropWeightsFunc = [&](const std::vector<int64_t>& normIndices) {
             const int64_t dyNormOffset = hipdnn_test_sdk::detail::flatOffset(
                 normIndices.data(), dyStrides.data() + batchDimCount, normCount);
             const int64_t xNormOffset = hipdnn_test_sdk::detail::flatOffset(
@@ -436,9 +438,9 @@ public:
             auto dbiasVal = static_cast<ComputeDataType>(0.0);
             for(size_t element = 0; element < batchElementCount; ++element)
             {
-                auto dyVal
+                const auto dyVal
                     = static_cast<ComputeDataType>(dyBase[dyNormOffset + dyBatchOffsets[element]]);
-                auto xVal
+                const auto xVal
                     = static_cast<ComputeDataType>(xBase[xNormOffset + xBatchOffsets[element]]);
                 dscaleVal += dyVal * (xVal - batchMean[element]) * batchRstd[element];
                 dbiasVal += dyVal;
@@ -453,10 +455,10 @@ public:
         };
 
         // Parallelize pass 1 over the batch and pass 2 over the normalized dimensions
-        auto parallelValuesFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+        const auto parallelValuesFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
             layernormBpropValuesFunc, batchExtents);
         parallelValuesFunc(std::thread::hardware_concurrency());
-        auto parallelWeightsFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+        const auto parallelWeightsFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
             layernormBpropWeightsFunc, normExtents);
         parallelWeightsFunc(std::thread::hardware_concurrency());
 
@@ -543,17 +545,17 @@ private:
 
         for(const auto offset : xNormOffsets)
         {
-            auto xVal = static_cast<ComputeDataType>(xBatch[offset]);
+            const auto xVal = static_cast<ComputeDataType>(xBatch[offset]);
 
             count++;
-            auto delta = xVal - mean;
+            const auto delta = xVal - mean;
             mean += delta / static_cast<ComputeDataType>(count);
-            auto delta2 = xVal - mean;
+            const auto delta2 = xVal - mean;
             m2 += delta * delta2;
         }
 
-        auto variance = m2 / static_cast<ComputeDataType>(count);
-        auto rstd
+        const auto variance = m2 / static_cast<ComputeDataType>(count);
+        const auto rstd
             = static_cast<ComputeDataType>(1.0) / hipdnn_data_sdk::types::sqrt(variance + epsilon);
         return {mean, rstd};
     }

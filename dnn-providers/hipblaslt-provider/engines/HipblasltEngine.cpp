@@ -42,7 +42,7 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
     flatbuffers::FlatBufferBuilder builder;
     const std::vector<int32_t> behaviorNotes{
         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+    const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
         builder, _id, nullptr, &behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

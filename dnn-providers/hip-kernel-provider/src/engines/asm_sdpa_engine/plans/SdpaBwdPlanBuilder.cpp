@@ -365,7 +365,7 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
     };
 
     // [B, H, S, D] tensors: Get(0)=batch, Get(1)=head, Get(2)=seq.
-    auto checkBwdTensor
+    const auto checkBwdTensor
         = [&](const char* prefix, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
               const auto* s = t.strides();
               bool ok = true;
@@ -1132,8 +1132,8 @@ static Rejection
     // Reject GQA/MQA here rather than letting buildPlan succeed and execute a kernel
     // that corrupts memory.  Restore the weaker "nhead_q % nhead_k == 0" check once
     // the expansion and reduction are implemented.
-    auto numHeadsQ = qTensor->dims()->Get(1);
-    auto numHeadsKv = kTensor->dims()->Get(1);
+    const auto numHeadsQ = qTensor->dims()->Get(1);
+    const auto numHeadsKv = kTensor->dims()->Get(1);
     HIP_KERNEL_REJECT_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
                          "GQA/MQA backward requires dK/dV head expansion, which is not "
                          "implemented (Actual: nhead_q="
@@ -1353,10 +1353,10 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
 
     // Q tensor layout is [B, H_q, S_q, D_qk]
-    auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
-    auto headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
-    auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
-    auto headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
+    const auto batch = static_cast<size_t>(qTensor->dims()->Get(0));
+    const auto headsQ = static_cast<size_t>(qTensor->dims()->Get(1));
+    const auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
+    const auto headDimQk = static_cast<size_t>(qTensor->dims()->Get(3));
 
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
@@ -1472,68 +1472,68 @@ void SdpaBwdPlanBuilder::buildPlan(
 
     // Dimensions from Q: [B, H_q, S_q, D_qk]
     auto* qDims = qTensor->dims();
-    auto batchSize = static_cast<unsigned int>(qDims->Get(0));
-    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
-    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    const auto batchSize = static_cast<unsigned int>(qDims->Get(0));
+    const auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
+    const auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
     auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
     // Dimensions from K: [B, H_kv, S_kv, D_qk]
-    auto numHeadsKv = static_cast<unsigned int>(kTensor->dims()->Get(1));
-    auto seqLenKv = static_cast<unsigned int>(kTensor->dims()->Get(2));
+    const auto numHeadsKv = static_cast<unsigned int>(kTensor->dims()->Get(1));
+    const auto seqLenKv = static_cast<unsigned int>(kTensor->dims()->Get(2));
 
     // Dimensions from V: [B, H_kv, S_kv, D_v]
-    auto headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
+    const auto headDimV = static_cast<unsigned int>(vTensor->dims()->Get(3));
 
     // -------------------------------------------------------------------------
     // 2. Extract strides (in elements) from tensor metadata
     // -------------------------------------------------------------------------
     // Q: [B, H_q, S_q, D_qk]
     auto* qStrides = qTensor->strides();
-    auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
-    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
-    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+    const auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
+    const auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
+    const auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
 
     // K: [B, H_kv, S_kv, D_qk]
     auto* kStrides = kTensor->strides();
-    auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
-    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
-    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
+    const auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
+    const auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
+    const auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
 
     // V: [B, H_kv, S_kv, D_v]
     auto* vStrides = vTensor->strides();
-    auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
-    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
-    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
+    const auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
+    const auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
+    const auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
 
     // O: [B, H_q, S_q, D_v]
     auto* oStrides = oTensor->strides();
-    auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
-    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
-    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
+    const auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
+    const auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
+    const auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
 
     // dO: [B, H_q, S_q, D_v]
     auto* doStrides = doTensor->strides();
-    auto doStrideBatch = static_cast<unsigned int>(doStrides->Get(0));
-    auto doStrideHead = static_cast<unsigned int>(doStrides->Get(1));
-    auto doStrideSeq = static_cast<unsigned int>(doStrides->Get(2));
+    const auto doStrideBatch = static_cast<unsigned int>(doStrides->Get(0));
+    const auto doStrideHead = static_cast<unsigned int>(doStrides->Get(1));
+    const auto doStrideSeq = static_cast<unsigned int>(doStrides->Get(2));
 
     // dQ: [B, H_q, S_q, D_qk]
     auto* dqStrides = dqTensor->strides();
-    auto dqStrideBatch = static_cast<unsigned int>(dqStrides->Get(0));
-    auto dqStrideHead = static_cast<unsigned int>(dqStrides->Get(1));
-    auto dqStrideSeq = static_cast<unsigned int>(dqStrides->Get(2));
+    const auto dqStrideBatch = static_cast<unsigned int>(dqStrides->Get(0));
+    const auto dqStrideHead = static_cast<unsigned int>(dqStrides->Get(1));
+    const auto dqStrideSeq = static_cast<unsigned int>(dqStrides->Get(2));
 
     // dK: [B, H_kv, S_kv, D_qk]
     auto* dkStrides = dkTensor->strides();
-    auto dkStrideBatch = static_cast<unsigned int>(dkStrides->Get(0));
-    auto dkStrideHead = static_cast<unsigned int>(dkStrides->Get(1));
-    auto dkStrideSeq = static_cast<unsigned int>(dkStrides->Get(2));
+    const auto dkStrideBatch = static_cast<unsigned int>(dkStrides->Get(0));
+    const auto dkStrideHead = static_cast<unsigned int>(dkStrides->Get(1));
+    const auto dkStrideSeq = static_cast<unsigned int>(dkStrides->Get(2));
 
     // dV: [B, H_kv, S_kv, D_v]
     auto* dvStrides = dvTensor->strides();
-    auto dvStrideBatch = static_cast<unsigned int>(dvStrides->Get(0));
-    auto dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
-    auto dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
+    const auto dvStrideBatch = static_cast<unsigned int>(dvStrides->Get(0));
+    const auto dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
+    const auto dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
 
     // Stats (LSE) and the D workspace: packed [B, H_q, S_q] FP32. isApplicable
     // declines any stats tensor that is not packed on every axis of size > 1, so
@@ -1611,7 +1611,7 @@ void SdpaBwdPlanBuilder::buildPlan(
 
     // isApplicable resolved every A32 stage and a16DeclineReason every A16 one,
     // so a miss here is an internal error.
-    auto resolveStage = [&](bwd_dispatch::PipelineStage stage) {
+    const auto resolveStage = [&](bwd_dispatch::PipelineStage stage) {
         auto cfgOpt = resolveStageConfig(stage, deviceString, request);
         if(!cfgOpt)
         {
@@ -1624,7 +1624,7 @@ void SdpaBwdPlanBuilder::buildPlan(
         }
         return *cfgOpt;
     };
-    auto toResolvedKernel = [](const fmha_v3_bwdConfig& cfg) {
+    const auto toResolvedKernel = [](const fmha_v3_bwdConfig& cfg) {
         return ResolvedKernel{getKernelTocKey(cfg.co_name),
                               cfg.knl_name,
                               SdpaBwdParams::KernelTiles{static_cast<unsigned int>(cfg.ts)}};

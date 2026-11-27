@@ -38,7 +38,7 @@ protected:
 
 TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdActivGraph)
 {
-    auto builder = createValidConvFwdActivGraph();
+    const auto builder = createValidConvFwdActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -55,7 +55,7 @@ TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdActivGraph)
 
 TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdBiasActivGraph)
 {
-    auto builder = createValidConvFwdBiasActivGraph();
+    const auto builder = createValidConvFwdBiasActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -91,16 +91,16 @@ TEST(TestConvFwdBiasActivParams, PadsOneDimensionalGraphToTwoDimensions)
     const std::vector<int64_t> convStrides = {1};
     const std::vector<int64_t> convDilation = {1};
 
-    auto builder = createValidConvFwdBiasActivGraph(xDims,
-                                                    xStrides,
-                                                    wDims,
-                                                    wStrides,
-                                                    yDims,
-                                                    yStrides,
-                                                    convPrePadding,
-                                                    convPostPadding,
-                                                    convStrides,
-                                                    convDilation);
+    const auto builder = createValidConvFwdBiasActivGraph(xDims,
+                                                          xStrides,
+                                                          wDims,
+                                                          wStrides,
+                                                          yDims,
+                                                          yStrides,
+                                                          convPrePadding,
+                                                          convPostPadding,
+                                                          convStrides,
+                                                          convDilation);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -143,17 +143,18 @@ TEST(TestConvFwdBiasActivParams, ThrowOnWrongActivationMode)
     const std::vector<int64_t> convStrides = {1, 1};
     const std::vector<int64_t> convDilation = {1, 1};
 
-    auto builder = createValidConvFwdBiasActivGraph(xDims,
-                                                    generateStrides(xDims),
-                                                    wDims,
-                                                    generateStrides(wDims),
-                                                    yDims,
-                                                    generateStrides(yDims),
-                                                    convPadding,
-                                                    convPadding,
-                                                    convStrides,
-                                                    convDilation,
-                                                    PointwiseMode::ADD); // Invalid activation mode
+    const auto builder
+        = createValidConvFwdBiasActivGraph(xDims,
+                                           generateStrides(xDims),
+                                           wDims,
+                                           generateStrides(wDims),
+                                           yDims,
+                                           generateStrides(yDims),
+                                           convPadding,
+                                           convPadding,
+                                           convStrides,
+                                           convDilation,
+                                           PointwiseMode::ADD); // Invalid activation mode
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -175,7 +176,7 @@ TEST(TestConvFwdBiasActivParams, ThrowOnWrongActivationMode)
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)
 {
-    auto builder = createValidConvFwdActivGraph();
+    const auto builder = createValidConvFwdActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
@@ -196,7 +197,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileOnly)
 {
-    auto builder = createValidConvFwdActivGraph();
+    const auto builder = createValidConvFwdActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
@@ -217,7 +218,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileO
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspaceOnly)
 {
-    auto builder = createValidConvFwdActivGraph();
+    const auto builder = createValidConvFwdActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
@@ -238,7 +239,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspac
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
 {
-    auto builder = createValidConvFwdBiasActivGraph();
+    const auto builder = createValidConvFwdBiasActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
@@ -263,7 +264,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphCompileOnly)
 {
-    auto builder = createValidConvFwdBiasActivGraph();
+    const auto builder = createValidConvFwdBiasActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
@@ -288,7 +289,7 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphComp
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphWorkspaceOnly)
 {
-    auto builder = createValidConvFwdBiasActivGraph();
+    const auto builder = createValidConvFwdBiasActivGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);

@@ -47,7 +47,7 @@
 | C++ Compiler | C++17 compatible | AMD Clang, or MSVC on Windows (plugins using device code may require C++20 and AMD Clang)|
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
-| clang-tidy | 20.x | Static analysis tool |
+| clang-tidy | 23.x | Static analysis tool (PyPI wheel, installed into a virtual environment: see [Version Suffix](#version-suffix)) |
 | LLVM Tools | 20.x | LLVM tools for code_coverage, and ASAN enabled builds |
 
 #### Optional Dependencies
@@ -488,11 +488,11 @@ cmake --preset release -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/an
 
 ### Clang Tools
 
-Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
+Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 23. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
 
 #### Version Suffix
 
-Before searching for the tool using it's standard name, a search will be made for a tool that has the version appended as a suffix. E.g. before looking for `clang-format` a search for a file named `clang-format-18` will be run first, and if that fails then a search will be made for `clang-format`. Similarly, `clang-tidy-20` will be searched-for first, and then `clang-tidy`. This approach can be used if it is possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names.
+Before searching for the tool using it's standard name, a search will be made for a tool that has the version appended as a suffix. E.g. before looking for `clang-format` a search for a file named `clang-format-18` will be run first, and if that fails then a search will be made for `clang-format`. Similarly, `clang-tidy-23` will be searched-for first, and then `clang-tidy`. This approach can be used if it is possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names. The `clang-tidy` PyPI wheel installs plain `clang-tidy` and `run-clang-tidy.py` into its Python environment's `bin` directory; `run-clang-tidy.py` is found as a last-resort name. Ubuntu 24.04's apt provides clang-tidy only up to version 20, and its system Python refuses a bare `pip install` (PEP 668), so install the wheel into a virtual environment and pass the binary: `python3 -m venv ~/venvs/tidy23 && ~/venvs/tidy23/bin/pip install clang-tidy==23.1.4`, then configure with `-DCLANG_TIDY_EXE=$HOME/venvs/tidy23/bin/clang-tidy`. The matching `run-clang-tidy.py` is looked up in the same directory first, and the `tidy` targets run it with `-clang-tidy-binary`, so the version-checked `clang-tidy` is the one that runs even when another `clang-tidy` is earlier on `PATH`.
 
 #### LLVM_TOOLS_SEARCH_PREFIX
 
@@ -895,6 +895,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
 * clang-tidy is **off by default on Windows** because it roughly doubles build time. Pass `-DENABLE_CLANG_TIDY=ON` to run it before pushing a branch; it is expected to be clean. Two checks are dropped on Windows only (`bugprone-exception-escape` and `performance-noexcept-move-constructor`) because the Microsoft STL makes them fire on code that is clean against libstdc++ — see the WIN32 block in `cmake/ClangTidy.cmake`. On Linux clang-tidy is on by default and `-DENABLE_CLANG_TIDY=OFF` reduces build time during development. `-DENABLE_CLANG_FORMAT=OFF` does the same for clang-format on both platforms.
+* `windows_build_setup.ps1` installs LLVM 20.1.8, whose `clang-tidy` is version 20, not the required 23. With only that toolchain, `-DENABLE_CLANG_TIDY=ON` reports a version mismatch and tidy stays disabled. The script does not install clang-tidy 23: install the wheel into a virtual environment (`pip install clang-tidy==23.1.4`) and pass `-DCLANG_TIDY_EXE=<venv>\Scripts\clang-tidy.exe`. The Windows CI job runs with clang-tidy off, so nothing gates Windows-only code.
 
 ## Troubleshooting
 

@@ -272,7 +272,7 @@ TEST(TestLinearDataAdapter, ArchitecturesComeFromTheArtifact)
 TEST(TestLinearDataAdapter, TheDeclaredModelHashIsVerifiedBeforeTheBytesAreRead)
 {
     const auto buffer = validModel().build();
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     EXPECT_EQ(LinearDataAdapter::loadFromBuffer(
                   buffer.data(), buffer.size(), TEST_HASH, sha256(std::string("other bytes"))),
@@ -287,7 +287,7 @@ TEST(TestLinearDataAdapter, TheDeclaredModelHashIsVerifiedBeforeTheBytesAreRead)
 
 TEST(TestLinearDataAdapter, AFeaturesHashOtherThanTheDescriptorsIsRefused)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto buffer = validModel().setFeaturesHash("sha256:fedcba9876543210").build();
     EXPECT_EQ(LinearDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
@@ -399,7 +399,7 @@ TEST(TestLinearDataAdapter, AModelThatIsInconsistentWithItselfIsRefusedWithOneEr
     for(const auto& refusal : refusals)
     {
         SCOPED_TRACE(refusal.name);
-        auto recorder
+        const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
         auto builder = refusal.builder;
         const auto buffer = builder.build();

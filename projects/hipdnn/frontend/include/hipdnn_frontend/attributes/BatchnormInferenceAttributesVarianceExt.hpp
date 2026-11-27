@@ -195,7 +195,7 @@ public:
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const
     {
-        auto it = inputs.find(name);
+        const auto it = inputs.find(name);
         if(it != inputs.end())
         {
             return it->second;
@@ -205,7 +205,7 @@ private:
 
     std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
     {
-        auto it = outputs.find(name);
+        const auto it = outputs.find(name);
         if(it != outputs.end())
         {
             return it->second;

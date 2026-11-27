@@ -168,7 +168,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBw
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     for(int node = 0; node < (spec.secondNode ? 2 : 1); ++node)
     {
-        auto attributes = data_objects::CreateRMSNormBackwardAttributes(
+        const auto attributes = data_objects::CreateRMSNormBackwardAttributes(
             builder,
             FLYDSL_BWD_DY_UID,
             FLYDSL_BWD_X_UID,
@@ -186,9 +186,9 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBw
             attributes.Union()));
     }
 
-    auto name = builder.CreateString("flydsl_rmsnorm_bwd_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    const auto name = builder.CreateString("flydsl_rmsnorm_bwd_test");
+    const auto tensorsVector = builder.CreateVector(tensors);
+    const auto nodesVector = builder.CreateVector(nodes);
     data_objects::GraphBuilder graphBuilder(builder);
     graphBuilder.add_name(name);
     graphBuilder.add_tensors(tensorsVector);

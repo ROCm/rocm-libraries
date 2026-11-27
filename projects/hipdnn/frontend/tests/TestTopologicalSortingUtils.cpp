@@ -27,7 +27,7 @@ protected:
 
         for(size_t node = 0; node < structure.adjacencyList.size(); ++node)
         {
-            for(auto neighbor : structure.adjacencyList[node])
+            for(const auto neighbor : structure.adjacencyList[node])
             {
                 if(position[node] >= position[neighbor])
                 {
@@ -95,7 +95,7 @@ TEST_F(TestTopologicalSortingUtils, EmptyGraph)
     GraphStructure structure;
     structure.adjacencyList = {};
 
-    auto result = performTopologicalSortWithComponentDetection(structure);
+    const auto result = performTopologicalSortWithComponentDetection(structure);
 
     EXPECT_TRUE(result.order.empty());
     EXPECT_FALSE(result.hasCycle);
@@ -164,7 +164,7 @@ TEST_F(TestTopologicalSortingUtils, MultipleSourcesAndSinks)
     GraphStructure structure;
     structure.adjacencyList = {{2, 3}, {2, 3}, {}, {}};
 
-    auto result = performTopologicalSortWithComponentDetection(structure);
+    const auto result = performTopologicalSortWithComponentDetection(structure);
 
     ASSERT_EQ(result.order.size(), 4);
     EXPECT_TRUE(isValidTopologicalOrder(result.order, structure));
@@ -197,7 +197,7 @@ TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
         GraphStructure structure;
         structure.adjacencyList = {{1}, {}, {}};
 
-        auto result = performTopologicalSortWithComponentDetection(structure);
+        const auto result = performTopologicalSortWithComponentDetection(structure);
 
         EXPECT_FALSE(result.hasCycle);
         EXPECT_EQ(result.componentCount, 2);
@@ -208,7 +208,7 @@ TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
         GraphStructure structure;
         structure.adjacencyList = {{1}, {}, {3}, {}};
 
-        auto result = performTopologicalSortWithComponentDetection(structure);
+        const auto result = performTopologicalSortWithComponentDetection(structure);
 
         EXPECT_FALSE(result.hasCycle);
         EXPECT_EQ(result.componentCount, 2);
@@ -219,7 +219,7 @@ TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
         GraphStructure structure;
         structure.adjacencyList = {{1}, {}, {3}, {}, {}};
 
-        auto result = performTopologicalSortWithComponentDetection(structure);
+        const auto result = performTopologicalSortWithComponentDetection(structure);
 
         EXPECT_FALSE(result.hasCycle);
         EXPECT_EQ(result.componentCount, 3);
@@ -230,7 +230,7 @@ TEST_F(TestTopologicalSortingUtils, DisconnectedNodes)
         GraphStructure structure;
         structure.adjacencyList = {{1, 2}, {3}, {3}, {}, {5}, {}, {}, {8}, {9}, {}};
 
-        auto result = performTopologicalSortWithComponentDetection(structure);
+        const auto result = performTopologicalSortWithComponentDetection(structure);
 
         EXPECT_FALSE(result.hasCycle);
         EXPECT_EQ(result.componentCount, 4);
@@ -280,7 +280,7 @@ TEST_F(TestTopologicalSortingUtils, CyclicGraph)
     // Graph: 0 -> 1 -> 2 -> 1 (cycle)
     GraphStructure structure;
     structure.adjacencyList = {{1}, {2}, {1}};
-    auto sortResult = performTopologicalSortWithComponentDetection(structure);
+    const auto sortResult = performTopologicalSortWithComponentDetection(structure);
 
     EXPECT_TRUE(sortResult.hasCycle);
 }

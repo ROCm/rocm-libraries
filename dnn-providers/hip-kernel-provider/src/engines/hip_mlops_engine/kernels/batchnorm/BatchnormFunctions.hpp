@@ -90,7 +90,7 @@ __forceinline__ __device__ __host__ void _accumulate_mad8(T1& a, T2 const& b, T3
 } // namespace detail
 
 template <typename TAccum, typename T>
-__forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, T const& b, T const& c)
+__forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, const T& b, const T& c)
 {
     constexpr auto TaccumSize = mapped_vector_info<TAccum>::size;
     constexpr auto TSize = mapped_vector_info<T>::size;
@@ -118,7 +118,7 @@ __forceinline__ __device__ __host__ void _accumulate_mad(TAccum& a, T const& b, 
 }
 
 template <typename TAccum, typename T>
-__forceinline__ __device__ __host__ void _accumulate(TAccum& a, T const& b)
+__forceinline__ __device__ __host__ void _accumulate(TAccum& a, const T& b)
 {
     constexpr auto TaccumSize = mapped_vector_info<TAccum>::size;
     constexpr auto TSize = mapped_vector_info<T>::size;
@@ -310,9 +310,9 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
 template <typename FpAccumType_C>
 struct StashUpdater
 {
-    FpAccumType_C const mean;
-    FpAccumType_C const variance;
-    FpAccumType_C const expAvgFactor;
+    const FpAccumType_C mean;
+    const FpAccumType_C variance;
+    const FpAccumType_C expAvgFactor;
 
     __device__ StashUpdater(FpAccumType_C m, FpAccumType_C v, FpAccumType_C e)
         : mean(m)
@@ -342,9 +342,9 @@ struct StashUpdater
 template <typename FpAccumType_C>
 struct StashUpdaterPA
 {
-    FpAccumType_C const mean;
-    FpAccumType_C const variance;
-    FpAccumType_C const expAvgFactor;
+    const FpAccumType_C mean;
+    const FpAccumType_C variance;
+    const FpAccumType_C expAvgFactor;
 
     __device__ StashUpdaterPA(FpAccumType_C m, FpAccumType_C v, FpAccumType_C e)
         : mean(m)
@@ -386,7 +386,7 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
                                               const FpPrecType_C* __restrict prevRunningVariance,
                                               FpPrecType_C* __restrict nextRunningMean,
                                               FpPrecType_C* __restrict nextRunningVariance,
-                                              Updater const& update,
+                                              const Updater& update,
                                               unsigned int channel)
 {
     // Variant 4 is not used any more. There used to be a special updater for that case deleted when
@@ -405,9 +405,9 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const&,
-                                                             FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activation_op(const FpPrecType& tmp,
+                                                             const FpPrecType&,
+                                                             const FpPrecType&)
 {
     return tmp;
 }
@@ -415,12 +415,12 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(const FpPrecType& dy,
+                                                                 const FpPrecType&,
+                                                                 const FpPrecType&,
+                                                                 const FpPrecType&,
+                                                                 const FpPrecType&,
+                                                                 const FpPrecType&)
 {
     return dy;
 }
@@ -428,9 +428,9 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const&,
-                                                             FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activation_op(const FpPrecType& tmp,
+                                                             const FpPrecType&,
+                                                             const FpPrecType&)
 {
     return max(tmp, hip_kernel_provider::cast<FpPrecType>(0.));
 }
@@ -438,12 +438,12 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const& xnorm,
-                                                                 FpPrecType const& scale,
-                                                                 FpPrecType const& bias,
-                                                                 FpPrecType const&,
-                                                                 FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(const FpPrecType& dy,
+                                                                 const FpPrecType& xnorm,
+                                                                 const FpPrecType& scale,
+                                                                 const FpPrecType& bias,
+                                                                 const FpPrecType&,
+                                                                 const FpPrecType&)
 {
     FpPrecType macro_tmp = scale * xnorm + bias;
     return (macro_tmp > 0) ? dy : 0;
@@ -452,9 +452,9 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const& _alpha,
-                                                             FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activation_op(const FpPrecType& tmp,
+                                                             const FpPrecType& _alpha,
+                                                             const FpPrecType&)
 {
     return min(_alpha, max(tmp, hip_kernel_provider::cast<FpPrecType>(0.)));
 }
@@ -462,12 +462,12 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const& xnorm,
-                                                                 FpPrecType const& scale,
-                                                                 FpPrecType const& bias,
-                                                                 FpPrecType const& alpha,
-                                                                 FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(const FpPrecType& dy,
+                                                                 const FpPrecType& xnorm,
+                                                                 const FpPrecType& scale,
+                                                                 const FpPrecType& bias,
+                                                                 const FpPrecType& alpha,
+                                                                 const FpPrecType&)
 {
     FpPrecType macro_tmp = scale * xnorm + bias;
     return (macro_tmp > 0 && macro_tmp <= alpha) ? dy : 0;
@@ -476,9 +476,9 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const& _alpha,
-                                                             FpPrecType const& _beta)
+__forceinline__ __host__ __device__ FpPrecType activation_op(const FpPrecType& tmp,
+                                                             const FpPrecType& _alpha,
+                                                             const FpPrecType& _beta)
 {
     return hip_kernel_provider::max(_alpha, hip_kernel_provider::min(_beta, tmp));
 }
@@ -486,12 +486,12 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
           typename std::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
-                                                                 FpPrecType const& xnorm,
-                                                                 FpPrecType const& scale,
-                                                                 FpPrecType const& bias,
-                                                                 FpPrecType const& alpha,
-                                                                 FpPrecType const& beta)
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(const FpPrecType& dy,
+                                                                 const FpPrecType& xnorm,
+                                                                 const FpPrecType& scale,
+                                                                 const FpPrecType& bias,
+                                                                 const FpPrecType& alpha,
+                                                                 const FpPrecType& beta)
 {
     FpPrecType macro_tmp = scale * xnorm + bias;
     return (macro_tmp > alpha && macro_tmp <= beta) ? dy : 0;

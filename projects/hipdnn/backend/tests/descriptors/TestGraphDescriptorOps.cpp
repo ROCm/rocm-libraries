@@ -98,7 +98,7 @@ public:
 
     void setHandle() const
     {
-        auto desc = getDescriptor();
+        const auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
         desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
                            HIPDNN_TYPE_HANDLE,
@@ -127,9 +127,9 @@ protected:
 
 TEST_F(TestGraphDescriptorOps, BuildFromSingleOperation)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -140,14 +140,14 @@ TEST_F(TestGraphDescriptorOps, BuildFromSingleOperation)
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -184,18 +184,18 @@ TEST_F(TestGraphDescriptorOps, BuildFromSingleOperation)
 TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
 {
     // First conv: primary tensor set
-    auto conv1 = createDefaultConvOp();
+    const auto conv1 = createDefaultConvOp();
 
     // Second conv: second tensor set
-    auto xDesc2 = createFinalizedTensor(
+    const auto xDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
-    auto wDesc2 = createFinalizedTensor(
+    const auto wDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
-    auto yDesc2 = createFinalizedTensor(
+    const auto yDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
-    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+    const auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {conv1.convOp.get(), convOp2.get()};
@@ -205,8 +205,8 @@ TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 2);
     ASSERT_EQ(graphT->tensors.size(), 6);
@@ -271,17 +271,17 @@ TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
 TEST_F(TestGraphDescriptorOps, TensorDeduplication)
 {
     // Two operations sharing the same output tensor (Y from first op)
-    auto conv1 = createDefaultConvOp();
+    const auto conv1 = createDefaultConvOp();
 
-    auto xDesc2 = createFinalizedTensor(
+    const auto xDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
-    auto wDesc2 = createFinalizedTensor(
+    const auto wDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
 
     // Reuse conv1.yDesc (uid 3) as Y for the second op
-    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), conv1.yDesc.get());
+    const auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), conv1.yDesc.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {conv1.convOp.get(), convOp2.get()};
@@ -291,8 +291,8 @@ TEST_F(TestGraphDescriptorOps, TensorDeduplication)
                                        static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 2);
     // Should have 5 unique tensors, not 6 (tensor Y deduplicated)
@@ -358,9 +358,9 @@ TEST_F(TestGraphDescriptorOps, TensorDeduplication)
 
 TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
 {
-    auto conv = createDefaultConvOp(HIPDNN_DATA_HALF);
+    const auto conv = createDefaultConvOp(HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -370,8 +370,8 @@ TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -407,11 +407,11 @@ TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
 
 TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
     // Create conv op with non-default parameters to test graph roundtrip
-    auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
-    auto convDesc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
+    const auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
+    const auto convDesc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* x = conv.xDesc.get();
     HipdnnBackendDescriptor* w = conv.wDesc.get();
@@ -419,7 +419,8 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     // (32 + 2 + 4 - 3) / 2 + 1 = 18 and (32 + 3 + 5 - 3) / 2 + 1 = 19.
     const std::vector<int64_t> customYDims = {1, 64, 18, 19};
     const std::vector<int64_t> customYStrides = {21888, 342, 19, 1};
-    auto customYDesc = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, customYDims, customYStrides);
+    const auto customYDesc
+        = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, customYDims, customYStrides);
     HipdnnBackendDescriptor* y = customYDesc.get();
 
     convDesc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
@@ -457,7 +458,7 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     convDesc->finalize();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
@@ -467,8 +468,8 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -510,10 +511,10 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 {
     // Test: operations first, then handle
     {
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
-        auto desc = graphWrapper->asDescriptor<GraphDescriptor>();
+        const auto graphWrapper = createDescriptor<GraphDescriptor>();
+        const auto desc = graphWrapper->asDescriptor<GraphDescriptor>();
 
-        auto conv = createDefaultConvOp();
+        const auto conv = createDefaultConvOp();
 
         std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
         ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -529,8 +530,8 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
         ASSERT_NO_THROW(desc->finalize());
 
-        auto serialized = desc->getSerializedGraph();
-        auto graphT = UnPackGraph(serialized.ptr);
+        const auto serialized = desc->getSerializedGraph();
+        const auto graphT = UnPackGraph(serialized.ptr);
 
         ASSERT_EQ(graphT->tensors.size(), 3);
         ASSERT_EQ(graphT->nodes.size(), 1);
@@ -562,15 +563,15 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
     // Test: handle first, then operations (with alternate UIDs)
     {
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
-        auto desc = graphWrapper->asDescriptor<GraphDescriptor>();
+        const auto graphWrapper = createDescriptor<GraphDescriptor>();
+        const auto desc = graphWrapper->asDescriptor<GraphDescriptor>();
 
-        auto xDesc = createFinalizedTensor(K_ALT_TENSOR_X_UID);
-        auto wDesc = createFinalizedTensor(
+        const auto xDesc = createFinalizedTensor(K_ALT_TENSOR_X_UID);
+        const auto wDesc = createFinalizedTensor(
             K_ALT_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
-        auto yDesc = createFinalizedTensor(
+        const auto yDesc = createFinalizedTensor(
             K_ALT_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
-        auto convOp = createFinalizedConvOp(xDesc.get(), wDesc.get(), yDesc.get());
+        const auto convOp = createFinalizedConvOp(xDesc.get(), wDesc.get(), yDesc.get());
 
         hipdnnHandle_t handle = &_mockHandle;
         ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
@@ -586,8 +587,8 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
         ASSERT_NO_THROW(desc->finalize());
 
-        auto serialized = desc->getSerializedGraph();
-        auto graphT = UnPackGraph(serialized.ptr);
+        const auto serialized = desc->getSerializedGraph();
+        const auto graphT = UnPackGraph(serialized.ptr);
 
         ASSERT_EQ(graphT->tensors.size(), 3);
         ASSERT_EQ(graphT->nodes.size(), 1);
@@ -620,17 +621,17 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
 TEST_F(TestGraphDescriptorOps, SetOperationsMultipleBatches)
 {
-    auto conv1 = createDefaultConvOp();
+    const auto conv1 = createDefaultConvOp();
 
-    auto xDesc2 = createFinalizedTensor(
+    const auto xDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
-    auto wDesc2 = createFinalizedTensor(
+    const auto wDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
-    auto yDesc2 = createFinalizedTensor(
+    const auto yDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
-    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+    const auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     // Set multiple operations in a single setAttribute call
@@ -642,8 +643,8 @@ TEST_F(TestGraphDescriptorOps, SetOperationsMultipleBatches)
 
     ASSERT_NO_THROW(desc->finalize());
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Both operations should be present in the graph
     ASSERT_EQ(graphT->nodes.size(), 2);
@@ -710,10 +711,10 @@ TEST_F(TestGraphDescriptorOps, SetOperationsMultipleBatches)
 
 TEST_F(TestGraphDescriptorOps, SetOperationsFailsUnfinalized)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Create unfinalized operation
-    auto unfinalizedOp = createDescriptor<ConvolutionFwdOperationDescriptor>();
+    const auto unfinalizedOp = createDescriptor<ConvolutionFwdOperationDescriptor>();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {unfinalizedOp.get()};
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -725,7 +726,7 @@ TEST_F(TestGraphDescriptorOps, SetOperationsFailsUnfinalized)
 
 TEST_F(TestGraphDescriptorOps, SetOperationsFailsNullDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {nullptr};
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -737,10 +738,10 @@ TEST_F(TestGraphDescriptorOps, SetOperationsFailsNullDescriptor)
 
 TEST_F(TestGraphDescriptorOps, SetOperationsFailsWrongType)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
 
     // Use a TensorDescriptor instead of an operation descriptor
-    auto tensorDesc = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    const auto tensorDesc = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {tensorDesc.get()};
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -752,9 +753,9 @@ TEST_F(TestGraphDescriptorOps, SetOperationsFailsWrongType)
 
 TEST_F(TestGraphDescriptorOps, SetOperationsFailsAfterFinalize)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -774,9 +775,9 @@ TEST_F(TestGraphDescriptorOps, SetOperationsFailsAfterFinalize)
 
 TEST_F(TestGraphDescriptorOps, FinalizeFailsWithoutHandle)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     // Don't set handle
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -790,7 +791,7 @@ TEST_F(TestGraphDescriptorOps, FinalizeFailsWithoutHandle)
 
 TEST_F(TestGraphDescriptorOps, FinalizeFailsWithoutOperationsOrGraph)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
     // Don't set operations or deserialize graph
 
@@ -803,9 +804,9 @@ TEST_F(TestGraphDescriptorOps, FinalizeFailsWithoutOperationsOrGraph)
 
 TEST_F(TestGraphDescriptorOps, SerializedGraphVerifiable)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -815,14 +816,14 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphVerifiable)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
 
     // Verify FlatBuffer is valid
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
     // Verify the verified buffer contains the expected graph structure
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->tensors.size(), 3);
     ASSERT_EQ(graphT->nodes.size(), 1);
     verifyConvFwdNode(*graphT->nodes[0],
@@ -838,9 +839,9 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphVerifiable)
 
 TEST_F(TestGraphDescriptorOps, SerializedGraphUnpackable)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -850,11 +851,11 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphUnpackable)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
+    const auto serialized = desc->getSerializedGraph();
     ASSERT_NE(GetGraph(serialized.ptr), nullptr);
 
     // Unpack should work and produce correct values
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_NE(graphT, nullptr);
     ASSERT_EQ(graphT->tensors.size(), 3);
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -890,9 +891,9 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphUnpackable)
 
 TEST_F(TestGraphDescriptorOps, GetSerializedGraphMultipleCalls)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -903,16 +904,16 @@ TEST_F(TestGraphDescriptorOps, GetSerializedGraphMultipleCalls)
     desc->finalize();
 
     // Call getSerializedGraph multiple times
-    auto serialized1 = desc->getSerializedGraph();
-    auto serialized2 = desc->getSerializedGraph();
+    const auto serialized1 = desc->getSerializedGraph();
+    const auto serialized2 = desc->getSerializedGraph();
 
     // Should return same data
     EXPECT_EQ(serialized1.ptr, serialized2.ptr);
     EXPECT_EQ(serialized1.size, serialized2.size);
 
     // Both should unpack to identical graph values
-    auto graphT1 = UnPackGraph(serialized1.ptr);
-    auto graphT2 = UnPackGraph(serialized2.ptr);
+    const auto graphT1 = UnPackGraph(serialized1.ptr);
+    const auto graphT2 = UnPackGraph(serialized2.ptr);
 
     ASSERT_EQ(graphT1->tensors.size(), 3);
     ASSERT_EQ(graphT2->tensors.size(), 3);
@@ -939,9 +940,9 @@ TEST_F(TestGraphDescriptorOps, GetSerializedGraphMultipleCalls)
 
 TEST_F(TestGraphDescriptorOps, GraphHasCorrectNodeCount)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -951,8 +952,8 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectNodeCount)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -970,9 +971,9 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectNodeCount)
 
 TEST_F(TestGraphDescriptorOps, GraphHasCorrectTensorCount)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -982,8 +983,8 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectTensorCount)
                        static_cast<const void*>(ops.data()));
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->tensors.size(), 3);
 
@@ -1065,13 +1066,13 @@ public:
         nodeOffsets.push_back(Node::Pack(builder, &nodeT));
 
         // Build graph
-        auto graphOffset = CreateGraphDirect(builder,
-                                             nullptr, // name
-                                             DataType::UNSET,
-                                             DataType::UNSET,
-                                             DataType::UNSET,
-                                             &tensorOffsets,
-                                             &nodeOffsets);
+        const auto graphOffset = CreateGraphDirect(builder,
+                                                   nullptr, // name
+                                                   DataType::UNSET,
+                                                   DataType::UNSET,
+                                                   DataType::UNSET,
+                                                   &tensorOffsets,
+                                                   &nodeOffsets);
         builder.Finish(graphOffset);
         return builder.Release();
     }
@@ -1094,13 +1095,13 @@ public:
                                                      hipdnnDataType_t computeDataType)
     {
         // Create tensor descriptors
-        auto xDesc = createFinalizedTensor(xUid, xDims, xStrides, tensorDataType);
-        auto wDesc = createFinalizedTensor(wUid, wDims, wStrides, tensorDataType);
-        auto yDesc = createFinalizedTensor(yUid, yDims, yStrides, tensorDataType);
+        const auto xDesc = createFinalizedTensor(xUid, xDims, xStrides, tensorDataType);
+        const auto wDesc = createFinalizedTensor(wUid, wDims, wStrides, tensorDataType);
+        const auto yDesc = createFinalizedTensor(yUid, yDims, yStrides, tensorDataType);
 
         // Create conv op descriptor
-        auto convWrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
-        auto convDesc = convWrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
+        const auto convWrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
+        const auto convDesc = convWrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
 
         HipdnnBackendDescriptor* x = xDesc.get();
         HipdnnBackendDescriptor* w = wDesc.get();
@@ -1142,8 +1143,8 @@ public:
         convDesc->finalize();
 
         // Build graph via GraphDescriptor
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
-        auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
+        const auto graphWrapper = createDescriptor<GraphDescriptor>();
+        const auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
         hipdnnHandle_t handle = &_mockHandle;
         graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
@@ -1158,15 +1159,15 @@ public:
                                 static_cast<const void*>(ops.data()));
         graphDesc->finalize();
 
-        auto serialized = graphDesc->getSerializedGraph();
+        const auto serialized = graphDesc->getSerializedGraph();
         return UnPackGraph(serialized.ptr);
     }
 
     void verifyEquivalence(const ConvEquivalenceParams& p)
     {
         // Build via FlatBuffer path
-        auto sdkTensorDt = hipdnn_backend::toSdkDataType(p.tensorDataType);
-        auto sdkComputeDt = hipdnn_backend::toSdkDataType(p.computeDataType);
+        const auto sdkTensorDt = hipdnn_backend::toSdkDataType(p.tensorDataType);
+        const auto sdkComputeDt = hipdnn_backend::toSdkDataType(p.computeDataType);
 
         TensorAttributesT xTensor;
         xTensor.uid = p.xUid;
@@ -1197,24 +1198,24 @@ public:
 
         auto flatbufferBuffer
             = buildGraphViaFlatBuffer(xTensor, wTensor, yTensor, convAttrs, sdkComputeDt);
-        auto serializedGraphT = UnPackGraph(flatbufferBuffer.data());
+        const auto serializedGraphT = UnPackGraph(flatbufferBuffer.data());
 
         // Build via descriptor path
-        auto descriptorGraphT = buildGraphViaDescriptors(p.xUid,
-                                                         p.wUid,
-                                                         p.yUid,
-                                                         p.xDims,
-                                                         p.xStrides,
-                                                         p.wDims,
-                                                         p.wStrides,
-                                                         p.yDims,
-                                                         p.yStrides,
-                                                         p.prePadding,
-                                                         p.postPadding,
-                                                         p.stride,
-                                                         p.dilation,
-                                                         p.tensorDataType,
-                                                         p.computeDataType);
+        const auto descriptorGraphT = buildGraphViaDescriptors(p.xUid,
+                                                               p.wUid,
+                                                               p.yUid,
+                                                               p.xDims,
+                                                               p.xStrides,
+                                                               p.wDims,
+                                                               p.wStrides,
+                                                               p.yDims,
+                                                               p.yStrides,
+                                                               p.prePadding,
+                                                               p.postPadding,
+                                                               p.stride,
+                                                               p.dilation,
+                                                               p.tensorDataType,
+                                                               p.computeDataType);
 
         // Verify structural equivalence
         ASSERT_EQ(serializedGraphT->tensors.size(), descriptorGraphT->tensors.size());
@@ -1229,7 +1230,7 @@ public:
 
         for(const auto& descTensor : descriptorGraphT->tensors)
         {
-            auto it = fbTensors.find(descTensor->uid);
+            const auto it = fbTensors.find(descTensor->uid);
             ASSERT_NE(it, fbTensors.end())
                 << "Tensor UID " << descTensor->uid << " not found in FlatBuffer graph";
 
@@ -1340,9 +1341,9 @@ INSTANTIATE_TEST_SUITE_P(ConvOps,
 
 TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesPreserved)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1368,8 +1369,8 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesPreserved)
 
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     EXPECT_EQ(graphT->compute_data_type, DataType::HALF);
     EXPECT_EQ(graphT->intermediate_data_type, DataType::BFLOAT16);
@@ -1378,9 +1379,9 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesPreserved)
 
 TEST_F(TestGraphDescriptorOps, PreferredEngineIdPreserved)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1395,17 +1396,17 @@ TEST_F(TestGraphDescriptorOps, PreferredEngineIdPreserved)
 
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     EXPECT_EQ(graphT->preferred_engine_id, 42);
 }
 
 TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesDefaultToUnset)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1417,8 +1418,8 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesDefaultToUnset)
     // Finalize without setting any graph-level data types
     desc->finalize();
 
-    auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto serialized = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     EXPECT_EQ(graphT->compute_data_type, DataType::UNSET);
     EXPECT_EQ(graphT->intermediate_data_type, DataType::UNSET);
@@ -1428,8 +1429,8 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesDefaultToUnset)
 TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
 {
     // Same tensor used as Y in first op and X in second op
-    auto graphWrapper = createDescriptor<GraphDescriptor>();
-    auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
+    const auto graphWrapper = createDescriptor<GraphDescriptor>();
+    const auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
     auto handle = reinterpret_cast<hipdnnHandle_t>(&_mockHandle);
     graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
@@ -1438,20 +1439,21 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
                             static_cast<const void*>(&handle));
 
     // Create tensors (Y tensor shared between ops)
-    auto xDesc1 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
-    auto wDesc1 = createFinalizedTensor(
+    const auto xDesc1 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    const auto wDesc1 = createFinalizedTensor(
         K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
-    auto sharedTensor = createFinalizedTensor(
+    const auto sharedTensor = createFinalizedTensor(
         K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
     // 64->64 channel weights unique to this test (not in the shared constant set)
-    auto wDesc2 = createFinalizedTensor(K_SHARED_TENSOR_W_UID, {64, 64, 3, 3}, {576, 9, 3, 1});
-    auto yDesc2 = createFinalizedTensor(
+    const auto wDesc2
+        = createFinalizedTensor(K_SHARED_TENSOR_W_UID, {64, 64, 3, 3}, {576, 9, 3, 1});
+    const auto yDesc2 = createFinalizedTensor(
         K_SHARED_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     // Op1: x=1, w=2, y=3
-    auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc1.get(), sharedTensor.get());
+    const auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc1.get(), sharedTensor.get());
     // Op2: x=3, w=4, y=5 (shares tensor 3 with op1 in a different position)
-    auto op2 = createFinalizedConvOp(sharedTensor.get(), wDesc2.get(), yDesc2.get());
+    const auto op2 = createFinalizedConvOp(sharedTensor.get(), wDesc2.get(), yDesc2.get());
 
     std::array<HipdnnBackendDescriptor*, 2> opDescs = {op1.get(), op2.get()};
     graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -1461,9 +1463,9 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
 
     graphDesc->finalize();
 
-    auto serialized = graphDesc->getSerializedGraph();
+    const auto serialized = graphDesc->getSerializedGraph();
     ASSERT_NE(GetGraph(serialized.ptr), nullptr);
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // 5 unique tensors, shared tensor is deduplicated
     ASSERT_EQ(graphT->tensors.size(), 5);
@@ -1522,24 +1524,24 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
 TEST_F(TestGraphDescriptorOps, FinalizeFailsDuplicateTensorUidDifferentDescriptors)
 {
     // Create two distinct tensor descriptors with the same UID
-    auto xDesc1 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
-    auto xDesc2 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
-    auto wDesc = createFinalizedTensor(
+    const auto xDesc1 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    const auto xDesc2 = createFinalizedTensor(K_FPROP_TENSOR_X_UID);
+    const auto wDesc = createFinalizedTensor(
         K_FPROP_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
-    auto yDesc = createFinalizedTensor(
+    const auto yDesc = createFinalizedTensor(
         K_FPROP_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
 
     // Op1 uses xDesc1, Op2 uses xDesc2 (different object, same UID)
-    auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc.get(), yDesc.get());
+    const auto op1 = createFinalizedConvOp(xDesc1.get(), wDesc.get(), yDesc.get());
 
-    auto xDesc2a = createFinalizedTensor(
+    const auto xDesc2a = createFinalizedTensor(
         K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
-    auto wDesc2 = createFinalizedTensor(
+    const auto wDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
     // Use xDesc2 (same UID as xDesc1, different descriptor object) as Y
-    auto op2 = createFinalizedConvOp(xDesc2a.get(), wDesc2.get(), xDesc2.get());
+    const auto op2 = createFinalizedConvOp(xDesc2a.get(), wDesc2.get(), xDesc2.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {op1.get(), op2.get()};
@@ -1553,8 +1555,8 @@ TEST_F(TestGraphDescriptorOps, FinalizeFailsDuplicateTensorUidDifferentDescripto
 
 TEST_F(TestGraphDescriptorOps, SetOperationsRejectsNonOperationDescriptor)
 {
-    auto graphWrapper = createDescriptor<GraphDescriptor>();
-    auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
+    const auto graphWrapper = createDescriptor<GraphDescriptor>();
+    const auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
     // Set handle first
     auto handle = reinterpret_cast<hipdnnHandle_t>(&_mockHandle);
@@ -1564,7 +1566,7 @@ TEST_F(TestGraphDescriptorOps, SetOperationsRejectsNonOperationDescriptor)
                             static_cast<const void*>(&handle));
 
     // Create a tensor descriptor (does NOT implement IGraphOperation)
-    auto tensorWrapper = createFinalizedTensor(99);
+    const auto tensorWrapper = createFinalizedTensor(99);
     HipdnnBackendDescriptor* tensorDescPtr = tensorWrapper.get();
 
     // Attempting to set a non-operation descriptor as an operation should throw
@@ -1581,9 +1583,9 @@ TEST_F(TestGraphDescriptorOps, SetOperationsRejectsNonOperationDescriptor)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperationCount)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1602,17 +1604,17 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperationCount)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperationCountMultiple)
 {
-    auto conv1 = createDefaultConvOp();
+    const auto conv1 = createDefaultConvOp();
 
-    auto xDesc2 = createFinalizedTensor(
+    const auto xDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_X2_UID, toVec(K_FPROP_TENSOR_X2_DIMS), toVec(K_FPROP_TENSOR_X2_STRIDES));
-    auto wDesc2 = createFinalizedTensor(
+    const auto wDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_W2_UID, toVec(K_FPROP_TENSOR_W2_DIMS), toVec(K_FPROP_TENSOR_W2_STRIDES));
-    auto yDesc2 = createFinalizedTensor(
+    const auto yDesc2 = createFinalizedTensor(
         K_FPROP_TENSOR_Y2_UID, toVec(K_FPROP_TENSOR_Y2_DIMS), toVec(K_FPROP_TENSOR_Y2_STRIDES));
-    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+    const auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {conv1.convOp.get(), convOp2.get()};
@@ -1630,9 +1632,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperationCountMultiple)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperations)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1660,15 +1662,15 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperations)
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
     EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 
-    auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
+    const auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
 }
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsComputeDataType)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1697,9 +1699,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsComputeDataType)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsIntermediateDataType)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1730,9 +1732,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsIntermediateDataType)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsIoDataType)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1761,9 +1763,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsIoDataType)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsPreferredEngineId)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1792,9 +1794,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsPreferredEngineId)
 
 TEST_F(TestGraphDescriptorOps, GetAttributePreferredEngineIdCountWhenUnset)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1818,9 +1820,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributePreferredEngineIdCountWhenUnset)
 
 TEST_F(TestGraphDescriptorOps, OperationsPreservedAfterFinalize)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1848,16 +1850,16 @@ TEST_F(TestGraphDescriptorOps, OperationsPreservedAfterFinalize)
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
     EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 
-    auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
+    const auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
 }
 
 TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForDataType)
 {
     // Build a graph with conv op, set compute data type to HALF, finalize
-    auto conv = createDefaultConvOp(HIPDNN_DATA_HALF);
+    const auto conv = createDefaultConvOp(HIPDNN_DATA_HALF);
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1887,9 +1889,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForDataType)
 TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForPreferredEngineId)
 {
     // Build a graph with conv op, set preferred engine id, finalize
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1919,9 +1921,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForPreferredEngineId)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeReturnsName)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1957,9 +1959,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsName)
 
 TEST_F(TestGraphDescriptorOps, GetAttributeNameCountWhenUnset)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
@@ -1981,9 +1983,9 @@ TEST_F(TestGraphDescriptorOps, GetAttributeNameCountWhenUnset)
 TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
 {
     // Set a single op, build the serialized buffer, then append more ops
-    auto conv1 = createDefaultConvOp();
+    const auto conv1 = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops1 = {conv1.convOp.get()};
@@ -1994,18 +1996,18 @@ TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
 
     // Build the serialized buffer explicitly
     desc->buildSerializedGraph();
-    auto serialized1 = desc->getSerializedGraph();
+    const auto serialized1 = desc->getSerializedGraph();
     ASSERT_NE(serialized1.ptr, nullptr);
     ASSERT_GT(serialized1.size, 0UL);
 
     // Append a second operation (should succeed and invalidate the cache)
-    auto xDesc2 = createFinalizedTensor(
+    const auto xDesc2 = createFinalizedTensor(
         K_ALT_TENSOR_X_UID, toVec(K_FPROP_TENSOR_X_DIMS), toVec(K_FPROP_TENSOR_X_STRIDES));
-    auto wDesc2 = createFinalizedTensor(
+    const auto wDesc2 = createFinalizedTensor(
         K_ALT_TENSOR_W_UID, toVec(K_FPROP_TENSOR_W_DIMS), toVec(K_FPROP_TENSOR_W_STRIDES));
-    auto yDesc2 = createFinalizedTensor(
+    const auto yDesc2 = createFinalizedTensor(
         K_ALT_TENSOR_Y_UID, toVec(K_FPROP_TENSOR_Y_DIMS), toVec(K_FPROP_TENSOR_Y_STRIDES));
-    auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
+    const auto convOp2 = createFinalizedConvOp(xDesc2.get(), wDesc2.get(), yDesc2.get());
 
     std::array<HipdnnBackendDescriptor*, 1> ops2 = {convOp2.get()};
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
@@ -2024,17 +2026,17 @@ TEST_F(TestGraphDescriptorOps, AppendOpsAfterSerialization)
 
     // Verify re-serialization reflects both operations
     desc->buildSerializedGraph();
-    auto serialized2 = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized2.ptr);
+    const auto serialized2 = desc->getSerializedGraph();
+    const auto graphT = UnPackGraph(serialized2.ptr);
     ASSERT_EQ(graphT->nodes.size(), 2);
     ASSERT_EQ(graphT->tensors.size(), 6);
 }
 
 TEST_F(TestGraphDescriptorOps, GetAttributeWrongTypeForName)
 {
-    auto conv = createDefaultConvOp();
+    const auto conv = createDefaultConvOp();
 
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     setHandle();
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};

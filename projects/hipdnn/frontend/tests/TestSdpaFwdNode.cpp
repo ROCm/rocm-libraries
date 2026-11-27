@@ -49,14 +49,14 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsMinimal)
 {
     // batch=2, num_heads=8, seq_q=16, head_dim=64
     // num_kv_heads=8, seq_kv=32
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -128,93 +128,93 @@ TEST(TestSdpaFwdNode, PreValidateSetterCallsForBothCausalMasksStayValid)
 TEST(TestSdpaFwdNode, PreValidateSucceedsGQA)
 {
     // num_heads=8, num_kv_heads=2 — 8 % 2 == 0, GQA valid
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 2, 32, 64);
-    auto v = makeTensor4D(2, 2, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 2, 32, 64);
+    const auto v = makeTensor4D(2, 2, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsMQA)
 {
     // MQA: num_kv_heads=1
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 1, 32, 64);
-    auto v = makeTensor4D(2, 1, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 1, 32, 64);
+    const auto v = makeTensor4D(2, 1, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsGQADifferentKVHeads)
 {
     // Q=32 heads, K=8, V=4 — independent GQA broadcast
-    auto q = makeTensor4D(2, 32, 128, 64);
-    auto k = makeTensor4D(2, 8, 128, 64);
-    auto v = makeTensor4D(2, 4, 128, 64);
+    const auto q = makeTensor4D(2, 32, 128, 64);
+    const auto k = makeTensor4D(2, 8, 128, 64);
+    const auto v = makeTensor4D(2, 4, 128, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsInvalidGQAVHeads)
 {
     // Q=8 heads, K=2 (valid), V=3 (8%3!=0)
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 2, 32, 64);
-    auto v = makeTensor4D(2, 3, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 2, 32, 64);
+    const auto v = makeTensor4D(2, 3, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsZeroKvHeads)
 {
     // K has 0 heads — should fail positivity check before divisibility
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 0, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 0, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsZeroVHeads)
 {
     // V has 0 heads — should fail positivity check
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 0, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 0, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsInvalidGQAKHeads)
 {
     // Q=8 heads, K=3 (8%3!=0), V=4 (8%4==0) — K invalid, V valid
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 3, 32, 64);
-    auto v = makeTensor4D(2, 4, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 3, 32, 64);
+    const auto v = makeTensor4D(2, 4, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
@@ -227,7 +227,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsMissingQ)
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -240,7 +240,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsMissingK)
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
@@ -253,187 +253,187 @@ TEST(TestSdpaFwdNode, PreValidateFailsMissingV)
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsRankLessThan4)
 {
     // Q is rank-3, should fail
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 64}); // rank-3
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsRankGreaterThan4)
 {
     // Q is rank-5, should fail
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({1, 2, 8, 16, 64}); // rank-5
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsDifferentHeadDimV)
 {
     // V head_dim=32 differs from Q/K head_dim=64 — valid, headDimV is independent
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 32);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 32);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsHeadDimMismatch)
 {
     // K head_dim=32, Q head_dim=64 — mismatch
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 32);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 32);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsOutputShapeMismatch)
 {
     // O shape [2, 8, 16, 99] but headDimV=64 — mismatch
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
 
     SdpaAttributes attrs;
     attrs.set_q(q);
     attrs.set_k(k);
     attrs.set_v(v);
-    auto o = makeTensor4D(2, 8, 16, 99); // wrong head_dim
+    const auto o = makeTensor4D(2, 8, 16, 99); // wrong head_dim
     attrs.set_o(o);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsCorrectOutputShape)
 {
     // O shape matches [batch, num_heads, seq_q, headDimV]
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 32); // headDimV=32
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 32); // headDimV=32
 
     SdpaAttributes attrs;
     attrs.set_q(q);
     attrs.set_k(k);
     attrs.set_v(v);
-    auto o = makeTensor4D(2, 8, 16, 32); // correct: matches headDimV
+    const auto o = makeTensor4D(2, 8, 16, 32); // correct: matches headDimV
     attrs.set_o(o);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsSeqKvMismatch)
 {
     // K seq_kv=32, V seq_kv=16 — mismatch
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 16, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 16, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsInvalidGQA)
 {
     // num_heads=8, num_kv_heads=3 — 8 % 3 != 0
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 3, 32, 64);
-    auto v = makeTensor4D(2, 3, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 3, 32, 64);
+    const auto v = makeTensor4D(2, 3, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsWithAttnMask)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     // Valid mask: [2, 8, 16, 32] — exact match
-    auto mask = std::make_shared<TensorAttributes>();
+    const auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim({2, 8, 16, 32});
     attrs.set_bias(mask);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsWithBroadcastAttnMask)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     // Broadcast mask: last two dims are 1
-    auto mask = std::make_shared<TensorAttributes>();
+    const auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim({1, 1});
     attrs.set_bias(mask);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskRankTooLarge)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     // Rank-5 mask is invalid
-    auto mask = std::make_shared<TensorAttributes>();
+    const auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim({1, 2, 8, 16, 32});
     attrs.set_bias(mask);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
@@ -445,7 +445,7 @@ Error preValidateWithAttnMask(const std::vector<int64_t>& maskDims)
 {
     auto attrs = makeMinimalAttrs(
         makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
-    auto mask = std::make_shared<TensorAttributes>();
+    const auto mask = std::make_shared<TensorAttributes>();
     mask->set_dim(maskDims);
     attrs.set_bias(mask);
 
@@ -457,7 +457,7 @@ Error preValidateWithAttnMask(const std::vector<int64_t>& maskDims)
 
 TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskBatchDimMismatch)
 {
-    auto err = preValidateWithAttnMask({3, 8, 16, 32});
+    const auto err = preValidateWithAttnMask({3, 8, 16, 32});
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
     EXPECT_NE(err.err_msg.find("batch"), std::string::npos) << err.err_msg;
 }
@@ -467,7 +467,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskHeadsDimMismatch)
     for(const auto& maskDims :
         {std::vector<int64_t>{2, 4, 16, 32}, std::vector<int64_t>{4, 16, 32}})
     {
-        auto err = preValidateWithAttnMask(maskDims);
+        const auto err = preValidateWithAttnMask(maskDims);
         EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
         EXPECT_NE(err.err_msg.find("num_heads"), std::string::npos) << err.err_msg;
     }
@@ -482,7 +482,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsAttnMaskBroadcastLeadingDims)
                                 std::vector<int64_t>{1, 16, 32},
                                 std::vector<int64_t>{16, 32}})
     {
-        auto err = preValidateWithAttnMask(maskDims);
+        const auto err = preValidateWithAttnMask(maskDims);
         EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
     }
 }
@@ -511,7 +511,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeedAndOffset)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout_probability(0.1f);
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
 }
@@ -522,7 +522,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutOffset)
     attrs.set_dropout_probability(0.1f);
     attrs.set_seed(makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
 }
 
@@ -533,7 +533,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeed)
     attrs.set_dropout_probability(0.1f);
     attrs.set_offset(makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
 }
@@ -543,7 +543,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsDropoutWithSeedAndOffset)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout(0.1f, makeTensor4D(1, 1, 1, 1), makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -552,7 +552,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsZeroDropoutWithoutSeed)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout_probability(0.0f);
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -561,7 +561,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsCustomDropoutMaskWithoutSeed)
     auto attrs = makeDropoutAttrs();
     attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -571,7 +571,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutProbabilityWithCustomMask)
     attrs.set_dropout_probability(0.1f);
     attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
 
-    auto err = preValidateDropout(std::move(attrs));
+    const auto err = preValidateDropout(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("custom dropout mask and dropout_probability"), std::string::npos)
         << err.err_msg;
@@ -579,35 +579,35 @@ TEST(TestSdpaFwdNode, PreValidateFailsDropoutProbabilityWithCustomMask)
 
 TEST(TestSdpaFwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     // Rule 6: attn_scale tensor and attn_scale_value are mutually exclusive.
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1}).set_is_pass_by_value(true);
     attrs.set_attn_scale(scale);
     attrs.attn_scale_value = 1.0f;
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, InferPropertiesSetsOutputShape)
 {
     // headDimV=64, so O shape should be [2, 8, 16, 64]
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
-    auto o = attrs.get_o();
+    const auto o = attrs.get_o();
 
     const GraphAttributes graphAttrs;
     SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     auto dims = o->get_dim();
@@ -621,15 +621,15 @@ TEST(TestSdpaFwdNode, InferPropertiesSetsOutputShape)
 TEST(TestSdpaFwdNode, InferPropertiesSetsOutputShapeDifferentHeadDimV)
 {
     // headDimV=32 (different from headDimQK=64), O shape should be [2, 8, 16, 32]
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 32); // headDimV=32
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 32); // headDimV=32
     auto attrs = makeMinimalAttrs(q, k, v);
-    auto o = attrs.get_o();
+    const auto o = attrs.get_o();
 
     const GraphAttributes graphAttrs;
     SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     auto dims = o->get_dim();
@@ -642,17 +642,17 @@ TEST(TestSdpaFwdNode, InferPropertiesSetsOutputShapeDifferentHeadDimV)
 
 TEST(TestSdpaFwdNode, InferPropertiesSetsStatsShape)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
-    auto stats = std::make_shared<TensorAttributes>();
+    const auto stats = std::make_shared<TensorAttributes>();
     attrs.set_stats(stats);
 
     const GraphAttributes graphAttrs;
     SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     // Stats shape: [batch, num_heads, seq_q, 1]
@@ -669,15 +669,15 @@ TEST(TestSdpaFwdNode, InferPropertiesSetsStatsShape)
 
 TEST(TestSdpaFwdNode, InferPropertiesSetsOutputStrides)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
-    auto o = attrs.get_o();
+    const auto o = attrs.get_o();
 
     const GraphAttributes graphAttrs;
     SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     auto strides = o->get_stride();
@@ -692,23 +692,23 @@ TEST(TestSdpaFwdNode, InferPropertiesSetsOutputStrides)
 TEST(TestSdpaFwdNode, InferPropertiesPreservesExplicitOutputShape)
 {
     // If O dims are already set, they should not be overwritten
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
 
     SdpaAttributes attrs;
     attrs.set_q(q);
     attrs.set_k(k);
     attrs.set_v(v);
 
-    auto o = std::make_shared<TensorAttributes>();
+    const auto o = std::make_shared<TensorAttributes>();
     o->set_dim({2, 8, 16, 64});
     o->set_stride({8192, 1024, 64, 1});
     attrs.set_o(o);
 
     const GraphAttributes graphAttrs;
     SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.infer_properties_node();
+    const auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
     // Dims should remain unchanged
@@ -720,28 +720,28 @@ TEST(TestSdpaFwdNode, InferPropertiesPreservesExplicitOutputShape)
 TEST(TestSdpaFwdNode, PreValidateFailsBatchMismatchQK)
 {
     // K batch=4 differs from Q batch=2
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(4, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(4, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsBatchMismatchQV)
 {
     // V batch=4 differs from Q batch=2
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(4, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(4, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
@@ -780,9 +780,9 @@ SdpaAttributes makePaddedAttrs(const std::shared_ptr<TensorAttributes>& q,
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsPagedKvWithBlockCountUnlikeBatch)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(37, 2, 16, 64); // 37 blocks of 16 keys
-    auto v = makeTensor4D(37, 2, 16, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(37, 2, 16, 64); // 37 blocks of 16 keys
+    const auto v = makeTensor4D(37, 2, 16, 64);
     auto attrs = makePaddedAttrs(q, k, v);
     attrs.set_paged_attention_k_table(makePageTable(2, 8));
     attrs.set_paged_attention_v_table(makePageTable(2, 8));
@@ -790,30 +790,30 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsPagedKvWithBlockCountUnlikeBatch)
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsPagedKWithDenseV)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(9, 2, 4, 64); // paged container, block size 4
-    auto v = makeTensor4D(2, 2, 32, 64); // dense V, 32 keys
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(9, 2, 4, 64); // paged container, block size 4
+    const auto v = makeTensor4D(2, 2, 32, 64); // dense V, 32 keys
     auto attrs = makePaddedAttrs(q, k, v);
     attrs.set_paged_attention_k_table(makePageTable(2, 8));
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaFwdNode, PreValidateFailsPagedDenseSideBatchMismatch)
 {
     // K is paged, but the dense V still has to carry Q's batch.
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(9, 2, 4, 64);
-    auto v = makeTensor4D(3, 2, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(9, 2, 4, 64);
+    const auto v = makeTensor4D(3, 2, 32, 64);
     auto attrs = makePaddedAttrs(q, k, v);
     attrs.set_paged_attention_k_table(makePageTable(2, 8));
 
@@ -825,9 +825,9 @@ TEST(TestSdpaFwdNode, PreValidateFailsPagedDenseSideBatchMismatch)
 TEST(TestSdpaFwdNode, PreValidateFailsPageTableBatchMismatch)
 {
     // Every batch needs a page-table row.
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(9, 2, 4, 64);
-    auto v = makeTensor4D(9, 2, 4, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(9, 2, 4, 64);
+    const auto v = makeTensor4D(9, 2, 4, 64);
     auto attrs = makePaddedAttrs(q, k, v);
     attrs.set_paged_attention_k_table(makePageTable(2, 8));
     attrs.set_paged_attention_v_table(makePageTable(3, 8));
@@ -839,9 +839,9 @@ TEST(TestSdpaFwdNode, PreValidateFailsPageTableBatchMismatch)
 
 TEST(TestSdpaFwdNode, PreValidatePagedBiasMustMatchMaxSeqLenKv)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(9, 2, 4, 64);
-    auto v = makeTensor4D(9, 2, 4, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(9, 2, 4, 64);
+    const auto v = makeTensor4D(9, 2, 4, 64);
     for(const auto& [biasKv, maxSeqLenKv, ok] :
         {std::tuple{int64_t{30}, std::optional<int32_t>{30}, true},
          std::tuple{int64_t{31}, std::optional<int32_t>{30}, false},
@@ -896,13 +896,13 @@ TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
     EXPECT_EQ(validate(paged(8, 0)), error_code_t::INVALID_VALUE) << "non-positive extent";
 
     auto floatTable = paged(8, 30);
-    auto floatK = makePageTable(2, 8);
+    const auto floatK = makePageTable(2, 8);
     floatK->set_data_type(DataType::FLOAT);
     floatTable.set_paged_attention_k_table(floatK);
     EXPECT_EQ(validate(floatTable), error_code_t::INVALID_VALUE) << "INT32 tables";
 
     auto rank3Table = paged(8, 30);
-    auto rank3 = std::make_shared<TensorAttributes>();
+    const auto rank3 = std::make_shared<TensorAttributes>();
     rank3->set_dim({2, 1, 8}).set_data_type(DataType::INT32);
     rank3Table.set_paged_attention_v_table(rank3);
     EXPECT_EQ(validate(rank3Table), error_code_t::INVALID_VALUE) << "rank-4 tables";
@@ -910,7 +910,7 @@ TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
     for(const auto& dims : {std::vector<int64_t>{2, 2, 8, 1}, std::vector<int64_t>{2, 1, 8, 2}})
     {
         auto wideTable = paged(8, 30);
-        auto table = std::make_shared<TensorAttributes>();
+        const auto table = std::make_shared<TensorAttributes>();
         table->set_dim(dims).set_data_type(DataType::INT32);
         wideTable.set_paged_attention_k_table(table);
         EXPECT_EQ(validate(wideTable), error_code_t::INVALID_VALUE)
@@ -920,7 +920,7 @@ TEST(TestSdpaFwdNode, PreValidatePagedRulesFollowCudnn)
         << "at least one table entry";
 
     auto packedTable = paged(8, 30);
-    auto packedK = makePageTable(2, 8);
+    const auto packedK = makePageTable(2, 8);
     packedK->set_ragged_offset(makeSeqLen(3));
     packedTable.set_paged_attention_k_table(packedK);
     EXPECT_EQ(validate(packedTable), error_code_t::OK)
@@ -968,7 +968,7 @@ TEST(TestSdpaFwdNode, PreValidateSeqLenShapeAndType)
     EXPECT_EQ(validate(valid, valid), error_code_t::OK);
 
     // Each invalid tensor is rejected as seq_len_q and as seq_len_kv.
-    auto int64Len = makeSeqLen(2);
+    const auto int64Len = makeSeqLen(2);
     int64Len->set_data_type(DataType::INT64);
     for(const auto& [invalid, rule] : {std::pair{makeSeqLen(3), "batch"},
                                        std::pair{withDims({2}), "rank"},
@@ -990,7 +990,7 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
     auto v = makeTensor4D(2, 2, 32, 64);
     const auto validate = [&](const std::vector<int64_t>& dims, DataType type, DataType io) {
         auto attrs = makeMinimalAttrs(q, k, v);
-        auto sink = std::make_shared<TensorAttributes>();
+        const auto sink = std::make_shared<TensorAttributes>();
         sink->set_dim(dims).set_data_type(type);
         attrs.set_sink_token(sink);
         GraphAttributes graphAttrs;
@@ -1039,7 +1039,7 @@ TEST(TestSdpaFwdNode, GraphValidateRejectsUntypedSinkInAHalfGraph)
                 hipdnn_data_sdk::utilities::generateStrides(dims));
             return t;
         };
-        auto sink = makeInput(4, {1, 8, 1, 1});
+        const auto sink = makeInput(4, {1, 8, 1, 1});
         if(setFloat)
         {
             sink->set_data_type(DataType::FLOAT);
@@ -1081,15 +1081,15 @@ TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)
 
 TEST(TestSdpaFwdNode, PreValidateFailsUnsupportedScoreMod)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     attrs.set_score_mod([](int) { return 0; });
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
 }
@@ -1098,16 +1098,16 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
 {
     // Q is rank-3 (shape-invalid) AND an unsupported setter is present. The drain
     // must run first, so the surfaced message is the unsupported one.
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16});
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
     attrs.set_score_mod([](int) { return 0; });
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
+    const auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
@@ -1115,11 +1115,11 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
 
 TEST(TestSdpaFwdNode, PostValidateFailsNegativeStrideOnO)
 {
-    auto q = makeTensor4D(2, 8, 16, 64);
+    const auto q = makeTensor4D(2, 8, 16, 64);
     q->set_stride({8192, 1024, 64, 1});
-    auto k = makeTensor4D(2, 8, 32, 64);
+    const auto k = makeTensor4D(2, 8, 32, 64);
     k->set_stride({16384, 2048, 64, 1});
-    auto v = makeTensor4D(2, 8, 32, 64);
+    const auto v = makeTensor4D(2, 8, 32, 64);
     v->set_stride({16384, 2048, 64, 1});
 
     SdpaAttributes attrs;
@@ -1127,7 +1127,7 @@ TEST(TestSdpaFwdNode, PostValidateFailsNegativeStrideOnO)
     attrs.set_q(q);
     attrs.set_k(k);
     attrs.set_v(v);
-    auto o = makeTensor4D(2, 8, 16, 64);
+    const auto o = makeTensor4D(2, 8, 16, 64);
     o->set_stride({8192, 1024, 64, -1});
     attrs.set_o(o);
 
@@ -1181,7 +1181,7 @@ Error preValidate(SdpaAttributes&& attrs)
 
 TEST(TestSdpaFwdNode, PreValidateSucceedsWithCuSeqLen)
 {
-    auto err = preValidate(makeCuSeqLenAttrs());
+    const auto err = preValidate(makeCuSeqLenAttrs());
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1191,7 +1191,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsWithCuSeqLenQAndSeqLenKv)
     auto attrs = makeCuSeqLenAttrs();
     attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_KV);
     attrs.set_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1200,7 +1200,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsWithSeqLenQAndCuSeqLenKv)
     auto attrs = makeCuSeqLenAttrs();
     attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_Q);
     attrs.set_seq_len_q(makeCuSeqLen({2, 1, 1, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1210,7 +1210,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsMixedFormWithoutPaddingMask)
     attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_KV);
     attrs.set_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
     attrs.set_padding_mask(false);
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("padding_mask"), std::string::npos) << err.err_msg;
 }
@@ -1220,7 +1220,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsWhenKvSideHasNoLengths)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_KV);
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("provided together"), std::string::npos) << err.err_msg;
 }
@@ -1229,7 +1229,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsWhenQSideHasNoLengths)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_Q);
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("provided together"), std::string::npos) << err.err_msg;
 }
@@ -1238,7 +1238,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenWithoutPaddingMask)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_padding_mask(false);
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("padding_mask"), std::string::npos) << err.err_msg;
 }
@@ -1248,7 +1248,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenQWithSeqLenQ)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_seq_len_q(makeCuSeqLen({2, 1, 1, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("seq_len_q and cu_seq_len_q cannot both be set"), std::string::npos)
         << err.err_msg;
@@ -1258,7 +1258,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenKvWithSeqLenKv)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("seq_len_kv and cu_seq_len_kv cannot both be set"),
               std::string::npos)
@@ -1270,7 +1270,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenFirstDimEqualsBatch)
     // A per-batch lengths tensor (B,1,1,1) is the seq_len_* shape, not the cu_seq_len one.
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_cu_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_kv dim[0]"), std::string::npos) << err.err_msg;
 }
@@ -1281,7 +1281,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsWithOneDimCuSeqLen)
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_cu_seq_len_q(makeCuSeqLen({3}));
     attrs.set_cu_seq_len_kv(makeCuSeqLen({3}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1290,7 +1290,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsOneDimCuSeqLenOfWrongLength)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_cu_seq_len_q(makeCuSeqLen({2}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_q dim[0]"), std::string::npos) << err.err_msg;
 }
@@ -1300,7 +1300,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotRank4)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_cu_seq_len_q(makeCuSeqLen({3, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_q must be rank-4"), std::string::npos) << err.err_msg;
 }
@@ -1309,11 +1309,11 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotRank4)
 TEST(TestSdpaFwdNode, PreValidateSucceedsWhenOneDimCuSeqLenDimsAreSetAfterTheSetter)
 {
     auto attrs = makeCuSeqLenAttrs();
-    auto cuQ = std::make_shared<TensorAttributes>();
+    const auto cuQ = std::make_shared<TensorAttributes>();
     cuQ->set_data_type(DataType::INT32);
     attrs.set_cu_seq_len_q(cuQ);
     cuQ->set_dim({3});
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1322,9 +1322,9 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsWhenOneDimCuSeqLenDimsAreSetAfterTheSet
 TEST(TestSdpaFwdNode, PreValidatePromotesOneDimCuSeqLenInPlaceKeepingTheLeadingStride)
 {
     auto attrs = makeCuSeqLenAttrs();
-    auto cuQ = makeCuSeqLen({3});
+    const auto cuQ = makeCuSeqLen({3});
     cuQ->set_stride({4});
-    auto cuKv = makeCuSeqLen({3});
+    const auto cuKv = makeCuSeqLen({3});
     attrs.set_cu_seq_len_q(cuQ);
     attrs.set_cu_seq_len_kv(cuKv);
     ASSERT_EQ(preValidate(std::move(attrs)).code, error_code_t::OK);
@@ -1339,7 +1339,7 @@ TEST(TestSdpaFwdNode, PreValidatePromotesOneDimCuSeqLenInPlaceKeepingTheLeadingS
 TEST(TestSdpaFwdNode, PreValidateLeavesFourDimCuSeqLenUntouched)
 {
     auto attrs = makeCuSeqLenAttrs();
-    auto cuQ = makeCuSeqLen({3, 1, 1, 1});
+    const auto cuQ = makeCuSeqLen({3, 1, 1, 1});
     cuQ->set_stride({2, 1, 1, 1});
     attrs.set_cu_seq_len_q(cuQ);
     ASSERT_EQ(preValidate(std::move(attrs)).code, error_code_t::OK);
@@ -1351,7 +1351,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenTrailingDimNotOne)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_cu_seq_len_q(makeCuSeqLen({3, 1, 2, 1}));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_q dim[2]"), std::string::npos) << err.err_msg;
 }
@@ -1360,7 +1360,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotInt32)
 {
     auto attrs = makeCuSeqLenAttrs();
     attrs.set_cu_seq_len_kv(makeCuSeqLen({3, 1, 1, 1}, DataType::INT64));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_kv must have INT32"), std::string::npos) << err.err_msg;
 }
@@ -1380,7 +1380,7 @@ SdpaAttributes makePaddingMaskAttrs()
 
 TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithoutSeqLens)
 {
-    auto err = preValidate(makePaddingMaskAttrs());
+    const auto err = preValidate(makePaddingMaskAttrs());
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
 }
@@ -1389,7 +1389,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenQ)
 {
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_q(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
 }
@@ -1401,7 +1401,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenKv)
 {
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_kv(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
     EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
 }
@@ -1411,7 +1411,7 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsPaddingMaskWithSeqLens)
     auto attrs = makePaddingMaskAttrs();
     attrs.set_seq_len_q(makeSeqLen(2));
     attrs.set_seq_len_kv(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
@@ -1421,6 +1421,6 @@ TEST(TestSdpaFwdNode, PreValidateSucceedsPaddingMaskRaggedQWithSeqLenKv)
     auto attrs = makePaddingMaskAttrs();
     attrs.get_q()->set_ragged_offset(makeCuSeqLen({3, 1, 1, 1}));
     attrs.set_seq_len_kv(makeSeqLen(2));
-    auto err = preValidate(std::move(attrs));
+    const auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }

@@ -83,7 +83,7 @@ public:
             }
         }
 
-        auto dequantizeFunc = [&](const std::vector<int64_t>& xIndices) {
+        const auto dequantizeFunc = [&](const std::vector<int64_t>& xIndices) {
             // Compute scale indices by dividing by block size for blocked dims.
             // Size to scale rank — getIndex() throws if indices.size() > strides().size().
             std::vector<int64_t> scaleIndices(scaleDims.size());
@@ -92,8 +92,8 @@ public:
                 scaleIndices[d] = xIndices[d] / effectiveBlockSize[d];
             }
 
-            auto xVal = static_cast<ComputeDataType>(x.getHostValue(xIndices));
-            auto scaleVal = static_cast<ComputeDataType>(scale.getHostValue(scaleIndices));
+            const auto xVal = static_cast<ComputeDataType>(x.getHostValue(xIndices));
+            const auto scaleVal = static_cast<ComputeDataType>(scale.getHostValue(scaleIndices));
 
             ComputeDataType yVal;
             if(isNegativeScale)
@@ -110,7 +110,7 @@ public:
             y.setHostValue(static_cast<YDataType>(yVal), xIndices);
         };
 
-        auto parallelFunc
+        const auto parallelFunc
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(dequantizeFunc, xDims);
         parallelFunc(std::thread::hardware_concurrency());
 

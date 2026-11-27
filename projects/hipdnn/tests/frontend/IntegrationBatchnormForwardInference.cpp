@@ -154,7 +154,7 @@ protected:
         const SimpleBatchnorm2DTensorBundle<float, float>& tensorBundle,
         bool useManualUids)
     {
-        auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+        const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)
             .set_io_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)

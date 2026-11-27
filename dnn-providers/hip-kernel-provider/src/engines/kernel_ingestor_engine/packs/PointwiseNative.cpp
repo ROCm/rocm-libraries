@@ -102,7 +102,7 @@ constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
+    const auto it = tensors.find(uid);
     return it == tensors.end() ? nullptr : it->second;
 }
 
@@ -430,7 +430,7 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
                                                  const PointwiseBinding& binding)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(binding.inputA);
+    const auto it = tensors.find(binding.inputA);
     if(it == tensors.end() || it->second == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

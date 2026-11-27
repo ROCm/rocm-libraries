@@ -80,7 +80,7 @@ void expectRejectedWith(Callable&& call, const std::string& needle)
 
 TEST(TestCpuFpReferenceRaggedRejection, ConvolutionFpropRejectsRaggedInput)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto x = makeRaggedTensor(aux);
     Tensor<float> w({1, 3, 1, 1});
     Tensor<float> y({2, 1, 2, 2});
@@ -95,7 +95,7 @@ TEST(TestCpuFpReferenceRaggedRejection, ConvolutionFpropRejectsRaggedInput)
 
 TEST(TestCpuFpReferenceRaggedRejection, ConvolutionDgradRejectsRaggedGradient)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto gradX = makeRaggedTensor(aux);
     Tensor<float> w({1, 3, 1, 1});
     Tensor<float> gradY({2, 1, 2, 2});
@@ -110,7 +110,7 @@ TEST(TestCpuFpReferenceRaggedRejection, ConvolutionDgradRejectsRaggedGradient)
 
 TEST(TestCpuFpReferenceRaggedRejection, ConvolutionWgradRejectsRaggedInput)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto x = makeRaggedTensor(aux);
     Tensor<float> gradW({1, 3, 1, 1});
     Tensor<float> gradY({2, 1, 2, 2});
@@ -126,7 +126,7 @@ TEST(TestCpuFpReferenceRaggedRejection, ConvolutionWgradRejectsRaggedInput)
 TEST(TestCpuFpReferenceRaggedRejection, ConvolutionFpropRejectsRaggedOutput)
 {
     // The output is written through the same hoisted pointer, so it needs the guard too.
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     Tensor<float> x({2, 3, 2, 2});
     Tensor<float> w({3, 3, 1, 1});
     auto y = makeRaggedTensor(aux);
@@ -141,7 +141,7 @@ TEST(TestCpuFpReferenceRaggedRejection, ConvolutionFpropRejectsRaggedOutput)
 
 TEST(TestCpuFpReferenceRaggedRejection, LayernormFpropRejectsRaggedInput)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto x = makeRaggedTensor(aux);
     Tensor<float> y(RAGGED_DIMS);
 
@@ -155,7 +155,7 @@ TEST(TestCpuFpReferenceRaggedRejection, LayernormFpropRejectsRaggedInput)
 
 TEST(TestCpuFpReferenceRaggedRejection, LayernormBpropRejectsRaggedGradient)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto dx = makeRaggedTensor(aux);
     Tensor<float> dy(RAGGED_DIMS);
     Tensor<float> x(RAGGED_DIMS);
@@ -173,7 +173,7 @@ TEST(TestCpuFpReferenceRaggedRejection, LayernormBpropRejectsRaggedGradient)
 
 TEST(TestCpuFpReferenceRaggedRejection, RmsNormForwardRejectsRaggedInput)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto x = makeRaggedTensor(aux);
     Tensor<float> scale({1, 1, 2, 2});
     Tensor<float> y(RAGGED_DIMS);
@@ -185,7 +185,7 @@ TEST(TestCpuFpReferenceRaggedRejection, RmsNormForwardRejectsRaggedInput)
 
 TEST(TestCpuFpReferenceRaggedRejection, RmsNormBackwardRejectsRaggedGradient)
 {
-    auto aux = makeOffsetAux();
+    const auto aux = makeOffsetAux();
     auto dx = makeRaggedTensor(aux);
     Tensor<float> dy(RAGGED_DIMS);
     Tensor<float> x(RAGGED_DIMS);

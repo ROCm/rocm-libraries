@@ -72,7 +72,7 @@ public:
     {
         HIPDNN_PLUGIN_LOG_INFO("Removing detached buffer at address: " << ptr);
 
-        auto it = _engineDetailsBuffers.find(ptr);
+        const auto it = _engineDetailsBuffers.find(ptr);
         if(it != _engineDetailsBuffers.end())
         {
             _engineDetailsBuffers.erase(it);

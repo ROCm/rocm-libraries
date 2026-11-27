@@ -107,7 +107,7 @@ TEST_F(TestCudnnCompatibilityV8Heuristics, SmCountTargetNotSupported)
     builder.setOperationGraph(graph).setHeurMode(CUDNN_HEUR_MODE_FALLBACK).setSMCount(8);
 
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_NE(failure.what.find("EngineHeuristicsBuilder: SM count target"), std::string::npos)
@@ -161,7 +161,7 @@ TEST_F(TestCudnnCompatibilityV8Heuristics, DevicePropertiesNotSupported)
         .setDeviceProperties(std::make_shared<const fe::DeviceProperties>());
 
     const BuildFailure failure
-        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        = failureOf([&builder] { [[maybe_unused]] const auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_NE(failure.what.find("EngineHeuristicsBuilder: device properties"), std::string::npos)
@@ -172,7 +172,7 @@ TEST_F(TestCudnnCompatibilityV8Heuristics, DevicePropertiesNotSupported)
 TEST_F(TestCudnnCompatibilityV8Heuristics, OpensourceModeRunsFallback)
 {
     fe::OperationGraph_v8 graph = convGraph();
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     fe::detail::openSourceModeWarned().store(false);
 

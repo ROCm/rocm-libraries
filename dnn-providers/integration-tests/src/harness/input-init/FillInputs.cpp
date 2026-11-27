@@ -786,7 +786,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
             std::memset(tensor.rawHostData(), 0, tensor.elementSpace() * tensor.elementSize());
         }
         const auto dataType = dataTypes.find(uid);
-        auto fillResult
+        const auto fillResult
             = fill(tensor,
                    recipes.fill(uid),
                    seed,

@@ -12,7 +12,7 @@ using namespace miopen_plugin;
 TEST(TestMiopenTensor, CanCreateAndDestroy)
 {
     // Use a real tensor attributes from a valid batchnorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -32,7 +32,7 @@ TEST(TestMiopenTensor, CanCreateAndDestroy)
 
 TEST(TestMiopenTensor, TensorDescriptorIsValid)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

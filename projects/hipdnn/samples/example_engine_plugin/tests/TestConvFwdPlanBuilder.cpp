@@ -40,7 +40,7 @@ protected:
 
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_SingleNodeConvFwd_ReturnsTrue)
 {
-    auto fbb = createConvFwdGraph();
+    const auto fbb = createConvFwdGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_TRUE(_planBuilder->isApplicable(_handle, graph));
@@ -48,7 +48,7 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_SingleNodeConvFwd_ReturnsTrue)
 
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_ReluFwdGraph_ReturnsFalse)
 {
-    auto fbb = createReluFwdGraph();
+    const auto fbb = createReluFwdGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
@@ -56,7 +56,7 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_ReluFwdGraph_ReturnsFalse)
 
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 {
-    auto fbb = createNonReluPointwiseGraph();
+    const auto fbb = createNonReluPointwiseGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
@@ -64,7 +64,7 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonReluPointwise_ReturnsFalse)
 
 TEST_F(ConvFwdPlanBuilderTest, IsApplicable_MultiNodeGraph_ReturnsFalse)
 {
-    auto fbb = createMultiNodeConvGraph();
+    const auto fbb = createMultiNodeConvGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
@@ -74,7 +74,7 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonUnitDilation_ReturnsFalse)
 {
     // Create a ConvFwd graph with dilation={2,2} on a large enough input (8x8)
     // so the output dimensions remain positive: outH = (8 - (2*(3-1)+1)) / 1 + 1 = 4
-    auto fbb = createConvFwdGraph(1, 2, 3, 1, 1, 8, 8, 1, 3, 3, 0, 0, 1, 1, 2, 2);
+    const auto fbb = createConvFwdGraph(1, 2, 3, 1, 1, 8, 8, 1, 3, 3, 0, 0, 1, 1, 2, 2);
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     ASSERT_TRUE(graph.isValid());
     EXPECT_FALSE(_planBuilder->isApplicable(_handle, graph));
@@ -82,7 +82,7 @@ TEST_F(ConvFwdPlanBuilderTest, IsApplicable_NonUnitDilation_ReturnsFalse)
 
 TEST_F(ConvFwdPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 {
-    auto fbb = createConvFwdGraph();
+    const auto fbb = createConvFwdGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     const ExampleProviderSettings settings;
     EXPECT_EQ(_planBuilder->getMaxWorkspaceSize(_handle, graph, settings), 0u);
@@ -90,7 +90,7 @@ TEST_F(ConvFwdPlanBuilderTest, GetMaxWorkspaceSize_ReturnsZero)
 
 TEST_F(ConvFwdPlanBuilderTest, GetCustomKnobs_ReturnsBlockSizeKnob)
 {
-    auto fbb = createConvFwdGraph();
+    const auto fbb = createConvFwdGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     const auto knobs = _planBuilder->getCustomKnobs(_handle, graph);
     ASSERT_EQ(knobs.size(), 1u);
@@ -99,9 +99,9 @@ TEST_F(ConvFwdPlanBuilderTest, GetCustomKnobs_ReturnsBlockSizeKnob)
 
 TEST_F(ConvFwdPlanBuilderTest, BuildPlan_SetsPlanOnContext)
 {
-    auto graphFbb = createConvFwdGraph();
+    const auto graphFbb = createConvFwdGraph();
     const GraphWrapper graph(graphFbb.GetBufferPointer(), graphFbb.GetSize());
-    auto configFbb = createEngineConfig(0);
+    const auto configFbb = createEngineConfig(0);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
         configFbb.GetBufferPointer(), configFbb.GetSize());
 

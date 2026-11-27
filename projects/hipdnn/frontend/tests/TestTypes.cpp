@@ -222,12 +222,12 @@ TEST(TestTypes, DataTypeCudnnCompatHasNoBackendMapping)
 {
     using namespace hipdnn_frontend;
 
-    for(auto dt : {DataType::INT8x4,
-                   DataType::UINT8x4,
-                   DataType::INT8x32,
-                   DataType::FAST_FLOAT_FOR_FP8,
-                   DataType::COMPLEX_FP32,
-                   DataType::COMPLEX_FP64})
+    for(const auto dt : {DataType::INT8x4,
+                         DataType::UINT8x4,
+                         DataType::INT8x32,
+                         DataType::FAST_FLOAT_FOR_FP8,
+                         DataType::COMPLEX_FP32,
+                         DataType::COMPLEX_FP64})
     {
         EXPECT_EQ(toHipdnnDataType(dt), std::nullopt)
             << "Unexpected backend mapping for " << to_string(dt);
@@ -433,57 +433,57 @@ TEST(TestTypes, PointwiseModeToString)
     EXPECT_STREQ(to_string(PointwiseMode::COUNT), "UNKNOWN");
 
     // Verify all valid modes produce a non-UNKNOWN string
-    for(auto mode : {PointwiseMode::NOT_SET,
-                     PointwiseMode::ABS,
-                     PointwiseMode::ADD,
-                     PointwiseMode::ADD_SQUARE,
-                     PointwiseMode::BINARY_SELECT,
-                     PointwiseMode::CEIL,
-                     PointwiseMode::CMP_EQ,
-                     PointwiseMode::CMP_GE,
-                     PointwiseMode::CMP_GT,
-                     PointwiseMode::CMP_LE,
-                     PointwiseMode::CMP_LT,
-                     PointwiseMode::CMP_NEQ,
-                     PointwiseMode::DIV,
-                     PointwiseMode::ELU_BWD,
-                     PointwiseMode::ELU_FWD,
-                     PointwiseMode::ERF,
-                     PointwiseMode::EXP,
-                     PointwiseMode::FLOOR,
-                     PointwiseMode::GELU_APPROX_TANH_BWD,
-                     PointwiseMode::GELU_APPROX_TANH_FWD,
-                     PointwiseMode::GELU_BWD,
-                     PointwiseMode::GELU_FWD,
-                     PointwiseMode::GEN_INDEX,
-                     PointwiseMode::IDENTITY,
-                     PointwiseMode::LOG,
-                     PointwiseMode::LOGICAL_AND,
-                     PointwiseMode::LOGICAL_NOT,
-                     PointwiseMode::LOGICAL_OR,
-                     PointwiseMode::MAX,
-                     PointwiseMode::MIN,
-                     PointwiseMode::MUL,
-                     PointwiseMode::NEG,
-                     PointwiseMode::RECIPROCAL,
-                     PointwiseMode::RELU_BWD,
-                     PointwiseMode::RELU_FWD,
-                     PointwiseMode::RSQRT,
-                     PointwiseMode::SIGMOID_BWD,
-                     PointwiseMode::SIGMOID_FWD,
-                     PointwiseMode::SIN,
-                     PointwiseMode::SOFTPLUS_BWD,
-                     PointwiseMode::SOFTPLUS_FWD,
-                     PointwiseMode::SQRT,
-                     PointwiseMode::SUB,
-                     PointwiseMode::SWISH_BWD,
-                     PointwiseMode::SWISH_FWD,
-                     PointwiseMode::TAN,
-                     PointwiseMode::TANH_BWD,
-                     PointwiseMode::TANH_FWD,
-                     PointwiseMode::MOD,
-                     PointwiseMode::POW,
-                     PointwiseMode::COS})
+    for(const auto mode : {PointwiseMode::NOT_SET,
+                           PointwiseMode::ABS,
+                           PointwiseMode::ADD,
+                           PointwiseMode::ADD_SQUARE,
+                           PointwiseMode::BINARY_SELECT,
+                           PointwiseMode::CEIL,
+                           PointwiseMode::CMP_EQ,
+                           PointwiseMode::CMP_GE,
+                           PointwiseMode::CMP_GT,
+                           PointwiseMode::CMP_LE,
+                           PointwiseMode::CMP_LT,
+                           PointwiseMode::CMP_NEQ,
+                           PointwiseMode::DIV,
+                           PointwiseMode::ELU_BWD,
+                           PointwiseMode::ELU_FWD,
+                           PointwiseMode::ERF,
+                           PointwiseMode::EXP,
+                           PointwiseMode::FLOOR,
+                           PointwiseMode::GELU_APPROX_TANH_BWD,
+                           PointwiseMode::GELU_APPROX_TANH_FWD,
+                           PointwiseMode::GELU_BWD,
+                           PointwiseMode::GELU_FWD,
+                           PointwiseMode::GEN_INDEX,
+                           PointwiseMode::IDENTITY,
+                           PointwiseMode::LOG,
+                           PointwiseMode::LOGICAL_AND,
+                           PointwiseMode::LOGICAL_NOT,
+                           PointwiseMode::LOGICAL_OR,
+                           PointwiseMode::MAX,
+                           PointwiseMode::MIN,
+                           PointwiseMode::MUL,
+                           PointwiseMode::NEG,
+                           PointwiseMode::RECIPROCAL,
+                           PointwiseMode::RELU_BWD,
+                           PointwiseMode::RELU_FWD,
+                           PointwiseMode::RSQRT,
+                           PointwiseMode::SIGMOID_BWD,
+                           PointwiseMode::SIGMOID_FWD,
+                           PointwiseMode::SIN,
+                           PointwiseMode::SOFTPLUS_BWD,
+                           PointwiseMode::SOFTPLUS_FWD,
+                           PointwiseMode::SQRT,
+                           PointwiseMode::SUB,
+                           PointwiseMode::SWISH_BWD,
+                           PointwiseMode::SWISH_FWD,
+                           PointwiseMode::TAN,
+                           PointwiseMode::TANH_BWD,
+                           PointwiseMode::TANH_FWD,
+                           PointwiseMode::MOD,
+                           PointwiseMode::POW,
+                           PointwiseMode::COS})
     {
         EXPECT_STRNE(to_string(mode), "UNKNOWN")
             << "to_string returned UNKNOWN for PointwiseMode " << static_cast<int>(mode);
@@ -504,7 +504,7 @@ TEST(TestTypes, PointwiseModeCudnnCompatClassificationAndMapping)
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::MOD));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::POW));
 
-    for(auto mode : {PointwiseMode::MOD, PointwiseMode::POW, PointwiseMode::COS})
+    for(const auto mode : {PointwiseMode::MOD, PointwiseMode::POW, PointwiseMode::COS})
     {
         EXPECT_EQ(toBackendPointwiseMode(mode), std::nullopt)
             << "Unexpected backend mapping for " << to_string(mode);
@@ -682,7 +682,7 @@ TEST(TestTypes, FromHipdnnDataTypeAllValidTypes)
 {
     using namespace hipdnn_frontend;
 
-    auto check = [](hipdnnDataType_t hipdnnType, DataType expected) {
+    const auto check = [](hipdnnDataType_t hipdnnType, DataType expected) {
         auto [dt, err] = fromHipdnnDataType(hipdnnType);
         EXPECT_TRUE(err.is_good())
             << "Error for " << static_cast<int>(hipdnnType) << ": " << err.get_message();
@@ -711,7 +711,7 @@ TEST(TestTypes, FromHipdnnDataTypeUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownType = static_cast<hipdnnDataType_t>(9999);
+    const auto unknownType = static_cast<hipdnnDataType_t>(9999);
     auto [dt, err] = fromHipdnnDataType(unknownType);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -723,22 +723,22 @@ TEST(TestTypes, FromHipdnnDataTypeRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto dt : {DataType::FLOAT,
-                   DataType::DOUBLE,
-                   DataType::HALF,
-                   DataType::INT8,
-                   DataType::INT32,
-                   DataType::UINT8,
-                   DataType::BFLOAT16,
-                   DataType::FP8_E4M3,
-                   DataType::FP8_E5M2,
-                   DataType::FP8_E8M0,
-                   DataType::FP4_E2M1,
-                   DataType::INT4,
-                   DataType::FP6_E2M3,
-                   DataType::FP6_E3M2,
-                   DataType::INT64,
-                   DataType::BOOLEAN})
+    for(const auto dt : {DataType::FLOAT,
+                         DataType::DOUBLE,
+                         DataType::HALF,
+                         DataType::INT8,
+                         DataType::INT32,
+                         DataType::UINT8,
+                         DataType::BFLOAT16,
+                         DataType::FP8_E4M3,
+                         DataType::FP8_E5M2,
+                         DataType::FP8_E8M0,
+                         DataType::FP4_E2M1,
+                         DataType::INT4,
+                         DataType::FP6_E2M3,
+                         DataType::FP6_E3M2,
+                         DataType::INT64,
+                         DataType::BOOLEAN})
     {
         auto hipdnnOpt = toHipdnnDataType(dt);
         ASSERT_TRUE(hipdnnOpt.has_value()) << "toHipdnnDataType failed for " << to_string(dt);
@@ -765,7 +765,7 @@ TEST(TestTypes, FromHipdnnConvModeUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownMode = static_cast<hipdnnConvolutionMode_t>(9999);
+    const auto unknownMode = static_cast<hipdnnConvolutionMode_t>(9999);
     auto [mode, err] = fromHipdnnConvMode(unknownMode);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -777,7 +777,7 @@ TEST(TestTypes, FromHipdnnConvModeRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto mode : {ConvolutionMode::CROSS_CORRELATION, ConvolutionMode::CONVOLUTION})
+    for(const auto mode : {ConvolutionMode::CROSS_CORRELATION, ConvolutionMode::CONVOLUTION})
     {
         auto hipdnnOpt = toBackendConvMode(mode);
         ASSERT_TRUE(hipdnnOpt.has_value());
@@ -854,7 +854,7 @@ TEST(TestTypes, FromHipdnnPointwiseModeUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownMode = static_cast<hipdnnPointwiseMode_t>(9999);
+    const auto unknownMode = static_cast<hipdnnPointwiseMode_t>(9999);
     auto [mode, err] = fromHipdnnPointwiseMode(unknownMode);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -879,7 +879,7 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownPhase = static_cast<hipdnnNormFwdPhase_t>(9999);
+    const auto unknownPhase = static_cast<hipdnnNormFwdPhase_t>(9999);
     auto [phase, err] = fromHipdnnNormFwdPhase(unknownPhase);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -891,7 +891,7 @@ TEST(TestTypes, FromHipdnnNormFwdPhaseRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto phase : {NormFwdPhase::INFERENCE, NormFwdPhase::TRAINING})
+    for(const auto phase : {NormFwdPhase::INFERENCE, NormFwdPhase::TRAINING})
     {
         auto hipdnnOpt = toBackendNormFwdPhase(phase);
         ASSERT_TRUE(hipdnnOpt.has_value())
@@ -923,7 +923,7 @@ TEST(TestTypes, FromHipdnnDiagonalAlignmentUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownVal = static_cast<hipdnnDiagonalAlignment_t>(9999);
+    const auto unknownVal = static_cast<hipdnnDiagonalAlignment_t>(9999);
     auto [alignment, err] = fromHipdnnDiagonalAlignment(unknownVal);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -935,7 +935,7 @@ TEST(TestTypes, FromHipdnnDiagonalAlignmentRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
     {
         auto backendOpt = toBackendDiagonalAlignment(alignment);
         ASSERT_TRUE(backendOpt.has_value())
@@ -973,7 +973,7 @@ TEST(TestTypes, FromHipdnnAttentionImplementationUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownVal = static_cast<hipdnnAttentionImplementation_t>(9999);
+    const auto unknownVal = static_cast<hipdnnAttentionImplementation_t>(9999);
     auto [impl, err] = fromHipdnnAttentionImplementation(unknownVal);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -985,9 +985,9 @@ TEST(TestTypes, FromHipdnnAttentionImplementationRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto impl : {AttentionImplementation::AUTO,
-                     AttentionImplementation::COMPOSITE,
-                     AttentionImplementation::UNIFIED})
+    for(const auto impl : {AttentionImplementation::AUTO,
+                           AttentionImplementation::COMPOSITE,
+                           AttentionImplementation::UNIFIED})
     {
         auto backendOpt = toBackendAttentionImplementation(impl);
         ASSERT_TRUE(backendOpt.has_value())
@@ -1006,53 +1006,53 @@ TEST(TestTypes, FromHipdnnPointwiseModeRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto mode : {PointwiseMode::ABS,
-                     PointwiseMode::ADD,
-                     PointwiseMode::ADD_SQUARE,
-                     PointwiseMode::BINARY_SELECT,
-                     PointwiseMode::CEIL,
-                     PointwiseMode::CMP_EQ,
-                     PointwiseMode::CMP_GE,
-                     PointwiseMode::CMP_GT,
-                     PointwiseMode::CMP_LE,
-                     PointwiseMode::CMP_LT,
-                     PointwiseMode::CMP_NEQ,
-                     PointwiseMode::DIV,
-                     PointwiseMode::ELU_BWD,
-                     PointwiseMode::ELU_FWD,
-                     PointwiseMode::ERF,
-                     PointwiseMode::EXP,
-                     PointwiseMode::FLOOR,
-                     PointwiseMode::GELU_APPROX_TANH_BWD,
-                     PointwiseMode::GELU_APPROX_TANH_FWD,
-                     PointwiseMode::GELU_BWD,
-                     PointwiseMode::GELU_FWD,
-                     PointwiseMode::GEN_INDEX,
-                     PointwiseMode::IDENTITY,
-                     PointwiseMode::LOG,
-                     PointwiseMode::LOGICAL_AND,
-                     PointwiseMode::LOGICAL_NOT,
-                     PointwiseMode::LOGICAL_OR,
-                     PointwiseMode::MAX,
-                     PointwiseMode::MIN,
-                     PointwiseMode::MUL,
-                     PointwiseMode::NEG,
-                     PointwiseMode::RECIPROCAL,
-                     PointwiseMode::RELU_BWD,
-                     PointwiseMode::RELU_FWD,
-                     PointwiseMode::RSQRT,
-                     PointwiseMode::SIGMOID_BWD,
-                     PointwiseMode::SIGMOID_FWD,
-                     PointwiseMode::SIN,
-                     PointwiseMode::SOFTPLUS_BWD,
-                     PointwiseMode::SOFTPLUS_FWD,
-                     PointwiseMode::SQRT,
-                     PointwiseMode::SUB,
-                     PointwiseMode::SWISH_BWD,
-                     PointwiseMode::SWISH_FWD,
-                     PointwiseMode::TAN,
-                     PointwiseMode::TANH_BWD,
-                     PointwiseMode::TANH_FWD})
+    for(const auto mode : {PointwiseMode::ABS,
+                           PointwiseMode::ADD,
+                           PointwiseMode::ADD_SQUARE,
+                           PointwiseMode::BINARY_SELECT,
+                           PointwiseMode::CEIL,
+                           PointwiseMode::CMP_EQ,
+                           PointwiseMode::CMP_GE,
+                           PointwiseMode::CMP_GT,
+                           PointwiseMode::CMP_LE,
+                           PointwiseMode::CMP_LT,
+                           PointwiseMode::CMP_NEQ,
+                           PointwiseMode::DIV,
+                           PointwiseMode::ELU_BWD,
+                           PointwiseMode::ELU_FWD,
+                           PointwiseMode::ERF,
+                           PointwiseMode::EXP,
+                           PointwiseMode::FLOOR,
+                           PointwiseMode::GELU_APPROX_TANH_BWD,
+                           PointwiseMode::GELU_APPROX_TANH_FWD,
+                           PointwiseMode::GELU_BWD,
+                           PointwiseMode::GELU_FWD,
+                           PointwiseMode::GEN_INDEX,
+                           PointwiseMode::IDENTITY,
+                           PointwiseMode::LOG,
+                           PointwiseMode::LOGICAL_AND,
+                           PointwiseMode::LOGICAL_NOT,
+                           PointwiseMode::LOGICAL_OR,
+                           PointwiseMode::MAX,
+                           PointwiseMode::MIN,
+                           PointwiseMode::MUL,
+                           PointwiseMode::NEG,
+                           PointwiseMode::RECIPROCAL,
+                           PointwiseMode::RELU_BWD,
+                           PointwiseMode::RELU_FWD,
+                           PointwiseMode::RSQRT,
+                           PointwiseMode::SIGMOID_BWD,
+                           PointwiseMode::SIGMOID_FWD,
+                           PointwiseMode::SIN,
+                           PointwiseMode::SOFTPLUS_BWD,
+                           PointwiseMode::SOFTPLUS_FWD,
+                           PointwiseMode::SQRT,
+                           PointwiseMode::SUB,
+                           PointwiseMode::SWISH_BWD,
+                           PointwiseMode::SWISH_FWD,
+                           PointwiseMode::TAN,
+                           PointwiseMode::TANH_BWD,
+                           PointwiseMode::TANH_FWD})
     {
         auto hipdnnOpt = toBackendPointwiseMode(mode);
         ASSERT_TRUE(hipdnnOpt.has_value())
@@ -1093,7 +1093,7 @@ TEST(TestTypes, FromHipdnnReductionModeUnknownReturnsError)
 {
     using namespace hipdnn_frontend;
 
-    auto unknownMode = static_cast<hipdnnReduceTensorOp_t>(9999);
+    const auto unknownMode = static_cast<hipdnnReduceTensorOp_t>(9999);
     auto [mode, err] = fromHipdnnReduceTensorOp(unknownMode);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
@@ -1105,7 +1105,7 @@ TEST(TestTypes, FromHipdnnReductionModeRoundTrip)
 {
     using namespace hipdnn_frontend;
 
-    for(auto mode : {
+    for(const auto mode : {
             ReductionMode::ADD,
             ReductionMode::MUL,
             ReductionMode::MIN,

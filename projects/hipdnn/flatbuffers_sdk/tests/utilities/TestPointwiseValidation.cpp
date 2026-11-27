@@ -99,7 +99,7 @@ TEST(TestPointwiseValidation, MutualExclusivityOfCategories)
         i <= static_cast<int>(PointwiseMode::TANH_FWD);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         const bool isUnary = isUnaryPointwiseMode(mode);
         const bool isBinary = isBinaryPointwiseMode(mode);
@@ -121,7 +121,7 @@ TEST(TestPointwiseValidation, ImplementedUnaryModesAreSubset)
         i <= static_cast<int>(PointwiseMode::TANH_FWD);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         if(isImplementedUnaryPointwiseMode(mode))
         {
@@ -139,7 +139,7 @@ TEST(TestPointwiseValidation, ImplementedBinaryModesAreSubset)
         i <= static_cast<int>(PointwiseMode::TANH_FWD);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         if(isImplementedBinaryPointwiseMode(mode))
         {
@@ -157,7 +157,7 @@ TEST(TestPointwiseValidation, ImplementedTernaryModesAreSubset)
         i <= static_cast<int>(PointwiseMode::TANH_FWD);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         if(isImplementedTernaryPointwiseMode(mode))
         {
@@ -188,7 +188,7 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         // Only check modes that are classified as unary
         if(!isUnaryPointwiseMode(mode))
@@ -220,7 +220,7 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
     // Check all binary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         // Only check modes that are classified as binary
         if(!isBinaryPointwiseMode(mode))
@@ -254,7 +254,7 @@ TEST(TestPointwiseValidation, BitsetConsistencyUnary)
         i <= static_cast<int>(PointwiseMode::TANH_FWD);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         const bool isUnaryFromFunction = isUnaryPointwiseMode(mode);
         const bool isImplementedFromFunction = isImplementedUnaryPointwiseMode(mode);
@@ -275,7 +275,7 @@ TEST(TestPointwiseValidation, BitsetConsistencyBinary)
         i <= static_cast<int>(PointwiseMode::TANH_FWD);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         const bool isBinaryFromFunction = isBinaryPointwiseMode(mode);
         const bool isImplementedFromFunction = isImplementedBinaryPointwiseMode(mode);
@@ -299,7 +299,7 @@ TEST(TestPointwiseValidation, AllModesAccountedFor)
     // All other modes MUST be classified as unary, binary, or ternary
     for(size_t i = 1; i < POINTWISE_MODE_COUNT; ++i) // Start from 1 to skip UNSET
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
 
         const bool isClassified = isUnaryPointwiseMode(mode) || isBinaryPointwiseMode(mode)
                                   || isTernaryPointwiseMode(mode);

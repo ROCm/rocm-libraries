@@ -20,7 +20,7 @@ TEST(TestConvolutionWgradAttributes, CreateConvolutionWgradAttributes)
     convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
     // Configure x tensor (input)
-    auto xTensor = convAttributes.get_x();
+    const auto xTensor = convAttributes.get_x();
     xTensor->set_uid(1)
         .set_name("XTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -28,7 +28,7 @@ TEST(TestConvolutionWgradAttributes, CreateConvolutionWgradAttributes)
         .set_stride({3072, 1024, 32, 1});
 
     // Configure dy tensor (gradient of output)
-    auto dyTensor = convAttributes.get_dy();
+    const auto dyTensor = convAttributes.get_dy();
     dyTensor->set_uid(2)
         .set_name("DyTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -36,7 +36,7 @@ TEST(TestConvolutionWgradAttributes, CreateConvolutionWgradAttributes)
         .set_stride({65536, 1024, 32, 1});
 
     // Configure dw tensor (gradient of weights)
-    auto dwTensor = convAttributes.get_dw();
+    const auto dwTensor = convAttributes.get_dw();
     dwTensor->set_uid(3)
         .set_name("DwTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -163,7 +163,7 @@ TEST(TestConvolutionWgradAttributes, SetXMove)
     EXPECT_EQ(xTensor, nullptr);
 
     // The moved tensor should be accessible through get_x()
-    auto retrievedTensor = convAttributes.get_x();
+    const auto retrievedTensor = convAttributes.get_x();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -187,7 +187,7 @@ TEST(TestConvolutionWgradAttributes, SetDyMove)
     EXPECT_EQ(dyTensor, nullptr);
 
     // The moved tensor should be accessible through get_dy()
-    auto retrievedTensor = convAttributes.get_dy();
+    const auto retrievedTensor = convAttributes.get_dy();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -211,7 +211,7 @@ TEST(TestConvolutionWgradAttributes, SetDwWithMove)
     EXPECT_EQ(dwTensor, nullptr);
 
     // The moved tensor should be accessible through get_dw()
-    auto retrievedTensor = convAttributes.get_dw();
+    const auto retrievedTensor = convAttributes.get_dw();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -220,13 +220,13 @@ TEST(TestConvolutionWgradAttributes, SetTensorsConstRef)
     hipdnn_frontend::graph::ConvWgradAttributes convAttributes;
 
     // Create tensors
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     xTensor->set_uid(40).set_name("XConstRef");
 
-    auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dyTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dyTensor->set_uid(50).set_name("DyConstRef");
 
-    auto dwTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dwTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dwTensor->set_uid(60).set_name("DwConstRef");
 
     // Set using const reference (copy)
@@ -249,15 +249,15 @@ TEST(TestConvWgradAttributes, LogicalAndStrictEquality)
     attr1.set_dilation({1, 1});
     attr1.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dy1->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dy(dy1);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto dw1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dw1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dw1->set_uid(3).set_name("DW").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dw(dw1);
 
@@ -268,15 +268,15 @@ TEST(TestConvWgradAttributes, LogicalAndStrictEquality)
     attr2.set_dilation({1, 1});
     attr2.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dy2->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dy(dy2);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto dw2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dw2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dw2->set_uid(3).set_name("DW").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dw(dw2);
 
@@ -286,7 +286,7 @@ TEST(TestConvWgradAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchDy->set_uid(99).set_name("MismatchedDY");
     attr2.set_dy(structuralMismatchDy);
 
@@ -320,7 +320,7 @@ TEST(TestConvWgradAttributes, LogicalAndStrictEquality)
     attr2.set_dilation({1, 1}); // Revert
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchDy
         ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("DY")

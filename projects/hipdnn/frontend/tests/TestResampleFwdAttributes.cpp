@@ -15,21 +15,21 @@ TEST(TestResampleFwdAttributes, CreateResample)
     resampleFwdAttributes.set_y(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     resampleFwdAttributes.set_index(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    auto xTensor = resampleFwdAttributes.get_x();
+    const auto xTensor = resampleFwdAttributes.get_x();
     xTensor->set_uid(1)
         .set_name("xTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto yTensor = resampleFwdAttributes.get_y();
+    const auto yTensor = resampleFwdAttributes.get_y();
     yTensor->set_uid(2)
         .set_name("yTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto indexTensor = resampleFwdAttributes.get_index();
+    const auto indexTensor = resampleFwdAttributes.get_index();
     indexTensor->set_uid(3)
         .set_name("indexTensor")
         .set_data_type(hipdnn_frontend::DataType::INT32)
@@ -66,7 +66,7 @@ TEST(TestResampleFwdAttributes, SetXWithMove)
 
     resampleFwdAttributes.set_x(std::move(xTensor));
 
-    auto retrieved = resampleFwdAttributes.get_x();
+    const auto retrieved = resampleFwdAttributes.get_x();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "xTensor");
 
@@ -85,7 +85,7 @@ TEST(TestResampleFwdAttributes, SetYWithMove)
 
     resampleFwdAttributes.set_y(std::move(yTensor));
 
-    auto retrieved = resampleFwdAttributes.get_y();
+    const auto retrieved = resampleFwdAttributes.get_y();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "yTensor");
 
@@ -104,7 +104,7 @@ TEST(TestResampleFwdAttributes, SetIndexWithMove)
 
     resampleFwdAttributes.set_index(std::move(indexTensor));
 
-    auto retrieved = resampleFwdAttributes.get_index();
+    const auto retrieved = resampleFwdAttributes.get_index();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "indexTensor");
 
@@ -207,15 +207,15 @@ TEST(TestResampleFwdAttributes, LogicalAndStrictEquality)
     attr1.set_padding_mode(hipdnn_frontend::PaddingMode::ZERO_PAD);
     attr1.set_generate_index(true);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y1->set_uid(2).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_y(y1);
 
-    auto index1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto index1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     index1->set_uid(3).set_name("Index").set_data_type(hipdnn_frontend::DataType::INT32);
     attr1.set_index(index1);
 
@@ -229,15 +229,15 @@ TEST(TestResampleFwdAttributes, LogicalAndStrictEquality)
     attr2.set_padding_mode(hipdnn_frontend::PaddingMode::ZERO_PAD);
     attr2.set_generate_index(true);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y2->set_uid(2).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_y(y2);
 
-    auto index2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto index2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     index2->set_uid(3).set_name("Index").set_data_type(hipdnn_frontend::DataType::INT32);
     attr2.set_index(index2);
 
@@ -247,7 +247,7 @@ TEST(TestResampleFwdAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchX->set_uid(99).set_name("MismatchedX");
     attr2.set_x(structuralMismatchX);
 
@@ -313,7 +313,7 @@ TEST(TestResampleFwdAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchX
         ->set_uid(555) // Diverges from attr1's x1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's x1 ("X")

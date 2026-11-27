@@ -62,8 +62,8 @@ public:
                                "BlockScaleDequantizeNode block_size must not be empty");
 
         // SECTION 2: Validate tensor dimensions (when set)
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         if(detail::areTensorDimensionsSet(x))
         {
@@ -102,7 +102,7 @@ public:
         // Scale covers every block of x. block_size aligns to the trailing dimensions of x:
         // entry i applies to dimension (rank - K + i) and the leading dimensions use block 1.
         // A scale dimension may exceed the block count (padded scale layouts).
-        auto scale = attributes.get_scale();
+        const auto scale = attributes.get_scale();
         if(detail::areTensorDimensionsSet(x) && detail::areTensorDimensionsSet(scale))
         {
             const auto& xDims = x->get_dim();
@@ -137,8 +137,8 @@ public:
 
     Error infer_properties_node() override
     {
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
 
         if(!x)
         {

@@ -143,7 +143,7 @@ protected:
                     &dims));
         }
 
-        auto rmsnormAttributes
+        const auto rmsnormAttributes
             = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                             1, // x uid
                                                                             3, // scale uid
@@ -151,33 +151,34 @@ protected:
                                                                             2 // y uid
             );
 
-        auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
-            builder,
-            leakyRelu ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD
-                      : pointwiseMode,
-            leakyRelu ? std::nullopt : std::make_optional(0.1f),
-            leakyRelu ? std::nullopt : std::make_optional(0.5f),
-            leakyRelu ? std::make_optional(0.01f) : std::nullopt,
-            std::nullopt,
-            disconnectNodes ? 6 : 2, // yActivIn uid or y uid
-            std::nullopt,
-            std::nullopt,
-            5, // yActiv uid
-            std::nullopt,
-            std::nullopt,
-            std::nullopt);
+        const auto pointwiseAttributes
+            = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+                builder,
+                leakyRelu ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD
+                          : pointwiseMode,
+                leakyRelu ? std::nullopt : std::make_optional(0.1f),
+                leakyRelu ? std::nullopt : std::make_optional(0.5f),
+                leakyRelu ? std::make_optional(0.01f) : std::nullopt,
+                std::nullopt,
+                disconnectNodes ? 6 : 2, // yActivIn uid or y uid
+                std::nullopt,
+                std::nullopt,
+                5, // yActiv uid
+                std::nullopt,
+                std::nullopt,
+                std::nullopt);
 
         std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
         if(invertNodes)
         {
-            auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+            const auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
                 builder,
                 "pointwise",
                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                 hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
                 pointwiseAttributes.Union());
             nodes.push_back(nodePointwise);
-            auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+            const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
                 builder,
                 "rmsnorm",
                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -187,14 +188,14 @@ protected:
         }
         else
         {
-            auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+            const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
                 builder,
                 "rmsnorm",
                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                 hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes,
                 rmsnormAttributes.Union());
             nodes.push_back(node);
-            auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+            const auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
                 builder,
                 "pointwise",
                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -203,7 +204,7 @@ protected:
             nodes.push_back(nodePointwise);
         }
 
-        auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
             builder,
             "test",
             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -224,7 +225,7 @@ protected:
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -233,7 +234,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceActivationGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -243,7 +244,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceActivatio
 // RMSnorm launches one block of 256 threads per row: 16777215 rows is 2^32 - 256 threads.
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimit)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormGraph({2, 1, 1, 1}, {16777215, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -253,7 +254,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimit)
 
 TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
 {
-    auto builder = createRMSnormActivationTestGraph(
+    const auto builder = createRMSnormActivationTestGraph(
         false,
         false,
         false,
@@ -268,7 +269,7 @@ TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimit)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidRMSNormGraph({2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -278,7 +279,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimi
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimitActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
         {2, 1, 1, 1}, {16777215, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -288,7 +289,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForRowCountAtThreadLimitAc
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimitActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
         {2, 1, 1, 1}, {16777216, 2, 1, 1});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -298,7 +299,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForRowCountOverThreadLimi
 
 TEST_F(TestRMSnormPlanBuilder, BackwardReluIsNotApplicable)
 {
-    auto builder = createRMSnormActivationTestGraph(
+    const auto builder = createRMSnormActivationTestGraph(
         false,
         false,
         false,
@@ -313,7 +314,7 @@ TEST_F(TestRMSnormPlanBuilder, BackwardReluIsNotApplicable)
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -326,7 +327,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGr
 }
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledActivationGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -344,7 +345,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledAc
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -353,7 +354,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForInvertedNodeOrderActivationGraph)
 {
-    auto builder = createRMSnormActivationTestGraph(true, false, false, false, false);
+    const auto builder = createRMSnormActivationTestGraph(true, false, false, false, false);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -363,7 +364,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForInvertedNodeOrderActiv
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForDisconnectedActivationGraph)
 {
-    auto builder = createRMSnormActivationTestGraph(false, true, false, false, false);
+    const auto builder = createRMSnormActivationTestGraph(false, true, false, false, false);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -373,7 +374,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForDisconnectedActivation
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForNonvirtualRMSOutputActivationGraph)
 {
-    auto builder = createRMSnormActivationTestGraph(false, false, true, false, false);
+    const auto builder = createRMSnormActivationTestGraph(false, false, true, false, false);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -383,7 +384,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForNonvirtualRMSOutputAct
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForVirtualActivationOutputActivationGraph)
 {
-    auto builder = createRMSnormActivationTestGraph(false, false, false, true, false);
+    const auto builder = createRMSnormActivationTestGraph(false, false, false, true, false);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -393,7 +394,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForVirtualActivationOutpu
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForLeakyReluActivationGraph)
 {
-    auto builder = createRMSnormActivationTestGraph(false, false, false, false, true);
+    const auto builder = createRMSnormActivationTestGraph(false, false, false, false, true);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -403,7 +404,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForLeakyReluActivationGra
 
 TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedActivationModeActivationGraph)
 {
-    auto builder = createRMSnormActivationTestGraph(
+    const auto builder = createRMSnormActivationTestGraph(
         false,
         false,
         false,
@@ -425,7 +426,7 @@ TEST_F(TestRMSnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -438,7 +439,7 @@ TEST_F(TestRMSnormPlanBuilder, BuildPlanSetsPlanForDoubleNodeInferenceActivation
 {
     setupMockCompileChain();
 
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     Context ctx;
@@ -453,7 +454,7 @@ TEST_F(TestRMSnormPlanBuilder, BuildPlanSetsPlanForDoubleNodeInferenceActivation
 
 TEST_F(TestRMSnormPlanBuilder, IsNotApplicableForBatchnormGraph)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -462,7 +463,7 @@ TEST_F(TestRMSnormPlanBuilder, IsNotApplicableForBatchnormGraph)
 
 TEST_F(TestRMSnormPlanBuilder, IsNotApplicableForNonF32ComputeType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -475,7 +476,7 @@ TEST_F(TestRMSnormPlanBuilder, IsNotApplicableForNonF32ComputeType)
 
 TEST_F(TestRMSnormPlanBuilder, IsNotApplicableForNonF32ComputeTypeActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -492,7 +493,7 @@ TEST_F(TestRMSnormPlanBuilder, IsNotApplicableForNonF32ComputeTypeActivation)
 
 TEST_F(TestRMSnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -502,7 +503,7 @@ TEST_F(TestRMSnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 
 TEST_F(TestRMSnormPlanBuilder, GetMaxWorkspaceSizeReturnsZeroActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const Settings settings;
@@ -516,21 +517,21 @@ TEST_F(TestRMSnormPlanBuilder, GetMaxWorkspaceSizeReturnsZeroActivation)
 
 TEST_F(TestRMSnormPlanBuilder, GetCustomKnobsReturnsEmpty)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
 TEST_F(TestRMSnormPlanBuilder, GetCustomKnobsReturnsEmptyActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+    const auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
     EXPECT_TRUE(knobs.empty());
 }
 
@@ -554,7 +555,7 @@ flatbuffers::FlatBufferBuilder rmsNormRow(int64_t columns, bool fused)
 
 TensorAttributesT& tensorNamed(GraphT& graph, const std::string& name)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->name == name)
         {
@@ -576,7 +577,7 @@ TEST_F(TestRMSnormPlanBuilder, ElementCountAtTheKernelIndexLimit)
                                               std::pair{(int64_t{1} << 32) + 1, false}})
         {
             SCOPED_TRACE(columns);
-            auto builder = rmsNormRow(columns, fused);
+            const auto builder = rmsNormRow(columns, fused);
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
             EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), expected);
@@ -596,7 +597,7 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
                          : hipdnn_test_sdk::utilities::createValidRMSNormGraph();
         };
         {
-            auto builder = base();
+            const auto builder = base();
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
             ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -605,12 +606,13 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
         for(const char* replacement : {"unknown uid", "device tensor"})
         {
             SCOPED_TRACE(replacement);
-            auto builder = hipdnn_test_sdk::utilities::mutateGraph(base(), [&](GraphT& graph) {
-                auto* attributes = graph.nodes.at(0)->attributes.AsRMSNormAttributes();
-                attributes->epsilon_tensor_uid = std::string(replacement) == "unknown uid"
-                                                     ? int64_t{9999}
-                                                     : attributes->scale_tensor_uid;
-            });
+            const auto builder
+                = hipdnn_test_sdk::utilities::mutateGraph(base(), [&](GraphT& graph) {
+                      auto* attributes = graph.nodes.at(0)->attributes.AsRMSNormAttributes();
+                      attributes->epsilon_tensor_uid = std::string(replacement) == "unknown uid"
+                                                           ? int64_t{9999}
+                                                           : attributes->scale_tensor_uid;
+                  });
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
             EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -624,7 +626,7 @@ TEST_F(TestRMSnormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
     for(const bool fused : {false, true})
     {
         SCOPED_TRACE(fused ? "fused activation" : "one node");
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
             fused ? hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph()
                   : hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
             [](GraphT& graph) {
@@ -643,7 +645,7 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAVirtualKernelBuffer)
     for(const char* name : {"x", "y", "scale"})
     {
         SCOPED_TRACE(name);
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
             hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
             [name](GraphT& graph) { tensorNamed(graph, name).virtual_ = true; });
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(

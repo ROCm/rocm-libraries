@@ -107,7 +107,7 @@ inline flatbuffers::FlatBufferBuilder
         nextVarianceUid = 12;
     }
 
-    auto bnormAttributes
+    const auto bnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormAttributes(builder,
                                                                           1,
                                                                           3,
@@ -124,7 +124,7 @@ inline flatbuffers::FlatBufferBuilder
                                                                           nextVarianceUid);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "batchnorm_training",
         computeDataType,
@@ -132,15 +132,16 @@ inline flatbuffers::FlatBufferBuilder
         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
-                                                                               "test",
-                                                                               computeDataType,
-                                                                               scaleBiasDataType,
-                                                                               inputDataType,
-                                                                               &tensorAttributes,
-                                                                               &nodes,
-                                                                               flatbuffers::nullopt,
-                                                                               false);
+    const auto graphOffset
+        = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(builder,
+                                                                  "test",
+                                                                  computeDataType,
+                                                                  scaleBiasDataType,
+                                                                  inputDataType,
+                                                                  &tensorAttributes,
+                                                                  &nodes,
+                                                                  flatbuffers::nullopt,
+                                                                  false);
     builder.Finish(graphOffset);
     return builder;
 }

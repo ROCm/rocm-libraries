@@ -85,13 +85,13 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowDyTensor = createShallowTensor<DyDataType>(
+        const auto shallowDyTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        auto shallowXTensor
+        const auto shallowXTensor
             = createShallowTensor<DxDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanInvVarianceDataType>>
@@ -109,13 +109,13 @@ public:
                 variantPack.at(_params.invVarianceTensor.value().uid));
         }
 
-        auto shallowDxTensor = createShallowTensor<DxDataType>(
+        const auto shallowDxTensor = createShallowTensor<DxDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dscaleTensor, variantPack.at(_params.dscaleTensor.uid));
 
-        auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)

@@ -89,7 +89,7 @@ TEST_F(IntegrationCudnnShimHandle, SetAndGetStreamRoundTrip)
 
 TEST_F(IntegrationCudnnShimHandle, CreateCudnnHandleHelperReturnsLiveHandle)
 {
-    auto handle = create_cudnn_handle();
+    const auto handle = create_cudnn_handle();
     ASSERT_NE(handle, nullptr);
     ASSERT_NE(*handle, nullptr);
     // Bind the default stream through the managed handle to prove it is live.

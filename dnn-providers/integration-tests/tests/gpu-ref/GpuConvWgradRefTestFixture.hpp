@@ -114,7 +114,7 @@ protected:
     static float tolerance(const ConvWgradShapeCase& tc)
     {
         constexpr double FILL_RANGE = 1.0;
-        auto dyDims = tc.computeOutputDims();
+        const auto dyDims = tc.computeOutputDims();
         return hipdnn_test_sdk::utilities::conv::
             calculateConvWrwTolerance<DataType, DataType, double>(
                 -FILL_RANGE, FILL_RANGE, -FILL_RANGE, FILL_RANGE, dyDims);
@@ -124,7 +124,7 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
-        auto dyDims = tc.computeOutputDims();
+        const auto dyDims = tc.computeOutputDims();
         runGpuVsCpuConvWrw<DataType>(tc.xDims,
                                      tc.wDims,
                                      dyDims,

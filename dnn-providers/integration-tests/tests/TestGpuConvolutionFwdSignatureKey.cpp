@@ -59,9 +59,9 @@ TEST(TestGpuConvolutionFwdSignatureKey, HashFunction)
     const GpuConvolutionFwdSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
-    auto hash5 = key5.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
+    const auto hash5 = key5.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
 }
@@ -89,21 +89,21 @@ TEST(TestGpuConvolutionFwdSignatureKey, CreateFromNodeAndTensorMap)
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           xDims,
-                                           wDims,
-                                           yDims,
-                                           generateStrides(xDims),
-                                           generateStrides(wDims),
-                                           generateStrides(yDims),
-                                           {0, 0},
-                                           {1, 1},
-                                           {1, 1},
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 xDims,
+                                                 wDims,
+                                                 yDims,
+                                                 generateStrides(xDims),
+                                                 generateStrides(wDims),
+                                                 generateStrides(yDims),
+                                                 {0, 0},
+                                                 {1, 1},
+                                                 {1, 1},
+                                                 DataType::FLOAT);
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuConvolutionFwdSignatureKey keyFromNode(

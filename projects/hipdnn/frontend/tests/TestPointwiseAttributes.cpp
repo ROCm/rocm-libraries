@@ -22,7 +22,7 @@ TEST(TestPointwiseAttributes, CreatePointwiseAttributes)
         .set_elu_alpha(0.9f)
         .set_softplus_beta(2.0f);
 
-    auto inputTensor = pointwiseAttributes.get_input_0();
+    const auto inputTensor = pointwiseAttributes.get_input_0();
     EXPECT_FALSE(inputTensor->has_uid());
 
     inputTensor->set_uid(1)
@@ -31,7 +31,7 @@ TEST(TestPointwiseAttributes, CreatePointwiseAttributes)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = pointwiseAttributes.get_output_0();
+    const auto outputTensor = pointwiseAttributes.get_output_0();
     EXPECT_FALSE(outputTensor->has_uid());
 
     outputTensor->set_uid(2)
@@ -78,21 +78,21 @@ TEST(TestPointwiseAttributes, CreatePointwiseAttributesWithTwoInputs)
     pointwiseAttributes.set_output_0(std::make_shared<TensorAttributes>());
     pointwiseAttributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto inputTensor0 = pointwiseAttributes.get_input_0();
+    const auto inputTensor0 = pointwiseAttributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto inputTensor1 = pointwiseAttributes.get_input_1();
+    const auto inputTensor1 = pointwiseAttributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = pointwiseAttributes.get_output_0();
+    const auto outputTensor = pointwiseAttributes.get_output_0();
     outputTensor->set_uid(3).set_name("OutputTensor");
 
     EXPECT_EQ(inputTensor0->get_uid(), 1);
@@ -115,7 +115,7 @@ TEST(TestPointwiseAttributes, SetInput0WithMove)
 
     pointwiseAttributes.set_input_0(std::move(inputTensor));
 
-    auto retrieved = pointwiseAttributes.get_input_0();
+    const auto retrieved = pointwiseAttributes.get_input_0();
     EXPECT_EQ(retrieved->get_uid(), 1);
     EXPECT_EQ(retrieved->get_name(), "InputTensor0");
 
@@ -134,7 +134,7 @@ TEST(TestPointwiseAttributes, SetInput1WithMove)
 
     pointwiseAttributes.set_input_1(std::move(inputTensor));
 
-    auto retrieved = pointwiseAttributes.get_input_1();
+    const auto retrieved = pointwiseAttributes.get_input_1();
     EXPECT_EQ(retrieved->get_uid(), 2);
     EXPECT_EQ(retrieved->get_name(), "InputTensor1");
 
@@ -153,7 +153,7 @@ TEST(TestPointwiseAttributes, SetInput2WithMove)
 
     pointwiseAttributes.set_input_2(std::move(inputTensor));
 
-    auto retrieved = pointwiseAttributes.get_input_2();
+    const auto retrieved = pointwiseAttributes.get_input_2();
     EXPECT_EQ(retrieved->get_uid(), 3);
     EXPECT_EQ(retrieved->get_name(), "InputTensor2");
 
@@ -172,7 +172,7 @@ TEST(TestPointwiseAttributes, SetOutput0WithMove)
 
     pointwiseAttributes.set_output_0(std::move(outputTensor));
 
-    auto retrieved = pointwiseAttributes.get_output_0();
+    const auto retrieved = pointwiseAttributes.get_output_0();
     EXPECT_EQ(retrieved->get_uid(), 4);
     EXPECT_EQ(retrieved->get_name(), "OutputTensor");
 
@@ -236,28 +236,28 @@ TEST(TestPointwiseAttributes, CreatePointwiseAttributesWithThreeInputs)
     pointwiseAttributes.set_output_0(std::make_shared<TensorAttributes>());
     pointwiseAttributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto inputTensor0 = pointwiseAttributes.get_input_0();
+    const auto inputTensor0 = pointwiseAttributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto inputTensor1 = pointwiseAttributes.get_input_1();
+    const auto inputTensor1 = pointwiseAttributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto inputTensor2 = pointwiseAttributes.get_input_2();
+    const auto inputTensor2 = pointwiseAttributes.get_input_2();
     inputTensor2->set_uid(3)
         .set_name("InputTensor2")
         .set_data_type(DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto outputTensor = pointwiseAttributes.get_output_0();
+    const auto outputTensor = pointwiseAttributes.get_output_0();
     outputTensor->set_uid(4).set_name("OutputTensor");
 
     EXPECT_EQ(inputTensor0->get_uid(), 1);
@@ -297,11 +297,11 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     attr1.set_elu_alpha(1.0f);
     attr1.set_softplus_beta(1.0f);
 
-    auto in01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto in01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     in01->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_input_0(in01);
 
-    auto out01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto out01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     out01->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_output_0(out01);
 
@@ -316,11 +316,11 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     attr2.set_elu_alpha(1.0f);
     attr2.set_softplus_beta(1.0f);
 
-    auto in02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto in02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     in02->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_input_0(in02);
 
-    auto out02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto out02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     out02->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_output_0(out02);
 
@@ -330,7 +330,7 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchIn0->set_uid(99).set_name("MismatchedIn0");
     attr2.set_input_0(structuralMismatchIn0);
 
@@ -403,7 +403,7 @@ TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchIn0
         ->set_uid(555) // Diverges from attr1's in01 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's in01 ("IN_0")

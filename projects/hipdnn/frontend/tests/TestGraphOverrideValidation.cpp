@@ -62,7 +62,7 @@ class TestGraphBackedOverrideValidation : public ::testing::TestWithParam<GraphB
 
 TEST(TestPlanOnlyOverrideValidation, AcceptsStructurallyValidOverrides)
 {
-    auto result = detail::validatePlanOnlyOverrideArguments(
+    const auto result = detail::validatePlanOnlyOverrideArguments(
         {1, 2}, {{1, 3, 4, 4}, {1, 3, 2, 2}}, {{48, 16, 4, 1}, {12, 4, 2, 1}});
 
     EXPECT_TRUE(result.is_good()) << result.err_msg;
@@ -71,7 +71,7 @@ TEST(TestPlanOnlyOverrideValidation, AcceptsStructurallyValidOverrides)
 TEST_P(TestPlanOnlyOverrideValidation, RejectsInvalidOverrides)
 {
     const auto& testCase = GetParam();
-    auto result = detail::validatePlanOnlyOverrideArguments(
+    const auto result = detail::validatePlanOnlyOverrideArguments(
         testCase.uids, testCase.shapes, testCase.strides);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -103,7 +103,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(TestGraphBackedOverrideValidation, AcceptsValidOverrides)
 {
-    auto result = detail::validateGraphBackedOverrideArguments(
+    const auto result = detail::validateGraphBackedOverrideArguments(
         makeTensorMap(), {1}, {{1, 3, 4, 4}}, {{48, 16, 4, 1}});
 
     EXPECT_TRUE(result.is_good()) << result.err_msg;
@@ -111,7 +111,7 @@ TEST(TestGraphBackedOverrideValidation, AcceptsValidOverrides)
 
 TEST(TestGraphBackedOverrideValidation, AcceptsWildcardDeclaredDimension)
 {
-    auto result = detail::validateGraphBackedOverrideArguments(
+    const auto result = detail::validateGraphBackedOverrideArguments(
         makeTensorMap({1, 3, -1, 4}, {48, 16, 4, 1}), {1}, {{1, 3, 128, 4}}, {{1536, 512, 4, 1}});
 
     EXPECT_TRUE(result.is_good()) << result.err_msg;
@@ -120,7 +120,7 @@ TEST(TestGraphBackedOverrideValidation, AcceptsWildcardDeclaredDimension)
 TEST_P(TestGraphBackedOverrideValidation, RejectsInvalidOverrides)
 {
     const auto& testCase = GetParam();
-    auto result = detail::validateGraphBackedOverrideArguments(
+    const auto result = detail::validateGraphBackedOverrideArguments(
         testCase.tensorsByUid, testCase.uids, testCase.shapes, testCase.strides);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);

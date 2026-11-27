@@ -102,7 +102,8 @@ public:
         };
         return detail::v8::buildDescriptor(m_matMulDesc, CUDNN_BACKEND_MATMUL_DESCRIPTOR, [&] {
             cudnnDataType_t cudnn_data_type;
-            auto status = detail::convert_to_cudnn_type(m_matMulDesc.compute_type, cudnn_data_type);
+            const auto status
+                = detail::convert_to_cudnn_type(m_matMulDesc.compute_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
                 throw detail::v8::CompatibilityError(

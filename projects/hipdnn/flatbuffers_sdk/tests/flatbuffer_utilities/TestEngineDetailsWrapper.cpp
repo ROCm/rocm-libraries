@@ -15,7 +15,8 @@ namespace
 flatbuffers::FlatBufferBuilder buildValidEngineDetailsBuffer(int64_t engineId)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto config = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, engineId);
+    const auto config
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, engineId);
     builder.Finish(config);
     return builder;
 }
@@ -24,8 +25,8 @@ flatbuffers::FlatBufferBuilder
     buildEngineDetailsWithBehaviorNotes(int64_t engineId, const std::vector<int32_t>& notes)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto notesVector = builder.CreateVector(notes);
-    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+    const auto notesVector = builder.CreateVector(notes);
+    const auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
         builder, engineId, 0, notesVector);
     builder.Finish(details);
     return builder;
@@ -36,8 +37,8 @@ flatbuffers::FlatBufferBuilder
 {
     flatbuffers::FlatBufferBuilder builder;
     // Built through the table API: an empty vector offset is written, unlike the object API.
-    auto notesVector = builder.CreateVector(notes);
-    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+    const auto notesVector = builder.CreateVector(notes);
+    const auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
         builder, engineId, 0, 0, 0, 0, notesVector);
     builder.Finish(details);
     return builder;
@@ -53,11 +54,11 @@ flatbuffers::FlatBufferBuilder
 
     for(const auto& knobIdStr : knobNames)
     {
-        auto knobIdStrOffset = builder.CreateString(knobIdStr);
-        auto descOffset = builder.CreateString("Description for " + knobIdStr);
+        const auto knobIdStrOffset = builder.CreateString(knobIdStr);
+        const auto descOffset = builder.CreateString("Description for " + knobIdStr);
 
         // Create a default int value (required field)
-        auto defaultValueOffset
+        const auto defaultValueOffset
             = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, int64_t{0});
 
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
@@ -69,8 +70,8 @@ flatbuffers::FlatBufferBuilder
         knobs.push_back(knobBuilder.Finish());
     }
 
-    auto knobsVector = builder.CreateVector(knobs);
-    auto details
+    const auto knobsVector = builder.CreateVector(knobs);
+    const auto details
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, engineId, knobsVector);
     builder.Finish(details);
     return builder;
@@ -79,8 +80,8 @@ flatbuffers::FlatBufferBuilder
 flatbuffers::FlatBufferBuilder buildEngineDetailsWithName(int64_t engineId, const std::string& name)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto nameOffset = builder.CreateString(name);
-    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+    const auto nameOffset = builder.CreateString(name);
+    const auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
         builder, engineId, 0, 0, nameOffset);
     builder.Finish(details);
     return builder;
@@ -99,7 +100,7 @@ TEST(TestEngineDetailsWrapper, InvalidBufferIsNotValid)
 TEST(TestEngineDetailsWrapper, ValidBufferIsValid)
 {
     const int64_t testEngineId = 42;
-    auto builder = buildValidEngineDetailsBuffer(testEngineId);
+    const auto builder = buildValidEngineDetailsBuffer(testEngineId);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.engineId(), testEngineId);
@@ -116,7 +117,7 @@ TEST(TestEngineDetailsWrapper, CorruptedBufferIsNotValid)
 
 TEST(TestEngineDetailsWrapper, KnobCountEmpty)
 {
-    auto builder = buildValidEngineDetailsBuffer(42);
+    const auto builder = buildValidEngineDetailsBuffer(42);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobCount(), 0u);
@@ -124,7 +125,7 @@ TEST(TestEngineDetailsWrapper, KnobCountEmpty)
 
 TEST(TestEngineDetailsWrapper, KnobCountNonEmpty)
 {
-    auto builder = buildEngineDetailsWithKnobs(42, {"KNOB_1", "KNOB_2", "KNOB_3"});
+    const auto builder = buildEngineDetailsWithKnobs(42, {"KNOB_1", "KNOB_2", "KNOB_3"});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobCount(), 3u);
@@ -132,7 +133,7 @@ TEST(TestEngineDetailsWrapper, KnobCountNonEmpty)
 
 TEST(TestEngineDetailsWrapper, KnobWrappersEmpty)
 {
-    auto builder = buildValidEngineDetailsBuffer(42);
+    const auto builder = buildValidEngineDetailsBuffer(42);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     const auto& wrappers = wrapper.knobWrappers();
     EXPECT_TRUE(wrappers.empty());
@@ -140,7 +141,7 @@ TEST(TestEngineDetailsWrapper, KnobWrappersEmpty)
 
 TEST(TestEngineDetailsWrapper, KnobWrappersPopulated)
 {
-    auto builder = buildEngineDetailsWithKnobs(42, {"KNOB_A", "KNOB_B"});
+    const auto builder = buildEngineDetailsWithKnobs(42, {"KNOB_A", "KNOB_B"});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     const auto& wrappers = wrapper.knobWrappers();
     EXPECT_EQ(wrappers.size(), 2u);
@@ -150,7 +151,7 @@ TEST(TestEngineDetailsWrapper, KnobWrappersPopulated)
 
 TEST(TestEngineDetailsWrapper, GetKnobByNameFound)
 {
-    auto builder = buildEngineDetailsWithKnobs(42, {"FIRST_KNOB", "SECOND_KNOB"});
+    const auto builder = buildEngineDetailsWithKnobs(42, {"FIRST_KNOB", "SECOND_KNOB"});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& knob = wrapper.getKnobByName("FIRST_KNOB");
@@ -162,7 +163,7 @@ TEST(TestEngineDetailsWrapper, GetKnobByNameFound)
 
 TEST(TestEngineDetailsWrapper, GetKnobByNameNotFound)
 {
-    auto builder = buildEngineDetailsWithKnobs(42, {"SOME_KNOB"});
+    const auto builder = buildEngineDetailsWithKnobs(42, {"SOME_KNOB"});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(wrapper.getKnobByName("NONEXISTENT_KNOB"), std::out_of_range);
@@ -180,14 +181,14 @@ TEST(TestEngineDetailsWrapper, KnobMethodsOnInvalidWrapperThrow)
 
 TEST(TestEngineDetailsWrapper, BehaviorNotesMissingFieldIsEmpty)
 {
-    auto builder = buildValidEngineDetailsBuffer(42);
+    const auto builder = buildValidEngineDetailsBuffer(42);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.behaviorNotes().empty());
 }
 
 TEST(TestEngineDetailsWrapper, BehaviorNotesPopulated)
 {
-    auto builder = buildEngineDetailsWithBehaviorNotes(42, {0, 3, 4});
+    const auto builder = buildEngineDetailsWithBehaviorNotes(42, {0, 3, 4});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto notes = wrapper.behaviorNotes();
@@ -199,14 +200,14 @@ TEST(TestEngineDetailsWrapper, BehaviorNotesPopulated)
 
 TEST(TestEngineDetailsWrapper, NumericalNotesMissingFieldIsNullopt)
 {
-    auto builder = buildValidEngineDetailsBuffer(42);
+    const auto builder = buildValidEngineDetailsBuffer(42);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(wrapper.numericalNotes().has_value());
 }
 
 TEST(TestEngineDetailsWrapper, NumericalNotesExplicitEmptyIsEmptyVector)
 {
-    auto builder = buildEngineDetailsWithNumericalNotes(42, {});
+    const auto builder = buildEngineDetailsWithNumericalNotes(42, {});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto notes = wrapper.numericalNotes();
@@ -216,7 +217,7 @@ TEST(TestEngineDetailsWrapper, NumericalNotesExplicitEmptyIsEmptyVector)
 
 TEST(TestEngineDetailsWrapper, NumericalNotesPopulated)
 {
-    auto builder = buildEngineDetailsWithNumericalNotes(42, {4, 0, 77});
+    const auto builder = buildEngineDetailsWithNumericalNotes(42, {4, 0, 77});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto notes = wrapper.numericalNotes();
@@ -232,7 +233,7 @@ TEST(TestEngineDetailsWrapper, NumericalNotesOnInvalidWrapperThrows)
 
 TEST(TestEngineDetailsWrapper, NamePopulated)
 {
-    auto builder = buildEngineDetailsWithName(42, "EXAMPLE_PROVIDER_RELU_ENGINE");
+    const auto builder = buildEngineDetailsWithName(42, "EXAMPLE_PROVIDER_RELU_ENGINE");
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.name(), "EXAMPLE_PROVIDER_RELU_ENGINE");
@@ -240,7 +241,7 @@ TEST(TestEngineDetailsWrapper, NamePopulated)
 
 TEST(TestEngineDetailsWrapper, NameMissingFieldIsEmpty)
 {
-    auto builder = buildValidEngineDetailsBuffer(42);
+    const auto builder = buildValidEngineDetailsBuffer(42);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_TRUE(wrapper.name().empty());
@@ -248,7 +249,7 @@ TEST(TestEngineDetailsWrapper, NameMissingFieldIsEmpty)
 
 TEST(TestEngineDetailsWrapper, NameEmptyStringIsEmpty)
 {
-    auto builder = buildEngineDetailsWithName(42, "");
+    const auto builder = buildEngineDetailsWithName(42, "");
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_TRUE(wrapper.name().empty());

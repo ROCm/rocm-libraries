@@ -38,8 +38,9 @@ inline flatbuffers::DetachedBuffer buildBatchnormGraph()
 {
     flatbuffers::FlatBufferBuilder builder;
     const auto json = nlohmann::json::parse(BATCHNORM_GRAPH_JSON);
-    auto offset = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
-        builder, json);
+    const auto offset
+        = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(builder,
+                                                                                        json);
     builder.Finish(offset);
     return builder.Release();
 }
@@ -97,7 +98,7 @@ inline flatbuffers::DetachedBuffer buildSdpaGraph(int64_t seq)
 {
     const auto dims = nlohmann::json::array({2, 4, seq, 128});
     const auto strides = nlohmann::json::array({4 * seq * 128, seq * 128, 128, 1});
-    auto tensor = [&](int64_t uid) {
+    const auto tensor = [&](int64_t uid) {
         return nlohmann::json{{"name", ""},
                               {"uid", uid},
                               {"strides", strides},
@@ -137,8 +138,9 @@ inline flatbuffers::DetachedBuffer buildSdpaGraph(int64_t seq)
         {"name", ""}};
 
     flatbuffers::FlatBufferBuilder builder;
-    auto offset = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
-        builder, graph);
+    const auto offset
+        = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(builder,
+                                                                                        graph);
     builder.Finish(offset);
     return builder.Release();
 }
@@ -171,7 +173,7 @@ inline flatbuffers::DetachedBuffer buildSdpaBackwardGraph(
             CreateTensorAttributesDirect(builder, uid, "", DataType::HALF, &qStrides, &qDims));
     }
 
-    auto attributes = CreateSdpaBackwardAttributes(builder, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    const auto attributes = CreateSdpaBackwardAttributes(builder, 1, 2, 3, 4, 5, 6, 7, 8, 9);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd",

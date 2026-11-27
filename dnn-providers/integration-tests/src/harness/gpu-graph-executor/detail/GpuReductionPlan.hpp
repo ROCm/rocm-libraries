@@ -101,7 +101,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_tensor_uid(), OutputDataTypeEnum);
 
         using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
-        auto mode = nodeAttributes->mode();
+        const auto mode = nodeAttributes->mode();
         switch(mode)
         {
         case ReductionMode::ADD:

@@ -20,7 +20,7 @@ TEST(TestConvolutionFwdAttributes, CreateConvolutionFwdAttributes)
     convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
     // Configure input tensor
-    auto xTensor = convAttributes.get_x();
+    const auto xTensor = convAttributes.get_x();
     xTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -28,7 +28,7 @@ TEST(TestConvolutionFwdAttributes, CreateConvolutionFwdAttributes)
         .set_stride({3072, 1024, 32, 1});
 
     // Configure weights tensor
-    auto wTensor = convAttributes.get_w();
+    const auto wTensor = convAttributes.get_w();
     wTensor->set_uid(2)
         .set_name("WeightsTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -36,7 +36,7 @@ TEST(TestConvolutionFwdAttributes, CreateConvolutionFwdAttributes)
         .set_stride({27, 9, 3, 1});
 
     // Configure output tensor
-    auto yTensor = convAttributes.get_y();
+    const auto yTensor = convAttributes.get_y();
     yTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
@@ -163,7 +163,7 @@ TEST(TestConvolutionFwdAttributes, SetXMove)
     EXPECT_EQ(xTensor, nullptr);
 
     // The moved tensor should be accessible through get_x()
-    auto retrievedTensor = convAttributes.get_x();
+    const auto retrievedTensor = convAttributes.get_x();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -187,7 +187,7 @@ TEST(TestConvolutionFwdAttributes, SetWMove)
     EXPECT_EQ(wTensor, nullptr);
 
     // The moved tensor should be accessible through get_w()
-    auto retrievedTensor = convAttributes.get_w();
+    const auto retrievedTensor = convAttributes.get_w();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -211,7 +211,7 @@ TEST(TestConvolutionFwdAttributes, SetYWithMove)
     EXPECT_EQ(yTensor, nullptr);
 
     // The moved tensor should be accessible through get_y()
-    auto retrievedTensor = convAttributes.get_y();
+    const auto retrievedTensor = convAttributes.get_y();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
 }
 
@@ -220,13 +220,13 @@ TEST(TestConvolutionFwdAttributes, SetTensorsConstRef)
     hipdnn_frontend::graph::ConvFpropAttributes convAttributes;
 
     // Create tensors
-    auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto xTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     xTensor->set_uid(40).set_name("InputConstRef");
 
-    auto wTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto wTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     wTensor->set_uid(50).set_name("WeightConstRef");
 
-    auto yTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto yTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     yTensor->set_uid(60).set_name("OutputConstRef");
 
     // Set using const reference (copy)
@@ -248,15 +248,15 @@ TEST(TestConvFpropAttributes, LogicalAndStrictEquality)
     attr1.set_dilation({1, 1});
     attr1.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto w1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto w1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     w1->set_uid(2).set_name("W").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_w(w1);
 
-    auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y1->set_uid(3).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_y(y1);
 
@@ -267,15 +267,15 @@ TEST(TestConvFpropAttributes, LogicalAndStrictEquality)
     attr2.set_dilation({1, 1});
     attr2.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto w2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto w2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     w2->set_uid(2).set_name("W").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_w(w2);
 
-    auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     y2->set_uid(3).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_y(y2);
 
@@ -285,7 +285,7 @@ TEST(TestConvFpropAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchX->set_uid(99).set_name("MismatchedX");
     attr2.set_x(structuralMismatchX);
 
@@ -319,7 +319,7 @@ TEST(TestConvFpropAttributes, LogicalAndStrictEquality)
     attr2.set_dilation({1, 1}); // Revert
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchX
         ->set_uid(555) // Diverges from attr1's x1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's x1 ("X")

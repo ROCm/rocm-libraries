@@ -15,31 +15,31 @@ TEST(TestLayernormBackwardAttributes, CreateLayernormBackwardAttributes)
     LayernormBackwardAttributes attrs;
 
     // Set all tensors
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(10);
     attrs.set_dy(dyTensor);
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(11);
     attrs.set_x(xTensor);
-    auto scaleTensor = std::make_shared<TensorAttributes>();
+    const auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_uid(12);
     attrs.set_scale(scaleTensor);
-    auto meanTensor = std::make_shared<TensorAttributes>();
+    const auto meanTensor = std::make_shared<TensorAttributes>();
     meanTensor->set_uid(13);
     attrs.set_mean(meanTensor);
-    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    const auto invVarianceTensor = std::make_shared<TensorAttributes>();
     invVarianceTensor->set_uid(14);
     attrs.set_inv_variance(invVarianceTensor);
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    const auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_uid(15);
     attrs.set_epsilon(epsilonTensor);
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(16);
     attrs.set_dx(dxTensor);
-    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    const auto dscaleTensor = std::make_shared<TensorAttributes>();
     dscaleTensor->set_uid(17);
     attrs.set_dscale(dscaleTensor);
-    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    const auto dbiasTensor = std::make_shared<TensorAttributes>();
     dbiasTensor->set_uid(18);
     attrs.set_dbias(dbiasTensor);
 
@@ -102,7 +102,7 @@ TEST(TestLayernormBackwardAttributes, SetDyMove)
     EXPECT_EQ(dyTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_dy();
+    const auto retrievedTensor = attrs.get_dy();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedDyTensor");
 }
@@ -123,7 +123,7 @@ TEST(TestLayernormBackwardAttributes, SetXMove)
     EXPECT_EQ(xTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_x();
+    const auto retrievedTensor = attrs.get_x();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedXTensor");
 }
@@ -146,7 +146,7 @@ TEST(TestLayernormBackwardAttributes, SetScaleMove)
     EXPECT_EQ(scaleTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_scale();
+    const auto retrievedTensor = attrs.get_scale();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedScaleTensor");
 }
@@ -169,7 +169,7 @@ TEST(TestLayernormBackwardAttributes, SetMeanMove)
     EXPECT_EQ(meanTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_mean();
+    const auto retrievedTensor = attrs.get_mean();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedMeanTensor");
 }
@@ -192,7 +192,7 @@ TEST(TestLayernormBackwardAttributes, SetInvVarianceMove)
     EXPECT_EQ(invVarianceTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_inv_variance();
+    const auto retrievedTensor = attrs.get_inv_variance();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedInvVarianceTensor");
 }
@@ -221,10 +221,10 @@ TEST(TestLayernormBackwardAttributes, SetMeanAndInvVarianceMove)
     EXPECT_EQ(invVarianceTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedMeanTensor = attrs.get_mean();
+    const auto retrievedMeanTensor = attrs.get_mean();
     EXPECT_EQ(retrievedMeanTensor.get(), rawMeanPtr);
     EXPECT_EQ(retrievedMeanTensor->get_name(), "MovedMeanTensor");
-    auto retrievedInvVarianceTensor = attrs.get_inv_variance();
+    const auto retrievedInvVarianceTensor = attrs.get_inv_variance();
     EXPECT_EQ(retrievedInvVarianceTensor.get(), rawInvVariancePtr);
     EXPECT_EQ(retrievedInvVarianceTensor->get_name(), "MovedInvVarianceTensor");
 }
@@ -233,11 +233,11 @@ TEST(TestLayernormBackwardAttributes, SetMeanAndInvVarianceCopy)
 {
     LayernormBackwardAttributes attrs;
 
-    auto meanTensor = std::make_shared<TensorAttributes>();
+    const auto meanTensor = std::make_shared<TensorAttributes>();
     meanTensor->set_uid(13)
         .set_name("CopiedMeanTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
-    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    const auto invVarianceTensor = std::make_shared<TensorAttributes>();
     invVarianceTensor->set_uid(14)
         .set_name("CopiedInvVarianceTensor")
         .set_data_type(hipdnn_frontend::DataType::FLOAT);
@@ -253,10 +253,10 @@ TEST(TestLayernormBackwardAttributes, SetMeanAndInvVarianceCopy)
     EXPECT_NE(invVarianceTensor, nullptr);
 
     // The copied tensor should be accessible through the getter and should have the correct name
-    auto retrievedMeanTensor = attrs.get_mean();
+    const auto retrievedMeanTensor = attrs.get_mean();
     EXPECT_EQ(retrievedMeanTensor.get(), rawMeanPtr);
     EXPECT_EQ(retrievedMeanTensor->get_name(), "CopiedMeanTensor");
-    auto retrievedInvVarianceTensor = attrs.get_inv_variance();
+    const auto retrievedInvVarianceTensor = attrs.get_inv_variance();
     EXPECT_EQ(retrievedInvVarianceTensor.get(), rawInvVariancePtr);
     EXPECT_EQ(retrievedInvVarianceTensor->get_name(), "CopiedInvVarianceTensor");
 }
@@ -279,7 +279,7 @@ TEST(TestLayernormBackwardAttributes, SetEpsilonMove)
     EXPECT_EQ(epsilonTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_epsilon();
+    const auto retrievedTensor = attrs.get_epsilon();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedEpsilonTensor");
 }
@@ -300,7 +300,7 @@ TEST(TestLayernormBackwardAttributes, SetDxMove)
     EXPECT_EQ(dxTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_dx();
+    const auto retrievedTensor = attrs.get_dx();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedDxTensor");
 }
@@ -323,7 +323,7 @@ TEST(TestLayernormBackwardAttributes, SetDscaleMove)
     EXPECT_EQ(dscaleTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_dscale();
+    const auto retrievedTensor = attrs.get_dscale();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedDscaleTensor");
 }
@@ -346,7 +346,7 @@ TEST(TestLayernormBackwardAttributes, SetDbiasMove)
     EXPECT_EQ(dbiasTensor, nullptr);
 
     // The moved tensor should be accessible through the getter and should have the correct name
-    auto retrievedTensor = attrs.get_dbias();
+    const auto retrievedTensor = attrs.get_dbias();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
     EXPECT_EQ(retrievedTensor->get_name(), "MovedDbiasTensor");
 }
@@ -356,23 +356,23 @@ TEST(TestLayernormBackwardAttributes, SetTensorsConstRef)
     LayernormBackwardAttributes attrs;
 
     // Create tensors
-    auto dyTensor = std::make_shared<TensorAttributes>();
+    const auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_uid(10).set_name("DyConstRef");
-    auto xTensor = std::make_shared<TensorAttributes>();
+    const auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(11).set_name("XConstRef");
-    auto scaleTensor = std::make_shared<TensorAttributes>();
+    const auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_uid(12).set_name("ScaleConstRef");
-    auto meanTensor = std::make_shared<TensorAttributes>();
+    const auto meanTensor = std::make_shared<TensorAttributes>();
     meanTensor->set_uid(13).set_name("MeanConstRef");
-    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    const auto invVarianceTensor = std::make_shared<TensorAttributes>();
     invVarianceTensor->set_uid(14).set_name("InvVarianceConstRef");
-    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    const auto epsilonTensor = std::make_shared<TensorAttributes>();
     epsilonTensor->set_uid(15).set_name("EpsilonConstRef");
-    auto dxTensor = std::make_shared<TensorAttributes>();
+    const auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(16).set_name("DxConstRef");
-    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    const auto dscaleTensor = std::make_shared<TensorAttributes>();
     dscaleTensor->set_uid(17).set_name("DscaleConstRef");
-    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    const auto dbiasTensor = std::make_shared<TensorAttributes>();
     dbiasTensor->set_uid(18).set_name("DbiasConstRef");
 
     // Set using const reference (copy)
@@ -404,33 +404,33 @@ TEST(TestLayernormBackwardAttributes, LogicalAndStrictEquality)
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_normalized_dim_count(2);
 
-    auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dy1->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dy(dy1);
 
-    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
-    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale1->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_scale(scale1);
 
-    auto mean1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto mean1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     mean1->set_uid(4).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    auto invVar1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invVar1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invVar1->set_uid(5).set_name("InvVar").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_saved_mean_and_inv_variance(mean1, invVar1);
 
-    auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon1->set_uid(6).set_name("Epsilon").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_epsilon(epsilon1);
 
-    auto dx1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dx1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dx1->set_uid(7).set_name("DX").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dx(dx1);
 
-    auto dscale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dscale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dscale1->set_uid(8).set_name("DScale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_dscale(dscale1);
 
@@ -438,33 +438,33 @@ TEST(TestLayernormBackwardAttributes, LogicalAndStrictEquality)
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_normalized_dim_count(2);
 
-    auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dy2->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dy(dy2);
 
-    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
-    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     scale2->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_scale(scale2);
 
-    auto mean2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto mean2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     mean2->set_uid(4).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
-    auto invVar2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto invVar2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     invVar2->set_uid(5).set_name("InvVar").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_saved_mean_and_inv_variance(mean2, invVar2);
 
-    auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon2->set_uid(6).set_name("Epsilon").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_epsilon(epsilon2);
 
-    auto dx2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dx2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dx2->set_uid(7).set_name("DX").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dx(dx2);
 
-    auto dscale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto dscale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dscale2->set_uid(8).set_name("DScale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_dscale(dscale2);
 
@@ -474,7 +474,7 @@ TEST(TestLayernormBackwardAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Structural tensor mismatch: different UID/name/type entirely
-    auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     structuralMismatchDy->set_uid(99).set_name("MismatchedDY");
     attr2.set_dy(structuralMismatchDy);
 
@@ -490,7 +490,7 @@ TEST(TestLayernormBackwardAttributes, LogicalAndStrictEquality)
     attr2.set_normalized_dim_count(2); // Revert
 
     // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
-    auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchDy
         ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
         .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("DY")

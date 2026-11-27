@@ -124,7 +124,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnMiopenHandle& handle,
         &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));
     _fusePlanDesc = hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t>(
         fusePlanDesc, [](miopenFusionPlanDescriptor_t desc) {
-            auto status = miopenDestroyFusionPlan(desc);
+            const auto status = miopenDestroyFusionPlan(desc);
             if(status != miopenStatusSuccess)
             {
                 HIPDNN_PLUGIN_LOG_ERROR(
@@ -182,9 +182,9 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
 {
     miopenOperatorArgs_t fusionArgs;
     THROW_ON_MIOPEN_FAILURE(miopenCreateOperatorArgs(&fusionArgs));
-    auto fusionArgsRes = hipdnn_data_sdk::utilities::ScopedResource<miopenOperatorArgs_t>(
+    const auto fusionArgsRes = hipdnn_data_sdk::utilities::ScopedResource<miopenOperatorArgs_t>(
         fusionArgs, [](miopenOperatorArgs_t args) {
-            auto status = miopenDestroyOperatorArgs(args);
+            const auto status = miopenDestroyOperatorArgs(args);
             if(status != miopenStatusSuccess)
             {
                 HIPDNN_PLUGIN_LOG_ERROR(
@@ -192,7 +192,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
             }
         });
 
-    auto wBuffer
+    const auto wBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
 
     int opIdx = 0;
@@ -206,7 +206,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_params.bias().has_value())
     {
-        auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        const auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.bias().value().uid(), deviceBuffers, numDeviceBuffers);
 
         miopenFusionOpDescriptor_t biasOp;
@@ -235,9 +235,9 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    auto xBuffer
+    const auto xBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer
+    const auto yBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
 
     THROW_ON_MIOPEN_FAILURE(miopenExecuteFusionPlan_v2(handle.miopenHandle,

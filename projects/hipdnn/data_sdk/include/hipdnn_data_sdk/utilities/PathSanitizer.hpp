@@ -49,7 +49,7 @@ inline std::string sanitizeForPath(std::string_view raw)
 
     constexpr size_t MAX_STEM_LENGTH = 96;
 
-    auto isIllegal = [](char c) {
+    const auto isIllegal = [](char c) {
         const auto byte = static_cast<unsigned char>(c);
         // Control bytes are illegal in a path component on both platforms, and a NUL
         // would silently end the name at the first C-string boundary. Non-ASCII bytes go

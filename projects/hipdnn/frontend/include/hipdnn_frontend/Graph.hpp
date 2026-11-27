@@ -517,7 +517,7 @@ protected:
     // identifying the step that failed.
     static Error finalizePlanDescriptor(CompiledPlan& plan)
     {
-        auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
+        const auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
             plan.executionPlanDesc->get(),
             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -532,7 +532,8 @@ protected:
                         + " Backend error: " + backendErrMsg.data()};
         }
 
-        auto finStatus = detail::hipdnnBackend()->backendFinalize(plan.executionPlanDesc->get());
+        const auto finStatus
+            = detail::hipdnnBackend()->backendFinalize(plan.executionPlanDesc->get());
         if(finStatus != HIPDNN_STATUS_SUCCESS)
         {
             std::array<char, 1024> backendErrMsg{};
@@ -544,7 +545,7 @@ protected:
         plan.executionPlanFinalized = true;
 
         int64_t wsSize = 0;
-        auto wsStatus = detail::hipdnnBackend()->backendGetAttribute(
+        const auto wsStatus = detail::hipdnnBackend()->backendGetAttribute(
             plan.executionPlanDesc->get(),
             HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
             HIPDNN_TYPE_INT64,
@@ -867,6 +868,7 @@ private:
         std::vector<Knob> knobVector;
         HIPDNN_CHECK_ERROR(detail::unpackKnobsFromDescriptors(engineDesc, knobVector));
 
+        // NOLINTNEXTLINE(misc-const-correctness) knob is moved from; const would copy
         for(auto& knob : knobVector)
         {
             knobs.try_emplace(knob.knobId(), std::move(knob));
@@ -939,7 +941,7 @@ private:
     // Add a plan spec to _planSpecs if no duplicate exists (linear scan dedup).
     void addPlanSpecIfUnique(const autotune::detail::PlanSpec& spec)
     {
-        auto it = std::find(_planSpecs.begin(), _planSpecs.end(), spec);
+        const auto it = std::find(_planSpecs.begin(), _planSpecs.end(), spec);
         if(it == _planSpecs.end())
         {
             _planSpecs.push_back(spec);
@@ -1060,7 +1062,7 @@ private:
 
         for(const auto& setting : settings)
         {
-            auto knobIt = existingKnobs.find(setting.knobId());
+            const auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
             {
                 HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
@@ -1106,7 +1108,7 @@ private:
                 continue;
             }
 
-            auto knobIt = knobLookup.find(setting.knobId());
+            const auto knobIt = knobLookup.find(setting.knobId());
             if(knobIt == knobLookup.end())
             {
                 return {ErrorCode::INVALID_VALUE,
@@ -1114,7 +1116,7 @@ private:
                             + std::to_string(engineId)};
             }
 
-            auto valErr = knobIt->second.validate(setting);
+            const auto valErr = knobIt->second.validate(setting);
             if(valErr.is_bad())
             {
                 return {ErrorCode::INVALID_VALUE,
@@ -1382,7 +1384,7 @@ private:
         if(_preferredEngineId.has_value())
         {
             const int64_t preferredId = _preferredEngineId.value();
-            auto it = std::find(engineIds.begin(), engineIds.end(), preferredId);
+            const auto it = std::find(engineIds.begin(), engineIds.end(), preferredId);
             if(it != engineIds.end())
             {
                 selectedIndex = static_cast<size_t>(std::distance(engineIds.begin(), it));
@@ -1426,10 +1428,10 @@ private:
 
         for(size_t inputNodeIndex = 0; inputNodeIndex < nodeCount; ++inputNodeIndex)
         {
-            auto inputs = _sub_nodes[inputNodeIndex]->getNodeInputTensorAttributes();
-            for(auto& input : inputs)
+            const auto inputs = _sub_nodes[inputNodeIndex]->getNodeInputTensorAttributes();
+            for(const auto& input : inputs)
             {
-                auto it = tensorToOriginNode.find(input);
+                const auto it = tensorToOriginNode.find(input);
                 if(it != tensorToOriginNode.end())
                 {
                     const size_t outputNodeIndex = it->second;
@@ -1448,8 +1450,8 @@ private:
 
         for(size_t i = 0; i < nodeCount; ++i)
         {
-            auto outputs = _sub_nodes[i]->getNodeOutputTensorAttributes();
-            for(auto& output : outputs)
+            const auto outputs = _sub_nodes[i]->getNodeOutputTensorAttributes();
+            for(const auto& output : outputs)
             {
                 tensorToOriginNode[output] = i;
             }
@@ -1463,7 +1465,7 @@ private:
         std::vector<std::shared_ptr<INode>> reorderedNodes;
         reorderedNodes.reserve(topologicalOrder.size());
 
-        for(auto idx : topologicalOrder)
+        for(const auto idx : topologicalOrder)
         {
             reorderedNodes.push_back(_sub_nodes[idx]);
         }
@@ -1478,11 +1480,11 @@ private:
         std::unordered_set<std::shared_ptr<TensorAttributes>> allNodeOutputs;
         std::unordered_set<std::shared_ptr<TensorAttributes>> graphInputs;
 
-        auto collectNodeOutputs = [&](const INode& node) {
+        const auto collectNodeOutputs = [&](const INode& node) {
             auto nodeOutputs = node.getNodeOutputTensorAttributes();
             allNodeOutputs.insert(nodeOutputs.begin(), nodeOutputs.end());
         };
-        auto collectGraphInputs = [&](const INode& node) {
+        const auto collectGraphInputs = [&](const INode& node) {
             auto nodeInputs = node.getNodeInputTensorAttributes();
             std::copy_if(nodeInputs.begin(),
                          nodeInputs.end(),
@@ -1800,7 +1802,7 @@ private:
                 size_t primingSupportedCount = 0;
                 for(size_t specIdx = 0; specIdx < filteredSpecs.size(); ++specIdx)
                 {
-                    auto& spec = filteredSpecs[specIdx];
+                    const auto& spec = filteredSpecs[specIdx];
                     if(!spec.supportsExhaustive)
                     {
                         HIPDNN_FE_LOG_INFO("autotune: engine "
@@ -1815,7 +1817,8 @@ private:
                     primingKnobs.emplace_back(autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1});
 
                     CompiledPlan primingPlan;
-                    auto compileErr = compilePlanFromSpec(spec.engineId, primingKnobs, primingPlan);
+                    const auto compileErr
+                        = compilePlanFromSpec(spec.engineId, primingKnobs, primingPlan);
                     if(compileErr.is_bad())
                     {
                         if(config.primingFailurePolicy
@@ -1836,7 +1839,7 @@ private:
 
                     // Finalize the priming plan (sets engine config, finalizes,
                     // and queries the compiled workspace into primingPlan.workspaceSize).
-                    auto finErr = finalizePlanDescriptor(primingPlan);
+                    const auto finErr = finalizePlanDescriptor(primingPlan);
                     if(finErr.is_bad())
                     {
                         if(config.primingFailurePolicy
@@ -1890,7 +1893,7 @@ private:
                     }
 
                     // Execute priming plan once
-                    auto execErr = detail::executeWithPlan(
+                    const auto execErr = detail::executeWithPlan(
                         handle, *primingPlan.executionPlanDesc, variantPackDesc);
                     if(execErr.is_bad())
                     {
@@ -1938,9 +1941,10 @@ private:
             {
                 const auto& spec = filteredSpecs[specIdx];
                 CompiledPlan plan = std::move(evaluatedSpecPlans[specIdx]);
-                auto compileErr = plan.engineConfigDesc != nullptr
-                                      ? Error{ErrorCode::OK, ""}
-                                      : compilePlanFromSpec(spec.engineId, spec.knobSettings, plan);
+                const auto compileErr
+                    = plan.engineConfigDesc != nullptr
+                          ? Error{ErrorCode::OK, ""}
+                          : compilePlanFromSpec(spec.engineId, spec.knobSettings, plan);
                 if(compileErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("autotune: failed to compile plan for engine "
@@ -1961,7 +1965,7 @@ private:
 
                 // Finalize the plan (sets engine config, finalizes, and queries
                 // the compiled workspace into plan.workspaceSize).
-                auto finErr = finalizePlanDescriptor(plan);
+                const auto finErr = finalizePlanDescriptor(plan);
                 if(finErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("autotune: failed to finalize plan for engine "
@@ -2315,7 +2319,7 @@ private:
                 bool warmupFailed = false;
                 for(int w = 0; w < config.warmupIterations; ++w)
                 {
-                    auto execErr
+                    const auto execErr
                         = detail::executeWithPlan(handle, *plan.executionPlanDesc, variantPackDesc);
                     if(execErr.is_bad())
                     {
@@ -2331,7 +2335,7 @@ private:
                 }
 
                 // --- Device sync before timed iterations ---
-                auto syncErr = autotune::detail::syncDevice();
+                const auto syncErr = autotune::detail::syncDevice();
                 if(syncErr.is_bad())
                 {
                     HIPDNN_FE_LOG_ERROR(
@@ -2359,7 +2363,7 @@ private:
                 // One lambda for both strategies: it just runs the reusable profiling
                 // sequence against this comparison's shared context; the loop helpers
                 // classify the result (record / restart-unstalled / malformed).
-                auto timeOnce = [&](::hipdnn_frontend::ExecutionTiming& timing) -> Error {
+                const auto timeOnce = [&](::hipdnn_frontend::ExecutionTiming& timing) -> Error {
                     return ::hipdnn_frontend::detail::executeWithPlanTimed(handle,
                                                                            *plan.executionPlanDesc,
                                                                            variantPackDesc,
@@ -2370,7 +2374,7 @@ private:
 
                 if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
                 {
-                    auto onIteration = [&](int t, float elapsed) {
+                    const auto onIteration = [&](int t, float elapsed) {
                         HIPDNN_FE_LOG_INFO("autotune: engine "
                                            << result.engineName << ": iter " << (t + 1) << "/"
                                            << config.timedIterations << ", time=" << elapsed
@@ -2392,7 +2396,7 @@ private:
                 }
                 else // RUN_UNTIL_STABLE
                 {
-                    auto onIteration = [&](int t, float elapsed, float cov, bool covValid) {
+                    const auto onIteration = [&](int t, float elapsed, float cov, bool covValid) {
                         const std::string covStr = covValid ? std::to_string(cov) : "N/A";
                         HIPDNN_FE_LOG_INFO("autotune: engine "
                                            << result.engineName << ": iter " << (t + 1) << "/"
@@ -2543,7 +2547,7 @@ private:
                     tensorIds.emplace_back(tensor.tensorId);
                 }
 
-                auto writeErr = autotune::detail::writeAutotuneResults(
+                const auto writeErr = autotune::detail::writeAutotuneResults(
                     storageConfig.filePath,
                     matchKey->opName,
                     allResults,
@@ -2806,10 +2810,11 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        auto tensorToOriginNode = buildTensorToOriginNodeMap();
-        auto graphStructure = buildAdjacencyList(tensorToOriginNode);
+        const auto tensorToOriginNode = buildTensorToOriginNodeMap();
+        const auto graphStructure = buildAdjacencyList(tensorToOriginNode);
 
-        auto sortResult = detail::performTopologicalSortWithComponentDetection(graphStructure);
+        const auto sortResult
+            = detail::performTopologicalSortWithComponentDetection(graphStructure);
 
         if(sortResult.hasCycle)
         {
@@ -3060,7 +3065,7 @@ public:
         }
 
         notes.reserve(backendNotes.size());
-        for(auto note : backendNotes)
+        for(const auto note : backendNotes)
         {
             // A note this frontend does not recognize is dropped rather than
             // surfaced: a newer backend may define notes past this frontend's
@@ -3166,7 +3171,7 @@ public:
         }
 
         notes.reserve(backendNotes.size());
-        for(auto note : backendNotes)
+        for(const auto note : backendNotes)
         {
             // A note this frontend does not recognize is dropped rather than
             // surfaced: a newer backend may define notes past this frontend's
@@ -3999,7 +4004,7 @@ public:
 
             for(const size_t i : candidates)
             {
-                auto& plan = _compiledPlans[i];
+                const auto& plan = _compiledPlans[i];
 
                 // The active plan, and any plan an earlier ALL or build_plan_at_index()
                 // finalized, is already built: finalizing it again fails in the backend.
@@ -4065,7 +4070,7 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        auto& activePlan = _compiledPlans[_activePlanIndex];
+        const auto& activePlan = _compiledPlans[_activePlanIndex];
         if(!activePlan.engineConfigDesc || !activePlan.executionPlanDesc)
         {
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};
@@ -4210,7 +4215,7 @@ public:
                     "The plan-spec path and compiled-plan path are mutually exclusive."};
         }
 
-        auto graphName
+        const auto graphName
             = graph_attributes.get_name().empty() ? "unnamed" : graph_attributes.get_name();
         HIPDNN_FE_LOG_INFO("BUILD with handle for graph '"
                            << graphName << "', policy: " << static_cast<int>(policy)
@@ -4279,7 +4284,7 @@ public:
             info.engineName = engineNameFor(handle, engineIds[i]);
 
             // Get knobs for this engine (failure is non-fatal; info.knobs stays empty)
-            auto knobErr = get_knobs_for_engine(engineIds[i], info.knobs);
+            const auto knobErr = get_knobs_for_engine(engineIds[i], info.knobs);
             if(knobErr.is_bad())
             {
                 HIPDNN_FE_LOG_WARN("Failed to get knobs for engine " << engineIds[i]);
@@ -4290,7 +4295,7 @@ public:
 
             // Query workspace size from finalized engine config descriptor
             int64_t wsSize = 0;
-            auto wsStatus
+            const auto wsStatus
                 = detail::hipdnnBackend()->backendGetAttribute(engineConfigDescs[i]->get(),
                                                                HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE,
                                                                HIPDNN_TYPE_INT64,
@@ -4386,7 +4391,7 @@ public:
 
         // Validate engine exists for this graph by querying knobs
         std::vector<Knob> knobs;
-        auto engineErr = get_knobs_for_engine(engineId, knobs);
+        const auto engineErr = get_knobs_for_engine(engineId, knobs);
         if(engineErr.is_bad())
         {
             return {ErrorCode::INVALID_VALUE,
@@ -4475,7 +4480,7 @@ public:
         {
             // Skip engines that don't work for this graph (batch semantics)
             std::vector<Knob> knobs;
-            auto err = get_knobs_for_engine(variant.engineId, knobs);
+            const auto err = get_knobs_for_engine(variant.engineId, knobs);
             if(err.is_bad())
             {
                 HIPDNN_FE_LOG_WARN("Skipping engine " << variant.engineId
@@ -4499,7 +4504,7 @@ public:
                 = autotune::detail::stripBenchmarkingKnob(variantSettings, "add_engine_variants()");
 
             // Validate knob settings - return hard error for invalid knobs
-            auto knobErr = validateKnobSettingsStrict(spec.knobSettings, variant.engineId);
+            const auto knobErr = validateKnobSettingsStrict(spec.knobSettings, variant.engineId);
             if(knobErr.is_bad())
             {
                 return {ErrorCode::INVALID_VALUE,
@@ -4539,7 +4544,7 @@ public:
         {
             // Validate engine
             std::vector<Knob> knobs;
-            auto validateErr = get_knobs_for_engine(sweepSpec.engineId, knobs);
+            const auto validateErr = get_knobs_for_engine(sweepSpec.engineId, knobs);
             if(validateErr.is_bad())
             {
                 HIPDNN_FE_LOG_WARN("Skipping engine " << sweepSpec.engineId
@@ -5151,7 +5156,7 @@ public:
                         + " has no valid execution plan descriptor."};
         }
 
-        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+        const auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
         {
@@ -5665,7 +5670,7 @@ public:
                     "from_compiled_plan_binary() first."};
         }
 
-        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+        const auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
         {
@@ -5795,7 +5800,7 @@ public:
                     "from_compiled_plan_binary() first."};
         }
 
-        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+        const auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
         {
@@ -5915,7 +5920,7 @@ public:
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "
                                               << overrideUids.size() << " override entries.");
 
-        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+        const auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
         {
@@ -6116,13 +6121,13 @@ public:
             attributes.set_name("Batchnorm_" + std::to_string(_sub_nodes.size()));
         }
 
-        auto y = outputTensor(attributes.get_name() + "::Y");
-        auto meanOut = outputTensor(attributes.get_name() + "::MEAN");
-        auto invVarianceOut = outputTensor(attributes.get_name() + "::INV_VARIANCE");
+        const auto y = outputTensor(attributes.get_name() + "::Y");
+        const auto meanOut = outputTensor(attributes.get_name() + "::MEAN");
+        const auto invVarianceOut = outputTensor(attributes.get_name() + "::INV_VARIANCE");
 
-        auto prevRunningMean = attributes.get_prev_running_mean();
-        auto prevRunningVariance = attributes.get_prev_running_variance();
-        auto momentum = attributes.get_momentum();
+        const auto prevRunningMean = attributes.get_prev_running_mean();
+        const auto prevRunningVariance = attributes.get_prev_running_variance();
+        const auto momentum = attributes.get_momentum();
 
         std::shared_ptr<TensorAttributes> nextRunningMean;
         std::shared_ptr<TensorAttributes> nextRunningVariance;
@@ -6183,9 +6188,9 @@ public:
             attributes.set_name("BatchnormBackward_" + std::to_string(_sub_nodes.size()));
         }
 
-        auto dx = outputTensor(attributes.get_name() + "::DX");
-        auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
-        auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
+        const auto dx = outputTensor(attributes.get_name() + "::DX");
+        const auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
+        const auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
 
         attributes.set_x(std::move(x));
         attributes.set_dy(std::move(dy));
@@ -6349,7 +6354,7 @@ public:
         nameInputIfUnset(bias, attributes.get_name(), "::BIAS");
         nameInputIfUnset(attributes.get_epsilon(), attributes.get_name(), "::EPSILON");
 
-        auto y = outputTensor(attributes.get_name() + "::Y");
+        const auto y = outputTensor(attributes.get_name() + "::Y");
 
         std::shared_ptr<TensorAttributes> mean = nullptr;
         std::shared_ptr<TensorAttributes> invVariance = nullptr;
@@ -6419,9 +6424,9 @@ public:
         nameInputIfUnset(attributes.get_inv_variance(), attributes.get_name(), "::INV_VARIANCE");
         nameInputIfUnset(attributes.get_epsilon(), attributes.get_name(), "::EPSILON");
 
-        auto dx = outputTensor(attributes.get_name() + "::DX");
-        auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
-        auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
+        const auto dx = outputTensor(attributes.get_name() + "::DX");
+        const auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
+        const auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
 
         attributes.set_dy(std::move(dy));
         attributes.set_x(std::move(x));
@@ -6477,7 +6482,7 @@ public:
             attributes.set_name("RMSNorm_" + std::to_string(_sub_nodes.size()));
         }
 
-        auto y = outputTensor(attributes.get_name() + "::Y");
+        const auto y = outputTensor(attributes.get_name() + "::Y");
 
         std::shared_ptr<TensorAttributes> invRmsOut;
         if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
@@ -6528,8 +6533,8 @@ public:
             attributes.set_name("RMSNormBackward_" + std::to_string(_sub_nodes.size()));
         }
 
-        auto dx = outputTensor(attributes.get_name() + "::DX");
-        auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
+        const auto dx = outputTensor(attributes.get_name() + "::DX");
+        const auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
 
         std::shared_ptr<TensorAttributes> dbias;
         if(attributes.get_compute_dbias())
@@ -6610,8 +6615,8 @@ public:
             attributes.set_name("BlockScaleQuantize_" + std::to_string(_sub_nodes.size()));
         }
 
-        auto y = outputTensor(attributes.get_name() + "::Y");
-        auto scale = outputTensor(attributes.get_name() + "::Scale");
+        const auto y = outputTensor(attributes.get_name() + "::Y");
+        const auto scale = outputTensor(attributes.get_name() + "::Scale");
 
         attributes.set_x(std::move(x));
         attributes.set_y(y);
@@ -7029,7 +7034,7 @@ public:
         nameInputIfUnset(k, attributes.get_name(), "::K");
         nameInputIfUnset(v, attributes.get_name(), "::V");
 
-        auto o = outputTensor(attributes.get_name() + "::O");
+        const auto o = outputTensor(attributes.get_name() + "::O");
         std::array<std::shared_ptr<TensorAttributes>, 2> ret = {o, nullptr};
 
         attributes.set_q(std::move(q));
@@ -7041,7 +7046,7 @@ public:
         {
             HIPDNN_FE_LOG_INFO("SDPA node '" << attributes.get_name()
                                              << "' is configured to generate stats output.");
-            auto stats = outputTensor(attributes.get_name() + "::STATS");
+            const auto stats = outputTensor(attributes.get_name() + "::STATS");
             attributes.set_stats(stats);
             ret[1] = stats;
         }
@@ -7097,9 +7102,9 @@ public:
         nameInputIfUnset(v, attributes.get_name(), "::V");
         nameInputIfUnset(dO, attributes.get_name(), "::dO");
 
-        auto dq = outputTensor(attributes.get_name() + "::dQ");
-        auto dk = outputTensor(attributes.get_name() + "::dK");
-        auto dv = outputTensor(attributes.get_name() + "::dV");
+        const auto dq = outputTensor(attributes.get_name() + "::dQ");
+        const auto dk = outputTensor(attributes.get_name() + "::dK");
+        const auto dv = outputTensor(attributes.get_name() + "::dV");
 
         attributes.set_q(std::move(q));
         attributes.set_k(std::move(k));
@@ -7153,7 +7158,7 @@ public:
         }
         nameInputIfUnset(x, attributes.get_name(), "::X");
 
-        auto y = outputTensor(attributes.get_name() + "::Y");
+        const auto y = outputTensor(attributes.get_name() + "::Y");
         std::shared_ptr<TensorAttributes> index = nullptr;
         const bool generateIndex = attributes.get_generate_index().value_or(false);
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)

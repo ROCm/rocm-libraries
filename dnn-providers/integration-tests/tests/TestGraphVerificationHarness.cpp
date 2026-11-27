@@ -102,7 +102,7 @@ TEST_F(TestGraphVerificationHarnessHostOnly, Fp8ToleranceReachesValidatorWithAto
     ASSERT_TRUE(fp8Step.has_value());
     ASSERT_NE(fp8Step->atol, fp8Step->rtol);
 
-    auto output = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto output = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     output->set_uid(7).set_name("y").set_data_type(hipdnn_frontend::DataType::FP8_E4M3);
     output->set_dim({1}).set_stride({1});
 

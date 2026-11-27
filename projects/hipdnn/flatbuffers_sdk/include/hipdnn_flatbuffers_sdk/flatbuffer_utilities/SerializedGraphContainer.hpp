@@ -68,7 +68,7 @@ inline flatbuffers::DetachedBuffer buildGraphAndPlanContainer(const void* graphD
     flatbuffers::FlatBufferBuilder builder;
 
     builder.ForceVectorAlignment(graphSize, sizeof(uint8_t), 8);
-    auto graphVec = builder.CreateVector(static_cast<const uint8_t*>(graphData), graphSize);
+    const auto graphVec = builder.CreateVector(static_cast<const uint8_t*>(graphData), graphSize);
 
     flatbuffers::Offset<flatbuffers::Vector<uint8_t>> planVec = 0;
     if(planData != nullptr && planSize > 0)
@@ -77,7 +77,7 @@ inline flatbuffers::DetachedBuffer buildGraphAndPlanContainer(const void* graphD
         planVec = builder.CreateVector(static_cast<const uint8_t*>(planData), planSize);
     }
 
-    auto root = data_objects::CreateSerializedGraphAndPlan(builder, graphVec, planVec);
+    const auto root = data_objects::CreateSerializedGraphAndPlan(builder, graphVec, planVec);
     data_objects::FinishSerializedGraphAndPlanBuffer(builder, root);
     return builder.Release();
 }

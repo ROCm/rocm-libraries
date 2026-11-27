@@ -541,18 +541,19 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged,
     const int64_t token = paged.queryHeads * d;
     const std::vector<int64_t> qDims{g.batch, paged.queryHeads, g.queryRows, d};
     const std::vector<int64_t> qStrides{g.queryRows * token, d, token, 1};
-    auto q = makeTensor(Q_UID, "Q", paged.dataType, qDims, qStrides);
+    const auto q = makeTensor(Q_UID, "Q", paged.dataType, qDims, qStrides);
     const int64_t row = paged.interleavedCache ? 2 * d : d;
     const std::vector<int64_t> cacheDims{g.numBlocks, paged.kvHeads, paged.pageSize, d};
     const std::vector<int64_t> cacheStrides{
         paged.kvHeads * paged.pageSize * row, paged.pageSize * row, row, 1};
-    auto k = makeTensor(K_UID, "K", paged.dataType, cacheDims, cacheStrides);
+    const auto k = makeTensor(K_UID, "K", paged.dataType, cacheDims, cacheStrides);
     const auto vS = vStridesOf(paged);
-    auto v = makeTensor(V_UID, "V", paged.dataType, cacheDims, {vS[0], vS[1], vS[2], 1});
+    const auto v = makeTensor(V_UID, "V", paged.dataType, cacheDims, {vS[0], vS[1], vS[2], 1});
     const std::vector<int64_t> tableDims{g.batch, 1, g.maxBlocksPerSeq, 1};
     const std::vector<int64_t> tableStrides{g.maxBlocksPerSeq, g.maxBlocksPerSeq, 1, 1};
-    auto table = makeTensor(PAGE_TABLE_UID, "page_table", DataType::INT32, tableDims, tableStrides);
-    auto tableV
+    const auto table
+        = makeTensor(PAGE_TABLE_UID, "page_table", DataType::INT32, tableDims, tableStrides);
+    const auto tableV
         = paged.separateVTable
               ? makeTensor(
                     PAGE_TABLE_V_UID, "page_table_v", DataType::INT32, tableDims, tableStrides)
@@ -592,7 +593,7 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged,
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
-    auto& o = outputs[0];
+    const auto& o = outputs[0];
     o->set_uid(O_UID)
         .set_name("O")
         .set_output(true)
@@ -1141,7 +1142,7 @@ TEST_P(IntegrationGpuGfx1151WmmaAttentionPaged, MatchesTheHipdnnReferenceAndRepl
     const auto& paged = GetParam();
     const auto g = geometryOf(paged);
     const PagedProblem problem(paged, g);
-    auto graph = buildPagedGraph(paged, g);
+    const auto graph = buildPagedGraph(paged, g);
     ASSERT_NO_FATAL_FAILURE(buildPinnedPlan(*graph));
 
     DeviceInputs device(paged, g, problem);
@@ -1160,7 +1161,7 @@ TEST_P(IntegrationGpuGfx1151WmmaAttentionPaged, MatchesTheHipdnnReferenceAndRepl
     hipGraphExec_t replay = nullptr;
     ASSERT_EQ(hipGraphInstantiate(&replay, captured, nullptr, nullptr, 0), hipSuccess);
 
-    auto rotate = [](std::vector<int32_t> values) {
+    const auto rotate = [](std::vector<int32_t> values) {
         std::rotate(values.begin(), values.begin() + 1, values.end());
         return values;
     };

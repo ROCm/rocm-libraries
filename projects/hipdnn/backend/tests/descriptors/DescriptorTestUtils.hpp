@@ -35,7 +35,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
+    const auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,

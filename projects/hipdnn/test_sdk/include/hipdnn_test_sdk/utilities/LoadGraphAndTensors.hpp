@@ -158,8 +158,8 @@ struct GraphAndTensorMap
             auto uid = mapPair.first;
             auto& referenceTensorPtr = mapPair.second;
 
-            auto dataType = tensorAttributeMap[uid]->data_type();
-            auto validatorFunc = hipdnn_data_sdk::utilities::Visitor{
+            const auto dataType = tensorAttributeMap[uid]->data_type();
+            const auto validatorFunc = hipdnn_data_sdk::utilities::Visitor{
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
                     if constexpr(std::is_same_v<DataType, bool>)
@@ -238,14 +238,14 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
     }(path);
 
     flatbuffers::FlatBufferBuilder graphBuilder;
-    auto graphOffset
+    const auto graphOffset
         = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
             graphBuilder, graphJson);
     graphBuilder.Finish(graphOffset);
 
     auto graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
 
-    auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
+    const auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
     std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
 
@@ -264,7 +264,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
             continue;
         }
 
-        auto tensorPath
+        const auto tensorPath
             = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
         tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
     }
@@ -273,15 +273,15 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     for(auto attributes : raggedTensors)
     {
-        auto raggedOffsetId = attributes->ragged_offset_tensor_uid().value();
-        auto offsetIt = tensorMap.find(raggedOffsetId);
+        const auto raggedOffsetId = attributes->ragged_offset_tensor_uid().value();
+        const auto offsetIt = tensorMap.find(raggedOffsetId);
         if(offsetIt == tensorMap.end())
         {
             throw std::runtime_error(
                 "Error in loadGraphAndTensors(): ragged tensor " + std::to_string(attributes->uid())
                 + " references missing offset tensor " + std::to_string(raggedOffsetId));
         }
-        auto tensorPath
+        const auto tensorPath
             = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
         tensorMap[attributes->uid()] = raggedTensorFromFileAndAttributes(
             tensorPath,

@@ -371,7 +371,7 @@ struct BwdCase
         return tensor;
     };
 
-    auto graph = std::make_shared<fe::graph::Graph>();
+    const auto graph = std::make_shared<fe::graph::Graph>();
     graph->set_name(c.name)
         .set_io_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT)
@@ -387,12 +387,12 @@ struct BwdCase
     const std::vector<int64_t> statsStrides = {c.queryHeads * c.seqQ, c.seqQ, 1, 1};
     const std::vector<int64_t> scalarDims = {1, 1, 1, 1};
 
-    auto q = make(bwd_uid::Q, "Q", c.dataType, qDims, qStrides);
-    auto k = make(bwd_uid::K, "K", c.dataType, kDims, kStrides);
-    auto v = make(bwd_uid::V, "V", c.dataType, vDims, vStrides);
-    auto o = make(bwd_uid::O, "O", c.dataType, qDims, qStrides);
-    auto dO = make(bwd_uid::DO, "dO", c.dataType, qDims, qStrides);
-    auto stats = make(bwd_uid::STATS, "LSE", DataType::FLOAT, statsDims, statsStrides);
+    const auto q = make(bwd_uid::Q, "Q", c.dataType, qDims, qStrides);
+    const auto k = make(bwd_uid::K, "K", c.dataType, kDims, kStrides);
+    const auto v = make(bwd_uid::V, "V", c.dataType, vDims, vStrides);
+    const auto o = make(bwd_uid::O, "O", c.dataType, qDims, qStrides);
+    const auto dO = make(bwd_uid::DO, "dO", c.dataType, qDims, qStrides);
+    const auto stats = make(bwd_uid::STATS, "LSE", DataType::FLOAT, statsDims, statsStrides);
 
     fe::graph::SdpaBackwardAttributes attributes;
     attributes.set_name(c.name);
@@ -412,7 +412,8 @@ struct BwdCase
             make(case_uid::BIAS, "Bias", biasSpec.type, biasSpec.dims, biasStrides));
         if(biasSpec.gradient)
         {
-            auto dBias = make(case_uid::DBIAS, "dBias", biasSpec.type, biasSpec.dims, biasStrides);
+            const auto dBias
+                = make(case_uid::DBIAS, "dBias", biasSpec.type, biasSpec.dims, biasStrides);
             dBias->set_output(true);
             attributes.set_dbias(dBias);
             prepared.outputs[case_uid::DBIAS] = {"dBias",

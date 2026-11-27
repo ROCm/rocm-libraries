@@ -92,18 +92,19 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     const auto oStrides = generateStrides(_oDims);
 
     // --- Forward graph (with stats / LSE output) ---
-    auto fwdBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(_qDims,
-                                                                          qStrides,
-                                                                          _kDims,
-                                                                          kStrides,
-                                                                          _vDims,
-                                                                          vStrides,
-                                                                          _oDims,
-                                                                          oStrides,
-                                                                          DataType::BFLOAT16,
-                                                                          /*withAttnMask=*/false,
-                                                                          /*withScale=*/false,
-                                                                          /*withStats=*/true);
+    const auto fwdBuilder
+        = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(_qDims,
+                                                              qStrides,
+                                                              _kDims,
+                                                              kStrides,
+                                                              _vDims,
+                                                              vStrides,
+                                                              _oDims,
+                                                              oStrides,
+                                                              DataType::BFLOAT16,
+                                                              /*withAttnMask=*/false,
+                                                              /*withScale=*/false,
+                                                              /*withStats=*/true);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper fwdGraph(
         fwdBuilder.GetBufferPointer(), fwdBuilder.GetSize());
@@ -125,7 +126,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     fwdBundle.randomizeTensor(fwdVUid, -1.0f, 1.0f, SEED + 2);
 
     // Execute forward CPU reference.
-    auto fwdVariantPack = fwdBundle.toHostVariantPack();
+    const auto fwdVariantPack = fwdBundle.toHostVariantPack();
     hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter().execute(
         fwdBuilder.GetBufferPointer(), fwdBuilder.GetSize(), fwdVariantPack);
 
@@ -135,7 +136,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     expectFiniteAndNonZero<float>(fwdBundle.getTensor(fwdStatsUid), "LSE_fwd");
 
     // --- Backward graph ---
-    auto bwdBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+    const auto bwdBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         _qDims, qStrides, _kDims, kStrides, _vDims, vStrides, _oDims, oStrides, DataType::BFLOAT16);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper bwdGraph(
@@ -156,7 +157,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     hipdnn_test_sdk::utilities::GraphTensorBundle bwdBundle(bwdTensorMap);
 
     // Copy forward tensors into backward bundle with size safety checks.
-    auto copyTensor
+    const auto copyTensor
         = [](hipdnn_data_sdk::utilities::ITensor& dst, hipdnn_data_sdk::utilities::ITensor& src) {
               const auto srcBytes = src.elementSpace() * src.elementSize();
               const auto dstBytes = dst.elementSpace() * dst.elementSize();
@@ -174,7 +175,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     bwdBundle.randomizeTensor(bwdDoUid, -1.0f, 1.0f, SEED + 3);
 
     // Execute backward CPU reference.
-    auto bwdVariantPack = bwdBundle.toHostVariantPack();
+    const auto bwdVariantPack = bwdBundle.toHostVariantPack();
     hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter().execute(
         bwdBuilder.GetBufferPointer(), bwdBuilder.GetSize(), bwdVariantPack);
 

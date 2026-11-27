@@ -133,7 +133,7 @@ TEST_F(ConvFwdPlanTest, Compile_CallsCompilerWithCorrectFilename)
                                STRIDE_H,
                                STRIDE_W,
                                BLOCK_SIZE};
-    auto plan = std::make_unique<ConvFwdPlan>(params);
+    const auto plan = std::make_unique<ConvFwdPlan>(params);
 
     auto compiledProgram = std::make_unique<MockCompiledProgram>();
     auto* rawProgram = compiledProgram.get();
@@ -151,7 +151,7 @@ TEST_F(ConvFwdPlanTest, Compile_CallsCompilerWithCorrectFilename)
 
 TEST_F(ConvFwdPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)
 {
-    auto plan = createAndCompilePlan();
+    const auto plan = createAndCompilePlan();
 
     // Total output elements: N*K*outH*outW = 1*1*2*2 = 4
     // blockSize=256, gridSize=ceil(4/256)=1
@@ -176,7 +176,7 @@ TEST_F(ConvFwdPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)
 
 TEST_F(ConvFwdPlanTest, Execute_MissingBuffer_Throws)
 {
-    auto plan = createAndCompilePlan();
+    const auto plan = createAndCompilePlan();
 
     std::vector<float> inputData(N * C * H * W, 1.0f);
 

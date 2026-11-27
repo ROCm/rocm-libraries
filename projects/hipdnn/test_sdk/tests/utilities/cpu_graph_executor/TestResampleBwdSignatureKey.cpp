@@ -88,7 +88,7 @@ TEST(TestResampleBwdSignatureKey, CopyConstructor)
 
 TEST(TestResampleBwdSignatureKey, CreateFromNodeWithoutIndex)
 {
-    auto builder = createValidResampleBwdGraph(false);
+    const auto builder = createValidResampleBwdGraph(false);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleBwdSignatureKey key(graph.getNode(0), graph.getTensorMap());
@@ -101,7 +101,7 @@ TEST(TestResampleBwdSignatureKey, CreateFromNodeWithoutIndex)
 
 TEST(TestResampleBwdSignatureKey, CreateFromNodeWithIndex)
 {
-    auto builder = createValidResampleBwdGraph(true);
+    const auto builder = createValidResampleBwdGraph(true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const ResampleBwdSignatureKey key(graph.getNode(0), graph.getTensorMap());

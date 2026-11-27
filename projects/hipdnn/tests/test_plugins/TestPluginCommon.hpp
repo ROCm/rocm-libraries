@@ -811,12 +811,13 @@ public:
             // the frontend checks before serializing a plan alongside the graph.
             const std::vector<int32_t> behaviorNotes{
                 static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
-            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
-                builder,
-                describedId,
-                knobs.empty() ? nullptr : &knobs,
-                &behaviorNotes,
-                getInstance()->getEngineName());
+            const auto newEngineDetails
+                = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+                    builder,
+                    describedId,
+                    knobs.empty() ? nullptr : &knobs,
+                    &behaviorNotes,
+                    getInstance()->getEngineName());
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 

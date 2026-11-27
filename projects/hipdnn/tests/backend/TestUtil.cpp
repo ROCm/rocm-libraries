@@ -271,7 +271,7 @@ void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGra
     nameToUidMap.clear();
     uidToDimsMap.clear();
 
-    auto deserializedGraph
+    const auto deserializedGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph.data());
     ASSERT_NE(deserializedGraph, nullptr);
 

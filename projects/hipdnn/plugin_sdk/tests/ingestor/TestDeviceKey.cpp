@@ -162,8 +162,8 @@ protected:
 
 TEST_P(TestIngestorDeviceKeyCollision, EqualHashesWithADifferingFieldStillCompareUnequal)
 {
-    auto baseline = CollidingKey::with(propertiesFor("gfx942"), 0xABCD);
-    auto variant = CollidingKey::with(GetParam(), 0xABCD);
+    const auto baseline = CollidingKey::with(propertiesFor("gfx942"), 0xABCD);
+    const auto variant = CollidingKey::with(GetParam(), 0xABCD);
 
     ASSERT_EQ(baseline.hash(), variant.hash()) << "the collision must actually be forced";
     EXPECT_NE(static_cast<const DeviceKey&>(baseline), static_cast<const DeviceKey&>(variant))

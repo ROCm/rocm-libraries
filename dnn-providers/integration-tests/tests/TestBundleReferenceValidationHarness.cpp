@@ -161,7 +161,7 @@ class TestBundleReferenceValidationHarnessDevice : public TestBundleReferenceVal
 // registration bug, not a property worth skipping over.
 TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithNoGoldenData)
 {
-    auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/false);
+    const auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/false);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
     harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
@@ -179,7 +179,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 // hand rather than through fixtures::loadBundle.
 TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithNoTensorData)
 {
-    auto bundle = std::make_shared<IntegrationTestBundle>();
+    const auto bundle = std::make_shared<IntegrationTestBundle>();
     bundle->hasGoldenOutputs = true; // clears the first guard so the second one fires
 
     BundleReferenceValidationHarness harness(
@@ -199,7 +199,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 // test above reaches the neighboring no-tensor-data guard.
 TEST_F(TestBundleReferenceValidationHarness, BodyFailsForABundleWithAnAliasAndGoldenData)
 {
-    auto bundle = std::make_shared<IntegrationTestBundle>();
+    const auto bundle = std::make_shared<IntegrationTestBundle>();
     bundle->hasGoldenOutputs = true; // clears SetUp()'s first guard
     bundle->blobs.emplace(); // clears SetUp()'s second guard
     bundle->metadata.aliases.push_back(TensorAlias{1, 0, 0});
@@ -240,7 +240,7 @@ TEST_F(TestBundleReferenceValidationHarness,
             std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
         });
 
-    auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
     harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
@@ -278,7 +278,7 @@ TEST_F(TestBundleReferenceValidationHarnessDevice,
         .Times(AtLeast(1))
         .WillRepeatedly(Return(true));
 
-    auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
     harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
@@ -440,7 +440,7 @@ TEST_F(TestBundleReferenceValidationHarness, ReferenceThatThrowsIsReportedWithIt
 // bundle, instead of the bundle having been dropped quietly at registration.
 TEST_F(TestBundleReferenceValidationHarness, UnreadableGoldenBlobFailsTheRunWithTheReason)
 {
-    auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
+    const auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     ASSERT_TRUE(bundle->blobs.has_value());
     ASSERT_FALSE(bundle->blobs->inputUids.empty());
     std::ofstream(bundle->blobs->pathForUid(bundle->blobs->inputUids.front()),

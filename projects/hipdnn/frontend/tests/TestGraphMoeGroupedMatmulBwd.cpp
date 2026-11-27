@@ -20,13 +20,13 @@ TEST(TestGraphMoeGroupedMatmulBwd, BuildGraph)
         .set_intermediate_data_type(DataType::FLOAT);
 
     // Create input tensors
-    auto dOutput = std::make_shared<TensorAttributes>();
+    const auto dOutput = std::make_shared<TensorAttributes>();
     dOutput->set_dim({1, 8, 32}).set_stride({256, 32, 1}).set_data_type(DataType::FLOAT);
 
-    auto token = std::make_shared<TensorAttributes>();
+    const auto token = std::make_shared<TensorAttributes>();
     token->set_dim({1, 8, 16}).set_stride({128, 16, 1}).set_data_type(DataType::FLOAT);
 
-    auto firstTokenOffset = std::make_shared<TensorAttributes>();
+    const auto firstTokenOffset = std::make_shared<TensorAttributes>();
     firstTokenOffset->set_dim({2, 1, 1}).set_stride({1, 1, 1}).set_data_type(DataType::INT32);
 
     // Create attributes
@@ -34,7 +34,7 @@ TEST(TestGraphMoeGroupedMatmulBwd, BuildGraph)
     attributes.set_name("MoeGroupedMatmulBwdNode");
 
     // Call graph method
-    auto dweight = graph.moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attributes);
+    const auto dweight = graph.moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attributes);
 
     // Verify returned tensor is non-null
     ASSERT_NE(dweight, nullptr);
@@ -42,7 +42,7 @@ TEST(TestGraphMoeGroupedMatmulBwd, BuildGraph)
     EXPECT_TRUE(dweight->get_is_virtual());
 
     // Verify graph validates successfully
-    auto validationResult = graph.validate();
+    const auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // dweight's dims are left unset above, so validate() infers them as
@@ -111,7 +111,7 @@ TEST_P(TestGraphMoeGroupedMatmulBwdNullInput, ReportsMissingInput)
     attributes.set_name("MoeGroupedMatmulBwdNullInput");
 
     // Must not crash even though one input is null.
-    auto dweight = graph.moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attributes);
+    const auto dweight = graph.moe_grouped_matmul_bwd(dOutput, token, firstTokenOffset, attributes);
     ASSERT_NE(dweight, nullptr);
 
     const auto result = graph.validate();

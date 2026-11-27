@@ -96,7 +96,7 @@ public:
         throwIfNotValid();
         populateKnobSettingWrappers();
 
-        auto it = _knobSettingNameToIndex.find(knobName);
+        const auto it = _knobSettingNameToIndex.find(knobName);
         if(it == _knobSettingNameToIndex.end())
         {
             throw std::out_of_range("KnobSetting with name '" + knobName + "' not found");
@@ -137,7 +137,7 @@ private:
                 auto knob = knobs->Get(i);
                 auto wrapper = std::make_unique<
                     hipdnn_flatbuffers_sdk::flatbuffer_utilities::KnobSettingWrapper>(knob);
-                auto knobName = wrapper->knobId();
+                const auto knobName = wrapper->knobId();
                 _knobSettingNameToIndex[knobName] = i;
                 _knobSettingWrappers.push_back(std::move(wrapper));
             }

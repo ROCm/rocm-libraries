@@ -58,7 +58,7 @@ class TestCustomLibraryAdapter : public ::testing::Test
 
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
 {
-    auto adapter = loadScorer("testLinearScorer", 3);
+    const auto adapter = loadScorer("testLinearScorer", 3);
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 3U);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
@@ -71,7 +71,7 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreLinear)
 
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreConstant)
 {
-    auto adapter = loadScorer("testConstantScorer", 2);
+    const auto adapter = loadScorer("testConstantScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     // testConstantScorer always returns 42.0
@@ -81,7 +81,7 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreConstant)
 
 TEST_F(TestCustomLibraryAdapter, LoadAndScoreProduct)
 {
-    auto adapter = loadScorer("testProductScorer", 2);
+    const auto adapter = loadScorer("testProductScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     // testProductScorer multiplies first two features
@@ -92,20 +92,21 @@ TEST_F(TestCustomLibraryAdapter, LoadAndScoreProduct)
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsMissingLibrary)
 {
-    auto adapter = CustomLibraryAdapter::load(
+    const auto adapter = CustomLibraryAdapter::load(
         "/nonexistent/path/to/library.so", "some_symbol", 2, TEST_HASH, libraryHash());
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsMissingSymbol)
 {
-    auto adapter = loadScorer("nonexistent_symbol", 2);
+    const auto adapter = loadScorer("nonexistent_symbol", 2);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptyLibraryPath)
 {
-    auto adapter = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH, libraryHash());
+    const auto adapter
+        = CustomLibraryAdapter::load("", "testLinearScorer", 2, TEST_HASH, libraryHash());
     EXPECT_EQ(adapter, nullptr);
 }
 
@@ -119,13 +120,13 @@ TEST_F(TestCustomLibraryAdapter, LoadRefusesALibraryDeclaringNoHash)
 
 TEST_F(TestCustomLibraryAdapter, LoadFailsEmptySymbolName)
 {
-    auto adapter = loadScorer("", 2);
+    const auto adapter = loadScorer("", 2);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 {
-    auto adapter = loadScorer("testLinearScorer", 3);
+    const auto adapter = loadScorer("testLinearScorer", 3);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_THROW(adapter->score({1.0, 2.0}), std::invalid_argument);
@@ -134,7 +135,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
 
 TEST_F(TestCustomLibraryAdapter, ScoreBatch)
 {
-    auto adapter = loadScorer("testLinearScorer", 2);
+    const auto adapter = loadScorer("testLinearScorer", 2);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {{1.0, 2.0}, {3.0, 4.0}, {0.0, 0.0}};
@@ -148,7 +149,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreBatch)
 TEST_F(TestCustomLibraryAdapter, MultipleAdaptersFromSameLibrary)
 {
     auto adapter1 = loadScorer("testLinearScorer", 2);
-    auto adapter2 = loadScorer("testConstantScorer", 2);
+    const auto adapter2 = loadScorer("testConstantScorer", 2);
 
     ASSERT_NE(adapter1, nullptr);
     ASSERT_NE(adapter2, nullptr);

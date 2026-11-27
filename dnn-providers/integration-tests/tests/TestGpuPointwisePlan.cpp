@@ -83,16 +83,16 @@ flatbuffers::FlatBufferBuilder createCmpGtGraph(DataType outputDataType = DataTy
                                                        false));
     }
 
-    auto pointwiseAttrs = CreatePointwiseAttributes(builder,
-                                                    PointwiseMode::CMP_GT,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    flatbuffers::nullopt,
-                                                    IN_0_UID,
-                                                    IN_1_UID,
-                                                    flatbuffers::nullopt,
-                                                    OUT_UID);
+    const auto pointwiseAttrs = CreatePointwiseAttributes(builder,
+                                                          PointwiseMode::CMP_GT,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          flatbuffers::nullopt,
+                                                          IN_0_UID,
+                                                          IN_1_UID,
+                                                          flatbuffers::nullopt,
+                                                          OUT_UID);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "pointwise_node",
@@ -112,13 +112,13 @@ flatbuffers::FlatBufferBuilder createCmpGtGraph(DataType outputDataType = DataTy
 
 TEST(TestGpuPointwiseUnaryPlanBuilder, PlanConstruction)
 {
-    auto builder = createUnaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createUnaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuPointwiseUnaryPlan<float, float, float>*>(builtPlan.get()) != nullptr;
@@ -127,8 +127,8 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, PlanConstruction)
 
 TEST(TestGpuPointwiseUnaryPlanBuilder, IsApplicable)
 {
-    auto builder = createUnaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createUnaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
@@ -150,8 +150,8 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, IsApplicable)
 
 TEST(TestGpuPointwiseUnaryPlanBuilder, IsNotApplicableForBinaryMode)
 {
-    auto builder = createBinaryGraph(PointwiseMode::ADD);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBinaryGraph(PointwiseMode::ADD);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
@@ -161,24 +161,24 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, IsNotApplicableForBinaryMode)
 
 TEST(TestGpuPointwiseUnaryPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = createUnaryGraph();
+    const auto builder = createUnaryGraph();
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuPointwiseUnaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
@@ -202,8 +202,8 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, IsApplicableForSupportedModes)
                            PointwiseMode::FLOOR,       PointwiseMode::ELU_FWD,
                            PointwiseMode::SOFTPLUS_FWD})
     {
-        auto builder = createUnaryGraph(mode);
-        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto builder = createUnaryGraph(mode);
+        const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()))
             << EnumNamePointwiseMode(mode);
@@ -217,8 +217,8 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, IsNotApplicableForUnsupportedMode)
     // Registered on the CPU reference but not on the GPU one
     for(const auto mode : {PointwiseMode::LOGICAL_NOT, PointwiseMode::GEN_INDEX})
     {
-        auto builder = createUnaryGraph(mode);
-        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto builder = createUnaryGraph(mode);
+        const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()))
             << EnumNamePointwiseMode(mode);
@@ -231,8 +231,8 @@ TEST(TestGpuPointwiseUnaryPlanBuilder, IsNotApplicableForUnsupportedMode)
 
 TEST(TestGpuPointwiseBinaryPlanBuilder, PlanConstruction)
 {
-    auto builder = createBinaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBinaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -241,7 +241,7 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, PlanConstruction)
                                         DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuPointwiseBinaryPlan<float, float, float, float>*>(builtPlan.get())
@@ -251,8 +251,8 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, PlanConstruction)
 
 TEST(TestGpuPointwiseBinaryPlanBuilder, IsApplicable)
 {
-    auto builder = createBinaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBinaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -295,8 +295,8 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, IsApplicableForSupportedModes)
                            PointwiseMode::TANH_BWD,
                            PointwiseMode::RELU_BWD})
     {
-        auto builder = createBinaryGraph(mode);
-        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto builder = createBinaryGraph(mode);
+        const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()))
             << EnumNamePointwiseMode(mode);
@@ -306,8 +306,8 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, IsApplicableForSupportedModes)
 TEST(TestGpuPointwiseBinaryPlanBuilder, IsNotApplicableForUnsupportedMode)
 {
     // DIV is registered on the CPU reference but not on the GPU one
-    auto builder = createBinaryGraph(PointwiseMode::DIV);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBinaryGraph(PointwiseMode::DIV);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -321,8 +321,8 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, IsNotApplicableForUnsupportedMode)
 
 TEST(TestGpuPointwiseBinaryPlanBuilder, IsNotApplicableForUnaryMode)
 {
-    auto builder = createUnaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createUnaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -336,11 +336,11 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, IsNotApplicableForUnaryMode)
 
 TEST(TestGpuPointwiseBinaryPlanBuilder, CmpGtRequiresBooleanOutput)
 {
-    auto booleanBuilder = createCmpGtGraph(DataType::BOOLEAN);
-    auto booleanGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto booleanBuilder = createCmpGtGraph(DataType::BOOLEAN);
+    const auto booleanGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         booleanBuilder.GetBufferPointer(), booleanBuilder.GetSize());
-    auto floatBuilder = createCmpGtGraph(DataType::FLOAT);
-    auto floatGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto floatBuilder = createCmpGtGraph(DataType::FLOAT);
+    const auto floatGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         floatBuilder.GetBufferPointer(), floatBuilder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -368,8 +368,8 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, BooleanOutputIsOnlyApplicableToCmpGt)
         PointwiseMode::MAX_OP, DIMS, strides, DIMS, strides, DIMS, strides);
     spec.ioDataType = DataType::BOOLEAN;
     spec.secondInputDataType = DataType::FLOAT;
-    auto builder = createPointwiseGraph(spec);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createPointwiseGraph(spec);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::BOOLEAN,
@@ -383,7 +383,7 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, BooleanOutputIsOnlyApplicableToCmpGt)
 
 TEST(TestGpuPointwiseBinaryPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = createBinaryGraph();
+    const auto builder = createBinaryGraph();
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
                                         DataType::FLOAT,
@@ -391,20 +391,20 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, IsNotApplicableForRaggedTensors)
                                         DataType::FLOAT>
         patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuPointwiseBinaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -422,8 +422,8 @@ TEST(TestGpuPointwiseBinaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesTyp
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, PlanConstruction)
 {
-    auto builder = createTernaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createTernaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -433,7 +433,7 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, PlanConstruction)
                                          DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuPointwiseTernaryPlan<float, float, bool, float>*>(builtPlan.get())
@@ -443,8 +443,8 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, PlanConstruction)
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, IsApplicable)
 {
-    auto builder = createTernaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createTernaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -474,8 +474,8 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, IsApplicable)
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableWhenMaskIsNotBoolean)
 {
-    auto builder = createTernaryGraph(DataType::FLOAT);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createTernaryGraph(DataType::FLOAT);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -490,8 +490,8 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableWhenMaskIsNotBoolean)
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableWhenModeIsNotBinarySelect)
 {
-    auto builder = createTernaryGraph(DataType::BOOLEAN, PointwiseMode::ADD);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createTernaryGraph(DataType::BOOLEAN, PointwiseMode::ADD);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -506,8 +506,8 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableWhenModeIsNotBinarySelec
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableForBinaryGraph)
 {
-    auto builder = createBinaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createBinaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -522,7 +522,7 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableForBinaryGraph)
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = createTernaryGraph();
+    const auto builder = createTernaryGraph();
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
                                          DataType::FLOAT,
@@ -531,20 +531,20 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, IsNotApplicableForRaggedTensors)
                                          DataType::FLOAT>
         patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuPointwiseTernaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -567,23 +567,23 @@ TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanEluWithAlpha)
 
     // The alpha attribute on the node must reach the kernel
     const float alpha = 2.5f;
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::ELU_FWD,
-                                                                  DIMS,
-                                                                  generateStrides(DIMS),
-                                                                  DIMS,
-                                                                  generateStrides(DIMS),
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  alpha));
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::ELU_FWD,
+                                                                        DIMS,
+                                                                        generateStrides(DIMS),
+                                                                        DIMS,
+                                                                        generateStrides(DIMS),
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        alpha));
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -615,24 +615,24 @@ TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanSoftplusWithBeta)
 
     // The beta attribute on the node must reach the kernel
     const float beta = 2.0f;
-    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::SOFTPLUS_FWD,
-                                                                  DIMS,
-                                                                  generateStrides(DIMS),
-                                                                  DIMS,
-                                                                  generateStrides(DIMS),
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  std::nullopt,
-                                                                  beta));
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::SOFTPLUS_FWD,
+                                                                        DIMS,
+                                                                        generateStrides(DIMS),
+                                                                        DIMS,
+                                                                        generateStrides(DIMS),
+                                                                        DataType::FLOAT,
+                                                                        DataType::FLOAT,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        std::nullopt,
+                                                                        beta));
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -665,12 +665,12 @@ TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanEluWithDefaultAlpha)
 
     // Without an alpha attribute on the node, the kernel uses the default of 1
     const float alpha = 1.0f;
-    auto builder = createUnaryGraph(PointwiseMode::ELU_FWD);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createUnaryGraph(PointwiseMode::ELU_FWD);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -702,12 +702,12 @@ TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanSoftplusWithDefaultBeta)
 
     // Without a beta attribute on the node, the kernel uses the default of 1
     const float beta = 1.0f;
-    auto builder = createUnaryGraph(PointwiseMode::SOFTPLUS_FWD);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createUnaryGraph(PointwiseMode::SOFTPLUS_FWD);
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -746,10 +746,10 @@ TEST(TestGpuPointwiseBinaryPlanDeviceFp32, ExecutePlanMaxMin)
 
     for(const auto mode : {PointwiseMode::MAX_OP, PointwiseMode::MIN_OP})
     {
-        auto builder = createBinaryGraph(mode);
-        auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto builder = createBinaryGraph(mode);
+        const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
-        auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+        const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
         Tensor<float> input0Tensor(DIMS);
         Tensor<float> input1Tensor(DIMS);
@@ -786,8 +786,8 @@ TEST(TestGpuPointwiseBinaryPlanDeviceFp32, ExecutePlanCmpGt)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = createCmpGtGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createCmpGtGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseBinaryPlanBuilder<DataType::FLOAT,
@@ -795,7 +795,7 @@ TEST(TestGpuPointwiseBinaryPlanDeviceFp32, ExecutePlanCmpGt)
                                         DataType::BOOLEAN,
                                         DataType::FLOAT>
         patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> input0Tensor(DIMS);
     Tensor<float> input1Tensor(DIMS);
@@ -829,8 +829,8 @@ TEST(TestGpuPointwiseTernaryPlanDeviceFp32, ExecutePlanBinarySelect)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = createTernaryGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = createTernaryGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseTernaryPlanBuilder<DataType::FLOAT,
@@ -839,7 +839,7 @@ TEST(TestGpuPointwiseTernaryPlanDeviceFp32, ExecutePlanBinarySelect)
                                          DataType::FLOAT,
                                          DataType::FLOAT>
         patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> input0Tensor(DIMS);
     Tensor<float> input1Tensor(DIMS);

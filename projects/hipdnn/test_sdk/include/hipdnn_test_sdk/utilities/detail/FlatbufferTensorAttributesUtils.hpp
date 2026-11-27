@@ -280,9 +280,9 @@ inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttr
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
     bool packSubByteElements = false)
 {
-    auto dims
+    const auto dims
         = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
-    auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
+    const auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
         attribute.strides());
 
     return createTensor(attribute.data_type(), dims, strides, packSubByteElements);
@@ -301,9 +301,9 @@ inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
         std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedOffset,
         const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& lengths = nullptr)
 {
-    auto dims
+    const auto dims
         = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
-    auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
+    const auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
         attribute.strides());
 
     return createRaggedTensor(attribute.data_type(),

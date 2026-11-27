@@ -30,8 +30,8 @@ using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuRMSNormFwdPlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -40,7 +40,7 @@ TEST(TestGpuRMSNormFwdPlanBuilder, PlanConstruction)
                                    DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuRMSNormFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
@@ -49,8 +49,8 @@ TEST(TestGpuRMSNormFwdPlanBuilder, PlanConstruction)
 
 TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -75,7 +75,7 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicable)
 
 TEST(TestGpuRMSNormFwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
                                    DataType::FLOAT,
@@ -83,20 +83,20 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                    DataType::FLOAT>
         patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuRMSNormFwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -110,8 +110,8 @@ TEST(TestGpuRMSNormFwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 
 TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -125,8 +125,8 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesTyp
 
 TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableFalseWhenScaleTensorMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -145,11 +145,11 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableFalseWhenScaleTensorMissing)
 
 TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -164,13 +164,14 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
 {
     // Helper uses float for epsilon type, which differs for double type we've passed for compute
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph({150528, 50176, 224, 1},
-                                                                       {1, 3, 224, 224},
-                                                                       DataType::FLOAT, // input
-                                                                       DataType::DOUBLE // compute
-    );
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidRMSNormGraph({150528, 50176, 224, 1},
+                                                              {1, 3, 224, 224},
+                                                              DataType::FLOAT, // input
+                                                              DataType::DOUBLE // compute
+        );
 
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
@@ -188,8 +189,8 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromCo
 
 TEST(TestGpuRMSNormBwdPlanBuilder, PlanConstruction)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -199,7 +200,7 @@ TEST(TestGpuRMSNormBwdPlanBuilder, PlanConstruction)
                                    DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
 
     const bool result
         = dynamic_cast<GpuRMSNormBwdPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -209,8 +210,8 @@ TEST(TestGpuRMSNormBwdPlanBuilder, PlanConstruction)
 
 TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -240,7 +241,7 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicable)
 
 TEST(TestGpuRMSNormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
                                    DataType::FLOAT,
@@ -249,20 +250,20 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                    DataType::FLOAT>
         patient;
 
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(patient.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(builder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(patient.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuRMSNormBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -277,8 +278,8 @@ TEST(TestGpuRMSNormBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 
 TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -293,8 +294,8 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableReturnsFalseForWrongAttributesTyp
 
 TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableFalseWhenInputTensorMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -314,12 +315,12 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableFalseWhenInputTensorMissing)
 
 TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableFalseWhenDxTensorTypeMismatched)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1},
         {1, 3, 224, 224},
         false,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -334,8 +335,8 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableFalseWhenDxTensorTypeMismatched)
 
 TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableFalseWhenInvRmsTensorMissing)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -355,9 +356,9 @@ TEST(TestGpuRMSNormBwdPlanBuilder, IsApplicableFalseWhenInvRmsTensorMissing)
 
 TEST(TestGpuRMSNormBwdPlanBuilder, BuildNodePlanSucceedsWithOptionalDbias)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+    const auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
-    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuRMSNormBwdPlanBuilder<DataType::FLOAT,
@@ -367,7 +368,7 @@ TEST(TestGpuRMSNormBwdPlanBuilder, BuildNodePlanSucceedsWithOptionalDbias)
                                    DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graph, graph.getNode(0));
     const bool result
         = dynamic_cast<GpuRMSNormBwdPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
@@ -388,10 +389,10 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     constexpr int64_t Y_UID = 2;
     constexpr int64_t SCALE_UID = 3;
     constexpr int64_t EPSILON_UID = 4;
-    auto xDataType = nativeTypeToDataType<XType>();
-    auto yDataType = nativeTypeToDataType<YType>();
-    auto scaleDataType = nativeTypeToDataType<ScaleType>();
-    auto computeDataType = nativeTypeToDataType<ComputeType>();
+    const auto xDataType = nativeTypeToDataType<XType>();
+    const auto yDataType = nativeTypeToDataType<YType>();
+    const auto scaleDataType = nativeTypeToDataType<ScaleType>();
+    const auto computeDataType = nativeTypeToDataType<ComputeType>();
     if(epsilonDataType == DataType::UNSET)
     {
         epsilonDataType = computeDataType;
@@ -419,7 +420,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     tensorAttributes.push_back(
         createScalarTensorAttributes(builder, EPSILON_UID, 1e-5, epsilonDataType, "epsilon"));
 
-    auto rmsnormAttributes
+    const auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
                                                                         X_UID, // x uid
                                                                         SCALE_UID, // scale uid
@@ -428,7 +429,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm",
         computeDataType,
@@ -436,7 +437,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         rmsnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         computeDataType,
@@ -521,11 +522,11 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     constexpr int64_t DSCALE_UID = 6;
     constexpr int64_t DBIAS_UID = 7;
 
-    auto dyDataType = nativeTypeToDataType<GradOutputType>();
-    auto xDataType = nativeTypeToDataType<InputType>();
-    auto scaleDataType = nativeTypeToDataType<ScaleType>();
-    auto dxDataType = nativeTypeToDataType<GradInputType>();
-    auto computeDataType = nativeTypeToDataType<ComputeType>();
+    const auto dyDataType = nativeTypeToDataType<GradOutputType>();
+    const auto xDataType = nativeTypeToDataType<InputType>();
+    const auto scaleDataType = nativeTypeToDataType<ScaleType>();
+    const auto dxDataType = nativeTypeToDataType<GradInputType>();
+    const auto computeDataType = nativeTypeToDataType<ComputeType>();
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -559,7 +560,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, DBIAS_UID, "dbias", scaleDataType, &derivedStrides, &derivedDims));
 
-    auto rmsnormBwdAttributes
+    const auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
             DY_UID, // dy uid
@@ -572,7 +573,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "rmsnorm_bwd",
         computeDataType,
@@ -580,7 +581,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         rmsnormBwdAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         computeDataType,

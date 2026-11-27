@@ -116,28 +116,28 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
     case data_objects::DataType::FP8_E4M3:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3::from_bits(val->value());
+            const auto fp8 = hipdnn_data_sdk::types::fp8_e4m3::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(fp8));
         }
         break;
     case data_objects::DataType::FP8_E5M2:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2::from_bits(val->value());
+            const auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;
     case data_objects::DataType::FP8_E4M3_FNUZ:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3_fnuz::from_bits(val->value());
+            const auto fp8 = hipdnn_data_sdk::types::fp8_e4m3_fnuz::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(fp8));
         }
         break;
     case data_objects::DataType::FP8_E5M2_FNUZ:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2_fnuz::from_bits(val->value());
+            const auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2_fnuz::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;
@@ -190,7 +190,7 @@ TargetType
         throw std::runtime_error(std::string(paramName) + " host scalar pointer is null");
     }
 
-    auto readAs = [hostPtr](auto typeTag) -> TargetType {
+    const auto readAs = [hostPtr](auto typeTag) -> TargetType {
         using SourceType = decltype(typeTag);
         SourceType value;
         std::memcpy(&value, hostPtr, sizeof(SourceType));
@@ -233,7 +233,7 @@ TargetType resolveScalarFromVariantPack(const data_objects::TensorAttributesT& t
 {
     if(tensorAttr.is_runtime_pass_by_value && tensorAttr.value.value == nullptr)
     {
-        auto it = variantPack.find(tensorAttr.uid);
+        const auto it = variantPack.find(tensorAttr.uid);
         if(it == variantPack.end() || it->second == nullptr)
         {
             throw std::runtime_error(

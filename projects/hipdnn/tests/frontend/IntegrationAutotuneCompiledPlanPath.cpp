@@ -108,7 +108,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, ManualLoopEndToEnd)
     int64_t bestIndex = -1;
     for(int64_t i = 0; i < planCount; ++i)
     {
-        auto execResult
+        const auto execResult
             = bundle.graph->execute_plan_at_index(_handle, bundle.variantPack, workspace.get(), i);
         if(execResult.is_good())
         {
@@ -185,7 +185,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, BuildPlansAllCompilesMultipleEngines
     int successCount = 0;
     for(int64_t i = 0; i < planCount; ++i)
     {
-        auto execResult
+        const auto execResult
             = bundle.graph->execute_plan_at_index(_handle, bundle.variantPack, workspace.get(), i);
         if(execResult.is_good())
         {
@@ -215,7 +215,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, BuildPlansAllVsHeuristicsChoice)
     int successCountA = 0;
     for(int64_t i = 0; i < planCountA; ++i)
     {
-        auto execResult = bundleA.graph->execute_plan_at_index(
+        const auto execResult = bundleA.graph->execute_plan_at_index(
             _handle, bundleA.variantPack, workspaceA.get(), i);
         if(execResult.is_good())
         {
@@ -238,7 +238,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, BuildPlansAllVsHeuristicsChoice)
     int successCountB = 0;
     for(int64_t i = 0; i < planCountB; ++i)
     {
-        auto execResult = bundleB.graph->execute_plan_at_index(
+        const auto execResult = bundleB.graph->execute_plan_at_index(
             _handle, bundleB.variantPack, workspaceB.get(), i);
         if(execResult.is_good())
         {
@@ -273,7 +273,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, ManualLoopMultipleEngines)
     std::vector<int64_t> successIndices;
     for(int64_t i = 0; i < planCount; ++i)
     {
-        auto execResult
+        const auto execResult
             = bundle.graph->execute_plan_at_index(_handle, bundle.variantPack, workspace.get(), i);
         if(execResult.is_good())
         {

@@ -22,11 +22,11 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdStrOffset = builder.CreateString(knobIdStr);
-        auto descOffset = builder.CreateString(description);
+        const auto knobIdStrOffset = builder.CreateString(knobIdStr);
+        const auto descOffset = builder.CreateString(description);
 
         // default_value is required - always create one
-        auto defaultVal
+        const auto defaultVal
             = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, defaultValue);
 
         flatbuffers::Offset<void> constraintOffset;
@@ -36,7 +36,7 @@ protected:
         if(withConstraint)
         {
             // Create a simple IntConstraint with min/max/step
-            auto constraint
+            const auto constraint
                 = hipdnn_flatbuffers_sdk::data_objects::CreateIntConstraint(builder, 0, 200, 10);
             constraintOffset = constraint.Union();
             constraintType = hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint;
@@ -58,7 +58,7 @@ protected:
             knobBuilder.add_constraint(constraintOffset);
         }
 
-        auto knob = knobBuilder.Finish();
+        const auto knob = knobBuilder.Finish();
         builder.Finish(knob);
 
         return builder.Release();
@@ -69,10 +69,10 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdStrOffset = builder.CreateString(knobIdStr);
-        auto descOffset = builder.CreateString("Float knob");
+        const auto knobIdStrOffset = builder.CreateString(knobIdStr);
+        const auto descOffset = builder.CreateString("Float knob");
 
-        auto floatVal
+        const auto floatVal
             = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, defaultValue);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
@@ -82,7 +82,7 @@ protected:
             hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
         knobBuilder.add_default_value(floatVal.Union());
 
-        auto knob = knobBuilder.Finish();
+        const auto knob = knobBuilder.Finish();
         builder.Finish(knob);
 
         return builder.Release();
@@ -94,11 +94,11 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdStrOffset = builder.CreateString(knobIdStr);
-        auto descOffset = builder.CreateString("Knob with float constraint");
+        const auto knobIdStrOffset = builder.CreateString(knobIdStr);
+        const auto descOffset = builder.CreateString("Knob with float constraint");
 
-        auto floatVal = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, 1.0);
-        auto floatConstraint = hipdnn_flatbuffers_sdk::data_objects::CreateFloatConstraint(
+        const auto floatVal = hipdnn_flatbuffers_sdk::data_objects::CreateFloatValue(builder, 1.0);
+        const auto floatConstraint = hipdnn_flatbuffers_sdk::data_objects::CreateFloatConstraint(
             builder, minValue, maxValue);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
@@ -111,7 +111,7 @@ protected:
             hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::FloatConstraint);
         knobBuilder.add_constraint(floatConstraint.Union());
 
-        auto knob = knobBuilder.Finish();
+        const auto knob = knobBuilder.Finish();
         builder.Finish(knob);
 
         return builder.Release();
@@ -124,11 +124,12 @@ protected:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        auto knobIdStrOffset = builder.CreateString(knobIdStr);
-        auto descOffset = builder.CreateString("Knob with string constraint");
+        const auto knobIdStrOffset = builder.CreateString(knobIdStr);
+        const auto descOffset = builder.CreateString("Knob with string constraint");
 
-        auto strVal = builder.CreateString("default_val");
-        auto stringValue = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strVal);
+        const auto strVal = builder.CreateString("default_val");
+        const auto stringValue
+            = hipdnn_flatbuffers_sdk::data_objects::CreateStringValue(builder, strVal);
 
         std::vector<flatbuffers::Offset<flatbuffers::String>> validValOffsets;
         validValOffsets.reserve(validValues.size());
@@ -136,8 +137,8 @@ protected:
         {
             validValOffsets.push_back(builder.CreateString(val));
         }
-        auto validValuesVector = builder.CreateVector(validValOffsets);
-        auto stringConstraint = hipdnn_flatbuffers_sdk::data_objects::CreateStringConstraint(
+        const auto validValuesVector = builder.CreateVector(validValOffsets);
+        const auto stringConstraint = hipdnn_flatbuffers_sdk::data_objects::CreateStringConstraint(
             builder, maxLength, validValuesVector);
 
         hipdnn_flatbuffers_sdk::data_objects::KnobBuilder knobBuilder(builder);
@@ -150,7 +151,7 @@ protected:
             hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::StringConstraint);
         knobBuilder.add_constraint(stringConstraint.Union());
 
-        auto knob = knobBuilder.Finish();
+        const auto knob = knobBuilder.Finish();
         builder.Finish(knob);
 
         return builder.Release();

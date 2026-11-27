@@ -163,7 +163,7 @@ TEST(IntegrationSetPluginPathsExt, InvalidAndValidNullptrCorrectness)
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
 
-    auto loadedPlugins = test_util::getLoadedPlugins(handle);
+    const auto loadedPlugins = test_util::getLoadedPlugins(handle);
     EXPECT_EQ(loadedPlugins.size(), 0);
 
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
@@ -294,7 +294,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
 
-    auto loadedPlugins = test_util::getLoadedPlugins(handle);
+    const auto loadedPlugins = test_util::getLoadedPlugins(handle);
 
     const std::string expectedPluginPath = testDefaultGoodPluginPath();
 
@@ -318,10 +318,10 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAdditiveLoadsBothDefaultA
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
 
-    auto loadedPlugins = test_util::getLoadedPlugins(handle);
+    const auto loadedPlugins = test_util::getLoadedPlugins(handle);
     EXPECT_GE(loadedPlugins.size(), 2);
 
-    auto defaultPluginPath = testDefaultGoodPluginPath();
+    const auto defaultPluginPath = testDefaultGoodPluginPath();
     const auto& testPluginPath = testGoodPluginPath();
 
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, defaultPluginPath));
@@ -343,10 +343,10 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAbsoluteLoadsOnlyCustom)
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(handle, nullptr);
 
-    auto loadedPlugins = test_util::getLoadedPlugins(handle);
+    const auto loadedPlugins = test_util::getLoadedPlugins(handle);
     EXPECT_EQ(loadedPlugins.size(), 1);
 
-    auto defaultPluginPath
+    const auto defaultPluginPath
         = fs::path("hipdnn_plugins/engines") / getLibraryName("test_good_default_plugin");
     const auto& testPluginPath = testGoodPluginPath();
 

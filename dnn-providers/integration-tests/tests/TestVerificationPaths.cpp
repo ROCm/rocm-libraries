@@ -48,7 +48,7 @@ void verifyGoldenComparison(
         goldenOutputs,
     float tolerance)
 {
-    auto wrapper = graphAndTensors.createGraphWrapper();
+    const auto wrapper = graphAndTensors.createGraphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
     for(const auto uid : graphAndTensors.outputTensorUids)
@@ -57,7 +57,7 @@ void verifyGoldenComparison(
         auto& expectedTensor = *goldenOutputs.at(uid);
         const auto dataType = tensorAttrMap.at(uid)->data_type();
 
-        auto validator
+        const auto validator
             = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expectedTensor, actualTensor))
             << "Golden comparison failed for tensor uid=" << uid;
@@ -117,7 +117,7 @@ TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
     }
     auto goldenOutputs = graphAndTensors.extractAndClearOutputTensorData();
 
-    auto hostBuffers = graphAndTensors.hostBufferMap();
+    const auto hostBuffers = graphAndTensors.hostBufferMap();
     hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter().execute(
         graphAndTensors.graphBuffer.data(), graphAndTensors.graphBuffer.size(), hostBuffers);
 

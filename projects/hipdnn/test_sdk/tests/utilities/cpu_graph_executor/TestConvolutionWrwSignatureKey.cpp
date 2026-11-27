@@ -59,9 +59,9 @@ TEST(TestConvolutionWrwSignatureKey, HashFunction)
     const ConvolutionWrwSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
-    auto hash3 = key3.hashSelf();
-    auto hash4 = key4.hashSelf();
-    auto hash5 = key5.hashSelf();
+    const auto hash3 = key3.hashSelf();
+    const auto hash4 = key4.hashSelf();
+    const auto hash5 = key5.hashSelf();
 
     EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
 }
@@ -91,11 +91,11 @@ TEST(TestConvolutionWrwSignatureKey, CreateFromNodeAndTensorMap)
 
     auto graphTuple = buildConvolutionWrwGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const ConvolutionWrwSignatureKey keyFromNode(

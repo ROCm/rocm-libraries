@@ -48,19 +48,19 @@ TEST_P(IntegrationMoeGroupedMatmul, GraphDispatchesToProvider)
     tokenKsTensor.fillWithValue(0);
     outputTensor.fillWithValue(0.0F);
 
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     graph->set_name("MoeGroupedMatmulDispatch")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto token = std::make_shared<TensorAttributes>(
+    const auto token = std::make_shared<TensorAttributes>(
         makeTensorAttributes("token", getDataTypeEnumFromType<float>(), tokenTensor));
     token->set_uid(1);
-    auto weight = std::make_shared<TensorAttributes>(
+    const auto weight = std::make_shared<TensorAttributes>(
         makeTensorAttributes("weight", getDataTypeEnumFromType<float>(), weightTensor));
     weight->set_uid(2);
-    auto firstTokenOffset = std::make_shared<TensorAttributes>(makeTensorAttributes(
+    const auto firstTokenOffset = std::make_shared<TensorAttributes>(makeTensorAttributes(
         "first_token_offset", getDataTypeEnumFromType<int32_t>(), firstTokenOffsetTensor));
     firstTokenOffset->set_uid(3);
     std::shared_ptr<TensorAttributes> tokenIndex;
@@ -82,7 +82,7 @@ TEST_P(IntegrationMoeGroupedMatmul, GraphDispatchesToProvider)
     attributes.set_name("moe_grouped_matmul")
         .set_mode(mode)
         .set_top_k(mode == MoeGroupedMatmulMode::SCATTER ? 2 : 0);
-    auto output = graph->moe_grouped_matmul(
+    const auto output = graph->moe_grouped_matmul(
         token, weight, firstTokenOffset, tokenIndex, tokenKs, attributes);
     output->set_uid(6).set_output(true).set_name("output");
 

@@ -179,14 +179,14 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(const RawBwdSpec& spec)
         add(19, "Offset", DataType::INT64, oneStrides, oneDims);
     }
 
-    auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaBackwardAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd_node",
                                      DataType::FLOAT,
                                      NodeAttributes::SdpaBackwardAttributes,
                                      sdpaAttrs.Union()));
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "SdpaBwdGraph", spec.io, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     builder.Finish(graph);
     return builder;
@@ -197,7 +197,7 @@ flatbuffers::FlatBufferBuilder makeRawSdpaBwdGraph(const RawBwdSpec& spec)
 template <typename SignatureKey>
 bool applicable(const RawBwdSpec& spec)
 {
-    auto graph = makeRawSdpaBwdGraph(spec);
+    const auto graph = makeRawSdpaBwdGraph(spec);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
         graph.GetBufferPointer(), graph.GetSize());
     const auto& node = wrapper.getNode(0);
@@ -391,7 +391,7 @@ TEST_P(TestGpuSdpaBwdPlanExecutorDevice, MatchesCpuExecutor)
     SKIP_IF_NO_DEVICES();
     const RawBwdSpec& spec = GetParam().spec;
     const unsigned int seed = GetParam().seedBase;
-    auto graph = makeRawSdpaBwdGraph(spec);
+    const auto graph = makeRawSdpaBwdGraph(spec);
 
     constexpr int64_t HEAD_DIM = 8;
     const std::vector<int64_t> qDims = {1, spec.heads, spec.seqQ, HEAD_DIM};
@@ -581,7 +581,7 @@ TEST(TestGpuSdpaBwdPlanZeroDropoutDevice, EqualsNoDropoutBitForBitAndTheCpuExecu
             pack[18] = ptr(seedTensor);
             pack[19] = ptr(offsetTensor);
         }
-        auto graph = makeRawSdpaBwdGraph(s);
+        const auto graph = makeRawSdpaBwdGraph(s);
         if(gpu)
         {
             hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;

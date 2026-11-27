@@ -46,15 +46,15 @@ inline flatbuffers::FlatBufferBuilder
     tensors.push_back(
         CreateTensorAttributesDirect(builder, yUid, "y", outputDataType, &yStrides, &yDims));
 
-    auto convAttrs = CreateConvolutionFwdAttributesDirect(builder,
-                                                          xUid,
-                                                          wUid,
-                                                          yUid,
-                                                          &padding,
-                                                          &padding,
-                                                          &convStride,
-                                                          &dilation,
-                                                          ConvMode::CROSS_CORRELATION);
+    const auto convAttrs = CreateConvolutionFwdAttributesDirect(builder,
+                                                                xUid,
+                                                                wUid,
+                                                                yUid,
+                                                                &padding,
+                                                                &padding,
+                                                                &convStride,
+                                                                &dilation,
+                                                                ConvMode::CROSS_CORRELATION);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -63,13 +63,13 @@ inline flatbuffers::FlatBufferBuilder
                                      NodeAttributes::ConvolutionFwdAttributes,
                                      convAttrs.Union()));
 
-    auto graph = CreateGraphDirect(builder,
-                                   "ConvFwdTestGraph",
-                                   inputDataType,
-                                   outputDataType,
-                                   DataType::FLOAT,
-                                   &tensors,
-                                   &nodes);
+    const auto graph = CreateGraphDirect(builder,
+                                         "ConvFwdTestGraph",
+                                         inputDataType,
+                                         outputDataType,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
 
     builder.Finish(graph);
     return builder;

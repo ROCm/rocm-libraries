@@ -1048,7 +1048,7 @@ TEST(TestJsonExpression, VariablesIteratorEqualityComparesPositions)
         = jexpr::compile<jexpr::JsonDataSource>(json({{"+", json::array({"$x", "$y"})}}));
     const auto r = expr.variables();
 
-    auto first = r.begin();
+    const auto first = r.begin();
     EXPECT_TRUE(first == first); // reflexive
     EXPECT_FALSE(first != first);
 

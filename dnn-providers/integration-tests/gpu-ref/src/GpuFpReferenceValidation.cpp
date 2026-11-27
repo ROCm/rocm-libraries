@@ -53,7 +53,7 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
     hipdnn_data_sdk::utilities::ITensor& reference,
     hipdnn_data_sdk::utilities::ITensor& implementation) const
 {
-    auto totalElements = static_cast<int64_t>(reference.elementCount());
+    const auto totalElements = static_cast<int64_t>(reference.elementCount());
 
     // Allocate single failure flag using MigratableMemory
     hipdnn_data_sdk::utilities::MigratableMemory<int> flagBuf(1);
@@ -64,7 +64,7 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
     auto* implPtr = implementation.rawDeviceData();
 
     // Build defines and compile kernel
-    auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
+    const auto defines = detail::buildValidatorDefines(detail::HipRtcTypeName<T>::VALUE, "double");
 
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     auto& kernel = compiler.getOrCompile("GpuRefValidator.cpp", defines, "validateAllClose");
@@ -84,7 +84,7 @@ bool GpuFpReferenceValidation<T>::gpuAllClose(
 
     // Read back single failure flag
     flagBuf.markDeviceModified();
-    auto hostFlag = flagBuf.hostData()[0];
+    const auto hostFlag = flagBuf.hostData()[0];
 
     return hostFlag == 0;
 }

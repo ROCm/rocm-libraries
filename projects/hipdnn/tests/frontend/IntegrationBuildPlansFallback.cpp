@@ -68,7 +68,7 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_compute_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(1)
             .set_name("X")
             .set_dim(K_DIMS)
@@ -79,7 +79,7 @@ protected:
         attrs.set_name("relu_node");
         attrs.set_mode(PointwiseMode::RELU_FWD);
 
-        auto y = graph->pointwise(x, attrs);
+        const auto y = graph->pointwise(x, attrs);
         y->set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
 
         graph->set_preferred_engine_id_ext(failingEngineId());
@@ -131,7 +131,7 @@ protected:
     // move on to the engine that works.
     void expectBuildPlansFallsBack(const std::string& name)
     {
-        auto graph = createBuiltGraph(name);
+        const auto graph = createBuiltGraph(name);
 
         std::vector<int64_t> ranked;
         auto result = graph->get_ranked_engine_ids(ranked);
@@ -152,9 +152,9 @@ protected:
     // Same scenario through the one-call build().
     void expectOneCallBuildFallsBack(const std::string& name)
     {
-        auto graph = createBuiltGraph(name);
+        const auto graph = createBuiltGraph(name);
 
-        auto result = graph->build(_handle);
+        const auto result = graph->build(_handle);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         expectPlanIsFinalizedOnEngine(*graph, goodEngineId());
     }
@@ -162,7 +162,7 @@ protected:
     // Control: BuildPlanPolicy::ALL skips a plan that fails to finalize.
     void expectPolicyAllSkipsFailingEngine(const std::string& name)
     {
-        auto graph = createBuiltGraph(name);
+        const auto graph = createBuiltGraph(name);
 
         auto result = graph->create_execution_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -176,7 +176,7 @@ protected:
     // together with the failing engine's own error, and leaves the active plan unchanged.
     void expectBuildPlansReportsAggregatedError(const std::string& name)
     {
-        auto graph = createBuiltGraph(name);
+        const auto graph = createBuiltGraph(name);
 
         auto result = graph->create_execution_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -196,9 +196,9 @@ protected:
     // Same scenario through the one-call build().
     void expectOneCallBuildReportsAggregatedError(const std::string& name)
     {
-        auto graph = createBuiltGraph(name);
+        const auto graph = createBuiltGraph(name);
 
-        auto result = graph->build(_handle);
+        const auto result = graph->build(_handle);
         EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
         EXPECT_NE(result.err_msg.find("Failed to finalize any execution plan"), std::string::npos)
             << result.err_msg;

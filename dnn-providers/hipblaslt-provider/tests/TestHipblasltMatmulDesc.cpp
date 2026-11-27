@@ -10,7 +10,7 @@ using namespace hipblaslt_plugin;
 TEST(TestHipblasltMatmulDesc, CanCreateAndDestroy)
 {
     EXPECT_NO_THROW({
-        HipblasltMatmulDesc const desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+        const HipblasltMatmulDesc desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
         EXPECT_NE(desc.matmulDesc(), nullptr);
     });
 }
@@ -74,7 +74,7 @@ TEST(TestHipblasltMatmulDesc, CloneReproducesConfiguration)
     desc.setAScaleMode(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
     desc.setBScaleMode(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
 
-    HipblasltMatmulDesc const copy = desc.clone();
+    const HipblasltMatmulDesc copy = desc.clone();
 
     // Independent descriptor with its own underlying handle.
     EXPECT_NE(copy.matmulDesc(), nullptr);
@@ -129,7 +129,7 @@ TEST(TestHipblasltMatmulDesc, CloneReproducesEpilogueConfiguration)
     desc.setEpilogueActArg1(0.75f);
     desc.setBiasDataType(HIP_R_16F);
 
-    HipblasltMatmulDesc const copy = desc.clone();
+    const HipblasltMatmulDesc copy = desc.clone();
 
     EXPECT_EQ(getDescAttribute<hipblasLtEpilogue_t>(copy, HIPBLASLT_MATMUL_DESC_EPILOGUE),
               HIPBLASLT_EPILOGUE_GELU_BIAS);

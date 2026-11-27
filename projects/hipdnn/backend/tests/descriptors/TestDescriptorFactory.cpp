@@ -156,7 +156,7 @@ TEST(TestDescriptorFactory, CreateVariantDescriptor)
     ASSERT_NO_THROW(DescriptorFactory::create(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, &descriptor));
     EXPECT_NE(descriptor, nullptr);
 
-    auto variantDescriptor = descriptor->asDescriptor<VariantDescriptor>();
+    const auto variantDescriptor = descriptor->asDescriptor<VariantDescriptor>();
     EXPECT_FALSE(variantDescriptor->isFinalized());
 
     ASSERT_NO_THROW(DescriptorFactory::destroy(descriptor));
@@ -186,7 +186,7 @@ TEST(TestDescriptorFactory, CreateKnobSettingDescriptor)
     ASSERT_NO_THROW(DescriptorFactory::create(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR, &descriptor));
     EXPECT_NE(descriptor, nullptr);
 
-    auto knobDesc = descriptor->asDescriptor<KnobSettingDescriptor>();
+    const auto knobDesc = descriptor->asDescriptor<KnobSettingDescriptor>();
     EXPECT_FALSE(knobDesc->isFinalized());
     EXPECT_EQ(knobDesc->getType(), HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
 

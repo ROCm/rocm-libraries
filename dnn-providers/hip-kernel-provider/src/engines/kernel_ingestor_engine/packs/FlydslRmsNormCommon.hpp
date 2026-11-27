@@ -62,7 +62,7 @@ static_assert(sizeof(Desc1D) == 4, "Desc1D must occupy the kernel's 4-byte 1-D l
 inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
+    const auto it = tensors.find(uid);
     return it == tensors.end() ? nullptr : it->second;
 }
 
@@ -280,7 +280,7 @@ inline std::optional<std::string> kernelDataTypeName(data_objects::DataType data
 inline const data_objects::TensorAttributes& requireTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
+    const auto it = tensors.find(uid);
     if(it == tensors.end() || it->second == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

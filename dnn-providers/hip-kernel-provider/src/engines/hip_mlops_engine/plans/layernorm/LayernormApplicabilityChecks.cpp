@@ -54,11 +54,6 @@ bool hasDenseNonOverlappingStrides(const std::vector<int64_t>& dims,
     return true;
 }
 
-std::optional<int64_t> toStdOptional(flatbuffers::Optional<int64_t> value)
-{
-    return value.has_value() ? std::make_optional(value.value()) : std::nullopt;
-}
-
 } // namespace
 
 // --- Type Configuration Helpers ---
@@ -445,7 +440,7 @@ void LayernormValidator::checkTensorConfigSupported(
     checkOperandDimsMatchNormalizedDims(
         lnAttr.x_tensor_uid(),
         {{"scale", lnAttr.scale_tensor_uid()}, {"bias", lnAttr.bias_tensor_uid()}},
-        toStdOptional(lnAttr.mean_tensor_uid()),
+        lnAttr.mean_tensor_uid(),
         fwdStatTensors);
 }
 
@@ -505,7 +500,7 @@ void LayernormValidator::checkTensorConfigSupported(
                                         {{"scale", lnAttr.scale_tensor_uid()},
                                          {"dscale", lnAttr.dscale_tensor_uid()},
                                          {"dbias", lnAttr.dbias_tensor_uid()}},
-                                        toStdOptional(lnAttr.mean_tensor_uid()),
+                                        lnAttr.mean_tensor_uid(),
                                         bwdStatTensors);
     checkDxDataTypeSupported(lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid());
 }

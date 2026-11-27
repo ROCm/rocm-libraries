@@ -791,8 +791,8 @@ TEST_P(TestCpuFpReferenceSdpaPropertyPaged, EqualsDensePadded)
         }
     }
 
-    auto kPaged = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, MAX_KV);
-    auto vPaged = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, MAX_KV);
+    const auto kPaged = CpuFpReferenceSdpa::gatherPagedKv(kCache, pageTable, seqLenKv, MAX_KV);
+    const auto vPaged = CpuFpReferenceSdpa::gatherPagedKv(vCache, pageTable, seqLenKv, MAX_KV);
     Tensor<float> oPaged({BATCH, H, SQ, D});
     Tensor<float> lsePaged({BATCH, H, SQ, 1});
     for(const bool paged : {false, true})

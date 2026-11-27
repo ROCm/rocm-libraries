@@ -190,7 +190,7 @@ TEST(TestMiopenUnaryActivationChecks, DeclinesPassByValueBufferTensors)
             [&](fb::GraphT& graph) {
                 const auto* attrs = graph.nodes.at(0)->attributes.AsPointwiseAttributes();
                 const auto uid = markInput ? attrs->in_0_tensor_uid : attrs->out_0_tensor_uid;
-                for(auto& tensor : graph.tensors)
+                for(const auto& tensor : graph.tensors)
                 {
                     if(tensor->uid == uid)
                     {

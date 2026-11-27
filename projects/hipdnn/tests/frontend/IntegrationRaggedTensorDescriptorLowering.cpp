@@ -59,13 +59,13 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_compute_data_type(DataType::FLOAT);
 
-        auto in0 = std::make_shared<TensorAttributes>();
+        const auto in0 = std::make_shared<TensorAttributes>();
         in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
         in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
         if(withRaggedOffset)
         {
-            auto raggedOffset = std::make_shared<TensorAttributes>();
+            const auto raggedOffset = std::make_shared<TensorAttributes>();
             raggedOffset->set_uid(K_RAGGED_OFFSET_UID)
                 .set_name("RaggedOffset")
                 .set_data_type(DataType::INT64)
@@ -78,7 +78,7 @@ protected:
         pwAttrs.set_name("relu_op");
         pwAttrs.set_mode(PointwiseMode::RELU_FWD);
 
-        auto out0 = graph->pointwise(in0, pwAttrs);
+        const auto out0 = graph->pointwise(in0, pwAttrs);
         out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
         return graph;
@@ -104,15 +104,15 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_compute_data_type(DataType::FLOAT);
 
-        auto in0 = std::make_shared<TensorAttributes>();
+        const auto in0 = std::make_shared<TensorAttributes>();
         in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
         in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-        auto in1 = std::make_shared<TensorAttributes>();
+        const auto in1 = std::make_shared<TensorAttributes>();
         in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
         in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
-        auto makeAux = [](int64_t uid) {
+        const auto makeAux = [](int64_t uid) {
             auto aux = std::make_shared<TensorAttributes>();
             aux->set_uid(uid)
                 .set_name("RaggedOffset" + std::to_string(uid))
@@ -126,7 +126,7 @@ protected:
         {
         case AuxWiring::SHARED:
         {
-            auto aux = makeAux(K_RAGGED_OFFSET_UID);
+            const auto aux = makeAux(K_RAGGED_OFFSET_UID);
             in0->set_ragged_offset(aux);
             in1->set_ragged_offset(aux);
             break;
@@ -140,14 +140,14 @@ protected:
             break;
         case AuxWiring::NESTED:
         {
-            auto aux = makeAux(K_RAGGED_OFFSET_UID);
+            const auto aux = makeAux(K_RAGGED_OFFSET_UID);
             aux->set_ragged_offset(in1);
             in0->set_ragged_offset(aux);
             break;
         }
         case AuxWiring::VIRTUAL:
         {
-            auto aux = makeAux(K_RAGGED_OFFSET_UID);
+            const auto aux = makeAux(K_RAGGED_OFFSET_UID);
             aux->set_is_virtual(true);
             in0->set_ragged_offset(aux);
             break;
@@ -160,7 +160,7 @@ protected:
         pwAttrs.set_name("add_op");
         pwAttrs.set_mode(PointwiseMode::ADD);
 
-        auto out0 = graph->pointwise(in0, in1, pwAttrs);
+        const auto out0 = graph->pointwise(in0, in1, pwAttrs);
         out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
         return graph;
@@ -186,10 +186,10 @@ protected:
     static std::vector<uint8_t> lowerToSerializedBytes(TestableGraphLowering& graph,
                                                        hipdnnHandle_t handle)
     {
-        auto validated = graph.validate();
+        const auto validated = graph.validate();
         EXPECT_EQ(validated.code, ErrorCode::OK) << validated.err_msg;
 
-        auto built = graph.build_operation_graph_via_descriptors(handle);
+        const auto built = graph.build_operation_graph_via_descriptors(handle);
         EXPECT_EQ(built.code, ErrorCode::OK) << built.err_msg;
 
         auto rawDesc = graph.get_raw_graph_descriptor();
@@ -207,10 +207,10 @@ protected:
     // point (mirroring the backend deserialize rejections).
     static void expectLoweringRejected(TestableGraphLowering& graph, hipdnnHandle_t handle)
     {
-        auto validated = graph.validate();
+        const auto validated = graph.validate();
         EXPECT_EQ(validated.code, ErrorCode::OK) << validated.err_msg;
 
-        auto built = graph.build_operation_graph_via_descriptors(handle);
+        const auto built = graph.build_operation_graph_via_descriptors(handle);
         EXPECT_EQ(built.code, ErrorCode::INVALID_VALUE) << built.err_msg;
     }
 
@@ -235,14 +235,14 @@ protected:
 // ragged-offset link recorded on that tensor in the flatbuffer schema.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsTensorLinkInSchema)
 {
-    auto graph = makePointwiseGraph(/*withRaggedOffset=*/true);
+    const auto graph = makePointwiseGraph(/*withRaggedOffset=*/true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // Sanity: lowering produced a well-formed graph (in0, in0Offset, out0).
     ASSERT_EQ(graphT.tensors.size(), 3u);
 
-    auto findTensorIt = [&](int64_t uid) {
+    const auto findTensorIt = [&](int64_t uid) {
         return std::find_if(graphT.tensors.begin(), graphT.tensors.end(), [uid](const auto& t) {
             return t->uid == uid;
         });
@@ -257,7 +257,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsTensorLinkInSc
     EXPECT_EQ((*in0It)->ragged_offset_tensor_uid.value(), K_RAGGED_OFFSET_UID)
         << "IN0's ragged_offset_tensor_uid must point at the ragged-offset aux tensor.";
 
-    auto in0OffsetIt = findTensorIt(K_RAGGED_OFFSET_UID);
+    const auto in0OffsetIt = findTensorIt(K_RAGGED_OFFSET_UID);
     ASSERT_NE(in0OffsetIt, graphT.tensors.end())
         << "input tensor IN0's ragged offset missing from serialized graph";
 
@@ -272,7 +272,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsTensorLinkInSc
 // with both inputs linking to that single UID.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, SharedRaggedOffsetEmitsSingleAux)
 {
-    auto graph = makeBinaryPointwiseGraph(AuxWiring::SHARED);
+    const auto graph = makeBinaryPointwiseGraph(AuxWiring::SHARED);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
 
@@ -301,9 +301,9 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, SharedRaggedOffsetEmitsSingleA
 // tensor list than the shared case over the same operands.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, SeparateRaggedOffsetsEmitDistinctTensorList)
 {
-    auto graph = makeBinaryPointwiseGraph(AuxWiring::SEPARATE);
+    const auto graph = makeBinaryPointwiseGraph(AuxWiring::SEPARATE);
 
-    auto graphT = lowerAndDeserialize(*graph, _handle);
+    const auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // in0, in1, out0, and two distinct auxes.
     ASSERT_EQ(graphT.tensors.size(), 5u);
@@ -326,7 +326,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, SeparateRaggedOffsetsEmitDisti
 // throw and the shared tensor must appear exactly once.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, AuxThatIsAlsoGraphInputEmittedOnce)
 {
-    auto graph = makeBinaryPointwiseGraph(AuxWiring::AUX_IS_INPUT);
+    const auto graph = makeBinaryPointwiseGraph(AuxWiring::AUX_IS_INPUT);
 
     fbdata::GraphT graphT;
     ASSERT_NO_THROW(graphT = lowerAndDeserialize(*graph, _handle));
@@ -351,7 +351,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, AuxThatIsAlsoGraphInputEmitted
 // identical after a serialize -> deserialize -> re-serialize round trip.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedTensorListStableAcrossReserialize)
 {
-    auto graph = makeBinaryPointwiseGraph(AuxWiring::SHARED);
+    const auto graph = makeBinaryPointwiseGraph(AuxWiring::SHARED);
 
     auto firstBytes = lowerToSerializedBytes(*graph, _handle);
     ASSERT_FALSE(firstBytes.empty());
@@ -366,8 +366,8 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedTensorListStableAcrossRe
     EXPECT_EQ(hipdnnBackendDestroyDescriptor(revived), HIPDNN_STATUS_SUCCESS);
     ASSERT_FALSE(secondBytes.empty());
 
-    auto first = fbdata::UnPackGraph(firstBytes.data());
-    auto second = fbdata::UnPackGraph(secondBytes.data());
+    const auto first = fbdata::UnPackGraph(firstBytes.data());
+    const auto second = fbdata::UnPackGraph(secondBytes.data());
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
 
@@ -385,9 +385,9 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedTensorListStableAcrossRe
 // spuriously gated on ragged-tensor support.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphHasNoTensorLinkInSchema)
 {
-    auto graph = makePointwiseGraph(/*withRaggedOffset=*/false);
+    const auto graph = makePointwiseGraph(/*withRaggedOffset=*/false);
 
-    auto graphT = lowerAndDeserialize(*graph, _handle);
+    const auto graphT = lowerAndDeserialize(*graph, _handle);
 
     ASSERT_EQ(graphT.tensors.size(), 2u);
 
@@ -405,7 +405,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphHasNoTensorLinkI
 // bound while building the tensor descriptors.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, NestedRaggedOffsetRejectedInLowering)
 {
-    auto graph = makeBinaryPointwiseGraph(AuxWiring::NESTED);
+    const auto graph = makeBinaryPointwiseGraph(AuxWiring::NESTED);
     expectLoweringRejected(*graph, _handle);
 }
 
@@ -413,7 +413,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, NestedRaggedOffsetRejectedInLo
 // lowering, symmetric with the backend deserialize enforcement.
 TEST_F(IntegrationRaggedTensorDescriptorLowering, VirtualRaggedOffsetRejectedInLowering)
 {
-    auto graph = makeBinaryPointwiseGraph(AuxWiring::VIRTUAL);
+    const auto graph = makeBinaryPointwiseGraph(AuxWiring::VIRTUAL);
     expectLoweringRejected(*graph, _handle);
 }
 
@@ -436,13 +436,13 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
     constexpr int64_t K_OFFSETS_KV_UID = 21;
     constexpr int64_t K_LSE_ALIGNMENT = 4;
 
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("PackedSdpaLiftGraph")
         .set_io_data_type(DataType::HALF)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto offsets = [](int64_t uid, const std::string& name) {
+    const auto offsets = [](int64_t uid, const std::string& name) {
         auto t = std::make_shared<TensorAttributes>();
         t->set_uid(uid)
             .set_name(name)
@@ -456,7 +456,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
     const auto offsetsKv = offsets(K_OFFSETS_KV_UID, "OffsetsKv");
     const std::vector<int64_t> dims{K_BATCH, K_HEADS, K_SEQ, K_HEAD_DIM};
     const std::vector<int64_t> strides{K_SEQ * K_TOKEN_STRIDE, K_HEAD_DIM, K_TOKEN_STRIDE, 1};
-    auto packed = [&](int64_t uid, const std::string& name, const auto& table) {
+    const auto packed = [&](int64_t uid, const std::string& name, const auto& table) {
         auto t = std::make_shared<TensorAttributes>();
         t->set_uid(uid)
             .set_name(name)
@@ -466,9 +466,9 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
         t->set_ragged_offset(table).set_ragged_offset_multiplier(K_TOKEN_STRIDE);
         return t;
     };
-    auto q = packed(1, "Q", offsetsQ);
-    auto k = packed(2, "K", offsetsKv);
-    auto v = packed(3, "V", offsetsKv);
+    const auto q = packed(1, "Q", offsetsQ);
+    const auto k = packed(2, "K", offsetsKv);
+    const auto v = packed(3, "V", offsetsKv);
 
     SdpaAttributes attributes;
     attributes.set_name("sdpa").set_attn_scale(0.125F).set_generate_stats(true);
@@ -490,7 +490,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
 
     // The dnn-benchmarking / Python from_json(json) path: structure-only deserialize, then
     // build_operation_graph(handle), which re-lowers from the lifted nodes.
-    auto lifted = std::make_shared<TestableGraphLowering>();
+    const auto lifted = std::make_shared<TestableGraphLowering>();
     result = lifted->deserialize(originalJson);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     ASSERT_EQ(lifted->validate().code, ErrorCode::OK);
@@ -500,7 +500,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
     result = lifted->serialize(reloweredJson);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto byUid = [](const std::string& json) {
+    const auto byUid = [](const std::string& json) {
         std::map<int64_t, nlohmann::json> tensors;
         const auto parsed = nlohmann::json::parse(json);
         for(const auto& t : parsed.at("tensors"))

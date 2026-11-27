@@ -49,27 +49,27 @@ TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
-    auto graphBuilder = createLayernormBwdGraph(DY_UID,
-                                                X_UID,
-                                                SCALE_UID,
-                                                DX_UID,
-                                                DSCALE_UID,
-                                                DBIAS_UID,
-                                                EPSILON_UID,
-                                                MEAN_UID,
-                                                INV_VARIANCE_UID,
-                                                ioDims,
-                                                layout,
-                                                epsilon,
-                                                normalizedDimCount,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                      X_UID,
+                                                      SCALE_UID,
+                                                      DX_UID,
+                                                      DSCALE_UID,
+                                                      DBIAS_UID,
+                                                      EPSILON_UID,
+                                                      MEAN_UID,
+                                                      INV_VARIANCE_UID,
+                                                      ioDims,
+                                                      layout,
+                                                      epsilon,
+                                                      normalizedDimCount,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
-    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
@@ -79,7 +79,7 @@ TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
                                      DataType::FLOAT>
         planBuilder;
 
-    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const bool result
         = dynamic_cast<GpuLayernormBwdPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -87,9 +87,9 @@ TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
     EXPECT_TRUE(result);
 
     // Layernorm bwd builder should not be able to build a batchnorm bwd graph
-    auto batchnormGraphBuilder = createValidBatchnormBwdGraph();
+    const auto batchnormGraphBuilder = createValidBatchnormBwdGraph();
 
-    auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         batchnormGraphBuilder.GetBufferPointer(), batchnormGraphBuilder.GetSize());
 
     EXPECT_THROW(planBuilder.buildNodePlan(batchnormGraphWrapper, batchnormGraphWrapper.getNode(0)),
@@ -113,27 +113,27 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
-    auto graphBuilder = createLayernormBwdGraph(DY_UID,
-                                                X_UID,
-                                                SCALE_UID,
-                                                DX_UID,
-                                                DSCALE_UID,
-                                                DBIAS_UID,
-                                                EPSILON_UID,
-                                                MEAN_UID,
-                                                INV_VARIANCE_UID,
-                                                ioDims,
-                                                layout,
-                                                epsilon,
-                                                normalizedDimCount,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                      X_UID,
+                                                      SCALE_UID,
+                                                      DX_UID,
+                                                      DSCALE_UID,
+                                                      DBIAS_UID,
+                                                      EPSILON_UID,
+                                                      MEAN_UID,
+                                                      INV_VARIANCE_UID,
+                                                      ioDims,
+                                                      layout,
+                                                      epsilon,
+                                                      normalizedDimCount,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
-    auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
@@ -174,9 +174,9 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrapper.getNode(0), tensorMapCopy));
 
     // Layernorm bwd builder should not be applicable for a batchnorm bwd graph
-    auto batchnormGraphBuilder = createValidBatchnormBwdGraph();
+    const auto batchnormGraphBuilder = createValidBatchnormBwdGraph();
 
-    auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto batchnormGraphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         batchnormGraphBuilder.GetBufferPointer(), batchnormGraphBuilder.GetSize());
 
     EXPECT_FALSE(floatPlanBuilder.isApplicable(batchnormGraphWrapper.getNode(0),
@@ -196,25 +196,25 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
     constexpr int64_t INV_VARIANCE_UID = 18;
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
 
-    auto graphBuilder = createLayernormBwdGraph(DY_UID,
-                                                X_UID,
-                                                SCALE_UID,
-                                                DX_UID,
-                                                DSCALE_UID,
-                                                DBIAS_UID,
-                                                EPSILON_UID,
-                                                MEAN_UID,
-                                                INV_VARIANCE_UID,
-                                                {2, 3, 4, 5},
-                                                TensorLayout::NCHW,
-                                                epsilon,
-                                                2,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT);
+    const auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                      X_UID,
+                                                      SCALE_UID,
+                                                      DX_UID,
+                                                      DSCALE_UID,
+                                                      DBIAS_UID,
+                                                      EPSILON_UID,
+                                                      MEAN_UID,
+                                                      INV_VARIANCE_UID,
+                                                      {2, 3, 4, 5},
+                                                      TensorLayout::NCHW,
+                                                      epsilon,
+                                                      2,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT);
 
     const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
@@ -223,11 +223,11 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsNotApplicableForRaggedTensors)
                                      DataType::FLOAT>
         floatPlanBuilder;
 
-    auto denseWrap = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const auto denseWrap = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
-    auto raggedWrap = GraphWrapper(ragged.data(), ragged.size());
+    const auto raggedWrap = GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
@@ -248,28 +248,28 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFrom
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
-    auto graphBuilder = createLayernormBwdGraph(DY_UID,
-                                                X_UID,
-                                                SCALE_UID,
-                                                DX_UID,
-                                                DSCALE_UID,
-                                                DBIAS_UID,
-                                                EPSILON_UID,
-                                                MEAN_UID,
-                                                INV_VARIANCE_UID,
-                                                ioDims,
-                                                layout,
-                                                epsilon,
-                                                normalizedDimCount,
-                                                DataType::FLOAT, // dy
-                                                DataType::FLOAT, // dx/x
-                                                DataType::FLOAT, // scale/bias
-                                                DataType::FLOAT, // mean/inv_variance
-                                                DataType::FLOAT, // compute
-                                                DataType::DOUBLE // epsilon
+    const auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                      X_UID,
+                                                      SCALE_UID,
+                                                      DX_UID,
+                                                      DSCALE_UID,
+                                                      DBIAS_UID,
+                                                      EPSILON_UID,
+                                                      MEAN_UID,
+                                                      INV_VARIANCE_UID,
+                                                      ioDims,
+                                                      layout,
+                                                      epsilon,
+                                                      normalizedDimCount,
+                                                      DataType::FLOAT, // dy
+                                                      DataType::FLOAT, // dx/x
+                                                      DataType::FLOAT, // scale/bias
+                                                      DataType::FLOAT, // mean/inv_variance
+                                                      DataType::FLOAT, // compute
+                                                      DataType::DOUBLE // epsilon
     );
 
-    auto graphWrapper = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const auto graphWrapper = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
@@ -329,36 +329,36 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     constexpr int64_t MEAN_UID = 8;
     constexpr int64_t INV_VARIANCE_UID = 9;
 
-    auto dyDataType = nativeTypeToDataType<DyType>();
-    auto dxDataType = nativeTypeToDataType<DxType>();
-    auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
+    const auto dyDataType = nativeTypeToDataType<DyType>();
+    const auto dxDataType = nativeTypeToDataType<DxType>();
+    const auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
     auto meanInvVarianceDataType = nativeTypeToDataType<MeanInvVarianceType>();
-    auto computeDataType = nativeTypeToDataType<ComputeType>();
+    const auto computeDataType = nativeTypeToDataType<ComputeType>();
     if(epsilonDataType == DataType::UNSET)
     {
         epsilonDataType = computeDataType;
     }
 
     const double epsilon = LAYERNORM_DEFAULT_EPSILON;
-    auto graphBuilder = createLayernormBwdGraph(DY_UID,
-                                                X_UID,
-                                                SCALE_UID,
-                                                DX_UID,
-                                                DSCALE_UID,
-                                                DBIAS_UID,
-                                                EPSILON_UID,
-                                                MEAN_UID,
-                                                INV_VARIANCE_UID,
-                                                ioDims,
-                                                layout,
-                                                epsilon,
-                                                normalizedDimCount,
-                                                dyDataType,
-                                                dxDataType,
-                                                scaleBiasDataType,
-                                                meanInvVarianceDataType,
-                                                computeDataType,
-                                                epsilonDataType);
+    const auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                      X_UID,
+                                                      SCALE_UID,
+                                                      DX_UID,
+                                                      DSCALE_UID,
+                                                      DBIAS_UID,
+                                                      EPSILON_UID,
+                                                      MEAN_UID,
+                                                      INV_VARIANCE_UID,
+                                                      ioDims,
+                                                      layout,
+                                                      epsilon,
+                                                      normalizedDimCount,
+                                                      dyDataType,
+                                                      dxDataType,
+                                                      scaleBiasDataType,
+                                                      meanInvVarianceDataType,
+                                                      computeDataType,
+                                                      epsilonDataType);
 
     const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 

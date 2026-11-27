@@ -402,7 +402,7 @@ TEST_F(IntegrationGpuFlydslSdpaFrontendDeclines, DeclinesPagedKvUnderARaggedQuer
     // frontend and validated; 0 if none.
     std::string ranking;
     const auto firstFlydslEngineFor = [this](const VllmProblem& p, std::string& ranked) {
-        auto graph = makeVllmGraph(p);
+        const auto graph = makeVllmGraph(p);
         const auto result = graph->build_operation_graph(this->_handle);
         EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         return firstRankedFlydslEngine(*graph, ranked);

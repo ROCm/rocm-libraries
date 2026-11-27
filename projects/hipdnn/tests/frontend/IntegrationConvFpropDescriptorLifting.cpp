@@ -36,9 +36,9 @@ class IntegrationConvFpropDescriptorLifting : public IntegrationTestFixture
 // validation of graph data types, tensor attributes, and convolution parameters.
 TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
 {
-    auto originalGraph = buildConvFpropGraph();
+    const auto originalGraph = buildConvFpropGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -53,7 +53,7 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_FPROP_TENSOR_X_UID];
+    const auto liftedX = tensorMap[K_FPROP_TENSOR_X_UID];
     EXPECT_EQ(liftedX->get_uid(), K_FPROP_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
     EXPECT_EQ(liftedX->get_dim(), toVec(K_FPROP_TENSOR_X_DIMS));
@@ -62,7 +62,7 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
 
     // Verify W tensor
     ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u);
-    auto liftedW = tensorMap[K_FPROP_TENSOR_W_UID];
+    const auto liftedW = tensorMap[K_FPROP_TENSOR_W_UID];
     EXPECT_EQ(liftedW->get_uid(), K_FPROP_TENSOR_W_UID);
     EXPECT_EQ(liftedW->get_name(), "W");
     EXPECT_EQ(liftedW->get_dim(), toVec(K_FPROP_TENSOR_W_DIMS));
@@ -71,7 +71,7 @@ TEST_F(IntegrationConvFpropDescriptorLifting, BasicConvFpropRoundTrip)
 
     // Verify Y tensor
     ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
-    auto liftedY = tensorMap[K_FPROP_TENSOR_Y_UID];
+    const auto liftedY = tensorMap[K_FPROP_TENSOR_Y_UID];
     EXPECT_EQ(liftedY->get_uid(), K_FPROP_TENSOR_Y_UID);
     EXPECT_EQ(liftedY->get_name(), "Y");
     EXPECT_EQ(liftedY->get_dim(), toVec(K_FPROP_TENSOR_Y_DIMS));
@@ -104,17 +104,17 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAsymmetricPaddingPreserve
     constexpr std::array<int64_t, 2> K_ASYM_PRE_PADDING = {2, 0};
     constexpr std::array<int64_t, 2> K_ASYM_POST_PADDING = {0, 3};
 
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AsymmetricPaddingLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
@@ -126,10 +126,10 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAsymmetricPaddingPreserve
     convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
-    auto y = graph->conv_fprop(x, w, convAttrs);
+    const auto y = graph->conv_fprop(x, w, convAttrs);
     y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -158,9 +158,9 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAsymmetricPaddingPreserve
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropTensorSharingPreserved)
 {
-    auto originalGraph = buildConvFpropGraph();
+    const auto originalGraph = buildConvFpropGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -197,17 +197,17 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
     constexpr std::array<int64_t, 4> K_AUTO_W_DIMS = {16, 4, 3, 3};
     constexpr std::array<int64_t, 4> K_AUTO_W_STRIDES = {36, 9, 3, 1};
 
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_AUTO_X_DIMS)).set_stride(toVec(K_AUTO_X_STRIDES));
 
-    auto w = std::make_shared<TensorAttributes>();
+    const auto w = std::make_shared<TensorAttributes>();
     w->set_name("W").set_data_type(DataType::FLOAT);
     w->set_dim(toVec(K_AUTO_W_DIMS)).set_stride(toVec(K_AUTO_W_STRIDES));
 
@@ -219,10 +219,10 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
     convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
-    auto y = graph->conv_fprop(x, w, convAttrs);
+    const auto y = graph->conv_fprop(x, w, convAttrs);
     y->set_output(true).set_name("Y");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -248,9 +248,9 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
     ASSERT_NE(convNode, nullptr);
 
     // Verify tensor dims survived the round trip
-    auto xUid = convNode->attributes.get_x()->get_uid();
-    auto wUid = convNode->attributes.get_w()->get_uid();
-    auto yUid = convNode->attributes.get_y()->get_uid();
+    const auto xUid = convNode->attributes.get_x()->get_uid();
+    const auto wUid = convNode->attributes.get_w()->get_uid();
+    const auto yUid = convNode->attributes.get_y()->get_uid();
 
     EXPECT_NE(xUid, wUid);
     EXPECT_NE(xUid, yUid);
@@ -265,9 +265,9 @@ TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropAutoAssignedUidsPreserved
 // all conv fprop fields survive the FlatBuffer-direct path.
 TEST_F(IntegrationConvFpropDescriptorLifting, ConvFpropLiftWithoutFinalization)
 {
-    auto originalGraph = buildConvFpropGraph();
+    const auto originalGraph = buildConvFpropGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types

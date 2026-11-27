@@ -72,7 +72,7 @@ protected:
 
 TEST_F(TestKnobDescriptor, CreateDescriptor)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR);
@@ -1242,7 +1242,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithInt64Default)
     setInt64Default(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->knob_id, knobId);
     ASSERT_EQ(knob->default_value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
@@ -1258,7 +1258,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithDoubleDefault)
     setDoubleDefault(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->knob_id, knobId);
     ASSERT_EQ(knob->default_value.type,
@@ -1274,7 +1274,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithStringDefault)
     setStringDefault(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->knob_id, knobId);
     ASSERT_EQ(knob->default_value.type,
@@ -1306,7 +1306,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithIntConstraints)
                                                   validVals.data()));
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->constraint.type,
               hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint);
@@ -1332,7 +1332,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithFloatConstraints)
         HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_DOUBLE, 1, &maxVal));
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->constraint.type,
               hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::FloatConstraint);
@@ -1360,7 +1360,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithStringConstraints)
         HIPDNN_ATTR_KNOB_INFO_STRING_MAX_LENGTH, HIPDNN_TYPE_INT32, 1, &maxLen));
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->constraint.type,
               hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::StringConstraint);
@@ -1386,7 +1386,7 @@ TEST_F(TestKnobDescriptor, ToKnobTWithDeprecatedAndDescription)
         HIPDNN_ATTR_KNOB_INFO_DEPRECATED, HIPDNN_TYPE_BOOLEAN, 1, &deprecated));
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knob = getDescriptor()->toKnobT();
+    const auto knob = getDescriptor()->toKnobT();
     ASSERT_NE(knob, nullptr);
     ASSERT_EQ(knob->description, desc);
     ASSERT_TRUE(knob->deprecated);
@@ -1412,7 +1412,7 @@ TEST_F(TestKnobDescriptor, ToStringWithIntConstraints)
         getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64, 1, &stride));
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto str = getDescriptor()->toString();
+    const auto str = getDescriptor()->toString();
     EXPECT_NE(str.find("ts_knob"), std::string::npos);
     EXPECT_NE(str.find("intConstraint"), std::string::npos);
     EXPECT_NE(str.find("min=1"), std::string::npos);
@@ -1473,11 +1473,11 @@ TEST(TestKnobDescriptorFromKnobT, IntKnobWithConstraints)
     intConstraint.step = 10;
     knobT.constraint.Set(std::move(intConstraint));
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
-    auto roundTrip = desc->toKnobT();
+    const auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     EXPECT_EQ(roundTrip->knob_id, "test.int_knob");
     EXPECT_EQ(roundTrip->description, "An int knob");
@@ -1506,10 +1506,10 @@ TEST(TestKnobDescriptorFromKnobT, FloatKnobWithConstraints)
     floatConstraint.max_value = 1.0;
     knobT.constraint.Set(floatConstraint);
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     ASSERT_NE(desc, nullptr);
 
-    auto roundTrip = desc->toKnobT();
+    const auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     EXPECT_EQ(roundTrip->knob_id, "test.float_knob");
     EXPECT_DOUBLE_EQ(roundTrip->default_value.AsFloatValue()->value, 0.5);
@@ -1534,10 +1534,10 @@ TEST(TestKnobDescriptorFromKnobT, StringKnobWithConstraints)
     stringConstraint.valid_values = {"fast", "slow", "balanced"};
     knobT.constraint.Set(std::move(stringConstraint));
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     ASSERT_NE(desc, nullptr);
 
-    auto roundTrip = desc->toKnobT();
+    const auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     EXPECT_EQ(roundTrip->knob_id, "test.string_knob");
     EXPECT_EQ(roundTrip->default_value.AsStringValue()->value, "fast");
@@ -1557,10 +1557,10 @@ TEST(TestKnobDescriptorFromKnobT, DeprecatedKnob)
     intDefault.value = 0;
     knobT.default_value.Set(intDefault);
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     ASSERT_NE(desc, nullptr);
 
-    auto roundTrip = desc->toKnobT();
+    const auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     EXPECT_TRUE(roundTrip->deprecated);
 }
@@ -1573,10 +1573,10 @@ TEST(TestKnobDescriptorFromKnobT, IntKnobNoConstraint)
     intDefault.value = 42;
     knobT.default_value.Set(intDefault);
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     ASSERT_NE(desc, nullptr);
 
-    auto roundTrip = desc->toKnobT();
+    const auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     EXPECT_EQ(roundTrip->default_value.AsIntValue()->value, 42);
     EXPECT_EQ(roundTrip->constraint.type,
@@ -1595,10 +1595,10 @@ TEST(TestKnobDescriptorFromKnobT, IntKnobWithValidValues)
     intConstraint.valid_values = {8, 16, 32, 64};
     knobT.constraint.Set(std::move(intConstraint));
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     ASSERT_NE(desc, nullptr);
 
-    auto roundTrip = desc->toKnobT();
+    const auto roundTrip = desc->toKnobT();
     ASSERT_NE(roundTrip, nullptr);
     const auto* c = roundTrip->constraint.AsIntConstraint();
     ASSERT_NE(c, nullptr);
@@ -1611,7 +1611,7 @@ TEST(TestKnobDescriptorFromKnobT, UnknownValueTypeReturnsNull)
     knobT.knob_id = "test.unknown_type";
     // default_value is NONE by default (no Set called)
 
-    auto desc = KnobDescriptor::fromKnobT(knobT);
+    const auto desc = KnobDescriptor::fromKnobT(knobT);
     EXPECT_EQ(desc, nullptr);
 }
 
@@ -1626,7 +1626,7 @@ TEST(TestKnobDescriptorFactory, CreateKnobInfoDescriptorViaFactory)
                                                               &descriptor));
     EXPECT_NE(descriptor, nullptr);
 
-    auto knobDesc = descriptor->asDescriptor<KnobDescriptor>();
+    const auto knobDesc = descriptor->asDescriptor<KnobDescriptor>();
     EXPECT_NE(knobDesc, nullptr);
     EXPECT_FALSE(knobDesc->isFinalized());
     EXPECT_EQ(knobDesc->getType(), HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR);

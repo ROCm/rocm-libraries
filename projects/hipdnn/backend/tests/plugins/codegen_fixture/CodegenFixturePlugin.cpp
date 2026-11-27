@@ -50,7 +50,7 @@ void CodegenFixtureEngine::getDetails(
     // missing getEngineName — no name.
     flatbuffers::FlatBufferBuilder builder;
 
-    auto engineDetails
+    const auto engineDetails
         = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, K_FIXTURE_ENGINE_ID);
     builder.Finish(engineDetails);
 

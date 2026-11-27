@@ -142,8 +142,8 @@ BackendLogState& getBackendLogState()
     // as the mutex may already be destroyed. Ensure every thread that logs has emitted at least
     // one message before program exit handlers run. initialize() takes no reference on its
     // lock-free fast path, so only a message that reaches backendLoggingCallback() does.
-    static auto s_state = std::make_shared<BackendLogState>();
-    thread_local auto s_tlRef = s_state; // Each thread holds a reference
+    static const auto s_state = std::make_shared<BackendLogState>();
+    thread_local const auto s_tlRef = s_state; // Each thread holds a reference
     return *s_state;
 }
 
@@ -446,10 +446,10 @@ hipdnnStatus_t lockedAddUserCallback(BackendLogState& state,
                                      hipdnnLogCallbackMode_t mode)
 {
     // Create atomic callback holder
-    auto callbackHolder = std::make_shared<std::atomic<hipdnnUserLogCallback_t>>(callback);
+    const auto callbackHolder = std::make_shared<std::atomic<hipdnnUserLogCallback_t>>(callback);
 
     // Create sink with user handle
-    auto sink = std::make_shared<UserCallbackSink>(callbackHolder, userHandle);
+    const auto sink = std::make_shared<UserCallbackSink>(callbackHolder, userHandle);
     sink->set_level(toSpdlogLevel(minLevel));
     sink->set_pattern(BACKEND_LOGGER_PATTERN);
 
@@ -527,7 +527,7 @@ hipdnnStatus_t lockedRemoveUserCallback(BackendLogState& state,
                                         const BackendLogState::CallbackKey& key,
                                         std::shared_ptr<UserCallbackSink>& removedSink)
 {
-    auto it = state.userCallbacks.find(key);
+    const auto it = state.userCallbacks.find(key);
     if(it == state.userCallbacks.end())
     {
         return HIPDNN_STATUS_BAD_PARAM; // Not registered
@@ -605,7 +605,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
         else
         {
             // Update an existing registration, or add a new one
-            auto it = state.userCallbacks.find(key);
+            const auto it = state.userCallbacks.find(key);
             status = it != state.userCallbacks.end()
                          ? lockedUpdateUserCallback(state, it->second, minLevel, mode)
                          : lockedAddUserCallback(state, key, callback, userHandle, minLevel, mode);
@@ -690,7 +690,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
         ensureOutputSink(state);
     }
 
-    auto spdlogLevel = toSpdlogLevel(severity);
+    const auto spdlogLevel = toSpdlogLevel(severity);
 
     // Copy logger shared_ptrs under read lock, then release lock before logging.
     // This prevents deadlock if the callback re-enters (sync mode) and allows

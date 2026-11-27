@@ -96,9 +96,10 @@ public:
         }
 
         // Search (3) for benchmarking, None (1) otherwise. None defers to MIOPEN_FIND_ENFORCE.
-        auto policy = benchmarkingEnabled && !miopen_plugin::miopen_utils::envFindEnforceIsSet()
-                          ? miopenTuningPolicySearch
-                          : miopenTuningPolicyNone;
+        const auto policy
+            = benchmarkingEnabled && !miopen_plugin::miopen_utils::envFindEnforceIsSet()
+                  ? miopenTuningPolicySearch
+                  : miopenTuningPolicyNone;
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
@@ -116,7 +117,7 @@ public:
     /// @brief Destructor restores tuning policy to original value.
     ~ScopedTuningPolicy()
     {
-        auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
+        const auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
         if(status != miopenStatusSuccess)
         {
             HIPDNN_PLUGIN_LOG_ERROR(

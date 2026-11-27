@@ -102,7 +102,7 @@ float calculatePointwiseTolerance(double scale, PointwiseErrorClass errorClass)
 {
     hipdnn_test_sdk::utilities::validateComputeType<ComputeType>();
 
-    auto epsilonCompute = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilonCompute = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     // Core error: C * epsilon_compute * scale
     const double c = detail::getErrorMultiplier<ComputeType>(errorClass);

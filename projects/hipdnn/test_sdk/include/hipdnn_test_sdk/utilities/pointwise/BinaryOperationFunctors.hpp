@@ -24,7 +24,7 @@ struct Add
     template <typename X0, typename X1>
     OutputType operator()(const X0& x0, const X1& x1) const
     {
-        auto result = static_cast<ComputeType>(x0) + static_cast<ComputeType>(x1);
+        const auto result = static_cast<ComputeType>(x0) + static_cast<ComputeType>(x1);
         return static_cast<OutputType>(result);
     }
 };
@@ -35,7 +35,7 @@ struct Subtract
     template <typename X0, typename X1>
     OutputType operator()(const X0& x0, const X1& x1) const
     {
-        auto result = static_cast<ComputeType>(x0) - static_cast<ComputeType>(x1);
+        const auto result = static_cast<ComputeType>(x0) - static_cast<ComputeType>(x1);
         return static_cast<OutputType>(result);
     }
 };
@@ -46,7 +46,7 @@ struct Multiply
     template <typename X0, typename X1>
     OutputType operator()(const X0& x0, const X1& x1) const
     {
-        auto result = static_cast<ComputeType>(x0) * static_cast<ComputeType>(x1);
+        const auto result = static_cast<ComputeType>(x0) * static_cast<ComputeType>(x1);
         return static_cast<OutputType>(result);
     }
 };
@@ -79,7 +79,7 @@ struct Divide
     template <typename X0, typename X1>
     OutputType operator()(const X0& x0, const X1& x1) const
     {
-        auto result = static_cast<ComputeType>(x0) / static_cast<ComputeType>(x1);
+        const auto result = static_cast<ComputeType>(x0) / static_cast<ComputeType>(x1);
         return static_cast<OutputType>(result);
     }
 };
@@ -91,8 +91,8 @@ struct AddSquare
     template <typename X0, typename X1>
     OutputType operator()(const X0& x0, const X1& x1) const
     {
-        auto y = static_cast<ComputeType>(x1);
-        auto result = static_cast<ComputeType>(x0) + y * y;
+        const auto y = static_cast<ComputeType>(x1);
+        const auto result = static_cast<ComputeType>(x0) + y * y;
         return static_cast<OutputType>(result);
     }
 };
@@ -196,10 +196,11 @@ struct ReluBackward
     template <typename Dy, typename X>
     OutputType operator()(const Dy& dy, const X& x) const
     {
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
-        auto localGradient = (xCompute > static_cast<ComputeType>(0)) ? static_cast<ComputeType>(1)
-                                                                      : static_cast<ComputeType>(0);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
+        const auto localGradient = (xCompute > static_cast<ComputeType>(0))
+                                       ? static_cast<ComputeType>(1)
+                                       : static_cast<ComputeType>(0);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -236,8 +237,8 @@ struct ParameterizedReluBackward
     template <typename Dy, typename X>
     OutputType operator()(const Dy& dy, const X& x) const
     {
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         ComputeType localGradient;
         if(xCompute <= lowerClip)
@@ -264,12 +265,12 @@ struct SigmoidBackward
     OutputType operator()(const Dy& dy, const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         ComputeType sigmoidVal
             = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-xCompute));
-        auto localGradient = sigmoidVal * (static_cast<ComputeType>(1) - sigmoidVal);
+        const auto localGradient = sigmoidVal * (static_cast<ComputeType>(1) - sigmoidVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -281,11 +282,11 @@ struct TanhBackward
     OutputType operator()(const Dy& dy, const X& x) const
     {
         using hipdnn_data_sdk::types::tanh;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         ComputeType tanhVal = tanh(xCompute);
-        auto localGradient = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
+        const auto localGradient = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -298,8 +299,8 @@ struct GeluBackward
     {
         using hipdnn_data_sdk::types::exp;
         using hipdnn_data_sdk::types::sqrt;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx [x * Phi(x)] = Phi(x) + x * phi(x), with Phi the standard normal CDF and phi its PDF
         static const ComputeType s_kInvSqrt2Pi
@@ -307,10 +308,10 @@ struct GeluBackward
               / sqrt(static_cast<ComputeType>(2) * static_cast<ComputeType>(PI));
         // Phi(x) = 0.5 * erfc(-x / sqrt(2)); unlike 1 + erf(...), erfc keeps the negative tail
         // when erf rounds to -1.
-        auto cdf = static_cast<ComputeType>(0.5)
-                   * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
-                       std::erfc(-static_cast<double>(xCompute) / std::sqrt(2.0)));
-        auto pdf = exp(static_cast<ComputeType>(-0.5) * xCompute * xCompute) * s_kInvSqrt2Pi;
+        const auto cdf = static_cast<ComputeType>(0.5)
+                         * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
+                             std::erfc(-static_cast<double>(xCompute) / std::sqrt(2.0)));
+        const auto pdf = exp(static_cast<ComputeType>(-0.5) * xCompute * xCompute) * s_kInvSqrt2Pi;
         return static_cast<OutputType>(dyCompute * (cdf + xCompute * pdf));
     }
 };
@@ -323,22 +324,23 @@ struct GeluApproxTanhBackward
     {
         using hipdnn_data_sdk::types::sqrt;
         using hipdnn_data_sdk::types::tanh;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         // Matches GeluApproxTanhForward: 0.5 * x * (1 + tanh(u)), u = sqrt(2/pi) * (x + c * x^3)
         static const ComputeType s_kSqrt2OverPi
             = sqrt(static_cast<ComputeType>(2) / static_cast<ComputeType>(PI));
         static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
-        auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
-        auto tanhVal = tanh(inner);
-        auto innerGradient = s_kSqrt2OverPi
-                             * (static_cast<ComputeType>(1)
-                                + static_cast<ComputeType>(3) * s_kCoeff * xCompute * xCompute);
-        auto localGradient = static_cast<ComputeType>(0.5) * (static_cast<ComputeType>(1) + tanhVal)
-                             + static_cast<ComputeType>(0.5) * xCompute
-                                   * (static_cast<ComputeType>(1) - tanhVal * tanhVal)
-                                   * innerGradient;
+        const auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
+        const auto tanhVal = tanh(inner);
+        const auto innerGradient
+            = s_kSqrt2OverPi
+              * (static_cast<ComputeType>(1)
+                 + static_cast<ComputeType>(3) * s_kCoeff * xCompute * xCompute);
+        const auto localGradient
+            = static_cast<ComputeType>(0.5) * (static_cast<ComputeType>(1) + tanhVal)
+              + static_cast<ComputeType>(0.5) * xCompute
+                    * (static_cast<ComputeType>(1) - tanhVal * tanhVal) * innerGradient;
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -357,13 +359,13 @@ struct SwishBackward
     OutputType operator()(const Dy& dy, const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx [x * sigmoid(beta * x)] = s + beta * x * s * (1 - s), with s = sigmoid(beta * x)
         ComputeType sigmoidVal
             = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
-        auto localGradient
+        const auto localGradient
             = sigmoidVal
               + beta * xCompute * sigmoidVal * (static_cast<ComputeType>(1) - sigmoidVal);
         return static_cast<OutputType>(dyCompute * localGradient);
@@ -384,12 +386,13 @@ struct EluBackward
     OutputType operator()(const Dy& dy, const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx ELU(x) = 1 for x > 0, alpha * exp(x) otherwise
-        auto localGradient = xCompute > static_cast<ComputeType>(0) ? static_cast<ComputeType>(1)
-                                                                    : alpha * exp(xCompute);
+        const auto localGradient = xCompute > static_cast<ComputeType>(0)
+                                       ? static_cast<ComputeType>(1)
+                                       : alpha * exp(xCompute);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -408,11 +411,11 @@ struct SoftplusBackward
     OutputType operator()(const Dy& dy, const X& x) const
     {
         using hipdnn_data_sdk::types::exp;
-        auto dyCompute = static_cast<ComputeType>(dy);
-        auto xCompute = static_cast<ComputeType>(x);
+        const auto dyCompute = static_cast<ComputeType>(dy);
+        const auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx [log(1 + exp(beta * x)) / beta] = sigmoid(beta * x)
-        auto localGradient
+        const auto localGradient
             = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
         return static_cast<OutputType>(dyCompute * localGradient);
     }

@@ -92,7 +92,7 @@ public:
         [[maybe_unused]] hipdnnBackendDescriptor_t opDesc,
         [[maybe_unused]] std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto nodeName = getNodeName();
+        const auto nodeName = getNodeName();
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
                 "unpack_from_descriptor not implemented for node"
                     + (nodeName.empty() ? std::string{} : ": " + nodeName)};

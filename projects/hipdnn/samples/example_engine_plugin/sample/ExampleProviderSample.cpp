@@ -108,13 +108,13 @@ struct ReluGraph
 // Build a pointwise ReLU forward graph with the given tensor dimensions.
 static ReluGraph createReluGraph(const std::string& name, const std::vector<int64_t>& dims)
 {
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name(name)
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim(dims)
@@ -125,7 +125,7 @@ static ReluGraph createReluGraph(const std::string& name, const std::vector<int6
     attrs.set_name("relu_fwd");
     attrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto y = graph->pointwise(x, attrs);
+    const auto y = graph->pointwise(x, attrs);
     y->set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
 
     return {graph, x, y};
@@ -138,7 +138,7 @@ static bool runReluGraph(hipdnnHandle_t handle,
                          const std::vector<float>& input,
                          std::vector<float>& output)
 {
-    auto numElements = static_cast<int64_t>(input.size());
+    const auto numElements = static_cast<int64_t>(input.size());
     const std::vector<int64_t> dims = {1, 1, 1, numElements};
 
     auto [graph, x, y] = createReluGraph(graphName, dims);
@@ -235,7 +235,7 @@ static void printMatrix(const std::string& label, const float* m, int rows, int 
 static void printLoadedPlugins(hipdnnHandle_t handle)
 {
     std::vector<std::filesystem::path> paths;
-    auto err = getLoadedEnginePluginPaths(handle, paths);
+    const auto err = getLoadedEnginePluginPaths(handle, paths);
     if(err.is_bad() || paths.empty())
     {
         std::cout << "  (no plugins loaded)\n";
@@ -253,7 +253,7 @@ static void printLoadedPlugins(hipdnnHandle_t handle)
 static bool verifyPluginPresence(hipdnnHandle_t handle, const std::string& modeLabel)
 {
     std::vector<std::filesystem::path> paths;
-    auto err = getLoadedEnginePluginPaths(handle, paths);
+    const auto err = getLoadedEnginePluginPaths(handle, paths);
     if(err.is_bad() || paths.empty())
     {
         std::cerr << "  ERROR: No plugins loaded after " << modeLabel << "\n";
@@ -304,13 +304,13 @@ static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths)
 
     std::vector<int64_t> dims = {1, 1, 1, 6};
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("Scenario1_ReLU")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    const auto x = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x->set_uid(1)
         .set_name("X")
         .set_dim(dims)
@@ -321,7 +321,7 @@ static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths)
     attrs.set_name("relu_fwd");
     attrs.set_mode(PointwiseMode::RELU_FWD);
 
-    auto y = graph->pointwise(x, attrs);
+    const auto y = graph->pointwise(x, attrs);
     y->set_uid(2).set_data_type(DataType::FLOAT).set_output(true);
 
     // Select the example plugin's GPU ReLU engine by name
@@ -500,14 +500,14 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths)
     const int64_t outH = H - R + 1; // 2
     const int64_t outW = W - S + 1; // 2
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("Scenario2_ConvFwd")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     // Input tensor X: NCHW layout (using makeTensorAttributes + generateStrides)
-    auto xAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto xAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "X",
             DataType::FLOAT,
@@ -515,7 +515,7 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths)
             hipdnn_data_sdk::utilities::generateStrides({N, C, H, W})));
 
     // Weight tensor W: KCRS layout (using makeTensorAttributes + generateStrides)
-    auto wAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+    const auto wAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
             "W",
             DataType::FLOAT,
@@ -526,7 +526,7 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths)
     convAttrs.set_padding({0, 0}).set_stride({1, 1}).set_dilation({1, 1});
 
     // Output tensor Y (attributes derived from conv_fprop)
-    auto yOut = graph->conv_fprop(xAttr, wAttr, convAttrs);
+    const auto yOut = graph->conv_fprop(xAttr, wAttr, convAttrs);
     yOut->set_data_type(DataType::FLOAT).set_output(true);
 
     // Select the example plugin's ConvFwd engine by name
@@ -781,7 +781,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+                const auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
                 pluginPath = std::filesystem::absolute(exeDir).string();
                 std::cout << "Plugin path (from executable location): " << pluginPath << "\n";
             }
@@ -790,7 +790,7 @@ int main(int argc, char* argv[])
         // To assist in debugging issues when running this sample, determine whether
         // the plugin exists before running the scenarios.
         std::vector<std::string> pluginPaths;
-        auto fsPath = std::filesystem::path(pluginPath);
+        const auto fsPath = std::filesystem::path(pluginPath);
         if(std::filesystem::is_regular_file(fsPath))
         {
             if(fsPath.filename().string().find("example_provider_plugin") != std::string::npos)

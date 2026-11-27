@@ -85,16 +85,16 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t SEQ_LEN = 128;
     constexpr int64_t HEAD_DIM = 128;
 
-    auto graph = std::make_shared<graph::Graph>();
+    const auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     setPreferredEngine(graph, config);
 
-    auto qAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
-    auto kAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
-    auto vAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    const auto qAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    const auto kAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    const auto vAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
 
     // Attn_scale is a pass-by-value scalar, not a device buffer.
     // Compile-time constant: value is baked into the op-graph at build() and requires no
@@ -103,7 +103,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // variant pack at execute(), allowing it to vary across executions without rebuilding the
     // graph. Requires plugin SDK >= 1.2.0.
     const float attnScaleDefault = 1.0f / std::sqrt(static_cast<float>(HEAD_DIM));
-    auto attnScale = std::make_shared<graph::TensorAttributes>();
+    const auto attnScale = std::make_shared<graph::TensorAttributes>();
     attnScale->set_dim({1}).set_stride({1}).set_data_type(getDataTypeEnumFromType<float>());
     if(config.useRuntimePassByValue)
     {
@@ -175,7 +175,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // Runs CPU reference validation against the current GPU output buffer. Called once after
     // the initial execute() and again after the runtime pass-by-value re-execution demo below,
     // so both scalar values get verified against the CPU reference.
-    auto runCpuValidation = [&]() -> bool {
+    const auto runCpuValidation = [&]() -> bool {
         std::cout << "Running CPU reference validation...\n";
 
         utilities::Tensor<InputType> oRefTensor(oAttrRef->get_dim(), layout);
@@ -203,7 +203,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             tolerance = 1e-2f;
         }
 
-        auto oValidator
+        const auto oValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         const bool oValid = oValidator.allClose(oRefTensor, oTensor);
@@ -255,7 +255,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv, SampleType::SDPA);
+        const auto config = parseCommandLineArgs(argc, argv, SampleType::SDPA);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

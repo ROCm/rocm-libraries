@@ -191,7 +191,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
 {
     std::cout << "\n=== Scenario 2: Exhaustive Autotune ===\n";
 
-    auto state = buildConvGraph(handle, largeMode);
+    const auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
     HIPDNN_FE_CHECK(state.graph->add_all_engines());
@@ -307,7 +307,7 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
 {
     std::cout << "\n=== Scenario 3: Filtered Autotune (Workspace Constrained) ===\n";
 
-    auto state = buildConvGraph(handle, largeMode);
+    const auto state = buildConvGraph(handle, largeMode);
 
     // Step 1: Discover available engines
     std::vector<EngineConfigInfo> configs;
@@ -389,7 +389,7 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle,
 
     const std::filesystem::path configFile = "sample_autotune_results.json";
 
-    auto state = buildConvGraph(handle, largeMode);
+    const auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
     HIPDNN_FE_CHECK(state.graph->add_all_engines());
@@ -577,7 +577,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
         }
 
         HIP_CHECK(hipEventRecord(startEvent));
-        auto result
+        const auto result
             = state.graph->execute_plan_at_index(handle, state.variantPack, workspace.get(), i);
         HIP_CHECK(hipEventRecord(stopEvent));
         HIP_CHECK(hipEventSynchronize(stopEvent));

@@ -452,7 +452,7 @@ TEST(TestIngestorStagedApplicability, FinishDeclinesAPendingBegunByAnotherEngine
     auto staged = owner->beginApplicability(handle, graph, scope);
     ASSERT_FALSE(staged.decided);
 
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     EXPECT_FALSE(stranger->finishApplicability(std::move(staged.pending)));
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U);
 
@@ -472,7 +472,7 @@ TEST(TestIngestorStagedApplicability, FinishDeclinesAnEmptyPending)
     EXPECT_FALSE(empty.valid());
     EXPECT_EQ(empty.predictedVariants(), 0U);
 
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     EXPECT_FALSE(engine->finishApplicability(std::move(empty)));
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U);
 }
@@ -1299,7 +1299,7 @@ TEST(TestSlottedStagedApplicability, FinishDeclinesAPendingBegunByAnotherEngine)
     auto staged = owner->beginApplicability(handle, graph, scope);
     ASSERT_FALSE(staged.decided);
 
-    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     EXPECT_FALSE(stranger->finishApplicability(std::move(staged.pending)));
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U);
 }

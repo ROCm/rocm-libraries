@@ -244,8 +244,8 @@ TEST(TestCpuFpReferenceValidationStrided, StridedTensorEqual)
 
     // Fill with same values
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = static_cast<float>((indices[0] * 1000) + (indices[1] * 100) + (indices[2] * 10)
-                                        + indices[3]);
+        const auto value = static_cast<float>((indices[0] * 1000) + (indices[1] * 100)
+                                              + (indices[2] * 10) + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -264,8 +264,8 @@ TEST(TestCpuFpReferenceValidation, StridedTensorNotEqual)
 
     // Fill tensor1
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = static_cast<float>((indices[0] * 1000) + (indices[1] * 100) + (indices[2] * 10)
-                                        + indices[3]);
+        const auto value = static_cast<float>((indices[0] * 1000) + (indices[1] * 100)
+                                              + (indices[2] * 10) + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -304,7 +304,7 @@ TEST(TestCpuFpReferenceValidation, StridedTensorDifferentStrides)
 
     // Set same logical values despite different memory layouts
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = static_cast<float>(indices[0] + indices[1] + indices[2] + indices[3]);
+        const auto value = static_cast<float>(indices[0] + indices[1] + indices[2] + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -564,8 +564,8 @@ TEST(TestCpuIntReferenceValidationStrided, StridedTensorEqual)
 
     // Fill with same values
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = safeTestTypeCast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
-                                               + (indices[2] * 10) + indices[3]);
+        const auto value = safeTestTypeCast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
+                                                     + (indices[2] * 10) + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -584,8 +584,8 @@ TEST(TestCpuIntReferenceValidation, StridedTensorNotEqual)
 
     // Fill tensor1
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = safeTestTypeCast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
-                                               + (indices[2] * 10) + indices[3]);
+        const auto value = safeTestTypeCast<int32_t>((indices[0] * 1000) + (indices[1] * 100)
+                                                     + (indices[2] * 10) + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });
@@ -624,7 +624,8 @@ TEST(TestCpuIntReferenceValidation, StridedTensorDifferentStrides)
 
     // Set same logical values despite different memory layouts
     iterateAlongDimensions(dims, [&](const std::vector<int64_t>& indices) {
-        auto value = safeTestTypeCast<int32_t>(indices[0] + indices[1] + indices[2] + indices[3]);
+        const auto value
+            = safeTestTypeCast<int32_t>(indices[0] + indices[1] + indices[2] + indices[3]);
         tensor1.setHostValue(value, indices);
         tensor2.setHostValue(value, indices);
     });

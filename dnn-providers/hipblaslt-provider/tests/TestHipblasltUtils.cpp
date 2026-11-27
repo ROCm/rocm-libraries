@@ -30,7 +30,7 @@ struct PointwiseAttrsHolder
                          flatbuffers::Optional<float> reluLowerClipSlope = flatbuffers::nullopt,
                          flatbuffers::Optional<float> swishBeta = flatbuffers::nullopt)
     {
-        auto offset
+        const auto offset
             = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(builder,
                                                                               operation,
                                                                               reluLowerClip,
@@ -54,13 +54,13 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
 {
     // -- Null attrs ----------------------------------------------------------
     {
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(nullptr, false);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(nullptr, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_DEFAULT);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(nullptr, true);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(nullptr, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_BIAS);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
@@ -69,135 +69,135 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
     // -- ReLU / Clamp --------------------------------------------------------
     {
         // RELU_FWD with both clips → CLAMP without bias
-        PointwiseAttrsHolder const h(PM::RELU_FWD, -1.0f, 6.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, -1.0f, 6.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_EXT);
         EXPECT_FLOAT_EQ(result.act0, -1.0f);
         EXPECT_FLOAT_EQ(result.act1, 6.0f);
     }
     {
         // RELU_FWD with both clips → CLAMP with bias
-        PointwiseAttrsHolder const h(PM::RELU_FWD, -1.0f, 6.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, -1.0f, 6.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT);
         EXPECT_FLOAT_EQ(result.act0, -1.0f);
         EXPECT_FLOAT_EQ(result.act1, 6.0f);
     }
     {
         // RELU_FWD standard (lower_clip = 0, no upper_clip) without bias
-        PointwiseAttrsHolder const h(PM::RELU_FWD, 0.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, 0.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
         // RELU_FWD standard (lower_clip = 0, no upper_clip) with bias
-        PointwiseAttrsHolder const h(PM::RELU_FWD, 0.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, 0.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU_BIAS);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
         // RELU_FWD with non-zero lower_clip only → throws
-        PointwiseAttrsHolder const h(PM::RELU_FWD, 1.0f);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, 1.0f);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
         // RELU_FWD with nothing set: unset lower clip means 0, so this is standard ReLU
-        PointwiseAttrsHolder const h(PM::RELU_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const PointwiseAttrsHolder h(PM::RELU_FWD);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
-        PointwiseAttrsHolder const h(PM::RELU_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
+        const PointwiseAttrsHolder h(PM::RELU_FWD);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU_BIAS);
     }
     {
         // A slope of exactly 0 is the same as no slope
-        PointwiseAttrsHolder const h(
+        const PointwiseAttrsHolder h(
             PM::RELU_FWD, flatbuffers::nullopt, flatbuffers::nullopt, 0.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_RELU);
     }
     {
         // Leaky ReLU encoded with an explicit zero lower clip must not run as plain ReLU
-        PointwiseAttrsHolder const h(PM::RELU_FWD, 0.0f, flatbuffers::nullopt, 0.01f);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, 0.0f, flatbuffers::nullopt, 0.01f);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
-        PointwiseAttrsHolder const h(
+        const PointwiseAttrsHolder h(
             PM::RELU_FWD, flatbuffers::nullopt, flatbuffers::nullopt, 0.01f);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
         // Upper clip only (ReLU6): unset lower clip means 0
-        PointwiseAttrsHolder const h(PM::RELU_FWD, flatbuffers::nullopt, 6.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, flatbuffers::nullopt, 6.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_EXT);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 6.0f);
     }
     {
-        PointwiseAttrsHolder const h(PM::RELU_FWD, flatbuffers::nullopt, 6.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, flatbuffers::nullopt, 6.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 6.0f);
     }
     {
-        PointwiseAttrsHolder const h(PM::RELU_FWD, -1.0f, 6.0f, 0.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, -1.0f, 6.0f, 0.0f);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_CLAMP_EXT);
         EXPECT_FLOAT_EQ(result.act0, -1.0f);
         EXPECT_FLOAT_EQ(result.act1, 6.0f);
     }
     {
-        PointwiseAttrsHolder const h(PM::RELU_FWD, -1.0f, 6.0f, 0.01f);
+        const PointwiseAttrsHolder h(PM::RELU_FWD, -1.0f, 6.0f, 0.01f);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
 
     // -- GELU ----------------------------------------------------------------
     {
-        PointwiseAttrsHolder const h(PM::GELU_APPROX_TANH_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const PointwiseAttrsHolder h(PM::GELU_APPROX_TANH_FWD);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_GELU);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
-        PointwiseAttrsHolder const h(PM::GELU_APPROX_TANH_FWD);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
+        const PointwiseAttrsHolder h(PM::GELU_APPROX_TANH_FWD);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_GELU_BIAS);
     }
 
     // -- Swish ---------------------------------------------------------------
     {
-        PointwiseAttrsHolder const h(
+        const PointwiseAttrsHolder h(
             PM::SWISH_FWD, flatbuffers::nullopt, flatbuffers::nullopt, flatbuffers::nullopt, 1.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SWISH_EXT);
         EXPECT_FLOAT_EQ(result.act0, 0.0f);
         EXPECT_FLOAT_EQ(result.act1, 0.0f);
     }
     {
-        PointwiseAttrsHolder const h(
+        const PointwiseAttrsHolder h(
             PM::SWISH_FWD, flatbuffers::nullopt, flatbuffers::nullopt, flatbuffers::nullopt, 1.0f);
-        auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
+        const auto result = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true);
         EXPECT_EQ(result.epilogue, HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
     }
     {
-        PointwiseAttrsHolder const h(
+        const PointwiseAttrsHolder h(
             PM::SWISH_FWD, flatbuffers::nullopt, flatbuffers::nullopt, flatbuffers::nullopt, 2.0f);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
@@ -205,12 +205,12 @@ TEST(TestHipblasltUtils, MapPointwiseModeToHipblasLtEpilogue)
 
     // -- Unsupported operations → throw --------------------------------------
     {
-        PointwiseAttrsHolder const h(PM::ADD);
+        const PointwiseAttrsHolder h(PM::ADD);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, false),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
-        PointwiseAttrsHolder const h(PM::IDENTITY);
+        const PointwiseAttrsHolder h(PM::IDENTITY);
         EXPECT_THROW(hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(h.attrs, true),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
@@ -418,12 +418,12 @@ TEST(TestHipblasltUtils, RequireRowMajorOutputRejectsOverlappingRows)
 TEST(TestHipblasltUtils, FindTensorAttributesReturnsCorrectValue)
 {
     flatbuffers::FlatBufferBuilder builder1;
-    auto attrOffset1
+    const auto attrOffset1
         = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder1, 1);
     builder1.Finish(attrOffset1);
 
     flatbuffers::FlatBufferBuilder builder2;
-    auto attrOffset2
+    const auto attrOffset2
         = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder2, 2);
     builder2.Finish(attrOffset2);
 
@@ -432,7 +432,7 @@ TEST(TestHipblasltUtils, FindTensorAttributesReturnsCorrectValue)
     auto attrPtr2 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         builder2.GetBufferPointer());
 
-    auto attrMap
+    const auto attrMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{
             {1, attrPtr1}, {2, attrPtr2}};
@@ -443,7 +443,7 @@ TEST(TestHipblasltUtils, FindTensorAttributesReturnsCorrectValue)
 
 TEST(TestHipblasltUtils, FindTensorAttributesThrowsIfNotFound)
 {
-    auto attrMap
+    const auto attrMap
         = std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>{};
 
@@ -602,7 +602,7 @@ TEST(TestHipblasltUtils, IsDenseRowMajorDeclinesRankMismatch)
 TEST(TestHipblasltUtils, ThrowOnHipblasltFailureEvaluatesItsArgumentOnce)
 {
     int calls = 0;
-    auto failsOnce = [&calls]() {
+    const auto failsOnce = [&calls]() {
         return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
     };
 
@@ -622,7 +622,7 @@ TEST(TestHipblasltUtils, ThrowOnHipblasltFailureEvaluatesItsArgumentOnce)
 TEST(TestHipblasltUtils, ThrowOnHipblasltFailureDoesNotThrowOnSuccess)
 {
     int calls = 0;
-    auto succeeds = [&calls]() {
+    const auto succeeds = [&calls]() {
         ++calls;
         return HIPBLAS_STATUS_SUCCESS;
     };
@@ -639,7 +639,7 @@ TEST(TestHipblasltUtils, LogOnHipblasltFailureEvaluatesItsArgumentOnce)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     int calls = 0;
-    auto failsOnce = [&calls]() {
+    const auto failsOnce = [&calls]() {
         return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
     };
 

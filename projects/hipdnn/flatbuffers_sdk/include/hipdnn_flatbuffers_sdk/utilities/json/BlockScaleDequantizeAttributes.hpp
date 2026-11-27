@@ -67,7 +67,7 @@ inline auto
         isNegativeScale = entry[keys::IS_NEGATIVE_SCALE].get<bool>();
     }
 
-    auto blockSizeVector = builder.CreateVector(blockSize);
+    const auto blockSizeVector = builder.CreateVector(blockSize);
 
     return data_objects::CreateBlockScaleDequantizeAttributes(
         builder,

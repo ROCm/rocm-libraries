@@ -22,7 +22,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     const std::vector<int64_t> dilation = {1, 1};
     const std::vector<int64_t> padding = {0, 0};
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionFwdTest");
     graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType))
         .set_compute_data_type(
@@ -36,14 +36,16 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.xTensor);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "W",
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.wTensor);
     wAttr.set_uid(uid++);
-    auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
+    const auto wTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
 
     hipdnn_frontend::graph::ConvFpropAttributes convAttrs;
     convAttrs.set_name("Convolution_fwd_inference");
@@ -53,7 +55,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     convAttrs.set_post_padding(padding);
     convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto yTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+    const auto yTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
     if(!yTensorAttr->has_uid())
     {
@@ -62,7 +64,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
 
     yTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
 
-    auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *wTensorAttr, *yTensorAttr);
+    const auto variantPack
+        = tensorBundle.createVariantPack(*xTensorAttr, *wTensorAttr, *yTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }
@@ -77,7 +80,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     const std::vector<int64_t> dilation = {1, 1};
     const std::vector<int64_t> padding = {0, 0};
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionBwdTest");
     graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType))
         .set_compute_data_type(
@@ -92,7 +95,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.dyTensor);
     dyAttr.set_uid(uid++);
-    auto dyTensorAttr
+    const auto dyTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
 
     auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -100,7 +103,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.wTensor);
     wAttr.set_uid(uid++);
-    auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
+    const auto wTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
 
     hipdnn_frontend::graph::ConvDgradAttributes convBwdAttrs;
     convBwdAttrs.set_name("Convolution_bwd");
@@ -110,7 +114,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     convBwdAttrs.set_post_padding(padding);
     convBwdAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto dxTensorAttr = graph->conv_dgrad(dyTensorAttr, wTensorAttr, convBwdAttrs);
+    const auto dxTensorAttr = graph->conv_dgrad(dyTensorAttr, wTensorAttr, convBwdAttrs);
 
     if(!dxTensorAttr->has_uid())
     {
@@ -120,7 +124,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     dxTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
     dxTensorAttr->set_dim(tensorBundle.dxTensor.dims());
 
-    auto variantPack = tensorBundle.createVariantPack(*dxTensorAttr, *wTensorAttr, *dyTensorAttr);
+    const auto variantPack
+        = tensorBundle.createVariantPack(*dxTensorAttr, *wTensorAttr, *dyTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }
@@ -135,7 +140,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     const std::vector<int64_t> dilation = {1, 1};
     const std::vector<int64_t> padding = {0, 0};
 
-    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionWrwTest");
     graph->set_io_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType))
         .set_compute_data_type(
@@ -150,7 +155,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.dyTensor);
     dyAttr.set_uid(uid++);
-    auto dyTensorAttr
+    const auto dyTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
 
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -158,7 +163,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType),
         tensorBundle.xTensor);
     xAttr.set_uid(uid++);
-    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+    const auto xTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
     hipdnn_frontend::graph::ConvWgradAttributes convWrwAttrs;
     convWrwAttrs.set_name("Convolution_wrw");
@@ -168,7 +174,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     convWrwAttrs.set_post_padding(padding);
     convWrwAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
 
-    auto dwTensorAttr = graph->conv_wgrad(dyTensorAttr, xTensorAttr, convWrwAttrs);
+    const auto dwTensorAttr = graph->conv_wgrad(dyTensorAttr, xTensorAttr, convWrwAttrs);
 
     if(!dwTensorAttr->has_uid())
     {
@@ -178,7 +184,8 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     dwTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
     dwTensorAttr->set_dim(tensorBundle.dwTensor.dims());
 
-    auto variantPack = tensorBundle.createVariantPack(*xTensorAttr, *dwTensorAttr, *dyTensorAttr);
+    const auto variantPack
+        = tensorBundle.createVariantPack(*xTensorAttr, *dwTensorAttr, *dyTensorAttr);
 
     return std::make_tuple(graph, variantPack);
 }

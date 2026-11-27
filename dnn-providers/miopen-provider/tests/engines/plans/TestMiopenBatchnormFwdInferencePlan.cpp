@@ -11,7 +11,7 @@ using namespace miopen_plugin;
 TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid batchnorm graph
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -32,7 +32,7 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
 TEST(TestMiopenBatchnormFwdInferenceParams, InitializesFusedActivationBiasWithAllTensors)
 {
     // Create a fused batchnorm fwd + activation graph
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

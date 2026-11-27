@@ -25,10 +25,10 @@ template <>
 inline auto to<data_objects::CustomOpAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                  const nlohmann::json& entry)
 {
-    auto customOpId = entry.at("custom_op_id").get<std::string>();
-    auto inputUids = entry.at("input_tensor_uids").get<std::vector<int64_t>>();
-    auto outputUids = entry.at("output_tensor_uids").get<std::vector<int64_t>>();
-    auto data = entry.at("data").get<std::vector<uint8_t>>();
+    const auto customOpId = entry.at("custom_op_id").get<std::string>();
+    const auto inputUids = entry.at("input_tensor_uids").get<std::vector<int64_t>>();
+    const auto outputUids = entry.at("output_tensor_uids").get<std::vector<int64_t>>();
+    const auto data = entry.at("data").get<std::vector<uint8_t>>();
 
     return data_objects::CreateCustomOpAttributesDirect(
         builder, customOpId.c_str(), &inputUids, &outputUids, &data);

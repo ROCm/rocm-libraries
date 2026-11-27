@@ -69,14 +69,14 @@ constexpr const char* DISABLE_EXACT_CACHE_ENV = "HIPDNN_DISABLE_EXACT_ENGINE_CAC
 std::vector<uint8_t> buildEmptyGraphBuffer()
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             nullptr,
-                                             nullptr,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   nullptr,
+                                                   nullptr,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -102,7 +102,7 @@ std::vector<uint8_t> buildConvFwdGraphBuffer(const std::vector<int64_t>& xDims,
             builder, Y_UID, "y", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto convAttrs = fb::CreateConvolutionFwdAttributesDirect(builder, X_UID, W_UID, Y_UID);
+    const auto convAttrs = fb::CreateConvolutionFwdAttributesDirect(builder, X_UID, W_UID, Y_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -111,14 +111,14 @@ std::vector<uint8_t> buildConvFwdGraphBuffer(const std::vector<int64_t>& xDims,
                              fb::NodeAttributes::ConvolutionFwdAttributes,
                              convAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -201,8 +201,9 @@ std::vector<uint8_t> buildTwoConvFwdGraphBuffer()
             builder, Y1_UID, "y1", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto firstConvAttrs = fb::CreateConvolutionFwdAttributesDirect(builder, X0_UID, W0_UID, Y0_UID);
-    auto secondConvAttrs
+    const auto firstConvAttrs
+        = fb::CreateConvolutionFwdAttributesDirect(builder, X0_UID, W0_UID, Y0_UID);
+    const auto secondConvAttrs
         = fb::CreateConvolutionFwdAttributesDirect(builder, X1_UID, W1_UID, Y1_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
@@ -217,14 +218,14 @@ std::vector<uint8_t> buildTwoConvFwdGraphBuffer()
                              fb::NodeAttributes::ConvolutionFwdAttributes,
                              secondConvAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -252,7 +253,7 @@ std::vector<uint8_t> buildConvBwdGraphBuffer(const std::vector<int64_t>& dyDims,
             builder, DX_UID, "dx", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto convAttrs = fb::CreateConvolutionBwdAttributesDirect(builder, DY_UID, W_UID, DX_UID);
+    const auto convAttrs = fb::CreateConvolutionBwdAttributesDirect(builder, DY_UID, W_UID, DX_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -261,14 +262,14 @@ std::vector<uint8_t> buildConvBwdGraphBuffer(const std::vector<int64_t>& dyDims,
                              fb::NodeAttributes::ConvolutionBwdAttributes,
                              convAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -295,7 +296,7 @@ std::vector<uint8_t> buildConvWrwGraphBuffer(const std::vector<int64_t>& xDims,
             builder, DW_UID, "dw", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto convAttrs = fb::CreateConvolutionWrwAttributesDirect(builder, X_UID, DY_UID, DW_UID);
+    const auto convAttrs = fb::CreateConvolutionWrwAttributesDirect(builder, X_UID, DY_UID, DW_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -304,14 +305,14 @@ std::vector<uint8_t> buildConvWrwGraphBuffer(const std::vector<int64_t>& xDims,
                              fb::NodeAttributes::ConvolutionWrwAttributes,
                              convAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -334,16 +335,16 @@ std::vector<uint8_t> buildPointwiseBinaryGraphBuffer(fb::PointwiseMode mode)
             builder, OUT_UID, "out", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
-                                                        mode,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        X_UID,
-                                                        Y_UID,
-                                                        ::flatbuffers::nullopt,
-                                                        OUT_UID);
+    const auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                              mode,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              X_UID,
+                                                              Y_UID,
+                                                              ::flatbuffers::nullopt,
+                                                              OUT_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -352,14 +353,14 @@ std::vector<uint8_t> buildPointwiseBinaryGraphBuffer(fb::PointwiseMode mode)
                              fb::NodeAttributes::PointwiseAttributes,
                              pointwiseAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -381,16 +382,16 @@ std::vector<uint8_t> buildPointwiseBinaryGraphBufferWithoutSecondInputTensor()
             builder, OUT_UID, "out", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
-                                                        fb::PointwiseMode::ADD,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        X_UID,
-                                                        MISSING_Y_UID,
-                                                        ::flatbuffers::nullopt,
-                                                        OUT_UID);
+    const auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                              fb::PointwiseMode::ADD,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              X_UID,
+                                                              MISSING_Y_UID,
+                                                              ::flatbuffers::nullopt,
+                                                              OUT_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -399,14 +400,14 @@ std::vector<uint8_t> buildPointwiseBinaryGraphBufferWithoutSecondInputTensor()
                              fb::NodeAttributes::PointwiseAttributes,
                              pointwiseAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -445,17 +446,17 @@ std::vector<uint8_t> buildPointwiseThenConvGraphBuffer()
             builder, CONV_Y_UID, "conv_y", fb::DataType::FLOAT, nullptr, nullptr),
     };
 
-    auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
-                                                        fb::PointwiseMode::ADD,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        ::flatbuffers::nullopt,
-                                                        PW_X_UID,
-                                                        PW_Y_UID,
-                                                        ::flatbuffers::nullopt,
-                                                        PW_OUT_UID);
-    auto convAttrs
+    const auto pointwiseAttrs = fb::CreatePointwiseAttributes(builder,
+                                                              fb::PointwiseMode::ADD,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              PW_X_UID,
+                                                              PW_Y_UID,
+                                                              ::flatbuffers::nullopt,
+                                                              PW_OUT_UID);
+    const auto convAttrs
         = fb::CreateConvolutionFwdAttributesDirect(builder, CONV_X_UID, CONV_W_UID, CONV_Y_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
@@ -470,14 +471,14 @@ std::vector<uint8_t> buildPointwiseThenConvGraphBuffer()
                              fb::NodeAttributes::ConvolutionFwdAttributes,
                              convAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};
@@ -524,16 +525,16 @@ std::vector<uint8_t> buildBatchnormTrainingGraphBuffer(bool includePeerStatTenso
                                                            &channelDims));
     }
 
-    auto batchnormAttrs = fb::CreateBatchnormAttributesDirect(builder,
-                                                              X_UID,
-                                                              SCALE_UID,
-                                                              BIAS_UID,
-                                                              EPSILON_UID,
-                                                              &peerStats,
-                                                              ::flatbuffers::nullopt,
-                                                              ::flatbuffers::nullopt,
-                                                              ::flatbuffers::nullopt,
-                                                              Y_UID);
+    const auto batchnormAttrs = fb::CreateBatchnormAttributesDirect(builder,
+                                                                    X_UID,
+                                                                    SCALE_UID,
+                                                                    BIAS_UID,
+                                                                    EPSILON_UID,
+                                                                    &peerStats,
+                                                                    ::flatbuffers::nullopt,
+                                                                    ::flatbuffers::nullopt,
+                                                                    ::flatbuffers::nullopt,
+                                                                    Y_UID);
 
     const std::vector<flatbuffers::Offset<fb::Node>> nodes{
         fb::CreateNodeDirect(builder,
@@ -542,14 +543,14 @@ std::vector<uint8_t> buildBatchnormTrainingGraphBuffer(bool includePeerStatTenso
                              fb::NodeAttributes::BatchnormAttributes,
                              batchnormAttrs.Union())};
 
-    auto graphOffset = fb::CreateGraphDirect(builder,
-                                             nullptr,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             fb::DataType::UNSET,
-                                             &tensors,
-                                             &nodes,
-                                             ::flatbuffers::nullopt);
+    const auto graphOffset = fb::CreateGraphDirect(builder,
+                                                   nullptr,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   fb::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes,
+                                                   ::flatbuffers::nullopt);
     fb::FinishGraphBuffer(builder, graphOffset);
     const auto* data = builder.GetBufferPointer();
     return {data, data + builder.GetSize()};

@@ -542,8 +542,8 @@ public:
             }
             // Engine C: no knobs (empty vector)
 
-            auto knobsVector = builder.CreateVector(knobOffsets);
-            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+            const auto knobsVector = builder.CreateVector(knobOffsets);
+            const auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, engineId, knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();

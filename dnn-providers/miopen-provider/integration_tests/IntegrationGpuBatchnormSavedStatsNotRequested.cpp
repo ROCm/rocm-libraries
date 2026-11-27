@@ -44,7 +44,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
 
         const std::string pluginPathStr = pluginPath.string();
@@ -88,14 +88,14 @@ TEST_F(IntegrationGpuBatchnormSavedStatsNotRequested, TrainingWithOnlyYAsOutputM
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>(
+    const auto x = std::make_shared<TensorAttributes>(
         makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
-    auto scale = std::make_shared<TensorAttributes>(
+    const auto scale = std::make_shared<TensorAttributes>(
         makeTensorAttributes("scale", DataType::FLOAT, cDims, generateStrides(cDims)));
-    auto bias = std::make_shared<TensorAttributes>(
+    const auto bias = std::make_shared<TensorAttributes>(
         makeTensorAttributes("bias", DataType::FLOAT, cDims, generateStrides(cDims)));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
+    const auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1}).set_stride({1}).set_data_type(DataType::DOUBLE);
     epsilon->set_compile_time_constant(EPSILON);
 

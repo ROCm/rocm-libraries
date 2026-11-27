@@ -119,9 +119,9 @@ TEST(TestCudnnShimGraphSDPA, BackwardConstructAndValidate)
     std::shared_ptr<fe::graph::Tensor_attributes> k;
     std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
-    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
-    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
-    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+    const auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    const auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    const auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
 
     auto [dq, dk, dv]
         = graph.sdpa_backward(q, k, v, o, dO, stats, fe::graph::SDPA_backward_attributes{});
@@ -141,9 +141,9 @@ TEST(TestCudnnShimGraphSDPA, BackwardDeterministicRequestSurfacesRecordedError)
     std::shared_ptr<fe::graph::Tensor_attributes> k;
     std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
-    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
-    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
-    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+    const auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    const auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    const auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
 
     graph.sdpa_backward(q,
                         k,
@@ -163,9 +163,9 @@ TEST(TestCudnnShimGraphSDPA, BackwardDeterministicFalseIsIgnored)
     std::shared_ptr<fe::graph::Tensor_attributes> k;
     std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
-    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
-    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
-    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+    const auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    const auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    const auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
 
     graph.sdpa_backward(q,
                         k,
@@ -209,9 +209,9 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
     std::shared_ptr<fe::graph::Tensor_attributes> k;
     std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
-    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
-    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
-    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+    const auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    const auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    const auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
 
     fe::graph::SDPA_backward_attributes attrs;
     attrs
@@ -235,9 +235,9 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
     std::shared_ptr<fe::graph::Tensor_attributes> k;
     std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
-    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
-    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
-    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+    const auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    const auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    const auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
 
     fe::graph::SDPA_backward_attributes attrs;
     attrs.set_max_total_seq_len_q(128).set_score_mod(

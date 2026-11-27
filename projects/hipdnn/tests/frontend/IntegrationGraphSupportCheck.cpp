@@ -68,7 +68,7 @@ TEST_F(IntegrationGraphSupportCheck, SupportedWithGoodPlugin)
 {
     Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -80,7 +80,7 @@ TEST_F(IntegrationGraphSupportCheck, NotSupportedWhenNoApplicableEngines)
 
     Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_FALSE(result.is_good()) << "Expected failure when no engines are applicable";
 }
 
@@ -92,7 +92,7 @@ TEST_F(IntegrationGraphSupportCheck, SupportedWithMixedPlugins)
 
     Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -102,7 +102,7 @@ TEST_F(IntegrationGraphSupportCheck, AutoBuildsGraphIfNotBuilt)
     Graph graph = FrontendGraphFactory::create(OperationType::CONV_FORWARD);
 
     // is_supported_ext should auto-validate and auto-build
-    auto result = graph.is_supported_ext(_handle);
+    const auto result = graph.is_supported_ext(_handle);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 

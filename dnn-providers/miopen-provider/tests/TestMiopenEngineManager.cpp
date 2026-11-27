@@ -110,7 +110,7 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 
     const MockGraph mockGraph;
     HipdnnMiopenHandle dummyHandle;
-    auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
+    const auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
     EXPECT_TRUE(applicable.empty());
 }

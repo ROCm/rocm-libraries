@@ -44,7 +44,7 @@ std::vector<PointwiseMode> getPointwiseModesByChecker(CheckerFunc checker)
         i < static_cast<int>(K_POINTWISE_MODE_COUNT);
         ++i)
     {
-        auto mode = static_cast<PointwiseMode>(i);
+        const auto mode = static_cast<PointwiseMode>(i);
         if(checker(mode) && toBackendPointwiseMode(mode).has_value())
         {
             modes.push_back(mode);
@@ -90,20 +90,20 @@ TEST_P(TestPointwiseNodeUnaryOps, ValidWithOneInput)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(_mode);
 
-    auto inputTensor = attributes.get_input_0();
+    const auto inputTensor = attributes.get_input_0();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(2).set_name("OutputTensor").set_dim({2, 3, 4});
 
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Unary operation " << static_cast<int>(_mode) << " should be valid with one input";
 }
@@ -119,7 +119,7 @@ TEST_P(TestPointwiseNodeUnaryOps, ValidWithSurplusSecondInput)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Unary operation " << static_cast<int>(_mode) << " should accept a surplus second input";
 }
@@ -136,7 +136,7 @@ TEST_P(TestPointwiseNodeUnaryOps, ValidWithSurplusSecondAndThirdInputs)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK) << "Unary operation " << static_cast<int>(_mode)
                                          << " should accept surplus second and third inputs";
 }
@@ -168,7 +168,7 @@ TEST_P(TestPointwiseNodeBinaryOps, InvalidWithOneInput)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE)
         << "Binary operation " << static_cast<int>(_mode) << " should be invalid with one input";
 }
@@ -181,27 +181,27 @@ TEST_P(TestPointwiseNodeBinaryOps, ValidWithTwoInputs)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(_mode);
 
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3).set_name("OutputTensor").set_dim({2, 3, 4});
 
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Binary operation " << static_cast<int>(_mode) << " should be valid with two inputs";
 }
@@ -218,7 +218,7 @@ TEST_P(TestPointwiseNodeBinaryOps, ValidWithSurplusThirdInput)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Binary operation " << static_cast<int>(_mode) << " should accept a surplus third input";
 }
@@ -250,7 +250,7 @@ TEST_P(TestPointwiseNodeTernaryOps, InvalidWithOneInput)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE)
         << "Ternary operation " << static_cast<int>(_mode) << " should be invalid with one input";
 }
@@ -266,7 +266,7 @@ TEST_P(TestPointwiseNodeTernaryOps, InvalidWithTwoInputs)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE)
         << "Ternary operation " << static_cast<int>(_mode) << " should be invalid with two inputs";
 }
@@ -280,34 +280,34 @@ TEST_P(TestPointwiseNodeTernaryOps, ValidWithThreeInputs)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(_mode);
 
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto inputTensor2 = attributes.get_input_2();
+    const auto inputTensor2 = attributes.get_input_2();
     inputTensor2->set_uid(3)
         .set_name("InputTensor2")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(4).set_name("OutputTensor").set_dim({2, 3, 4});
 
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK)
         << "Ternary operation " << static_cast<int>(_mode) << " should be valid with three inputs";
 }
@@ -327,7 +327,7 @@ PointwiseNode makeNodeWithModeOperands(PointwiseMode mode)
     const size_t inputCount = std::max<size_t>(PointwiseNode::modeInputCount(mode), 1);
     for(size_t slot = 0; slot < inputCount; ++slot)
     {
-        auto input = std::make_shared<TensorAttributes>();
+        const auto input = std::make_shared<TensorAttributes>();
         input->set_uid(static_cast<int64_t>(slot) + 1)
             .set_name("InputTensor" + std::to_string(slot))
             .set_data_type(DataType::FLOAT)
@@ -335,7 +335,7 @@ PointwiseNode makeNodeWithModeOperands(PointwiseMode mode)
             .set_stride({12, 4, 1});
         attributes.inputs[static_cast<PointwiseAttributes::InputNames>(slot)] = input;
     }
-    auto output = std::make_shared<TensorAttributes>();
+    const auto output = std::make_shared<TensorAttributes>();
     output->set_uid(10).set_name("OutputTensor").set_dim({2, 3, 4});
     attributes.set_output_0(output);
 
@@ -362,7 +362,7 @@ TEST(TestPointwiseNode, PreValidateAgreesWithLoweringForEveryMode)
 
 TEST(TestPointwiseNode, PreValidateRejectsModesWithoutBackendMapping)
 {
-    for(auto mode : {PointwiseMode::COS, PointwiseMode::MOD, PointwiseMode::POW})
+    for(const auto mode : {PointwiseMode::COS, PointwiseMode::MOD, PointwiseMode::POW})
     {
         const auto node = makeNodeWithModeOperands(mode);
         const auto error = node.pre_validate_node();
@@ -382,7 +382,7 @@ TEST(TestPointwiseNode, ZeroInputsError)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -402,7 +402,7 @@ TEST(TestPointwiseNode, MoreThanThreeInputsError)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -415,7 +415,7 @@ TEST(TestPointwiseNode, MissingOutputError)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -428,7 +428,7 @@ TEST(TestPointwiseNode, BroadcastableDimsValid)
     attributes.set_mode(PointwiseMode::ADD);
 
     // Input0: [1, 3, 1, 4] - broadcastable to output
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
@@ -436,7 +436,7 @@ TEST(TestPointwiseNode, BroadcastableDimsValid)
         .set_stride({12, 4, 4, 1});
 
     // Input1: [2, 1, 5, 1] - broadcastable to output
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
@@ -444,7 +444,7 @@ TEST(TestPointwiseNode, BroadcastableDimsValid)
         .set_stride({5, 5, 1, 1});
 
     // Output: [2, 3, 5, 4] - common broadcast shape
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_dim({2, 3, 5, 4})
@@ -453,7 +453,7 @@ TEST(TestPointwiseNode, BroadcastableDimsValid)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -465,7 +465,7 @@ TEST(TestPointwiseNode, StrideInferenceFailsWithMismatchedDims)
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
     // Input: [2, 3, 4] with strides
-    auto inputTensor = attributes.get_input_0();
+    const auto inputTensor = attributes.get_input_0();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
@@ -473,7 +473,7 @@ TEST(TestPointwiseNode, StrideInferenceFailsWithMismatchedDims)
         .set_stride({12, 4, 1});
 
     // Output: [5, 6, 7] - completely different dims, no stride set
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(2)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -482,7 +482,7 @@ TEST(TestPointwiseNode, StrideInferenceFailsWithMismatchedDims)
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -494,7 +494,7 @@ TEST(TestPointwiseNode, InferDimsAndStridesFromSingleInput)
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
     // Input with dims and strides
-    auto inputTensor = attributes.get_input_0();
+    const auto inputTensor = attributes.get_input_0();
     inputTensor->set_uid(1)
         .set_name("InputTensor")
         .set_data_type(DataType::FLOAT)
@@ -502,13 +502,13 @@ TEST(TestPointwiseNode, InferDimsAndStridesFromSingleInput)
         .set_stride({12, 4, 1});
 
     // Output with no dims or strides - should be inferred
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(2).set_name("OutputTensor").set_data_type(DataType::FLOAT);
 
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     // Check that dims and strides were inferred
@@ -525,7 +525,7 @@ TEST(TestPointwiseNode, BroadcastTwoInputsWithMismatchedDims)
     attributes.set_mode(PointwiseMode::ADD);
 
     // Input0: [1, 3, 1] - smaller shape
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
@@ -533,7 +533,7 @@ TEST(TestPointwiseNode, BroadcastTwoInputsWithMismatchedDims)
         .set_stride({3, 1, 1});
 
     // Input1: [2, 1, 4] - different shape
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
@@ -541,7 +541,7 @@ TEST(TestPointwiseNode, BroadcastTwoInputsWithMismatchedDims)
         .set_stride({4, 4, 1});
 
     // Output: [2, 3, 4] - matches the broadcast result
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -551,7 +551,7 @@ TEST(TestPointwiseNode, BroadcastTwoInputsWithMismatchedDims)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -564,7 +564,7 @@ TEST(TestPointwiseNode, InferCommonShapeFromMultipleInputs)
     attributes.set_mode(PointwiseMode::ADD);
 
     // Input0: [2, 3, 4]
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
@@ -572,7 +572,7 @@ TEST(TestPointwiseNode, InferCommonShapeFromMultipleInputs)
         .set_stride({3, 1, 1});
 
     // Input1: [2, 1, 4]
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
@@ -581,13 +581,13 @@ TEST(TestPointwiseNode, InferCommonShapeFromMultipleInputs)
 
     // Output with no dims - should be inferred as [2, 3, 4]
     // strides not set, should be inferred as [3, 1, 1]
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3).set_name("OutputTensor").set_data_type(DataType::FLOAT);
 
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     // Check that common shape was inferred correctly
@@ -604,7 +604,7 @@ TEST(TestPointwiseNode, ScalarBroadcast)
     attributes.set_mode(PointwiseMode::ADD);
 
     // Input0: scalar [1]
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("ScalarInput")
         .set_data_type(DataType::FLOAT)
@@ -612,7 +612,7 @@ TEST(TestPointwiseNode, ScalarBroadcast)
         .set_stride({1});
 
     // Input1: [2, 3, 4]
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("TensorInput")
         .set_data_type(DataType::FLOAT)
@@ -620,7 +620,7 @@ TEST(TestPointwiseNode, ScalarBroadcast)
         .set_stride({12, 4, 1});
 
     // Output: [2, 3, 4]
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -630,7 +630,7 @@ TEST(TestPointwiseNode, ScalarBroadcast)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -643,7 +643,7 @@ TEST(TestPointwiseNode, BroadcastWithFewerDimensions)
     attributes.set_mode(PointwiseMode::ADD);
 
     // Input0: [3, 4] - can broadcast to [2, 3, 4]
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
@@ -651,7 +651,7 @@ TEST(TestPointwiseNode, BroadcastWithFewerDimensions)
         .set_stride({4, 1});
 
     // Input1: [4] - can broadcast to [2, 3, 4]
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
@@ -659,7 +659,7 @@ TEST(TestPointwiseNode, BroadcastWithFewerDimensions)
         .set_stride({1});
 
     // Output: [2, 3, 4]
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -669,7 +669,7 @@ TEST(TestPointwiseNode, BroadcastWithFewerDimensions)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
@@ -682,7 +682,7 @@ TEST(TestPointwiseNode, NonBroadcastableDimensionsError)
     attributes.set_mode(PointwiseMode::ADD);
 
     // Input0: [2, 3, 4] - NOT broadcastable to output [2, 5, 4]
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
@@ -690,7 +690,7 @@ TEST(TestPointwiseNode, NonBroadcastableDimensionsError)
         .set_stride({12, 4, 1});
 
     // Input1: [2, 5, 4] - matches output
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
@@ -698,7 +698,7 @@ TEST(TestPointwiseNode, NonBroadcastableDimensionsError)
         .set_stride({20, 4, 1});
 
     // Output: [2, 5, 4]
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -708,7 +708,7 @@ TEST(TestPointwiseNode, NonBroadcastableDimensionsError)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -727,7 +727,7 @@ TEST(TestPointwiseNode, MultipleOutputsError)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -739,7 +739,7 @@ TEST(TestPointwiseNode, NullInputTensorPreValidation)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(1)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -749,7 +749,7 @@ TEST(TestPointwiseNode, NullInputTensorPreValidation)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -762,14 +762,14 @@ TEST(TestPointwiseNode, NullInputAmongMultipleInputsPreValidation)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -779,7 +779,7 @@ TEST(TestPointwiseNode, NullInputAmongMultipleInputsPreValidation)
     const GraphAttributes graphAttributes;
     const PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.pre_validate_node();
+    const auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -791,13 +791,13 @@ TEST(TestPointwiseNode, NullInputTensorInferProperties)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(PointwiseMode::RELU_FWD);
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(1).set_name("OutputTensor").set_data_type(DataType::FLOAT);
 
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -811,27 +811,27 @@ TEST(TestPointwiseNode, NullInputAmongMultipleInferProperties)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(PointwiseMode::BINARY_SELECT);
 
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto inputTensor1 = attributes.get_input_1();
+    const auto inputTensor1 = attributes.get_input_1();
     inputTensor1->set_uid(2)
         .set_name("InputTensor1")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(4).set_name("OutputTensor").set_data_type(DataType::FLOAT);
 
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -844,20 +844,20 @@ TEST(TestPointwiseNode, NullSecondInputInferProperties)
     attributes.set_output_0(std::make_shared<TensorAttributes>());
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto inputTensor0 = attributes.get_input_0();
+    const auto inputTensor0 = attributes.get_input_0();
     inputTensor0->set_uid(1)
         .set_name("InputTensor0")
         .set_data_type(DataType::FLOAT)
         .set_dim({2, 3, 4})
         .set_stride({12, 4, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3).set_name("OutputTensor").set_data_type(DataType::FLOAT);
 
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
@@ -889,13 +889,13 @@ TEST(TestPointwiseNode, InferBroadcastAlignsLowerRankInputOnTrailingDims)
         .set_dim({4})
         .set_stride({1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3).set_name("OutputTensor").set_data_type(DataType::FLOAT);
 
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
     EXPECT_EQ(outputTensor->get_dim(), (std::vector<int64_t>{2, 3, 4}));
     EXPECT_EQ(outputTensor->get_stride(), (std::vector<int64_t>{12, 4, 1}));
@@ -922,7 +922,7 @@ TEST(TestPointwiseNode, InferBroadcastExpandsUnitDimForVirtualOutput)
         .set_dim({4})
         .set_stride({1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -963,7 +963,7 @@ TEST(TestPointwiseNode, InferVirtualOutputStridePutsExtraLeadingAxisOutermost)
         .set_dim({4, 1, 1})
         .set_stride({1, 1, 1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -972,7 +972,7 @@ TEST(TestPointwiseNode, InferVirtualOutputStridePutsExtraLeadingAxisOutermost)
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     ASSERT_EQ(error.code, ErrorCode::OK) << error.get_message();
     EXPECT_EQ(outputTensor->get_dim(), (std::vector<int64_t>{4, 2, 3}));
     // The trailing axes keep IN_0's column-major order; the leading axis is outermost
@@ -1000,7 +1000,7 @@ TEST(TestPointwiseNode, InferBroadcastStrideFailsForNonVirtualOutputMatchingNoIn
         .set_dim({4})
         .set_stride({1});
 
-    auto outputTensor = attributes.get_output_0();
+    const auto outputTensor = attributes.get_output_0();
     outputTensor->set_uid(3)
         .set_name("OutputTensor")
         .set_data_type(DataType::FLOAT)
@@ -1009,7 +1009,7 @@ TEST(TestPointwiseNode, InferBroadcastStrideFailsForNonVirtualOutputMatchingNoIn
     const GraphAttributes graphAttributes;
     PointwiseNode node(std::move(attributes), graphAttributes);
 
-    auto error = node.infer_properties_node();
+    const auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 

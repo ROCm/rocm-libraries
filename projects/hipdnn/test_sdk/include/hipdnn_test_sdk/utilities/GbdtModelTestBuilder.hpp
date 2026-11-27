@@ -227,8 +227,8 @@ public:
                                       : writeSplitLeaf(fbb, std::get<SplitLeafSpec>(tree)));
         }
 
-        auto treesVector = fbb.CreateVector(treeOffsets);
-        auto hashOffset = fbb.CreateString(_featuresHash);
+        const auto treesVector = fbb.CreateVector(treeOffsets);
+        const auto hashOffset = fbb.CreateString(_featuresHash);
 
         flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
             archesVectorOffset = 0;
@@ -309,7 +309,7 @@ public:
                     earlyExitVector));
         }
 
-        auto modelOffset = modelBuilder.Finish();
+        const auto modelOffset = modelBuilder.Finish();
         fbb.Finish(modelOffset, fb::GbdtModelIdentifier());
 
         return {fbb.GetBufferPointer(), fbb.GetBufferPointer() + fbb.GetSize()};

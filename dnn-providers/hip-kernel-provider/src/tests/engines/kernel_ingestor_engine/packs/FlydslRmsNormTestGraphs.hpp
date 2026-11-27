@@ -298,7 +298,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     for(int node = 0; node < (extras.secondNode ? 2 : 1); ++node)
     {
-        auto attributes = data_objects::CreateRMSNormAttributes(
+        const auto attributes = data_objects::CreateRMSNormAttributes(
             builder,
             FLYDSL_X_UID,
             FLYDSL_SCALE_UID,
@@ -315,9 +315,9 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
                                            attributes.Union()));
     }
 
-    auto name = builder.CreateString("flydsl_rmsnorm_test");
-    auto tensorsVector = builder.CreateVector(tensors);
-    auto nodesVector = builder.CreateVector(nodes);
+    const auto name = builder.CreateString("flydsl_rmsnorm_test");
+    const auto tensorsVector = builder.CreateVector(tensors);
+    const auto nodesVector = builder.CreateVector(nodes);
 
     data_objects::GraphBuilder graphBuilder(builder);
     graphBuilder.add_name(name);

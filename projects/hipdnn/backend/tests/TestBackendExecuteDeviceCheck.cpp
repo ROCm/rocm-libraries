@@ -43,7 +43,7 @@ std::vector<uint8_t> makeSerializedPlan()
     const std::vector<int64_t> tensorUids{1};
     const std::vector<int64_t> tensorAlignments{16};
     const std::vector<uint8_t> pluginPayload{1, 2, 3};
-    auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
+    const auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
         builder,
         2,
         ENGINE_ID,
@@ -104,12 +104,13 @@ protected:
     // Finalizes _planWrapper from a graph whose handle is _buildHandle.
     void finalizePlan()
     {
-        auto graph
+        const auto graph
             = MockDescriptorUtility::asDescriptorUnsafe<MockGraphDescriptor>(_graphWrapper.get());
-        auto engine
+        const auto engine
             = MockDescriptorUtility::asDescriptorUnsafe<MockEngineDescriptor>(_engineWrapper.get());
-        auto engineConfig = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
-            _engineConfigWrapper.get());
+        const auto engineConfig
+            = MockDescriptorUtility::asDescriptorUnsafe<MockEngineConfigDescriptor>(
+                _engineConfigWrapper.get());
 
         EXPECT_CALL(*graph, getHandle()).WillRepeatedly(Return(&_buildHandle));
         EXPECT_CALL(*graph, getSerializedGraph())

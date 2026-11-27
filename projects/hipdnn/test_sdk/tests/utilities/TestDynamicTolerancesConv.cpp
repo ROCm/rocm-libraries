@@ -201,7 +201,7 @@ std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypeTriple<ha
 template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
@@ -230,10 +230,10 @@ protected:
         }
         else
         {
-            auto tol = calculateConvWrwTolerance<Out, In, Comp>(
+            const auto tol = calculateConvWrwTolerance<Out, In, Comp>(
                 params.inputMin, params.inputMax, params.dyMin, params.dyMax, params.dyDims);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(tol, expected, 1e-5f);
         }
@@ -312,9 +312,9 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // Populate with values
     // Correct value: 1.0
@@ -326,13 +326,13 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     actualPassing->fillTensorWithValue(1.05f);
     actualFailing->fillTensorWithValue(1.2f);
 
-    auto tol = calculateConvWrwTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
+    const auto tol = calculateConvWrwTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
 
     // tol approx 0.1
     EXPECT_LT(tol, 0.15f);
     EXPECT_GT(tol, 0.09f);
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
@@ -600,7 +600,7 @@ template <>
 std::vector<ConvDgradToleranceTestCase>
     getConvDgradToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
@@ -631,10 +631,10 @@ protected:
         }
         else
         {
-            auto tol = calculateConvDgradTolerance<Out, In, Comp>(
+            const auto tol = calculateConvDgradTolerance<Out, In, Comp>(
                 params.dyMin, params.dyMax, params.wMin, params.wMax, params.wDims);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(tol, expected, 1e-5f);
         }
@@ -714,9 +714,9 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // Populate with values
     baseline->fillTensorWithValue(1.0f);
@@ -724,14 +724,14 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     actualFailing->fillTensorWithValue(2.5f); // Large error
 
     const std::vector<int64_t> wDims = {10, 1, 10, 10}; // Accum = 1000
-    auto tol = calculateConvDgradTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, wDims);
+    const auto tol = calculateConvDgradTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, wDims);
 
     // tol should be reasonable for 1000 accumulations with half/half/float
     // For half precision with statistical bound, can be > 1.0
     EXPECT_LT(tol, 2.0f);
     EXPECT_GT(tol, 0.1f);
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
@@ -949,7 +949,7 @@ template <>
 std::vector<ConvFpropToleranceTestCase>
     getConvFpropToleranceTestCases<TypeTriple<half, half, half>>()
 {
-    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    const auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
 
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
@@ -982,10 +982,10 @@ protected:
         }
         else
         {
-            auto tol = calculateConvFpropTolerance<Out, In, Comp>(
+            const auto tol = calculateConvFpropTolerance<Out, In, Comp>(
                 params.inputMin, params.inputMax, params.wMin, params.wMax, params.wDims);
 
-            auto expected = static_cast<float>(params.expectedTolerance);
+            const auto expected = static_cast<float>(params.expectedTolerance);
 
             EXPECT_NEAR(static_cast<float>(tol), expected, 1e-5f)
                 << "Failed for dims size: " << params.wDims.size();
@@ -1067,21 +1067,21 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     baseline->fillTensorWithValue(1.0f);
     actualPassing->fillTensorWithValue(1.05f);
     actualFailing->fillTensorWithValue(1.2f);
 
-    auto tol = calculateConvFpropTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
+    const auto tol = calculateConvFpropTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
 
     // tol approx 0.1
     EXPECT_LT(tol, 0.15f);
     EXPECT_GT(tol, 0.09f);
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     {

@@ -73,7 +73,7 @@ TEST(TestFeasibleShapeSet, FindsARegionTooSparseForRejectionSampling)
         return shape[0] % 8 == 0 && shape[1] % 8 == 0 && shape[2] % 8 == 0;
     };
 
-    auto request = requestFor(matmulLikeDimensions());
+    const auto request = requestFor(matmulLikeDimensions());
     const auto result = buildFeasibleShapeSet(region, request);
 
     // The corpus is the occupied cells; many cells hold no feasible point, so the target count

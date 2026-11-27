@@ -87,12 +87,12 @@ public:
                                "BatchnormBackwardNode missing dbias for pre-validation");
 
         // Get tensor references
-        auto dy = attributes.get_dy();
-        auto x = attributes.get_x();
-        auto dx = attributes.get_dx();
-        auto scale = attributes.get_scale();
-        auto dscale = attributes.get_dscale();
-        auto dbias = attributes.get_dbias();
+        const auto dy = attributes.get_dy();
+        const auto x = attributes.get_x();
+        const auto dx = attributes.get_dx();
+        const auto scale = attributes.get_scale();
+        const auto dscale = attributes.get_dscale();
+        const auto dbias = attributes.get_dbias();
 
         // SECTION 2: Validate Required Tensor Dimensions
         // Why: All required tensors (x, dy, scale) must have dimensions set by user.
@@ -124,8 +124,8 @@ public:
         // Saved statistics (mean_c, invStd_c) are per-channel for backward computation.
 
         // Extract optional tensors once for reuse in both shape validation and consistency check
-        auto mean = attributes.get_mean();
-        auto invVar = attributes.get_inv_variance();
+        const auto mean = attributes.get_mean();
+        const auto invVar = attributes.get_inv_variance();
 
         // Extract channel count - safe to access xDims[1] after SECTION 2 validation
         auto& xDims = x->get_dim();
@@ -168,7 +168,7 @@ public:
     Error infer_properties_node() override
     {
         auto x = attributes.get_x();
-        auto dx = attributes.get_dx();
+        const auto dx = attributes.get_dx();
         auto dscale = attributes.get_dscale();
         auto dbias = attributes.get_dbias();
 
@@ -205,7 +205,7 @@ public:
             dx->set_stride(x->get_stride());
         }
 
-        auto inferCTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
+        const auto inferCTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
             if(tensorToInfer->get_dim().empty())
             {
                 std::vector<int64_t> tensorDims(x->get_dim().size(), 1);
@@ -215,7 +215,8 @@ public:
 
             if(tensorToInfer->get_stride().empty())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                const auto strideOrder
+                    = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                 tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
                     tensorToInfer->get_dim(), strideOrder));
             }

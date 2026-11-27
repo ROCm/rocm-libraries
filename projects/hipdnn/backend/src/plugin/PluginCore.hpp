@@ -78,7 +78,7 @@ protected:
     template <typename Callable, typename... Args>
     void invokePluginFunction(const char* description, Callable&& func, Args&&... args) const
     {
-        auto status = func(std::forward<Args>(args)...);
+        const auto status = func(std::forward<Args>(args)...);
         if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
         {
             throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,

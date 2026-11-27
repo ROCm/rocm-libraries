@@ -154,7 +154,7 @@ protected:
         const SimpleBatchnorm2DTensorBundle<float, float>& tensorBundle,
         bool useManualUids)
     {
-        auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+        const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)
             .set_io_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT)
@@ -200,7 +200,7 @@ protected:
         tensors.bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
         // Epsilon (pass-by-value)
-        auto epsilon = std::make_shared<TensorAttributes>();
+        const auto epsilon = std::make_shared<TensorAttributes>();
         epsilon->set_name("epsilon").set_compile_time_constant(1e-5f);
         if(useManualUids)
         {

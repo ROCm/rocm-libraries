@@ -14,7 +14,7 @@
 
 TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Initialize frontend logging via component-specific macro
@@ -40,7 +40,7 @@ TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
 
 TEST(TestSdkLogging, SdkLogContainsComponentName)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");
@@ -60,7 +60,7 @@ TEST(TestSdkLogging, SdkLogContainsComponentName)
 
 TEST(TestSdkLogging, SdkLogAllSeverityLevels)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");
@@ -94,7 +94,7 @@ TEST(TestSdkLogging, SdkLogAllSeverityLevels)
 
 TEST(TestSdkLogging, SdkLogRespectsLogLevel)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     HIPDNN_FE_LOG_ERROR("Frontend initialized");
@@ -128,7 +128,7 @@ TEST(TestSdkLogging, SdkLogRespectsLogLevel)
 
 TEST(TestSdkLogging, SdkLogStreamFormatting)
 {
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");

@@ -189,7 +189,7 @@ TEST(TestFeatureExtractor, KernelOnlyEntriesAreCachedPerKernelAndMixedOnesRunPer
     const auto cached = extractor.kernelOnlyValues(kernelOnly);
     EXPECT_EQ(cached, (std::vector<double>{32, 96}));
 
-    auto work = extractor.prepare(ctx);
+    const auto work = extractor.prepare(ctx);
     auto row = work.values;
     extractor.applyKernelOnly(row.data(), cached);
     for(size_t j = 0; j < extractor.mixedCount(); ++j)

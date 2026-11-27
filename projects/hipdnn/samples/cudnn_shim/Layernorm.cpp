@@ -45,24 +45,25 @@ int main(int argc, char** argv)
             .set_intermediate_data_type(cudnn_frontend::DataType_t::FLOAT)
             .set_compute_data_type(cudnn_frontend::DataType_t::FLOAT);
 
-        auto x = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                  .set_name("X")
-                                  .set_dim({b * s, d, 1, 1})
-                                  .set_stride({d, 1, d, d})
-                                  .set_uid(1));
-        auto scale = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                      .set_name("scale")
-                                      .set_dim({1, d, 1, 1})
-                                      .set_stride({d, 1, d, d})
-                                      .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-                                      .set_uid(2));
-        auto bias = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
-                                     .set_name("bias")
-                                     .set_dim({1, d, 1, 1})
-                                     .set_stride({d, 1, d, d})
-                                     .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-                                     .set_uid(3));
-        auto epsilon = graph.tensor(1e-05F, cudnn_frontend::graph::ScalarType::COMPILE_TIME_CONST);
+        const auto x = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                        .set_name("X")
+                                        .set_dim({b * s, d, 1, 1})
+                                        .set_stride({d, 1, d, d})
+                                        .set_uid(1));
+        const auto scale = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                            .set_name("scale")
+                                            .set_dim({1, d, 1, 1})
+                                            .set_stride({d, 1, d, d})
+                                            .set_data_type(cudnn_frontend::DataType_t::FLOAT)
+                                            .set_uid(2));
+        const auto bias = graph.tensor(cudnn_frontend::graph::Tensor_attributes{}
+                                           .set_name("bias")
+                                           .set_dim({1, d, 1, 1})
+                                           .set_stride({d, 1, d, d})
+                                           .set_data_type(cudnn_frontend::DataType_t::FLOAT)
+                                           .set_uid(3));
+        const auto epsilon
+            = graph.tensor(1e-05F, cudnn_frontend::graph::ScalarType::COMPILE_TIME_CONST);
 
         auto [y, mean, invVariance]
             = graph.layernorm(x,

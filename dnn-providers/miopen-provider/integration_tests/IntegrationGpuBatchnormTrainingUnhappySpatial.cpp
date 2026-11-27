@@ -41,14 +41,14 @@ Graph makeUnhappySpatialGraph(const UnhappyBnTrainingSpatialCase& tc)
     const auto cDims = getDerivedShape(dims);
 
     // Input tensor
-    auto x = std::make_shared<TensorAttributes>(
+    const auto x = std::make_shared<TensorAttributes>(
         makeTensorAttributes("x", DataType::FLOAT, dims, generateStrides(dims)));
 
     // Required BN parameters
-    auto scale = std::make_shared<TensorAttributes>(
+    const auto scale = std::make_shared<TensorAttributes>(
         makeTensorAttributes("scale", DataType::FLOAT, cDims, generateStrides(cDims)));
 
-    auto bias = std::make_shared<TensorAttributes>(
+    const auto bias = std::make_shared<TensorAttributes>(
         makeTensorAttributes("bias", DataType::FLOAT, cDims, generateStrides(cDims)));
 
     // Forward BatchNorm training
@@ -77,7 +77,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
 
         const std::string pluginPathStr = pluginPath.string();
@@ -114,7 +114,7 @@ TEST_P(IntegrationGpuBatchnormTrainingUnhappySpatial, RejectsInsufficientSpatial
     const auto& tc = GetParam();
 
     auto graph = makeUnhappySpatialGraph(tc);
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
 
     // Must fail
     EXPECT_NE(result.code, ErrorCode::OK) << "Unexpected success. err_msg: " << result.err_msg;

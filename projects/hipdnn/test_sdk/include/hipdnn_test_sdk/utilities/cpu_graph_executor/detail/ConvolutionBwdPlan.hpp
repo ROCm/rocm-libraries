@@ -69,13 +69,13 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowDXTensor = createShallowTensor<OutputDataType>(
+        const auto shallowDXTensor = createShallowTensor<OutputDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowWTensor
+        const auto shallowWTensor
             = createShallowTensor<WDataType>(_params.wTensor, variantPack.at(_params.wTensor.uid));
 
-        auto shallowDYTensor = createShallowTensor<DyDataType>(
+        const auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
         utilities::CpuFpReferenceConvolution::dgrad(*shallowDXTensor,

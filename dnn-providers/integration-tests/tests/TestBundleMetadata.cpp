@@ -183,7 +183,7 @@ TEST(TestLoadBundleMetadata, LoadsMinimalMetadata)
 TEST(TestLoadBundleMetadata, ReturnsNulloptWhenFileNotFound)
 {
     const TempBundle bundle; // no meta.json created
-    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     EXPECT_FALSE(meta.has_value());
 }
 
@@ -435,7 +435,7 @@ TEST(TestCheckArchCompatibility, SkipsWhenArchDoesNotMatch)
 {
     BundleMetadata meta;
     meta.gpuArchitecture = "gfx1100";
-    auto result = checkArchCompatibility(meta, "gfx942:sramecc+:xnack-");
+    const auto result = checkArchCompatibility(meta, "gfx942:sramecc+:xnack-");
     ASSERT_TRUE(result.has_value());
 }
 
@@ -612,7 +612,7 @@ TEST(TestLoadBundleMetadata, ErrorNamesTheMetaJsonFile)
 
 TEST(TestParseBundleMetadataJson, ParsesValidObject)
 {
-    auto meta = parseBundleMetadataJson(
+    const auto meta = parseBundleMetadataJson(
         nlohmann::json::parse(R"({"format_version": 1, "enforcement_level": "buildable"})"),
         "case_0");
     EXPECT_EQ(meta.enforcementLevel, EnforcementLevel::BUILDABLE);

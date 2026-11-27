@@ -1457,7 +1457,7 @@ public:
 
         const auto& launchInputs = preparedDense.launchInputs();
         const auto& p = launchInputs.problem;
-        auto& kernel = preparedDense.kernelForStream(handle.getStream());
+        const auto& kernel = preparedDense.kernelForStream(handle.getStream());
 
         // Exactly the arguments the code object was checked against (kernelSignature): a
         // BAKED_HEAD_COUNTS code object bakes the head counts, a RUNTIME_HEAD_COUNTS one

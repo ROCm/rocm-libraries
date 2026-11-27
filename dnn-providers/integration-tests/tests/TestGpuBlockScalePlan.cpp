@@ -33,10 +33,10 @@ using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 
 std::unique_ptr<GraphT> smallBlockScaleGraph(bool quantize)
 {
-    auto builder
+    const auto builder
         = quantize ? createValidBlockScaleQuantizeGraph() : createValidBlockScaleDequantizeGraph();
     auto graph = UnPackGraph(builder.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    for(const auto& tensor : graph->tensors)
     {
         tensor->dims = {2, 3, 5};
         tensor->strides = {15, 5, 1};
@@ -104,7 +104,7 @@ void expectMatchingTensors(Tensor<T>& actual, Tensor<T>& expected)
 template <typename RealType = float, typename QuantizedType = float, typename ScaleType = float>
 void executeQuantizeGraph(std::optional<int64_t> axis)
 {
-    auto graph = smallBlockScaleGraph(true);
+    const auto graph = smallBlockScaleGraph(true);
     auto* attributes = graph->nodes[0]->attributes.AsBlockScaleQuantizeAttributes();
     attributes->axis = axis;
     const auto targetAxis = static_cast<size_t>(axis.value_or(2));
@@ -116,7 +116,7 @@ void executeQuantizeGraph(std::optional<int64_t> axis)
     graph->tensors[1]->data_type = nativeTypeToDataType<QuantizedType>();
     graph->tensors[1]->strides = {1, 10, 2};
     scaleAttr.data_type = nativeTypeToDataType<ScaleType>();
-    auto builder = packGraph(*graph);
+    const auto builder = packGraph(*graph);
     GpuReferenceGraphExecutor gpuExecutor;
     ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
     Tensor<RealType> x({2, 3, 5});
@@ -152,14 +152,14 @@ void executeQuantizeGraph(std::optional<int64_t> axis)
 template <typename XType = float, typename ScaleType = float, typename YType = float>
 void executeDequantizeGraph(bool isNegativeScale)
 {
-    auto graph = smallBlockScaleGraph(false);
+    const auto graph = smallBlockScaleGraph(false);
     graph->nodes[0]->attributes.AsBlockScaleDequantizeAttributes()->is_negative_scale
         = isNegativeScale;
     graph->tensors[0]->data_type = nativeTypeToDataType<XType>();
     graph->tensors[1]->data_type = nativeTypeToDataType<ScaleType>();
     graph->tensors[2]->data_type = nativeTypeToDataType<YType>();
     graph->tensors[2]->strides = {1, 10, 2};
-    auto builder = packGraph(*graph);
+    const auto builder = packGraph(*graph);
     GpuReferenceGraphExecutor gpuExecutor;
     ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
     Tensor<XType> x({2, 3, 5});
@@ -216,7 +216,7 @@ class TestGpuBlockScaleInvalidMetadata
 TEST_P(TestGpuBlockScaleInvalidMetadata, IsNotApplicable)
 {
     const auto [quantize, invalid] = GetParam();
-    auto graph = smallBlockScaleGraph(quantize);
+    const auto graph = smallBlockScaleGraph(quantize);
     auto builder = packGraph(*graph);
     ASSERT_TRUE(
         builderIsApplicable(GraphWrapper(builder.GetBufferPointer(), builder.GetSize()), quantize));
@@ -253,7 +253,7 @@ TEST_P(TestGpuBlockScaleInvalidMetadata, IsNotApplicable)
         graph->nodes[0]->compute_data_type = DataType::DOUBLE;
         break;
     case InvalidMetadata::RANK_ABOVE_LIMIT:
-        for(auto& tensor : graph->tensors)
+        for(const auto& tensor : graph->tensors)
         {
             tensor->dims.insert(tensor->dims.begin(), 3, 1);
             tensor->strides.insert(tensor->strides.begin(), 3, 30);
@@ -284,9 +284,9 @@ TEST(TestGpuBlockScalePlan, InvalidQuantizeAxisIsNotApplicable)
 {
     for(const int64_t axis : {-1, 3})
     {
-        auto graph = smallBlockScaleGraph(true);
+        const auto graph = smallBlockScaleGraph(true);
         graph->nodes[0]->attributes.AsBlockScaleQuantizeAttributes()->axis = axis;
-        auto builder = packGraph(*graph);
+        const auto builder = packGraph(*graph);
         EXPECT_FALSE(
             builderIsApplicable(GraphWrapper(builder.GetBufferPointer(), builder.GetSize()), true));
     }
@@ -296,9 +296,9 @@ TEST(TestGpuBlockScalePlan, MissingOrOversizedDequantizeBlockSizeIsNotApplicable
 {
     for(const auto& blockSize : std::vector<std::vector<int32_t>>{{}, {1, 1, 2, 2}})
     {
-        auto graph = smallBlockScaleGraph(false);
+        const auto graph = smallBlockScaleGraph(false);
         graph->nodes[0]->attributes.AsBlockScaleDequantizeAttributes()->block_size = blockSize;
-        auto builder = packGraph(*graph);
+        const auto builder = packGraph(*graph);
         EXPECT_FALSE(builderIsApplicable(
             GraphWrapper(builder.GetBufferPointer(), builder.GetSize()), false));
     }
@@ -312,7 +312,7 @@ TEST(TestGpuBlockScalePlan, RuntimePassByValueTensorIsNotApplicable)
         {
             SCOPED_TRACE(::testing::Message()
                          << "quantize=" << quantize << " tensorIndex=" << tensorIndex);
-            auto graph = smallBlockScaleGraph(quantize);
+            const auto graph = smallBlockScaleGraph(quantize);
             auto builder = packGraph(*graph);
             ASSERT_TRUE(builderIsApplicable(
                 GraphWrapper(builder.GetBufferPointer(), builder.GetSize()), quantize));
@@ -370,34 +370,34 @@ TEST(TestGpuBlockScalePlanDeviceBfp16, ExecuteGraphsMatchCpu)
 
 TEST(TestGpuBlockScalePlan, QuantizeFloatGraphIsApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph();
+    const auto graph = createValidBlockScaleQuantizeGraph();
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, DequantizeFloatGraphIsApplicable)
 {
-    auto graph = createValidBlockScaleDequantizeGraph();
+    const auto graph = createValidBlockScaleDequantizeGraph();
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, CompactMxGraphIsApplicable)
 {
-    auto graph = createValidBlockScaleDequantizeGraph({65536, 2048, 64, 1},
-                                                      {2, 32, 32, 64},
-                                                      DataType::FP4_E2M1,
-                                                      DataType::FLOAT,
-                                                      false,
-                                                      DataType::FP8_E8M0,
-                                                      DataType::FLOAT);
+    const auto graph = createValidBlockScaleDequantizeGraph({65536, 2048, 64, 1},
+                                                            {2, 32, 32, 64},
+                                                            DataType::FP4_E2M1,
+                                                            DataType::FLOAT,
+                                                            false,
+                                                            DataType::FP8_E8M0,
+                                                            DataType::FLOAT);
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, InvalidScaleDimensionsAreNotApplicable)
 {
-    auto graph
+    const auto graph
         = createValidBlockScaleQuantizeGraph({2, 64, 32, 32}, {65536, 1024, 32, 1}, {2, 3, 32, 32});
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
@@ -405,46 +405,46 @@ TEST(TestGpuBlockScalePlan, InvalidScaleDimensionsAreNotApplicable)
 
 TEST(TestGpuBlockScalePlan, RankAboveLimitIsNotApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph({1, 2, 3, 4, 5, 6},
-                                                    {720, 360, 120, 30, 6, 1},
-                                                    {1, 1, 3, 4, 5, 6},
-                                                    {360, 360, 120, 30, 6, 1});
+    const auto graph = createValidBlockScaleQuantizeGraph({1, 2, 3, 4, 5, 6},
+                                                          {720, 360, 120, 30, 6, 1},
+                                                          {1, 1, 3, 4, 5, 6},
+                                                          {360, 360, 120, 30, 6, 1});
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, UnsupportedCompactTypeCombinationIsNotApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                    {65536, 1024, 32, 1},
-                                                    {2, 2, 32, 32},
-                                                    {2048, 1024, 32, 1},
-                                                    32,
-                                                    DataType::FLOAT,
-                                                    DataType::FP4_E2M1,
-                                                    DataType::FLOAT);
+    const auto graph = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                          {65536, 1024, 32, 1},
+                                                          {2, 2, 32, 32},
+                                                          {2048, 1024, 32, 1},
+                                                          32,
+                                                          DataType::FLOAT,
+                                                          DataType::FP4_E2M1,
+                                                          DataType::FLOAT);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, NonFloatComputeIsNotApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
-                                                    {65536, 1024, 32, 1},
-                                                    {2, 2, 32, 32},
-                                                    {2048, 1024, 32, 1},
-                                                    32,
-                                                    DataType::FLOAT,
-                                                    DataType::FLOAT,
-                                                    DataType::FLOAT,
-                                                    DataType::DOUBLE);
+    const auto graph = createValidBlockScaleQuantizeGraph({2, 64, 32, 32},
+                                                          {65536, 1024, 32, 1},
+                                                          {2, 2, 32, 32},
+                                                          {2048, 1024, 32, 1},
+                                                          32,
+                                                          DataType::FLOAT,
+                                                          DataType::FLOAT,
+                                                          DataType::FLOAT,
+                                                          DataType::DOUBLE);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
 TEST(TestGpuBlockScalePlan, RaggedTensorIsNotApplicable)
 {
-    auto graph = createValidBlockScaleQuantizeGraph();
+    const auto graph = createValidBlockScaleQuantizeGraph();
     auto ragged
         = hipdnn_integration_tests::test_utils::markFirstTensorRagged(graph.GetBufferPointer());
     GpuReferenceGraphExecutor executor;

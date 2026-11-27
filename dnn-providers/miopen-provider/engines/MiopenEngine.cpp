@@ -50,7 +50,8 @@ void handleBenchmarkingKnobSetting(
                     knobSetting.valueType())));
     }
 
-    auto value = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
+    const auto value
+        = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
     executionSettings.setBenchmarkingEnabled(value != 0);
 }
 
@@ -110,7 +111,7 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto benchmarkingKnob = createBenchmarkingKnob(builder);
+    const auto benchmarkingKnob = createBenchmarkingKnob(builder);
 
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(benchmarkingKnob);
@@ -118,7 +119,7 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
     {
-        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+        const auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
 
         if(customKnobs.empty())
         {
@@ -127,7 +128,8 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
 
         for(const auto& knobT : customKnobs)
         {
-            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
+            const auto knobOffset
+                = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
             knobsVector.push_back(knobOffset);
         }
 
@@ -136,7 +138,7 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
         break;
     }
 
-    auto knobs = builder.CreateVector(knobsVector);
+    const auto knobs = builder.CreateVector(knobsVector);
 
     // Determinism is the only numerical claim: MIOPEN_ENGINE_DETERMINISTIC reports an explicit
     // empty note list (the field is present), every other engine is NONDETERMINISTIC.
@@ -144,9 +146,9 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
         = _id == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID
               ? std::vector<int32_t>{}
               : std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
-    auto numericalNotes = builder.CreateVector(numericalNotesList);
+    const auto numericalNotes = builder.CreateVector(numericalNotesList);
 
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+    const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
         builder, _id, knobs, 0, 0, 0, numericalNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

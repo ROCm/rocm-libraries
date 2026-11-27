@@ -30,7 +30,7 @@ inline std::vector<int> computeInDegrees(const GraphStructure& structure)
     std::vector<int> inDegrees(nodeCount, 0);
     for(size_t i = 0; i < nodeCount; ++i)
     {
-        for(auto neighbor : structure.adjacencyList[i])
+        for(const auto neighbor : structure.adjacencyList[i])
         {
             inDegrees[neighbor]++;
         }
@@ -61,7 +61,7 @@ inline std::vector<size_t> performTopologicalSort(const GraphStructure& structur
         zeroInDegree.pop();
         topologicalOrder.push_back(current);
 
-        for(auto neighbor : structure.adjacencyList[current])
+        for(const auto neighbor : structure.adjacencyList[current])
         {
             inDegrees[neighbor]--;
             if(inDegrees[neighbor] == 0)
@@ -87,7 +87,7 @@ inline int countConnectedComponents(const GraphStructure& structure)
     std::vector<std::vector<size_t>> undirectedGraph(nodeCount);
     for(size_t i = 0; i < nodeCount; ++i)
     {
-        for(auto j : structure.adjacencyList[i])
+        for(const auto j : structure.adjacencyList[i])
         {
             undirectedGraph[i].push_back(j);
             undirectedGraph[j].push_back(i);
@@ -121,7 +121,7 @@ inline int countConnectedComponents(const GraphStructure& structure)
 
             visited.insert(current);
 
-            for(auto neighbor : undirectedGraph[current])
+            for(const auto neighbor : undirectedGraph[current])
             {
                 if(visited.find(neighbor) == visited.end())
                 {
@@ -153,9 +153,9 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
     std::vector<int> inDegrees = computeInDegrees(structure);
 
     // Recalculate which nodes weren't processed
-    for(auto processed : topologicalOrder)
+    for(const auto processed : topologicalOrder)
     {
-        for(auto neighbor : structure.adjacencyList[processed])
+        for(const auto neighbor : structure.adjacencyList[processed])
         {
             inDegrees[neighbor]--;
         }
@@ -172,7 +172,7 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
     if(!cycleNodes.empty())
     {
         std::string nodeList;
-        for(auto idx : cycleNodes)
+        for(const auto idx : cycleNodes)
         {
             if(!nodeList.empty())
             {
@@ -190,7 +190,7 @@ inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
 inline TopologicalSortResult
     performTopologicalSortWithComponentDetection(const GraphStructure& structure)
 {
-    auto topologicalOrder = performTopologicalSort(structure);
+    const auto topologicalOrder = performTopologicalSort(structure);
     const int componentCount = countConnectedComponents(structure);
     const bool hasCycle = detectCycle(topologicalOrder, structure);
 

@@ -77,11 +77,11 @@ public:
                                "BatchnormNode missing epsilon for pre-validation");
 
         // Get tensor references
-        auto x = attributes.get_x();
-        auto y = attributes.get_y();
-        auto scale = attributes.get_scale();
-        auto bias = attributes.get_bias();
-        auto epsilon = attributes.get_epsilon();
+        const auto x = attributes.get_x();
+        const auto y = attributes.get_y();
+        const auto scale = attributes.get_scale();
+        const auto bias = attributes.get_bias();
+        const auto epsilon = attributes.get_epsilon();
 
         // SECTION 2: Validate Parameter Dimensions
         // Required parameters ( x, y, scale, bias and epsilon) must have valid dimensions.
@@ -137,10 +137,10 @@ public:
         //   nextRunVar_c  = (1-momentum)*prevRunVar_c  + momentum*batchVar_c
         // These are used for inference after training completes. If any are provided,
         // all must be provided to ensure consistent exponential moving average updates.
-        auto prevRunningMean = attributes.get_prev_running_mean();
-        auto prevRunningVar = attributes.get_prev_running_variance();
-        auto nextRunningMean = attributes.get_next_running_mean();
-        auto nextRunningVar = attributes.get_next_running_variance();
+        const auto prevRunningMean = attributes.get_prev_running_mean();
+        const auto prevRunningVar = attributes.get_prev_running_variance();
+        const auto nextRunningMean = attributes.get_next_running_mean();
+        const auto nextRunningVar = attributes.get_next_running_variance();
 
         // If any running stat is provided, all must be provided
         const bool hasPrevRunningMean = prevRunningMean != nullptr;
@@ -182,7 +182,7 @@ public:
     Error infer_properties_node() override
     {
         auto x = attributes.get_x();
-        auto y = attributes.get_y();
+        const auto y = attributes.get_y();
 
         if(!x)
         {
@@ -206,7 +206,7 @@ public:
             y->set_stride(x->get_stride());
         }
 
-        auto inferCTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
+        const auto inferCTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
             if(tensorToInfer->get_dim().empty())
             {
                 std::vector<int64_t> tensorDims(x->get_dim().size(), 1);
@@ -216,7 +216,8 @@ public:
 
             if(tensorToInfer->get_stride().empty())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                const auto strideOrder
+                    = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
                 tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
                     tensorToInfer->get_dim(), strideOrder));
             }
@@ -235,8 +236,8 @@ public:
             inferCTensor(invVar);
         }
 
-        auto prevRunningMean = attributes.get_prev_running_mean();
-        auto prevRunningVar = attributes.get_prev_running_variance();
+        const auto prevRunningMean = attributes.get_prev_running_mean();
+        const auto prevRunningVar = attributes.get_prev_running_variance();
 
         auto nextRunningMean = attributes.get_next_running_mean();
         auto nextRunningVar = attributes.get_next_running_variance();

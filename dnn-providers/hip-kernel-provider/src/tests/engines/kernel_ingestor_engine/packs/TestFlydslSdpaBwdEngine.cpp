@@ -1956,7 +1956,7 @@ TEST(TestFlydslSdpaBwdMergedReduce, RefusesABroadcastDbiasOnAnObjectWithoutARedu
 {
     auto unnamed = biasRow();
     unnamed.reduceSymbol = "";
-    auto absent = biasRow();
+    const auto absent = biasRow();
     const auto spec = withBias(baseSpec(), true, {1, 8, 16, 16});
     expectBadParam([&] { static_cast<void>(dumpOf(spec, unnamed, WORKSPACE)); });
 
@@ -2380,6 +2380,7 @@ TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
 }
 
 #define FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(SUITE, BASE, ENGINE, DTYPE)                        \
+    /* NOLINTNEXTLINE(bugprone-macro-parentheses) class and base names, not expressions */     \
     class SUITE : public BASE, public ::testing::WithParamInterface<int>                       \
     {                                                                                          \
     };                                                                                         \

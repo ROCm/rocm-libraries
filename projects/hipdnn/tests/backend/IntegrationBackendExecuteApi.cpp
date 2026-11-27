@@ -144,7 +144,7 @@ protected:
     void createExecutablePlan()
     {
         auto batchnormBuilder = test_util::createAndPopulateBatchnormNode();
-        auto serializedGraph = batchnormBuilder.Release();
+        const auto serializedGraph = batchnormBuilder.Release();
 
         std::unordered_map<int64_t, std::string> uidToNameMap;
         std::unordered_map<std::string, int64_t> nameToUidMap;
@@ -211,7 +211,7 @@ private:
 TEST_F(IntegrationBackendExecuteApi, NullHandle)
 {
     auto batchnormBuilder = test_util::createAndPopulateBatchnormNode();
-    auto serializedGraph = batchnormBuilder.Release();
+    const auto serializedGraph = batchnormBuilder.Release();
 
     test_util::createAndInitializeBackendDescriptor(&_graphDescriptor, serializedGraph, _handle);
     test_util::createTestEngine(&_engine, &_graphDescriptor, _handle, GIDX, true);
@@ -234,7 +234,7 @@ TEST_F(IntegrationBackendExecuteApi, NullHandle)
 TEST_F(IntegrationBackendExecuteApi, NullVariantPack)
 {
     auto batchnormBuilder = test_util::createAndPopulateBatchnormNode();
-    auto serializedGraph = batchnormBuilder.Release();
+    const auto serializedGraph = batchnormBuilder.Release();
 
     test_util::createAndInitializeBackendDescriptor(&_graphDescriptor, serializedGraph, _handle);
     test_util::createTestEngine(&_engine, &_graphDescriptor, _handle, GIDX, true);
@@ -267,7 +267,7 @@ TEST_F(IntegrationBackendExecuteApi, UnfinalizedPlan)
         HIPDNN_STATUS_SUCCESS);
 
     auto batchnormBuilder = test_util::createAndPopulateBatchnormNode();
-    auto serializedGraph = batchnormBuilder.Release();
+    const auto serializedGraph = batchnormBuilder.Release();
 
     test_util::createAndInitializeBackendDescriptor(&_graphDescriptor, serializedGraph, _handle);
 
@@ -283,7 +283,7 @@ TEST_F(IntegrationBackendExecuteApi, UnfinalizedPlan)
 TEST_F(IntegrationBackendExecuteApi, WrongDescriptorTypes)
 {
     auto batchnormBuilder = test_util::createAndPopulateBatchnormNode();
-    auto serializedGraph = batchnormBuilder.Release();
+    const auto serializedGraph = batchnormBuilder.Release();
 
     test_util::createAndInitializeBackendDescriptor(&_graphDescriptor, serializedGraph, _handle);
     test_util::createTestEngine(&_engine, &_graphDescriptor, _handle, GIDX, true);
@@ -322,7 +322,7 @@ TEST_F(IntegrationBackendExecuteApi, ExecuteLogsExecutionCountPerPlan)
     ASSERT_NO_FATAL_FAILURE(test_util::populateTestExecutionPlan(
         &rawOtherPlan, &_engineConfig, &_engine, &_graphDescriptor, _handle, GIDX, true));
 
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_tests::ScopedBackendLogCapture logCapture(
         IsolatedLogRecorder::getIsolatedUserRecordingCallback(), HIPDNN_SEV_INFO, this);
 
@@ -368,7 +368,7 @@ TEST_F(IntegrationBackendExecuteApi, FailedExecuteDoesNotAdvanceExecutionCount)
               HIPDNN_STATUS_SUCCESS);
     const ScopedBackendDescriptor unfinalizedVariantPack(rawUnfinalizedVariantPack);
 
-    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_tests::ScopedBackendLogCapture logCapture(
         IsolatedLogRecorder::getIsolatedUserRecordingCallback(), HIPDNN_SEV_INFO, this);
 

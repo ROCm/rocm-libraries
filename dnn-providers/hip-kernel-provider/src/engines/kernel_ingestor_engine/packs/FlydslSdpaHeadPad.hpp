@@ -351,8 +351,8 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     const int64_t widthQk = headPadWidth(headDim(qUid));
     const int64_t widthV = headPadWidth(headDim(vUid));
 
-    std::unique_ptr<data_objects::GraphT> graph(context.graph.getGraph().UnPack());
-    for(auto& tensor : graph->tensors)
+    const std::unique_ptr<data_objects::GraphT> graph(context.graph.getGraph().UnPack());
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor == nullptr)
         {

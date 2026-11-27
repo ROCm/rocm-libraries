@@ -39,7 +39,7 @@ flatbuffers::FlatBufferBuilder
         valueOffset
             = builder.CreateStruct(hipdnn_flatbuffers_sdk::data_objects::Float64Value(1.0)).Union();
     }
-    auto attrOffset
+    const auto attrOffset
         = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(builder,
                                                                              uid,
                                                                              "t",
@@ -61,9 +61,9 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsAcceptsUniformFl
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(
+    const auto b1 = buildTensorAttrBuffer(
         1, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &dims, &strides);
-    auto b2 = buildTensorAttrBuffer(
+    const auto b2 = buildTensorAttrBuffer(
         2, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &dims, &strides);
 
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
@@ -79,11 +79,11 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsVirtualTe
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(1,
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                    &dims,
-                                    &strides,
-                                    /*isVirtual=*/true);
+    const auto b1 = buildTensorAttrBuffer(1,
+                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                          &dims,
+                                          &strides,
+                                          /*isVirtual=*/true);
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         b1.GetBufferPointer());
 
@@ -96,7 +96,7 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsBakedValu
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1
+    const auto b1
         = buildTensorAttrBuffer(1,
                                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                 &dims,
@@ -115,13 +115,13 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsRuntimePa
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(1,
-                                    hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                    &dims,
-                                    &strides,
-                                    /*isVirtual=*/false,
-                                    hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
-                                    /*isRuntimePassByValue=*/true);
+    const auto b1 = buildTensorAttrBuffer(1,
+                                          hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                          &dims,
+                                          &strides,
+                                          /*isVirtual=*/false,
+                                          hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
+                                          /*isRuntimePassByValue=*/true);
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         b1.GetBufferPointer());
 
@@ -134,7 +134,7 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsUnsupport
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(
+    const auto b1 = buildTensorAttrBuffer(
         1, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16, &dims, &strides);
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         b1.GetBufferPointer());
@@ -148,9 +148,9 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsMismatche
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(
+    const auto b1 = buildTensorAttrBuffer(
         1, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &dims, &strides);
-    auto b2 = buildTensorAttrBuffer(
+    const auto b2 = buildTensorAttrBuffer(
         2, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF, &dims, &strides);
 
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
@@ -166,7 +166,7 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsNullDims)
 {
     const std::vector<int64_t> strides = {48, 16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(
+    const auto b1 = buildTensorAttrBuffer(
         1, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, nullptr, &strides);
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         b1.GetBufferPointer());
@@ -179,7 +179,7 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsNullStrid
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
 
-    auto b1 = buildTensorAttrBuffer(
+    const auto b1 = buildTensorAttrBuffer(
         1, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &dims, nullptr);
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         b1.GetBufferPointer());
@@ -193,7 +193,7 @@ TEST(TestMiopenPointwiseTensorChecks, ValidatePointwiseIoTensorsRejectsDimsStrid
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     const std::vector<int64_t> strides = {16, 4, 1};
 
-    auto b1 = buildTensorAttrBuffer(
+    const auto b1 = buildTensorAttrBuffer(
         1, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &dims, &strides);
     const auto* t1 = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
         b1.GetBufferPointer());

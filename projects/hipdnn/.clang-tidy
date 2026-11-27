@@ -10,8 +10,13 @@
 # until they are added here on purpose.
 #
 # Generated from `clang-tidy --list-checks` against LLVM 20 with the prior
-# wildcard config. 209 checks total. Re-generate after a deliberate
-# clang-tidy upgrade to pick up new checks.
+# wildcard config. 209 checks total. The list is carried over to clang-tidy 23 except
+# that performance-faster-string-find is now named performance-prefer-single-char-overloads
+# (renamed upstream in 23); checks added in 21-23 are not enabled. Check behaviour is not
+# carried over: LLVM 23 turned on misc-const-correctness's AnalyzeAutoVariables and
+# AnalyzeLambdas options, so with this config it now reports `auto` locals and lambdas that
+# can be const, which clang-tidy 20 never did. Re-generate after a deliberate clang-tidy
+# upgrade to pick up new checks.
 #
 # Checks the prior wildcard config explicitly excluded (and which therefore
 # remain absent here on purpose — do not add without discussion):
@@ -187,7 +192,6 @@ Checks: >
   modernize-use-transparent-functors,
   modernize-use-uncaught-exceptions,
   performance-avoid-endl,
-  performance-faster-string-find,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
   performance-inefficient-algorithm,
@@ -200,6 +204,7 @@ Checks: >
   performance-noexcept-destructor,
   performance-noexcept-move-constructor,
   performance-noexcept-swap,
+  performance-prefer-single-char-overloads,
   performance-trivially-destructible,
   performance-type-promotion-in-math-fn,
   performance-unnecessary-copy-initialization,

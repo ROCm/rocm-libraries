@@ -75,11 +75,11 @@ float calculateRMSNormFwdTolerance(double xMin,
 
     // Sum of squares accumulation error
     // S = sum_{c=0}^{C-1} x_c^2 (self-product)
-    auto numberOfAccumulations = static_cast<uint64_t>(nChannels);
+    const auto numberOfAccumulations = static_cast<uint64_t>(nChannels);
     const double maxProduct = maxAbsX * maxAbsX; // self-product
     const double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
 
     // Use shared computeGamma() for the error growth factor
     const double gamma = computeGamma(numberOfAccumulations, epsilon);

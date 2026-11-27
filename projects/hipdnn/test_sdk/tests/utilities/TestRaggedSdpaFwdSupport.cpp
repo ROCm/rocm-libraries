@@ -56,8 +56,8 @@ flatbuffers::DetachedBuffer makeGraph(const std::vector<int64_t>& ragged)
                                                 DIMS,
                                                 DIMS,
                                                 DataType::BFLOAT16);
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
-    for(auto& tensor : graphT->tensors)
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
+    for(const auto& tensor : graphT->tensors)
     {
         const bool primary = tensor->uid == Q_UID || tensor->uid == K_UID || tensor->uid == V_UID
                              || tensor->uid == O_UID;

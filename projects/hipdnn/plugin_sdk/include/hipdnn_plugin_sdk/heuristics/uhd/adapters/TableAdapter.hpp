@@ -114,7 +114,7 @@ namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 inline std::size_t VectorHash::operator()(const std::vector<uint32_t>& vec) const
 {
     std::size_t seed = vec.size();
-    for(auto val : vec)
+    for(const auto val : vec)
     {
         // Hash combining from Boost
         seed ^= static_cast<std::size_t>(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -132,7 +132,7 @@ inline std::unique_ptr<TableAdapter> TableAdapter::load(const std::string& model
         return nullptr;
     }
 
-    auto size = file.tellg();
+    const auto size = file.tellg();
     if(size <= 0 || size > static_cast<std::streamoff>(256 * 1024 * 1024))
     {
         return nullptr;

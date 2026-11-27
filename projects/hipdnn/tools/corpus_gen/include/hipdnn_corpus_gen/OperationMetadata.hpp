@@ -1256,7 +1256,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                     {
                         std::string what = "follows undeclared parameter '";
                         what += hood.mirrors;
-                        what += "'";
+                        what += '\'';
                         complain(what);
                     }
                 }

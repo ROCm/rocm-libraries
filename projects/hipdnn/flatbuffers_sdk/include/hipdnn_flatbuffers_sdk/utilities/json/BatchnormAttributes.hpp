@@ -43,7 +43,7 @@ inline auto to<data_objects::BatchnormAttributes>(flatbuffers::FlatBufferBuilder
     auto& inputs = entry.at("inputs");
     auto& outputs = entry.at("outputs");
 
-    auto peerStats = inputs.at("peer_stats_tensor_uid").get<std::vector<int64_t>>();
+    const auto peerStats = inputs.at("peer_stats_tensor_uid").get<std::vector<int64_t>>();
 
     return data_objects::CreateBatchnormAttributesDirect(
         builder,

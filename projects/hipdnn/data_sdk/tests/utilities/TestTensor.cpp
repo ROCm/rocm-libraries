@@ -95,7 +95,7 @@ TEST(TestTensor, FillWithRandomValuesNonPacked)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*reinterpret_cast<const float*>((*it)))};
+        const auto val{(*reinterpret_cast<const float*>((*it)))};
         EXPECT_GE(val, 1.0f);
         EXPECT_LE(val, 3.0f);
     }
@@ -136,7 +136,7 @@ TEST(TestTensor, FillWithValuesHostGeneratorPacked)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*static_cast<const float*>((*it)))};
+        const auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, min);
         EXPECT_LE(val, max);
     }
@@ -177,7 +177,7 @@ TEST(TestTensor, FillWithValuesHostGeneratorNonPacked)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*static_cast<const float*>((*it)))};
+        const auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, min);
         EXPECT_LE(val, max);
     }
@@ -196,7 +196,7 @@ TEST(TestTensor, FillWithValuesDeviceGeneratorPacked)
             std::vector<float> writeData(count);
             std::iota(writeData.begin(), writeData.end(), 0.0f);
 
-            auto err = hipMemcpyWithStream(
+            const auto err = hipMemcpyWithStream(
                 data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
             if(err != hipSuccess)
             {
@@ -227,7 +227,7 @@ TEST(TestTensor, FillWithValuesDeviceGeneratorNonPacked)
             std::vector<float> writeData(count);
             std::iota(writeData.begin(), writeData.end(), 0.0f);
 
-            auto err = hipMemcpyWithStream(
+            const auto err = hipMemcpyWithStream(
                 data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
             if(err != hipSuccess)
             {
@@ -495,10 +495,10 @@ TEST(TestTensor, GetIndexConsistency)
         {
             for(int k = 0; k < 7; ++k)
             {
-                auto variadicIndex = tensor.getIndex(i, j, k);
+                const auto variadicIndex = tensor.getIndex(i, j, k);
 
                 const std::vector<int64_t> vecIndices = {i, j, k};
-                auto vectorIndex = tensor.getIndex(vecIndices);
+                const auto vectorIndex = tensor.getIndex(vecIndices);
 
                 EXPECT_EQ(variadicIndex, vectorIndex);
             }
@@ -968,7 +968,7 @@ TYPED_TEST(TensorSentinel, PackedTensorFilled)
 
     for(auto valuePtr : tensor)
     {
-        auto value = *static_cast<TypeParam*>(valuePtr);
+        const auto value = *static_cast<TypeParam*>(valuePtr);
         if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
         {
             EXPECT_TRUE(isnan(value));
@@ -991,7 +991,7 @@ TYPED_TEST(TensorSentinel, StridedTensorFilled)
 
     for(auto valuePtr : tensor)
     {
-        auto value = *static_cast<TypeParam*>(valuePtr);
+        const auto value = *static_cast<TypeParam*>(valuePtr);
         if constexpr(std::numeric_limits<TypeParam>::has_quiet_NaN)
         {
             EXPECT_TRUE(isnan(value));

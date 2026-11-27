@@ -116,7 +116,7 @@ inline uint16_t float_to_bfloat16_bits_truncate(float f) noexcept
     uint32_t bits;
     std::memcpy(&bits, &f, sizeof(float));
 
-    auto upper = static_cast<uint16_t>(bits >> 16);
+    const auto upper = static_cast<uint16_t>(bits >> 16);
 
     const uint32_t exp = (bits >> 23) & 0xFF;
     const uint32_t mant = bits & 0x007FFFFF;
@@ -151,7 +151,7 @@ inline uint16_t float_to_bfloat16_bits_rne(float f) noexcept
     }
 
     // Extract lower 16 bits (the bits being truncated)
-    auto lower = static_cast<uint16_t>(bits & 0xFFFF);
+    const auto lower = static_cast<uint16_t>(bits & 0xFFFF);
 
     // Round-to-nearest-even:
     // - Round up if remainder > 0.5 (lower > 0x8000)

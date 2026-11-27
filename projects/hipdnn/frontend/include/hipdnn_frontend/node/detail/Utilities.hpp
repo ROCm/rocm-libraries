@@ -240,7 +240,7 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<graph::TensorAttrib
 
     if(it1 != dims1.end())
     {
-        auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
+        const auto index = static_cast<size_t>(std::distance(dims1.begin(), it1));
         return {ErrorCode::INVALID_VALUE,
                 getTensorNameForError(tensor1, fallbackName1) + " and "
                     + getTensorNameForError(tensor2, fallbackName2)
@@ -612,7 +612,7 @@ inline Error validateLayernormAffineIfSet(const std::shared_ptr<graph::TensorAtt
             dimsText += dimsText.empty() ? "[" : ",";
             dimsText += std::to_string(dim);
         }
-        dimsText += "]";
+        dimsText += ']';
         return {ErrorCode::INVALID_VALUE,
                 "normalized_dim_count " + std::to_string(count) + " does not match "
                     + getTensorNameForError(tensor, fallbackName) + " dims " + dimsText
@@ -734,7 +734,7 @@ inline Error validateScalarParameter(const std::shared_ptr<graph::TensorAttribut
     // Scalar parameters should be single-element tensors
     // Typically [1] or [1, 1, 1, 1] depending on how they're created
     int64_t totalElements = 1;
-    for(auto dim : dims)
+    for(const auto dim : dims)
     {
         totalElements *= dim;
     }
@@ -787,11 +787,13 @@ inline Error validateIndexTensor(const std::shared_ptr<graph::TensorAttributes>&
                         RANK,
                         ErrorCode::INVALID_VALUE,
                         prefix + " must be rank-4, got rank=" + std::to_string(dims.size()));
-    HIPDNN_RETURN_IF_NE(dims[0],
-                        firstDim,
-                        ErrorCode::INVALID_VALUE,
-                        prefix + " dim[0] must equal " + firstDimLabel + " ("
-                            + std::to_string(firstDim) + "), got " + std::to_string(dims[0]));
+    if(dims[0] != firstDim)
+    {
+        std::string message = prefix;
+        message.append(" dim[0] must equal ").append(firstDimLabel).append(" (");
+        message.append(std::to_string(firstDim)).append("), got ").append(std::to_string(dims[0]));
+        return {ErrorCode::INVALID_VALUE, message};
+    }
     for(size_t i = 1; i < RANK; ++i)
     {
         HIPDNN_RETURN_IF_NE(dims[i],

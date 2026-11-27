@@ -41,11 +41,11 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BSD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FP8_E4M3);
         x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
-        auto scale = std::make_shared<TensorAttributes>();
+        const auto scale = std::make_shared<TensorAttributes>();
         scale->set_uid(K_BSD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
         scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS))
             .set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
@@ -55,7 +55,7 @@ protected:
             .set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE))
             .set_is_negative_scale(false);
 
-        auto y = graph->block_scale_dequantize(x, scale, attrs);
+        const auto y = graph->block_scale_dequantize(x, scale, attrs);
         y->set_uid(K_BSD_TENSOR_Y_UID).set_name("Y");
 
         return graph;
@@ -68,9 +68,9 @@ protected:
 // validation.
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BasicBlockScaleDequantizeRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -132,9 +132,9 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BasicBlockScaleDequanti
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BlockScaleDequantizeTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -161,9 +161,9 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, BlockScaleDequantizeTen
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting,
        BlockScaleDequantizeLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    const auto originalGraph = buildGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -207,17 +207,17 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting,
 // round-trip.
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, IsNegativeScalePreservedInLiftingRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("BlockScaleDequantizeIsNegativeScaleLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(K_BSD_TENSOR_X_UID).set_name("X").set_data_type(DataType::FP8_E4M3);
     x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(K_BSD_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS)).set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
@@ -226,10 +226,10 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, IsNegativeScalePreserve
         .set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE))
         .set_is_negative_scale(true);
 
-    auto y = graph->block_scale_dequantize(x, scale, attrs);
+    const auto y = graph->block_scale_dequantize(x, scale, attrs);
     y->set_uid(K_BSD_TENSOR_Y_UID).set_name("Y");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -246,31 +246,31 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, IsNegativeScalePreserve
 // and that these UIDs are correctly preserved through the lifting round-trip.
 TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidBlockScaleDequantizeLiftingGraph")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
     // Create tensors without explicit UIDs
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FP8_E4M3);
     x->set_dim(toVec(K_BSD_TENSOR_X_DIMS)).set_stride(toVec(K_BSD_TENSOR_X_STRIDES));
 
-    auto scale = std::make_shared<TensorAttributes>();
+    const auto scale = std::make_shared<TensorAttributes>();
     scale->set_name("Scale").set_data_type(DataType::FLOAT);
     scale->set_dim(toVec(K_BSD_TENSOR_SCALE_DIMS)).set_stride(toVec(K_BSD_TENSOR_SCALE_STRIDES));
 
     BlockScaleDequantizeAttributes attrs;
     attrs.set_block_size(static_cast<int32_t>(K_BSD_BLOCK_SIZE));
 
-    auto y = graph->block_scale_dequantize(x, scale, attrs);
+    const auto y = graph->block_scale_dequantize(x, scale, attrs);
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify all tensors have unique UIDs
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 3u);
 
     std::unordered_set<int64_t> uids;
@@ -289,9 +289,9 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLifting, AutoAssignedUidsPreserv
     ASSERT_NE(opNode, nullptr);
 
     // Verify the node's tensors have UIDs that exist in the tensor map
-    auto xUid = opNode->attributes.get_x()->get_uid();
-    auto scaleUid = opNode->attributes.get_scale()->get_uid();
-    auto yUid = opNode->attributes.get_y()->get_uid();
+    const auto xUid = opNode->attributes.get_x()->get_uid();
+    const auto scaleUid = opNode->attributes.get_scale()->get_uid();
+    const auto yUid = opNode->attributes.get_y()->get_uid();
 
     EXPECT_TRUE(uids.count(xUid) > 0)
         << "X tensor UID " << xUid

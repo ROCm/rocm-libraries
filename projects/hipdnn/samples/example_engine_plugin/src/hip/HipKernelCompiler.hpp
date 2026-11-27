@@ -33,7 +33,7 @@ public:
         // Extract base GPU architecture from gcnArchName
         // e.g., "gfx90a:sramecc+:xnack-" -> "gfx90a"
         std::string archName(props.gcnArchName);
-        auto colonPos = archName.find(':');
+        const auto colonPos = archName.find(':');
         if(colonPos != std::string::npos)
         {
             archName = archName.substr(0, colonPos);

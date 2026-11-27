@@ -79,7 +79,7 @@ float calculateConvWrwTolerance(double inputMin,
     // Bound on sum(|x_i * y_i|)
     const double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     const double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
     hipdnn_test_sdk::utilities::validateGamma(gamma);
 
@@ -164,7 +164,7 @@ float calculateConvDgradTolerance(
     // Bound on sum(|dy_i * w_i|)
     const double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     const double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
     hipdnn_test_sdk::utilities::validateGamma(gamma);
 
@@ -262,7 +262,7 @@ float calculateConvFpropTolerance(
     // Bound on sum(|x_i * w_i|)
     const double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
 
-    auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
     const double gamma = hipdnn_test_sdk::utilities::computeGamma(numberOfAccumulations, epsilon);
     hipdnn_test_sdk::utilities::validateGamma(gamma);
 

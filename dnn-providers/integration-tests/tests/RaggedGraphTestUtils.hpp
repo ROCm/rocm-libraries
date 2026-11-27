@@ -18,9 +18,9 @@ inline flatbuffers::DetachedBuffer markFirstTensorRagged(const void* graphBuffer
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     const Graph* graph = GetGraph(graphBuffer);
-    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
 
-    for(auto& tensor : graphT->tensors)
+    for(const auto& tensor : graphT->tensors)
     {
         if(!tensor->virtual_)
         {

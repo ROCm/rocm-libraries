@@ -123,7 +123,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        auto allEngineIds = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
+        const auto allEngineIds
+            = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -137,7 +138,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         else
         {
             *numEngines = 0;
-            for(auto engineId : allEngineIds)
+            for(const auto engineId : allEngineIds)
             {
                 if(*numEngines == maxEngines)
                 {
@@ -167,7 +168,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* ha
 
         hipblaslt_plugin::HipblasltHandleFactory::createHipblasltHandle(handle);
 
-        std::lock_guard<std::mutex> const lock(hipblasltContainerMutex);
+        const std::lock_guard<std::mutex> lock(hipblasltContainerMutex);
         auto hipblasltContainerPtr = hipblasltContainerLifecyclePtr.lock();
         if(hipblasltContainerPtr == nullptr)
         {
@@ -232,12 +233,13 @@ hipdnnPluginStatus_t
         throwIfNull(numEngines);
 
         auto& engineManager = handle->getEngineManager();
-        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
+        const GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
 
-        auto applicableEngines = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
+        const auto applicableEngines
+            = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
 
         *numEngines = 0;
-        for(auto& engineId : applicableEngines)
+        for(const auto& engineId : applicableEngines)
         {
             if(*numEngines == maxEngines)
             {
@@ -272,7 +274,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetailsImpl(hipdnnEnginePluginHa
         throwIfNull(engineDetails);
 
         auto& engineManager = handle->getEngineManager();
-        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
+        const GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
 
         engineManager.getEngineDetails(*handle, opGraphWrapper, engineId, *engineDetails);
 
@@ -315,10 +317,10 @@ hipdnnPluginStatus_t
         throwIfNull(opGraph);
         throwIfNull(workspaceSize);
 
-        auto& engineManager = handle->getEngineManager();
+        const auto& engineManager = handle->getEngineManager();
 
-        EngineConfigWrapper const engineConfigWrapper(engineConfig->ptr, engineConfig->size);
-        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
+        const EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+        const GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
         *workspaceSize = engineManager.getWorkspaceSize(
             *handle, engineConfigWrapper.engineId(), opGraphWrapper);
 
@@ -343,10 +345,10 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextImpl(
         throwIfNull(opGraph);
         throwIfNull(executionContext);
 
-        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
-        EngineConfigWrapper const engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+        const GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
+        const EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
-        auto& engineManager = handle->getEngineManager();
+        const auto& engineManager = handle->getEngineManager();
 
         auto context = new HipdnnEnginePluginExecutionContext;
 

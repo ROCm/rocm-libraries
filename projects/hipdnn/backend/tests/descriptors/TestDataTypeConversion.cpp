@@ -38,19 +38,19 @@ class TestDataTypeConversionRoundTrip : public ::testing::TestWithParam<DataType
 
 TEST_P(TestDataTypeConversionRoundTrip, ToSdkDataType)
 {
-    auto param = GetParam();
+    const auto param = GetParam();
     ASSERT_EQ(toSdkDataType(param.apiType), param.sdkType);
 }
 
 TEST_P(TestDataTypeConversionRoundTrip, FromSdkDataType)
 {
-    auto param = GetParam();
+    const auto param = GetParam();
     ASSERT_EQ(fromSdkDataType(param.sdkType), param.apiType);
 }
 
 TEST_P(TestDataTypeConversionRoundTrip, GetDataTypeByteSize)
 {
-    auto param = GetParam();
+    const auto param = GetParam();
     ASSERT_EQ(getDataTypeByteSize(param.sdkType), param.byteSize);
 }
 

@@ -65,7 +65,7 @@ void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     float tolerance,
                     const std::string& tensorName = "Tensor")
 {
-    auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, tolerance);
+    const auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, tolerance);
     ASSERT_TRUE(validator.allClose(expected, actual)) << tensorName << " failed verification";
 }
 

@@ -65,7 +65,7 @@ inline flatbuffers::FlatBufferBuilder createMatmulGraph(const int64_t aUid,
                                                    0,
                                                    runtimePassByValue));
 
-    auto matmulAttrs = CreateMatmulAttributes(builder, aUid, bUid, cUid);
+    const auto matmulAttrs = CreateMatmulAttributes(builder, aUid, bUid, cUid);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -74,7 +74,7 @@ inline flatbuffers::FlatBufferBuilder createMatmulGraph(const int64_t aUid,
                                      NodeAttributes::MatmulAttributes,
                                      matmulAttrs.Union()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         builder, "MatmulTestGraph", computeDataType, computeDataType, aDataType, &tensors, &nodes);
 
     builder.Finish(graph);

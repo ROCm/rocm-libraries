@@ -42,7 +42,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -80,9 +80,9 @@ Graph makePlainAddReductionGraph()
 
     const std::vector<int64_t> xDims = {2, 4, 8, 8};
     const std::vector<int64_t> yDims = {2, 4, 1, 1};
-    auto x = std::make_shared<TensorAttributes>(
+    const auto x = std::make_shared<TensorAttributes>(
         makeTensorAttributes("x", DataType::FLOAT, xDims, generateStrides(xDims)));
-    auto y = std::make_shared<TensorAttributes>(
+    const auto y = std::make_shared<TensorAttributes>(
         makeTensorAttributes("y", DataType::FLOAT, yDims, generateStrides(yDims)));
 
     ReductionAttributes attrs;

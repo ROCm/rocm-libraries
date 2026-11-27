@@ -33,7 +33,7 @@
     do                                                              \
     {                                                               \
         int device_count;                                           \
-        auto result = hipGetDeviceCount(&device_count);             \
+        const auto result = hipGetDeviceCount(&device_count);       \
         if(result == hipErrorNoDevice || device_count == 0)         \
         {                                                           \
             GTEST_SKIP() << "No devices available. Skipping test."; \

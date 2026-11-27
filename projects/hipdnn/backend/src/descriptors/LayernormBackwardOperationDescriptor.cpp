@@ -352,7 +352,7 @@ std::string LayernormBackwardOperationDescriptor::toString() const
     str += ", normalized_dim_count=" + std::to_string(_data.normalized_dim_count);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

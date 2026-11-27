@@ -37,9 +37,9 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
                           uint32_t numDeviceBuffers,
                           void* /*workspace*/) const
 {
-    auto inputBuffer = findDeviceBuffer(_params.inputUid, deviceBuffers, numDeviceBuffers);
-    auto weightBuffer = findDeviceBuffer(_params.weightUid, deviceBuffers, numDeviceBuffers);
-    auto outputBuffer = findDeviceBuffer(_params.outputUid, deviceBuffers, numDeviceBuffers);
+    const auto inputBuffer = findDeviceBuffer(_params.inputUid, deviceBuffers, numDeviceBuffers);
+    const auto weightBuffer = findDeviceBuffer(_params.weightUid, deviceBuffers, numDeviceBuffers);
+    const auto outputBuffer = findDeviceBuffer(_params.outputUid, deviceBuffers, numDeviceBuffers);
 
     auto* input = static_cast<const float*>(inputBuffer.ptr);
     auto* weight = static_cast<const float*>(weightBuffer.ptr);
@@ -53,8 +53,8 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
             "Total output elements exceeds unsigned int maximum");
     }
 
-    auto totalOutputElements = static_cast<unsigned int>(totalOutputElementsI64);
-    auto blockSizeU = static_cast<unsigned int>(_params.blockSize);
+    const auto totalOutputElements = static_cast<unsigned int>(totalOutputElementsI64);
+    const auto blockSizeU = static_cast<unsigned int>(_params.blockSize);
     const unsigned int gridSize = (totalOutputElements + blockSizeU - 1) / blockSizeU;
 
     _kernel->setBlockSize(blockSizeU, 1, 1);

@@ -118,7 +118,7 @@ void expectArrayRejected(std::shared_ptr<Graph>& graph,
                          const std::string& expectedRuleSubstring = "")
 {
     resetLastCallRecord(implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(handle, variantPack, nullptr, uids, shapes, strides);
+    const auto result = graph->execute(handle, variantPack, nullptr, uids, shapes, strides);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Parallel-array overload should have rejected: " << result.err_msg;
     if(!expectedRuleSubstring.empty())
@@ -141,7 +141,7 @@ void expectMapRejected(std::shared_ptr<Graph>& graph,
                        const std::unordered_map<int64_t, OverrideEntry>& overrides)
 {
     resetLastCallRecord(implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(handle, variantPack, nullptr, overrides);
+    const auto result = graph->execute(handle, variantPack, nullptr, overrides);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Map overload should have rejected: " << result.err_msg;
     const auto* record = getLastCallRecord(implementingPlugin, "OverrideImplementing");
@@ -207,7 +207,7 @@ TEST_F(IntegrationOverrideValidation, ValidOverrideReachesPlugin)
     const std::vector<std::vector<int64_t>> strides = {packedStrides(dims)};
 
     resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+    const auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const auto* record = getLastCallRecord(*_implementingPlugin, "OverrideImplementing");
@@ -229,7 +229,7 @@ TEST_F(IntegrationOverrideValidation, OverrideUidMissingFromVariantPackRejectedB
     const std::vector<std::vector<int64_t>> strides = {packedStrides(dims)};
 
     resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+    const auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Override UID 2 is a graph tensor, but it is absent from the variant pack.";
     EXPECT_NE(result.err_msg.find("variant pack"), std::string::npos);
@@ -301,7 +301,7 @@ TEST_F(IntegrationOverrideValidationFlagAbsent, ArrayFormRejectedWhenFlagAbsent)
         = {hipdnn_data_sdk::utilities::generateStrides(dims)};
 
     resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+    const auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
         << "Override-execute on a graph that did not opt in must reject "
            "(RFC §7.1): "
@@ -330,7 +330,7 @@ TEST_F(IntegrationOverrideValidationFlagAbsent, PostBuildToggleDoesNotEnableExis
         = {hipdnn_data_sdk::utilities::generateStrides(dims)};
 
     resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+    const auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
     EXPECT_NE(result.code, ErrorCode::OK)
         << "Toggling override shape support after build must not make the existing plan "
            "override-capable.";
@@ -357,7 +357,7 @@ TEST_F(IntegrationOverrideValidationFlagAbsent, MapFormRejectedWhenFlagAbsent)
     overrides[1] = OverrideEntry{dims, hipdnn_data_sdk::utilities::generateStrides(dims)};
 
     resetLastCallRecord(*_implementingPlugin, "OverrideImplementing");
-    auto result = graph->execute(_handle, variantPack, nullptr, overrides);
+    const auto result = graph->execute(_handle, variantPack, nullptr, overrides);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
     const auto* record = getLastCallRecord(*_implementingPlugin, "OverrideImplementing");
     ASSERT_NE(record, nullptr);
@@ -388,7 +388,7 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledFlagSurvivesSerialization
     const ScopedHipdnnHandle handle(rawHandle, hipdnnDestroy);
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     graph->set_name("RoundTrip_OverrideShapeEnabled")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -398,11 +398,11 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledFlagSurvivesSerialization
     EXPECT_TRUE(graph->is_override_shape_enabled())
         << "Setter must round-trip via the in-memory getter immediately.";
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_dim(dims).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
     PointwiseAttributes attrs;
     attrs.set_mode(PointwiseMode::RELU_FWD);
-    auto y = graph->pointwise(x, attrs);
+    const auto y = graph->pointwise(x, attrs);
     y->set_uid(2)
         .set_dim(dims)
         .set_stride({48, 16, 4, 1})
@@ -420,8 +420,8 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledFlagSurvivesSerialization
     auto [data, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto restored = std::make_shared<Graph>();
-    auto deserResult = restored->deserialize(nullptr, data);
+    const auto restored = std::make_shared<Graph>();
+    const auto deserResult = restored->deserialize(nullptr, data);
     ASSERT_EQ(deserResult.code, ErrorCode::OK) << deserResult.err_msg;
 
     EXPECT_TRUE(restored->is_override_shape_enabled())
@@ -442,7 +442,7 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledFlagSurvivesJsonRoundTrip
     const ScopedHipdnnHandle handle(rawHandle, hipdnnDestroy);
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
+    const auto graph = hipdnn_tests::override_test_utils::buildPointwiseReluGraph(
         "RoundTrip_OverrideShapeEnabledJson",
         dims,
         /*strides=*/{},
@@ -455,8 +455,8 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledFlagSurvivesJsonRoundTrip
     auto [json, serErr] = graph->to_json();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto restored = std::make_shared<Graph>();
-    auto deserResult = restored->from_json(json);
+    const auto restored = std::make_shared<Graph>();
+    const auto deserResult = restored->from_json(json);
     ASSERT_EQ(deserResult.code, ErrorCode::OK) << deserResult.err_msg;
     EXPECT_TRUE(restored->is_override_shape_enabled())
         << "is_override_shape_enabled must survive a JSON serialize/deserialize round-trip.";
@@ -480,17 +480,17 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledDefaultFalseSurvivesBuild
     const ScopedHipdnnHandle handle(rawHandle, hipdnnDestroy);
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     // Intentionally do NOT call set_override_shape_enabled; the default is false.
     graph->set_name("BuildOpGraph_DefaultFalse")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_dim(dims).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
     PointwiseAttributes attrs;
     attrs.set_mode(PointwiseMode::RELU_FWD);
-    auto y = graph->pointwise(x, attrs);
+    const auto y = graph->pointwise(x, attrs);
     y->set_uid(2)
         .set_dim(dims)
         .set_stride({48, 16, 4, 1})
@@ -518,8 +518,8 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledDefaultFalseSurvivesBuild
     auto [data, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto restored = std::make_shared<Graph>();
-    auto deserResult = restored->deserialize(nullptr, data);
+    const auto restored = std::make_shared<Graph>();
+    const auto deserResult = restored->deserialize(nullptr, data);
     ASSERT_EQ(deserResult.code, ErrorCode::OK) << deserResult.err_msg;
 
     EXPECT_FALSE(restored->is_override_shape_enabled())
@@ -544,16 +544,16 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledDefaultFalseSurvivesSeria
     const ScopedHipdnnHandle handle(rawHandle, hipdnnDestroy);
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = std::make_shared<Graph>();
+    const auto graph = std::make_shared<Graph>();
     graph->set_name("RoundTrip_DefaultFalse")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(1).set_dim(dims).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
     PointwiseAttributes attrs;
     attrs.set_mode(PointwiseMode::RELU_FWD);
-    auto y = graph->pointwise(x, attrs);
+    const auto y = graph->pointwise(x, attrs);
     y->set_uid(2)
         .set_dim(dims)
         .set_stride({48, 16, 4, 1})
@@ -563,14 +563,14 @@ TEST(IntegrationOverrideRoundTrip, OverrideShapeEnabledDefaultFalseSurvivesSeria
     EXPECT_FALSE(graph->is_override_shape_enabled())
         << "Default (unset) must read as false from the in-memory getter.";
 
-    auto result = graph->validate();
+    const auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     auto [data, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto restored = std::make_shared<Graph>();
-    auto deserResult = restored->deserialize(nullptr, data);
+    const auto restored = std::make_shared<Graph>();
+    const auto deserResult = restored->deserialize(nullptr, data);
     ASSERT_EQ(deserResult.code, ErrorCode::OK) << deserResult.err_msg;
 
     EXPECT_FALSE(restored->is_override_shape_enabled())

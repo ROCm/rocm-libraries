@@ -106,14 +106,14 @@ void fillExactlyRepresentableMask(hipdnn_data_sdk::utilities::Tensor<MaskT>& mas
 
 TEST(TestGpuSdpaFwdPlanBuilder, PlanConstruction)
 {
-    auto graphBuilder = makeGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
 
-    auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
         = dynamic_cast<GpuSdpaFwdPlan<float, float, float, float, float>*>(builtPlan.get())
@@ -123,8 +123,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, PlanConstruction)
 
 TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
 {
-    auto graphBuilder = makeGraph();
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph();
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
@@ -148,13 +148,13 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
 
-    auto graphBuilder = makeGraph();
-    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph();
+    const auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
 
     auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
-    auto raggedWrap
+    const auto raggedWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
     EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
@@ -165,8 +165,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         floatPlanBuilder;
 
     const auto isApplicableWith = [&](const SdpaAttributesT& attrs) {
-        auto graphBuilder = makeGraph(attrs);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = makeGraph(attrs);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
@@ -238,15 +238,15 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableWithStatsOutput)
 {
     // A graph with a valid FLOAT stats/LSE output tensor is supported: the plan must be
     // applicable and buildNodePlan must produce the concrete GpuSdpaFwdPlan.
-    auto graphBuilder = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
-    auto builtPlan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto builtPlan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
     const bool result
         = dynamic_cast<GpuSdpaFwdPlan<float, float, float, float, float>*>(builtPlan.get())
           != nullptr;
@@ -272,12 +272,12 @@ TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteWritesLseThroughGraph)
     const int64_t seqQ = DIMS[2];
     const std::vector<int64_t> lseDims = {batch, numHeads, seqQ};
 
-    auto graphBuilder = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -335,12 +335,12 @@ TEST(TestGpuSdpaFwdPlanBuilderDevice, DeprecatedCausalMaskWithLeftBoundIsSliding
     SdpaAttributesT attrs;
     attrs.causal_mask = true;
     attrs.left_bound = 2;
-    auto graphBuilder = makeGraph(attrs);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph(attrs);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -359,7 +359,7 @@ TEST(TestGpuSdpaFwdPlanBuilderDevice, DeprecatedCausalMaskWithLeftBoundIsSliding
     plan->execute(variantPack);
     oPlan.markDeviceModified();
 
-    auto direct = [&](int64_t leftBound) {
+    const auto direct = [&](int64_t leftBound) {
         Tensor<float> out(DIMS);
         GpuFpReferenceSdpa::fprop<float, float, float, float, float>(
             q,
@@ -397,16 +397,16 @@ TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteUsesFloatProbabilityNotProviderRoun
     const std::vector<int64_t> qDims = {1, 1, 1, 1};
     const std::vector<int64_t> kvDims = {1, 1, 4, 1};
     const std::vector<int64_t> oDims = {1, 1, 1, 1};
-    auto graphBuilder = createSdpaFwdGraph(
+    const auto graphBuilder = createSdpaFwdGraph(
         Q_UID, K_UID, V_UID, O_UID, qDims, kvDims, kvDims, oDims, DataType::BFLOAT16);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
                                 DataType::BFLOAT16,
                                 DataType::BFLOAT16,
                                 DataType::BFLOAT16>
         bfloat16PlanBuilder;
-    auto plan = bfloat16PlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = bfloat16PlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<bfloat16> q(qDims);
     Tensor<bfloat16> k(kvDims);
@@ -468,24 +468,24 @@ TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteAppliesRuntimePassByValueScale)
     scaleSpec.uid = SCALE_UID;
     scaleSpec.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
 
-    auto graphBuilder = createSdpaFwdGraph(Q_UID,
-                                           K_UID,
-                                           V_UID,
-                                           O_UID,
-                                           DIMS,
-                                           DIMS,
-                                           DIMS,
-                                           DIMS,
-                                           DataType::FLOAT,
-                                           /*attrs=*/{},
-                                           /*statsUid=*/std::nullopt,
-                                           scaleSpec);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                                 K_UID,
+                                                 V_UID,
+                                                 O_UID,
+                                                 DIMS,
+                                                 DIMS,
+                                                 DIMS,
+                                                 DIMS,
+                                                 DataType::FLOAT,
+                                                 /*attrs=*/{},
+                                                 /*statsUid=*/std::nullopt,
+                                                 scaleSpec);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -527,19 +527,19 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
     constexpr int64_t SCALE_UID = 15;
 
     const auto isApplicableWith = [&](const FloatOperandSpec& scale) {
-        auto graphBuilder = createSdpaFwdGraph(Q_UID,
-                                               K_UID,
-                                               V_UID,
-                                               O_UID,
-                                               DIMS,
-                                               DIMS,
-                                               DIMS,
-                                               DIMS,
-                                               DataType::FLOAT,
-                                               /*attrs=*/{},
-                                               /*statsUid=*/std::nullopt,
-                                               scale);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                                     K_UID,
+                                                     V_UID,
+                                                     O_UID,
+                                                     DIMS,
+                                                     DIMS,
+                                                     DIMS,
+                                                     DIMS,
+                                                     DataType::FLOAT,
+                                                     /*attrs=*/{},
+                                                     /*statsUid=*/std::nullopt,
+                                                     scale);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
@@ -594,8 +594,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, ThrowsOnBothCausalFlags)
     attrs.causal_mask = true;
     attrs.causal_mask_bottom_right = true;
 
-    auto graphBuilder = makeGraph(attrs);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphBuilder = makeGraph(attrs);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
@@ -612,16 +612,16 @@ TEST(TestGpuSdpaFwdPlanBuilder, ThrowsOnInvalidBounds)
     {
         SdpaAttributesT attrs;
         attrs.left_bound = int64_t{-2};
-        auto graphBuilder = makeGraph(attrs);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = makeGraph(attrs);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         EXPECT_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::invalid_argument);
     }
     {
         SdpaAttributesT attrs;
         attrs.right_bound = int64_t{-5};
-        auto graphBuilder = makeGraph(attrs);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = makeGraph(attrs);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         EXPECT_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::invalid_argument);
     }
@@ -657,7 +657,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, MaskDataTypeSelectsApplicableBuilder)
         bfloat16MaskBuilder;
 
     const auto applicability = [&](flatbuffers::FlatBufferBuilder& graphBuilder) {
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         const auto& node = graphWrap.getNode(0);
         const auto& tensorMap = graphWrap.getTensorMap();
@@ -695,12 +695,12 @@ protected:
 
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, NoMaskAndSupportedMaskDataTypesAreApplicable)
 {
-    auto noMask = makeGraph();
+    const auto noMask = makeGraph();
     EXPECT_TRUE(_executor.isApplicable(noMask.GetBufferPointer(), noMask.GetSize()));
 
     for(const auto maskType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
-        auto graph = makeGraphWithMask(maskType);
+        const auto graph = makeGraphWithMask(maskType);
         EXPECT_TRUE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
     }
 }
@@ -708,7 +708,7 @@ TEST_F(TestGpuSdpaFwdMaskGraphExecutor, NoMaskAndSupportedMaskDataTypesAreApplic
 // INT32 maps to no registered key: the registry throws, and the graph is not applicable.
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsupportedMaskDataTypeHasNoPlan)
 {
-    auto graph = makeGraphWithMask(DataType::INT32);
+    const auto graph = makeGraphWithMask(DataType::INT32);
     EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 
     const std::unordered_map<int64_t, void*> emptyVariantPack;
@@ -730,7 +730,7 @@ TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsupportedMaskDataTypeHasNoPlan)
 // An UNSET-dtype mask maps to the registered no-mask key, whose builder rejects it.
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsetMaskDataTypeIsCapabilityError)
 {
-    auto graph = makeGraphWithMask(DataType::UNSET);
+    const auto graph = makeGraphWithMask(DataType::UNSET);
     EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 
     const std::unordered_map<int64_t, void*> emptyVariantPack;
@@ -740,21 +740,21 @@ TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsetMaskDataTypeIsCapabilityError)
 
 TEST_F(TestGpuSdpaFwdMaskGraphExecutor, DanglingMaskUidIsNotApplicable)
 {
-    auto graph = createSdpaFwdGraph(Q_UID,
-                                    K_UID,
-                                    V_UID,
-                                    O_UID,
-                                    DIMS,
-                                    DIMS,
-                                    DIMS,
-                                    DIMS,
-                                    DataType::FLOAT,
-                                    {},
-                                    std::nullopt,
-                                    /*scale=*/std::nullopt,
-                                    MASK_UID,
-                                    MASK_DIMS,
-                                    std::nullopt);
+    const auto graph = createSdpaFwdGraph(Q_UID,
+                                          K_UID,
+                                          V_UID,
+                                          O_UID,
+                                          DIMS,
+                                          DIMS,
+                                          DIMS,
+                                          DIMS,
+                                          DataType::FLOAT,
+                                          {},
+                                          std::nullopt,
+                                          /*scale=*/std::nullopt,
+                                          MASK_UID,
+                                          MASK_DIMS,
+                                          std::nullopt);
     EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
 }
 
@@ -773,8 +773,8 @@ void expectMaskedPlanMatchesReferences()
     using hipdnn_data_sdk::utilities::Tensor;
     using MaskT = hipdnn_test_sdk::utilities::MaskDataTypeToNative<MaskEnum>;
 
-    auto graph = makeGraphWithMask(MaskEnum);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = makeGraphWithMask(MaskEnum);
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graph.GetBufferPointer(), graph.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
                                 DataType::FLOAT,
@@ -782,10 +782,10 @@ void expectMaskedPlanMatchesReferences()
                                 DataType::FLOAT,
                                 MaskEnum>
         builder;
-    auto plan = builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    auto floatGraph = makeGraphWithMask(DataType::FLOAT);
-    auto floatGraphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto floatGraph = makeGraphWithMask(DataType::FLOAT);
+    const auto floatGraphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         floatGraph.GetBufferPointer(), floatGraph.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
                                 DataType::FLOAT,
@@ -793,7 +793,7 @@ void expectMaskedPlanMatchesReferences()
                                 DataType::FLOAT,
                                 DataType::FLOAT>
         floatBuilder;
-    auto floatPlan = floatBuilder.buildNodePlan(floatGraphWrap, floatGraphWrap.getNode(0));
+    const auto floatPlan = floatBuilder.buildNodePlan(floatGraphWrap, floatGraphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -872,8 +872,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, Fp8ApplicabilityGatesEveryField)
 {
     using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
     const auto applicable = [](const auto& builder, const SdpaGraphSpec& spec) {
-        auto graphBuilder = makeSdpaGraph(spec);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = makeSdpaGraph(spec);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
@@ -967,8 +967,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, BlockMaskApplicabilityGatesEveryField)
                                 DataType::BFLOAT16>
         bf16;
     const auto applicable = [&bf16](const SdpaGraphSpec& spec) {
-        auto graphBuilder = makeSdpaGraph(spec);
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graphBuilder = makeSdpaGraph(spec);
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         return bf16.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
@@ -1031,7 +1031,7 @@ flatbuffers::FlatBufferBuilder makeGraphWithExtras(SdpaAttributesT attrs,
         add(extra.uid, extra.dataType, extra.dims);
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
@@ -1064,16 +1064,16 @@ TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecutePhiloxDropoutMatchesCpuOnDumpedMask
     attrs.seed_tensor_uid = SEED_UID;
     attrs.offset_tensor_uid = OFFSET_UID;
     attrs.rng_dump_tensor_uid = RNG_DUMP_UID;
-    auto graph = makeGraphWithExtras(attrs,
-                                     {{SEED_UID, DataType::INT64, {1}},
-                                      {OFFSET_UID, DataType::INT64, {1}},
-                                      {RNG_DUMP_UID, DataType::FLOAT, DROPOUT_DIMS}});
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graph = makeGraphWithExtras(attrs,
+                                           {{SEED_UID, DataType::INT64, {1}},
+                                            {OFFSET_UID, DataType::INT64, {1}},
+                                            {RNG_DUMP_UID, DataType::FLOAT, DROPOUT_DIMS}});
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graph.GetBufferPointer(), graph.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -1133,8 +1133,8 @@ TEST(TestGpuSdpaFwdPlanBuilder, SinkApplicabilityFollowsCudnnShape)
     const auto applicable = [&floatPlanBuilder](DataType type, const std::vector<int64_t>& dims) {
         SdpaAttributesT attrs;
         attrs.sink_token_tensor_uid = SINK_UID;
-        auto graph = makeGraphWithExtras(attrs, {{SINK_UID, type, dims}});
-        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        const auto graph = makeGraphWithExtras(attrs, {{SINK_UID, type, dims}});
+        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graph.GetBufferPointer(), graph.GetSize());
         return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
@@ -1168,7 +1168,7 @@ TEST(TestGpuSdpaFwdPlanDescaleDevice, ScalarDescalesMatchDeviceDescales)
         SdpaGraphSpec spec;
         spec.descaleStorage = storage;
         spec.bakedDescale = 0.5F;
-        auto graph = makeSdpaGraph(spec);
+        const auto graph = makeSdpaGraph(spec);
         ASSERT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
         std::unordered_map<int64_t, void*> pack = {{Q, q.memory().deviceData()},
                                                    {K, k.memory().deviceData()},
@@ -1208,10 +1208,10 @@ TEST(TestGpuSdpaFwdPlanDescale, MultiElementPassByValueDescaleIsDeclined)
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
     SdpaGraphSpec spec;
     spec.descaleKDims = {1, 2, 1, 1};
-    auto tensorGraph = makeSdpaGraph(spec);
+    const auto tensorGraph = makeSdpaGraph(spec);
     EXPECT_TRUE(executor.isApplicable(tensorGraph.GetBufferPointer(), tensorGraph.GetSize()));
     spec.descaleStorage = OperandStorage::RUNTIME_PASS_BY_VALUE;
-    auto passByValueGraph = makeSdpaGraph(spec);
+    const auto passByValueGraph = makeSdpaGraph(spec);
     EXPECT_FALSE(
         executor.isApplicable(passByValueGraph.GetBufferPointer(), passByValueGraph.GetSize()));
 }

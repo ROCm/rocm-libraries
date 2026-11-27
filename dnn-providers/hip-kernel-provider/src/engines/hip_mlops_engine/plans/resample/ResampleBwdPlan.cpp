@@ -232,8 +232,8 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
     }
 
     const auto numDxElements
-        = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
-    const auto shapes = launchShapes(static_cast<int64_t>(numDxElements));
+        = std::accumulate(dxDims.begin(), dxDims.end(), int64_t{1}, std::multiplies<>());
+    const auto shapes = launchShapes(numDxElements);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);

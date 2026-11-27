@@ -52,7 +52,7 @@ TEST(TestBackendFactory, TryToUseBackendInterfaceVersionMismatchReportsBothVersi
 {
     const std::string backendVersion
         = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR + 1) + ".0.0.TWEAK";
-    auto backend = tryToUseBackendInterface(backendVersion.c_str());
+    const auto backend = tryToUseBackendInterface(backendVersion.c_str());
     ASSERT_TRUE(std::dynamic_pointer_cast<IncompatibleBackendWrapper>(backend));
 
     std::array<char, 256> message{};
@@ -68,11 +68,11 @@ TEST(TestBackendFactory, TryToUseBackendInterfaceVersionMismatchReportsBothVersi
 TEST(TestBackendFactory, GetOrCreateInstanceReturnsPresetInstanceWithoutCallingFactory)
 {
     IHipdnnBackend::resetInstance();
-    auto presetBackend = std::make_shared<IncompatibleBackendWrapper>();
+    const auto presetBackend = std::make_shared<IncompatibleBackendWrapper>();
     IHipdnnBackend::setInstance(presetBackend);
 
     int factoryCalls = 0;
-    auto backend = IHipdnnBackend::getOrCreateInstance([&] {
+    const auto backend = IHipdnnBackend::getOrCreateInstance([&] {
         ++factoryCalls;
         return tryToUseBackendInterface(SUCCESS_VERSION.c_str());
     });
@@ -89,11 +89,11 @@ TEST(TestBackendFactory, GetOrCreateInstanceCachesFirstInitialization)
     auto createdBackend = std::make_shared<IncompatibleBackendWrapper>();
 
     int factoryCalls = 0;
-    auto firstBackend = IHipdnnBackend::getOrCreateInstance([&] {
+    const auto firstBackend = IHipdnnBackend::getOrCreateInstance([&] {
         ++factoryCalls;
         return createdBackend;
     });
-    auto secondBackend = IHipdnnBackend::getOrCreateInstance([&] {
+    const auto secondBackend = IHipdnnBackend::getOrCreateInstance([&] {
         ++factoryCalls;
         return tryToUseBackendInterface(SUCCESS_VERSION.c_str());
     });
@@ -108,7 +108,7 @@ TEST(TestBackendFactory, GetOrCreateInstanceCachesFirstInitialization)
 TEST(TestBackendFactory, HipdnnBackendReturnsPresetInstance)
 {
     IHipdnnBackend::resetInstance();
-    auto presetBackend = std::make_shared<IncompatibleBackendWrapper>();
+    const auto presetBackend = std::make_shared<IncompatibleBackendWrapper>();
     IHipdnnBackend::setInstance(presetBackend);
 
     EXPECT_EQ(hipdnnBackend(), presetBackend);
@@ -120,7 +120,7 @@ TEST(TestBackendFactory, HipdnnBackendCreatesDirectWrapperWithBackendVersion)
 {
     IHipdnnBackend::resetInstance();
 
-    auto backend = hipdnnBackend();
+    const auto backend = hipdnnBackend();
     EXPECT_TRUE(std::dynamic_pointer_cast<HipdnnDirectBackendWrapper>(backend));
     EXPECT_EQ(backend->version(), Version{std::string_view(backend->versionString())});
 

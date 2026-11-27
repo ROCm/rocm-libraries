@@ -23,14 +23,14 @@ using namespace hipdnn_integration_tests::test_utils;
 
 TEST(TestReferenceGraphExecutorFactory, CreateCpuExecutor)
 {
-    auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
+    const auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
     ASSERT_NE(executor, nullptr);
     EXPECT_FALSE(executor->requiresDeviceMemory());
 }
 
 TEST(TestReferenceGraphExecutorFactory, CreateDeviceExecutor)
 {
-    auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
+    const auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
     ASSERT_NE(executor, nullptr);
     EXPECT_TRUE(executor->requiresDeviceMemory());
 }
@@ -50,36 +50,36 @@ TEST(TestGpuReferenceGraphExecutorFactoryDevice, CpuAndDeviceExecutorsAgreeOnCon
     constexpr int64_t W_UID = 2;
     constexpr int64_t Y_UID = 3;
 
-    auto xStrides = generateStrides(tc.xDims);
-    auto wStrides = generateStrides(tc.wDims);
-    auto yStrides = generateStrides(tc.yDims);
+    const auto xStrides = generateStrides(tc.xDims);
+    const auto wStrides = generateStrides(tc.wDims);
+    const auto yStrides = generateStrides(tc.yDims);
 
-    auto graphBuilder = createConvFwdGraph(X_UID,
-                                           W_UID,
-                                           Y_UID,
-                                           tc.xDims,
-                                           tc.wDims,
-                                           tc.yDims,
-                                           xStrides,
-                                           wStrides,
-                                           yStrides,
-                                           tc.convPrePadding,
-                                           tc.convStride,
-                                           tc.convDilation,
-                                           DataType::FLOAT);
+    const auto graphBuilder = createConvFwdGraph(X_UID,
+                                                 W_UID,
+                                                 Y_UID,
+                                                 tc.xDims,
+                                                 tc.wDims,
+                                                 tc.yDims,
+                                                 xStrides,
+                                                 wStrides,
+                                                 yStrides,
+                                                 tc.convPrePadding,
+                                                 tc.convStride,
+                                                 tc.convDilation,
+                                                 DataType::FLOAT);
 
-    auto elemCount = [](const std::vector<int64_t>& dims) {
+    const auto elemCount = [](const std::vector<int64_t>& dims) {
         size_t count = 1;
-        for(auto d : dims)
+        for(const auto d : dims)
         {
             count *= static_cast<size_t>(d);
         }
         return count;
     };
 
-    auto xCount = elemCount(tc.xDims);
-    auto wCount = elemCount(tc.wDims);
-    auto yCount = elemCount(tc.yDims);
+    const auto xCount = elemCount(tc.xDims);
+    const auto wCount = elemCount(tc.wDims);
+    const auto yCount = elemCount(tc.yDims);
 
     // Fill input data
     std::vector<float> xData(xCount);
@@ -94,7 +94,7 @@ TEST(TestGpuReferenceGraphExecutorFactoryDevice, CpuAndDeviceExecutorsAgreeOnCon
     }
 
     // --- Run CPU executor (host pointers) ---
-    auto cpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
+    const auto cpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
     ASSERT_FALSE(cpuExecutor->requiresDeviceMemory());
 
     std::vector<float> cpuY(yCount, 0.0f);
@@ -106,7 +106,7 @@ TEST(TestGpuReferenceGraphExecutorFactoryDevice, CpuAndDeviceExecutorsAgreeOnCon
     cpuExecutor->execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuPack);
 
     // --- Run GPU executor (device pointers) ---
-    auto gpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
+    const auto gpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
     ASSERT_TRUE(gpuExecutor->requiresDeviceMemory());
 
     const hipdnn_data_sdk::utilities::Workspace dX(xCount * sizeof(float));

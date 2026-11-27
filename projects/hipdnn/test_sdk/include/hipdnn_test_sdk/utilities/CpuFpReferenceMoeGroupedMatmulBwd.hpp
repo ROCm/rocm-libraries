@@ -122,7 +122,7 @@ public:
         const int64_t dweightStride1 = dweightStrides[1];
         const int64_t dweightStride2 = dweightStrides[2];
 
-        auto dweightRowFunc = [&](const std::vector<int64_t>& indices) {
+        const auto dweightRowFunc = [&](const std::vector<int64_t>& indices) {
             const int64_t expert = indices[0];
             const int64_t k = indices[1];
 
@@ -160,7 +160,7 @@ public:
             }
         };
 
-        auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
+        const auto parallelFunc = hipdnn_test_sdk::detail::makeParallelTensorFunctor(
             dweightRowFunc, {expertCount, hiddenK});
         parallelFunc(std::thread::hardware_concurrency());
 

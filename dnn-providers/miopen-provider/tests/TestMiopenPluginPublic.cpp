@@ -12,7 +12,7 @@ using namespace miopen_plugin;
 TEST(TestMiopenPluginPublic, HipdnnPluginGetVersionSuccess)
 {
     const char* version;
-    auto status = hipdnnPluginGetVersion(&version);
+    const auto status = hipdnnPluginGetVersion(&version);
 
     ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_STREQ(version, HIPDNN_PLUGIN_VERSION);
@@ -20,14 +20,14 @@ TEST(TestMiopenPluginPublic, HipdnnPluginGetVersionSuccess)
 
 TEST(TestMiopenPluginPublic, HipdnnPluginGetVersionNullPtr)
 {
-    auto status = hipdnnPluginGetVersion(nullptr);
+    const auto status = hipdnnPluginGetVersion(nullptr);
     EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 TEST(TestMiopenPluginPublic, HipdnnPluginGetApiVersionSuccess)
 {
     const char* version;
-    auto status = hipdnnPluginGetApiVersion(&version);
+    const auto status = hipdnnPluginGetApiVersion(&version);
 
     ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_STREQ(version, HIPDNN_PLUGIN_API_VERSION);
@@ -35,20 +35,20 @@ TEST(TestMiopenPluginPublic, HipdnnPluginGetApiVersionSuccess)
 
 TEST(TestMiopenPluginPublic, HipdnnPluginGetApiVersionNullPtr)
 {
-    auto status = hipdnnPluginGetApiVersion(nullptr);
+    const auto status = hipdnnPluginGetApiVersion(nullptr);
     EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 TEST(TestMiopenPluginPublic, HipdnnPluginSetLogLevelSuccess)
 {
-    auto status = hipdnnPluginSetLogLevel(HIPDNN_SEV_INFO);
+    const auto status = hipdnnPluginSetLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_TRUE(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO));
 }
 
 TEST(TestMiopenPluginPublic, HipdnnPluginSetLogLevelFiltersLowerSeverity)
 {
-    auto status = hipdnnPluginSetLogLevel(HIPDNN_SEV_WARN);
+    const auto status = hipdnnPluginSetLogLevel(HIPDNN_SEV_WARN);
     ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_TRUE(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN));
     EXPECT_FALSE(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO));

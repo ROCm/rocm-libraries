@@ -116,7 +116,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceSanityValidationNchw)
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedOutput[0], tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), expectedOutput[1], tolerance);
@@ -253,7 +253,7 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceComputeUpscale)
     CpuFpReferenceBatchnorm::fwdInference<half, half, half, half, float>(
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 
-    auto tolerance = batchnorm::getToleranceInference<half>();
+    const auto tolerance = batchnorm::getToleranceInference<half>();
 
     EXPECT_NEAR(
         static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
@@ -302,7 +302,7 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceComputeUpscale)
     CpuFpReferenceBatchnorm::fwdInference<bfloat16, bfloat16, bfloat16, bfloat16, float>(
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 
-    auto tolerance = batchnorm::getToleranceInference<bfloat16>();
+    const auto tolerance = batchnorm::getToleranceInference<bfloat16>();
 
     EXPECT_NEAR(
         static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
@@ -416,11 +416,11 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
     invVarianceTensor.setHostValue(0.894423613312618, 0, 0);
 
     // dbias = sum(dy) = 0.1 + 0.2 + 0.3 + 0.4 = 1.0
-    auto expectedDbias = 1.0;
+    const auto expectedDbias = 1.0;
 
     // x_hat = (x - mean) * inv_variance = [-1.34163542 -0.44721181  0.44721181  1.34163542]
     // dscale = sum(dy * x_hat) = sum([-1.34163542 -0.44721181  0.44721181  1.34163542]) = 0.447211806656309
-    auto expectedDscale = 0.447211806656309;
+    const auto expectedDscale = 0.447211806656309;
 
     // dx is calculated pointwise via the full backward formula
     // dx = scale * inv_variance * (dy - mean(dy) - x_hat * dscale / 4)
@@ -436,7 +436,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
                                       &meanTensor,
                                       &invVarianceTensor);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), expectedDbias, tolerance);
     EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), expectedDscale, tolerance);
@@ -601,8 +601,8 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSav
     // inv_variance = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
 
     // Expected values should be identical to BatchnormBwdSanityValidationNchw
-    auto expectedDbias = 1.0;
-    auto expectedDscale = 0.447211806656309;
+    const auto expectedDbias = 1.0;
+    const auto expectedDscale = 0.447211806656309;
     std::vector<double> expectedDx
         = {-2.14659950e-06, -7.15533166e-07, 7.15533166e-07, 2.14659950e-06};
 
@@ -617,7 +617,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSav
         nullptr,
         BATCHNORM_DEFAULT_EPSILON);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), expectedDbias, tolerance);
     EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), expectedDscale, tolerance);
@@ -658,7 +658,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsSingleEl
     CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
         dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
 
     EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), 0.3f, tolerance);
     EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), 0.0f, tolerance);
@@ -714,7 +714,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsZeroVari
     CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
         dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
 
-    auto tolerance = 1e-4f;
+    const auto tolerance = 1e-4f;
 
     EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), 1.0f, tolerance);
     EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), 0.0f, tolerance);
@@ -757,7 +757,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStats2DMinima
     CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
         dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
 
-    auto tolerance = 1e-4f;
+    const auto tolerance = 1e-4f;
 
     EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), 0.6f, tolerance);
     EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), 0.199999f, tolerance);
@@ -799,7 +799,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEps
                                                                                 nullptr,
                                                                                 largeEpsilon);
 
-    auto tolerance = 1e-5f;
+    const auto tolerance = 1e-5f;
 
     EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), 0.5f, tolerance);
     EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), 0.0f, tolerance);
@@ -1117,7 +1117,7 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingSanityValidationNchw)
                                          &nextRunningMean,
                                          &nextRunningVariance);
 
-    auto tolerance = 1e-6;
+    const auto tolerance = 1e-6;
 
     // Verify output values
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedOutput[0], tolerance);

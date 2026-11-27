@@ -423,7 +423,7 @@ TEST(TestGpuValidatorFactory, FloatValidatorPassesMatchingData)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT, 0.0f, 0.0f);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT, 0.0f, 0.0f);
     ASSERT_NE(validator, nullptr);
 
     Tensor<float> ref({4});
@@ -449,7 +449,7 @@ TEST(TestGpuValidatorFactory, Int32ValidatorPassesMatchingData)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
     ASSERT_NE(validator, nullptr);
 
     Tensor<int32_t> ref({4});
@@ -500,7 +500,7 @@ template <typename T>
 RaggedTensor<T> makeRaggedTensor()
 {
     const std::vector<int32_t> offsets = {0, 8, 20};
-    auto offsetTensor = std::make_shared<Tensor<int32_t>>(
+    const auto offsetTensor = std::make_shared<Tensor<int32_t>>(
         std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
     for(size_t i = 0; i < offsets.size(); ++i)
     {
@@ -790,7 +790,7 @@ TYPED_TEST(TestGpuFpStridedValidation, StridedMismatchFails)
     std::vector<int64_t> indices(4, 0);
     for(size_t i = 0; i < ref.elementCount(); ++i)
     {
-        auto val = static_cast<TypeParam>(1.0f);
+        const auto val = static_cast<TypeParam>(1.0f);
         ref(indices) = val;
         impl(indices) = val;
 
@@ -906,7 +906,7 @@ TYPED_TEST(TestGpuIntStridedValidation, StridedExactMatchPasses)
     std::vector<int64_t> indices(4, 0);
     for(size_t i = 0; i < ref.elementCount(); ++i)
     {
-        auto val = static_cast<TypeParam>(i % 10);
+        const auto val = static_cast<TypeParam>(i % 10);
         ref(indices) = val;
         impl(indices) = val;
 
@@ -929,7 +929,7 @@ TYPED_TEST(TestGpuIntStridedValidation, StridedMismatchFails)
     std::vector<int64_t> indices(4, 0);
     for(size_t i = 0; i < ref.elementCount(); ++i)
     {
-        auto val = static_cast<TypeParam>(1);
+        const auto val = static_cast<TypeParam>(1);
         ref(indices) = val;
         impl(indices) = val;
 
@@ -957,7 +957,7 @@ TYPED_TEST(TestGpuVsCpuValidation, StridedAgreeOnPass)
     std::vector<int64_t> indices(4, 0);
     for(size_t i = 0; i < ref.elementCount(); ++i)
     {
-        auto val = static_cast<TypeParam>(static_cast<float>(i) * 0.01f);
+        const auto val = static_cast<TypeParam>(static_cast<float>(i) * 0.01f);
         ref(indices) = val;
         impl(indices) = static_cast<TypeParam>(static_cast<float>(val) + 1e-7f);
 
@@ -1027,7 +1027,7 @@ TEST(TestGpuFpValidationStrided, HighDimensionStridedPasses)
     std::vector<int64_t> indices(6, 0);
     for(size_t i = 0; i < ref.elementCount(); ++i)
     {
-        auto val = static_cast<float>(i) * 0.1f;
+        const auto val = static_cast<float>(i) * 0.1f;
         ref(indices) = val;
         impl(indices) = val;
 

@@ -14,7 +14,7 @@ using namespace hip_kernel_provider::layernorm;
 
 TEST(TestLayernormValidator, ValidFprop)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
@@ -26,7 +26,7 @@ TEST(TestLayernormValidator, ValidFprop)
 
 TEST(TestLayernormValidator, ValidBprop)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
@@ -38,7 +38,7 @@ TEST(TestLayernormValidator, ValidBprop)
 
 TEST(TestLayernormValidator, UnsupportedDimFprop)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({12, 4, 1}, {1, 3, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -52,7 +52,8 @@ TEST(TestLayernormValidator, UnsupportedDimFprop)
 
 TEST(TestLayernormValidator, UnsupportedDimBprop)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({12, 4, 1}, {1, 3, 4});
+    const auto builder
+        = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({12, 4, 1}, {1, 3, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
@@ -123,20 +124,21 @@ flatbuffers::FlatBufferBuilder createInvalidTypeLayernormFpropGraph(
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 7, "inv_variance", invVarianceType, &statsDims, &statsDims));
 
-    auto layernormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
-        builder,
-        1, // x tensor uid
-        3, // scale tensor uid
-        4, // bias tensor uid
-        5, // epsilon tensor uid
-        2, // y tensor uid
-        0, // normalized dim count
-        6, // mean tensor uid
-        7 // inv variance tensor uid
-    );
+    const auto layernormAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
+            builder,
+            1, // x tensor uid
+            3, // scale tensor uid
+            4, // bias tensor uid
+            5, // epsilon tensor uid
+            2, // y tensor uid
+            0, // normalized dim count
+            6, // mean tensor uid
+            7 // inv variance tensor uid
+        );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -144,7 +146,7 @@ flatbuffers::FlatBufferBuilder createInvalidTypeLayernormFpropGraph(
         layernormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -221,7 +223,7 @@ inline flatbuffers::FlatBufferBuilder createInvalidTypeLayernormBwdGraph(
         hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    auto layernormBackwardAttributes
+    const auto layernormBackwardAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormBackwardAttributes(
             builder,
             1, // dy tensor uid
@@ -237,7 +239,7 @@ inline flatbuffers::FlatBufferBuilder createInvalidTypeLayernormBwdGraph(
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm_bwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -245,7 +247,7 @@ inline flatbuffers::FlatBufferBuilder createInvalidTypeLayernormBwdGraph(
         layernormBackwardAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -261,7 +263,7 @@ inline flatbuffers::FlatBufferBuilder createInvalidTypeLayernormBwdGraph(
 
 TEST(TestLayernormValidator, ValidDifferentIOTypesFprop)
 {
-    auto builder = createInvalidTypeLayernormFpropGraph(
+    const auto builder = createInvalidTypeLayernormFpropGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -282,7 +284,7 @@ TEST(TestLayernormValidator, ValidDifferentIOTypesFprop)
 
 TEST(TestLayernormValidator, ValidDifferentIOTypesBprop)
 {
-    auto builder
+    const auto builder
         = createInvalidTypeLayernormBwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -305,7 +307,7 @@ TEST(TestLayernormValidator, ValidDifferentIOTypesBprop)
 
 TEST(TestLayernormValidator, MismatchAffineTypesFprop)
 {
-    auto builder = createInvalidTypeLayernormFpropGraph(
+    const auto builder = createInvalidTypeLayernormFpropGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
@@ -327,7 +329,7 @@ TEST(TestLayernormValidator, MismatchAffineTypesFprop)
 
 TEST(TestLayernormValidator, MismatchAffineTypesBprop)
 {
-    auto builder
+    const auto builder
         = createInvalidTypeLayernormBwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -351,7 +353,7 @@ TEST(TestLayernormValidator, MismatchAffineTypesBprop)
 
 TEST(TestLayernormValidator, MismatchStatsTypesFprop)
 {
-    auto builder = createInvalidTypeLayernormFpropGraph(
+    const auto builder = createInvalidTypeLayernormFpropGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -373,7 +375,7 @@ TEST(TestLayernormValidator, MismatchStatsTypesFprop)
 
 TEST(TestLayernormValidator, MismatchStatsTypesBprop)
 {
-    auto builder
+    const auto builder
         = createInvalidTypeLayernormBwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -397,7 +399,7 @@ TEST(TestLayernormValidator, MismatchStatsTypesBprop)
 
 TEST(TestLayernormValidator, InvalidEpsilonTypeFprop)
 {
-    auto builder = createInvalidTypeLayernormFpropGraph(
+    const auto builder = createInvalidTypeLayernormFpropGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -419,7 +421,7 @@ TEST(TestLayernormValidator, InvalidEpsilonTypeFprop)
 
 TEST(TestLayernormValidator, InvalidEpsilonTypeBprop)
 {
-    auto builder
+    const auto builder
         = createInvalidTypeLayernormBwdGraph(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -529,20 +531,21 @@ flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(createFloatOperand(
         builder, 7, "inv_variance", invVarianceStrides, invVarianceDims, passByValue));
 
-    auto layernormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
-        builder,
-        1, // x tensor uid
-        3, // scale tensor uid
-        4, // bias tensor uid
-        5, // epsilon tensor uid
-        2, // y tensor uid
-        0, // normalized dim count
-        6, // mean tensor uid
-        7 // inv variance tensor uid
-    );
+    const auto layernormAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
+            builder,
+            1, // x tensor uid
+            3, // scale tensor uid
+            4, // bias tensor uid
+            5, // epsilon tensor uid
+            2, // y tensor uid
+            0, // normalized dim count
+            6, // mean tensor uid
+            7 // inv variance tensor uid
+        );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -550,7 +553,7 @@ flatbuffers::FlatBufferBuilder
         layernormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -635,7 +638,7 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    auto layernormBackwardAttributes
+    const auto layernormBackwardAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormBackwardAttributes(
             builder,
             1, // dy tensor uid
@@ -651,7 +654,7 @@ flatbuffers::FlatBufferBuilder
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+    const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm_bwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -659,7 +662,7 @@ flatbuffers::FlatBufferBuilder
         layernormBackwardAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+    const auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -695,20 +698,20 @@ TEST(TestLayernormValidator, MismatchIOShapesFprop)
         = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto builder = createInvalidShapeLayernormFpropGraph(xDims,
-                                                         xStrides,
-                                                         ioDims,
-                                                         ioStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         epsilonDims,
-                                                         epsilonDims,
-                                                         statsDims,
-                                                         statsStrides,
-                                                         statsDims,
-                                                         statsStrides);
+    const auto builder = createInvalidShapeLayernormFpropGraph(xDims,
+                                                               xStrides,
+                                                               ioDims,
+                                                               ioStrides,
+                                                               affineDims,
+                                                               affineStrides,
+                                                               affineDims,
+                                                               affineStrides,
+                                                               epsilonDims,
+                                                               epsilonDims,
+                                                               statsDims,
+                                                               statsStrides,
+                                                               statsDims,
+                                                               statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -743,24 +746,24 @@ TEST(TestLayernormValidator, MismatchIOShapesBprop)
         = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto builder = createInvalidShapeLayernormBwdGraph(ioDims,
-                                                       ioStrides,
-                                                       xDims,
-                                                       xStrides,
-                                                       ioDims,
-                                                       ioStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       epsilonDims,
-                                                       epsilonDims,
-                                                       statsDims,
-                                                       statsStrides,
-                                                       statsDims,
-                                                       statsStrides);
+    const auto builder = createInvalidShapeLayernormBwdGraph(ioDims,
+                                                             ioStrides,
+                                                             xDims,
+                                                             xStrides,
+                                                             ioDims,
+                                                             ioStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             epsilonDims,
+                                                             epsilonDims,
+                                                             statsDims,
+                                                             statsStrides,
+                                                             statsDims,
+                                                             statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -792,20 +795,20 @@ TEST(TestLayernormValidator, MismatchAffineShapesFprop)
         = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto builder = createInvalidShapeLayernormFpropGraph(ioDims,
-                                                         ioStrides,
-                                                         ioDims,
-                                                         ioStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         biasDims,
-                                                         biasStrides,
-                                                         epsilonDims,
-                                                         epsilonDims,
-                                                         statsDims,
-                                                         statsStrides,
-                                                         statsDims,
-                                                         statsStrides);
+    const auto builder = createInvalidShapeLayernormFpropGraph(ioDims,
+                                                               ioStrides,
+                                                               ioDims,
+                                                               ioStrides,
+                                                               affineDims,
+                                                               affineStrides,
+                                                               biasDims,
+                                                               biasStrides,
+                                                               epsilonDims,
+                                                               epsilonDims,
+                                                               statsDims,
+                                                               statsStrides,
+                                                               statsDims,
+                                                               statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -837,24 +840,24 @@ TEST(TestLayernormValidator, MismatchAffineShapesBprop)
         = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto builder = createInvalidShapeLayernormBwdGraph(ioDims,
-                                                       ioStrides,
-                                                       ioDims,
-                                                       ioStrides,
-                                                       ioDims,
-                                                       ioStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       dbiasDims,
-                                                       dbiasStrides,
-                                                       epsilonDims,
-                                                       epsilonDims,
-                                                       statsDims,
-                                                       statsStrides,
-                                                       statsDims,
-                                                       statsStrides);
+    const auto builder = createInvalidShapeLayernormBwdGraph(ioDims,
+                                                             ioStrides,
+                                                             ioDims,
+                                                             ioStrides,
+                                                             ioDims,
+                                                             ioStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             dbiasDims,
+                                                             dbiasStrides,
+                                                             epsilonDims,
+                                                             epsilonDims,
+                                                             statsDims,
+                                                             statsStrides,
+                                                             statsDims,
+                                                             statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -886,20 +889,20 @@ TEST(TestLayernormValidator, MismatchStatsShapesFprop)
     const std::vector<int64_t> invVarStrides{150528, 50176, 224, 1};
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto builder = createInvalidShapeLayernormFpropGraph(ioDims,
-                                                         ioStrides,
-                                                         ioDims,
-                                                         ioStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         epsilonDims,
-                                                         epsilonDims,
-                                                         statsDims,
-                                                         statsStrides,
-                                                         invVarDims,
-                                                         invVarStrides);
+    const auto builder = createInvalidShapeLayernormFpropGraph(ioDims,
+                                                               ioStrides,
+                                                               ioDims,
+                                                               ioStrides,
+                                                               affineDims,
+                                                               affineStrides,
+                                                               affineDims,
+                                                               affineStrides,
+                                                               epsilonDims,
+                                                               epsilonDims,
+                                                               statsDims,
+                                                               statsStrides,
+                                                               invVarDims,
+                                                               invVarStrides);
     // NOLINTEND(readability-suspicious-call-argument)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -931,24 +934,24 @@ TEST(TestLayernormValidator, MismatchStatsShapesBprop)
     const std::vector<int64_t> invVarStrides{150528, 50176, 224, 1};
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
-    auto builder = createInvalidShapeLayernormBwdGraph(ioDims,
-                                                       ioStrides,
-                                                       ioDims,
-                                                       ioStrides,
-                                                       ioDims,
-                                                       ioStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       affineDims,
-                                                       affineStrides,
-                                                       epsilonDims,
-                                                       epsilonDims,
-                                                       statsDims,
-                                                       statsStrides,
-                                                       invVarDims,
-                                                       invVarStrides);
+    const auto builder = createInvalidShapeLayernormBwdGraph(ioDims,
+                                                             ioStrides,
+                                                             ioDims,
+                                                             ioStrides,
+                                                             ioDims,
+                                                             ioStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             affineDims,
+                                                             affineStrides,
+                                                             epsilonDims,
+                                                             epsilonDims,
+                                                             statsDims,
+                                                             statsStrides,
+                                                             invVarDims,
+                                                             invVarStrides);
     // NOLINTEND(readability-suspicious-call-argument)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1006,21 +1009,21 @@ LayoutCase makeNhwcCase()
 void expectFprop(const LayoutCase& layout, bool declined)
 {
     const std::vector<int64_t> epsilonDims = {1};
-    auto builder = createInvalidShapeLayernormFpropGraph(layout.xDims,
-                                                         layout.xStrides,
-                                                         layout.xDims,
-                                                         layout.xStrides,
-                                                         layout.affineDims,
-                                                         layout.scaleStrides,
-                                                         layout.affineDims,
-                                                         layout.biasStrides,
-                                                         epsilonDims,
-                                                         epsilonDims,
-                                                         layout.statDims,
-                                                         layout.meanStrides,
-                                                         layout.statDims,
-                                                         layout.invVarianceStrides,
-                                                         layout.passByValue);
+    const auto builder = createInvalidShapeLayernormFpropGraph(layout.xDims,
+                                                               layout.xStrides,
+                                                               layout.xDims,
+                                                               layout.xStrides,
+                                                               layout.affineDims,
+                                                               layout.scaleStrides,
+                                                               layout.affineDims,
+                                                               layout.biasStrides,
+                                                               epsilonDims,
+                                                               epsilonDims,
+                                                               layout.statDims,
+                                                               layout.meanStrides,
+                                                               layout.statDims,
+                                                               layout.invVarianceStrides,
+                                                               layout.passByValue);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormAttributes();
@@ -1040,25 +1043,25 @@ void expectFprop(const LayoutCase& layout, bool declined)
 void expectBprop(const LayoutCase& layout, bool declined)
 {
     const std::vector<int64_t> epsilonDims = {1};
-    auto builder = createInvalidShapeLayernormBwdGraph(layout.xDims,
-                                                       layout.xStrides,
-                                                       layout.xDims,
-                                                       layout.xStrides,
-                                                       layout.xDims,
-                                                       layout.xStrides,
-                                                       layout.affineDims,
-                                                       layout.scaleStrides,
-                                                       layout.affineDims,
-                                                       layout.dscaleStrides,
-                                                       layout.affineDims,
-                                                       layout.dbiasStrides,
-                                                       epsilonDims,
-                                                       epsilonDims,
-                                                       layout.statDims,
-                                                       layout.meanStrides,
-                                                       layout.statDims,
-                                                       layout.invVarianceStrides,
-                                                       layout.passByValue);
+    const auto builder = createInvalidShapeLayernormBwdGraph(layout.xDims,
+                                                             layout.xStrides,
+                                                             layout.xDims,
+                                                             layout.xStrides,
+                                                             layout.xDims,
+                                                             layout.xStrides,
+                                                             layout.affineDims,
+                                                             layout.scaleStrides,
+                                                             layout.affineDims,
+                                                             layout.dscaleStrides,
+                                                             layout.affineDims,
+                                                             layout.dbiasStrides,
+                                                             epsilonDims,
+                                                             epsilonDims,
+                                                             layout.statDims,
+                                                             layout.meanStrides,
+                                                             layout.statDims,
+                                                             layout.invVarianceStrides,
+                                                             layout.passByValue);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormBackwardAttributes();
@@ -1077,7 +1080,7 @@ void expectBprop(const LayoutCase& layout, bool declined)
 
 void expectBpropDxType(DT xType, DT dxType, bool declined)
 {
-    auto builder = createInvalidTypeLayernormBwdGraph(
+    const auto builder = createInvalidTypeLayernormBwdGraph(
         xType, xType, dxType, xType, xType, xType, DT::FLOAT, xType, xType);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());

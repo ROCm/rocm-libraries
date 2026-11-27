@@ -65,7 +65,7 @@ struct ConvTestCase
         }
 
         // Determine the number of spatial dimensions
-        auto spatialDims = xDims.size() - 2; // Exclude N and C
+        const auto spatialDims = xDims.size() - 2; // Exclude N and C
 
         // Validate that the convolution parameter vectors match the number of spatial dimensions
         if(convPrePadding.size() != spatialDims || convPostPadding.size() != spatialDims
@@ -76,15 +76,15 @@ struct ConvTestCase
         }
 
         // Calculate output dimensions based on input dimensions and convolution parameters
-        auto n = xDims[N];
-        auto cOut = wDims[N];
+        const auto n = xDims[N];
+        const auto cOut = wDims[N];
         std::vector<int64_t> outputDims = {n, cOut};
 
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            auto paddedInputSize = xDims[2 + i] + convPrePadding[i] + convPostPadding[i];
-            auto effectiveKernelSize = (convDilation[i] * (wDims[2 + i] - 1)) + 1;
-            auto dimOut = ((paddedInputSize - effectiveKernelSize) / convStride[i]) + 1;
+            const auto paddedInputSize = xDims[2 + i] + convPrePadding[i] + convPostPadding[i];
+            const auto effectiveKernelSize = (convDilation[i] * (wDims[2 + i] - 1)) + 1;
+            const auto dimOut = ((paddedInputSize - effectiveKernelSize) / convStride[i]) + 1;
             outputDims.push_back(dimOut);
         }
 
@@ -283,7 +283,7 @@ inline flatbuffers::FlatBufferBuilder cbaGraphWithFloatBiasOnHalfGraph()
 
     return hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(), [](GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 const bool isFloat = tensor->name == "bias" || tensor->name == "y_conv"
                                      || tensor->name == "y_bias";

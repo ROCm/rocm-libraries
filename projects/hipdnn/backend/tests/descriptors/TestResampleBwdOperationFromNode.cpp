@@ -88,8 +88,8 @@ protected:
 
 TEST_F(TestResampleBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
@@ -99,11 +99,11 @@ TEST_F(TestResampleBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 
 TEST_F(TestResampleBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 {
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     // NodeFactory::createOperationFromNode delegates to fromNode internally.
     // Verify the delegation produces a valid, correctly-typed descriptor.
-    auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
+    const auto graphOp = NodeFactory::createOperationFromNode(node, _tensorMap);
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the factory dispatched to the correct operation type, then static_cast.
@@ -112,7 +112,7 @@ TEST_F(TestResampleBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     ASSERT_NE(op, nullptr);
     const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ResampleBwdAttributes);
-    auto desc = std::static_pointer_cast<ResampleBwdOperationDescriptor>(graphOp);
+    const auto desc = std::static_pointer_cast<ResampleBwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
 
     // Verify all attributes are correctly populated via the delegated path
@@ -133,8 +133,8 @@ TEST_F(TestResampleBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 
 TEST_F(TestResampleBwdOperationFromNode, PreservesComputeDataType)
 {
-    auto node = createStandardNode(DataType::HALF);
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode(DataType::HALF);
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::HALF);
 }
@@ -145,7 +145,7 @@ TEST_F(TestResampleBwdOperationFromNode, PreservesResampleMode)
     auto attrs = createStandardResampleBwdAttrs();
     attrs.resample_mode = ResampleMode::AVGPOOL_EXCLUDE_PADDING;
     node.attributes.Set(attrs);
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().resample_mode, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 }
@@ -156,15 +156,15 @@ TEST_F(TestResampleBwdOperationFromNode, PreservesPaddingMode)
     auto attrs = createStandardResampleBwdAttrs();
     attrs.padding_mode = PaddingMode::NEG_INF_PAD;
     node.attributes.Set(attrs);
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_EQ(desc->getData().padding_mode, PaddingMode::NEG_INF_PAD);
 }
 
 TEST_F(TestResampleBwdOperationFromNode, PreservesDataFields)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getData().pre_padding, toVec(K_PRE_PADDING));
     EXPECT_EQ(desc->getData().post_padding, toVec(K_POST_PADDING));
@@ -176,8 +176,8 @@ TEST_F(TestResampleBwdOperationFromNode, PreservesDataFields)
 
 TEST_F(TestResampleBwdOperationFromNode, SetsTensorReferences)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_TENSOR_DY_UID);
@@ -189,8 +189,8 @@ TEST_F(TestResampleBwdOperationFromNode, SetsTensorReferences)
 
 TEST_F(TestResampleBwdOperationFromNode, TensorReferencesMatchTensorMap)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     EXPECT_EQ(desc->getDyDesc(), _tensorMap[K_TENSOR_DY_UID]);
     EXPECT_EQ(desc->getDxDesc(), _tensorMap[K_TENSOR_DX_UID]);
@@ -199,8 +199,8 @@ TEST_F(TestResampleBwdOperationFromNode, TensorReferencesMatchTensorMap)
 
 TEST_F(TestResampleBwdOperationFromNode, SetsTensorReferencesWithFullValues)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     ASSERT_NE(desc->getDyDesc(), nullptr);
     EXPECT_EQ(desc->getDyDesc()->getData().uid, K_TENSOR_DY_UID);
@@ -224,7 +224,7 @@ TEST_F(TestResampleBwdOperationFromNode, SetsTensorReferencesWithFullValues)
 TEST_F(TestResampleBwdOperationFromNode, FailsWithMissingDyTensor)
 {
     _tensorMap.erase(K_TENSOR_DY_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ResampleBwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -233,7 +233,7 @@ TEST_F(TestResampleBwdOperationFromNode, FailsWithMissingDyTensor)
 TEST_F(TestResampleBwdOperationFromNode, FailsWithMissingDxTensor)
 {
     _tensorMap.erase(K_TENSOR_DX_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ResampleBwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -249,7 +249,7 @@ TEST_F(TestResampleBwdOperationFromNode, SucceedsWithOnlyRequiredTensors)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
 
@@ -276,7 +276,7 @@ TEST_F(TestResampleBwdOperationFromNode, FailsWithoutIndexForMaxpool)
 TEST_F(TestResampleBwdOperationFromNode, FailsWhenOptionalIndexUidSetButTensorMissing)
 {
     _tensorMap.erase(K_TENSOR_INDEX_UID);
-    auto node = createStandardNode();
+    const auto node = createStandardNode();
 
     ASSERT_THROW_HIPDNN_STATUS(ResampleBwdOperationDescriptor::fromNode(node, _tensorMap),
                                HIPDNN_STATUS_INTERNAL_ERROR);
@@ -284,8 +284,8 @@ TEST_F(TestResampleBwdOperationFromNode, FailsWhenOptionalIndexUidSetButTensorMi
 
 TEST_F(TestResampleBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
@@ -296,8 +296,8 @@ TEST_F(TestResampleBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestResampleBwdOperationFromNode, BuildNodeRoundTrip)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
@@ -319,8 +319,8 @@ TEST_F(TestResampleBwdOperationFromNode, BuildNodeRoundTrip)
 
 TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     // Verify pre_padding
     std::vector<int64_t> prePadding(2);
@@ -440,7 +440,7 @@ TEST_F(TestResampleBwdOperationFromNode, NamePreservedFromNode)
     auto node = createStandardNode();
     node.name = "test_resamplebwd_1";
 
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -455,8 +455,8 @@ TEST_F(TestResampleBwdOperationFromNode, NamePreservedFromNode)
 
 TEST_F(TestResampleBwdOperationFromNode, EmptyNamePreservedFromNode)
 {
-    auto node = createStandardNode();
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto node = createStandardNode();
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     int64_t count = 0;
     desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
@@ -468,7 +468,7 @@ TEST_F(TestResampleBwdOperationFromNode, BuildNodePreservesName)
     auto node = createStandardNode();
     node.name = "test_build_name";
 
-    auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = ResampleBwdOperationDescriptor::fromNode(node, _tensorMap);
     const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);

@@ -97,7 +97,7 @@ constexpr size_t SUPPORTED_SPATIAL_RANK = 2;
 const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
+    const auto it = tensors.find(uid);
     return it == tensors.end() ? nullptr : it->second;
 }
 
@@ -459,7 +459,7 @@ std::string elementTypeFor(const KernelDefinition& kernel)
 const data_objects::TensorAttributes& requireTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
+    const auto it = tensors.find(uid);
     if(it == tensors.end() || it->second == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

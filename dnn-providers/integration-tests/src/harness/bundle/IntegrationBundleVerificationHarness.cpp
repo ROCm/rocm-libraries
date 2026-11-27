@@ -388,7 +388,7 @@ std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeS
     const std::string arch = baseArchToken(_deps.policy.arch);
     const auto& rankedIds = session.engines.rankedIds;
 
-    auto observe = [&](const LoadedEngine& engine) {
+    const auto observe = [&](const LoadedEngine& engine) {
         const bool engineIsSupported
             = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
         return ObservedGraphSupport{

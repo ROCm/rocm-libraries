@@ -39,7 +39,7 @@ protected:
             .set_intermediate_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::FLOAT);
 
-        auto x = std::make_shared<TensorAttributes>();
+        const auto x = std::make_shared<TensorAttributes>();
         x->set_uid(K_BSQ_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
         x->set_dim(toVec(K_BSQ_TENSOR_X_DIMS)).set_stride(toVec(K_BSQ_TENSOR_X_STRIDES));
 
@@ -60,9 +60,9 @@ protected:
 // validation of graph data types, tensor attributes, and BSQ parameters.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BasicBsqRoundTrip)
 {
-    auto originalGraph = buildBsqGraph();
+    const auto originalGraph = buildBsqGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types
@@ -77,7 +77,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BasicBsqRoundTrip)
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_X_UID), 0u);
-    auto liftedX = tensorMap[K_BSQ_TENSOR_X_UID];
+    const auto liftedX = tensorMap[K_BSQ_TENSOR_X_UID];
     EXPECT_EQ(liftedX->get_uid(), K_BSQ_TENSOR_X_UID);
     EXPECT_EQ(liftedX->get_name(), "X");
     EXPECT_EQ(liftedX->get_dim(), toVec(K_BSQ_TENSOR_X_DIMS));
@@ -86,7 +86,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BasicBsqRoundTrip)
 
     // Verify Y tensor
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_Y_UID), 0u);
-    auto liftedY = tensorMap[K_BSQ_TENSOR_Y_UID];
+    const auto liftedY = tensorMap[K_BSQ_TENSOR_Y_UID];
     EXPECT_EQ(liftedY->get_uid(), K_BSQ_TENSOR_Y_UID);
     EXPECT_EQ(liftedY->get_name(), "Y");
     EXPECT_EQ(liftedY->get_dim(), toVec(K_BSQ_TENSOR_Y_DIMS));
@@ -95,7 +95,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BasicBsqRoundTrip)
 
     // Verify Scale tensor
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_SCALE_UID), 0u);
-    auto liftedScale = tensorMap[K_BSQ_TENSOR_SCALE_UID];
+    const auto liftedScale = tensorMap[K_BSQ_TENSOR_SCALE_UID];
     EXPECT_EQ(liftedScale->get_uid(), K_BSQ_TENSOR_SCALE_UID);
     EXPECT_EQ(liftedScale->get_name(), "Scale");
 
@@ -125,13 +125,13 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqWithAxisAndTransposePr
     constexpr int64_t Y_UID = 51;
     constexpr int64_t SCALE_UID = 52;
 
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("BsqAxisTransposeLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_uid(X_UID).set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(xDims).set_stride(xStrides);
 
@@ -145,7 +145,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqWithAxisAndTransposePr
     y->set_uid(Y_UID).set_output(true).set_name("Y");
     scale->set_uid(SCALE_UID).set_output(true).set_name("Scale");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto& subNodes = liftedGraph->getSubNodes();
@@ -166,9 +166,9 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqWithAxisAndTransposePr
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqTensorSharingPreserved)
 {
-    auto originalGraph = buildBsqGraph();
+    const auto originalGraph = buildBsqGraph();
 
-    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    const auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -199,13 +199,13 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqTensorSharingPreserved
 // survive the round trip and are all distinct.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraphLifting>();
+    const auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidBsqLiftTest")
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_io_data_type(DataType::FLOAT);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X").set_data_type(DataType::FLOAT);
     x->set_dim(toVec(K_BSQ_TENSOR_X_DIMS)).set_stride(toVec(K_BSQ_TENSOR_X_STRIDES));
 
@@ -216,7 +216,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreserved
     y->set_output(true).set_name("Y");
     scale->set_output(true).set_name("Scale");
 
-    auto liftedGraph = liftGraph(*graph, _handle);
+    const auto liftedGraph = liftGraph(*graph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
 
     auto tensorMap = liftedGraph->getTensorsByUid();
@@ -242,9 +242,9 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreserved
     ASSERT_NE(bsqNode, nullptr);
 
     // Verify tensor UIDs are distinct
-    auto xUid = bsqNode->attributes.get_x()->get_uid();
-    auto yUid = bsqNode->attributes.get_y()->get_uid();
-    auto scaleUid = bsqNode->attributes.get_scale()->get_uid();
+    const auto xUid = bsqNode->attributes.get_x()->get_uid();
+    const auto yUid = bsqNode->attributes.get_y()->get_uid();
+    const auto scaleUid = bsqNode->attributes.get_scale()->get_uid();
 
     EXPECT_NE(xUid, yUid);
     EXPECT_NE(xUid, scaleUid);
@@ -259,9 +259,9 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, AutoAssignedUidsPreserved
 // all BSQ fields survive the FlatBuffer-direct path.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLifting, BsqLiftWithoutFinalization)
 {
-    auto originalGraph = buildBsqGraph();
+    const auto originalGraph = buildBsqGraph();
 
-    auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
+    const auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
 
     // Verify graph-level data types

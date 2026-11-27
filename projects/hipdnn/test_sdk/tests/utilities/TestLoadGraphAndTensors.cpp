@@ -129,7 +129,7 @@ void touchFile(const std::filesystem::path& p)
 
 TEST(TestScanBundleJsonFiles, NonexistentDirectory)
 {
-    auto results = scanBundleJsonFiles("/tmp/nonexistent_dir_xyzzy_42");
+    const auto results = scanBundleJsonFiles("/tmp/nonexistent_dir_xyzzy_42");
     EXPECT_TRUE(results.empty());
 }
 
@@ -137,7 +137,7 @@ TEST(TestScanBundleJsonFiles, EmptyDirectory)
 {
     const ScopedDirectory dir = claimScratchDirectory("scan_empty");
 
-    auto results = scanBundleJsonFiles(dir.path());
+    const auto results = scanBundleJsonFiles(dir.path());
     EXPECT_TRUE(results.empty());
 }
 
@@ -151,7 +151,7 @@ TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
     touchFile(nested / "deep.json");
     touchFile(nested / "data.bin"); // non-json, excluded
 
-    auto results = scanBundleJsonFiles(dir.path());
+    const auto results = scanBundleJsonFiles(dir.path());
     ASSERT_EQ(results.size(), 2u);
 
     std::vector<std::string> filenames;
@@ -237,11 +237,11 @@ TEST(TestLoadGraphAndTensors, Valid)
         EXPECT_EQ(expectedAttributes[uid], tensorPtr->dims());
     }
 
-    auto deviceBuffers = res.deviceBuffers();
+    const auto deviceBuffers = res.deviceBuffers();
     EXPECT_EQ(deviceBuffers.size(), res.tensorMap.size());
-    for(auto db : deviceBuffers)
+    for(const auto db : deviceBuffers)
     {
-        auto& tensorPtr = res.tensorMap.at(db.uid);
+        const auto& tensorPtr = res.tensorMap.at(db.uid);
         EXPECT_EQ(tensorPtr->rawDeviceData(), db.ptr);
     }
 }
@@ -269,11 +269,11 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     std::unordered_map<int64_t, std::shared_ptr<ITensor>> savedTensorOutputs;
 
     // Save tensor data
-    for(auto id : res.outputTensorUids)
+    for(const auto id : res.outputTensorUids)
     {
         const auto& tensor = res.tensorMap.at(id);
         const size_t bytesInTensor = tensor->elementSpace() * tensor->elementSize();
-        auto& savedTensor = savedTensorOutputs[id]
+        const auto& savedTensor = savedTensorOutputs[id]
             = std::shared_ptr<ITensor>(new Tensor<float>(tensor->dims(), tensor->strides()));
         savedTensor->fillWithData(tensor->rawHostData(), bytesInTensor);
     }
@@ -282,7 +282,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 
     ASSERT_EQ(outputMap.size(), res.outputTensorUids.size());
 
-    for(auto id : res.outputTensorUids)
+    for(const auto id : res.outputTensorUids)
     {
         EXPECT_EQ(outputMap.count(id), 1);
         const TensorView<float> savedTensorView{*savedTensorOutputs[id]};
@@ -297,7 +297,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
             EXPECT_EQ(*savedIter, *extractedIter);
         }
 
-        for(auto value : TensorView<float>(*res.tensorMap[id]))
+        for(const auto value : TensorView<float>(*res.tensorMap[id]))
         {
             EXPECT_EQ(value, 0.0);
         }

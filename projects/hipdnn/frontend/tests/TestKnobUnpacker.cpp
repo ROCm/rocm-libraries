@@ -582,7 +582,7 @@ protected:
     /// Set up HIPDNN_ATTR_ENGINE_KNOB_INFO count+data queries on _fakeEngine to return descs.
     void expectKnobDescArrayQuery(const std::vector<hipdnnBackendDescriptor_t>& descs)
     {
-        auto count = static_cast<int64_t>(descs.size());
+        const auto count = static_cast<int64_t>(descs.size());
 
         EXPECT_CALL(*_mockBackend,
                     backendGetAttribute(_fakeEngine,
@@ -644,7 +644,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, EmptyArrayReturnsEmptyKnobs)
     expectKnobDescArrayQuery({});
 
     std::vector<Knob> knobs;
-    auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
+    const auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_TRUE(knobs.empty());
@@ -663,7 +663,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, AggregatesTwoKnobs)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::vector<Knob> knobs;
-    auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
+    const auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_EQ(knobs.size(), 2u);
@@ -684,7 +684,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, CountQueryFailurePropagates)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::vector<Knob> knobs;
-    auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
+    const auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
 
     EXPECT_TRUE(err.is_bad());
     EXPECT_TRUE(knobs.empty());
@@ -709,7 +709,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, MidArrayFailureSkipsInvalidKnob)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::vector<Knob> knobs;
-    auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
+    const auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_NE(err.get_message().find("Loaded 1 knobs, skipped 1 invalid/duplicate knobs"),
@@ -731,7 +731,7 @@ TEST_F(TestUnpackKnobsFromDescriptors, DuplicateKnobIdsAreSkipped)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::vector<Knob> knobs;
-    auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
+    const auto err = unpackKnobsFromDescriptors(_fakeEngine, knobs);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_NE(err.get_message().find("Loaded 1 knobs, skipped 1 invalid/duplicate knobs"),

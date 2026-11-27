@@ -173,7 +173,7 @@ protected:
         const GroupLengthSet& lengths = groupLengthSet(this->GetParam().groupLengths);
         // Tensors the qkStress branches fill: q, k, v, descale_q and descale_k.
         int stressFilled = 0;
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             const auto uid = tensorPair.first;
             const auto nameIt = uidToName.find(uid);
@@ -279,7 +279,7 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        const auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const GraphTestCase& testCase = this->GetParam();
 
         // Skip if device is not supported
@@ -293,7 +293,7 @@ protected:
         const auto& graph = built.graph;
         const auto& stats = built.stats;
 
-        auto validationResult = graph->validate();
+        const auto validationResult = graph->validate();
 
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
@@ -405,7 +405,7 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(const auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
         }
@@ -417,7 +417,7 @@ protected:
         // but load different .co files (MI300/ vs MI308/ subdirectory in getKernelCoPath()).
         // Integration tests exercise whichever device the CI agent has. Full coverage
         // requires CI agents with both MI300 and MI308 hardware.
-        auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        const auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const SdpaFwdTestCase& testCase = this->GetParam();
 
         if(testCase.arch != deviceString)
@@ -433,17 +433,17 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        auto q = std::make_shared<TensorAttributes>();
+        const auto q = std::make_shared<TensorAttributes>();
         q->set_dim(testCase.qDims)
             .set_stride(generateStrides(testCase.qDims))
             .set_data_type(dataType);
 
-        auto k = std::make_shared<TensorAttributes>();
+        const auto k = std::make_shared<TensorAttributes>();
         k->set_dim(testCase.kDims)
             .set_stride(generateStrides(testCase.kDims))
             .set_data_type(dataType);
 
-        auto v = std::make_shared<TensorAttributes>();
+        const auto v = std::make_shared<TensorAttributes>();
         v->set_dim(testCase.vDims)
             .set_stride(generateStrides(testCase.vDims))
             .set_data_type(dataType);
@@ -466,7 +466,7 @@ protected:
 
         o->set_output(true).set_data_type(dataType);
 
-        auto validationResult = graph.validate();
+        const auto validationResult = graph.validate();
         ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
         GraphVerificationContext context(graph);
@@ -1071,7 +1071,7 @@ INSTANTIATE_TEST_SUITE_P(Fp8CausalQTiles,
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)
 {
-    auto tolerance = 1e-2f;
+    const auto tolerance = 1e-2f;
     runGraphTest(tolerance);
 }
 

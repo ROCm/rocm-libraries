@@ -240,7 +240,7 @@ void createPlanOnlyGraph(hipdnnHandle_t handle,
     ASSERT_FALSE(compiledPlan.empty());
 
     restored = std::make_shared<Graph>();
-    auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
+    const auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
     ASSERT_EQ(restoreResult.code, ErrorCode::OK) << restoreResult.err_msg << "\n"
                                                  << describeCompiledPlanForFailure(compiledPlan);
     EXPECT_TRUE(restored->is_override_shape_enabled());
@@ -263,7 +263,7 @@ void createPlanOnlyGraphOverrideDisabled(hipdnnHandle_t handle,
     ASSERT_FALSE(compiledPlan.empty());
 
     restored = std::make_shared<Graph>();
-    auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
+    const auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
     ASSERT_EQ(restoreResult.code, ErrorCode::OK) << restoreResult.err_msg << "\n"
                                                  << describeCompiledPlanForFailure(compiledPlan);
     EXPECT_FALSE(restored->is_override_shape_enabled());
@@ -335,7 +335,7 @@ TEST_F(IntegrationOverrideExecutePluginDispatch,
     variantPack[2] = bundle.yTensor.memory().deviceData();
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(_handle, variantPack, nullptr);
+    const auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const auto* afterLoad = getOverrideImplementingRecord();
@@ -375,7 +375,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphLegacyPluginUsesLegacyEn
     variantPack[1] = bundle.xTensor.memory().deviceData();
     variantPack[2] = bundle.yTensor.memory().deviceData();
 
-    auto result = graph->execute(_handle, variantPack, nullptr);
+    const auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const auto* record = getRecordForOwnedPlugin(
@@ -405,7 +405,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, LegacyGraphImplementingPluginUsesLe
     variantPack[1] = bundle.xTensor.memory().deviceData();
     variantPack[2] = bundle.yTensor.memory().deviceData();
 
-    auto result = graph->execute(_handle, variantPack, nullptr);
+    const auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const auto* record = getRecordForOwnedPlugin(
@@ -426,7 +426,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphOmittingPluginNoApplic
     loadOmittingOnly();
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = createSimplePointwiseGraph(
+    const auto graph = createSimplePointwiseGraph(
         "FourCorner_OverrideGraphOmittingPlugin", dims, /*overrideShapeEnabled=*/true);
 
     // Validation succeeds (it is structural, not engine-aware).
@@ -489,7 +489,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner, OverrideGraphImplementingPluginUses
 
     int workspaceStorage = 0;
     void* workspace = &workspaceStorage;
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, workspace, overrideUids, overrideShapes, overrideStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -524,7 +524,7 @@ TEST_F(IntegrationOverrideExecuteFourCorner,
     const std::vector<std::vector<int64_t>> overrideShapes = {{1, 3, 2, 2}};
     const std::vector<std::vector<int64_t>> overrideStrides = {{12, 4, 2, 1}};
 
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -577,7 +577,7 @@ TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyMapDispatchesLegacyEntry)
     variantPack[2] = bundle.yTensor.memory().deviceData();
 
     const std::unordered_map<int64_t, OverrideEntry> emptyOverrides;
-    auto result = graph->execute(_handle, variantPack, nullptr, emptyOverrides);
+    const auto result = graph->execute(_handle, variantPack, nullptr, emptyOverrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // With `overrideShapeEnabled=true`, the omitting plugin is filtered out
@@ -613,7 +613,7 @@ TEST_F(IntegrationOverrideExecuteShortCircuit, EmptyParallelArraysDispatchesLega
     const std::vector<std::vector<int64_t>> emptyShapes;
     const std::vector<std::vector<int64_t>> emptyStrides;
 
-    auto result
+    const auto result
         = graph->execute(_handle, variantPack, nullptr, emptyUids, emptyShapes, emptyStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -657,7 +657,7 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
         const std::vector<int64_t> uids = {1, 2};
         const std::vector<std::vector<int64_t>> shapes = {shape, shape};
         const std::vector<std::vector<int64_t>> strides = {stride, stride};
-        auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
+        const auto result = graph->execute(_handle, variantPack, nullptr, uids, shapes, strides);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
     const auto* recordAfterArray = getRecordForOwnedPlugin(
@@ -676,7 +676,7 @@ TEST_F(IntegrationOverrideExecuteEquivalence, MapAndParallelArrayProduceSameDisp
         std::unordered_map<int64_t, OverrideEntry> overrides;
         overrides[1] = OverrideEntry{shape, stride};
         overrides[2] = OverrideEntry{shape, stride};
-        auto result = graph->execute(_handle, variantPack, nullptr, overrides);
+        const auto result = graph->execute(_handle, variantPack, nullptr, overrides);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
     const auto* recordAfterMap = getRecordForOwnedPlugin(
@@ -722,7 +722,7 @@ TEST_F(IntegrationOverrideExecuteEquivalence, SinglePlanExecutesMultipleOverride
         const auto& payload = payloads[i];
         resetOverrideImplementingRecord();
 
-        auto result = graph->execute(
+        const auto result = graph->execute(
             _handle, variantPack, nullptr, payload.uids, payload.shapes, payload.strides);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -762,7 +762,7 @@ TEST_F(IntegrationOverrideExecutePlanGuard, ArrayFormRejectedBeforeBuildPlan)
     // Build but DO NOT compile (no validate / build_operation_graph /
     // create_execution_plans / check_support / build_plans). The override
     // overload must reject before touching the (absent) plan descriptor.
-    auto graph = createSimplePointwiseGraph(
+    const auto graph = createSimplePointwiseGraph(
         "PlanGuard_ArrayBeforeBuild", dims, /*overrideShapeEnabled=*/true);
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -774,7 +774,7 @@ TEST_F(IntegrationOverrideExecutePlanGuard, ArrayFormRejectedBeforeBuildPlan)
     const std::vector<std::vector<int64_t>> overrideStrides
         = {{int64_t{3} * 4 * 4, int64_t{4} * 4, 4, 1}, {int64_t{3} * 4 * 4, int64_t{4} * 4, 4, 1}};
 
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
@@ -830,7 +830,7 @@ TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanNormalExecuteUses
     variantPack[2] = bundle.yTensor.memory().deviceData();
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(_handle, variantPack, nullptr);
+    const auto result = graph->execute(_handle, variantPack, nullptr);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const auto* record = getOverrideImplementingRecord();
@@ -860,7 +860,7 @@ TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanOverrideExecuteFo
     const std::vector<std::vector<int64_t>> overrideStrides = {stride, stride};
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -896,7 +896,7 @@ TEST_F(IntegrationOverrideExecutePlanOnly,
     const std::vector<std::vector<int64_t>> overrideStrides = {stride, stride};
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
@@ -950,7 +950,7 @@ TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanForwardsDifferent
     const std::vector<std::vector<int64_t>> overrideStrides = {{12, 4, 2, 1}, {12, 4, 1}};
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -981,7 +981,7 @@ TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanUnknownGraphUidRe
     const std::vector<std::vector<int64_t>> overrideStrides = {{1, 1, 1, 1}};
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(
+    const auto result = graph->execute(
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -1008,12 +1008,12 @@ TEST_P(IntegrationOverrideExecutePlanOnlyReject, RestoredCompiledPlanRejectsInva
     const auto& testCase = GetParam();
 
     resetOverrideImplementingRecord();
-    auto result = graph->execute(_handle,
-                                 variantPack,
-                                 nullptr,
-                                 testCase.overrideUids,
-                                 testCase.overrideShapes,
-                                 testCase.overrideStrides);
+    const auto result = graph->execute(_handle,
+                                       variantPack,
+                                       nullptr,
+                                       testCase.overrideUids,
+                                       testCase.overrideShapes,
+                                       testCase.overrideStrides);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
 
     const auto* record = getOverrideImplementingRecord();

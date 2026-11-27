@@ -354,8 +354,8 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, DoutputTokenRowCountMismatchThrows)
 
 TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, RankTwoTensorsThrow)
 {
-    auto doutput = createTensor<float>({4, 1});
-    auto token = createTensor<float>({4, 1});
+    const auto doutput = createTensor<float>({4, 1});
+    const auto token = createTensor<float>({4, 1});
     auto offsets = createTensor<int32_t>({1, 1, 1});
     setValues(offsets, {0});
     auto dweight = createTensor<float>({1, 1, 1});
@@ -369,8 +369,8 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, RankTwoTensorsThrow)
 // the ragged doutput itself.
 TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, RaggedDoutputThrows)
 {
-    auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1},
-                                                          std::vector<int64_t>{1, 1, 1, 1});
+    const auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1},
+                                                                std::vector<int64_t>{1, 1, 1, 1});
     setValues(*raggedOffset, {0.0F, 2.0F});
     RaggedTensor<float> doutput({1, 2, 1}, {2, 1, 1}, 1, raggedOffset);
     auto token = createTensor<float>({1, 2, 1});
@@ -392,8 +392,8 @@ TEST(TestCpuFpReferenceMoeGroupedMatmulBwd, RaggedDweightThrows)
     auto token = createTensor<float>({1, 1, 1});
     auto offsets = createTensor<int32_t>({1, 1, 1});
     setValues(offsets, {0});
-    auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1},
-                                                          std::vector<int64_t>{1, 1, 1, 1});
+    const auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1},
+                                                                std::vector<int64_t>{1, 1, 1, 1});
     setValues(*raggedOffset, {0.0F, 1.0F});
     RaggedTensor<float> dweight({1, 1, 1}, {1, 1, 1}, 1, raggedOffset);
 

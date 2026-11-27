@@ -24,6 +24,6 @@ int main(int argc, char** argv)
     // NOTE: Logs are not routed to the backend as this is an SDK unit test harness.
     hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
 
-    auto result = RUN_ALL_TESTS();
+    const auto result = RUN_ALL_TESTS();
     return result;
 }
