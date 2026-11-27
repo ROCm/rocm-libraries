@@ -93,6 +93,21 @@ namespace
         return a;
     }
 
+    // Two nonzeros in the first row, so that row reaches the wavefront that
+    // holds the last nonzero. One nonzero in that row leaves the scan blocked.
+    Pattern scattered_gap_first_row_reaches_tail()
+    {
+        Pattern a;
+        a.n = 2;
+        a.add(std::vector<int64_t>{0, 1});
+        for(int i = 0; i < 20000; ++i)
+        {
+            a.add(0);
+        }
+        a.add(std::vector<int64_t>{0});
+        return a;
+    }
+
     // The same gap in a square lower-triangular matrix, so it can be symmetric.
     Pattern scattered_gap_lower()
     {
@@ -671,6 +686,11 @@ TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_internal_empty_gap)
     expect_nnzsplit(run_f32(handle, scattered_gap(), Options{}));
 }
 
+TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_when_first_row_reaches_the_tail)
+{
+    expect_nnzsplit(run_f32(handle, scattered_gap_first_row_reaches_tail(), Options{}));
+}
+
 TEST_F(CsrmvDefaultDispatch, explicit_adaptive_is_not_replaced)
 {
     expect_adaptive(run_f32(handle, scattered_gap(), with_alg(rocsparse_spmv_alg_csr_adaptive)),
@@ -783,6 +803,20 @@ TEST_F(CsrmvDefaultDispatch, transposed_csc_default_uses_the_csr_rule)
     o.beta    = 1.0;
     expect_nnzsplit(run_f32(handle, scattered_gap(), o));
     expect_nnzsplit(run_f32(handle, alternating(), o));
+}
+
+// A transposed CSC product runs the non-transposed CSR kernel on the stored
+// columns, so the first column reaches the wavefront that holds the last
+// nonzero.
+TEST_F(CsrmvDefaultDispatch, transposed_csc_default_when_first_column_reaches_the_tail)
+{
+    Options t = with_op(rocsparse_operation_transpose);
+    t.as_csc  = true;
+    expect_nnzsplit(run_f32(handle, scattered_gap_first_row_reaches_tail(), t));
+    Options h = with_op(rocsparse_operation_conjugate_transpose);
+    h.as_csc  = true;
+    expect_nnzsplit(run<int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex>(
+        handle, scattered_gap_first_row_reaches_tail(), h));
 }
 
 TEST_F(CsrmvDefaultDispatch, conjugate_transposed_csc_default_uses_the_csr_rule)

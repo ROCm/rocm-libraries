@@ -46,15 +46,6 @@
 
 using namespace extra_ut;
 
-namespace rocsparse_ut
-{
-    template <>
-    inline rocsparse_datatype dt_of<int32_t>()
-    {
-        return rocsparse_datatype_i32_r;
-    }
-}
-
 namespace
 {
     using stage_t = rocsparse_spgeam_stage;

@@ -132,6 +132,16 @@ namespace rocsparse_ut
     {
         return rocsparse_datatype_bf16_r;
     }
+    template <>
+    inline rocsparse_datatype dt_of<int8_t>()
+    {
+        return rocsparse_datatype_i8_r;
+    }
+    template <>
+    inline rocsparse_datatype dt_of<int32_t>()
+    {
+        return rocsparse_datatype_i32_r;
+    }
 
     template <typename I>
     rocsparse_indextype it_of();

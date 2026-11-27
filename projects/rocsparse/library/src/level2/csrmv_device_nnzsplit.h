@@ -254,6 +254,19 @@ namespace rocsparse
 
             left = (row_indices[local_nnz_index] != 0) ? row_indices[local_nnz_index] : left_init;
         }
+
+        // The search returns row 0 for a position past the last nonzero. That
+        // row can follow other rows, which the segmented reduction does not
+        // allow, so mark those positions with -1. csrmv_nnzsplit_device treats
+        // -1 as "no row": the scan predicate checks current_row == -1, and each
+        // atomic add is skipped unless the row is >= 0.
+        for(uint32_t local_nnz_index = 0; local_nnz_index < NNZ_PER_THREAD; ++local_nnz_index)
+        {
+            if(w_offset + static_cast<I>(lid + local_nnz_index * WFSIZE) >= nnz)
+            {
+                row_indices[local_nnz_index] = static_cast<J>(-1);
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -559,10 +572,12 @@ namespace rocsparse
         csrmv_nnzsplit_get_row_indices<BLOCKSIZE, NNZ_PER_THREAD>(
             row_indices, bStart, bStart + bNum, offset, nnz, csr_row_ptr_begin, idx_base);
 
+        // A position past the last nonzero has no row, so it must not read x.
         for(uint32_t i = 0; i < NNZ_PER_THREAD; ++i)
         {
-            T mul     = alpha * rocsparse::ldg(x + row_indices[i]);
-            values[i] = values[i] * mul;
+            const I toffset = offset + static_cast<I>(i);
+            values[i] = (toffset < nnz) ? values[i] * (alpha * rocsparse::ldg(x + row_indices[i]))
+                                        : static_cast<T>(0);
         }
 
         // load offset column ids
