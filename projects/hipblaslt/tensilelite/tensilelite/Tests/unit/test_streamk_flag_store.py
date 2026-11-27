@@ -315,18 +315,21 @@ amdhsa.kernels:
     ],
 )
 def test_flag_store_has_one_active_writer_and_restores_exec(tmp_path, arch, isa, wave):
-    from gpu_test_helpers import run_on_gpu
+    from gpu_test_helpers import _assembler_target, run_on_gpu
 
+    # Build for the device the gate matched: gpu("gfx1250") also admits
+    # gfx1250-strict, which rejects gfx1250 code objects.
+    target = _assembler_target()
     writer = _FlagWriter(isa, wave)
     source = tmp_path / "flag.s"
     code = tmp_path / "flag.co"
-    source.write_text(_trace_kernel(writer, arch, wave))
+    source.write_text(_trace_kernel(writer, target, wave))
     command = [
         writer.compiler,
         "-x",
         "assembler",
         "--target=amdgcn-amd-amdhsa",
-        f"-mcpu={arch}",
+        f"-mcpu={target}",
         "-mcode-object-version=5",
     ]
     if writer.states.archCaps["HasWavefrontSize32Directive"]:
