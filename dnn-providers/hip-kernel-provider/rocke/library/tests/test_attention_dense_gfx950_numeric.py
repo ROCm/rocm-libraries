@@ -352,13 +352,18 @@ class TestDenseNumeric:
         path; the reference attends over the SAME dequantized K/V,
         so this isolates kernel error from quantization loss (the convention the
         live bench uses). Covered over the causal, sliding-window and non-causal
-        masks the grid variant serves for fp8."""
+        masks the grid variant serves for fp8.
+
+        Unit-variance inputs, as the cohort's: scaled-down Q and K flatten the
+        softmax toward the mean of V, whose peak falls under any useful bound on
+        the full-mask rows, and a kernel that ignores the scores or writes zeros
+        would pass there. The check asserts that a zero output fails it."""
         B, S = 1, 512
         scale = 1.0 / math.sqrt(d)
         rng = np.random.default_rng(0)
-        q = operand(rng, (B, S, hq, d), dtype, scale=0.3)
-        k = storage.round_to(rng.standard_normal((B, S, hkv, d)) * 0.3, dtype)
-        v = storage.round_to(rng.standard_normal((B, S, hkv, d)) * 0.3, dtype)
+        q = operand(rng, (B, S, hq, d), dtype)
+        k = storage.round_to(rng.standard_normal((B, S, hkv, d)), dtype)
+        v = storage.round_to(rng.standard_normal((B, S, hkv, d)), dtype)
         k_fp8, k_scale, k_deq = fp8_kv(k, dtype)
         v_fp8, v_scale, v_deq = fp8_kv(v, dtype)
 
@@ -389,13 +394,14 @@ class TestDenseNumeric:
         ref, _ = dense_reference(
             q, k_deq, v_deq, scale, causal=causal, window=sliding_window
         )
-        max_abs = max_abs_error(values(out), values(ref))
-        # Reference attends over the dequantized K/V, so the residual is kernel
-        # compute error at the compute precision; keep a small fp8 margin over tol.
-        assert max_abs < 6e-2, (
-            f"fp8 {dtype} D{d} GQA{hq}/{hkv} causal={causal} "
-            f"swa={sliding_window}: max_abs={max_abs:.3e}"
-        )
+        # The reference attends over the dequantized K/V, so the residual is
+        # kernel compute error at the compute precision: the bf16 / fp16 bound.
+        tol = attention_tolerance(dtype)
+        label = f"fp8 {dtype} D{d} GQA{hq}/{hkv} causal={causal} swa={sliding_window}"
+        assert not within_tolerance(
+            np.zeros_like(ref), ref, tol
+        ), f"{label}: a zero output would pass"
+        assert_close(out, ref, tol, label)
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
