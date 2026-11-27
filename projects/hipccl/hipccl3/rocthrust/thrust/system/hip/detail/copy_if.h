@@ -178,6 +178,11 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
+  if (num_items == 0)
+  {
+    return output;
+  }
+
   thrust::detail::temporary_array<std::uint8_t, Derived> flags(policy, num_items);
 
   hip_rocprim::throw_on_error(
@@ -192,16 +197,27 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
       debug_sync),
     "copy_if failed on transform");
 
-  thrust::detail::temporary_array<std::uint32_t, Derived> pos(policy, num_items);
+  thrust::detail::temporary_array<size_type, Derived> pos(policy, num_items);
 
-  thrust::inclusive_scan(policy, flags.begin(), flags.end(), pos.begin());
+  // The scan accumulates in its input's value type, so widen the flags first: scanning the
+  // std::uint8_t flags directly wraps the positions after 255 selected elements.
+  auto wide_flags = thrust::make_transform_iterator(flags.begin(), [] __host__ __device__(std::uint8_t flag) {
+    return static_cast<size_type>(flag);
+  });
+  thrust::inclusive_scan(policy, wide_flags, wide_flags + num_items, pos.begin());
 
   constexpr static size_t items_per_thread  = 16;
   constexpr static size_t threads_per_block = 256;
-  const size_t block_size                   = std::ceil(static_cast<float>(num_items) / 16 / threads_per_block);
+  constexpr static size_t items_per_block   = items_per_thread * threads_per_block;
+  const size_t grid_size                    = (static_cast<size_t>(num_items) + items_per_block - 1) / items_per_block;
 
   copy_if_kernel<items_per_thread>
-    <<<block_size, threads_per_block>>>(first, flags.begin(), pos.begin(), num_items, output);
+    <<<grid_size, threads_per_block, 0, stream>>>(first, flags.begin(), pos.begin(), num_items, output);
+  hip_rocprim::throw_on_error(hipGetLastError(), "copy_if failed on scatter");
+  if (debug_sync)
+  {
+    hip_rocprim::throw_on_error(hipStreamSynchronize(stream), "copy_if failed to synchronize after scatter");
+  }
 
   return output + get_value(policy, &pos[num_items - 1]);
 }
