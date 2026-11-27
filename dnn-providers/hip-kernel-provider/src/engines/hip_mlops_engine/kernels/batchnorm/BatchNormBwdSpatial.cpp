@@ -161,7 +161,7 @@ struct BatchNormBwdSpatialImpl<0>
                                                ComputeType beta)
     {
 #if(HIP_PLUGIN_BN_USESAVED == 0)
-        auto variance = hip_kernel_provider::cast<MeanVarType>(0.0);
+        reduction::Welford<ComputeType> stats{};
 #endif
         auto mean = hip_kernel_provider::cast<ComputeType>(0.0);
         auto invVariance = hip_kernel_provider::cast<ComputeType>(0.0);
@@ -210,37 +210,49 @@ struct BatchNormBwdSpatialImpl<0>
     // == RECALC MEAN AND VARIANCE ===========
         if(lid < segment)
         {
-            for(unsigned int batch = 0; batch < batchLoopm; ++batch)
+            unsigned int batch = 0;
+            for(; batch + 3 < batchLoopm; batch += 4)
+            {
+                const unsigned int b0 = batch * segiSpatial + lidiSpatial;
+                const unsigned int b1 = (batch + 1) * segiSpatial + lidiSpatial;
+                const unsigned int b2 = (batch + 2) * segiSpatial + lidiSpatial;
+                const unsigned int b3 = (batch + 3) * segiSpatial + lidiSpatial;
+                batchValues[batch] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b0 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                batchValues[batch + 1] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b1 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                batchValues[batch + 2] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b2 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                batchValues[batch + 3] = hip_kernel_provider::cast<ComputeType>(
+                    x_in[b3 * hip_plugin_bn_config::batch_size + channelSpatialId]);
+                stats.add4(batchValues[batch],
+                           batchValues[batch + 1],
+                           batchValues[batch + 2],
+                           batchValues[batch + 3]);
+            }
+            for(; batch < batchLoopm; ++batch)
             {
                 batchId = batch * segiSpatial + lidiSpatial;
                 index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
                 batchValues[batch] = hip_kernel_provider::cast<ComputeType>(x_in[index]);
-                mean += batchValues[batch];
-                variance = fma(batchValues[batch], batchValues[batch], variance);
+                stats.add(batchValues[batch]);
             }
             batchId = snSpatial + lidiSpatial;
             index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
-            batchValues[batchLoopm] = index < hip_plugin_bn_config::tensor_size
-                                          ? hip_kernel_provider::cast<ComputeType>(x_in[index])
-                                          : 0;
-            mean += batchValues[batchLoopm];
-            variance = fma(batchValues[batchLoopm], batchValues[batchLoopm], variance);
+            if(index < hip_plugin_bn_config::tensor_size)
+            {
+                batchValues[batchLoopm] = hip_kernel_provider::cast<ComputeType>(x_in[index]);
+                stats.add(batchValues[batchLoopm]);
+            }
+            else
+            {
+                batchValues[batchLoopm] = 0;
+            }
         }
 
-        __syncthreads();
-
-        hip_kernel_provider::batchnorm::reduction::
-            reduce2<ComputeType, ComputeType, hip_plugin_bn_config::lds_size>(
-                mean,
-                variance,
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lid);
-
-        variance = fma(-mean, mean, variance);
-        if(variance < 0)
-        {
-            variance = 0;
-        }
+        reduction::reduce_welford(stats, lid);
+        mean = stats.mean;
+        const ComputeType variance = stats.m2 * hip_plugin_bn_config::i_channel_slice_size;
         invVariance = rsqrt(variance + epsilon);
 
 #endif // end -- Recalc mean and variance \
@@ -416,72 +428,53 @@ struct BatchNormBwdSpatialImpl<1>
 
 #if(HIP_PLUGIN_BN_USESAVED == 0)
         //==== CALC MEAN and VARIANCE ONCE AGAIN =======================
-        ComputeType variance = 0;
+        reduction::Welford<ComputeType> stats{};
         if constexpr(!hip_plugin_config::layout_channel_last
                      && hip_plugin_bn_config::spatial_size >= 4096)
         {
-            ComputeReadVecType read4;
             for(unsigned int k = lid * read_size; k < less4; k += grprd)
             {
-                read4 = hip_kernel_provider::cast<ComputeReadVecType>(
-                    *reinterpret_cast<const InputReadVecType*>(x_in + getTensorIndex(k)));
-                hip_kernel_provider::batchnorm::_accumulate(mean, read4);
-                hip_kernel_provider::batchnorm::_accumulate_mad(variance, read4, read4);
+                stats.add(hip_kernel_provider::cast<ComputeReadVecType>(
+                    *reinterpret_cast<const InputReadVecType*>(x_in + getTensorIndex(k))));
             }
 
             if constexpr(rem4 > 0)
             {
-                if(lid < rem4)
+                if(lid * read_size < rem4)
                 {
-                    unsigned int index = getTensorIndex((lid * read_size) + less4);
-                    if(index + read_size - 1 < hip_plugin_bn_config::tensor_size)
-                    {
-                        read4 = hip_kernel_provider::cast<ComputeReadVecType>(
-                            *reinterpret_cast<const InputReadVecType*>(x_in + index));
-                        hip_kernel_provider::batchnorm::_accumulate(mean, read4);
-                        hip_kernel_provider::batchnorm::_accumulate_mad(variance, read4, read4);
-                    }
+                    const unsigned int index = getTensorIndex(lid * read_size + less4);
+                    stats.add(hip_kernel_provider::cast<ComputeReadVecType>(
+                        *reinterpret_cast<const InputReadVecType*>(x_in + index)));
                 }
             }
         }
         else
         {
-            for(unsigned int k = lid; k < less; k += hip_plugin_bn_config::launch_dim.grp0)
+            constexpr unsigned int step = hip_plugin_bn_config::launch_dim.grp0;
+            constexpr unsigned int less4s = (less / (4 * step)) * (4 * step);
+            for(unsigned int k = lid; k < less4s; k += 4 * step)
             {
-                auto in = hip_kernel_provider::cast<ComputeType>(x_in[getTensorIndex(k)]);
-                mean += in;
-                variance = fma(in, in, variance);
+                stats.add4(x_in[getTensorIndex(k)],
+                           x_in[getTensorIndex(k + step)],
+                           x_in[getTensorIndex(k + 2 * step)],
+                           x_in[getTensorIndex(k + 3 * step)]);
+            }
+            for(unsigned int k = less4s + lid; k < less; k += step)
+            {
+                stats.add(x_in[getTensorIndex(k)]);
             }
             if constexpr(rem > 0)
             {
                 if(lid < rem)
                 {
-                    unsigned int index = getTensorIndex(lid + less);
-                    auto in = (index < hip_plugin_bn_config::tensor_size)
-                                  ? hip_kernel_provider::cast<ComputeType>(x_in[index])
-                                  : hip_kernel_provider::cast<ComputeType>(0.0);
-                    mean += in;
-                    variance = fma(in, in, variance);
+                    stats.add(x_in[getTensorIndex(lid + less)]);
                 }
             }
         }
 
-        __syncthreads();
-
-        // REDUCE MEAN AND VARIANCE -----------------------
-        hip_kernel_provider::batchnorm::reduction::
-            reduce2<ComputeType, ComputeType, hip_plugin_bn_config::lds_size>(
-                mean,
-                variance,
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lid);
-
-        // REDUCTION COMPLETE ---------------------------
-        variance = fma(-mean, mean, variance);
-        if(variance < 0)
-        {
-            variance = 0;
-        }
+        reduction::reduce_welford(stats, lid);
+        mean = stats.mean;
+        const ComputeType variance = stats.m2 * hip_plugin_bn_config::i_channel_slice_size;
         invVariance = rsqrt(variance + epsilon);
 
 #else // HIP_PLUGIN_BN_USESAVED == 1
@@ -634,7 +627,7 @@ struct BatchNormBwdSpatialImpl<3>
     {
         ComputeType mean = 0;
 #if(HIP_PLUGIN_BN_USESAVED == 0)
-        ComputeType variance = 0;
+        reduction::Welford<ComputeType> stats{};
 #endif
         ComputeType invVariance = 0;
         ComputeType pscale = 0;
@@ -663,43 +656,42 @@ struct BatchNormBwdSpatialImpl<3>
 
         if(lid < hip_plugin_bn_config::spatial_size)
         {
-            for(int batch = 0; batch < hip_plugin_bn_config::batches; batch++)
+            unsigned int batch = 0;
+            for(; batch + 3 < hip_plugin_bn_config::batches; batch += 4)
             {
-                index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const unsigned int base
+                    = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto v0 = hip_kernel_provider::cast<ComputeType>(x_in[base]);
+                const auto v1 = hip_kernel_provider::cast<ComputeType>(
+                    x_in[base + hip_plugin_bn_config::batch_size]);
+                const auto v2 = hip_kernel_provider::cast<ComputeType>(
+                    x_in[base + 2 * hip_plugin_bn_config::batch_size]);
+                const auto v3 = hip_kernel_provider::cast<ComputeType>(
+                    x_in[base + 3 * hip_plugin_bn_config::batch_size]);
+                stats.add4(v0, v1, v2, v3);
                 if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
                 {
-                    batchValues[batch] = hip_kernel_provider::cast<ComputeType>(x_in[index]);
-                    mean += batchValues[batch];
-                    variance = fma(batchValues[batch], batchValues[batch], variance);
+                    batchValues[batch] = v0;
+                    batchValues[batch + 1] = v1;
+                    batchValues[batch + 2] = v2;
+                    batchValues[batch + 3] = v3;
                 }
-                else
+            }
+            for(; batch < hip_plugin_bn_config::batches; ++batch)
+            {
+                index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto value = hip_kernel_provider::cast<ComputeType>(x_in[index]);
+                stats.add(value);
+                if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
                 {
-                    auto in = hip_kernel_provider::cast<ComputeType>(x_in[index]);
-                    mean += in;
-                    variance = fma(in, in, variance);
+                    batchValues[batch] = value;
                 }
             }
         }
-        else
-        {
-            mean = hip_kernel_provider::cast<ComputeType>(0.0);
-            variance = hip_kernel_provider::cast<ComputeType>(0.0);
-        }
 
-        // REDUCE MEAN AND VARIANCE -----------------------
-        hip_kernel_provider::batchnorm::reduction::
-            reduce2<ComputeType, ComputeType, hip_plugin_bn_config::lds_size>(
-                mean,
-                variance,
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lid);
-
-        // REDUCTION COMPLETE -----------------------
-        variance = fma(-mean, mean, variance);
-        if(variance < 0)
-        {
-            variance = 0;
-        }
+        reduction::reduce_welford(stats, lid);
+        mean = stats.mean;
+        const ComputeType variance = stats.m2 * hip_plugin_bn_config::i_channel_slice_size;
         invVariance = rsqrt(variance + epsilon);
 
 // RECALC of MEAN and VARIANCE complete
@@ -844,128 +836,7 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim_fi
         InputType* __restrict meanvarbuff, // meanvarbuff uses the dx buffer as a workspace, so InputType instead of MeanVarType
         double epsilon)
 {
-    unsigned int xlid = threadIdx.x;
-    unsigned int ylid = threadIdx.y;
-    unsigned int zlid = threadIdx.z;
-    unsigned int xgrp_id = blockIdx.x;
-    unsigned int xgid = blockDim.x * blockIdx.x + threadIdx.x;
-    unsigned int xgrp_size = blockDim.x;
-    unsigned int ygrp_size = blockDim.y;
-    unsigned int zgrp_size = blockDim.z;
-
-    unsigned int xstride
-        = hip_plugin_config::layout_channel_last ? 1 : hip_plugin_bn_config::spatial_size;
-    unsigned int ystride
-        = hip_plugin_config::layout_channel_last ? hip_plugin_bn_config::channels : 1;
-
-    if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::channels)
-    {
-        return;
-    }
-
-    auto variance = hip_kernel_provider::cast<ComputeChannelVecType>(0.0);
-    auto mean = hip_kernel_provider::cast<ComputeChannelVecType>(0.0);
-    ComputeChannelVecType invVariance;
-
-    for(unsigned int zoffset = zlid; zoffset < hip_plugin_bn_config::launch_groups.grp2;
-        zoffset += zgrp_size)
-    {
-        for(unsigned int yoffset = ylid; yoffset < hip_plugin_bn_config::launch_groups.grp1;
-            yoffset += ygrp_size)
-        {
-            mean += hip_kernel_provider::batchnorm::loadFromStash<ComputeChannelVecType>(
-                reinterpret_cast<const InputChannelVecType*>(meanvarbuff),
-                0,
-                hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                    * hip_plugin_bn_config::batch_elements,
-                hip_plugin_bn_config::launch_dim.grp1 * yoffset * hip_plugin_bn_config::vec_size_y,
-                ystride / hip_plugin_bn_config::vec_size_x,
-                xgrp_size,
-                xgrp_id,
-                xlid,
-                xstride);
-            variance += hip_kernel_provider::batchnorm::loadFromStash<ComputeChannelVecType>(
-                reinterpret_cast<const InputChannelVecType*>(meanvarbuff),
-                1,
-                hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                    * hip_plugin_bn_config::batch_elements,
-                hip_plugin_bn_config::launch_dim.grp1 * yoffset * hip_plugin_bn_config::vec_size_y,
-                ystride / hip_plugin_bn_config::vec_size_x,
-                xgrp_size,
-                xgrp_id,
-                xlid,
-                xstride);
-        }
-    }
-
-    if constexpr(!hip_plugin_bn_config::use_amdgcn || hip_plugin_bn_config::launch_dim.grp0 > 1
-                 || (hip_plugin_bn_config::lds_gcn_size == 1)
-                 || hip_plugin_bn_config::vec_size_x > 1)
-    {
-        __shared__ ComputeChannelVecType
-            lcl_data[2 * hip_plugin_bn_config::launch_dim_final.bounds];
-        hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(
-            mean,
-            variance,
-            hip_kernel_provider::cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-            lcl_data,
-            xgrp_size,
-            xlid,
-            ylid + zlid * ygrp_size,
-            ygrp_size * zgrp_size);
-    }
-    else
-    {
-        hip_kernel_provider::batchnorm::reduction::reduce2<
-            ComputeChannelVecType,
-            ComputeType,
-            hip_plugin_bn_config::launch_dim_final.bounds>(
-            mean,
-            variance,
-            hip_kernel_provider::cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-            ylid + zlid * ygrp_size);
-    }
-
-    variance = hip_kernel_provider::fma(-mean, mean, variance);
-    variance
-        = hip_kernel_provider::max(variance, hip_kernel_provider::cast<ComputeChannelVecType>(0.0));
-    invVariance = hip_kernel_provider::rsqrt(
-        variance + hip_kernel_provider::cast<ComputeChannelVecType>(epsilon));
-
-    for(unsigned int zoffset = zlid; zoffset < hip_plugin_bn_config::launch_groups.grp2;
-        zoffset += zgrp_size)
-    {
-        for(unsigned int yoffset = ylid; yoffset < hip_plugin_bn_config::launch_groups.grp1;
-            yoffset += ygrp_size)
-        {
-            // Replicate mean and variance for all y groups because stash == dx_out and
-            // BatchNormBwdSpatialDX will read them and rewrite the buffer entirely.
-            hip_kernel_provider::batchnorm::storeToStash(
-                mean,
-                reinterpret_cast<InputChannelVecType*>(meanvarbuff),
-                0,
-                hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                    * hip_plugin_bn_config::batch_elements,
-                hip_plugin_bn_config::launch_dim.grp1 * yoffset * hip_plugin_bn_config::vec_size_y,
-                ystride / hip_plugin_bn_config::vec_size_x,
-                xgrp_size,
-                xgrp_id,
-                xlid,
-                xstride);
-            hip_kernel_provider::batchnorm::storeToStash(
-                invVariance,
-                reinterpret_cast<InputChannelVecType*>(meanvarbuff),
-                1,
-                hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                    * hip_plugin_bn_config::batch_elements,
-                hip_plugin_bn_config::launch_dim.grp1 * yoffset * hip_plugin_bn_config::vec_size_y,
-                ystride / hip_plugin_bn_config::vec_size_x,
-                xgrp_size,
-                xgrp_id,
-                xlid,
-                xstride);
-        }
-    }
+    hip_kernel_provider::batchnorm::finalize_stashed_stats(meanvarbuff, epsilon);
 }
 
 extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bounds)
@@ -973,99 +844,8 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bo
         const InputType* __restrict in,
         InputType* __restrict meanvarbuff) // meanvarbuff uses the dx buffer as a workspace, so InputType instead of MeanVarType
 {
-    unsigned int xlid = threadIdx.x;
-    unsigned int ylid = threadIdx.y;
-    unsigned int zlid = threadIdx.z;
-    unsigned int xgrp_id = blockIdx.x;
-    unsigned int ygrp_id = blockIdx.y;
-    unsigned int zgrp_id = blockIdx.z;
-    unsigned int xgid = blockDim.x * blockIdx.x + threadIdx.x;
-    unsigned int ygid = blockDim.y * blockIdx.y + threadIdx.y;
-    unsigned int zgid = blockDim.z * blockIdx.z + threadIdx.z;
-    unsigned int xgrp_size = blockDim.x;
-    unsigned int ygrp_size = blockDim.y;
-    unsigned int zgrp_size = blockDim.z;
-
-    unsigned int xstride
-        = hip_plugin_config::layout_channel_last ? 1 : hip_plugin_bn_config::spatial_size;
-    unsigned int ystride
-        = hip_plugin_config::layout_channel_last ? hip_plugin_bn_config::channels : 1;
-
-    if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::channels)
-    {
-        return;
-    }
-
-    auto variance = hip_kernel_provider::cast<ComputeChannelVecType>(0.0);
-    auto mean = hip_kernel_provider::cast<ComputeChannelVecType>(0.0);
-
-    if(ygid * hip_plugin_bn_config::vec_size_y < hip_plugin_bn_config::spatial_size
-       && zgid < hip_plugin_bn_config::batches)
-    {
-        unsigned int index_base
-            = zgid * hip_plugin_bn_config::batch_elements * hip_plugin_bn_config::batch_size
-              + ygid * ystride * hip_plugin_bn_config::vec_size_y
-              + xgid * xstride * hip_plugin_bn_config::vec_size_x;
-        for(unsigned int batch = 0; batch < hip_plugin_bn_config::batch_elements; batch++)
-        {
-            unsigned int index = index_base + batch * hip_plugin_bn_config::batch_size;
-            auto value = hip_kernel_provider::cast<ComputeVecType>(
-                *reinterpret_cast<const InputVecType*>(in + index));
-
-            hip_kernel_provider::batchnorm::_accumulate(mean, value);
-            hip_kernel_provider::batchnorm::_accumulate_mad(variance, value, value);
-        }
-    }
-
-    if constexpr(!hip_plugin_bn_config::use_amdgcn || hip_plugin_bn_config::launch_dim.grp0 > 1
-                 || (hip_plugin_bn_config::lds_gcn_size == 1)
-                 || hip_plugin_bn_config::vec_size_x > 1)
-    {
-        __shared__ ComputeChannelVecType lcl_data[2 * hip_plugin_bn_config::lds_size];
-        hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(
-            mean,
-            variance,
-            hip_kernel_provider::cast<ComputeChannelVecType>(1.0),
-            lcl_data,
-            xgrp_size,
-            xlid,
-            ylid + zlid * ygrp_size,
-            ygrp_size * zgrp_size);
-    }
-    else
-    {
-        hip_kernel_provider::batchnorm::reduction::reduce2<ComputeChannelVecType,
-                                                           ComputeType,
-                                                           hip_plugin_bn_config::lds_size>(
-            mean, variance, hip_kernel_provider::cast<ComputeType>(1.0), ylid + zlid * ygrp_size);
-    }
-
-    if(ylid == 0 && zlid == 0)
-    {
-        hip_kernel_provider::batchnorm::storeToStash(
-            mean,
-            reinterpret_cast<InputChannelVecType*>(meanvarbuff),
-            0,
-            zgrp_size * zgrp_id * hip_plugin_bn_config::batch_elements,
-            ygrp_size * ygrp_id * hip_plugin_bn_config::vec_size_y,
-            ystride / hip_plugin_bn_config::vec_size_x,
-            xgrp_size,
-            xgrp_id,
-            xlid,
-            xstride);
-        hip_kernel_provider::batchnorm::storeToStash(
-            variance,
-            reinterpret_cast<InputChannelVecType*>(meanvarbuff),
-            1,
-            zgrp_size * zgrp_id * hip_plugin_bn_config::batch_elements,
-            ygrp_size * ygrp_id * hip_plugin_bn_config::vec_size_y,
-            ystride / hip_plugin_bn_config::vec_size_x,
-            xgrp_size,
-            xgrp_id,
-            xlid,
-            xstride);
-    }
-} // end spatial mean kernel
+    hip_kernel_provider::batchnorm::stash_partial_stats(in, meanvarbuff);
+}
 
 extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bounds)
     BatchNormBwdSpatialDScaleDBias(

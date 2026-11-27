@@ -42,14 +42,14 @@ RMS normalization accepts unary `IDENTITY` in either direction; backward
 passthrough does not require ReLU's second input. Existing tensor/layout and
 graph connectivity requirements still apply.
 
-Batch normalization and RMS normalization share the same activation-mode
-validation for direction, passthrough and supported ReLU parameters.
+Leaky ReLU is **unsupported** in these normalization fusions. For batch
+normalization, a `relu_lower_clip_slope` of `0.0` or `-0.0` has the same effect
+as an unset slope, including when clip bounds are set. RMS normalization
+requires the slope to be unset.
 
-Leaky ReLU is **unsupported** in these normalization fusions: any supplied
-`relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
-Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
-do not implement its forward function or gradient, so accepting the slope would
-silently produce incorrect results.
+Batch normalization training and backward statistics recomputation use
+Welford reductions for variance to avoid cancellation when inputs have a large
+mean and a small spread.
 
 Layer normalization supports only a single normalization node, not fused
 pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions

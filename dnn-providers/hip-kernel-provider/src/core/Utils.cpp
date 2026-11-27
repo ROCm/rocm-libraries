@@ -40,12 +40,10 @@ ActivationParams
                                     0.0,
                                     0.0};
         }
-        if(attrs.relu_lower_clip_slope())
+        if(const float slope = attrs.relu_lower_clip_slope().value_or(0.0f); slope != 0.0f)
         {
-            return ActivationParams{ActivationMode::LEAKY_RELU,
-                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
-                                    0.0,
-                                    0.0};
+            return ActivationParams{
+                ActivationMode::LEAKY_RELU, static_cast<double>(slope), 0.0, 0.0};
         }
         if(attrs.relu_lower_clip().has_value() && attrs.relu_lower_clip().value() != 0.f)
         {

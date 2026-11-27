@@ -205,8 +205,12 @@ INSTANTIATE_TEST_SUITE_P(
                       ActivationCase{PointwiseMode::RELU_BWD, flatbuffers::nullopt, false, true},
                       ActivationCase{PointwiseMode::RELU_FWD, 0.1f, false, false},
                       ActivationCase{PointwiseMode::RELU_BWD, 0.1f, false, false},
-                      ActivationCase{PointwiseMode::RELU_FWD, 0.0f, false, false},
-                      ActivationCase{PointwiseMode::RELU_BWD, 0.0f, false, false}));
+                      ActivationCase{PointwiseMode::RELU_FWD, -0.1f, false, false},
+                      ActivationCase{PointwiseMode::RELU_BWD, -0.1f, false, false},
+                      ActivationCase{PointwiseMode::RELU_FWD, +0.0f, true, false},
+                      ActivationCase{PointwiseMode::RELU_BWD, +0.0f, false, true},
+                      ActivationCase{PointwiseMode::RELU_FWD, -0.0f, true, false},
+                      ActivationCase{PointwiseMode::RELU_BWD, -0.0f, false, true}));
 
 TEST(TestBatchnormValidator, MismatchShapes)
 {

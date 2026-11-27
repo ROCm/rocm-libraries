@@ -729,13 +729,15 @@ void BatchnormValidator::checkBwdActivationTensorConfigSupported(
 void BatchnormValidator::checkFwdActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr)
 {
-    checkNormalizationActivationModeSupported(activAttr, false, "Batchnorm");
+    checkNormalizationActivationModeSupported(
+        activAttr, false, "Batchnorm", /*allowExplicitZeroSlope=*/true);
 }
 
 void BatchnormValidator::checkBwdActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr)
 {
-    checkNormalizationActivationModeSupported(activAttr, true, "Batchnorm");
+    checkNormalizationActivationModeSupported(
+        activAttr, true, "Batchnorm", /*allowExplicitZeroSlope=*/true);
 }
 
 } // namespace hip_kernel_provider

@@ -4,7 +4,8 @@
 #pragma once
 
 #include "Configuration.hpp"
-#include "StaticUnroll.hpp"
+#include "HipKernelMath.hpp"
+#include "VectorTypes.hpp"
 
 namespace hip_kernel_provider::batchnorm
 {
@@ -39,31 +40,6 @@ template <int N>
 constexpr static int log2_ceil_v = log2_ceil<N>::value;
 
 } // namespace detail
-
-template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
-__forceinline__ __device__ void lds_reduce2(FloatAccumC& x,
-                                            FloatAccumC& y,
-                                            FloatAccum scale,
-                                            FloatAccumC (&lcl_data_x)[SizeLclData],
-                                            FloatAccumC (&lcl_data_y)[SizeLclData],
-                                            unsigned int lid)
-{
-    lcl_data_x[lid] = x;
-    lcl_data_y[lid] = y;
-    __syncthreads();
-    for(unsigned int red = (1 << detail::log2_ceil_v<SizeLclData>) >> 1; red > 0; red >>= 1)
-    {
-        if(lid < red && lid + red < SizeLclData)
-        {
-            lcl_data_x[lid] += lcl_data_x[lid + red];
-            lcl_data_y[lid] += lcl_data_y[lid + red];
-        }
-        __syncthreads();
-    }
-
-    x = lcl_data_x[0] * scale;
-    y = lcl_data_y[0] * scale;
-}
 
 // NOTE: unlike MIOpen's fixed version (MIOpen PR #4411), the reduction loop below does not bound
 // `red` against `size`, only against `SizeLclData`. This is safe only because every current
@@ -107,64 +83,6 @@ __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
     }
     x = static_cast<FloatAccumC>(lcl_data[xlid * 2 + 0] * scale);
     y = static_cast<FloatAccumC>(lcl_data[xlid * 2 + 1] * scale);
-}
-
-template <typename FloatAccum>
-__forceinline__ __device__ void dpp_interleaved_reduction(FloatAccum& temp_sum1,
-                                                          FloatAccum& temp_sum2)
-{
-    __asm__ volatile("s_nop 4\n"
-                     "v_add_f32 %0 %0 %0 row_shr:1 bound_ctrl:0\n"
-                     "v_add_f32 %1 %1 %1 row_shr:1 bound_ctrl:0\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_shr:2 bound_ctrl:0\n"
-                     "v_add_f32 %1 %1 %1 row_shr:2 bound_ctrl:0\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_shr:4 bank_mask:0xe\n"
-                     "v_add_f32 %1 %1 %1 row_shr:4 bank_mask:0xe\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_shr:8 bank_mask:0xc\n"
-                     "v_add_f32 %1 %1 %1 row_shr:8 bank_mask:0xc\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_bcast:15 row_mask:0xa\n"
-                     "v_add_f32 %1 %1 %1 row_bcast:15 row_mask:0xa\n"
-                     "s_nop 0\n"
-                     "v_add_f32 %0 %0 %0 row_bcast:31 row_mask:0xc\n"
-                     "v_add_f32 %1 %1 %1 row_bcast:31 row_mask:0xc\n"
-                     "s_nop 0"
-                     : "=v"(temp_sum1), "=v"(temp_sum2)
-                     : "0"(temp_sum1), "1"(temp_sum2));
-}
-
-template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
-__forceinline__ __device__ void gcn_reduce2(FloatAccumC& x,
-                                            FloatAccumC& y,
-                                            FloatAccum scale,
-                                            FloatAccumC (&lcl_data_x)[SizeLclData],
-                                            FloatAccumC (&lcl_data_y)[SizeLclData],
-                                            unsigned int lid)
-{
-    const unsigned int ldsidx = lid >> 6;
-    dpp_interleaved_reduction(x, y);
-    // Last thread
-    if((lid % 64) == 63)
-    {
-        lcl_data_x[ldsidx] = x;
-        lcl_data_y[ldsidx] = y;
-    }
-
-    __syncthreads();
-
-    x = y = 0;
-
-    // This could be changed to clang loop unroll(full), because the size is small
-    static_unroll_count<unsigned int, 0, SizeLclData, 1, 2>{[&](unsigned int i) {
-        x += lcl_data_x[i];
-        y += lcl_data_y[i];
-    }};
-
-    x *= scale;
-    y *= scale;
 }
 
 template <typename FloatAccumC, typename FloatAccum, unsigned int BlockSize>
@@ -272,117 +190,165 @@ __forceinline__ __device__ void
     }
 }
 
-// Portable (shuffle-only) counterpart of the per-wave step inside reduce2_welford. MIOpen also
-// has a GFX9 DPP-asm variant of this step (restricted to GFX9 by MIOpen PR #12889), which is not
-// ported here: this provider always builds with HIP_PLUGIN_USE_AMDGCN=0, so the DPP path would be
-// dead code.
-template <typename FloatAccum>
-__forceinline__ __device__ void shfl_interleaved_reduction_welford(FloatAccum& temp_mean,
-                                                                   FloatAccum& temp_var,
-                                                                   FloatAccum& temp_count)
+// Each accumulator holds a mean and the sum of squared deviations from that mean (M2).
+// Counts are scalar even when the samples are vectors of adjacent channels.
+template <typename T>
+struct Welford
 {
+    T mean;
+    T m2;
+    float count;
+
+    __forceinline__ __device__ void merge(T otherMean, T otherM2, float otherCount)
+    {
+        if(otherCount == 0.0f)
+        {
+            return;
+        }
+        if(count == 0.0f)
+        {
+            mean = otherMean;
+            m2 = otherM2;
+            count = otherCount;
+            return;
+        }
+        const T delta = otherMean - mean;
+        const float totalCount = count + otherCount;
+        const float weight = otherCount * __builtin_amdgcn_rcpf(totalCount);
+        mean = fma(delta, cast<T>(weight), mean);
+        m2 = fma(delta, delta * cast<T>(count * weight), m2 + otherM2);
+        count = totalCount;
+    }
+
+    // Branchless merge for a non-empty power-of-two chunk (otherCount in {1, 2, 4}).
+    // When count == 0 (mean == 0, m2 == 0), otherCount * rcpf(otherCount) == 1.0f exactly.
+    __forceinline__ __device__ void mergeNonEmpty(T otherMean, T otherM2, float otherCount)
+    {
+        const T delta = otherMean - mean;
+        const float totalCount = count + otherCount;
+        const float weight = otherCount * __builtin_amdgcn_rcpf(totalCount);
+        mean = fma(delta, cast<T>(weight), mean);
+        m2 = fma(delta, delta * cast<T>(count * weight), m2 + otherM2);
+        count = totalCount;
+    }
+
+    template <typename Sample>
+    __forceinline__ __device__ void add(Sample sample)
+    {
+        if constexpr(mapped_vector_info<T>::size == mapped_vector_info<Sample>::size)
+        {
+            const T x = cast<T>(sample);
+            count += 1.0f;
+            const T delta = x - mean;
+            mean = fma(delta, cast<T>(__builtin_amdgcn_rcpf(count)), mean);
+            m2 = fma(delta, x - mean, m2);
+        }
+        else
+        {
+            static_assert(mapped_vector_info<T>::size == 1
+                          && (mapped_vector_info<Sample>::size == 2
+                              || mapped_vector_info<Sample>::size == 4));
+            // Merge spatial samples from one vector load before updating the running statistics.
+            if constexpr(mapped_vector_info<Sample>::size == 4)
+            {
+                add4(sample.x, sample.y, sample.z, sample.w);
+            }
+            else
+            {
+                const T dx = sample.y - sample.x;
+                const T meanXY = fma(dx, cast<T>(0.5f), sample.x);
+                const T m2XY = dx * (dx * cast<T>(0.5f));
+                mergeNonEmpty(meanXY, m2XY, 2.0f);
+            }
+        }
+    }
+
+    template <typename Sample>
+    __forceinline__ __device__ void add4(Sample s0, Sample s1, Sample s2, Sample s3)
+    {
+        if constexpr(mapped_vector_info<T>::size == mapped_vector_info<Sample>::size)
+        {
+            const T x0 = cast<T>(s0);
+            const T x1 = cast<T>(s1);
+            const T x2 = cast<T>(s2);
+            const T x3 = cast<T>(s3);
+            const T d01 = x1 - x0;
+            const T m01 = fma(d01, cast<T>(0.5f), x0);
+            const T m2_01 = d01 * (d01 * cast<T>(0.5f));
+            const T d23 = x3 - x2;
+            const T m23 = fma(d23, cast<T>(0.5f), x2);
+            const T delta = m23 - m01;
+            const T chunkMean = fma(delta, cast<T>(0.5f), m01);
+            const T chunkM2 = fma(delta, delta, fma(d23, d23 * cast<T>(0.5f), m2_01));
+            mergeNonEmpty(chunkMean, chunkM2, 4.0f);
+        }
+        else
+        {
+            add(s0);
+            add(s1);
+            add(s2);
+            add(s3);
+        }
+    }
+};
+
+// Single-channel, single-workgroup variants: only one partial per wave goes to LDS.
+template <typename T, unsigned int WaveCount = config::lds_gcn_size>
+__forceinline__ __device__ void reduce_welford(Welford<T>& stats, unsigned int lid)
+{
+    __shared__ Welford<T> waves[WaveCount];
+
 #pragma unroll
-    for(unsigned int offset = warpSize >> 1; offset >= 1; offset >>= 1)
+    for(unsigned int offset = warpSize >> 1; offset > 0; offset >>= 1)
     {
-        FloatAccum otherMean = __shfl_down_sync(detail::FULL_MASK, temp_mean, offset);
-        FloatAccum delta = otherMean - temp_mean;
-        FloatAccum n_a = temp_count;
-        FloatAccum n_b = __shfl_down_sync(detail::FULL_MASK, temp_count, offset);
-        FloatAccum n_new = n_a + n_b;
-        FloatAccum n_rcp = n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new) : 0.0f;
-        temp_mean = (temp_mean * n_a + otherMean * n_b) * n_rcp;
-        temp_var = temp_var + __shfl_down_sync(detail::FULL_MASK, temp_var, offset)
-                   + (delta * delta * (n_a * n_b)) * n_rcp;
-        temp_count = n_new;
-    }
-}
-
-// Welford's online algorithm for mean/variance, reducing per-thread (mean, variance, count)
-// triples across a workgroup. Replaces the naive E[x^2] - mean^2 accumulation (reduce2/gcn_reduce2)
-// for cases where catastrophic cancellation is a problem, e.g. inputs with a large mean
-// (MIOpen PR #5013). Unlike reduce2/gcn_reduce2, this only has the portable shuffle-based wave
-// reduction: see the comment on shfl_interleaved_reduction_welford above for why.
-template <typename FloatAccum, unsigned int SizeLclData>
-__forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
-                                                FloatAccum& variance,
-                                                FloatAccum& count,
-                                                FloatAccum scale,
-                                                FloatAccum (&lcl_data_mean)[SizeLclData],
-                                                FloatAccum (&lcl_data_variance)[SizeLclData],
-                                                FloatAccum (&lcl_data_count)[SizeLclData],
-                                                unsigned int lid)
-{
-    const unsigned int ldsidx
-        = lid >> (warpSize == 32 ? 5 : 6); // warpSize is either 32 or 64 on AMD hardware.
-
-    shfl_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
-
-    // The shuffle reduction produces the wave's result in lane 0.
-    if((lid % static_cast<unsigned int>(warpSize)) == 0)
-    {
-        lcl_data_mean[ldsidx] = mean;
-        lcl_data_variance[ldsidx] = variance;
-        lcl_data_count[ldsidx] = count;
+        const auto otherMean = __shfl_down_sync(detail::FULL_MASK, stats.mean, offset);
+        const auto otherM2 = __shfl_down_sync(detail::FULL_MASK, stats.m2, offset);
+        const auto otherCount = __shfl_down_sync(detail::FULL_MASK, stats.count, offset);
+        stats.merge(otherMean, otherM2, otherCount);
     }
 
+    const auto waveSize = static_cast<unsigned int>(warpSize);
+    if(lid % waveSize == 0)
+    {
+        waves[lid / waveSize] = stats;
+    }
     __syncthreads();
 
-    // The reduction here merges partitions together in a tree-like fashion. Otherwise,
-    // precision is lost in both the mean and variance.
-    for(unsigned int red = (1 << detail::log2_ceil_v<SizeLclData>) >> 1; red > 0; red >>= 1)
+    for(unsigned int red = WaveCount >> 1; red > 0; red >>= 1)
     {
-        if(lid < red && lid + red < SizeLclData)
+        if(lid < red)
         {
-            FloatAccum delta = lcl_data_mean[lid + red] - lcl_data_mean[lid];
-            FloatAccum n_a = lcl_data_count[lid];
-            FloatAccum n_b = lcl_data_count[lid + red];
-            FloatAccum n_new = n_a + n_b;
-            FloatAccum n_new_rcp = n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new) : 0.f;
-            lcl_data_mean[lid]
-                = (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) * n_new_rcp;
-            lcl_data_variance[lid] = lcl_data_variance[lid] + lcl_data_variance[lid + red]
-                                     + delta * delta * (n_a * n_b * n_new_rcp);
-            lcl_data_count[lid] = n_new;
+            const auto other = waves[lid + red];
+            stats = waves[lid];
+            stats.merge(other.mean, other.m2, other.count);
+            waves[lid] = stats;
         }
         __syncthreads();
     }
-
-    mean = lcl_data_mean[0];
-    variance = lcl_data_variance[0] * scale;
+    stats = waves[0];
 }
 
-// Manually unrolled Welford update for 4 elements read as a vector, plus a merge step into the
-// running (mean, variance, curN). Ported from MIOpen PR #5013.
-template <typename FpPrecType>
+// Variant 2 maps x lanes to independent channels. The launch dimensions are powers of two.
+template <unsigned int XSize, unsigned int BlockSize, typename T>
 __forceinline__ __device__ void
-    welford_step_unroll4(typename mapped_vector_type<FpPrecType, 4>::type& read4Prec,
-                         FpPrecType& mean,
-                         FpPrecType& variance,
-                         FpPrecType& curN)
+    reduce_welford_2d(Welford<T>& stats, unsigned int xlid, unsigned int yzlid)
 {
-    FpPrecType mean4 = read4Prec.x;
-    FpPrecType oldMean4 = mean4;
-    FpPrecType variance4 = hip_kernel_provider::cast<FpPrecType>(0.);
+    __shared__ Welford<T> partials[BlockSize];
+    const unsigned int lid = xlid + yzlid * XSize;
+    partials[lid] = stats;
+    __syncthreads();
 
-    mean4 += read4Prec.y;
-    mean4 *= 0.5f;
-    variance4 = fma(read4Prec.y - mean4, read4Prec.y - oldMean4, variance4);
-
-    oldMean4 = mean4;
-    mean4 = mean4 * 2.0f + read4Prec.z;
-    mean4 *= 0.333333333f;
-    variance4 = fma(read4Prec.z - mean4, read4Prec.z - oldMean4, variance4);
-
-    oldMean4 = mean4;
-    mean4 = mean4 * 3.0f + read4Prec.w;
-    mean4 *= 0.25f;
-    variance4 = fma(read4Prec.w - mean4, read4Prec.w - oldMean4, variance4);
-
-    // Merge the local mean and variance with the currently computed ones.
-    FpPrecType delta = mean4 - mean;
-    mean = (mean4 * 4.0f + mean * curN) / (curN + 4.f);
-    variance += variance4 + delta * delta * 4.f * curN / (curN + 4.f);
-    curN += 4.f;
+    for(unsigned int red = (BlockSize / XSize) >> 1; red > 0; red >>= 1)
+    {
+        if(yzlid < red)
+        {
+            const auto other = partials[lid + red * XSize];
+            stats.merge(other.mean, other.m2, other.count);
+            partials[lid] = stats;
+        }
+        __syncthreads();
+    }
+    stats = partials[xlid];
 }
 
 } // namespace reduction

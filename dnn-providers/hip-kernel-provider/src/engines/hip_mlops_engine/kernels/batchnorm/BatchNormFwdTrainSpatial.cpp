@@ -76,12 +76,8 @@ struct BatchNormFwdTrainSpatialImpl<0>
                                                ComputeType _alpha,
                                                ComputeType _beta)
     {
-        // SPATIAL
-        mean = hip_kernel_provider::cast<MeanVarType>(0.0);
-        variance = hip_kernel_provider::cast<MeanVarType>(0.0);
-        invVariance = hip_kernel_provider::cast<MeanVarType>(0.0);
+        reduction::Welford<ComputeType> stats{};
         InputType batchvalues[batchLoop];
-        ComputeType temp;
 
         __shared__ ComputeType lcl_scale;
         __shared__ ComputeType lcl_bias;
@@ -104,63 +100,43 @@ struct BatchNormFwdTrainSpatialImpl<0>
 
         if(lid < segment)
         {
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
-            // Using this unrollHint and the static_unroll_count struct replicates this.
-            constexpr int unrollHint
-                = hip_plugin_config::input_type_strategy == type_strategy::fpmix ? 2 : 1;
-            static_unroll_count<unsigned int, 0, batchLoopm, 1, unrollHint>{
-                [&](unsigned int batch) {
-                    batchId = batch * segiSpatial + lidiSpatial;
-                    index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
-                    batchvalues[batch] = *(in + index);
-                    temp = hip_kernel_provider::cast<ComputeType>(in[index]);
-                    mean += temp;
-                    variance = fma(temp, temp, variance);
-                }};
+            unsigned int batch = 0;
+            for(; batch + 3 < batchLoopm; batch += 4)
+            {
+                const unsigned int b0 = batch * segiSpatial + lidiSpatial;
+                const unsigned int b1 = (batch + 1) * segiSpatial + lidiSpatial;
+                const unsigned int b2 = (batch + 2) * segiSpatial + lidiSpatial;
+                const unsigned int b3 = (batch + 3) * segiSpatial + lidiSpatial;
+                batchvalues[batch] = in[b0 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                batchvalues[batch + 1]
+                    = in[b1 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                batchvalues[batch + 2]
+                    = in[b2 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                batchvalues[batch + 3]
+                    = in[b3 * hip_plugin_bn_config::batch_size + channelSpatialId];
+                stats.add4(batchvalues[batch],
+                           batchvalues[batch + 1],
+                           batchvalues[batch + 2],
+                           batchvalues[batch + 3]);
+            }
+            for(; batch < batchLoopm; ++batch)
+            {
+                batchId = batch * segiSpatial + lidiSpatial;
+                index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
+                batchvalues[batch] = *(in + index);
+                stats.add(batchvalues[batch]);
+            }
             batchId = snSpatial + lidiSpatial;
             index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
-            batchvalues[batchLoopm] = (index < hip_plugin_bn_config::tensor_size)
-                                          ? in[index]
-                                          : hip_kernel_provider::cast<InputType>(0.0);
-            temp = hip_kernel_provider::cast<ComputeType>(batchvalues[batchLoopm]);
-            mean += temp;
-            variance = fma(temp, temp, variance);
+            if(index < hip_plugin_bn_config::tensor_size)
+            {
+                batchvalues[batchLoopm] = in[index];
+                stats.add(batchvalues[batchLoopm]);
+            }
         }
-        __syncthreads();
-
-        constexpr auto lcl_data_size = hip_plugin_bn_config::use_amdgcn
-                                           ? hip_plugin_bn_config::lds_gcn_size
-                                           : hip_plugin_bn_config::lds_size;
-        __shared__ ComputeType lcl_data_x[lcl_data_size];
-        __shared__ ComputeType lcl_data_y[lcl_data_size];
-        if constexpr(hip_plugin_bn_config::use_amdgcn)
-        {
-            hip_kernel_provider::batchnorm::reduction::gcn_reduce2(
-                static_cast<ComputeType&>(mean),
-                static_cast<ComputeType&>(variance),
-                hip_kernel_provider::cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            hip_kernel_provider::batchnorm::reduction::lds_reduce2(
-                static_cast<ComputeType&>(mean),
-                static_cast<ComputeType&>(variance),
-                hip_kernel_provider::cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-
-        // Reduction complete
-
-        variance = fma(-mean, mean, variance);
-        if(variance < 0)
-        {
-            variance = 0;
-        }
+        reduction::reduce_welford(stats, lid);
+        mean = stats.mean;
+        variance = stats.m2 * hip_plugin_bn_config::i_channel_slice_size;
         invVariance = hip_kernel_provider::rsqrt(variance
                                                  + hip_kernel_provider::cast<ComputeType>(epsilon));
 
@@ -194,12 +170,12 @@ struct BatchNormFwdTrainSpatialImpl<0>
                 }};
 
             // Tail of loop
-            inhat = (hip_kernel_provider::cast<ComputeType>(batchvalues[batchLoopm]) - mean)
-                    * invVariance;
             batchId = snSpatial + lidiSpatial;
             index = batchId * hip_plugin_bn_config::batch_size + channelSpatialId;
             if(index < hip_plugin_bn_config::tensor_size)
             {
+                inhat = (hip_kernel_provider::cast<ComputeType>(batchvalues[batchLoopm]) - mean)
+                        * invVariance;
                 auto value = hip_kernel_provider::cast<ComputeType>(fma(pvscale, inhat, pvbias));
                 value = hip_kernel_provider::applyActivation<ComputeType,
                                                              hip_plugin_config::neuron_op>(
@@ -258,9 +234,7 @@ struct BatchNormFwdTrainSpatialImpl<1>
     {
         ComputeType pvscale, pvbias;
 
-        mean = hip_kernel_provider::cast<MeanVarType>(0.0);
-        variance = hip_kernel_provider::cast<MeanVarType>(0.0);
-        invVariance = hip_kernel_provider::cast<MeanVarType>(0.0);
+        reduction::Welford<ComputeType> stats{};
 
         __shared__ ComputeType lcl_scale;
         __shared__ ComputeType lcl_bias;
@@ -278,10 +252,6 @@ struct BatchNormFwdTrainSpatialImpl<1>
 
         unsigned int batchIdx = 0;
         unsigned int lidx = 0;
-        // Running sample count for Welford's online variance algorithm (MIOpen PR #5013), used
-        // instead of the naive E[x^2] - mean^2 accumulation to avoid catastrophic cancellation
-        // for inputs with a large mean.
-        ComputeType curN = hip_kernel_provider::cast<ComputeType>(0.0);
 
         if(lid == 0)
         {
@@ -300,7 +270,6 @@ struct BatchNormFwdTrainSpatialImpl<1>
         {
             using InputVecType4 = typename mapped_vector_type<InputType, 4>::type;
             using ComputeVecType4 = typename mapped_vector_type<ComputeType, 4>::type;
-            InputVecType4 read4;
 
             static_unroll_count<unsigned int, 0, less4, grpread, 2>{[&](unsigned int k) {
                 if((k + (lid << 2)) < less4)
@@ -308,57 +277,53 @@ struct BatchNormFwdTrainSpatialImpl<1>
                     batchIdx = (k + (lid << 2)) / hip_plugin_bn_config::spatial_size;
                     lidx = (k + (lid << 2)) - (batchIdx * hip_plugin_bn_config::spatial_size);
                     index = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId + lidx;
-                    read4 = *reinterpret_cast<const InputVecType4*>(in + index);
-                    auto read4Compute = hip_kernel_provider::cast<ComputeVecType4>(read4);
-                    hip_kernel_provider::batchnorm::reduction::welford_step_unroll4(
-                        read4Compute, mean, variance, curN);
+                    stats.add(hip_kernel_provider::cast<ComputeVecType4>(
+                        *reinterpret_cast<const InputVecType4*>(in + index)));
                 }
             }};
 
             if constexpr(rem4 > 0u)
             {
-                const unsigned int remkey = (lid << 2) + less4;
-                batchIdx = remkey / hip_plugin_bn_config::spatial_size;
-                lidx = remkey - (batchIdx * hip_plugin_bn_config::spatial_size);
-                index = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId + lidx;
-
-                // index is unsigned int, so if the result would normally end up negative,
-                // the value wraps around and the check fails. Improves on the
-                // previous way of handling which was: if(index < (hip_plugin_bn_config::tensor_size - 3))
-                if(index + 3 < (hip_plugin_bn_config::tensor_size))
+                if((lid << 2) < rem4)
                 {
-                    read4 = *reinterpret_cast<const InputVecType4*>(in + index);
-                    auto read4Compute = hip_kernel_provider::cast<ComputeVecType4>(read4);
-                    hip_kernel_provider::batchnorm::reduction::welford_step_unroll4(
-                        read4Compute, mean, variance, curN);
+                    const unsigned int remkey = (lid << 2) + less4;
+                    batchIdx = remkey / hip_plugin_bn_config::spatial_size;
+                    lidx = remkey - (batchIdx * hip_plugin_bn_config::spatial_size);
+                    index = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId + lidx;
+                    stats.add(hip_kernel_provider::cast<ComputeVecType4>(
+                        *reinterpret_cast<const InputVecType4*>(in + index)));
                 }
             }
         }
         else
         {
-            static_unroll_count<unsigned int, 0, less, hip_plugin_bn_config::launch_dim.grp0, 4>{
-                [&](unsigned int k) {
-                    if(k + lid < less)
-                    {
-                        batchIdx = (k + lid) / hip_plugin_bn_config::spatial_size;
-                        lidx = (k + lid) - (batchIdx * hip_plugin_bn_config::spatial_size);
-                        if constexpr(hip_plugin_config::layout_channel_last)
-                        {
-                            index = batchIdx * hip_plugin_bn_config::batch_size
-                                    + lidx * hip_plugin_bn_config::channels + grpid;
-                        }
-                        else
-                        {
-                            index = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId
-                                    + lidx;
-                        }
-                        const auto xin = hip_kernel_provider::cast<ComputeType>(in[index]);
-                        const ComputeType oldMean = mean;
-                        mean = (mean * curN + xin) / (curN + 1.f);
-                        curN += 1.f;
-                        variance = fma(xin - mean, xin - oldMean, variance);
-                    }
-                }};
+            constexpr unsigned int step = hip_plugin_bn_config::launch_dim.grp0;
+            constexpr unsigned int less4s = (less / (4 * step)) * (4 * step);
+            auto loadAt = [&](unsigned int pos) {
+                const unsigned int b = pos / hip_plugin_bn_config::spatial_size;
+                const unsigned int s = pos - b * hip_plugin_bn_config::spatial_size;
+                if constexpr(hip_plugin_config::layout_channel_last)
+                {
+                    return in[b * hip_plugin_bn_config::batch_size
+                              + s * hip_plugin_bn_config::channels + grpid];
+                }
+                else
+                {
+                    return in[b * hip_plugin_bn_config::batch_size + channelSpatialId + s];
+                }
+            };
+            for(unsigned int k = 0; k < less4s; k += 4 * step)
+            {
+                const unsigned int base = k + lid;
+                stats.add4(loadAt(base),
+                           loadAt(base + step),
+                           loadAt(base + 2 * step),
+                           loadAt(base + 3 * step));
+            }
+            for(unsigned int k = less4s; k < less; k += step)
+            {
+                stats.add(loadAt(k + lid));
+            }
 
             if constexpr(rem > 0u)
             {
@@ -381,42 +346,17 @@ struct BatchNormFwdTrainSpatialImpl<1>
                             = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId + lidx;
                     }
 
-                    const bool contributeToVariance = index < hip_plugin_bn_config::tensor_size;
-                    const ComputeType xin = contributeToVariance
-                                                ? hip_kernel_provider::cast<ComputeType>(in[index])
-                                                : hip_kernel_provider::cast<ComputeType>(0.0);
-                    const ComputeType oldMean = mean;
-                    mean = contributeToVariance ? ((mean * curN + xin) / (curN + 1.f)) : mean;
-                    curN += contributeToVariance ? 1.f : 0.f;
-                    variance += contributeToVariance ? ((xin - mean) * (xin - oldMean))
-                                                     : hip_kernel_provider::cast<ComputeType>(0.0);
+                    if(index < hip_plugin_bn_config::tensor_size)
+                    {
+                        stats.add(in[index]);
+                    }
                 }
             }
         }
 
-        __syncthreads();
-
-        constexpr auto lcl_data_size = hip_plugin_bn_config::lds_gcn_size;
-        __shared__ ComputeType lcl_data_mean[lcl_data_size];
-        __shared__ ComputeType lcl_data_variance[lcl_data_size];
-        __shared__ ComputeType lcl_data_count[lcl_data_size];
-
-        // Unconditional: reduce2_welford only has the portable shuffle-based reduction (see
-        // ReductionFunctions.hpp), since HIP_PLUGIN_USE_AMDGCN is always 0 for this provider.
-        hip_kernel_provider::batchnorm::reduction::reduce2_welford(
-            static_cast<ComputeType&>(mean),
-            static_cast<ComputeType&>(variance),
-            curN,
-            static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-            lcl_data_mean,
-            lcl_data_variance,
-            lcl_data_count,
-            lid);
-
-        // REDUCTION COMPLETE ---------------------------
-        // Welford's algorithm already yields the true variance directly (no E[x^2] - mean^2
-        // step needed); still clamp to zero since floating point can produce tiny negatives.
-        variance = fmax(variance, hip_kernel_provider::cast<MeanVarType>(0.0));
+        reduction::reduce_welford(stats, lid);
+        mean = stats.mean;
+        variance = stats.m2 * hip_plugin_bn_config::i_channel_slice_size;
 
         // unsafe: casting double to ComputeType
         invVariance = hip_kernel_provider::rsqrt(variance + static_cast<ComputeType>(epsilon));
@@ -546,10 +486,7 @@ struct BatchNormFwdTrainSpatialImpl<3>
                                                ComputeType alpha,
                                                ComputeType beta)
     {
-        // SPATIAL
-        mean = hip_kernel_provider::cast<MeanVarType>(0.0);
-        variance = hip_kernel_provider::cast<MeanVarType>(0.0);
-        invVariance = hip_kernel_provider::cast<MeanVarType>(0.0);
+        reduction::Welford<ComputeType> stats{};
         ComputeType inhat = hip_kernel_provider::cast<ComputeType>(0.0);
         ComputeType pvscale = hip_kernel_provider::cast<ComputeType>(0.0);
         ComputeType pvbias = hip_kernel_provider::cast<ComputeType>(0.0);
@@ -574,48 +511,38 @@ struct BatchNormFwdTrainSpatialImpl<3>
 
         if(lid < hip_plugin_bn_config::spatial_size)
         {
-            static_unroll_count<unsigned int, 0, hip_plugin_bn_config::batches, 1, 2>{
-                [&](unsigned int batch) {
-                    index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
-                    xin = hip_kernel_provider::cast<ComputeType>(in[index]);
-                    mean += xin;
-                    variance = fma(xin, xin, variance);
-
-                    if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
-                    {
-                        minibatch[batch] = in[index];
-                    }
-                }};
+            unsigned int batch = 0;
+            for(; batch + 3 < hip_plugin_bn_config::batches; batch += 4)
+            {
+                const unsigned int base
+                    = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto v0 = in[base];
+                const auto v1 = in[base + hip_plugin_bn_config::batch_size];
+                const auto v2 = in[base + 2 * hip_plugin_bn_config::batch_size];
+                const auto v3 = in[base + 3 * hip_plugin_bn_config::batch_size];
+                stats.add4(v0, v1, v2, v3);
+                if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
+                {
+                    minibatch[batch] = v0;
+                    minibatch[batch + 1] = v1;
+                    minibatch[batch + 2] = v2;
+                    minibatch[batch + 3] = v3;
+                }
+            }
+            for(; batch < hip_plugin_bn_config::batches; ++batch)
+            {
+                index = batch * hip_plugin_bn_config::batch_size + channelIdx + lid;
+                const auto value = in[index];
+                stats.add(value);
+                if constexpr(hip_plugin_bn_config::batches < hip_plugin_bn_config::max_batches)
+                {
+                    minibatch[batch] = value;
+                }
+            }
         }
-        __syncthreads();
-
-        constexpr auto lcl_data_size = hip_plugin_bn_config::use_amdgcn
-                                           ? hip_plugin_bn_config::lds_gcn_size
-                                           : hip_plugin_bn_config::lds_size;
-        __shared__ ComputeType lcl_data_x[lcl_data_size];
-        __shared__ ComputeType lcl_data_y[lcl_data_size];
-        if constexpr(hip_plugin_bn_config::use_amdgcn)
-        {
-            hip_kernel_provider::batchnorm::reduction::gcn_reduce2(
-                static_cast<ComputeType&>(mean),
-                static_cast<ComputeType&>(variance),
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            hip_kernel_provider::batchnorm::reduction::lds_reduce2(
-                static_cast<ComputeType&>(mean),
-                static_cast<ComputeType&>(variance),
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-
-        variance = fmax(fma(-mean, mean, variance), hip_kernel_provider::cast<MeanVarType>(0.0));
+        reduction::reduce_welford(stats, lid);
+        mean = stats.mean;
+        variance = stats.m2 * hip_plugin_bn_config::i_channel_slice_size;
         invVariance = hip_kernel_provider::rsqrt(variance + static_cast<ComputeType>(epsilon));
 
         if(lid < hip_plugin_bn_config::spatial_size)
@@ -650,9 +577,6 @@ struct BatchNormFwdTrainSpatialImpl<3>
 
 struct BatchNormFwdTrainSpatialImplVar2
 {
-    static constexpr unsigned int ngrps = hip_plugin_bn_config::launch_groups.grp1;
-    static constexpr unsigned int ngrps2 = hip_plugin_bn_config::launch_groups.grp2;
-
     static __forceinline__ __device__ void Norm(const InputType* __restrict__ in,
                                                 OutputType* __restrict__ out,
                                                 const ScaleBiasType* scale,
@@ -782,262 +706,6 @@ struct BatchNormFwdTrainSpatialImplVar2
             } // end for(batch)
         } // end if(inImgIndex)
     } // end spatial norm
-
-    static __forceinline__ __device__ void FinalMeanVariance(
-        OutputType* __restrict__ meanvarbuff, // meanvarbuff uses the y buffer as a workspace, so OutputType instead of MeanVarType
-        double epsilon,
-        const unsigned int& xgid,
-        const unsigned int& ygid,
-        const unsigned int& zgid,
-        unsigned int& commitID,
-        MeanVarChannelVecType& mean,
-        MeanVarChannelVecType& variance,
-        MeanVarChannelVecType& invVariance)
-    {
-        variance = hip_kernel_provider::cast<MeanVarChannelVecType>(0.0);
-        invVariance = hip_kernel_provider::cast<MeanVarChannelVecType>(0.0);
-        mean = hip_kernel_provider::cast<MeanVarChannelVecType>(0.0);
-
-        unsigned int xgrp_id = blockIdx.x;
-
-        // These values (?grp_size) cannot be substituted with hip_plugin_bn_config::launch_dim.grp? because
-        // the dimensions of the blocks for this kernel may be different from the other
-        // kernels that take part in the operation. Given that the launch dimensions are
-        // rounded up, blockDim would return a consistent value.
-
-        unsigned int xgrp_size = blockDim.x;
-        unsigned int ygrp_size = blockDim.y;
-        unsigned int zgrp_size = blockDim.z;
-
-        unsigned int xlid = threadIdx.x;
-        unsigned int ylid = threadIdx.y;
-        unsigned int zlid = threadIdx.z;
-
-        unsigned int xstride
-            = hip_plugin_config::layout_channel_last ? 1 : hip_plugin_bn_config::spatial_size;
-        unsigned int ystride
-            = hip_plugin_config::layout_channel_last ? hip_plugin_bn_config::channels : 1;
-
-        commitID = 0;
-
-        for(unsigned int zoffset = zlid; zoffset < hip_plugin_bn_config::launch_groups.grp2;
-            zoffset += zgrp_size)
-        {
-            for(unsigned int yoffset = ylid; yoffset < hip_plugin_bn_config::launch_groups.grp1;
-                yoffset += ygrp_size)
-            {
-                mean += hip_kernel_provider::batchnorm::loadFromStash<ComputeChannelVecType>(
-                    reinterpret_cast<OutputChannelVecType*>(meanvarbuff),
-                    0,
-                    hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                        * hip_plugin_bn_config::batch_elements,
-                    hip_plugin_bn_config::launch_dim.grp1 * yoffset
-                        * hip_plugin_bn_config::vec_size_y,
-                    ystride / hip_plugin_bn_config::vec_size_x,
-                    xgrp_size,
-                    xgrp_id,
-                    xlid,
-                    xstride);
-                variance += hip_kernel_provider::batchnorm::loadFromStash<ComputeChannelVecType>(
-                    reinterpret_cast<OutputChannelVecType*>(meanvarbuff),
-                    1,
-                    hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                        * hip_plugin_bn_config::batch_elements,
-                    hip_plugin_bn_config::launch_dim.grp1 * yoffset
-                        * hip_plugin_bn_config::vec_size_y,
-                    ystride / hip_plugin_bn_config::vec_size_x,
-                    xgrp_size,
-                    xgrp_id,
-                    xlid,
-                    xstride);
-            }
-        }
-
-        if constexpr(!hip_plugin_bn_config::use_amdgcn || hip_plugin_bn_config::launch_dim.grp0 > 1
-                     || (hip_plugin_bn_config::lds_gcn_size == 1)
-                     || hip_plugin_bn_config::vec_size_x > 1
-                     || (hip_plugin_bn_config::launch_dim_final.bounds < 64))
-        {
-            __shared__ ComputeChannelVecType
-                lcl_data[2 * hip_plugin_bn_config::launch_dim_final.bounds];
-
-            hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(
-                static_cast<ComputeChannelVecType&>(mean),
-                static_cast<ComputeChannelVecType&>(variance),
-                hip_plugin_bn_config::i_channel_slice_size,
-                lcl_data,
-                xgrp_size,
-                xlid,
-                ylid + zlid * ygrp_size,
-                ygrp_size * zgrp_size);
-        }
-        else
-        {
-            // C++17 idiomatic: ensure array size is never zero using constexpr ternary
-            constexpr auto lds_gcn_array_size
-                = hip_plugin_bn_config::launch_dim_final.bounds >= 64
-                      ? hip_plugin_bn_config::launch_dim_final.bounds / 64
-                      : 1;
-
-            commitID = 64;
-            __shared__ ComputeChannelVecType lcl_data_x[lds_gcn_array_size];
-            __shared__ ComputeChannelVecType lcl_data_y[lds_gcn_array_size];
-            hip_kernel_provider::batchnorm::reduction::gcn_reduce2(
-                static_cast<ComputeChannelVecType&>(mean),
-                static_cast<ComputeChannelVecType&>(variance),
-                hip_plugin_bn_config::i_channel_slice_size,
-                lcl_data_x,
-                lcl_data_y,
-                ylid + zlid * ygrp_size);
-        }
-
-        variance = hip_kernel_provider::fma(-mean, mean, variance);
-        variance
-            = hip_kernel_provider::max(hip_kernel_provider::cast<ComputeChannelVecType>(variance),
-                                       hip_kernel_provider::cast<ComputeChannelVecType>(0.0));
-        invVariance = hip_kernel_provider::rsqrt(
-            hip_kernel_provider::cast<ComputeChannelVecType>(variance)
-            + hip_kernel_provider::cast<ComputeChannelVecType>(epsilon));
-
-        for(unsigned int zoffset = zlid; zoffset < hip_plugin_bn_config::launch_groups.grp2;
-            zoffset += zgrp_size)
-        {
-            for(unsigned int yoffset = ylid; yoffset < hip_plugin_bn_config::launch_groups.grp1;
-                yoffset += ygrp_size)
-            {
-                storeToStash(mean,
-                             reinterpret_cast<OutputChannelVecType*>(meanvarbuff),
-                             0,
-                             hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                                 * hip_plugin_bn_config::batch_elements,
-                             hip_plugin_bn_config::launch_dim.grp1 * yoffset
-                                 * hip_plugin_bn_config::vec_size_y,
-                             ystride / hip_plugin_bn_config::vec_size_x,
-                             xgrp_size,
-                             xgrp_id,
-                             xlid,
-                             xstride);
-                storeToStash(invVariance,
-                             reinterpret_cast<OutputChannelVecType*>(meanvarbuff),
-                             1,
-                             hip_plugin_bn_config::launch_dim.grp2 * zoffset
-                                 * hip_plugin_bn_config::batch_elements,
-                             hip_plugin_bn_config::launch_dim.grp1 * yoffset
-                                 * hip_plugin_bn_config::vec_size_y,
-                             ystride / hip_plugin_bn_config::vec_size_x,
-                             xgrp_size,
-                             xgrp_id,
-                             xlid,
-                             xstride);
-            }
-        }
-    }
-
-    static __forceinline__ __device__ void MeanVariance(
-        const InputType* __restrict__ in,
-        OutputType* __restrict__ meanvarbuff) // meanvarbuff uses the y buffer as a workspace, so OutputType instead of MeanVarType
-    {
-        unsigned int xgrp_id = blockIdx.x;
-        unsigned int ygrp_id = blockIdx.y;
-        unsigned int zgrp_id = blockIdx.z;
-
-        unsigned int xgrp_size = hip_plugin_bn_config::launch_dim.grp0;
-        unsigned int ygrp_size = hip_plugin_bn_config::launch_dim.grp1;
-        unsigned int zgrp_size = hip_plugin_bn_config::launch_dim.grp2;
-
-        unsigned int xlid = threadIdx.x;
-        unsigned int ylid = threadIdx.y;
-        unsigned int zlid = threadIdx.z;
-
-        unsigned int xgid = xgrp_id * xgrp_size + xlid;
-        unsigned int ygid = ygrp_id * ygrp_size + ylid;
-        unsigned int zgid = zgrp_id * zgrp_size + zlid;
-
-        unsigned int xstride
-            = hip_plugin_config::layout_channel_last ? 1 : hip_plugin_bn_config::spatial_size;
-        unsigned int ystride
-            = hip_plugin_config::layout_channel_last ? hip_plugin_bn_config::channels : 1;
-
-        unsigned int index;
-
-        auto mean = hip_kernel_provider::cast<ComputeChannelVecType>(0.0);
-        auto variance = hip_kernel_provider::cast<ComputeChannelVecType>(0.0);
-
-        if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::channels)
-        {
-            return;
-        }
-
-        if(ygid * hip_plugin_bn_config::vec_size_y < hip_plugin_bn_config::spatial_size
-           && zgid < hip_plugin_bn_config::batches)
-        {
-            unsigned int index_base
-                = zgid * hip_plugin_bn_config::batch_elements * hip_plugin_bn_config::batch_size
-                  + ygid * ystride * hip_plugin_bn_config::vec_size_y
-                  + xgid * xstride * hip_plugin_bn_config::vec_size_x;
-            for(unsigned int batch = 0; batch < hip_plugin_bn_config::batch_elements; batch++)
-            {
-                index = index_base + batch * hip_plugin_bn_config::batch_size;
-                auto read4 = hip_kernel_provider::cast<ComputeVecType>(
-                    *reinterpret_cast<const InputVecType*>(in + index));
-
-                hip_kernel_provider::batchnorm::_accumulate(mean, read4);
-                hip_kernel_provider::batchnorm::_accumulate_mad(variance, read4, read4);
-            }
-        }
-
-        if constexpr(!hip_plugin_bn_config::use_amdgcn || hip_plugin_bn_config::launch_dim.grp0 > 1
-                     || (hip_plugin_bn_config::lds_gcn_size == 1)
-                     || hip_plugin_bn_config::vec_size_x > 1)
-        {
-            __shared__ ComputeChannelVecType lcl_data[2 * hip_plugin_bn_config::lds_size];
-            hip_kernel_provider::batchnorm::reduction::lds_reduce2_2d(
-                mean,
-                variance,
-                hip_kernel_provider::cast<ComputeType>(1.0),
-                lcl_data,
-                xgrp_size,
-                xlid,
-                ylid + zlid * ygrp_size,
-                ygrp_size * zgrp_size);
-        }
-        else
-        {
-            __shared__ ComputeChannelVecType lcl_data_x[hip_plugin_bn_config::lds_gcn_size];
-            __shared__ ComputeChannelVecType lcl_data_y[hip_plugin_bn_config::lds_gcn_size];
-            hip_kernel_provider::batchnorm::reduction::gcn_reduce2(
-                mean,
-                variance,
-                hip_kernel_provider::cast<ComputeType>(1.0),
-                lcl_data_x,
-                lcl_data_y,
-                ylid + zlid * ygrp_size);
-        }
-
-        if(ylid == 0 && zlid == 0)
-        {
-            storeToStash(mean,
-                         reinterpret_cast<OutputChannelVecType*>(meanvarbuff),
-                         0,
-                         zgrp_size * zgrp_id * hip_plugin_bn_config::batch_elements,
-                         ygrp_size * ygrp_id * hip_plugin_bn_config::vec_size_y,
-                         ystride / hip_plugin_bn_config::vec_size_x,
-                         xgrp_size,
-                         xgrp_id,
-                         xlid,
-                         xstride);
-            storeToStash(variance,
-                         reinterpret_cast<OutputChannelVecType*>(meanvarbuff),
-                         1,
-                         zgrp_size * zgrp_id * hip_plugin_bn_config::batch_elements,
-                         ygrp_size * ygrp_id * hip_plugin_bn_config::vec_size_y,
-                         ystride / hip_plugin_bn_config::vec_size_x,
-                         xgrp_size,
-                         xgrp_id,
-                         xlid,
-                         xstride);
-        }
-    }
 };
 
 #endif // HIP_PLUGIN_BN_VARIANT == 2
@@ -1146,22 +814,14 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim_fi
 #endif
     )
 {
-    MeanVarChannelVecType mean;
-    MeanVarChannelVecType variance;
-    MeanVarChannelVecType invVariance;
-
     unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
     unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
-    unsigned int commitID;
 
-    if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::channels)
-        return;
-
-    hip_kernel_provider::batchnorm::BatchNormFwdTrainSpatialImplVar2{}.FinalMeanVariance(
-        meanvarbuff, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);
-    // Save mean and calculate and save running mean
-    if(ygid == commitID && zgid == 0)
+    const auto [mean, variance, invVariance]
+        = hip_kernel_provider::batchnorm::finalize_stashed_stats(meanvarbuff, epsilon);
+    if(xgid * hip_plugin_bn_config::vec_size_x < hip_plugin_bn_config::channels && ygid == 0
+       && zgid == 0)
     {
 #if(HIP_PLUGIN_BN_RUNNING_RESULT == 1)
         using StashUpdater = hip_kernel_provider::batchnorm::StashUpdater<MeanVarChannelVecType>;
@@ -1195,8 +855,7 @@ extern "C" __global__ void __launch_bounds__(hip_plugin_bn_config::launch_dim.bo
         const InputType* __restrict__ in,
         OutputType* __restrict__ meanvarbuff) // meanvarbuff uses the y buffer as a workspace, so OutputType instead of MeanVarType
 {
-    hip_kernel_provider::batchnorm::BatchNormFwdTrainSpatialImplVar2{}.MeanVariance(in,
-                                                                                    meanvarbuff);
+    hip_kernel_provider::batchnorm::stash_partial_stats(in, meanvarbuff);
 }
 
 #endif
