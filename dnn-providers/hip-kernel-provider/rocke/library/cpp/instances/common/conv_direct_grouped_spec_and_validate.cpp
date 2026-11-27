@@ -2909,6 +2909,11 @@ static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spe
     {
         ROCKE_WGRAD_SC_WHY("small_c needs groups=1 (got %d)", p->groups);
     }
+    if(p->cpg < 1 || p->kpg < 1)
+    {
+        ROCKE_WGRAD_SC_WHY(
+            "small_c needs cpg >= 1 and kpg >= 1 (got cpg %d, kpg %d)", p->cpg, p->kpg);
+    }
     if(spec->small_k)
     {
         int pad_w = rocke_direct_conv_problem_pad_w(p);

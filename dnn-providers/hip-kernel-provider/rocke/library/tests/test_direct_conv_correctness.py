@@ -2778,6 +2778,33 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
                             cfg=(wk, wc, 1, 32, 1),
                             extra=dict(extra, small_c=True),
                         )
+        # The shipped narrow layer (64 -> 128, 3x3, stride 2) at its cached tile.
+        narrow = _Shape(
+            "sc_narrow_3x3s2",
+            N=2,
+            H=17,
+            W=23,
+            groups=1,
+            cpg=64,
+            kpg=128,
+            PAD=1,
+            stride=2,
+        )
+        tile = dict(
+            wave_tiles_k=1,
+            wave_tiles_c=3,
+            vec_x=4,
+            sub_steps=2,
+            ws_replicas=32,
+            row_blocks=32,
+        )
+        with self.subTest(shape=narrow.id, dtype="fp16"):
+            self._run_wgrad(
+                narrow,
+                dtype="fp16",
+                cfg=(8, 1, 1, 32, 1),
+                extra=dict(tile, small_c=True),
+            )
         self._assert_ran()
 
     def test_wgrad_small_k(self):

@@ -2756,34 +2756,21 @@ def _knob_grid(
             wgrad_waves(), WGRAD_HPB, WGRAD_MFMA_K
         ):
             yield dict(waves_k=wk, waves_c=wc, waves_q=wq, ho_per_block=hpb, mfma_k=mk)
-    elif variant == "direct_wgrad_small_c":
+    elif variant in ("direct_wgrad_small_c", "direct_wgrad_small_k"):
         from rocke.core.arch import ArchTarget
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
         configs = WGRAD_SMALL_C_CONFIGS
-        if caps is not None and caps.cpg >= 8:
+        if variant == "direct_wgrad_small_k":
+            configs = _small_c_tiles(WGRAD_SMALL_K_CONFIGS, dtype, caps)
+        elif caps is not None and any(
+            (caps.KH, caps.PAD, caps.stride, (caps.cpg, caps.kpg)) == (k, pad, s, ch)
+            for k, s, pad, chans in _SMALL_C_NARROW
+            for ch in chans
+        ):
             # The narrow layers: few pixels, short pixel splits.
             configs = _small_c_tiles(WGRAD_SMALL_C_NARROW_CONFIGS, dtype, caps)
-        for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in configs:
-            for rb in row_blocks:
-                yield dict(
-                    waves_k=wk,
-                    waves_c=wc,
-                    wave_tiles_k=tk,
-                    wave_tiles_c=tc,
-                    vec_x=vx,
-                    sub_steps=ss,
-                    ws_replicas=wsr,
-                    uniform_wave=uw,
-                    row_blocks=rb,
-                )
-    elif variant == "direct_wgrad_small_k":
-        from rocke.core.arch import ArchTarget
-
-        if ArchTarget.from_gfx(arch).wave_size != 32:
-            return
-        configs = _small_c_tiles(WGRAD_SMALL_K_CONFIGS, dtype, caps)
         for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in configs:
             for rb in row_blocks:
                 yield dict(

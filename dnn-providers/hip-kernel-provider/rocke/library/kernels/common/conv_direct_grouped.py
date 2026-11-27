@@ -5904,6 +5904,8 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
         return _WGRAD_WAVE32_MK_WHY.format(mfma_k=spec.mfma_k)
     if p.groups != 1:
         return f"small_c needs groups=1 (got {p.groups})"
+    if p.cpg < 1 or p.kpg < 1:
+        return f"small_c needs cpg >= 1 and kpg >= 1 (got cpg {p.cpg}, kpg {p.kpg})"
     if spec.small_k:
         if p.stride != 1:
             return f"small_k swaps X and dY, which needs stride 1 (got {p.stride})"
