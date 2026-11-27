@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_lrb_info.hpp"
 
 // gfx12 and gfx13 order the stores before releasing other workgroups with __threadfence; from
 // gfx1250 on there is no s_waitcnt. SPIR-V uses __threadfence on every processor, so it stays
@@ -662,9 +663,9 @@ namespace rocsparse
     // given an auxiliary structure storing the start index of each bin in that array.
     // Output:  rows_binoffsets_scratch = <uint32_t* of length csr.rows>. Temp storage for each row's
     //          atomically-calculated offset into its respective row-bin, EXCLUDING the row-bin start idx.
-    // Output:  n_rows_bins = <array of 32 uint32_t's>, where the value at index i is the number of rows
-    //          in bin i. May want to be particular about spreading across cache banks (w/ padding),
-    //          for atomics-load-balancing reasons.
+    // Output:  n_rows_bins = <array of lrb_num_bin_counters J's>, where the value at index i is the
+    //          number of rows in bin i. May want to be particular about spreading across cache banks
+    //          (w/ padding), for atomics-load-balancing reasons.
     template <uint32_t BLOCKSIZE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrmvn_preprocess_device_32_bins_3phase_phase1(J        m,
@@ -687,20 +688,21 @@ namespace rocsparse
 
     // Compute the start index of each bin, based on the bin lengths we computed in phase 1.
     // At present, for simplicity, we do this in a single GPU thread from a single workgroup,
-    // since we only have 32 bins and the computation itself is pretty trivial.
+    // since we only have lrb_num_bins bins and the computation itself is pretty trivial.
     // This is in a separate kernel right now for synchronization reasons, since we need a barrier
     // across all workgroups. A different, intra-kernel, synchronization method could be used instead
     // (e.g. cooperative groups or global flags with spin-waits) to make the preprocessing a single
     // kernel launch instead of three.
-    // Input/output:    n_rows_bins = <array of 32 J's>. Input value at index i is the number of rows
-    //                  in bin i; output value is the starting index of each bin in the phase-3 rows_bins
+    // Input/output:    n_rows_bins = <array of lrb_num_bin_counters J's>, of which only the first
+    //                  lrb_num_bins are used. Input value at index i is the number of rows in bin i;
+    //                  output value is the starting index of each bin in the phase-3 rows_bins
     //                  output array.
     template <typename J>
     ROCSPARSE_KERNEL(1)
     void csrmvn_preprocess_device_32_bins_3phase_phase2(J* n_rows_bins)
     {
         J acc = 0;
-        for(int i = 0; i < 32; i++)
+        for(int i = 0; i < rocsparse::lrb_num_bins; i++)
         {
             const J tmp    = n_rows_bins[i];
             n_rows_bins[i] = acc;
@@ -713,8 +715,9 @@ namespace rocsparse
     // this could be removed if using a different synchronization method.
     // Input:   rows_binoffsets_scratch = <J* of length csr.rows>. Temp storage for each row's
     //          atomically-calculated offset into its respective row-bin, EXCLUDING the row-bin start idx.
-    // Input:   n_rows_bins = <array of 32 J's>, where the value at index i is the starting index
-    //          of each bin in the final output array.
+    // Input:   n_rows_bins = <array of lrb_num_bin_counters J's>, of which only the first
+    //          lrb_num_bins are used. The value at index i is the starting index of each bin in
+    //          the final output array.
     // Output:  rows_bins = <J* of length csr.rows>. Single array with all bins:
     //          [(bin0 first row #), ... (bin0 last row #), (bin1 first row #), ... (bin1 last row #), ...]
     template <uint32_t BLOCKSIZE, typename I, typename J>

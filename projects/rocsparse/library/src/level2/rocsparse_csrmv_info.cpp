@@ -26,6 +26,9 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <algorithm>
+#include <iterator>
+
 _rocsparse_csrmv_info::_rocsparse_csrmv_info() = default;
 
 _rocsparse_csrmv_info::~_rocsparse_csrmv_info()
@@ -268,10 +271,13 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     {
         if(dest->lrb.n_rows_bins == nullptr)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->lrb.n_rows_bins, J_size * 32));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->lrb.n_rows_bins,
+                                                    J_size * rocsparse::lrb_num_bin_counters));
         }
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
-            dest->lrb.n_rows_bins, src->lrb.n_rows_bins, J_size * 32, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->lrb.n_rows_bins,
+                                                src->lrb.n_rows_bins,
+                                                J_size * rocsparse::lrb_num_bin_counters,
+                                                hipMemcpyDeviceToDevice));
     }
 
     RETURN_IF_ROCSPARSE_ERROR(dest->nnzsplit.copy_from(src->nnzsplit));
@@ -289,6 +295,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->index_type_J       = src->index_type_J;
     dest->alg                = src->alg;
     dest->max_nnz_per_row    = src->max_nnz_per_row;
+
+    std::copy(std::begin(src->lrb.nRowsBins), std::end(src->lrb.nRowsBins), dest->lrb.nRowsBins);
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     dest->descr       = src->descr;

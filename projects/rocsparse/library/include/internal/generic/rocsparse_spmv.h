@@ -184,7 +184,11 @@ extern "C" {
 *               \p buffer_size pointer is invalid.
 *  \retval      rocsparse_status_invalid_value the value of \p trans, \p compute_type, \p alg, or \p stage is incorrect.
 *  \retval      rocsparse_status_not_implemented \p compute_type or \p alg is
-*               currently not supported.
+*               currently not supported, or \p alg is \ref rocsparse_spmv_alg_csr_lrb and either
+*               \p trans is \ref rocsparse_operation_none and a row of a CSR matrix has more than
+*               2^31 non-zeros, or \p trans is \ref rocsparse_operation_transpose or
+*               \ref rocsparse_operation_conjugate_transpose and a column of a CSC matrix has more
+*               than 2^31 non-zeros.
 *
 *  \par Example
 *  \snippet example_rocsparse_spmv.cpp doc example

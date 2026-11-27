@@ -1478,25 +1478,27 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
     _rocsparse_csrmv_info empty_src;
     EXPECT_EQ(rocsparse::copy_csrmv_info(&empty_dest, &empty_src), rocsparse_status_success);
 
-    // n_rows_bins is copied as J_size * 32, which is 256 bytes for 64-bit indices.
-    auto alloc = [](void** ptr) { ASSERT_EQ(hipMalloc(ptr, 256), hipSuccess); };
+    // n_rows_bins is copied as J_size * lrb_num_bin_counters, the largest copy for 64-bit indices.
+    const size_t n_rows_bins_bytes = sizeof(int64_t) * rocsparse::lrb_num_bin_counters;
+    auto alloc = [&](void** ptr) { ASSERT_EQ(hipMalloc(ptr, n_rows_bins_bytes), hipSuccess); };
 
     auto fill
         = [&](_rocsparse_csrmv_info& info, rocsparse_indextype itype, rocsparse_indextype jtype) {
-              info.m                  = 1;
-              info.n                  = 1;
-              info.nnz                = 1;
-              info.max_rows           = 1;
-              info.trans              = rocsparse_operation_transpose;
-              info.adaptive.size      = 1;
-              info.adaptive.first_row = 0;
-              info.adaptive.last_row  = 1;
-              info.lrb.size           = 1;
-              info.index_type_I       = itype;
-              info.index_type_J       = jtype;
-              info.descr              = nullptr;
-              info.csr_row_ptr        = nullptr;
-              info.csr_col_ind        = nullptr;
+              info.m                                          = 1;
+              info.n                                          = 1;
+              info.nnz                                        = 1;
+              info.max_rows                                   = 1;
+              info.trans                                      = rocsparse_operation_transpose;
+              info.adaptive.size                              = 1;
+              info.adaptive.first_row                         = 0;
+              info.adaptive.last_row                          = 1;
+              info.lrb.size                                   = 1;
+              info.lrb.nRowsBins[rocsparse::lrb_num_bins - 1] = 1;
+              info.index_type_I                               = itype;
+              info.index_type_J                               = jtype;
+              info.descr                                      = nullptr;
+              info.csr_row_ptr                                = nullptr;
+              info.csr_col_ind                                = nullptr;
               alloc(reinterpret_cast<void**>(&info.adaptive.row_blocks));
               alloc(reinterpret_cast<void**>(&info.adaptive.wg_flags));
               alloc(reinterpret_cast<void**>(&info.adaptive.wg_ids));
@@ -1541,6 +1543,11 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
         EXPECT_EQ(d.adaptive.first_row, s.adaptive.first_row);
         EXPECT_EQ(d.adaptive.last_row, s.adaptive.last_row);
         EXPECT_EQ(d.lrb.size, s.lrb.size);
+        // LRB compute launches a bin only if its host count is nonzero.
+        for(int j = 0; j < rocsparse::lrb_num_bins; ++j)
+        {
+            EXPECT_EQ(d.lrb.nRowsBins[j], s.lrb.nRowsBins[j]) << "nRowsBins[" << j << "]";
+        }
         EXPECT_EQ(d.index_type_I, s.index_type_I);
         EXPECT_EQ(d.index_type_J, s.index_type_J);
     };
@@ -1576,15 +1583,15 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
     _rocsparse_csrmv_info dest64;
     fill(src64, rocsparse_indextype_i64, rocsparse_indextype_i64);
     // The last 4 bytes of each 64-bit-sized copy: row_blocks is I_size * size,
-    // n_rows_bins is J_size * 32.
+    // n_rows_bins is J_size * lrb_num_bin_counters.
     write(src64.adaptive.row_blocks, pattern, 4);
-    write(src64.lrb.n_rows_bins, pattern, 252);
+    write(src64.lrb.n_rows_bins, pattern, n_rows_bins_bytes - sizeof(pattern));
     EXPECT_EQ(rocsparse::copy_csrmv_info(&dest64, &src64), rocsparse_status_success);
     expect_scalars(dest64, src64);
     ASSERT_NE(dest64.adaptive.row_blocks, nullptr);
     ASSERT_NE(dest64.lrb.n_rows_bins, nullptr);
     EXPECT_EQ(read(dest64.adaptive.row_blocks, 4), pattern);
-    EXPECT_EQ(read(dest64.lrb.n_rows_bins, 252), pattern);
+    EXPECT_EQ(read(dest64.lrb.n_rows_bins, n_rows_bins_bytes - sizeof(pattern)), pattern);
 }
 
 // Each debug switch is a full hit only when the value both changes and does not.
