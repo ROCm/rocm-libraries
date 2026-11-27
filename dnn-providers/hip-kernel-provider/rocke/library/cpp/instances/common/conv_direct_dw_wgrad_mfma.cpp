@@ -32,7 +32,7 @@ constexpr int kBC = 64; /* channels per block: 16 per wave */
 constexpr int kTaps = 4; /* M = N of the 4x4x4 atom */
 constexpr int kCH = kBC / 8; /* 16-byte chunks per staged pixel */
 
-const char* bf16_flag[1] = {"bf16"};
+const char* name_flags[4] = {"bf16", "xcdp", "swz", "adir"};
 
 int imax(int a, int b)
 {
@@ -44,6 +44,44 @@ int imin(int a, int b)
     return a < b ? a : b;
 }
 
+/* Stride 2: four stride-1 sub-problems (one per input row / column parity),
+ * run side by side on the grid's z axis. */
+bool phased(const rocke_dw_wgrad_mfma_spec_t* s)
+{
+    return s->problem.stride == 2;
+}
+
+/* Padding of the (sub-)problem the main loop runs. */
+int sub_pad(const rocke_dw_wgrad_mfma_spec_t* s)
+{
+    return phased(s) ? pyfloordiv(s->problem.PAD + 1, 2) : s->problem.PAD;
+}
+
+int sub_k(const rocke_dw_wgrad_mfma_spec_t* s, int k)
+{
+    if(!phased(s))
+    {
+        return k;
+    }
+    return pyfloordiv(k - 1 - s->problem.PAD, 2) + sub_pad(s) + 1;
+}
+
+int sub_kh(const rocke_dw_wgrad_mfma_spec_t* s)
+{
+    return sub_k(s, s->problem.KH);
+}
+
+int sub_kw(const rocke_dw_wgrad_mfma_spec_t* s)
+{
+    return sub_k(s, s->problem.KW);
+}
+
+/* Rows of the (largest) sub-problem image. */
+int sub_hh(const rocke_dw_wgrad_mfma_spec_t* s)
+{
+    return phased(s) ? pyfloordiv(s->problem.H + 1, 2) : s->problem.H;
+}
+
 int block_q(const rocke_dw_wgrad_mfma_spec_t* s)
 {
     return 4 * s->q_tiles;
@@ -51,18 +89,18 @@ int block_q(const rocke_dw_wgrad_mfma_spec_t* s)
 
 int rg(const rocke_dw_wgrad_mfma_spec_t* s)
 {
-    return cdiv(s->problem.KH, kTaps);
+    return cdiv(sub_kh(s), kTaps);
 }
 
 int sg(const rocke_dw_wgrad_mfma_spec_t* s)
 {
-    return cdiv(s->problem.KW, kTaps);
+    return cdiv(sub_kw(s), kTaps);
 }
 
 /* A lane's tap shift reaches past one v_perm (3 halves) from KW 4 on. */
 bool preshift(const rocke_dw_wgrad_mfma_spec_t* s)
 {
-    return imin(kTaps, s->problem.KW) - 1 > 2;
+    return imin(kTaps, sub_kw(s)) - 1 > 2;
 }
 
 int win_words(const rocke_dw_wgrad_mfma_spec_t* s)
@@ -122,7 +160,7 @@ int n_q(const rocke_dw_wgrad_mfma_spec_t* s)
 int n_units(const rocke_dw_wgrad_mfma_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return cdiv(p->N, s->unfold_n) * cdiv(p->H, s->rows_per_chunk);
+    return cdiv(p->N, s->unfold_n) * cdiv(sub_hh(s), s->rows_per_chunk);
 }
 
 int n_z(const rocke_dw_wgrad_mfma_spec_t* s)
@@ -144,6 +182,9 @@ extern "C" rocke_dw_wgrad_mfma_spec_t rocke_dw_wgrad_mfma_spec_default(void)
     s.prefetch = 2;
     s.target_blocks = 2048;
     s.unfold_n = 1;
+    s.xcd_pair = false;
+    s.swz = false;
+    s.adir = false;
     return s;
 }
 
@@ -177,7 +218,7 @@ extern "C" void rocke_dw_wgrad_mfma_launch_geometry(const rocke_dw_wgrad_mfma_sp
 {
     grid[0] = n_channel_tiles(s);
     grid[1] = n_q(s);
-    grid[2] = n_z(s);
+    grid[2] = n_z(s) * (phased(s) ? 4 : 1);
     block[0] = kNW * kWave;
     block[1] = 1;
     block[2] = 1;
@@ -199,8 +240,8 @@ extern "C" rocke_status_t
     snprintf(un_buf, sizeof un_buf, "un%d", s->unfold_n);
     snprintf(tb_buf, sizeof tb_buf, "tb%d", s->target_blocks);
     const char* parts[6] = {f_buf, qt_buf, rpc_buf, pf_buf, un_buf, tb_buf};
-    int on[1] = {problem_is_bf16(p) ? 1 : 0};
-    return rocke_kernel_name_join(s->name, parts, 6, bf16_flag, on, 1, out, out_cap, NULL);
+    int on[4] = {problem_is_bf16(p) ? 1 : 0, s->xcd_pair ? 1 : 0, s->swz ? 1 : 0, s->adir ? 1 : 0};
+    return rocke_kernel_name_join(s->name, parts, 6, name_flags, on, 4, out, out_cap, NULL);
 }
 
 extern "C" bool rocke_dw_wgrad_mfma_is_valid_spec(const rocke_dw_wgrad_mfma_spec_t* s,
@@ -233,9 +274,13 @@ extern "C" bool rocke_dw_wgrad_mfma_is_valid_spec(const rocke_dw_wgrad_mfma_spec
     {
         why = "fp16/bf16 only";
     }
-    else if(p->stride != 1)
+    else if(p->stride != 1 && p->stride != 2)
     {
-        why = "stride 1 only";
+        why = "stride 1 or 2 only";
+    }
+    else if(p->stride == 2 && s->unfold_n != 1)
+    {
+        why = "stride 2: no image packing";
     }
     else if(p->PAD > p->KH - 1 || p->PAD > p->KW - 1)
     {
@@ -321,8 +366,11 @@ rocke_kernel_def_t*
     }
     Em e{b};
     const rocke_direct_conv_problem_t& p = spec->problem;
-    const int KH = p.KH, KW = p.KW, PAD = p.PAD;
-    const int TAPS = KH * KW;
+    /* The main loop's (sub-)problem. */
+    const int KH = sub_kh(spec), KW = sub_kw(spec), PAD = sub_pad(spec);
+    const int KH0 = p.KH, KW0 = p.KW, PAD0 = p.PAD;
+    const int TAPS = KH0 * KW0;
+    const bool PH = phased(spec);
     const int QT = spec->q_tiles, BQ = block_q(spec);
     const int RG = rg(spec), SG = sg(spec);
     const int D = spec->prefetch;
@@ -363,21 +411,91 @@ rocke_kernel_def_t*
     V wave = rocke_b_readfirstlane(b, e.divi(tid, kWave));
     V ctile = rocke_b_block_id_x(b);
     V qtile = rocke_b_block_id_y(b);
-    V zslot = rocke_b_block_id_z(b);
+    V zall = rocke_b_block_id_z(b);
+    if(spec->xcd_pair)
+    {
+        /* C, W, N are runtime: rebuild the grid extents (n_z as sized by the
+         * launch) and re-key only when C % 64 != 0 and 8 | gy * gz. */
+        V r_gx = e.cdivi(p_C, kBC);
+        V r_gy = e.cdivi(p_Wo, BQ);
+        V r_hh = P.p_Hi;
+        if(PH)
+        {
+            r_hh = e.div(e.add(P.p_Hi, c1), c2);
+        }
+        V r_units = e.cdivi(p_N, spec->unfold_n);
+        r_units = e.mul(r_units, e.cdivi(r_hh, spec->rows_per_chunk));
+        V r_planes = e.mul(r_gx, r_gy);
+        V r_nz = e.ci(spec->target_blocks);
+        r_nz = e.add(r_nz, e.sub(r_planes, c1));
+        r_nz = e.div(r_nz, r_planes);
+        r_nz = e.smax(r_nz, c1);
+        r_nz = e.smin(r_units, r_nz);
+        V r_gz = PH ? e.muli(r_nz, 4) : r_nz;
+        V on = e.modi(p_C, kBC);
+        on = rocke_b_cmp_ne(b, on, c0);
+        V on2 = e.ge(r_gx, c2);
+        V on3 = e.mul(r_gy, r_gz);
+        on3 = e.modi(on3, 8);
+        on3 = e.eq(on3, c0);
+        on2 = e.land(on2, on3);
+        on = e.land(on, on2);
+        V flat = e.mul(r_gy, zall);
+        flat = e.add(qtile, flat);
+        flat = e.mul(r_gx, flat);
+        flat = e.add(ctile, flat);
+        V rest = e.muli(r_gx, 8);
+        rest = e.div(flat, rest);
+        rest = e.muli(rest, 8);
+        rest = e.add(rest, e.modi(flat, 8));
+        V ct2 = e.divi(flat, 8);
+        ct2 = e.mod(ct2, r_gx);
+        ctile = rocke_b_readfirstlane(b, e.select(on, ct2, ctile));
+        V qt2 = e.mod(rest, r_gy);
+        qtile = rocke_b_readfirstlane(b, e.select(on, qt2, qtile));
+        V z2 = e.div(rest, r_gy);
+        zall = rocke_b_readfirstlane(b, e.select(on, z2, zall));
+    }
+    V zslot = zall;
+    V pa = NULL, pb = NULL, x_base = NULL;
+    if(PH)
+    {
+        /* z = 4 * zz + phase: phase (a, bb) = (row, column) parity of the input
+         * pixels 2 * i + a, 2 * j + bb the sub-problem sees as an image. */
+        V phase = rocke_b_readfirstlane(b, e.modi(zall, 4));
+        zslot = rocke_b_readfirstlane(b, e.divi(zall, 4));
+        pa = e.div(phase, c2);
+        pb = e.mod(phase, c2);
+        p_H = e.add(e.sub(p_H, pa), c1);
+        p_H = e.div(p_H, c2);
+        p_W = e.add(e.sub(p_W, pb), c1);
+        p_W = e.div(p_W, c2);
+        x_base = e.mul(pa, sx_h);
+        x_base = e.add(x_base, e.mul(pb, sx_w));
+        sx_h = e.mul(sx_h, c2);
+        sx_w = e.mul(sx_w, c2);
+    }
     V c_blk0 = e.muli(ctile, kBC);
     V q0 = e.muli(qtile, BQ);
     V n_q_v = e.cdivi(p_Wo, BQ);
     V n_chunks = e.cdivi(p_H, spec->rows_per_chunk);
     V n_ngrp = e.cdivi(p_N, UN);
     V n_units_v = e.mul(n_ngrp, n_chunks);
-    /* Same formula as DwWgradMfmaSpec.n_z, which sizes the grid. */
+    /* Same formula as DwWgradMfmaSpec.n_z, which sizes the grid (rows of the
+     * larger parity image when stride 2). */
+    V n_units_z = n_units_v;
+    if(PH)
+    {
+        V h_big = e.div(e.add(P.p_Hi, c1), c2);
+        n_units_z = e.mul(n_ngrp, e.cdivi(h_big, spec->rows_per_chunk));
+    }
     V n_ct = e.cdivi(p_C, kBC);
     V planes = e.mul(n_ct, n_q_v);
     V nz = e.ci(spec->target_blocks);
     nz = e.add(nz, e.sub(planes, c1));
     nz = e.div(nz, planes);
     nz = e.smax(nz, c1);
-    V n_z_v = e.smin(n_units_v, nz);
+    V n_z_v = e.smin(n_units_z, nz);
 
     V a_rsrc = rocke_b_buffer_rsrc(b, P.A, P.A_bytes); /* dY */
     V b_rsrc = rocke_b_buffer_rsrc(b, P.Bp, P.B_bytes); /* X */
@@ -422,6 +540,13 @@ rocke_kernel_def_t*
             Lane l;
             l.col = e.divi(slot, kCH);
             V ch = e.modi(slot, kCH);
+            if(spec->swz)
+            {
+                V f = e.div(l.col, c2);
+                f = e.land(f, c1);
+                f = e.muli(f, 4);
+                ch = e.bxor(ch, f);
+            }
             ch = e.muli(ch, 8);
             l.cc = e.add(c_blk0, ch);
             V a = e.lti(l.col, cols);
@@ -498,8 +623,22 @@ rocke_kernel_def_t*
     V tr_row = e.modi(e.divi(lane, 4), 4);
     V tr_cg = e.muli(e.divi(lane, 16), 4);
     tr_cg = e.add(tr_cg, e.modi(lane, 4));
-    V tr_base = e.muli(tr_row, kBC);
-    tr_base = e.add(tr_base, e.muli(tr_cg, 4));
+    V tr_base = NULL;
+    if(spec->swz)
+    {
+        V tr_col = e.muli(tr_cg, 4);
+        V f = e.div(tr_row, c2);
+        f = e.land(f, c1);
+        f = e.muli(f, 32);
+        tr_col = e.bxor(tr_col, f);
+        tr_base = e.muli(tr_row, kBC);
+        tr_base = e.add(tr_base, tr_col);
+    }
+    else
+    {
+        tr_base = e.muli(tr_row, kBC);
+        tr_base = e.add(tr_base, e.muli(tr_cg, 4));
+    }
 
     auto transpose_rows = [&](V stage_x, V stage_y, bool with_x) {
         struct Read
@@ -566,6 +705,15 @@ rocke_kernel_def_t*
         c = e.smini(c, NWR - 1);
         c = e.muli(c, 8);
         a_reads.push_back(e.add(a, c));
+    }
+    std::vector<V> a_dir;
+    if(spec->adir)
+    {
+        for(int m = 0; m < NWR; ++m)
+        {
+            V a = e.muli(ch_w, HALF);
+            a_dir.push_back(e.addi(a, 8 * m));
+        }
     }
     /* Likewise the newest dY row: lane j of a channel reads q tiles j, j + 4. */
     for(int k = 0; k < cdiv(QT, 4); ++k)
@@ -636,17 +784,30 @@ rocke_kernel_def_t*
 
     /* MFMA the X row in main_in against the dY rows in ``ring``. */
     auto compute = [&](const Ring& ring, std::vector<V>& accs) {
-        std::vector<std::vector<V>> part;
-        for(V idx : a_reads)
-        {
-            part.push_back(words(e.smem_load(main_in, c0, idx, io_type, 8), 4));
-        }
         std::vector<V> win;
-        for(int m = 0; m < NWR; ++m)
+        if(spec->adir)
         {
-            for(int el = 0; el < 4; ++el)
+            for(V idx : a_dir)
             {
-                win.push_back(bcast(part[m / 4][el], m % 4));
+                for(V w : words(e.smem_load(main_in, c0, idx, io_type, 8), 4))
+                {
+                    win.push_back(w);
+                }
+            }
+        }
+        else
+        {
+            std::vector<std::vector<V>> part;
+            for(V idx : a_reads)
+            {
+                part.push_back(words(e.smem_load(main_in, c0, idx, io_type, 8), 4));
+            }
+            for(int m = 0; m < NWR; ++m)
+            {
+                for(int el = 0; el < 4; ++el)
+                {
+                    win.push_back(bcast(part[m / 4][el], m % 4));
+                }
             }
         }
         if(preshift(spec))
@@ -742,12 +903,65 @@ rocke_kernel_def_t*
                 V x_img = e.mul(n_img, sx_n);
                 V y_img = e.mul(n_img, sdy_n);
 
+                /* adir: byte offsets of the lanes for this unit, OOB lanes at
+                 * 2^31 - 1; a step adds the row's bytes, or 2^31 for a row
+                 * outside the image (u32 sum stays >= 2^31, no wrap). */
+                std::vector<V> xb, yb;
+                V row_oob = NULL;
+                if(spec->adir)
+                {
+                    auto lane_base = [&](const std::vector<Off>& offs, V img) {
+                        std::vector<V> out;
+                        for(const Off& o : offs)
+                        {
+                            V ok = o.ok;
+                            if(UN > 1)
+                            {
+                                V a = e.add(n_img, o.j);
+                                ok = e.land(ok, e.lt(a, p_N));
+                            }
+                            V v = e.mul(e.add(o.off, img), c2);
+                            out.push_back(e.select(ok, v, oob));
+                        }
+                        return out;
+                    };
+                    xb = lane_base(x_offs, PH ? e.add(x_img, x_base) : x_img);
+                    yb = lane_base(y_offs, y_img);
+                    row_oob = e.ci(-((int64_t)1 << 31));
+                }
+
                 /* DMA step t: X row y0 - PRE + t (steps >= PRE), dY row y + PAD. */
                 auto issue = [&](int buf, V t) {
                     V y = e.add(e.subi(y0, PRE), t);
+                    if(spec->adir)
+                    {
+                        V x_ok = e.gei(t, PRE);
+                        x_ok = e.land(x_ok, e.lt(t, n_steps));
+                        V xr = e.mul(e.mul(y, sx_h), c2);
+                        xr = rocke_b_readfirstlane(b, e.select(x_ok, xr, row_oob));
+                        for(int i = 0; i < (int)xb.size(); ++i)
+                        {
+                            dma(b_rsrc, x_addr[buf], IX, i, e.add(xb[i], xr));
+                        }
+                        V pr = e.addi(y, PAD);
+                        V y_ok = e.ge(pr, c0);
+                        y_ok = e.land(y_ok, e.lt(pr, p_Ho));
+                        y_ok = e.land(y_ok, e.lt(t, n_steps));
+                        V yr = e.mul(e.mul(pr, sdy_h), c2);
+                        yr = rocke_b_readfirstlane(b, e.select(y_ok, yr, row_oob));
+                        for(int i = 0; i < (int)yb.size(); ++i)
+                        {
+                            dma(a_rsrc, y_addr[buf], IY, i, e.add(yb[i], yr));
+                        }
+                        return;
+                    }
                     V x_ok = e.gei(t, PRE);
                     x_ok = e.land(x_ok, e.lt(t, n_steps));
                     V x_row = e.add(x_img, e.mul(y, sx_h));
+                    if(PH)
+                    {
+                        x_row = e.add(x_row, x_base);
+                    }
                     for(int i = 0; i < (int)x_offs.size(); ++i)
                     {
                         V ok = e.land(x_offs[i].ok, x_ok);
@@ -847,14 +1061,35 @@ rocke_kernel_def_t*
         V part = e.add(e.mul(zslot, n_q_v), qtile);
         V c_glb = e.add(c_blk0, ch_w);
         V c_ok = e.lt(c_glb, p_C);
+        /* Sub-problem tap index -> filter tap (stride 2: the four phases of
+         * one part own disjoint taps). */
+        auto tap_of = [&](V k, V par) {
+            V t = e.subi(k, PAD);
+            t = e.mul(t, c2);
+            V u = e.addi(par, PAD0);
+            return e.add(t, u);
+        };
         for(int rgi = 0; rgi < RG; ++rgi)
         {
-            V r = e.addi(lane4, rgi * kTaps);
+            V kk = e.addi(lane4, rgi * kTaps);
+            V r = PH ? tap_of(kk, pa) : kk;
+            V ok_r = NULL;
+            if(PH)
+            {
+                ok_r = e.lti(kk, KH);
+                V a = e.ge(r, c0);
+                a = e.land(a, e.lti(r, KH0));
+                ok_r = e.land(ok_r, a);
+            }
             V row0 = e.muli(part, TAPS);
-            row0 = e.add(row0, e.muli(r, KW));
+            row0 = e.add(row0, e.muli(r, KW0));
             row0 = e.mul(row0, p_C);
             row0 = e.add(row0, c_glb);
-            e.if_(e.land(c_ok, e.lti(r, KH)), [&]() {
+            if(!PH)
+            {
+                ok_r = e.lti(r, KH);
+            }
+            e.if_(e.land(c_ok, ok_r), [&]() {
                 for(int sgi = 0; sgi < SG; ++sgi)
                 {
                     V acc = accs[rgi * SG + sgi];
@@ -864,8 +1099,23 @@ rocke_kernel_def_t*
                         if(s < KW)
                         {
                             V ks = e.ci(s);
-                            V off = e.add(row0, e.mul(ks, p_C));
-                            rocke_b_global_store(b, P.D, off, rocke_b_vec_extract(b, acc, i), 4);
+                            if(PH)
+                            {
+                                V sc = tap_of(ks, pb);
+                                V a = e.ge(sc, c0);
+                                a = e.land(a, e.lti(sc, KW0));
+                                e.if_(a, [&]() {
+                                    V off = e.add(row0, e.mul(sc, p_C));
+                                    rocke_b_global_store(
+                                        b, P.D, off, rocke_b_vec_extract(b, acc, i), 4);
+                                });
+                            }
+                            else
+                            {
+                                V off = e.add(row0, e.mul(ks, p_C));
+                                rocke_b_global_store(
+                                    b, P.D, off, rocke_b_vec_extract(b, acc, i), 4);
+                            }
                         }
                     }
                 }

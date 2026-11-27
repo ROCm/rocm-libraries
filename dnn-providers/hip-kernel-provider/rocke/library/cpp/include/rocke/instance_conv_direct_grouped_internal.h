@@ -1253,6 +1253,14 @@ void rocke_dw_win_tile(rocke_ir_builder_t* b,
                        int rows,
                        rocke_value_t** n_tile,
                        rocke_value_t** h0);
+/* rocke_dw_win_tile with the block z given (bz NULL: block_id_z), e.g. the
+ * XCD-remapped one. */
+void rocke_dw_win_tile_ex(rocke_ir_builder_t* b,
+                          rocke_value_t* p_Hi,
+                          int rows,
+                          rocke_value_t* bz,
+                          rocke_value_t** n_tile,
+                          rocke_value_t** h0);
 
 rocke_value_t* rocke_dconv_buf_load_half(rocke_ir_builder_t* b,
                                          bool bf16,

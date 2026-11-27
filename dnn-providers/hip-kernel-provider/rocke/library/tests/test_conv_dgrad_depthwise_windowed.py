@@ -222,7 +222,7 @@ class TestMfmaSpec(unittest.TestCase):
             ({"w_fold": 3}, "w_fold must be 1, 2 or 4"),
             ({"prefetch_rows": 0}, "prefetch_rows must be >= 1"),
             ({"prefetch_rows": 5}, "prefetch_rows must be <= 4"),
-            ({"block_waves": 16}, "block_waves <= 8"),
+            ({"block_waves": 17}, "1..1024 threads"),
             ({"problem": _problem(1, 24, 24, 64, 15, 15, 7)}, "VGPRs"),
             ({"block_h": 224}, "MFMAs"),
         ]

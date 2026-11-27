@@ -869,6 +869,20 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
   `global_atomic_add`, so the caller must zero it first.  gfx950 only;
   `stride = 1` only; `cpg` and `kpg` are independent.
 
+  gfx950 adds, on the Toeplitz MFMA form, the dense (`dense`) channel form
+  with swizzled LDS staging (`lds_swz`), XCD-local tile order (`xcd_tiles`)
+  and LDS-DMA loads of dY (`dma`) and weights (`wdma`), 2/4-channel
+  block-diagonal forward groups and up to 16 waves; the spatial
+  depthwise kernel takes a row tile `block_h`. All default off; see
+  `conv/docs/convolution.md` (Windowed Depthwise Dgrad Kernel). Depthwise
+  wgrad gains lane-channel (`lane_ch`) and XCD-pair (`xcd_pair`) variants and
+  a stride-2 MFMA form (see the wgrad table there). C++ mirror:
+  `conv_direct_grouped_build_depthwise_dgrad_win.cpp`,
+  `conv_direct_grouped_build_depthwise_spatial.cpp`,
+  `conv_direct_dw_wgrad{,_mfma}.cpp`. Tests:
+  `library/tests/test_direct_grouped_dw_gfx950.py` (CPU and gfx950-runner GPU
+  cases); parity configs in `conv_direct_dgrad_ext_emit`.
+
 ---
 
 ## Dual-Engine Parity

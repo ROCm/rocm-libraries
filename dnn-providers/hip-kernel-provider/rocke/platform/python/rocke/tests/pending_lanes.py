@@ -1330,6 +1330,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_direct_dgrad_pp_mfma.py",
         "library/tests/test_direct_fwd_flex_mfma.py",
         "library/tests/test_direct_fwd_pp_mfma.py",
+        "library/tests/test_direct_grouped_dw_gfx950.py",
         "library/tests/test_dsa_indexer_numeric.py",
         "library/tests/test_extended_parity_attention.py",
         "library/tests/test_fwd_small_mfma.py",

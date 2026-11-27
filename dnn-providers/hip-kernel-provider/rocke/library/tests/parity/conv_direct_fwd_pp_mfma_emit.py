@@ -24,6 +24,9 @@
 #  10  rejected by both engines: gfx942 (no 16-byte LDS DMA)
 #  11  rejected by both engines: stride 2
 #  12  rejected by both engines: C = 12 (not a multiple of 8)
+#  13  bf16, 3x3, valid padding (PAD 0), block_k 128
+#  14  fp16, 3x3, valid padding (PAD 0), block_k 64
+#  15  rejected by both engines: grouped (2 groups)
 from dataclasses import replace
 
 from _emit_common import run_emit
@@ -31,7 +34,7 @@ from kernels.common.conv_direct_fwd_pp_mfma import FwdPpMfmaSpec, build_fwd_pp_m
 from kernels.common.conv_direct_grouped import DirectConvProblem
 
 
-def _p(*, KH=3, dtype="bf16", cpg=72):
+def _p(*, KH=3, dtype="bf16", cpg=72, PAD=None):
     return DirectConvProblem(
         N=2,
         H=20,
@@ -41,7 +44,7 @@ def _p(*, KH=3, dtype="bf16", cpg=72):
         kpg=96,
         KH=KH,
         KW=KH,
-        PAD=(KH - 1) // 2,
+        PAD=(KH - 1) // 2 if PAD is None else PAD,
         stride=1,
         dtype=dtype,
     )
@@ -63,6 +66,9 @@ def _spec(idx: int):
         10: (S(problem=_p()), "gfx942"),
         11: (S(problem=replace(_p(), stride=2)), "gfx950"),
         12: (S(problem=_p(cpg=12)), "gfx950"),
+        13: (S(problem=_p(PAD=0)), "gfx950"),
+        14: (S(problem=_p(PAD=0, dtype="fp16"), block_k=64), "gfx950"),
+        15: (S(problem=replace(_p(cpg=36), groups=2, kpg=48)), "gfx950"),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

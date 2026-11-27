@@ -140,6 +140,8 @@ rocke_status_t rocke_dw_wgrad_cols_lower_to_llvm(const rocke_dw_wgrad_cols_spec_
  *      prefetch: int = 2
  *      rows_per_seg: int = 32
  *      target_blocks: int = 1024
+ *      lane_ch: int = 8        # channels per lane: 8, 4 or 2
+ *      xcd_pair: bool = False  # re-key sibling channel tiles onto one XCD
  * ===================================================================== */
 typedef struct rocke_dw_wgrad_lds_spec
 {
@@ -151,6 +153,8 @@ typedef struct rocke_dw_wgrad_lds_spec
     int prefetch; /* default 2 */
     int rows_per_seg; /* default 32 */
     int target_blocks; /* default 1024 */
+    int lane_ch; /* default 8 (channels per lane: 8, 4 or 2). Name part ch{n} when != 8. */
+    bool xcd_pair; /* default false -- XCD re-key of sibling channel tiles. Name flag xcdp. */
 } rocke_dw_wgrad_lds_spec_t;
 
 rocke_dw_wgrad_lds_spec_t rocke_dw_wgrad_lds_spec_default(void);
@@ -163,7 +167,7 @@ void rocke_dw_wgrad_lds_launch_geometry(const rocke_dw_wgrad_lds_spec_t* spec,
                                         int grid[3],
                                         int block[3]);
 /* kernel_name_join(name, f{KH}x{KW}p{PAD}s{stride}, lc{n}, lw{n}, cpl{n},
- * pf{n}, rps{n}, tb{n}, flags [bf16]). */
+ * pf{n}, rps{n}, tb{n}, [ch{n}], flags [bf16, xcdp]). */
 rocke_status_t rocke_dw_wgrad_lds_kernel_name(const rocke_dw_wgrad_lds_spec_t* spec,
                                               char* out,
                                               size_t out_cap);

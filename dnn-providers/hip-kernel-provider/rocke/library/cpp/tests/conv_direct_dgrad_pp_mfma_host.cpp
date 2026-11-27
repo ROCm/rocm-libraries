@@ -86,6 +86,12 @@ static void test_accepted(void)
     s.problem.KH = s.problem.KW = 5;
     s.problem.PAD = 2;
     expect_ok("5x5 block_k 128", &s);
+    s = base_spec();
+    s.problem.groups = 4;
+    s.problem.cpg = 56;
+    s.problem.kpg = 56;
+    s.block_k = 64;
+    expect_ok("grouped block_k 64", &s);
 }
 
 static void test_arch_and_dtype_refusals(void)
@@ -116,7 +122,9 @@ static void test_problem_refusals(void)
         {"N 0", [](rocke_direct_conv_problem_t* p) { p->N = 0; }, "N must be >= 1 (got 0)"},
         {"cpg 0", [](rocke_direct_conv_problem_t* p) { p->cpg = 0; }, "cpg must be >= 1 (got 0)"},
         {"kpg 0", [](rocke_direct_conv_problem_t* p) { p->kpg = 0; }, "kpg must be >= 1 (got 0)"},
-        {"groups 2", [](rocke_direct_conv_problem_t* p) { p->groups = 2; }, "groups must be 1"},
+        {"groups 2",
+         [](rocke_direct_conv_problem_t* p) { p->groups = 2; },
+         "grouped: block_k must be 64 (128-byte weight rows)"},
         {"stride 2", [](rocke_direct_conv_problem_t* p) { p->stride = 2; }, "stride must be 1"},
         {"dil_h 2", [](rocke_direct_conv_problem_t* p) { p->dil_h = 2; }, "dilation must be 1"},
         {"dil_w 2", [](rocke_direct_conv_problem_t* p) { p->dil_w = 2; }, "dilation must be 1"},

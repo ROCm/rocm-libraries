@@ -29,7 +29,8 @@
 # Indices 45..49: the MFMA form with fwd (the rotated filter; 48, fwd
 # without mfma, both reject; 49, a 9x9 depthwise filter).
 # Indices 50..58: its grouped forward form (cpg = kpg = 8 / 16 / 32; 52,
-# without fwd, and 55, a block narrower than a group, both reject); 56..58
+# without fwd, is the grouped wave64 dgrad form; 55, a block narrower than a
+# group, both reject); 56..58
 # the forward form at stride 2 (58, an odd block_h, both reject). Indices
 # 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
 # cpg 64 (stride 2).
@@ -40,6 +41,12 @@
 # on gfx950) and 70 (wave64 on gfx1250) reject; 71 is the depthwise fwd at
 # stride 1 (the gfx1250 depthwise forward's kernel) and 72 (fwd at stride 2,
 # a wave64 mode) rejects.
+# Indices 73..88: the fp32-storage configs (see _F32_CFG_BASE).
+# Indices 89..117: the gfx950 knobs of DirectDepthwiseDgradWindowedSpec on the
+# wave64 MFMA (_WIN_X_CFGS, full problems incl. cpg and stride): lds_swz,
+# xcd_tiles, the block-diagonal cpg 2 / 4 forward, the dense form with and
+# without the dY / weight LDS DMA (dma, wdma), the stride-2 and grouped dgrad
+# and 16 waves; 111..117 both engines reject.
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -370,7 +377,7 @@ _WIN_FWD_CFGS = (
 
 # The grouped forward form (cpg = kpg, fwd, MFMA; ``_cpg`` defaults to 8):
 # 50 3x3 fp16 with a partial channel block, 51 7x7 bf16 under w_fold 2; 52
-# cpg = 8 without fwd -- both engines reject. G counts groups.
+# cpg = 8 without fwd -- the grouped dgrad form (wave64). G counts groups.
 _WIN_G8_CFG_BASE = _WIN_FWD_CFG_BASE + len(_WIN_FWD_CFGS)
 _WIN_G8_CFGS = (
     (
@@ -666,6 +673,56 @@ _F32_FOURC_CFGS = (
 )
 
 
+# The gfx950 knobs of the windowed spec (wave64 MFMA), from index
+# _WIN_X_CFG_BASE, after the fp32-storage configs: full problems
+# (N, H, W, G, cpg, KH, KW, PAD, stride, dtype, arch, knobs).
+_WIN_X_CFG_BASE = _F32_CFG_BASE + len(_F32_GENERIC_CFGS) + len(_F32_FOURC_CFGS)
+_M = dict(mfma=True)
+_WIN_X_CFGS = (
+    # 0..10: the forward form: lds_swz + xcd_tiles (3x3, 5x5 w_fold 2), xcd_tiles
+    # alone with 3 rows in flight, lds_swz at out_stride 2, the block-diagonal
+    # cpg 4 / cpg 2 groups, the dense form (cpg 32), dense + lds_swz + dma +
+    # wdma (cpg 32 fp16, cpg 32 bf16, cpg 64), dense at w_fold 4.
+    (2, 28, 28, 64, 1, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, block_waves=8, block_h=14, w_fold=1, prefetch_rows=2, lds_swz=True, xcd_tiles=True, **_M)),
+    (3, 16, 20, 64, 1, 5, 5, 2, 1, "bf16", "gfx950", dict(fwd=True, block_waves=4, block_h=16, w_fold=2, prefetch_rows=2, lds_swz=True, xcd_tiles=True, **_M)),
+    (2, 16, 24, 64, 1, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, block_waves=8, block_h=8, w_fold=1, prefetch_rows=3, xcd_tiles=True, **_M)),
+    (2, 28, 28, 64, 1, 3, 3, 1, 1, "bf16", "gfx950", dict(fwd=True, out_stride=2, block_waves=8, block_h=14, w_fold=1, prefetch_rows=2, lds_swz=True, xcd_tiles=True, **_M)),
+    (2, 13, 21, 16, 4, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, block_waves=3, block_h=13, w_fold=2, prefetch_rows=2, **_M)),
+    (2, 12, 12, 32, 2, 3, 3, 1, 1, "bf16", "gfx950", dict(fwd=True, block_waves=2, block_h=8, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 14, 14, 4, 32, 3, 3, 1, 1, "bf16", "gfx950", dict(fwd=True, dense=True, block_waves=4, block_h=14, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 14, 14, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, dense=True, lds_swz=True, dma=True, wdma=True, block_waves=4, block_h=14, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 16, 16, 4, 32, 3, 3, 1, 1, "bf16", "gfx950", dict(fwd=True, dense=True, lds_swz=True, dma=True, wdma=True, block_waves=4, block_h=16, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 12, 12, 2, 64, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, dense=True, lds_swz=True, dma=True, wdma=True, block_waves=4, block_h=8, w_fold=1, prefetch_rows=2, **_M)),
+    (5, 9, 7, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, dense=True, block_waves=2, block_h=4, w_fold=4, prefetch_rows=2, **_M)),
+    # 11..19: the dgrad form: stride 2 (3x3 w_fold 2, 7x7 w_fold 4), grouped
+    # (cpg 16; cpg 8 at stride 2), dense (cpg 32), dense + lds_swz + dma + wdma
+    # (cpg 32 fp16, cpg 64 bf16), dense at stride 2, and 16 waves.
+    (2, 24, 24, 64, 1, 3, 3, 1, 2, "bf16", "gfx950", dict(block_waves=8, block_h=12, w_fold=2, prefetch_rows=2, **_M)),
+    (2, 21, 19, 64, 1, 7, 7, 3, 2, "fp16", "gfx950", dict(block_waves=4, block_h=8, w_fold=4, prefetch_rows=2, **_M)),
+    (2, 13, 21, 4, 16, 3, 3, 1, 1, "fp16", "gfx950", dict(block_waves=4, block_h=8, w_fold=2, prefetch_rows=2, **_M)),
+    (2, 24, 22, 8, 8, 3, 3, 1, 2, "bf16", "gfx950", dict(block_waves=8, block_h=12, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 16, 16, 4, 32, 3, 3, 1, 1, "bf16", "gfx950", dict(dense=True, block_waves=4, block_h=16, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 14, 14, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", dict(dense=True, lds_swz=True, dma=True, wdma=True, block_waves=4, block_h=14, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 16, 16, 2, 64, 3, 3, 1, 1, "bf16", "gfx950", dict(dense=True, lds_swz=True, dma=True, wdma=True, block_waves=4, block_h=16, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 32, 32, 4, 32, 3, 3, 1, 2, "fp16", "gfx950", dict(dense=True, block_waves=4, block_h=16, w_fold=1, prefetch_rows=2, **_M)),
+    (2, 20, 20, 128, 1, 3, 3, 1, 1, "fp16", "gfx950", dict(block_waves=16, block_h=10, w_fold=1, prefetch_rows=2, **_M)),
+    # 20..21: the grouped forward form with lds_swz (cpg 16) and the dgrad
+    # depthwise form with lds_swz at w_fold 4.
+    (2, 16, 16, 8, 16, 3, 3, 1, 1, "bf16", "gfx950", dict(fwd=True, lds_swz=True, block_waves=4, block_h=8, w_fold=1, prefetch_rows=2, **_M)),
+    (4, 12, 9, 64, 1, 5, 5, 2, 1, "fp16", "gfx950", dict(lds_swz=True, block_waves=4, block_h=12, w_fold=4, prefetch_rows=2, **_M)),
+    # 22..28: both engines reject: dma without dense, wdma without dma,
+    # xcd_tiles on gfx942, dense at cpg 16, a stride-2 dgrad with an odd
+    # block_h, lds_swz at wave32, a stride-2 VALU dgrad.
+    (2, 14, 14, 64, 1, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, lds_swz=True, dma=True, block_waves=4, block_h=14, prefetch_rows=2, **_M)),
+    (2, 14, 14, 4, 32, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, dense=True, lds_swz=True, wdma=True, block_waves=4, block_h=14, prefetch_rows=2, **_M)),
+    (2, 14, 14, 64, 1, 3, 3, 1, 1, "fp16", "gfx942", dict(xcd_tiles=True, block_h=8)),
+    (2, 14, 14, 8, 16, 3, 3, 1, 1, "fp16", "gfx950", dict(fwd=True, dense=True, block_waves=4, block_h=14, prefetch_rows=2, **_M)),
+    (2, 24, 24, 64, 1, 3, 3, 1, 2, "bf16", "gfx950", dict(block_waves=8, block_h=7, prefetch_rows=2, **_M)),
+    (2, 14, 14, 64, 1, 3, 3, 1, 1, "bf16", "gfx1250", dict(lds_swz=True, wave_size=32, block_waves=4, block_h=14, **_M)),
+    (2, 24, 24, 64, 1, 3, 3, 1, 2, "fp16", "gfx950", dict(block_w=8, block_h=8)),
+)  # fmt: skip
+
+
 def _f32_spec(idx: int):
     """Config ``_F32_CFG_BASE + idx``, or None past the last one."""
     if idx < len(_F32_GENERIC_CFGS):
@@ -702,7 +759,27 @@ def _build(spec, arch):
     return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
 
 
+def _win_x_spec(idx: int):
+    N, H, W, G, cpg, KH, KW, PAD, stride, dtype, arch, knobs = _WIN_X_CFGS[idx]
+    problem = DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=G,
+        cpg=cpg,
+        kpg=cpg,
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+    )
+    return DirectDepthwiseDgradWindowedSpec(problem=problem, **knobs), arch
+
+
 def _spec(idx: int):
+    if _WIN_X_CFG_BASE <= idx < _WIN_X_CFG_BASE + len(_WIN_X_CFGS):
+        return _win_x_spec(idx - _WIN_X_CFG_BASE)
     if idx >= _F32_CFG_BASE:
         sel = _f32_spec(idx - _F32_CFG_BASE)
         if sel is None:

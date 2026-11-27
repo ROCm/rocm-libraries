@@ -28,7 +28,9 @@
 # grouped kernel that serves them, see _f32_spec, from index 318 the gfx1250
 # wave32 and image-per-block DirectConvWgradSpec, from index 349
 # DirectDepthwiseWgradSpec and from index 356 the small-C wgrad stems of the
-# AOT grid), builds the kernel via the matching build_direct_conv_* function
+# AOT grid; from index 371 the gfx950 depthwise knobs: DwWgradLdsSpec lane_ch /
+# xcd_pair, DwWgradMfmaSpec stride 2 / xcd_pair / swz / adir and the row-tiled
+# DirectDepthwiseSpatialSpec (block_h)), builds the kernel via the matching build_direct_conv_* function
 # (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -449,7 +451,7 @@ def _wgrad_direct_spec(idx: int):
         ),
         # PAD = KH - 1: one prologue body only.
         39: ("dw_wgrad_mfma", dm(problem=_dwp(64, PAD=2), q_tiles=4)),
-        # Must reject: stride 2.
+        # Stride 2: four stride-1 phases on the grid's z axis.
         40: ("dw_wgrad_mfma", dm(problem=_dwp(64, stride=2))),
         # Grouped 4x4x4 MFMA: 4 channels per group.
         41: ("grouped_wgrad_mfma", gm(problem=_wp(groups=16, cpg=4, kpg=4))),
@@ -2521,8 +2523,114 @@ def _wgrad_pp_spec(idx: int):
     return ("wgrad_tiled", sel, "gfx950")
 
 
+# The gfx950 depthwise knobs, indices 371..385: DwWgradLdsSpec lane_ch 4 / 2
+# and xcd_pair (3 rejects lane_ch 3), DwWgradMfmaSpec stride 2 (the four
+# phases), xcd_pair, swz and adir (with stride 2 and with packed images; 9
+# and 10 reject), then DirectDepthwiseSpatialSpec row tiles (block_h; 13 is a
+# 9x9 filter at one wave per SIMD, 14 rejects block_h -1).
+_DW_X_CFG_BASE = 371
+
+
+def _dw_x_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_DW_X_CFG_BASE + idx``, or None."""
+    ls, dm = DwWgradLdsSpec, DwWgradMfmaSpec
+
+    def sp(**kw):
+        b = dict(N=2, H=40, W=36, groups=16, cpg=1, kpg=1, KH=3, KW=3, PAD=1)
+        b.update(stride=1, dtype="fp16")
+        b.update(kw)
+        return DirectConvProblem(**b)
+
+    table = {
+        0: ("dw_wgrad_lds", ls(problem=_dwp(64, KH=5, KW=5, PAD=2), lane_ch=4)),
+        1: (
+            "dw_wgrad_lds",
+            ls(
+                problem=_dwp(72, KH=7, KW=7, PAD=3, dtype="fp16"),
+                lane_ch=2,
+                xcd_pair=True,
+            ),
+        ),
+        2: (
+            "dw_wgrad_lds",
+            ls(problem=_dwp(192, stride=2, H=30, W=40), lanes_w=8, xcd_pair=True),
+        ),
+        3: ("dw_wgrad_lds", ls(problem=_dwp(64), lane_ch=3)),
+        4: ("dw_wgrad_mfma", dm(problem=_dwp(64, stride=2, H=20, W=24))),
+        5: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(72, KH=5, KW=5, PAD=2, stride=2, H=21, W=26, dtype="fp16"),
+                q_tiles=4,
+                rows_per_chunk=8,
+                xcd_pair=True,
+                swz=True,
+            ),
+        ),
+        6: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(96),
+                rows_per_chunk=32,
+                target_blocks=4096,
+                adir=True,
+                swz=True,
+                xcd_pair=True,
+            ),
+        ),
+        7: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(64, KH=7, KW=7, PAD=3, stride=2, H=28, W=28),
+                q_tiles=4,
+                adir=True,
+            ),
+        ),
+        8: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(64, KH=5, KW=5, PAD=0, H=10, W=6),
+                q_tiles=5,
+                unfold_n=2,
+                adir=True,
+            ),
+        ),
+        # Must reject: packed images at stride 2, and stride 3.
+        9: ("dw_wgrad_mfma", dm(problem=_dwp(64, stride=2), unfold_n=2)),
+        10: ("dw_wgrad_mfma", dm(problem=_dwp(64, stride=3))),
+        11: ("spatial", DirectDepthwiseSpatialSpec(problem=sp(), block_h=64)),
+        12: (
+            "spatial",
+            DirectDepthwiseSpatialSpec(
+                problem=sp(
+                    H=33, W=30, groups=8, KH=5, KW=5, PAD=2, stride=2, dtype="bf16"
+                ),
+                block_h=8,
+                block_waves=2,
+            ),
+        ),
+        13: (
+            "spatial",
+            DirectDepthwiseSpatialSpec(
+                problem=sp(N=1, H=40, W=40, groups=4, KH=9, KW=9, PAD=4), block_h=16
+            ),
+        ),
+        # Must reject: a negative row tile.
+        14: ("spatial", DirectDepthwiseSpatialSpec(problem=sp(), block_h=-1)),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return (sel[0], sel[1], "gfx950")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _DW_X_CFG_BASE:
+        sel = _dw_x_spec(idx - _DW_X_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_PP_CFG_BASE:
         sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:

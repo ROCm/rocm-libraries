@@ -55,6 +55,9 @@ __all__ = [
 ]
 
 BLOCK_K = (128, 256)
+# Grouped problems (one group per block): 64-output blocks for kpg <= 64,
+# 128-byte weight rows with their own transposing-read swizzle.
+GROUPED_BLOCK_K = (64,)
 
 
 # The forward problem the dgrad of a problem runs as: the 4c dgrad's
@@ -80,6 +83,16 @@ def dgrad_pp_mfma_tile_efficiency(spec: DgradPpMfmaSpec) -> float:
 
 
 def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | None":
+    if spec.problem.groups > 1:
+        return pp_mfma_reason(
+            spec,
+            arch,
+            family="dgrad_pp_mfma",
+            block_ks=GROUPED_BLOCK_K,
+            block_k_reason="grouped: block_k must be 64 (128-byte weight rows)",
+            needs_ds_read_tr=True,
+            groups_ok=True,
+        )
     return pp_mfma_reason(
         spec,
         arch,
@@ -97,14 +110,23 @@ def is_valid_dgrad_pp_mfma_spec(
     return (why is None, why or "ok")
 
 
-def _tr_swz(b: IRBuilder, row: Value) -> Value:
+def _tr_swz(b: IRBuilder, row: Value, block_k: int = 128) -> Value:
     """Granule XOR of weight row ``row``, 2 * (row % 4 + 4 * ((row // 8) % 2)):
     the 32 lanes of a transposing-read phase (rows 8b + i, b in 0..1, i in
     0..3, column pairs 4j) land on 32 distinct 8-byte slots of a 256-byte bank
     period. Not an entry of ``rocke.helpers.layouts.XOR_SWIZZLE_TABLE``, whose
     byte-offset swizzles cover the listed MFMA tile shapes but not this
     64-row tile read across rows by ``ds_read_b64_tr_b16``; the C++ mirror is
-    ``tr_swz`` in ``conv_direct_dgrad_pp_mfma.cpp``."""
+    ``tr_swz`` in ``conv_direct_dgrad_pp_mfma.cpp``.
+
+    64-output blocks (128-byte rows, two per bank period): the granule XOR is
+    2 * ((row // 2) % 2 + 2 * ((row // 8) % 2)), so the 4 rows of one parity
+    in a read phase take XORs 0, 2, 4, 6 and their 2 granules each land on 8
+    distinct slots of the half period."""
+    if block_k == 64:
+        lo = b.mod(b.div(row, b.const_i32(2)), b.const_i32(2))
+        hi = b.mod(b.div(row, b.const_i32(8)), b.const_i32(2))
+        return b.mul(b.add(lo, b.mul(hi, b.const_i32(2))), b.const_i32(2))
     lo = b.mod(row, b.const_i32(4))
     hi = b.mod(b.div(row, b.const_i32(8)), b.const_i32(2))
     return b.mul(b.add(lo, b.mul(hi, b.const_i32(4))), b.const_i32(2))
@@ -130,7 +152,7 @@ class _DgradWeights(PpWeights):
         for i in range(w_per_wave):
             q = b.add(b.mul(ctx.wave_g, ci(w_per_wave)), ci(i))
             row = b.add(b.mul(q, ci(RPI)), b.div(ctx.lane, ci(GPR)))
-            gran = b.xor(b.mod(ctx.lane, ci(GPR)), _tr_swz(b, row))
+            gran = b.xor(b.mod(ctx.lane, ci(GPR)), _tr_swz(b, row, BK))
             cc = b.add(ctx.k0, b.mul(gran, ci(GRAN)))
             self.w_pieces.append(
                 (
@@ -150,7 +172,8 @@ class _DgradWeights(PpWeights):
         KH, KW = p.KH, p.KW
         r, s_ = divmod(tap, KW)
         tap_f = (KH - 1 - r) * KW + (KW - 1 - s_)
-        base = b.add(b.mul(c_base, self.row_len), b.mul(ci(tap_f), ctx.K))
+        c_row = c_base if ctx.g_c is None else b.add(c_base, ctx.g_c)
+        base = b.add(b.mul(c_row, self.row_len), b.mul(ci(tap_f), ctx.K))
         for row, off, k_ok, lds_off in self.w_pieces:
             ok = b.land(k_ok, b.cmp_lt(b.add(c_base, row), ctx.C))
             voff = b.select(ok, b.mul(b.add(off, base), ctx.c2), ctx.oob)
@@ -178,7 +201,7 @@ class _DgradWeights(PpWeights):
             for part in range(PARTS_C):
                 for rd in range(2):
                     row = b.add(b.add(ci(part * 32 + 4 * rd), b.mul(tb, ci(8))), ti)
-                    slot = b.xor(b.div(col, ci(GRAN)), _tr_swz(b, row))
+                    slot = b.xor(b.div(col, ci(GRAN)), _tr_swz(b, row, BK))
                     self.a_idx[(kf, part, rd)] = b.add(
                         b.mul(row, ci(BK)),
                         b.add(b.mul(slot, ci(GRAN)), b.mod(col, ci(GRAN))),

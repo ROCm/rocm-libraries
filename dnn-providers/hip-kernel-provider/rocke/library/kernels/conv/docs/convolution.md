@@ -945,6 +945,11 @@ class DirectDepthwiseDgradWindowedSpec:
     wave_size: int = 64
     fwd: bool = False       # mfma: rotated filter -- the forward pass
     out_stride: int = 1     # fwd: 2 keeps every 2nd row/col of the grid
+    dense: bool = False     # mfma, wave64: dense 16-channel form (below)
+    lds_swz: bool = False   # mfma: swizzled, unpadded LDS staging
+    xcd_tiles: bool = False # mfma: XCD-contiguous tile order (gfx950)
+    dma: bool = False       # dense lds_swz: dY rows by LDS-DMA copies
+    wdma: bool = False      # dma: weights by LDS-DMA copies too
 ```
 
 The filter, the padding and the dtype are baked (the kernel name carries
@@ -952,6 +957,36 @@ The filter, the padding and the dtype are baked (the kernel name carries
 `block_h` is a build-time tile height: the rows of a tile are unrolled, the
 image height is the `p_Hi` kernarg and rows past it are guarded at run time,
 so there is no whole-image (`block_h = 0`) form.
+
+gfx950 knobs of the Toeplitz MFMA form (all default off, a default spec emits
+the same IR as before; both engines validate them with the same texts):
+
+- `dense` (grouped form, wave64, `cpg` a multiple of `DW_WIN_DENSE_K` = 32):
+  a wave owns `DW_WIN_DENSE_CH` = 16 channels and the filter taps are dense A
+  fragments (one atom contracts 32 input channels of one tap), so no Toeplitz
+  pass is padded. A forward over groups of 2 or 4 channels
+  (`DW_WIN_FWD_SUB_GROUP_CH`) uses block-diagonal A fragments instead.
+- `lds_swz`: unpadded 16-byte channel chunks, rotated per pixel, at a
+  per-kernel image pitch (`_dw_win_swz_layout`), instead of the padded pixel
+  row; the layout is chosen against the LDS bank model.
+- `xcd_tiles`: the launch is remapped so each XCD runs one contiguous run of
+  (column tile, channel block, row band) tiles and neighbouring column tiles
+  share their window halo in one L2.
+- `dma` (dense `lds_swz`, stride-1 window, i.e. the forward or the stride-1
+  dgrad): the dY window rows reach LDS by 16-byte LDS-DMA
+  copies into `prefetch_rows + 1` ring buffers, one barrier per row; the
+  swizzle is applied on the source side. `wdma` also stages the weights by
+  LDS-DMA (one filter row ahead of that row's dY copies) and reads them once
+  into registers. The `vmcnt` waits are derived from the issue order of the
+  copies and stores, so a change of the issue order changes the waits
+  (C++: the same wait-count log).
+- Stride 2 on the MFMA dgrad form (wave64): the kernel walks the stride-1
+  dgrad over the zero-upsampled dY, so the window loads and the LDS layout are
+  the stride-1 ones (`dma` stays stride-1 only).
+- Up to `DW_DGRAD_MFMA_MAX_WAVES` (16) waves per block.
+
+`DirectDepthwiseSpatialSpec.block_h` (a row tile, 0 = one block walks the
+image) is mirrored in the C++ spatial builder.
 
 Algorithm of the VALU form (the rows of a tile and the taps are unrolled):
 
@@ -1330,13 +1365,19 @@ covers every knob; the byte-identity gate is
 builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`),
 on the ping-pong pipeline of `conv_direct_pp_mfma.py` (shared with the direct
 forward on MFMA with LDS DMA).
-A dense (`groups == 1`) stride-1 dgrad for gfx950 (wave64,
+A dense (`groups == 1`) stride-1 dgrad (or, grouped, see below) for gfx950 (wave64,
 `mfma_f32_16x16x32`), computed as the forward pass over the transposed problem
 (`dgrad_pp_mfma_problem`: dY in, dX out, padding `dil_h * (KH - 1) - PAD`
 per axis). The spec's problem is that forward pass: its `cpg` is the dgrad's
 K and its `kpg` the dgrad's C. The arch gate reads `ArchTarget` capabilities
 (wave64, `ds_read_b64_tr_b16`, 16-byte `buffer_load ... lds`,
 `mfma_f32_16x16x32`), which of the known targets only gfx950 has.
+
+Grouped problems (`groups > 1`, one group per block, the per-group channel
+counts baked) run the same pipeline with `block_k` 64 (128-byte weight rows,
+a transposing-read swizzle of their own, `_tr_swz`); the tiles of one group
+are `ceil(kpg / 64)` blocks. The AOT grid builds them for the per-group
+channel counts in `DGRAD_PP_MFMA_GROUPED_CHANNELS`.
 
 A workgroup of 8 waves owns a 16x16 dX pixel tile and `block_k` (128 or 256)
 dX channels, and walks the dY channels in chunks of 64:
@@ -1623,7 +1664,8 @@ or 256) output channels, and walks the input channels in chunks of 64:
 
 Runtime (kernargs, the direct-conv block): batch, extents and both channel
 counts. Build-time: the filter, padding, dtype and `block_k`. Constraints:
-square odd filters, stride 1, no dilation, "same" padding on both axes,
+square odd filters, stride 1, no dilation, "same" or valid (zero) padding on
+both axes (valid padding bounds the tiles by Ho x Wo),
 every extent and channel count at least 1, C a multiple of 8 and K a
 multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 up to
 `block_k` 128, 7x7 only at 64), and one input image, one output image and
@@ -1735,6 +1777,16 @@ bf16 I/O). Four implementations:
   `benchmark_conv_compare.py --run-from-cache` runs it beside the direct-conv
   and implicit-GEMM sweeps when the cache directory holds its binaries, and
   `--results` merges the three engines' rows.
+- **Dense 3x3 stride-1 dgrad through the same pipeline.** `RtFilterSpec(dgrad=True)`
+  (name tag `dg`) makes K1 read the filter of the dgrad as the forward over
+  dY: the original `[C][3][3][K]` filter with the taps flipped and the channel
+  axes swapped on the fly, padding `2 - pad`, no weight pre-pass. Dense
+  problems only (`groups == 1`); K2, K3 and K4 are the forward's. The AOT grid
+  builds one `dgrad` filter binary beside each forward one (same tiles, dtypes
+  and vector widths). The cache holds these binaries for the Winograd sweep
+  (`benchmark_winograd_aot.py --direction dgrad`, which the comparison driver
+  runs); the packaged library plan stays forward-only, so no packaged dgrad
+  request selects them yet.
 - **Generalized** (`conv_winograd_gen` + K3 with `taps`): any `F(m, r)` per
   axis (1-D `1 x r` / `r x 1`, 5x5), and segmented long filters: `S`
   segments of `F(m, m)` share one input transform and K3 sums
@@ -1788,10 +1840,10 @@ in fp32.
 | Spec | Serves | Output |
 |---|---|---|
 | `DirectWgradTiledSpec` | dense and grouped, stride 1, `cpg`/`kpg` multiples of 8 | `global_atomic_add` into a zeroed fp32 `dW[K, KH, KW, cpg]` |
-| `DwWgradLdsSpec` | depthwise, `C % 8 == 0`, 3x3, stride 1/2 | partial slots `ws[part][tap][c]` |
+| `DwWgradLdsSpec` | depthwise, `C % 8 == 0`, 3x3 to 7x7 (`lane_ch` 8, 4 or 2 channels per lane so the filter's accumulators fit), stride 1/2 | partial slots `ws[part][tap][c]` |
 | `DwWgradColsSpec` | depthwise, `C <= 8` (stem layers), any filter | partial slots `ws[part][tap][c]` |
 | `WgradGatherSpec` | dense, small `C` (`KW * C <= 96`), any stride | partial slots `ws[part][(r, s, c)][k]` |
-| `DwWgradMfmaSpec` | depthwise, `C % 8 == 0`, any filter, stride 1 | partial slots `ws[part][tap][c]` |
+| `DwWgradMfmaSpec` | depthwise, `C % 8 == 0`, any filter, stride 1 or 2 (stride 2 as four phased stride-1 sub-problems) | partial slots `ws[part][tap][c]` |
 | `GroupedWgradMfmaSpec` | grouped, `cpg = kpg` in (4, 8), stride 1 | partial slots `ws[part][(r, s, c)][k]` |
 | `DwWgradFoldSpec` | the fold after a partial-slot pass | `dW` written whole (no zeroing) |
 
@@ -1820,6 +1872,17 @@ in fp32.
   barrier skips the LDS wait (each MFMA waits for its own fragment); one extra
   row buffer (`n_buffers = prefetch + 2`) keeps the refill clear of reads still
   in flight. Each segment starts staggered and ends realigned.
+- **gfx950 depthwise wgrad knobs.** `xcd_pair` (`DwWgradLdsSpec`,
+  `DwWgradMfmaSpec`; tag `xcdp`) re-keys the sibling channel tiles of one
+  partition onto one XCD when `C` is not a multiple of the channel tile, so
+  they share the 128-byte lines at the tile seam (a bijection only when 8
+  divides the partition count; otherwise the launch is unchanged). The MFMA
+  kernel adds `swz` (flip the 64-byte half of a staged 128-byte pixel row on
+  odd column pairs so the transposed reads hit disjoint banks) and `adir`
+  (every lane reads its channel's whole window itself, the four lanes of a
+  channel sharing one address as an LDS broadcast, instead of a quarter each
+  plus quad broadcasts). All default off and absent from the kernel name
+  while off; the AOT grid enumerates them in their own table sections.
 - **Partial slots + fold.** Same-address fp32 atomics serialize, and a
   depthwise `dW` has only a few thousand addresses, so the depthwise and gather
   kernels store one partial slot per partition with plain stores and

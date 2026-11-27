@@ -311,7 +311,10 @@ def test_instance_id_is_the_identity_stable_hash(seed_identities):
     from kernels.conv.kernel_identity import KernelIdentity
 
     for identity in seed_identities:
-        spec, _ = tool.instance_spec(identity)
+        spec, why = tool.instance_spec(identity)
+        if spec is None:
+            assert why.startswith("knobs ["), why
+            continue
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
 
 
@@ -426,7 +429,7 @@ _DIRECT_GRID = {
     # 3058 unsplit and 1816 split-C kernels.
     "direct_nongrouped": 4874,
     "direct_grouped_halo": 2850,
-    "direct_depthwise_win": 759,
+    "direct_depthwise_win": 818,
 }
 #: Forward identities per dtype and algorithm of the direct sweep the packaged launch
 #: does not run, and the start of the reason the adapter refuses them with: the
@@ -444,13 +447,25 @@ _DIRECT_REFUSED = {
         "direct algorithm 'direct_fwd_smallk_mfma' has no packaged launch",
     ),
     "direct_fwd_pp_mfma": (
-        3,
+        4,
         "direct algorithm 'direct_fwd_pp_mfma' has no packaged launch",
     ),
     "direct_fwd_flex_mfma": (
         102,
         "direct algorithm 'direct_fwd_flex_mfma' has no packaged launch",
     ),
+}
+
+
+#: Forward identities per dtype of the packaged algorithms whose knobs the packaged
+#: launch does not carry (the spatial and windowed row-block knob `block_h`, and the
+#: windowed-only prefetch, DMA and tile-order knobs); the adapter refuses them with a
+#: reason that starts "knobs [".
+_KNOB_REFUSED = {
+    ("fp16", "direct_depthwise_spatial"): 12,
+    ("bf16", "direct_depthwise_spatial"): 12,
+    ("fp16", "direct_depthwise_win"): 42,
+    ("bf16", "direct_depthwise_win"): 29,
 }
 
 
@@ -466,9 +481,13 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
 
     assert tool.PACKAGED_DIRECT_ALGORITHMS == AOT_DIRECT_ALGORITHMS
     assert tool.DIRECT_ALGORITHMS.items() <= tool.PACKAGED_DIRECT_ALGORITHMS.items()
-    accepted, refused = {}, {}
+    accepted, refused, knob_refused = {}, {}, {}
     for identity in forward_direct_identities:
         spec, why = tool.instance_spec(identity)
+        if _packaged_direct(identity) and spec is None and why.startswith("knobs ["):
+            key = (identity["dtype_a"], identity["algorithm"])
+            knob_refused[key] = knob_refused.get(key, 0) + 1
+            continue
         if not _packaged_direct(identity):
             key = (identity["dtype_a"], identity["algorithm"])
             refused[key] = refused.get(key, 0) + 1
@@ -484,6 +503,7 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
         )
         key = (spec.dtype, identity["algorithm"])
         accepted[key] = accepted.get(key, 0) + 1
+    assert knob_refused == _KNOB_REFUSED
     # Every forward identity of the packaged algorithms, in both dtypes.
     assert accepted == {
         (dtype, algorithm): count
@@ -511,7 +531,10 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
     for identity in forward_direct_identities[::7]:
         if not _packaged_direct(identity):
             continue
-        spec, _ = tool.instance_spec(identity)
+        spec, why = tool.instance_spec(identity)
+        if spec is None:
+            assert why.startswith("knobs ["), why
+            continue
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
         assert (
             spec.filter_h,

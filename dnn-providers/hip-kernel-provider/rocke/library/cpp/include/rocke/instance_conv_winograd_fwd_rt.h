@@ -53,6 +53,10 @@ typedef struct rocke_winograd_rt_spec
     const char* operand_dtype; /* "fp16" (K1, K2, K4) */
     int vec; /* 8 */
     int filter_rows; /* 1 (K1) */
+    /* false (K1): read the filter of the dense stride-1 dgrad this forward runs
+     * as ([C][3][3][K], taps flipped, channel axes swapped on the fly). Name
+     * tag dg. */
+    bool dgrad;
     int block_size; /* 256 (K2, K4) */
     bool prescale; /* false (K2, K4) */
     int tiles_per_thread; /* 1 (K2) */

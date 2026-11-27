@@ -517,7 +517,8 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
  *  Thread layout: ch = tid % groups, w_in_wave = tid // groups.
  *  Each wave covers n_w_per_wave = wave_size // groups output W positions.
  *  block_w = block_waves * n_w_per_wave.
- *  Grid: (ceil(Wo / block_w), 1, N) — no channel tile.
+ *  Grid: (ceil(Wo / block_w), 1, N * h_tiles) — no channel tile;
+ *  h_tiles = ceil(Ho / block_h) with a row tile, else 1.
  * ===================================================================== */
 typedef struct rocke_direct_depthwise_spatial_spec
 {
@@ -525,6 +526,9 @@ typedef struct rocke_direct_depthwise_spatial_spec
     const char* name; /* default "direct_depthwise_spatial" */
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
+    /* default 0 -- output rows per block (0: one block walks the whole
+     * image). Name part bh{n} when set. */
+    int block_h;
 } rocke_direct_depthwise_spatial_spec_t;
 
 rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);
@@ -705,7 +709,18 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *      fwd: bool = False         # rotated filter: the forward pass (mfma only);
  *                                # a forward problem may be grouped, cpg = kpg
  *                                # a multiple of 8 up to ROCKE_DW_WIN_MAX_GROUP_CH
+ *                                # (or 2 / 4: block-diagonal 8-channel chunks);
+ *                                # the wave64 dgrad form is grouped too
  *      out_stride: int = 1       # fwd: 2 keeps every 2nd row/col of the grid
+ *      dense: bool = False       # grouped cpg % 32 == 0: 16 channels per wave,
+ *                                # one 32-channel K atom per tap
+ *      lds_swz: bool = False     # swizzled unpadded LDS staging (wave64)
+ *      xcd_tiles: bool = False   # XCD-contiguous tile order (gfx950)
+ *      dma: bool = False         # dense lds_swz: dY rows by 16-byte LDS DMA
+ *      wdma: bool = False        # dma: the dense weights by LDS DMA too
+ *
+ *  A wave64 MFMA dgrad also runs stride 2 (the stride-1 dgrad over the
+ *  zero-upsampled dY; block_h even).
  *
  *  AOT: with fwd=False, takes the direct dgrad kernarg block (N, H, W, Ho, Wo,
  *  groups and the dY/dX strides are runtime); with fwd=True, the rotated
@@ -721,12 +736,15 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
 #define ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES ((1 << 30) - 1)
 #define ROCKE_DW_DGRAD_MFMA_CH 8
 #define ROCKE_DW_DGRAD_MFMA_MAX_UNROLL 512
-#define ROCKE_DW_DGRAD_MFMA_MAX_WAVES 8
+#define ROCKE_DW_DGRAD_MFMA_MAX_WAVES 16
 #define ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS 224
 #define ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS 4
 #define ROCKE_DW_DGRAD_MFMA_LDS_BUDGET (64 * 1024)
 /* Widest group (cpg = kpg) the grouped forward form contracts per wave. */
 #define ROCKE_DW_WIN_MAX_GROUP_CH 64
+/* The dense channel form: 16 channels per wave, 32-channel K. */
+#define ROCKE_DW_WIN_DENSE_CH 16
+#define ROCKE_DW_WIN_DENSE_K 32
 
 typedef struct rocke_direct_depthwise_dgrad_win_spec
 {
@@ -743,6 +761,11 @@ typedef struct rocke_direct_depthwise_dgrad_win_spec
     int wave_size; /* default 64 */
     bool fwd; /* default false */
     int out_stride; /* default 1; 2 with fwd */
+    bool dense; /* default false. Name flag dn. */
+    bool lds_swz; /* default false. Name flag sw. */
+    bool xcd_tiles; /* default false. Name flag xc. */
+    bool dma; /* default false. Name flag dma. */
+    bool wdma; /* default false. Name flag wd. */
 } rocke_direct_depthwise_dgrad_win_spec_t;
 
 rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void);

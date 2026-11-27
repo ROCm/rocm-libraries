@@ -50,7 +50,10 @@ struct PpSpec
 
 /* What pp_mfma_reason takes besides the spec: the family's name in the
  * reasons, the block_k values its weight staging takes (block_k_reason
- * refuses the rest) and whether it needs the transposing LDS read. */
+ * refuses the rest), whether it needs the transposing LDS read, whether it
+ * also takes valid padding (PAD 0: the kernel bounds its tiles by Ho x Wo)
+ * and whether it takes grouped problems (one group per block, the per-group
+ * channel counts baked). */
 struct PpFamily
 {
     const char* family;
@@ -58,6 +61,8 @@ struct PpFamily
     int n_block_ks;
     const char* block_k_reason;
     bool needs_ds_read_tr;
+    bool valid_ok;
+    bool groups_ok;
 };
 
 long pp_lds_bytes(const PpSpec& s);
@@ -78,6 +83,9 @@ struct PpCtx
     V lane, wave_k, wave_g, k0, C, K, c0, c2, oob, w_rsrc;
     V w_bufs[2], w_addr[2];
     std::function<V(V, V)> lds_at;
+    /* Grouped problems: the block's first reduction channel (g * cpg; NULL
+     * when dense). C and K above are then the baked per-group counts. */
+    V g_c;
     /* Lane values a PpWeights computed and the pipeline reuses: l_row,
      * l_gran, lane_c (dma_geometry), lane_hi, l16 (a_geometry). */
     std::map<std::string, V> shared;

@@ -1116,7 +1116,7 @@ def test_compare_forwards_an_miopen_command_to_winograd(tmp_path, monkeypatch):
     "extra, why",
     [
         ([], "no Winograd cache"),
-        (["--direction", "wgrad"], "forward direction only"),
+        (["--direction", "wgrad"], "forward and dgrad directions only"),
         (["--skip-winograd"], None),
     ],
 )
@@ -1224,8 +1224,8 @@ def test_winograd_reads_the_directions_of_an_miopen_line():
         ("wgrad", "bf16"),
     ]
     reasons = [W.winograd_case_reason(p, dt, d) for p, dt, d in cases]
-    assert reasons[0] is None
-    assert all("forward direction only" in r for r in reasons[1:])
+    assert reasons[:2] == [None, None]
+    assert "forward and dgrad directions only" in reasons[2]
     # --dtype / --direction override the line, as in the other sweeps.
     over = W.cases_of(_wino_args("--miopen-cmd", line, "--dtype", "fp16",
                                  "--direction", "fwd"))  # fmt: skip

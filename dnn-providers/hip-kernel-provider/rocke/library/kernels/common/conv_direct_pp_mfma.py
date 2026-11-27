@@ -141,16 +141,22 @@ class PpMfmaSpec:
             f"f{p.KH}x{p.KW}",
             f"p{p.PAD}",
             f"bk{self.block_k}",
+            # The baked per-group channel counts: two grouped problems that
+            # differ only in cpg/kpg are different binaries.
+            f"c{p.cpg}k{p.kpg}" if p.groups > 1 else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
     def grid(self) -> Tuple[int, int, int]:
         p = self.problem
+        # Grouped: the output-channel tiles of every group (one group per
+        # block, ``ceil(kpg / block_k)`` tiles each); dense: kpg == total_k.
         n = (
             p.N
             * ceil_div(p.Ho, TH)
             * ceil_div(p.Wo, TW)
-            * ceil_div(p.total_k, self.block_k)
+            * p.groups
+            * ceil_div(p.kpg, self.block_k)
         )
         return (n, 1, 1)
 
@@ -161,12 +167,12 @@ class PpMfmaSpec:
 def pp_mfma_tile_efficiency(spec: PpMfmaSpec) -> float:
     """Real work over the padded tile grid (pixels x output channels)."""
     p = spec.problem
-    return (p.Ho * p.Wo * p.total_k) / (
+    return (p.Ho * p.Wo * p.kpg) / (
         ceil_div(p.Ho, TH)
         * TH
         * ceil_div(p.Wo, TW)
         * TW
-        * ceil_div(p.total_k, spec.block_k)
+        * ceil_div(p.kpg, spec.block_k)
         * spec.block_k
     )
 
@@ -179,12 +185,17 @@ def pp_mfma_reason(
     block_ks: Sequence[int],
     block_k_reason: str,
     needs_ds_read_tr: bool = False,
+    valid_ok: bool = False,
+    groups_ok: bool = False,
 ) -> "str | None":
     """Why ``spec`` cannot build on ``arch`` (None when it can).
 
     ``family`` names the kernel in the reasons; ``block_ks`` are the block_k
     values its weight staging takes (``block_k_reason`` refuses the rest);
-    ``needs_ds_read_tr`` gates on the transposing LDS read.
+    ``needs_ds_read_tr`` gates on the transposing LDS read; ``valid_ok`` also
+    takes valid padding (PAD 0: the kernel bounds its tiles by Ho x Wo);
+    ``groups_ok`` takes grouped problems (one group per block, the per-group
+    channel counts baked).
     """
     p = spec.problem
     target = ArchTarget.from_gfx(arch)
@@ -204,7 +215,7 @@ def pp_mfma_reason(
     why = problem_dims_reason(p)
     if why is not None:
         return why
-    if p.groups != 1:
+    if p.groups != 1 and not groups_ok:
         return "groups must be 1"
     if p.stride != 1:
         return "stride must be 1"
@@ -212,7 +223,7 @@ def pp_mfma_reason(
         return "dilation must be 1"
     if p.KH != p.KW or p.KH < 3 or p.KH % 2 == 0:
         return "square odd filters >= 3 only"
-    if p.PAD != (p.KH - 1) // 2:
+    if p.PAD != (p.KH - 1) // 2 and not (valid_ok and p.PAD == 0):
         return f"'same' padding only: PAD must be {(p.KH - 1) // 2} (got {p.PAD})"
     why = one_padding_reason(p)
     if why is not None:
@@ -291,6 +302,9 @@ class PpCtx:
     w_bufs: List[Value]
     w_addr: List[Value]
     lds_at: Callable[[Value, Value], Value]
+    # Grouped problems: the block's first reduction channel (g * cpg; None
+    # when dense). C and K above are then the baked per-group counts.
+    g_c: Optional[Value] = None
     # Lane values a PpWeights computed and the pipeline reuses (see
     # PpWeights.dma_geometry and PpWeights.a_geometry).
     shared: Dict[str, Value] = field(default_factory=dict)
@@ -365,6 +379,12 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
     p_Hi, p_Wi = params["p_Hi"], params["p_Wi"]
     p_Ho, p_Wo = params["p_Ho"], params["p_Wo"]
     C, K = params["p_total_c"], params["p_total_k"]
+    # Grouped: one group per block, per-group channel counts baked; the group
+    # count is the runtime total over the baked kpg.
+    grouped = p.groups > 1
+    if grouped:
+        n_groups = b.div(K, ci(p.kpg))
+        C, K = ci(p.cpg), ci(p.kpg)
     sa_n, sa_h, sa_w = (
         params["p_A_stride_n"],
         params["p_A_stride_hi"],
@@ -393,6 +413,12 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
     rest = b.div(blk, n_kt)
     w_tile = b.mod(rest, n_wt)
     rest = b.div(rest, n_wt)
+    g_c = g_k = None
+    if grouped:
+        grp = b.mod(rest, n_groups)
+        rest = b.div(rest, n_groups)
+        g_c = b.mul(grp, ci(p.cpg))
+        g_k = b.mul(grp, ci(p.kpg))
     h_tile = b.mod(rest, n_ht)
     n_img = b.div(rest, n_ht)
     oh0 = b.mul(h_tile, ci(TH))
@@ -440,6 +466,7 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
         w_bufs=w_bufs,
         w_addr=w_addr,
         lds_at=lds_at,
+        g_c=g_c,
     )
 
     # ---- rank 0: weight DMA geometry (the family's) -------------------------
@@ -484,6 +511,8 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
         )
         c_ok = b.cmp_lt(b.add(c_base, ch), C)
         g_off = b.add(b.add(off, b.mul(ih, sa_h)), c_base)
+        if g_c is not None:
+            g_off = b.add(g_off, g_c)
         voff = b.select(b.land(b.land(ok, row_ok), c_ok), b.mul(g_off, c2), oob)
         lds_off = b.add(b.mul(row, ci(ROW_E * 2)), ci(c_first * CK * 2))
         b.async_buffer_load_lds(a_rsrc, lds_at(in_addr[buf], lds_off), voff, c0, dw)
@@ -618,6 +647,8 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
         oh = b.add(oh0, b.add(b.mul(wave_j, ci(8)), ci(jb)))
         hw_ok = b.land(w_ok, b.cmp_lt(oh, p_Ho))
         pix = b.add(b.mul(oh, sd_h), b.mul(ow, sd_w))
+        if g_k is not None:
+            pix = b.add(pix, g_k)
         for kf in range(KF):
             k = b.add(k_lane, ci(kf * ATOM))
             ok = b.land(hw_ok, b.cmp_lt(k, K))

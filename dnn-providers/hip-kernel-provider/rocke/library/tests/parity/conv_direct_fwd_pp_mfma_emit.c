@@ -94,6 +94,20 @@ static int make_cfg(int idx, rocke_fwd_pp_mfma_spec_t* s, const char** arch)
     case 12: /* rejected by both engines: C = 12 */
         s->problem = make_problem(3, "bf16", 12);
         return 0;
+    case 13: /* bf16, 3x3, valid padding (PAD 0), block_k 128 */
+        s->problem = make_problem(3, "bf16", 72);
+        s->problem.PAD = 0;
+        return 0;
+    case 14: /* fp16, 3x3, valid padding (PAD 0), block_k 64 */
+        s->problem = make_problem(3, "fp16", 72);
+        s->problem.PAD = 0;
+        s->block_k = 64;
+        return 0;
+    case 15: /* rejected by both engines: grouped (2 groups) */
+        s->problem = make_problem(3, "bf16", 36);
+        s->problem.groups = 2;
+        s->problem.kpg = 48;
+        return 0;
     default:
         return -1;
     }

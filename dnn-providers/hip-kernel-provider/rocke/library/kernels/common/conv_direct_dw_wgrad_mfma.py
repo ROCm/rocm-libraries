@@ -73,6 +73,53 @@ class DwWgradMfmaSpec:
     # Images packed side by side in one column tile (small images), at the
     # pitch of image_pitch(): neighbours share their zero padding.
     unfold_n: int = 1
+    # Re-key the sibling channel blocks of one (q tile, z) onto one XCD when
+    # C % 64 != 0 (they share the 128 B lines at the channel-block seam).
+    xcd_pair: bool = False
+    # Swizzled staging: flip the 64 B half of a staged 128 B pixel row on
+    # columns with bit 1 set, so the transposed reads of columns x and x + 2
+    # of one 32-lane half-wave hit disjoint banks.
+    swz: bool = False
+    # A direct: every lane reads its channel's whole main_in window itself
+    # (the four lanes of a channel share one address = LDS broadcast) instead
+    # of a quarter each plus quad broadcasts; and the DMA lane offsets are
+    # built once per unit (each step adds only the row offset).
+    adir: bool = False
+
+    def xcd_paired(self) -> bool:
+        return self.xcd_pair
+
+    @property
+    def phased(self) -> bool:
+        """Stride 2: four stride-1 sub-problems (one per input row/column
+        parity), run side by side on the grid's z axis."""
+        return self.problem.stride == 2
+
+    @property
+    def pad(self) -> int:
+        """Padding of the (sub-)problem the main loop runs."""
+        p = self.problem
+        return (p.PAD + 1) // 2 if self.phased else p.PAD
+
+    def _sub_k(self, k: int) -> int:
+        p = self.problem
+        if not self.phased:
+            return k
+        return (k - 1 - p.PAD) // 2 + self.pad + 1
+
+    @property
+    def kh(self) -> int:
+        return self._sub_k(self.problem.KH)
+
+    @property
+    def kw(self) -> int:
+        return self._sub_k(self.problem.KW)
+
+    @property
+    def hh(self) -> int:
+        """Rows of the (largest) sub-problem image."""
+        h = self.problem.H
+        return (h + 1) // 2 if self.phased else h
 
     @property
     def block_q(self) -> int:
@@ -80,16 +127,16 @@ class DwWgradMfmaSpec:
 
     @property
     def rg(self) -> int:
-        return ceil_div(self.problem.KH, _TAPS)
+        return ceil_div(self.kh, _TAPS)
 
     @property
     def sg(self) -> int:
-        return ceil_div(self.problem.KW, _TAPS)
+        return ceil_div(self.kw, _TAPS)
 
     @property
     def preshift(self) -> bool:
         # A lane's tap shift reaches past one v_perm (3 halves) from KW 4 on.
-        return min(_TAPS, self.problem.KW) - 1 > 2
+        return min(_TAPS, self.kw) - 1 > 2
 
     def win_words(self) -> int:
         return 2 * (self.q_tiles - 1) + 2 * (self.sg - 1) + 3
@@ -132,7 +179,12 @@ class DwWgradMfmaSpec:
             f"pf{self.prefetch}",
             f"un{self.unfold_n}",
             f"tb{self.target_blocks}",
-            flags=flags,
+            flags=dict(
+                flags,
+                **({"xcdp": True} if self.xcd_paired() else {}),
+                **({"swz": True} if self.swz else {}),
+                **({"adir": True} if self.adir else {}),
+            ),
         )
 
     def n_channel_tiles(self) -> int:
@@ -149,7 +201,7 @@ class DwWgradMfmaSpec:
 
     def n_units(self) -> int:
         p = self.problem
-        return ceil_div(p.N, self.unfold_n) * ceil_div(p.H, self.rows_per_chunk)
+        return ceil_div(p.N, self.unfold_n) * ceil_div(self.hh, self.rows_per_chunk)
 
     def n_z(self) -> int:
         planes = self.n_channel_tiles() * self.n_q()
@@ -163,7 +215,8 @@ class DwWgradMfmaSpec:
         return self.n_partitions() * p.KH * p.KW * p.groups * 4
 
     def launch_geometry(self):
-        return (self.n_channel_tiles(), self.n_q(), self.n_z()), (_NW * _WAVE, 1, 1)
+        z = self.n_z() * (4 if self.phased else 1)
+        return (self.n_channel_tiles(), self.n_q(), z), (_NW * _WAVE, 1, 1)
 
     def lds_bytes(self) -> int:
         stage = self.prefetch * _NW * (self.ix() + self.iy()) * _WAVE * 16
@@ -179,8 +232,10 @@ def is_valid_dw_wgrad_mfma_spec(spec: DwWgradMfmaSpec, arch: str = "gfx950"):
         return False, "depthwise only"
     if p.dtype not in ("fp16", "bf16"):
         return False, "fp16/bf16 only"
-    if p.stride != 1:
-        return False, "stride 1 only"
+    if p.stride not in (1, 2):
+        return False, "stride 1 or 2 only"
+    if p.stride == 2 and spec.unfold_n != 1:
+        return False, "stride 2: no image packing"
     if p.PAD > p.KH - 1 or p.PAD > p.KW - 1:
         return False, "PAD <= K - 1"
     if p.groups % 8:
@@ -212,8 +267,10 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
     if not ok:
         raise ValueError(f"invalid DwWgradMfmaSpec: {why}")
     p = spec.problem
-    KH, KW, PAD = p.KH, p.KW, p.PAD
-    TAPS = KH * KW
+    KH, KW, PAD = spec.kh, spec.kw, spec.pad  # the main loop's (sub-)problem
+    KH0, KW0, PAD0 = p.KH, p.KW, p.PAD
+    TAPS = KH0 * KW0
+    PH = spec.phased
     QT, BQ = spec.q_tiles, spec.block_q
     RG, SG = spec.rg, spec.sg
     D = spec.prefetch
@@ -255,7 +312,51 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
     tid = b.thread_id_x()
     lane = b.mod(tid, ci(_WAVE))
     wave = b.readfirstlane(b.div(tid, ci(_WAVE)))
-    ctile, qtile, zslot = b.block_id_x(), b.block_id_y(), b.block_id_z()
+    ctile, qtile, zall = b.block_id_x(), b.block_id_y(), b.block_id_z()
+    if spec.xcd_paired():
+        # C, W, N are runtime: rebuild the grid extents (n_z as sized by the
+        # launch) and re-key only when C % 64 != 0 and 8 | gy * gz (a bijection).
+        r_gx = b.div(b.add(p_C, ci(_BC - 1)), ci(_BC))
+        r_gy = b.div(b.add(p_Wo, ci(BQ - 1)), ci(BQ))
+        r_hh = b.div(b.add(params["p_Hi"], c1), c2) if PH else params["p_Hi"]
+        r_units = b.mul(
+            b.div(b.add(p_N, ci(spec.unfold_n - 1)), ci(spec.unfold_n)),
+            b.div(b.add(r_hh, ci(spec.rows_per_chunk - 1)), ci(spec.rows_per_chunk)),
+        )
+        r_planes = b.mul(r_gx, r_gy)
+        r_nz = b.smin(
+            r_units,
+            b.smax(
+                b.div(b.add(ci(spec.target_blocks), b.sub(r_planes, c1)), r_planes), c1
+            ),
+        )
+        r_gz = b.mul(r_nz, ci(4)) if PH else r_nz
+        on = b.land(
+            b.cmp_ne(b.mod(p_C, ci(_BC)), c0),
+            b.land(
+                b.cmp_ge(r_gx, c2),
+                b.cmp_eq(b.mod(b.mul(r_gy, r_gz), ci(8)), c0),
+            ),
+        )
+        flat = b.add(ctile, b.mul(r_gx, b.add(qtile, b.mul(r_gy, zall))))
+        rest = b.add(b.mul(b.div(flat, b.mul(r_gx, ci(8))), ci(8)), b.mod(flat, ci(8)))
+        ctile = b.readfirstlane(b.select(on, b.mod(b.div(flat, ci(8)), r_gx), ctile))
+        qtile = b.readfirstlane(b.select(on, b.mod(rest, r_gy), qtile))
+        zall = b.readfirstlane(b.select(on, b.div(rest, r_gy), zall))
+    if PH:
+        # z = 4 * zz + phase: phase (a, bb) = (row, column) parity of the
+        # input pixels 2 * i + a, 2 * j + bb the sub-problem sees as an image.
+        phase = b.readfirstlane(b.mod(zall, ci(4)))
+        zslot = b.readfirstlane(b.div(zall, ci(4)))
+        pa = b.div(phase, c2)
+        pb = b.mod(phase, c2)
+        p_H = b.div(b.add(b.sub(p_H, pa), c1), c2)
+        p_W = b.div(b.add(b.sub(p_W, pb), c1), c2)
+        x_base = b.add(b.mul(pa, sx_h), b.mul(pb, sx_w))
+        sx_h = b.mul(sx_h, c2)
+        sx_w = b.mul(sx_w, c2)
+    else:
+        zslot = zall
     c_blk0 = b.mul(ctile, ci(_BC))
     q0 = b.mul(qtile, ci(BQ))
     n_q = b.div(b.add(p_Wo, ci(BQ - 1)), ci(BQ))
@@ -263,11 +364,19 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
     n_chunks = b.div(b.add(p_H, ci(spec.rows_per_chunk - 1)), ci(spec.rows_per_chunk))
     n_ngrp = b.div(b.add(p_N, ci(UN - 1)), ci(UN))
     n_units = b.mul(n_ngrp, n_chunks)
-    # Same formula as DwWgradMfmaSpec.n_z, which sizes the grid.
+    # Same formula as DwWgradMfmaSpec.n_z, which sizes the grid (rows of the
+    # larger parity image when stride 2).
+    n_units_z = n_units
+    if PH:
+        h_big = b.div(b.add(params["p_Hi"], c1), c2)
+        n_units_z = b.mul(
+            n_ngrp,
+            b.div(b.add(h_big, ci(spec.rows_per_chunk - 1)), ci(spec.rows_per_chunk)),
+        )
     n_ct = b.div(b.add(p_C, ci(_BC - 1)), ci(_BC))
     planes = b.mul(n_ct, n_q)
     n_z = b.smin(
-        n_units,
+        n_units_z,
         b.smax(b.div(b.add(ci(spec.target_blocks), b.sub(planes, c1)), planes), c1),
     )
 
@@ -297,7 +406,10 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
         for i in range(n_instr):
             slot = b.add(b.mul(b.add(b.mul(wave, ci(n_instr)), ci(i)), ci(_WAVE)), lane)
             col = b.div(slot, ci(_CH))
-            cc = b.add(c_blk0, b.mul(b.mod(slot, ci(_CH)), ci(8)))
+            chunk = b.mod(slot, ci(_CH))
+            if spec.swz:
+                chunk = b.xor(chunk, b.mul(b.land(b.div(col, c2), c1), ci(4)))
+            cc = b.add(c_blk0, b.mul(chunk, ci(8)))
             out.append((col, b.land(b.cmp_lt(col, ci(cols)), b.cmp_lt(cc, p_C)), cc))
         return out
 
@@ -345,7 +457,12 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
     # channels 4 * (4b + j) .. + 3.
     tr_row = b.mod(b.div(lane, ci(4)), ci(4))
     tr_cg = b.add(b.mul(b.div(lane, ci(16)), ci(4)), b.mod(lane, ci(4)))
-    tr_base = b.add(b.mul(tr_row, ci(_BC)), b.mul(tr_cg, ci(4)))
+    if spec.swz:
+        tr_col = b.mul(tr_cg, ci(4))
+        tr_col = b.xor(tr_col, b.mul(b.land(b.div(tr_row, c2), c1), ci(32)))
+        tr_base = b.add(b.mul(tr_row, ci(_BC)), tr_col)
+    else:
+        tr_base = b.add(b.mul(tr_row, ci(_BC)), b.mul(tr_cg, ci(4)))
 
     def transpose_rows(stage_x, stage_y, with_x: bool):
         """Staged NHWC rows -> main_in / dnew, channel-major."""
@@ -404,6 +521,11 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
         )
         for k in range(ceil_div(NWR, 4))
     ]
+    a_dir = (
+        [b.add(b.mul(ch_w, ci(HALF)), ci(8 * m)) for m in range(NWR)]
+        if spec.adir
+        else []
+    )
     # Likewise the newest dY row: lane j of a channel reads q tiles j, j + 4.
     d_reads = [
         b.add(
@@ -446,11 +568,18 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
 
     def compute(ring, accs):
         """MFMA the X row in main_in against the dY rows in ``ring``."""
-        part = [
-            words(b.smem_load_vN(main_in, c0, idx, dtype=io_type, n=8), 4)
-            for idx in a_reads
-        ]
-        win = [bcast(part[m // 4][e], m % 4) for m in range(NWR) for e in range(4)]
+        if spec.adir:
+            win = [
+                w
+                for idx in a_dir
+                for w in words(b.smem_load_vN(main_in, c0, idx, dtype=io_type, n=8), 4)
+            ]
+        else:
+            part = [
+                words(b.smem_load_vN(main_in, c0, idx, dtype=io_type, n=8), 4)
+                for idx in a_reads
+            ]
+            win = [bcast(part[m // 4][e], m % 4) for m in range(NWR) for e in range(4)]
         if spec.preshift:
             win = [b.perm_b32(win[j + 1], win[j], pre_sel) for j in range(WW)]
         bfr = [
@@ -510,11 +639,48 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
             x_img = b.mul(n_img, sx_n)
             y_img = b.mul(n_img, sdy_n)
 
+            if spec.adir:
+                # Byte offsets of the lanes for this unit, OOB lanes at 2^31 - 1;
+                # a step adds the row's bytes, or 2^31 for a row outside the
+                # image (u32 sum stays >= 2^31 > the buffer size, no wrap).
+                def lane_base(offs, img):
+                    out = []
+                    for off, okl, j in offs:
+                        ok = okl
+                        if UN > 1:
+                            ok = b.land(ok, b.cmp_lt(b.add(n_img, j), p_N))
+                        out.append(b.select(ok, b.mul(b.add(off, img), c2), oob))
+                    return out
+
+                xb = lane_base(x_offs, b.add(x_img, x_base) if PH else x_img)
+                yb = lane_base(y_offs, y_img)
+                row_oob = ci(-(1 << 31))
+
             def issue(buf: int, t: Value):
                 """DMA step t: X row y0 - PRE + t (steps >= PRE) and dY row y + PAD."""
                 y = b.add(b.sub(y0, ci(PRE)), t)
+                if spec.adir:
+                    x_ok = b.land(b.cmp_ge(t, ci(PRE)), b.cmp_lt(t, n_steps))
+                    xr = b.readfirstlane(
+                        b.select(x_ok, b.mul(b.mul(y, sx_h), c2), row_oob)
+                    )
+                    for i, base in enumerate(xb):
+                        dma(b_rsrc, x_addr[buf], IX, i, b.add(base, xr))
+                    pr = b.add(y, ci(PAD))
+                    y_ok = b.land(
+                        b.land(b.cmp_ge(pr, c0), b.cmp_lt(pr, p_Ho)),
+                        b.cmp_lt(t, n_steps),
+                    )
+                    yr = b.readfirstlane(
+                        b.select(y_ok, b.mul(b.mul(pr, sdy_h), c2), row_oob)
+                    )
+                    for i, base in enumerate(yb):
+                        dma(a_rsrc, y_addr[buf], IY, i, b.add(base, yr))
+                    return
                 x_ok = b.land(b.cmp_ge(t, ci(PRE)), b.cmp_lt(t, n_steps))
                 x_row = b.add(x_img, b.mul(y, sx_h))
+                if PH:
+                    x_row = b.add(x_row, x_base)
                 for i, (off, okl, j) in enumerate(x_offs):
                     ok = b.land(okl, x_ok)
                     if UN > 1:
@@ -574,24 +740,50 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
         accs = list(unit_loop.results)
 
         # ---- epilogue: ws[part][tap][c], part = zslot * n_q + qtile -------------
+        # (stride 2: the four phases of one part own disjoint taps)
         part = b.add(b.mul(zslot, n_q), qtile)
         c_glb = b.add(c_blk0, ch_w)
         c_ok = b.cmp_lt(c_glb, p_C)
+
+        def tap_of(k, par, k0):
+            """Sub-problem tap index -> filter tap (runtime when phased)."""
+            if not PH:
+                return k
+            return b.add(b.mul(b.sub(k, ci(PAD)), c2), b.add(par, ci(PAD0)))
+
         for rgi in range(RG):
-            r = b.add(lane4, ci(rgi * _TAPS))
+            kk = b.add(lane4, ci(rgi * _TAPS))
+            r = tap_of(kk, pa if PH else None, KH0)
+            if PH:
+                ok_r = b.land(
+                    b.cmp_lt(kk, ci(KH)),
+                    b.land(b.cmp_ge(r, c0), b.cmp_lt(r, ci(KH0))),
+                )
             row0 = b.add(
-                b.mul(b.add(b.mul(part, ci(TAPS)), b.mul(r, ci(KW))), p_C), c_glb
+                b.mul(b.add(b.mul(part, ci(TAPS)), b.mul(r, ci(KW0))), p_C), c_glb
             )
-            with b.scf_if(b.land(c_ok, b.cmp_lt(r, ci(KH)))):
+            if not PH:
+                ok_r = b.cmp_lt(r, ci(KH))
+            with b.scf_if(b.land(c_ok, ok_r)):
                 for sgi in range(SG):
                     acc = accs[rgi * SG + sgi]
                     for i in range(_TAPS):
                         s = sgi * _TAPS + i
                         if s < KW:
-                            off = b.add(row0, b.mul(ci(s), p_C))
-                            b.global_store(
-                                params["D"], off, b.vec_extract(acc, i), align=4
-                            )
+                            if PH:
+                                sc = tap_of(ci(s), pb, KW0)
+                                with b.scf_if(
+                                    b.land(b.cmp_ge(sc, c0), b.cmp_lt(sc, ci(KW0)))
+                                ):
+                                    off = b.add(row0, b.mul(sc, p_C))
+                                    b.global_store(
+                                        params["D"], off, b.vec_extract(acc, i), align=4
+                                    )
+                            else:
+                                off = b.add(row0, b.mul(ci(s), p_C))
+                                b.global_store(
+                                    params["D"], off, b.vec_extract(acc, i), align=4
+                                )
 
     if PAD == KH - 1:
         emit_body(PAD)

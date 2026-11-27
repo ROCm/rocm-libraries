@@ -43,13 +43,19 @@ extern "C" {
  *
  *  @dataclass(frozen=True)
  *  class DwWgradMfmaSpec:
- *      problem: DirectConvProblem          # depthwise, stride 1
+ *      problem: DirectConvProblem          # depthwise, stride 1 or 2
  *      name: str = "dw_wgrad_mfma"
  *      q_tiles: int = 8
  *      rows_per_chunk: int = 16
  *      prefetch: int = 2
  *      target_blocks: int = 2048
  *      unfold_n: int = 1
+ *      xcd_pair: bool = False   # re-key sibling channel blocks onto one XCD
+ *      swz: bool = False        # swizzled staging (64 B half flip)
+ *      adir: bool = False       # direct A window reads, per-unit DMA bases
+ *
+ *  Stride 2 runs four stride-1 sub-problems (one per input row / column
+ *  parity) side by side on the grid's z axis ("phased").
  * ===================================================================== */
 typedef struct rocke_dw_wgrad_mfma_spec
 {
@@ -60,6 +66,9 @@ typedef struct rocke_dw_wgrad_mfma_spec
     int prefetch; /* default 2 */
     int target_blocks; /* default 2048 */
     int unfold_n; /* default 1 */
+    bool xcd_pair; /* default false. Name flag xcdp. */
+    bool swz; /* default false. Name flag swz. */
+    bool adir; /* default false. Name flag adir. */
 } rocke_dw_wgrad_mfma_spec_t;
 
 rocke_dw_wgrad_mfma_spec_t rocke_dw_wgrad_mfma_spec_default(void);
@@ -72,7 +81,7 @@ void rocke_dw_wgrad_mfma_launch_geometry(const rocke_dw_wgrad_mfma_spec_t* spec,
                                          int grid[3],
                                          int block[3]);
 /* kernel_name_join(name, f{KH}x{KW}p{PAD}s{stride}, qt{n}, rpc{n}, pf{n},
- * un{n}, tb{n}, flags [bf16]). */
+ * un{n}, tb{n}, flags [bf16, xcdp, swz, adir]). */
 rocke_status_t rocke_dw_wgrad_mfma_kernel_name(const rocke_dw_wgrad_mfma_spec_t* spec,
                                                char* out,
                                                size_t out_cap);

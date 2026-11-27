@@ -96,7 +96,8 @@ def test_reasons():
     assert why(kpg=0) == "kpg must be >= 1 (got 0)"
     assert why(N=0) == "N must be >= 1 (got 0)"
     # "Same" padding on both axes only.
-    assert why(PAD=0) == "'same' padding only: PAD must be 1 (got 0)"
+    assert why(PAD=0) is None  # valid padding
+    assert why(PAD=2) == "'same' padding only: PAD must be 1 (got 2)"
     assert why(pad_w=0) == "one padding for both axes (got PAD=1x0)"
     assert "pad_w must be -1" in why(pad_w=-3)
     assert why(pad_w=1) is None
@@ -284,6 +285,8 @@ def test_engines_agree_on_specs():
         (dict(N=1 << 25, H=256, W=256), {}),
         (dict(H=(1 << 31) - 1, W=(1 << 31) - 1, cpg=(1 << 31) - 8, kpg=8), {}),
         ({}, dict(wave_size=32)),
+        # Valid padding (PAD 0) of a 3x3 filter.
+        (dict(PAD=0), dict(block_k=64)),
     ):
         specs.append(FwdPpMfmaSpec(problem=replace(base, **pkw), **knobs))
     for arch in ("gfx950", "gfx942", "gfx1250"):
