@@ -1051,9 +1051,15 @@ def _write_record(llvm_flavor: str) -> None:
             for index, entry in enumerate(by_target.get(target, []))
             if entry["class"] == "issuable"
         ]
-        verdicts = _compile_target(clang_flavor, target, jobs)
-        if isinstance(verdicts, str):
-            raise SystemExit(f"{verdicts}; use a clang that can judge every target")
+        judged = _compile_target(clang_flavor, target, jobs)
+        if isinstance(judged, str):
+            raise SystemExit(f"{judged}; use a clang that can judge every target")
+        verdicts, refused = judged
+        if refused:
+            raise SystemExit(
+                f"the {clang_flavor} lowering refuses {sorted(refused)} on {target} for its "
+                "emission profile; use a clang that can judge every pair"
+            )
         for (op_id, index), (verdict, _) in verdicts.items():
             if verdict != "accepted":
                 document["pairs"][op_id][target][index]["class"] = "invalid_ir"
