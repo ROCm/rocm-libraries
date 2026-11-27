@@ -2,15 +2,141 @@
   "version": 1,
   "cases": [
     {
-      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_5d7f44",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf",
       "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ]
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              1,
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionWrw",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1626058612,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1581728547
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 778498933
+          }
+        }
+      }
+    },
+    {
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ]
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
               16,
               3,
               3
@@ -21,446 +147,10 @@
               48,
               16
             ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              1,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "bfloat16"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            2,
-            2
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw2dBfp16.Correctness/12",
-        "operation": "Smoke/IntegrationGpuConvWrw2dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw2dBfp16.Correctness_12"
-      }
-    },
-    {
-      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_e770b6",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
-              128,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              8
-            ],
-            "strides": [
-              2048,
-              128,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw2dBfp16.Correctness/6",
-        "operation": "Smoke/IntegrationGpuConvWrw2dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw2dBfp16.Correctness_6"
-      }
-    },
-    {
-      "id": "2_8_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              8,
-              3,
-              3
-            ],
-            "strides": [
-              72,
-              1,
-              24,
-              8
-            ],
             "data_type": "half"
           },
           {
             "uid": 1,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              2
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "half"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw2dFp16.Correctness/16",
-        "operation": "Smoke/IntegrationGpuConvWrw2dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw2dFp16.Correctness_16"
-      }
-    },
-    {
-      "id": "1_16_3_3_fp16_nchw_dil2x2_postpad2x2_prepad2x2",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            2,
-            2
-          ],
-          "parameters__post_padding": [
-            2,
-            2
-          ],
-          "parameters__pre_padding": [
-            2,
-            2
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw2dFp16.Correctness/4",
-        "operation": "Smoke/IntegrationGpuConvWrw2dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw2dFp16.Correctness_4"
-      }
-    },
-    {
-      "id": "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_72e79a",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              1,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            0,
-            0
-          ],
-          "parameters__pre_padding": [
-            0,
-            0
-          ],
-          "parameters__stride": [
-            1,
-            1
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw2dFp32.Correctness/0",
-        "operation": "Smoke/IntegrationGpuConvWrw2dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw2dFp32.Correctness_0"
-      }
-    },
-    {
-      "id": "4_8_3_3_fp32_nhwc_dil2x2_postpad1x1_prepad1x1",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              4,
-              8,
-              3,
-              3
-            ],
-            "strides": [
-              72,
-              1,
-              24,
-              8
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              1,
-              28,
-              4
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
             "dims": [
               2,
               32,
@@ -473,56 +163,91 @@
               512,
               32
             ],
-            "data_type": "float"
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "half"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            2,
-            2
-          ],
-          "parameters__post_padding": [
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1
-          ],
-          "parameters__stride": [
-            2,
-            2
-          ]
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw2dFp32.Correctness/17",
-        "operation": "Smoke/IntegrationGpuConvWrw2dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw2dFp32.Correctness_17"
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionWrw",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1122226728,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 144165350
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 235032168
+          }
+        }
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_446616",
+      "id": "s17_2d_i16x16_n2c16k32_f3x3_bf16_cf",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "bfloat16",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            2,
+            2
+          ]
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              1,
+              32,
               16,
-              3,
               3,
               3
             ],
             "strides": [
-              432,
-              27,
+              144,
               9,
               3,
               1
@@ -532,17 +257,15 @@
           {
             "uid": 1,
             "dims": [
-              1,
-              1,
-              16,
+              2,
+              32,
               8,
-              4
+              8
             ],
             "strides": [
-              512,
-              512,
-              32,
-              4,
+              2048,
+              64,
+              8,
               1
             ],
             "data_type": "bfloat16"
@@ -550,159 +273,84 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               16,
               16,
-              8,
-              4
+              16
             ],
             "strides": [
-              8192,
-              512,
-              32,
-              4,
+              4096,
+              256,
+              16,
               1
             ],
             "data_type": "bfloat16"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ]
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/6",
-        "operation": "Smoke/IntegrationGpuConvWrw3dBfp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw3dBfp16.Correctness_6"
-      }
-    },
-    {
-      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_23e21e",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              27,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionWrw",
+        "plan_items": [
+          "S17"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1214491866,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1755220323
           },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              8192,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "half"
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 273239279
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ]
         }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw3dFp16.Correctness/6",
-        "operation": "Smoke/IntegrationGpuConvWrw3dFp16",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw3dFp16.Correctness_6"
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_64a8a5",
+      "id": "s3_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1,
+            1
+          ]
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              1,
+              32,
               16,
               3,
               3,
@@ -720,32 +368,32 @@
           {
             "uid": 1,
             "dims": [
-              1,
-              1,
-              16,
+              2,
+              32,
+              8,
               8,
               4
             ],
             "strides": [
-              512,
+              8192,
               1,
-              32,
-              4,
-              1
+              1024,
+              128,
+              32
             ],
             "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               16,
-              16,
+              8,
               8,
               4
             ],
             "strides": [
-              8192,
+              4096,
               1,
               512,
               64,
@@ -753,368 +401,179 @@
             ],
             "data_type": "float"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__pre_padding": [
-            1,
-            1,
-            1
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ]
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw3dFp32.Correctness/15",
-        "operation": "Smoke/IntegrationGpuConvWrw3dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw3dFp32.Correctness_15"
-      }
-    },
-    {
-      "id": "1d_filter1_fp16_nlc_pad0_stride1",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "half",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16
-            ],
-            "data_type": "half"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1
-          ],
-          "parameters__post_padding": [
-            0
-          ],
-          "parameters__pre_padding": [
-            0
-          ],
-          "parameters__stride": [
-            1
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "manual",
-        "generator_version": "1.0.0",
-        "notes": "1D (NCL/NLC) convolution; the MIOpen provider pads a trailing size-1 spatial dimension internally.",
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionWrw",
-        "seed": 1
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1192188709,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1139299447
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1776823933
+          }
+        }
       }
     },
     {
-      "id": "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_bf16_cl",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "bfloat16",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              3
-            ],
-            "strides": [
-              48,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              16
-            ],
-            "strides": [
-              16,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ],
+        "override_shape": false,
         "attributes": {
-          "parameters__dilation": [
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
             1
           ],
-          "parameters__post_padding": [
-            1
+          "post_padding": [
+            0,
+            0
           ],
-          "parameters__pre_padding": [
-            1
+          "pre_padding": [
+            0,
+            0
           ],
-          "parameters__stride": [
+          "stride": [
+            1,
             1
           ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "manual",
-        "generator_version": "1.0.0",
-        "notes": "1D (NCL/NLC) convolution; the MIOpen provider pads a trailing size-1 spatial dimension internally.",
-        "operation": "ConvolutionWrw",
-        "seed": 1
-      }
-    },
-    {
-      "id": "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              1,
+              32,
               16,
-              3
-            ],
-            "strides": [
-              48,
-              3,
+              1,
               1
             ],
-            "data_type": "float"
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 1,
             "dims": [
-              1,
-              1,
-              8
+              2,
+              32,
+              16,
+              16
             ],
             "strides": [
-              8,
-              8,
-              1
+              8192,
+              1,
+              512,
+              32
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 2,
             "dims": [
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1
-          ],
-          "parameters__post_padding": [
-            1
-          ],
-          "parameters__pre_padding": [
-            1
-          ],
-          "parameters__stride": [
-            2
-          ]
-        }
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "manual",
-        "generator_version": "1.0.0",
-        "notes": "1D (NCL/NLC) convolution; the MIOpen provider pads a trailing size-1 spatial dimension internally.",
-        "operation": "ConvolutionWrw",
-        "seed": 1
-      }
-    },
-    {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              1,
-              16,
-              3,
-              3,
-              3
-            ],
-            "strides": [
-              432,
-              1,
-              144,
-              48,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              1,
-              196,
-              14,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              16,
+              2,
               16,
               16,
               16
             ],
             "strides": [
-              65536,
-              1,
               4096,
+              1,
               256,
               16
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1,
-            1,
-            1
-          ],
-          "parameters__post_padding": [
-            0,
-            0,
-            0
-          ],
-          "parameters__pre_padding": [
-            0,
-            0,
-            0
-          ],
-          "parameters__stride": [
-            1,
-            1,
-            1
-          ]
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "capture-bundles",
-        "generator_version": "1.0.0",
-        "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrw3dFp32.Correctness/10",
-        "operation": "Smoke/IntegrationGpuConvWrw3dFp32",
-        "seed": 1,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvWrw3dFp32.Correctness_10"
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionWrw",
+        "plan_items": [
+          "S1"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1801114802,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1040924149
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 362169851
+          }
+        }
       }
     },
     {
-      "id": "1d_grouped2_fp16_ncl_pad1_stride1",
+      "id": "s53_2d_i16x16_n2c16k16g16_f3x3_fp16_cf",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ]
+        },
         "tensors": [
           {
             "uid": 0,
             "dims": [
-              2,
-              8,
+              16,
+              1,
+              3,
               3
             ],
             "strides": [
-              24,
+              9,
+              9,
               3,
               1
             ],
@@ -1123,12 +582,14 @@
           {
             "uid": 1,
             "dims": [
-              1,
               2,
+              16,
+              16,
               16
             ],
             "strides": [
-              32,
+              4096,
+              256,
               16,
               1
             ],
@@ -1137,40 +598,257 @@
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
+              16,
               16,
               16
             ],
             "strides": [
+              4096,
               256,
               16,
               1
             ],
             "data_type": "half"
           }
-        ],
-        "attributes": {
-          "parameters__dilation": [
-            1
-          ],
-          "parameters__post_padding": [
-            1
-          ],
-          "parameters__pre_padding": [
-            1
-          ],
-          "parameters__stride": [
-            1
-          ]
-        }
+        ]
       },
       "metadata": {
         "format_version": 1,
-        "generator": "manual",
-        "generator_version": "1.0.0",
-        "notes": "1D (NCL/NLC) convolution; the MIOpen provider pads a trailing size-1 spatial dimension internally.",
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionWrw",
-        "seed": 1
+        "plan_items": [
+          "S53"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 2001641819,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1185710005
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1601858398
+          }
+        }
+      }
+    },
+    {
+      "id": "s44_2d_i16x16_n2c64k64g8_f3x3_fp32_cf",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ]
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              64,
+              8,
+              3,
+              3
+            ],
+            "strides": [
+              72,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              64,
+              16,
+              16
+            ],
+            "strides": [
+              16384,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              16,
+              16
+            ],
+            "strides": [
+              16384,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionWrw",
+        "plan_items": [
+          "S44"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 676112697,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 838078498
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 759603552
+          }
+        }
+      }
+    },
+    {
+      "id": "a1_2d_i32x32_n4c16k16_f3x3_fp32_cl",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ]
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              16,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              1,
+              48,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              16,
+              32,
+              32
+            ],
+            "strides": [
+              16384,
+              1,
+              512,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              16,
+              32,
+              32
+            ],
+            "strides": [
+              16384,
+              1,
+              512,
+              16
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_wrw_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionWrw",
+        "plan_items": [
+          "A1"
+        ],
+        "purpose": "claim",
+        "size_class": "A",
+        "seed": 375827793,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 311716505
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 2110797850
+          }
+        }
       }
     }
   ]
