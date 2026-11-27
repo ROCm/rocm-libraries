@@ -16,7 +16,8 @@
           "kmd_id": "eb82dc6b-33ee-46dd-b085-c789be79fa26",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "block_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -27,15 +28,31 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "292c8634-49d9-4698-ad59-33211527593f",
-      "name": "hip_mlops.resample_fwd",
+      "id": "3f3e6ac5-3518-445a-a02a-51bbfbb02d6d",
+      "name": "hip_mlops.resample_fwd.block128",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/ResampleFwd.cpp",
         "entry_point": "ResampleFwd"
       },
       "metadata": {
-        "operation": "RESAMPLE_FWD"
+        "operation": "RESAMPLE_FWD",
+        "block_size": 128
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "292c8634-49d9-4698-ad59-33211527593f",
+      "name": "hip_mlops.resample_fwd.block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ResampleFwd.cpp",
+        "entry_point": "ResampleFwd"
+      },
+      "metadata": {
+        "operation": "RESAMPLE_FWD",
+        "block_size": 256
       },
       "priority": 0
     }

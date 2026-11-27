@@ -10,6 +10,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <numeric>
 
@@ -200,11 +201,27 @@ ResampleBwdPlan::ResampleBwdPlan(ResampleBwdParams&& params)
 {
 }
 
-std::vector<KernelLaunchShape> ResampleBwdPlan::launchShapes(int64_t numElements)
+std::vector<KernelLaunchShape> ResampleBwdPlan::launchShapes(int64_t numElements, int64_t blockSize)
 {
     return {{"ResampleBwd",
-             numElements / BLOCK_SIZE + (numElements % BLOCK_SIZE != 0 ? 1 : 0),
-             BLOCK_SIZE}};
+             numElements / blockSize + (numElements % blockSize != 0 ? 1 : 0),
+             blockSize}};
+}
+
+bool isResampleBwdConfigApplicable(const ResampleBwdParams& params, const ResampleConfig& config)
+{
+    if(!isBlockSizeSupported(config))
+    {
+        return false;
+    }
+    const auto dxDims = tensorDims(*params.dx());
+    const auto numDxElements
+        = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
+    const auto shapes
+        = ResampleBwdPlan::launchShapes(static_cast<int64_t>(numDxElements), config.blockSize);
+    return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
+        return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);
+    });
 }
 
 size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
@@ -214,7 +231,8 @@ size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) 
 }
 
 ResampleKernelBuild buildResampleBwdKernel(const ResampleBwdParams& params,
-                                           const std::string& gcnArchName)
+                                           const std::string& gcnArchName,
+                                           const ResampleConfig& config)
 {
     const auto spatialDims = params.dy()->dims()->size() - 2;
     const auto dyDims = tensorDims(*params.dy());
@@ -234,7 +252,8 @@ ResampleKernelBuild buildResampleBwdKernel(const ResampleBwdParams& params,
 
     const auto numDxElements
         = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
-    const auto shapes = ResampleBwdPlan::launchShapes(static_cast<int64_t>(numDxElements));
+    const auto shapes
+        = ResampleBwdPlan::launchShapes(static_cast<int64_t>(numDxElements), config.blockSize);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
@@ -258,17 +277,18 @@ ResampleKernelBuild buildResampleBwdKernel(const ResampleBwdParams& params,
     addStrideOptions(options, params, spatialDims);
     addSpatialOptions(options, params, spatialDims);
 
-    return {std::move(options), static_cast<unsigned int>(shapes[0].blocks)};
+    return {std::move(options), config.blockSize, static_cast<unsigned int>(shapes[0].blocks)};
 }
 
 void ResampleBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                               const hipDeviceProp_t& deviceProperties)
 {
-    const auto build = buildResampleBwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    const auto build = buildResampleBwdKernel(
+        _params, std::string(deviceProperties.gcnArchName), ResampleConfig{});
 
     _compiledProgram = kernelCompiler.compile("ResampleBwd.cpp", build.options);
     _runnableKernel = _compiledProgram->getKernel("ResampleBwd");
-    _runnableKernel->setBlockSize(ResampleKernelBuild::BLOCK_SIZE, 1, 1);
+    _runnableKernel->setBlockSize(build.blockSize, 1, 1);
     _runnableKernel->setGridSize(build.gridSize, 1, 1);
 }
 

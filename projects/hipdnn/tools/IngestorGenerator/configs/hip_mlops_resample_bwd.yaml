@@ -13,11 +13,18 @@ engine:
   # fixed order, so a (graph, configuration, device) gives the same bits every run:
   # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
   numerical_notes: []
-  heuristic: none
+  # Each block size is a kernel of its own, addressed by this knob. The native scorer ranks
+  # the hand-written plan's first.
+  knobs: [block_size]
+  heuristic: native
 
+# block_size defaults to ResampleConfig's own default, the hand-written plan's block.
 kmd_fields:
   - name: operation
     type: string
+  - name: block_size
+    type: int
+    default_value: 256
 
 graph_match:
   shape: shared_shape
@@ -29,20 +36,41 @@ workspace_policy: none
 authored_subpath: descriptors/HipMlops/resample_bwd
 
 packs:
+  # One kernel per block size the screening kept: a thread per dx element in blocks of
+  # 256, 512 or 1024 threads.
   - name: resample_bwd
     kernels:
-      - name: hip_mlops.resample_bwd
+      - name: hip_mlops.resample_bwd.block256
         kernel_source:
           kind: embedded_source
           source_file: kernels/ResampleBwd.cpp
           entry_point: ResampleBwd
         metadata:
           operation: RESAMPLE_BWD
+          block_size: 256
+        priority: 0
+      - name: hip_mlops.resample_bwd.block512
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/ResampleBwd.cpp
+          entry_point: ResampleBwd
+        metadata:
+          operation: RESAMPLE_BWD
+          block_size: 512
+        priority: 0
+      - name: hip_mlops.resample_bwd.block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/ResampleBwd.cpp
+          entry_point: ResampleBwd
+        metadata:
+          operation: RESAMPLE_BWD
+          block_size: 1024
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, block_size]
   bindings: {}
   vocabulary: {}

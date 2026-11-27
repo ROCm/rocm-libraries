@@ -68,12 +68,19 @@ private:
     hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType;
 };
 
-/// The compile options and grid of the ResampleFwd kernel for @p params on @p gcnArchName.
+/// The compile options and grid of the ResampleFwd kernel for @p params on @p gcnArchName, in
+/// blocks of @p config's size.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM when the shapes disagree with the resample
 ///         parameters or the output is too large for one launch.
 ResampleKernelBuild buildResampleFwdKernel(const ResampleFwdParams& params,
-                                           const std::string& gcnArchName);
+                                           const std::string& gcnArchName,
+                                           const ResampleConfig& config);
+
+/// Whether the launch of @p config can run @p params: a supported block
+/// (isBlockSizeSupported()) whose grid stays below the 2^32 threads HIP accepts.
+/// checkLaunchShapesFitThreadLimit() checks the default's.
+bool isResampleFwdConfigApplicable(const ResampleFwdParams& params, const ResampleConfig& config);
 
 class ResampleFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
@@ -86,8 +93,9 @@ public:
     ResampleFwdPlan(ResampleFwdPlan&&) = default;
     ResampleFwdPlan& operator=(ResampleFwdPlan&&) = delete;
 
-    // Every kernel launch of the plan for the given number of output elements.
-    static std::vector<KernelLaunchShape> launchShapes(int64_t numElements);
+    // Every kernel launch of the plan for the given number of output elements, in blocks of
+    // blockSize threads.
+    static std::vector<KernelLaunchShape> launchShapes(int64_t numElements, int64_t blockSize);
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
@@ -99,8 +107,6 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    static constexpr int64_t BLOCK_SIZE = ResampleKernelBuild::BLOCK_SIZE;
-
     ResampleFwdParams _params;
     std::unique_ptr<ICompiledProgram> _compiledProgram;
     std::unique_ptr<IRunnableKernel> _runnableKernel;

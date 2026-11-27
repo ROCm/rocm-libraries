@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "7f1ec09a-5f0f-4f22-935d-0fa4084427d2",
+  "name": "ResampleBwd selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.resample_bwd.score"
+  }
+}

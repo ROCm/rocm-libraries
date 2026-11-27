@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -33,6 +35,11 @@
  *        name and id, each accepts what its hand-written builder accepts (up to the same
  *        launch thread limit) and declines override shapes, and they compute forward and
  *        backward resampling as CPU references do.
+ *
+ *        Each ships a kernel per block size (ALMIOPEN-3066), addressed by the knob
+ *        `block_size`: the hand-written plans' ranks first, a wider one whose grid reaches the
+ *        thread limit is not admitted, and each, pinned through the knob, computes as the
+ *        reference does.
  */
 namespace
 {
@@ -313,6 +320,103 @@ TEST(TestHipMlopsResampleGraphMatch, DeclinesALaunchReachingTheThreadLimit)
 }
 
 // ---------------------------------------------------------------------------
+// Knob: one kernel per block size, in each direction
+// ---------------------------------------------------------------------------
+
+/// The block sizes each direction ships a kernel for, those a screening kept: the forward's
+/// 128 and 256, the backward's 256, 512 and 1024. The hand-written plans' is 256.
+const std::set<int64_t> FWD_BLOCK_SIZES = {128, 256};
+const std::set<int64_t> BWD_BLOCK_SIZES = {256, 512, 1024};
+constexpr int64_t DEFAULT_BLOCK_SIZE = 256;
+
+/// The block sizes @p backward's direction ships a kernel for.
+const std::set<int64_t>& blockSizesOf(bool backward)
+{
+    return backward ? BWD_BLOCK_SIZES : FWD_BLOCK_SIZES;
+}
+
+const std::vector<std::string> KNOBS = {"block_size"};
+
+/// A graph of @p backward's direction: forward maxpool, or backward averaging (the maxpool
+/// backward needs an index).
+ResampleGraph directionOf(bool backward)
+{
+    ResampleGraph spec;
+    spec.backward = backward;
+    if(backward)
+    {
+        spec.mode = data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING;
+        spec.padding = data_objects::PaddingMode::ZERO_PAD;
+    }
+    return spec;
+}
+
+TEST(TestHipMlopsResampleKnob, EachDirectionShipsAKernelPerBlockSize)
+{
+    for(const bool backward : {false, true})
+    {
+        const auto& engine = engineFor(directionOf(backward));
+        SCOPED_TRACE(std::string(engine.name));
+        EXPECT_EQ(engineKnobs(engine), KNOBS);
+        std::set<int64_t> blockSizes;
+        for(const auto& kernel : loadedKernels(engine))
+        {
+            EXPECT_TRUE(blockSizes.insert(kernel.getIntMetadata("block_size")).second)
+                << kernel.name;
+        }
+        EXPECT_EQ(blockSizes, blockSizesOf(backward));
+    }
+}
+
+TEST(TestHipMlopsResampleKnob, TheHandWrittenBlockRanksFirst)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        const auto spec = directionOf(backward);
+        const auto kernels = rankedKernels(engineFor(spec), buildResampleGraph(spec));
+        expectUniqueTuples(kernels, KNOBS);
+        const auto offered = knobValues(kernels, "block_size");
+        ASSERT_EQ(offered.size(), blockSizesOf(backward).size());
+        EXPECT_EQ(offered.front(), DEFAULT_BLOCK_SIZE);
+        EXPECT_EQ(std::set<int64_t>(offered.begin(), offered.end()), blockSizesOf(backward));
+    }
+}
+
+TEST(TestHipMlopsResampleKnob, PinningABlockBuildsIt)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        const auto spec = directionOf(backward);
+        const auto kernels = rankedKernels(engineFor(spec), buildResampleGraph(spec));
+        for(const int64_t blockSize : blockSizesOf(backward))
+        {
+            EXPECT_EQ(pinnedTuple(kernels, KNOBS, {{"block_size", blockSize}}),
+                      (KnobSettings{{"block_size", blockSize}}));
+        }
+    }
+}
+
+// The hand-written builders' boundary above: 2^32 - 256 elements fit a grid of blocks of 256
+// threads or fewer, while blocks of 512 or 1024 round the grid up to 2^32 threads, so only the
+// narrower blocks are admitted: the forward's 128 and 256, the backward's 256.
+TEST(TestHipMlopsResampleKnob, ABlockReachingTheThreadLimitIsNotAdmitted)
+{
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        const auto spec = elementwise(backward, 16777215, 256);
+        const auto offered
+            = knobValues(rankedKernels(engineFor(spec), buildResampleGraph(spec)), "block_size");
+        ASSERT_FALSE(offered.empty());
+        EXPECT_EQ(offered.front(), DEFAULT_BLOCK_SIZE);
+        EXPECT_EQ(std::set<int64_t>(offered.begin(), offered.end()),
+                  backward ? std::set<int64_t>{256} : FWD_BLOCK_SIZES);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Numerics through the engine
 // ---------------------------------------------------------------------------
 
@@ -502,6 +606,67 @@ TEST(TestHipMlopsResampleDevice, MaxpoolIndexAndBackwardMatchTheReference)
         buildResampleGraph(backward),
         {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}, {INDEX_UID, indexBuffer.get()}}));
     expectNear(dx.read(), backwardReference(dyValues, data_objects::ResampleMode::MAXPOOL, index));
+}
+
+TEST(TestHipMlopsResampleDevice, TheProviderAdvertisesTheBlockKnob)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const bool backward : {false, true})
+    {
+        SCOPED_TRACE(backward ? "backward" : "forward");
+        const auto spec = directionOf(backward);
+        const auto knobs = advertisedKnobs(engineFor(spec), buildResampleGraph(spec));
+        ASSERT_EQ(knobs.size(), 1U);
+        EXPECT_EQ(knobs[0].name, "block_size");
+        EXPECT_EQ(knobs[0].defaultValue, DEFAULT_BLOCK_SIZE);
+        EXPECT_EQ(std::set<int64_t>(knobs[0].validValues.begin(), knobs[0].validValues.end()),
+                  blockSizesOf(backward));
+    }
+}
+
+TEST(TestHipMlopsResampleDevice, EachBlockPinnedThroughTheKnobMatchesTheReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // 72 output elements and 252 dx elements: a partial block of every size, so the kernels'
+    // tail guard runs.
+    const auto x = deterministicValues(elementCount(INPUT_DIMS), 0.3f);
+    const auto dyValues = deterministicValues(elementCount(OUTPUT_DIMS), 2.3f);
+    for(const int64_t blockSize : FWD_BLOCK_SIZES)
+    {
+        SCOPED_TRACE("forward, block " + std::to_string(blockSize));
+        const KnobSettings pins = {{"block_size", blockSize}};
+
+        ResampleGraph forward;
+        forward.mode = data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING;
+        forward.padding = data_objects::PaddingMode::ZERO_PAD;
+        const DeviceBuffer<float> xBuffer(elementCount(INPUT_DIMS), x);
+        const DeviceBuffer<float> yBuffer(elementCount(OUTPUT_DIMS));
+        ASSERT_NO_FATAL_FAILURE(
+            executeThroughTheEngine(RESAMPLE_FWD_ENGINE,
+                                    buildResampleGraph(forward),
+                                    {{SOURCE_UID, xBuffer.get()}, {RESULT_UID, yBuffer.get()}},
+                                    nullptr,
+                                    pins));
+        expectNear(yBuffer.read(), forwardReference(x, forward.mode));
+    }
+    for(const int64_t blockSize : BWD_BLOCK_SIZES)
+    {
+        SCOPED_TRACE("backward, block " + std::to_string(blockSize));
+        const KnobSettings pins = {{"block_size", blockSize}};
+
+        const auto backward = directionOf(true);
+        const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS), dyValues);
+        const DeviceBuffer<float> dx(elementCount(INPUT_DIMS));
+        ASSERT_NO_FATAL_FAILURE(
+            executeThroughTheEngine(RESAMPLE_BWD_ENGINE,
+                                    buildResampleGraph(backward),
+                                    {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}},
+                                    nullptr,
+                                    pins));
+        expectNear(dx.read(), backwardReference(dyValues, backward.mode, {}));
+    }
 }
 
 TEST(TestHipMlopsResampleDevice, AveragingBackwardMatchesTheReference)

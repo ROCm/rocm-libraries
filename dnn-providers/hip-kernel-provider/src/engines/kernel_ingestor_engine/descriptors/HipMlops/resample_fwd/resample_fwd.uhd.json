@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "9791a103-3409-438f-9cea-85962653669f",
+  "name": "ResampleFwd selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.resample_fwd.score"
+  }
+}

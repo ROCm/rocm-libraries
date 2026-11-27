@@ -289,7 +289,7 @@ void checkLaunchShapesFitThreadLimit(
     const std::unordered_map<int64_t, const data_objects::TensorAttributes*>& tensorMap)
 {
     const auto count = elementCount(findTensorAttributes(tensorMap, resampleAttr.y_tensor_uid()));
-    for(const auto& shape : ResampleFwdPlan::launchShapes(count))
+    for(const auto& shape : ResampleFwdPlan::launchShapes(count, ResampleConfig{}.blockSize))
     {
         checkLaunchFitsThreadLimit(shape);
     }
@@ -301,7 +301,7 @@ void checkLaunchShapesFitThreadLimit(
 {
     const auto count
         = elementCount(findTensorAttributes(tensorMap, resampleBwdAttr.dx_tensor_uid()));
-    for(const auto& shape : ResampleBwdPlan::launchShapes(count))
+    for(const auto& shape : ResampleBwdPlan::launchShapes(count, ResampleConfig{}.blockSize))
     {
         checkLaunchFitsThreadLimit(shape);
     }

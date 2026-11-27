@@ -16,7 +16,8 @@
           "kmd_id": "d0d0277d-a4ee-474d-b3df-88c3c9dd9c95",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "block_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -28,14 +29,45 @@
     {
       "version": "1.0",
       "id": "daf1f5f2-51d5-40d4-a653-38598292b796",
-      "name": "hip_mlops.resample_bwd",
+      "name": "hip_mlops.resample_bwd.block256",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/ResampleBwd.cpp",
         "entry_point": "ResampleBwd"
       },
       "metadata": {
-        "operation": "RESAMPLE_BWD"
+        "operation": "RESAMPLE_BWD",
+        "block_size": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "03fd67ca-c123-4330-bab5-a5092672cdf7",
+      "name": "hip_mlops.resample_bwd.block512",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ResampleBwd.cpp",
+        "entry_point": "ResampleBwd"
+      },
+      "metadata": {
+        "operation": "RESAMPLE_BWD",
+        "block_size": 512
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7d6c0a4c-2d8d-403d-8fea-d7eb655a7d78",
+      "name": "hip_mlops.resample_bwd.block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ResampleBwd.cpp",
+        "entry_point": "ResampleBwd"
+      },
+      "metadata": {
+        "operation": "RESAMPLE_BWD",
+        "block_size": 1024
       },
       "priority": 0
     }

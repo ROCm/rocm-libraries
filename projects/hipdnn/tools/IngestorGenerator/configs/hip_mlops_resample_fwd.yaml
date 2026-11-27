@@ -13,11 +13,18 @@ engine:
   # fixed order, so a (graph, configuration, device) gives the same bits every run:
   # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
   numerical_notes: []
-  heuristic: none
+  # Each block size is a kernel of its own, addressed by this knob. The native scorer ranks
+  # the hand-written plan's first.
+  knobs: [block_size]
+  heuristic: native
 
+# block_size defaults to ResampleConfig's own default, the hand-written plan's block.
 kmd_fields:
   - name: operation
     type: string
+  - name: block_size
+    type: int
+    default_value: 256
 
 graph_match:
   shape: shared_shape
@@ -29,20 +36,32 @@ workspace_policy: none
 authored_subpath: descriptors/HipMlops/resample_fwd
 
 packs:
+  # One kernel per block size the screening kept: a thread per output element in blocks of
+  # 128 or 256 threads.
   - name: resample_fwd
     kernels:
-      - name: hip_mlops.resample_fwd
+      - name: hip_mlops.resample_fwd.block128
         kernel_source:
           kind: embedded_source
           source_file: kernels/ResampleFwd.cpp
           entry_point: ResampleFwd
         metadata:
           operation: RESAMPLE_FWD
+          block_size: 128
+        priority: 0
+      - name: hip_mlops.resample_fwd.block256
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/ResampleFwd.cpp
+          entry_point: ResampleFwd
+        metadata:
+          operation: RESAMPLE_FWD
+          block_size: 256
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, block_size]
   bindings: {}
   vocabulary: {}

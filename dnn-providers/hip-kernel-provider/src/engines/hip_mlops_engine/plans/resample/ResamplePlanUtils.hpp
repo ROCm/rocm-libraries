@@ -18,16 +18,39 @@ namespace hip_kernel_provider::resample
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
+/// The performance choice of a resample launch: its block size. The kernels index by
+/// blockDim.x and return past the last element, so any block HIP launches runs them. The
+/// default is the hand-written plans' configuration.
+struct ResampleConfig
+{
+    unsigned int blockSize = 256;
+};
+
+inline bool operator==(const ResampleConfig& lhs, const ResampleConfig& rhs)
+{
+    return lhs.blockSize == rhs.blockSize;
+}
+
+inline bool operator!=(const ResampleConfig& lhs, const ResampleConfig& rhs)
+{
+    return !(lhs == rhs);
+}
+
+/// Whether @p config's block is one HIP launches: 1 to 1024 threads.
+inline bool isBlockSizeSupported(const ResampleConfig& config)
+{
+    return config.blockSize >= 1 && config.blockSize <= 1024;
+}
+
 /// What a resample launch compiles and how wide it runs: the compile options that bake the
-/// graph into the kernel, and the grid of BLOCK_SIZE-thread blocks covering one thread per
+/// graph into the kernel, and the grid of blockSize-thread blocks covering one thread per
 /// output element. Built by buildResampleFwdKernel()/buildResampleBwdKernel(), which the HIP
 /// MLOps engine's plans and the kernel ingestor's HipMlops packs both call, so the two engines
 /// compile the same program for the same graph.
 struct ResampleKernelBuild
 {
-    static constexpr unsigned int BLOCK_SIZE = 256;
-
     compilation::KernelCompileOptions options;
+    unsigned int blockSize;
     unsigned int gridSize;
 };
 

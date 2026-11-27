@@ -91,6 +91,7 @@
  * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
  * performance configuration their build takes (`variant`, `block_size`, `vector_size`),
  * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`),
+ * hipkernel:ResampleFwd and hipkernel:ResampleBwd a kernel per block size (`block_size`),
  * hipkernel:LayernormFwd, hipkernel:RmsNormFwd and hipkernel:RmsNormBwd a kernel per
  * workgroup size (`local_size`), and hipkernel:LayernormBwd a kernel per scale/bias reduction
  * and workgroup size (`parallel`, `local_size`), so a caller can pin one. Unpinned, each
@@ -129,7 +130,8 @@ constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
 // Batchnorm training and backward: BatchnormSpatialConfig's variant, groupSize and
 // vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize. Layernorm forward:
 // LayernormFwdConfig's localSize. Layernorm backward: LayernormBwdConfig's parallel, 0 or 1,
-// and localSize. RMSnorm forward and backward: RMSnormConfig's localSize.
+// and localSize. RMSnorm forward and backward: RMSnormConfig's localSize. Resample forward and
+// backward: ResampleConfig's blockSize.
 constexpr std::string_view VARIANT_FIELD = "variant";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view VECTOR_SIZE_FIELD = "vector_size";
@@ -765,6 +767,103 @@ double batchnormInferenceScore(const MatchContext& context,
     return heuristicFirstScore(inferenceConfigOf(kernel), heuristic, INFERENCE_CONFIG_ORDER);
 }
 
+/// The resample forward params of the graph.
+resample::ResampleFwdParams resampleFwdParams(const MatchContext& context)
+{
+    const auto& node = context.graph.getNodeWrapper(0);
+    return resample::ResampleFwdParams(node.attributesAs<data_objects::ResampleFwdAttributes>(),
+                                       context.graph.getTensorMap(),
+                                       node.computeDataType());
+}
+
+/// The resample backward params of the graph.
+resample::ResampleBwdParams resampleBwdParams(const MatchContext& context)
+{
+    const auto& node = context.graph.getNodeWrapper(0);
+    return resample::ResampleBwdParams(node.attributesAs<data_objects::ResampleBwdAttributes>(),
+                                       context.graph.getTensorMap(),
+                                       node.computeDataType());
+}
+
+/// The resample configuration @p kernel builds: its `block_size`.
+resample::ResampleConfig resampleConfigOf(const KernelDefinition& kernel)
+{
+    return {static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)))};
+}
+
+/// The order the resample forward scorer ranks the blocks the hand-written plan does not use:
+/// the forward ships 128 and 256 threads.
+constexpr std::array<resample::ResampleConfig, 2> RESAMPLE_FWD_CONFIG_ORDER = {{{256}, {128}}};
+
+/// The order the resample backward scorer ranks the blocks the hand-written plan does not use:
+/// the widest first, of the 256, 512 and 1024 threads the backward ships.
+constexpr std::array<resample::ResampleConfig, 3> RESAMPLE_BWD_CONFIG_ORDER
+    = {{{1024}, {512}, {256}}};
+
+/// Kernel-scoped, resample forward: the operation, and a block whose grid fits
+/// (isResampleFwdConfigApplicable()). familyOf() has checked the default's grid only.
+bool resampleFwdKernelMatches(const MatchContext& context,
+                              const BoundTokens& bound,
+                              const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        return resample::isResampleFwdConfigApplicable(resampleFwdParams(context),
+                                                       resampleConfigOf(kernel));
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:ResampleFwd declines kernel " << kernel.name << ": "
+                                                                        << error.what());
+        return false;
+    }
+}
+
+/// Kernel-scoped, resample backward: the operation, and a block whose grid fits
+/// (isResampleBwdConfigApplicable()). familyOf() has checked the default's grid only.
+bool resampleBwdKernelMatches(const MatchContext& context,
+                              const BoundTokens& bound,
+                              const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        return resample::isResampleBwdConfigApplicable(resampleBwdParams(context),
+                                                       resampleConfigOf(kernel));
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:ResampleBwd declines kernel " << kernel.name << ": "
+                                                                        << error.what());
+        return false;
+    }
+}
+
+/// Resample forward: the hand-written plan's block first, then RESAMPLE_FWD_CONFIG_ORDER.
+double resampleFwdScore(const MatchContext& /*context*/,
+                        const BoundTokens& /*bound*/,
+                        const KernelDefinition& kernel)
+{
+    return heuristicFirstScore(
+        resampleConfigOf(kernel), resample::ResampleConfig{}, RESAMPLE_FWD_CONFIG_ORDER);
+}
+
+/// Resample backward: the hand-written plan's block first, then RESAMPLE_BWD_CONFIG_ORDER.
+double resampleBwdScore(const MatchContext& /*context*/,
+                        const BoundTokens& /*bound*/,
+                        const KernelDefinition& kernel)
+{
+    return heuristicFirstScore(
+        resampleConfigOf(kernel), resample::ResampleConfig{}, RESAMPLE_BWD_CONFIG_ORDER);
+}
+
 /// The layernorm forward params of the graph.
 layernorm::LayernormFwdParams layernormFwdParams(const MatchContext& context)
 {
@@ -1186,23 +1285,23 @@ class ResampleFwdDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the block @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
     {
-        const auto& node = context.graph.getNodeWrapper(0);
-        const auto& attributes = node.attributesAs<data_objects::ResampleFwdAttributes>();
-        const resample::ResampleFwdParams params(
-            attributes, context.graph.getTensorMap(), node.computeDataType());
-        const auto build
-            = resample::buildResampleFwdKernel(params, context.deviceProperties.gcnArchName);
+        const auto& attributes
+            = context.graph.getNodeWrapper(0).attributesAs<data_objects::ResampleFwdAttributes>();
+        const auto params = resampleFwdParams(context);
+        const auto build = resample::buildResampleFwdKernel(
+            params, context.deviceProperties.gcnArchName, resampleConfigOf(kernel));
         auto code = compileEntryPoint(_compiler,
                                       _loader,
                                       context,
                                       kernel,
                                       build.options,
                                       "ResampleFwd",
-                                      resample::ResampleKernelBuild::BLOCK_SIZE,
+                                      build.blockSize,
                                       build.gridSize);
 
         return std::make_unique<PreparedResample>(std::move(code),
@@ -1218,23 +1317,23 @@ class ResampleBwdDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the block @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
     {
-        const auto& node = context.graph.getNodeWrapper(0);
-        const auto& attributes = node.attributesAs<data_objects::ResampleBwdAttributes>();
-        const resample::ResampleBwdParams params(
-            attributes, context.graph.getTensorMap(), node.computeDataType());
-        const auto build
-            = resample::buildResampleBwdKernel(params, context.deviceProperties.gcnArchName);
+        const auto& attributes
+            = context.graph.getNodeWrapper(0).attributesAs<data_objects::ResampleBwdAttributes>();
+        const auto params = resampleBwdParams(context);
+        const auto build = resample::buildResampleBwdKernel(
+            params, context.deviceProperties.gcnArchName, resampleConfigOf(kernel));
         auto code = compileEntryPoint(_compiler,
                                       _loader,
                                       context,
                                       kernel,
                                       build.options,
                                       "ResampleBwd",
-                                      resample::ResampleKernelBuild::BLOCK_SIZE,
+                                      build.blockSize,
                                       build.gridSize);
 
         return std::make_unique<PreparedResample>(std::move(code),
@@ -2194,14 +2293,16 @@ const Handler& dispatchHandler()
 void registerHipMlopsResampleFwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.resample_fwd.graph_match", &resampleFwdGraphMatches);
-    scope.add("hipkernel.resample_fwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.resample_fwd.kernel_match", &resampleFwdKernelMatches);
+    scope.add("hipkernel.resample_fwd.score", &resampleFwdScore);
     scope.add("hipkernel.resample_fwd.dispatch", &dispatchHandler<ResampleFwdDispatchHandler>());
 }
 
 void registerHipMlopsResampleBwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.resample_bwd.graph_match", &resampleBwdGraphMatches);
-    scope.add("hipkernel.resample_bwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.resample_bwd.kernel_match", &resampleBwdKernelMatches);
+    scope.add("hipkernel.resample_bwd.score", &resampleBwdScore);
     scope.add("hipkernel.resample_bwd.dispatch", &dispatchHandler<ResampleBwdDispatchHandler>());
 }
 
