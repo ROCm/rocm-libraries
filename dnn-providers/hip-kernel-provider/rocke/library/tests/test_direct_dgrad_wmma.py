@@ -981,7 +981,7 @@ class TestDgradWmmaNewKnobsStructure(unittest.TestCase):
 
     def test_engine_refuses_with_the_reason(self):
         """The C++ engine refuses the same specs with Python's reason."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for pkw, knobs in (
