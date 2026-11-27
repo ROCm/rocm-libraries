@@ -1412,6 +1412,37 @@ lambda = 20.0
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), fwdTolerance<half>());
 }
 
+// The bfloat16 table of each direction is read for its bfloat16 outputs, as the half and float
+// tables are for theirs.
+TEST_F(TestConvFwdToleranceGradingFixture, Bfloat16OutputOfEachDirectionIsGradedWithItsOwnTable)
+{
+    useTomlSettings(R"([meta]
+version = 1
+
+[conv_fwd_tolerance.bfloat16]
+lambda = 4.0
+
+[conv_dgrad_tolerance.bfloat16]
+lambda = 8.0
+
+[conv_wrw_tolerance.bfloat16]
+lambda = 2.0
+lambda_per_quartic_root_k = 1.0
+)");
+    const auto dgrad = dgradTolerance<bfloat16>(coefficientsOf(std::nullopt, 8.0));
+    // lambda 2 and 1 per K^(1/4), which is 2 at K = 16
+    const auto wrw = wrwTolerance<bfloat16>(coefficientsOf(std::nullopt, 2.0, 1.0));
+    const auto fwd = fwdTolerance<bfloat16>(coefficientsOf(std::nullopt, 4.0));
+    expectApart(dgrad, dgradTolerance<bfloat16>());
+    expectApart(wrw, wrwTolerance<bfloat16>());
+    expectApart(fwd, fwdTolerance<bfloat16>());
+    expectReported(grade(backwardSpec(Direction::DGRAD, false), K_FAR_OFF, K_REFERENCE), dgrad);
+    expectReported(grade(backwardSpec(Direction::WRW, false), K_FAR_OFF, K_REFERENCE), wrw);
+    Spec spec;
+    spec.isHalf = false;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), fwd);
+}
+
 // An engine's lambda is in units of the root mean square of the output, which has the means of
 // the inputs in it: dy and w uniform on [0, 2] have a mean of 1 and a mean square of 4/3, so the
 // rms of a dx element is sqrt(72 * 16/9 + 72 * 71) = 72.4 where its zero-mean spread is 11.3.
