@@ -24,36 +24,45 @@
 #
 # Navi (gfx11xx/gfx12xx) differs in two ways. First, the DB basename comes from
 # Handle::GetDbBasename's gfx11xx/gfx12xx branch, which uses GetMaxHardwareComputeUnits() ==
-# GetMaxComputeUnits() * 2 (CUs per WGP) in hex. The "cus" values below are therefore the arch's
+# GetMaxComputeUnits() * 2 (CUs per WGP) in hex. The "cu" values below are therefore the arch's
 # PHYSICAL CU count, i.e. the number encoded in the shipped DB basename: gfx110060 = 0x60 = 96,
 # gfx110136 = 0x36 = 54, gfx120020 = 0x20 = 32, gfx120140 = 0x40 = 64.
 # Second, a family can span several shipped DBs (gfx120X-all covers gfx1200 and gfx1201), so
 # FAMILY_MAP's value is a LIST of targets and each one gets its own rocjitsu run.
 #
-# A wrong "cus" value or a missing "retarget" can make gtest pass with nothing checked: every
+# A wrong "cu" value or a missing "retarget" can make gtest pass with nothing checked: every
 # StaticFDBSync param skips when the device reports another arch, and a param with a nonzero
-# num_cu (gfx90a, gfx942, gfx950, gfx1101, gfx1201) skips when the device's CU count selects
-# another system DB. Only a num_cu == 0 param that runs against a missing DB file fails on its own
-# (SetupPaths). So each run writes gtest's JSON report, and the runner fails unless exactly one
-# StaticFDBSync param for the target arch ran and was not skipped.
+# num_cu (gfx90a, gfx942, gfx950, gfx1101, gfx1201, gfx1250) skips when the device's CU count
+# selects another system DB. Only a num_cu == 0 param that runs against a missing DB file fails on
+# its own (SetupPaths). So each run writes gtest's JSON report and echoes the `FDB:` line db_sync.cpp
+# prints, and the runner fails unless exactly the expected param (full name, for example
+# StaticFDBSync/gfx942_228) ran unskipped and opened the expected SystemDB basename (gfx942e4). The
+# basename matters for gfx1100_0 and gfx1200_0, whose param name does not identify the DB.
 #
 # Env (provided by TheRock's test_component.yml): AMDGPU_FAMILIES (required), THEROCK_BIN_DIR
 # (default ./build/bin), OUTPUT_ARTIFACTS_DIR (default ./build), TEST_TYPE (quick/standard/...).
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Pinned rocjitsu source (ROCm/rocm-systems). Bump deliberately.
 ROCJITSU_REPO = "https://github.com/ROCm/rocm-systems.git"
 ROCJITSU_REF = "26a2330c02ea5f1191e67d877fe5761c040040fd"  # 2026-10-08
 
-# family -> [ {arch, rj_config, cus, [retarget]} ]. Each entry is one shipped SystemDB arch and
-# each CU count in "cus" is one CU-corrected rocjitsu run. gfx94X-dcgpu covers BOTH MI300X
-# (304 -> gfx942130) and MI300A (228 -> gfx942e4) with a single arch.
+# family -> [ {arch, rj_config, runs, [retarget]} ]. Each entry is one shipped SystemDB arch and
+# each item of "runs" is one CU-corrected rocjitsu run that must check exactly one SystemDB:
+#   cu     the CU count the rocjitsu device block is rewritten to (the arch's PHYSICAL CU count)
+#   param  the StaticFDBSync gtest param that must run, <arch>_<num_cu> as named by db_sync.cpp
+#   db     the SystemDB basename that run must open, which is the shipped <db>.HIP.fdb.txt
+# gfx94X-dcgpu covers BOTH MI300X (304 -> gfx942130) and MI300A (228 -> gfx942e4) with a single
+# arch. Both are spelled out because neither follows from the arch name or the CU count alone:
+# gfx1100_0 and gfx1200_0 do not name their DB at all, and a gfx942_304 param that runs at 228 CU
+# opens the MI300X DB a second time and never reaches the MI300A one.
 #
 # "retarget": the upstream rocjitsu configs dir has no KMD config for gfx1101, gfx1102 or gfx1200,
 # so we derive one from the same-generation sibling that does exist (gfx1100_w7900.json for RDNA3,
@@ -64,27 +73,46 @@ ROCJITSU_REF = "26a2330c02ea5f1191e67d877fe5761c040040fd"  # 2026-10-08
 # fails on the missing gfx110036 DB.
 FAMILY_MAP = {
     "gfx94X-dcgpu": [
-        {"arch": "gfx942", "rj_config": "gfx942_cdna3_kmd.json", "cus": [304, 228]},
+        {
+            "arch": "gfx942",
+            "rj_config": "gfx942_cdna3_kmd.json",
+            "runs": [
+                {"cu": 304, "param": "gfx942_304", "db": "gfx942130"},
+                {"cu": 228, "param": "gfx942_228", "db": "gfx942e4"},
+            ],
+        },
     ],
     "gfx950-dcgpu": [
-        {"arch": "gfx950", "rj_config": "gfx950_mi355x_kmd.json", "cus": [256]},
+        {
+            "arch": "gfx950",
+            "rj_config": "gfx950_mi355x_kmd.json",
+            "runs": [{"cu": 256, "param": "gfx950_256", "db": "gfx950100"}],
+        },
     ],
     # TheRock's family string for gfx90a has no -dcgpu suffix. Only the 104-CU MI210 system DB
     # (gfx90a68) is validated here: the 110-CU MI250X GCD one (gfx90a6e) still has wrong workspace
     # sizes in its find-db (known issue in #14519) and fails StaticFDBSync. Add 110 once it is
     # corrected.
     "gfx90a": [
-        {"arch": "gfx90a", "rj_config": "gfx90a_mi210_kmd.json", "cus": [104]},
+        {
+            "arch": "gfx90a",
+            "rj_config": "gfx90a_mi210_kmd.json",
+            "runs": [{"cu": 104, "param": "gfx90a_104", "db": "gfx90a68"}],
+        },
     ],
     "gfx110X-all": [
         # gfx110060, Radeon Pro W7900 / RX 7900 XTX
-        {"arch": "gfx1100", "rj_config": "gfx1100_w7900.json", "cus": [96]},
+        {
+            "arch": "gfx1100",
+            "rj_config": "gfx1100_w7900.json",
+            "runs": [{"cu": 96, "param": "gfx1100_0", "db": "gfx110060"}],
+        },
         # gfx110136, Radeon Pro V710. No upstream config, so derived from the gfx1100 one.
         {
             "arch": "gfx1101",
             "rj_config": "gfx1100_w7900.json",
             "retarget": True,
-            "cus": [54],
+            "runs": [{"cu": 54, "param": "gfx1101_27", "db": "gfx110136"}],
         },
     ],
     "gfx120X-all": [
@@ -93,16 +121,24 @@ FAMILY_MAP = {
             "arch": "gfx1200",
             "rj_config": "gfx1201_r9700.json",
             "retarget": True,
-            "cus": [32],
+            "runs": [{"cu": 32, "param": "gfx1200_0", "db": "gfx120020"}],
         },
         # gfx120140, Radeon AI PRO R9700
-        {"arch": "gfx1201", "rj_config": "gfx1201_r9700.json", "cus": [64]},
+        {
+            "arch": "gfx1201",
+            "rj_config": "gfx1201_r9700.json",
+            "runs": [{"cu": 64, "param": "gfx1201_32", "db": "gfx120140"}],
+        },
     ],
     # gfx1250100: 256 CU, reported as CUs and not WGPs, so the param is ("gfx1250", 256). rocjitsu's
     # gfx1250 config describes a 4 GPU node of identical devices. The CU-correction rewrites the
     # shared device block, so every one of them reports 256 CU and the one param runs.
     "gfx125X-dcgpu": [
-        {"arch": "gfx1250", "rj_config": "gfx1250_mi455x_kmd_4gpu.json", "cus": [256]},
+        {
+            "arch": "gfx1250",
+            "rj_config": "gfx1250_mi455x_kmd_4gpu.json",
+            "runs": [{"cu": 256, "param": "gfx1250_256", "db": "gfx1250100"}],
+        },
     ],
 }
 
@@ -111,11 +147,12 @@ FAMILY_MAP = {
 # - gfx1102 (gfx110220, RX 7600 XT): the find-db still has wrong workspace sizes (known issue in
 #   #14519, not yet corrected), so StaticFDBSync fails. Entry once corrected (no upstream config,
 #   derived from the gfx1100 one): {"arch": "gfx1102", "rj_config": "gfx1100_w7900.json",
-#   "retarget": True, "cus": [32]}.
+#   "retarget": True, "runs": [{"cu": 32, "param": "gfx1102_0", "db": "gfx110220"}]}.
 # - gfx1151 (gfx115128, Strix Halo 40 CU): #14519 corrected the find-db, but StaticFDBSync still
 #   reports wrong workspace sizes for GemmWrwUniversal and ConvWinoFuryRxS<2-3>. Entry once fixed:
-#   "gfx1151": [{"arch": "gfx1151", "rj_config": "gfx1151.json", "cus": [40]}]. The upstream config
-#   declares a 32 CU part, so the CU-correction is load-bearing there.
+#   "gfx1151": [{"arch": "gfx1151", "rj_config": "gfx1151.json",
+#   "runs": [{"cu": 40, "param": "gfx1151_0", "db": "gfx115128"}]}]. The upstream config declares
+#   a 32 CU part, so the CU-correction is load-bearing there.
 NOT_VALIDATED = {
     "gfx110X-all": {
         "gfx1102": "gfx110220 find-db has wrong workspace sizes (#14519 known issue)",
@@ -132,9 +169,78 @@ NOT_VALIDATED = {
 DBSYNC_MAX_THREADS = 1
 
 
+def validate_tables():
+    """Exit if FAMILY_MAP or NOT_VALIDATED is not shaped the way main() reads it.
+
+    Two PRs that each add a family can merge without a conflict and still leave an entry in the
+    wrong table or in the wrong shape (a dict where FAMILY_MAP now holds a list). main() would
+    then skip the family with exit 0, which looks like a green run that checked nothing.
+    """
+    for family, targets in FAMILY_MAP.items():
+        if not isinstance(targets, list) or not targets:
+            sys.exit(
+                f"::error::FAMILY_MAP['{family}'] must be a non-empty list of targets, "
+                f"got {type(targets).__name__}"
+            )
+        for target in targets:
+            arch = target.get("arch") if isinstance(target, dict) else None
+            runs = target.get("runs") if isinstance(target, dict) else None
+            if not arch or not target.get("rj_config") or not runs:
+                sys.exit(
+                    f"::error::FAMILY_MAP['{family}'] target {target!r} needs arch, rj_config "
+                    "and a non-empty runs list"
+                )
+            for run_spec in runs:
+                if sorted(run_spec) != ["cu", "db", "param"]:
+                    sys.exit(
+                        f"::error::FAMILY_MAP['{family}'] {arch} run {run_spec!r} must have "
+                        "exactly cu, param and db"
+                    )
+    for family, archs in NOT_VALIDATED.items():
+        if not isinstance(archs, dict) or not all(
+            isinstance(a, str) and isinstance(r, str) for a, r in archs.items()
+        ):
+            sys.exit(
+                f"::error::NOT_VALIDATED['{family}'] must map an arch to a reason string, "
+                f"got {archs!r}. A FAMILY_MAP entry merged into the wrong table?"
+            )
+        listed = {t["arch"] for t in FAMILY_MAP.get(family, [])}
+        both = sorted(listed & set(archs))
+        if both:
+            sys.exit(
+                f"::error::{', '.join(both)} is in both FAMILY_MAP and NOT_VALIDATED "
+                f"for '{family}'"
+            )
+
+
 def run(cmd, **kw):
     print(f"+ {' '.join(map(str, cmd))}", flush=True)
     subprocess.run(cmd, check=True, **kw)
+
+
+FDB_LINE = re.compile(r'^FDB: "?([^",]+?)"?, PDB: ')
+
+
+def run_capture_fdb(cmd, **kw):
+    """Like run(), but also return the find-db paths db_sync.cpp prints for the param it runs.
+
+    StaticFDBSync prints `FDB: "<dir>/<basename>.HIP.fdb.txt", PDB: ..., KDB: ...` once a param has
+    passed its arch and CU skips. That line is the only place the run reports which SystemDB it
+    opened, so the output is echoed as it arrives and the paths are kept for the check.
+    """
+    print(f"+ {' '.join(map(str, cmd))}", flush=True)
+    paths = []
+    with subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, encoding="utf-8", errors="replace", **kw
+    ) as proc:
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            match = FDB_LINE.match(line)
+            if match:
+                paths.append(match.group(1))
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    return paths
 
 
 def gfx_target_version(arch: str) -> int:
@@ -248,16 +354,23 @@ def build_rocjitsu(workdir: Path):
     return rocjitsu_bin, src
 
 
-def check_one_param_ran(report: Path, arch: str, cu: int):
-    """Exit with an error unless exactly one StaticFDBSync param ran unskipped, and it is arch's.
+def check_one_param_ran(report: Path, arch: str, expected: dict, fdb_paths: list):
+    """Exit with an error unless exactly the expected StaticFDBSync param ran, on the expected DB.
 
     gtest exits 0 when every selected test skips, so its exit code alone cannot tell a checked
     DB from a run that checked nothing (see the CU-match and arch skips in db_sync.cpp).
+
+    The param is compared by its full name. The arch alone would accept gfx942_304 for a 228 CU
+    run and check the MI300X DB twice. The name still does not say which DB a num_cu == 0 param
+    (gfx1100_0, gfx1200_0) opens, so the basename of the find-db db_sync.cpp announced for the run
+    must be the expected one as well.
     """
+    cu = expected["cu"]
+    want_param = f"StaticFDBSync/{expected['param']}"
+    want_fdb = f"{expected['db']}.HIP.fdb.txt"
+    label = f"StaticFDBSync {arch} @ {cu} CU"
     if not report.exists():
-        sys.exit(
-            f"::error::StaticFDBSync {arch} @ {cu} CU: no gtest report at {report}"
-        )
+        sys.exit(f"::error::{label}: no gtest report at {report}")
     params = [
         test
         for suite in json.loads(report.read_text())["testsuites"]
@@ -265,14 +378,19 @@ def check_one_param_ran(report: Path, arch: str, cu: int):
         if test["name"].startswith("StaticFDBSync/")
     ]
     ran = [t for t in params if t["status"] == "RUN" and t["result"] == "COMPLETED"]
-    if len(ran) != 1 or f'"{arch}"' not in ran[0].get("value_param", ""):
+    if [t["name"] for t in ran] != [want_param]:
         sys.exit(
-            f"::error::StaticFDBSync {arch} @ {cu} CU: expected exactly one {arch} param to "
-            f"run unskipped, got {[(t['name'], t.get('value_param')) for t in ran]} "
-            f"of {len(params)} params"
+            f"::error::{label}: expected exactly {want_param} to run unskipped, got "
+            f"{[(t['name'], t.get('value_param')) for t in ran]} of {len(params)} params"
+        )
+    opened = [PurePosixPath(p).name for p in fdb_paths]
+    if opened != [want_fdb]:
+        sys.exit(
+            f"::error::{label}: expected {want_param} to open exactly {want_fdb}, "
+            f"got {opened}"
         )
     print(
-        f"StaticFDBSync {arch} @ {cu} CU: checked {ran[0]['name']} {ran[0]['value_param']}",
+        f"{label}: checked {ran[0]['name']} {ran[0]['value_param']} on {want_fdb}",
         flush=True,
     )
 
@@ -288,6 +406,8 @@ def main():
             flush=True,
         )
         return 0
+
+    validate_tables()
 
     family = os.environ.get("AMDGPU_FAMILIES", "")
     for arch, reason in NOT_VALIDATED.get(family, {}).items():
@@ -342,7 +462,8 @@ def main():
 
     for target in targets:
         arch = target["arch"]
-        for cu in target["cus"]:
+        for expected in target["runs"]:
+            cu = expected["cu"]
             print(f"::group::StaticFDBSync {arch} @ {cu} CU", flush=True)
             rj_config = work / f"rj_config_{arch}_{cu}.json"
             write_config(
@@ -354,7 +475,7 @@ def main():
             )
             report = work / f"gtest_{arch}_{cu}.json"
             report.unlink(missing_ok=True)
-            run(
+            fdb_paths = run_capture_fdb(
                 [
                     str(rocjitsu_bin),
                     "--config",
@@ -367,7 +488,7 @@ def main():
                 ],
                 env=env_base,
             )
-            check_one_param_ran(report, arch, cu)
+            check_one_param_ran(report, arch, expected, fdb_paths)
             print("::endgroup::", flush=True)
 
     return 0
