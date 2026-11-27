@@ -1,10 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Times the near-die MXFP6 GEMM when its operands sit in a physically contiguous
-// allocation. That allocation is what puts each 8 KiB block on the die that reads
-// it. An ordinary allocation holds the same bytes and returns the same result,
-// and the reads are not the closer memory.
+// The near-die MXFP6 GEMM reads the closer memory only when its operands sit in a
+// physically contiguous allocation. SameResultAsOrdinaryAllocation checks that
+// this allocation returns the same result as an ordinary buffer. KernelTimes
+// reports the time of each registered kernel.
 //
 // The suite name starts with "stress" so the large-memory tier runs it. A normal
 // PR run does not: the allocation is 64 GiB + 2 MiB, and it is skipped unless the
@@ -132,6 +132,8 @@ namespace
         std::vector<uint8_t> groupedA;
         std::vector<uint8_t> groupedB;
         std::vector<uint8_t> groupedScaleA;
+        std::vector<uint8_t> planarA;
+        std::vector<uint8_t> planarB;
     };
 
     Images makeImages()
@@ -162,6 +164,10 @@ namespace
         mx_tile128x4::tileFp6Data(
             out.groupedB.data(), raw.data(), kN, kK, mx_tile128x4::TileOrder::P48);
         out.groupedScaleA = mx_tile128x4::shuffleScales(scales, kM, kKBlocks);
+        out.planarA.resize(packed);
+        mx_tile128x4::tileFp6Data(
+            out.planarA.data(), raw.data(), kM, kK, mx_tile128x4::TileOrder::P16);
+        out.planarB = raw;
         return out;
     }
 
@@ -174,24 +180,28 @@ namespace
 
     // One GEMM, timed as the mean of kHot launches after kCold warmup launches.
     // The clock is the host clock around the queued launches, with no flush.
-    Timed timeGemm(hipblasLtHandle_t           handle,
-                 hipStream_t                 stream,
-                 void*                       workspace,
-                 void*                       a,
-                 void*                       b,
-                 void*                       scaleA,
-                 void*                       scaleB,
-                 void*                       d,
-                 hipblasLtOrder_t            orderA,
-                 hipblasLtOrder_t            orderB,
-                 hipblasLtMatmulMatrixScale_t scaleAMode,
-                 hipblasLtMatmulMatrixScale_t scaleBMode)
+    Timed timeGemm(hipblasLtHandle_t            handle,
+                   hipStream_t                  stream,
+                   void*                        workspace,
+                   void*                        a,
+                   void*                        b,
+                   void*                        scaleA,
+                   void*                        scaleB,
+                   void*                        d,
+                   hipblasLtOrder_t             orderA,
+                   hipblasLtOrder_t             orderB,
+                   hipblasLtMatmulMatrixScale_t scaleAMode,
+                   hipblasLtMatmulMatrixScale_t scaleBMode,
+                   hipDataType                  type = HIP_R_6F_E2M3,
+                   int                          cold = kCold,
+                   int                          hot  = kHot,
+                   bool                         copyOut = true)
     {
         Timed out;
         hipblaslt_ext::GemmProblemType problem(HIPBLAS_OP_T,
                                                HIPBLAS_OP_N,
-                                               HIP_R_6F_E2M3,
-                                               HIP_R_6F_E2M3,
+                                               type,
+                                               type,
                                                HIP_R_16BF,
                                                HIP_R_16BF,
                                                HIPBLAS_COMPUTE_32F);
@@ -213,8 +223,8 @@ namespace
         hipblaslt_ext::Gemm gemm(handle,
                                  HIPBLAS_OP_T,
                                  HIPBLAS_OP_N,
-                                 HIP_R_6F_E2M3,
-                                 HIP_R_6F_E2M3,
+                                 type,
+                                 type,
                                  HIP_R_16BF,
                                  HIP_R_16BF,
                                  HIPBLAS_COMPUTE_32F);
@@ -253,7 +263,7 @@ namespace
             ADD_FAILURE() << out.name << " could not be initialized";
             return out;
         }
-        for(int i = 0; i < kCold; ++i)
+        for(int i = 0; i < cold; ++i)
         {
             if(gemm.run(stream) != HIPBLAS_STATUS_SUCCESS)
             {
@@ -267,7 +277,7 @@ namespace
             return out;
         }
         auto const t0 = std::chrono::steady_clock::now();
-        for(int i = 0; i < kHot; ++i)
+        for(int i = 0; i < hot; ++i)
         {
             if(gemm.run(stream) != HIPBLAS_STATUS_SUCCESS)
             {
@@ -282,7 +292,9 @@ namespace
         }
         out.us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0)
                      .count()
-                 / kHot;
+                 / hot;
+        if(!copyOut)
+            return out;
         out.d.resize(static_cast<size_t>(kM * kN));
         if(hipMemcpy(out.d.data(), d, out.d.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
            != hipSuccess)
@@ -291,7 +303,9 @@ namespace
     }
 } // namespace
 
-TEST(stress_near_die_arena, TimesThePlacedGemm)
+// One launch is enough: the check is that the contiguous allocation and an
+// ordinary buffer return the same result and select the expected kernels.
+TEST(stress_near_die_arena, SameResultAsOrdinaryAllocation)
 {
     int count = 0;
     if(hipGetDeviceCount(&count) != hipSuccess || count < 1)
@@ -396,7 +410,10 @@ TEST(stress_near_die_arena, TimesThePlacedGemm)
                               HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT,
                               HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT,
                               placedScale,
-                              tile);
+                              tile,
+                              HIP_R_6F_E2M3,
+                              0,
+                              1);
     Timed const plain       = timeGemm(handle,
                                stream,
                                ws,
@@ -408,7 +425,10 @@ TEST(stress_near_die_arena, TimesThePlacedGemm)
                                HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT,
                                HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT,
                                placedScale,
-                               tile);
+                               tile,
+                               HIP_R_6F_E2M3,
+                               0,
+                               1);
     Timed const grouped     = timeGemm(handle,
                                  stream,
                                  ws,
@@ -420,7 +440,10 @@ TEST(stress_near_die_arena, TimesThePlacedGemm)
                                  HIPBLASLT_ORDER_COL256_R128_P48_EXT,
                                  HIPBLASLT_ORDER_COL256_R128_P48_EXT,
                                  tile,
-                                 tile);
+                                 tile,
+                                 HIP_R_6F_E2M3,
+                                 0,
+                                 1);
     if(HasFailure())
         return;
 
@@ -437,12 +460,210 @@ TEST(stress_near_die_arena, TimesThePlacedGemm)
                             [](uint16_t v) { return v != 0; }),
               0)
         << "the result is all zeros";
+}
 
-    RecordProperty("contiguous_us", std::to_string(near.us));
-    RecordProperty("ordinary_us", std::to_string(plain.us));
-    RecordProperty("grouped_us", std::to_string(grouped.us));
-    std::printf("near-die contiguous %.3f us\nnear-die ordinary %.3f us\ngrouped ordinary %.3f us\n",
-                near.us,
-                plain.us,
-                grouped.us);
+// 1000 cold and 1000 hot launches, host clock around the batch, no flush. The
+// near-die kernel's operands sit in the contiguous allocation. The other two
+// kernels use ordinary allocations. Both 6-bit types.
+TEST(stress_near_die_arena, KernelTimes)
+{
+    int count = 0;
+    if(hipGetDeviceCount(&count) != hipSuccess || count < 1)
+        GTEST_SKIP() << "No GPU available";
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
+    if(std::string(prop.gcnArchName).rfind("gfx950", 0) != 0)
+        GTEST_SKIP() << "The near-die kernels are registered for gfx950 only";
+    int chip = 0;
+    ASSERT_EQ(hipDeviceGetAttribute(&chip, hipDeviceAttributePciChipId, device), hipSuccess);
+    if(chip != 0x75a0 && chip != 0x75a3)
+        GTEST_SKIP() << "The near-die kernels are registered for chips 0x75a0 and 0x75a3 only";
+    if(!driverSelectsNearDie())
+        GTEST_SKIP() << "The near-die kernels are selected on amdgpu 6.19 and newer";
+    int64_t const used = vramUsed(prop);
+    if(used < 0)
+        GTEST_SKIP() << "Could not read device memory in use";
+    if(used >= kCleanBelow)
+        GTEST_SKIP() << "Device memory in use is " << (used >> 20)
+                     << " MiB; the contiguous allocation needs under 2 GiB";
+
+    Arena arena;
+    if(hipExtMallocWithFlags(&arena.raw, static_cast<size_t>(kArenaBytes), hipDeviceMallocContiguous)
+           != hipSuccess
+       || !arena.raw)
+        GTEST_SKIP() << "The contiguous allocation failed";
+    if(reinterpret_cast<uintptr_t>(arena.raw) % (2u << 20) != 0)
+        GTEST_SKIP() << "The contiguous allocation is not aligned to 2 MiB";
+    arena.base = static_cast<char*>(arena.raw);
+
+    Images const images = makeImages();
+    char* const  slotA  = arena.slot(static_cast<int64_t>(images.nearA.size()));
+    char* const  slotB  = arena.slot(static_cast<int64_t>(images.nearB.size()));
+    char* const  slotSA = arena.slot(static_cast<int64_t>(images.nearScaleA.size()));
+    char* const  slotSB = arena.slot(static_cast<int64_t>(images.scaleB.size()));
+    ASSERT_NE(slotA, nullptr);
+    ASSERT_NE(slotB, nullptr);
+    ASSERT_NE(slotSA, nullptr);
+    ASSERT_NE(slotSB, nullptr);
+
+    Owned ordinary;
+    void* groupA  = ordinary.alloc(images.groupedA.size());
+    void* groupB  = ordinary.alloc(images.groupedB.size());
+    void* groupSA = ordinary.alloc(images.groupedScaleA.size());
+    void* groupSB = ordinary.alloc(images.scaleB.size());
+    void* planA   = ordinary.alloc(images.planarA.size());
+    void* planB   = ordinary.alloc(images.planarB.size());
+    void* dGroup  = ordinary.alloc(static_cast<size_t>(kM * kN) * sizeof(uint16_t));
+    void* dPlan   = ordinary.alloc(static_cast<size_t>(kM * kN) * sizeof(uint16_t));
+    void* dNear   = ordinary.alloc(static_cast<size_t>(kM * kN) * sizeof(uint16_t));
+    void* ws      = ordinary.alloc(kWorkspace);
+    if(!groupA || !groupB || !groupSA || !groupSB || !planA || !planB || !dGroup || !dPlan
+       || !dNear || !ws)
+        GTEST_SKIP() << "An ordinary device allocation failed";
+
+    ASSERT_TRUE(upload(slotA, images.nearA.data(), images.nearA.size()));
+    ASSERT_TRUE(upload(slotB, images.nearB.data(), images.nearB.size()));
+    ASSERT_TRUE(upload(slotSA, images.nearScaleA.data(), images.nearScaleA.size()));
+    ASSERT_TRUE(upload(slotSB, images.scaleB.data(), images.scaleB.size()));
+    ASSERT_TRUE(upload(groupA, images.groupedA.data(), images.groupedA.size()));
+    ASSERT_TRUE(upload(groupB, images.groupedB.data(), images.groupedB.size()));
+    ASSERT_TRUE(upload(groupSA, images.groupedScaleA.data(), images.groupedScaleA.size()));
+    ASSERT_TRUE(upload(groupSB, images.scaleB.data(), images.scaleB.size()));
+    ASSERT_TRUE(upload(planA, images.planarA.data(), images.planarA.size()));
+    ASSERT_TRUE(upload(planB, images.planarB.data(), images.planarB.size()));
+
+    hipblasLtHandle_t handle = nullptr;
+    hipStream_t       stream = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    struct Guard
+    {
+        hipblasLtHandle_t handle;
+        hipStream_t       stream;
+        ~Guard()
+        {
+            if(stream)
+                static_cast<void>(hipStreamDestroy(stream));
+            if(handle)
+                hipblasLtDestroy(handle);
+        }
+    } guard{handle, stream};
+
+    auto const tile        = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+    auto const placedScale = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
+    constexpr int kTableCold = 1000;
+    constexpr int kTableHot  = 1000;
+
+    std::string driver = "unknown";
+    {
+        std::ifstream in("/sys/module/amdgpu/version");
+        std::getline(in, driver);
+    }
+    std::printf("amdgpu %s  chip 0x%x  cold %d  hot %d  no flush\n",
+                driver.c_str(),
+                chip,
+                kTableCold,
+                kTableHot);
+    std::printf("%-12s %-6s %6s %6s %6s %7s %7s %7s %7s %9s %8s\n",
+                "kernel",
+                "type",
+                "M",
+                "N",
+                "K",
+                "orderA",
+                "orderB",
+                "scaleA",
+                "scaleB",
+                "time_us",
+                "tflops");
+
+    auto report = [&](char const*  typeName,
+                      char const*  expect,
+                      int          orderA,
+                      char const*  orderB,
+                      int          scaleA,
+                      int          scaleB,
+                      Timed const& timed) {
+        EXPECT_NE(timed.name.find(expect), std::string::npos) << timed.name;
+        double const tflops = 2.0 * kM * kN * kK / (timed.us * 1e-6) / 1e12;
+        char const*  stem   = "kernel";
+        if(timed.name.find("k067cdb88d0") != std::string::npos)
+            stem = "k067cdb88d0";
+        else if(timed.name.find("kd2977a1791") != std::string::npos)
+            stem = "kd2977a1791";
+        else if(timed.name.find("ka941ce3864") != std::string::npos)
+            stem = "ka941ce3864";
+        std::printf("%-12s %-6s %6lld %6lld %6lld %7d %7s %7d %7d %9.3f %8.1f\n",
+                    stem,
+                    typeName,
+                    static_cast<long long>(kM),
+                    static_cast<long long>(kN),
+                    static_cast<long long>(kK),
+                    orderA,
+                    orderB,
+                    scaleA,
+                    scaleB,
+                    timed.us,
+                    tflops);
+    };
+
+    for(auto const type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2})
+    {
+        char const* const typeName = type == HIP_R_6F_E2M3 ? "f6_r" : "bf6_r";
+        Timed const       grouped  = timeGemm(handle,
+                                       stream,
+                                       ws,
+                                       groupA,
+                                       groupB,
+                                       groupSA,
+                                       groupSB,
+                                       dGroup,
+                                       HIPBLASLT_ORDER_COL256_R128_P48_EXT,
+                                       HIPBLASLT_ORDER_COL256_R128_P48_EXT,
+                                       tile,
+                                       tile,
+                                       type,
+                                       kTableCold,
+                                       kTableHot,
+                                       false);
+        Timed const       planar   = timeGemm(handle,
+                                      stream,
+                                      ws,
+                                      planA,
+                                      planB,
+                                      groupSA,
+                                      groupSB,
+                                      dPlan,
+                                      HIPBLASLT_ORDER_COL256_R128_P16_EXT,
+                                      HIPBLASLT_ORDER_COL,
+                                      tile,
+                                      tile,
+                                      type,
+                                      kTableCold,
+                                      kTableHot,
+                                      false);
+        Timed const       near     = timeGemm(handle,
+                                    stream,
+                                    ws,
+                                    slotA,
+                                    slotB,
+                                    slotSA,
+                                    slotSB,
+                                    dNear,
+                                    HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT,
+                                    HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT,
+                                    placedScale,
+                                    tile,
+                                    type,
+                                    kTableCold,
+                                    kTableHot,
+                                    false);
+        if(HasFailure())
+            return;
+        report(typeName, "k067cdb88d0", 105, "105", 1018, 1018, grouped);
+        report(typeName, "kd2977a1791", 106, "column", 1018, 1018, planar);
+        report(typeName, "ka941ce3864", 107, "108", 1019, 1018, near);
+    }
 }
