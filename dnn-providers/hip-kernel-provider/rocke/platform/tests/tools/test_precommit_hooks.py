@@ -94,6 +94,12 @@ def test_a_hook_that_sets_nothing_gets_pre_commits_defaults(config):
     assert not hook.takes("vendored/any/path.py")
 
 
+def test_the_local_hooks_load_in_the_order_the_config_lists_them(config):
+    hooks = precommit_hooks.load_local_hooks(config)
+    assert [hook.hook_id for hook in hooks] == ["checks", "plain", "twice", "twice"]
+    assert hooks[0] == precommit_hooks.load_local_hook(config, "checks")
+
+
 @pytest.mark.parametrize(
     ("path", "taken"),
     [

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-__all__ = ["PrecommitHook", "load_local_hook"]
+__all__ = ["PrecommitHook", "load_local_hook", "load_local_hooks"]
 
 # pre-commit's defaults for a config or hook that leaves the key out.
 _DEFAULT_FILES = ""
@@ -53,39 +53,19 @@ class PrecommitHook:
         )
 
 
-def load_local_hook(config: Path, hook_id: str) -> PrecommitHook:
-    """The ``repo: local`` hook ``hook_id`` of the pre-commit config ``config``.
-
-    Raises ``KeyError`` when no local hook has that id, ``ValueError`` when more
-    than one has it or ``config`` is not YAML, and ``OSError`` when ``config``
-    cannot be read."""
+def _read_config(config: Path) -> dict:
     try:
-        document = yaml.safe_load(config.read_text(encoding="utf-8"))
+        return yaml.safe_load(config.read_text(encoding="utf-8"))
     except yaml.YAMLError as error:
         raise ValueError(
             f"loading a pre-commit hook failed - config={config} does not parse "
             f"({error}), expected a YAML pre-commit config"
         ) from error
-    found = [
-        hook
-        for repo in document.get("repos", [])
-        if repo.get("repo") == "local"
-        for hook in repo.get("hooks", [])
-        if hook.get("id") == hook_id
-    ]
-    if not found:
-        raise KeyError(
-            f"loading a pre-commit hook failed - id={hook_id!r}, expected a local "
-            f"hook of {config} with that id"
-        )
-    if len(found) > 1:
-        raise ValueError(
-            f"loading a pre-commit hook failed - id={hook_id!r} names "
-            f"{len(found)} local hooks of {config}, expected one"
-        )
-    (hook,) = found
+
+
+def _hook(document: dict, hook: dict) -> PrecommitHook:
     return PrecommitHook(
-        hook_id=hook_id,
+        hook_id=hook["id"],
         entry=hook["entry"],
         args=tuple(hook.get("args", ())),
         language=hook["language"],
@@ -96,3 +76,38 @@ def load_local_hook(config: Path, hook_id: str) -> PrecommitHook:
         config_files=re.compile(document.get("files", _DEFAULT_FILES)),
         config_exclude=re.compile(document.get("exclude", _DEFAULT_EXCLUDE)),
     )
+
+
+def load_local_hooks(config: Path) -> tuple[PrecommitHook, ...]:
+    """Every ``repo: local`` hook of the pre-commit config ``config``, in the
+    order the config lists them.
+
+    Raises ``ValueError`` when ``config`` is not YAML and ``OSError`` when it
+    cannot be read."""
+    document = _read_config(config)
+    return tuple(
+        _hook(document, hook)
+        for repo in document.get("repos", [])
+        if repo.get("repo") == "local"
+        for hook in repo.get("hooks", [])
+    )
+
+
+def load_local_hook(config: Path, hook_id: str) -> PrecommitHook:
+    """The ``repo: local`` hook ``hook_id`` of the pre-commit config ``config``.
+
+    Raises ``KeyError`` when no local hook has that id, ``ValueError`` when more
+    than one has it or ``config`` is not YAML, and ``OSError`` when ``config``
+    cannot be read."""
+    found = [hook for hook in load_local_hooks(config) if hook.hook_id == hook_id]
+    if not found:
+        raise KeyError(
+            f"loading a pre-commit hook failed - id={hook_id!r}, expected a local "
+            f"hook of {config} with that id"
+        )
+    if len(found) > 1:
+        raise ValueError(
+            f"loading a pre-commit hook failed - id={hook_id!r} names "
+            f"{len(found)} local hooks of {config}, expected one"
+        )
+    return found[0]

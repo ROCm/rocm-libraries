@@ -4,11 +4,12 @@
 
 pre-commit gives a hook only the changed files that still exist, so a change
 that deletes a hook's files and edits none skips it. ``rocke/tools/
-run_hook_on_deletion.py`` runs from an always_run hook and runs the named hook
+run_hook_on_deletion.py`` runs from an always_run hook and runs each named hook
 for such a change, from the staged changes or, with PRE_COMMIT_FROM_REF and
 PRE_COMMIT_TO_REF set, from the diff between them. Each case builds a real git
-repository whose hook records that it ran. The last case holds the monorepo's
-own deletion hook to what the script needs of it.
+repository whose hooks record that they ran. The last cases hold the
+monorepo's own deletion hook to what the script needs of it, and to naming
+every rocKE hook that takes no file names.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ ROCKE = platform_root().resolve().parent
 GATE = ROCKE / "tools" / "run_hook_on_deletion.py"
 # rocke -> hip-kernel-provider -> dnn-providers -> monorepo.
 MONOREPO = ROCKE.parents[2]
+# The monorepo's always_run hook that runs this script.
+DELETION_HOOK = "rocke-on-deletion"
 pytestmark = [
     pytest.mark.skipif(
         not GATE.is_file(),
@@ -42,7 +45,8 @@ pytestmark = [
 ]
 
 # The hook "registry" records that it ran and fails with HOOK_STATUS, so a case
-# sees both whether it ran and that its status comes back.
+# sees both whether it ran and that its status comes back; "notes" records that
+# it ran and passes.
 HOOK_STATUS = 3
 CONFIG = f"""\
 repos:
@@ -54,6 +58,12 @@ repos:
         language: python
         files: ^lib/
         exclude: \\.md$
+        pass_filenames: false
+      - id: notes
+        name: notes
+        entry: python -c "import pathlib; pathlib.Path('ran-notes').touch()"
+        language: python
+        files: \\.md$
         pass_filenames: false
       - id: per-file
         name: per-file
@@ -98,7 +108,10 @@ def repo(tmp_path):
     return tmp_path
 
 
-def _run_gate(repo: Path, hook_id: str = "registry", refs: tuple[str, str] = ()):
+def _run_gate(
+    repo: Path, *hook_ids: str, refs: tuple[str, str] = ()
+) -> subprocess.CompletedProcess:
+    """Run the script from ``repo`` for ``hook_ids`` (default: registry)."""
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -113,7 +126,7 @@ def _run_gate(repo: Path, hook_id: str = "registry", refs: tuple[str, str] = ())
         [str(Path(sys.executable).parent), environment.get("PATH", "")]
     )
     return subprocess.run(
-        [sys.executable, str(GATE), hook_id],
+        [sys.executable, str(GATE), *(hook_ids or ("registry",))],
         cwd=repo,
         env=environment,
         capture_output=True,
@@ -124,6 +137,10 @@ def _run_gate(repo: Path, hook_id: str = "registry", refs: tuple[str, str] = ())
 
 def _ran(repo: Path) -> bool:
     return (repo / "ran").exists()
+
+
+def _ran_notes(repo: Path) -> bool:
+    return (repo / "ran-notes").exists()
 
 
 def _commit_on_branch(repo: Path, *git_steps: tuple[str, ...]) -> None:
@@ -169,7 +186,7 @@ def test_a_change_that_deletes_nothing_reads_no_config_and_runs_no_hook(repo):
     (repo / "lib/kept.py").write_text("# edited\n")
     _git(repo, "add", "lib/kept.py")
     # An id the config lacks: the script returns before it reads the config.
-    assert _run_gate(repo, hook_id="no-such-hook").returncode == 0
+    assert _run_gate(repo, "no-such-hook").returncode == 0
     assert not _ran(repo)
 
 
@@ -252,7 +269,7 @@ def test_two_refs_with_no_merge_base_compare_whole_trees(repo):
 
 def test_a_hook_that_takes_file_names_is_refused(repo):
     _git(repo, "rm", "-q", "lib/dropped.py")
-    result = _run_gate(repo, hook_id="per-file")
+    result = _run_gate(repo, "per-file")
     assert result.returncode == 2
     assert result.stderr.strip() == (
         "running a hook for deleted files failed - hook='per-file' takes file "
@@ -263,7 +280,7 @@ def test_a_hook_that_takes_file_names_is_refused(repo):
 
 def test_an_unknown_hook_is_refused_when_a_change_deletes_files(repo):
     _git(repo, "rm", "-q", "lib/dropped.py")
-    result = _run_gate(repo, hook_id="no-such-hook")
+    result = _run_gate(repo, "no-such-hook")
     assert result.returncode == 2
     assert result.stderr.strip() == (
         "loading a pre-commit hook failed - id='no-such-hook', expected a local "
@@ -271,21 +288,74 @@ def test_an_unknown_hook_is_refused_when_a_change_deletes_files(repo):
     )
 
 
-def test_the_monorepos_deletion_hook_runs_a_hook_this_script_can_run():
+def test_each_named_hook_runs_for_the_deletions_it_takes(repo):
+    _git(repo, "rm", "-q", "lib/dropped.py", "lib/notes.md")
+    result = _run_gate(repo, "registry", "notes")
+    # registry fails, and notes still runs after it.
+    assert result.returncode == HOOK_STATUS
+    assert _ran(repo) and _ran_notes(repo)
+
+
+def test_a_named_hook_that_takes_no_deleted_path_does_not_run(repo):
+    _git(repo, "rm", "-q", "lib/notes.md")
+    assert _run_gate(repo, "registry", "notes").returncode == 0
+    assert _ran_notes(repo)
+    assert not _ran(repo)
+
+
+def test_every_named_hook_is_checked_before_any_runs(repo):
+    _git(repo, "rm", "-q", "lib/dropped.py")
+    result = _run_gate(repo, "registry", "per-file")
+    assert result.returncode == 2
+    assert not _ran(repo)
+
+
+@pytest.fixture(scope="module")
+def monorepo_hooks():
     config = MONOREPO / ".pre-commit-config.yaml"
     if not config.is_file():
         pytest.skip(f"no monorepo pre-commit config at {config}")
     hooks = load_module_from_path(
         "precommit_hooks_for_deletion", ROCKE / "tools" / "precommit_hooks.py"
     )
-    deletion = hooks.load_local_hook(config, "rocke-pending-lanes-on-deletion")
-    checked_out, gate, hook_id = deletion.args
+    return {hook.hook_id: hook for hook in hooks.load_local_hooks(config)}
+
+
+def test_the_monorepos_deletion_hook_runs_hooks_this_script_can_run(monorepo_hooks):
+    deletion = monorepo_hooks[DELETION_HOOK]
+    checked_out, gate, *hook_ids = deletion.args
     assert (MONOREPO / checked_out).resolve() == ROCKE
     assert (MONOREPO / gate).resolve() == GATE
-    target = hooks.load_local_hook(config, hook_id)
-    assert not target.pass_filenames
-    # The script runs the target's command in the deletion hook's environment.
-    assert (target.language, target.additional_dependencies) == (
-        deletion.language,
-        deletion.additional_dependencies,
+    assert hook_ids
+    for hook_id in hook_ids:
+        target = monorepo_hooks[hook_id]
+        assert not target.pass_filenames, hook_id
+        # The script runs each target's command in the deletion hook's
+        # environment.
+        assert (target.language, target.additional_dependencies) == (
+            deletion.language,
+            deletion.additional_dependencies,
+        ), hook_id
+
+
+def test_the_monorepos_deletion_hook_names_every_rocke_hook_without_file_names(
+    monorepo_hooks,
+):
+    # A pure deletion can leave any whole-tree check stale (a registry record,
+    # an allowlist line, a source file CMake still lists), and pre-commit runs
+    # none of them for it. A hook that takes file names is given none for a
+    # deletion, and one that always runs needs no help.
+    expected = {
+        hook_id
+        for hook_id, hook in monorepo_hooks.items()
+        if hook_id.startswith("rocke-")
+        and not hook.pass_filenames
+        and hook_id != DELETION_HOOK
+    }
+    _, _, *named = monorepo_hooks[DELETION_HOOK].args
+    assert sorted(named) == sorted(set(named)), "a hook is named twice"
+    assert set(named) == expected, (
+        f"{DELETION_HOOK} in .pre-commit-config.yaml must name exactly the rocKE "
+        f"hooks that take no file names; add {sorted(expected - set(named))}, "
+        f"drop {sorted(set(named) - expected)}"
     )

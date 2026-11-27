@@ -459,17 +459,21 @@ repos:
         files: ^dnn-providers/hip-kernel-provider/(rocke/|ROCKE_ENGINE_test_categories_external\.yaml$)
         exclude: ^dnn-providers/hip-kernel-provider/rocke/(.*\.mdc?|(.*/)?\.clinerules)$
         pass_filenames: false
-      # Runs rocke-pending-lanes for a change that deletes files it takes and
-      # adds or edits none, which pre-commit would skip it for: see
-      # rocke/tools/run_hook_on_deletion.py. It runs on every change; one that
-      # deletes nothing costs a git diff. CI checks out only the directories a
-      # change touches, so this command (shared with rocke-hook-checks) runs
-      # python with the arguments after the first only when that path, rocKE,
-      # is checked out. It is not for a change that touches nothing under
-      # hip-kernel-provider, which deletes nothing under rocKE, or that only
-      # moves rocKE files elsewhere (CI lists a rename by its new path).
-      - id: rocke-pending-lanes-on-deletion
-        name: rocKE every test file is assigned to a CI entry or has a recorded reason (deletions)
+      # Runs each rocKE hook of this file that takes no file names, for a
+      # change that deletes files it takes and adds or edits none, which
+      # pre-commit would skip it for: deleting a test file the registry
+      # records, or a file an allowlist lists, leaves a stale line that fails
+      # the next change. See rocke/tools/run_hook_on_deletion.py;
+      # test_run_hook_on_deletion.py holds the list to every such hook. It
+      # runs on every change; one that deletes nothing costs a git diff. CI
+      # checks out only the directories a change touches, so this command
+      # (shared with rocke-hook-checks) runs python with the arguments after
+      # the first only when that path, rocKE, is checked out. It is not for a
+      # change that touches nothing under hip-kernel-provider, which deletes
+      # nothing under rocKE, or that only moves rocKE files elsewhere (CI
+      # lists a rename by its new path).
+      - id: rocke-on-deletion
+        name: rocKE hooks run for a change that only deletes files they read
         entry: &rocke_when_checked_out >-
           python -c "import os, subprocess, sys;
           sys.exit(os.path.exists(sys.argv[1])
@@ -477,7 +481,16 @@ repos:
         args:
           - dnn-providers/hip-kernel-provider/rocke
           - dnn-providers/hip-kernel-provider/rocke/tools/run_hook_on_deletion.py
+          - rocke-library-reach
           - rocke-pending-lanes
+          - rocke-compliance-rules
+          - rocke-no-torch
+          - rocke-toolchain-pins
+          - rocke-arch-table-engine-parity
+          - rocke-gemm-spec-dict-binding-parity
+          - rocke-emitter-pair-parity
+          - rocke-emitter-pair-files
+          - rocke-hook-checks
         language: python
         additional_dependencies: *rocke_dependencies
         always_run: true
