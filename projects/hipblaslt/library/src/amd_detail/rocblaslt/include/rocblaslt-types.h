@@ -566,6 +566,10 @@ struct RocblasltContractionProblem
     // This owned buffer is used to hold such overridden alpha values.
     // NOTE: sized to 16 bytes to hold any supported scalar type representation.
     std::array<int8_t, 16> alpha_owned = {0};
+    // Same for beta. A stored problem must not keep the caller's scalar pointer:
+    // scaleAlphaVec points alpha at a stack temporary, and a later heuristic
+    // reads both scalars again.
+    std::array<int8_t, 16> beta_owned = {0};
 
     hipDataType        a_type;
     const void*        A;
@@ -689,6 +693,10 @@ struct RocblasltContractionProblem
 
     // gemm_ex
     // gemm_strided_batched_ex
+    // Value-initializing this builds a problem the host unit tests can fill
+    // without calling the out-of-line constructor.
+    RocblasltContractionProblem() = default;
+
     RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                 hipblasOperation_t     trans_b,
                                 int64_t                m,

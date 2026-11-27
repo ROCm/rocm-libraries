@@ -300,6 +300,16 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                   bool* layoutRuledOut = nullptr);
 
+// Whether this problem is served by rocRoller. Declared here so callers do not
+// put the declaration inside an extern "C" block.
+bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob);
+
+#ifndef HIPBLASLT_USE_ROCROLLER
+// Object-API counterpart: the gemm object was created from a problem useRocRoller
+// would route. False when gemmData holds no such problem.
+bool rocblaslt_routed_to_rocroller(rocblaslt_handle handle, const std::shared_ptr<void>& gemmData);
+#endif
+
 /**
  * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
  * libraries, as hipblasLtMatmulAlgoGetHeuristic does when the ranked libraries

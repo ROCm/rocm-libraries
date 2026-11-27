@@ -310,7 +310,8 @@ namespace
            && kernel.workspaceSizePerElemC == none.workspaceSizePerElemC
            && kernel.workspaceSizePerElemBias == none.workspaceSizePerElemBias
            && kernel.generated == none.generated
-           && kernel.uniformSummationOrder == none.uniformSummationOrder)
+           && kernel.uniformSummationOrder == none.uniformSummationOrder
+           && kernel.unroll == none.unroll)
         {
             add("customKernel", "{}");
             return lines;
@@ -325,6 +326,10 @@ namespace
         add("customKernel.workspaceSizePerElemBias", jsonNumber(kernel.workspaceSizePerElemBias));
         add("customKernel.generated", jsonBool(kernel.generated));
         add("customKernel.uniformSummationOrder", jsonBool(kernel.uniformSummationOrder));
+        // 0 means not declared. The Python builder omits it too, so the
+        // checked-in records stay byte-identical.
+        if(kernel.unroll != 0)
+            add("customKernel.unroll", jsonNumber(kernel.unroll));
         return lines;
     }
 

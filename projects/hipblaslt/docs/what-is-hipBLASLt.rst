@@ -333,7 +333,9 @@ identical columns of op(B) yield bitwise identical columns of D, provided C, any
 vectors, any block scales of op(A) (for rows) or op(B) (for columns), and the auxiliary buffer a
 gradient epilogue reads are uniform along the same dimension. Fewer kernels
 qualify, which can cost performance, and the call returns an error rather than quietly giving you a
-non-uniform result. ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` steers selection and grid sizing
+non-uniform result. In a build without rocRoller, a routed Stream-K kernel is rejected when the
+request is on and its grid does not divide the output tiles. A kernel whose grid divides the tiles,
+and a data-parallel rocRoller kernel, still run. ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` steers selection and grid sizing
 toward a compute-unit budget, which is useful when a GEMM has to share the device with other work.
 
 :doc:`hipBLASLt PCI chip ID predicates <./conceptual/pci-chip-id-predicates-walkthrough>` describes

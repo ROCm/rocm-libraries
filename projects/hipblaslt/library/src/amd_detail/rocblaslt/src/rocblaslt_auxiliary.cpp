@@ -3280,7 +3280,14 @@ rocblaslt_status
         // getBestSolutions, and the dedup below still reads this count.
         *returnAlgoCount = 0;
 
-        if(tuningFile.active)
+        // A rocRoller-routed problem keeps the checked-in walk's pick. A tuning
+        // file would put a Tensile-ranked kernel in front of it.
+#ifndef HIPBLASLT_USE_ROCROLLER
+        const bool routedToRocRoller = useRocRoller(handle, prob);
+#else
+        const bool routedToRocRoller = false;
+#endif
+        if(tuningFile.active && !routedToRocRoller)
         {
             override_success = problem_override_from_file(handle,
                                                           prob,
@@ -3313,7 +3320,7 @@ rocblaslt_status
         // under a different adaptive hint can re-select, and give it enough
         // workspace for a re-grid or a re-selection. A tuning-file result is not
         // tagged; the other results and AlgoCheck report the plain size.
-        if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
+        if(prob.adaptive_sm_count && !override_success && !routedToRocRoller && *returnAlgoCount > 0
            && heuristicResultsArray[0].state == rocblaslt_status_success
            && *(int*)heuristicResultsArray[0].algo.data >= 0)
         {
@@ -3344,7 +3351,8 @@ rocblaslt_status
         // Try to get size independent solutions from getAllSolutions(). Its
         // search loads every shard of the operation, so it is skipped when the
         // MX scale layout rule emptied the ranked list.
-        if(requestedAlgoCount > *returnAlgoCount && !layoutRuledOut
+        // A routed walk already returned every kernel it will serve.
+        if(requestedAlgoCount > *returnAlgoCount && !layoutRuledOut && !routedToRocRoller
            && topUpWithSizeIndependentSolutions(handle,
                                                 prob,
                                                 tensile_data,
@@ -3544,7 +3552,13 @@ rocblaslt_status
         bool                                           override_success = false;
         std::vector<rocblaslt_matmul_heuristic_result> override_result;
 
-        if(tuningFile.active)
+#ifndef HIPBLASLT_USE_ROCROLLER
+        const bool routedToRocRoller = gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM
+                                       && rocblaslt_routed_to_rocroller(handle, gemmData);
+#else
+        const bool routedToRocRoller = false;
+#endif
+        if(tuningFile.active && !routedToRocRoller)
         {
             override_success = problem_override_from_file_cpp(
                 handle, gemmType, gemmData, override_result, tuningFile.path, workspaceLimit);
@@ -3575,7 +3589,8 @@ rocblaslt_status
 
         // Try to get size independent solutions from getAllSolutions(), unless
         // the MX scale layout rule emptied the ranked list, as above.
-        if(requestedAlgoCount > results.size() && !layoutRuledOut)
+        // A routed walk already returned every kernel it will serve.
+        if(requestedAlgoCount > results.size() && !layoutRuledOut && !routedToRocRoller)
         {
             // If the #-returned < #-requested, we'll call getAll. But in that case we
             // don't need GridBased or Prediction, which are already returned above, so
