@@ -106,14 +106,16 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
 set(FMHA_BWD_INSTANCE_FILTER "" CACHE STRING
-  "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = all.")
+  "fnmatch filter for generated FMHA BWD kernels: dot_do_o@convert_dq@dq_dk_dv. Empty = default.")
 set(FMHA_FWD_INSTANCE_FILTER "" CACHE STRING
-  "fnmatch filters for generated FMHA FWD kernels, one per enabled API. Empty = default.")
+  "fnmatch filters, one per enabled API; fwd accepts | alternatives. Empty = default.")
 
 if(NOT FMHA_BWD_INSTANCE_FILTER STREQUAL "")
   # must go into COMMON_ARGS so --list_blobs and --output_dir stay in agreement
   list(APPEND FMHA_BWD_CODE_GEN_COMMON_ARGS --filter ${FMHA_BWD_INSTANCE_FILTER})
   message(STATUS "CK Tile FMHA BWD instance filter: ${FMHA_BWD_INSTANCE_FILTER}")
+elseif(BUILD_TESTING AND FMHA_FWD_HAS_GFX125 AND FMHA_BWD_CODEGEN_RECEIPT EQUAL 3)
+  list(APPEND FMHA_BWD_CODE_GEN_COMMON_ARGS --filter "*@*@*_ndropout_*")
 endif()
 
 # Reduce building time by disabling instances that are not currently used in the gtests
@@ -128,9 +130,17 @@ elseif(BUILD_TESTING)
   # The split-KV entry says *logits* rather than *_nlogits* so that the soft-cap
   # instances are built too: SplitKvSinkSoftCap needs a soft cap and a sink on the
   # same split, and without these instances it would report success while
-  # skipping every case that matters. fnmatch takes one pattern per API, so this
+  # skipping every case that matters. The split-KV filter takes one pattern, so this
   # also pulls in the soft-cap instances without a sink, for 524 more instances.
-  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*logits*_nbias*,*,*_nlogits*_nskip*_pagedkv*)
+  set(FMHA_FWD_DEFAULT_FILTER "*_nlogits*_nskip*")
+  if(FMHA_FWD_HAS_GFX125 AND FMHA_FWD_CODEGEN_RECEIPT EQUAL 0)
+    string(JOIN "|" FMHA_FWD_DEFAULT_FILTER
+      "*_fp16_*_nlogits*_ndropout*_nskip*"
+      "*_bf16_*_nlogits*_ndropout*_nskip*"
+      "*_fp8*_nlogits*_nbias*_nskip*"
+      "*_mxfp8*_nlogits*_nbias*_nskip*")
+  endif()
+  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter "${FMHA_FWD_DEFAULT_FILTER},*@*logits*_nbias*,*,*_nlogits*_nskip*_pagedkv*")
 endif()
 
 # generate a list of kernels, but not actually emit files at config sta
@@ -163,6 +173,7 @@ add_custom_command(
   --output_dir ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${CODE_GEN_SCRIPTS}
   COMMENT "Generate CK Tile FMHA FWD kernels"
+  VERBATIM
 )
 
 add_custom_command(

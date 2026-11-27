@@ -1557,7 +1557,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
                 )
                 packed = [k for k in kernels if _fp8_sched_kind(k) == "packgqa"]
-                self.assertEqual(len(packed), len(qscales) * 8)
+                self.assertEqual(len(packed), len(qscales) * 4)
                 for k in packed:
                     self.assertEqual(k.F_mode, "batch")
                     self.assertEqual(k.F_pipeline.F_bias, "no")
@@ -1577,7 +1577,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
 
     def test_fp8_sched_packgqa_one_wave_decode_instances(self):
         # Packed-GQA decode on the 32-row one-wavefront tile: batch only, dispatched first.
-        for dtype, count in (("fp8bf16", 32), ("mxfp8bf16", 8)):
+        for dtype, count in (("fp8bf16", 16), ("mxfp8bf16", 4)):
             with self.subTest(dtype=dtype):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d64_{dtype}_*", 0, [64], "simplified"
@@ -1649,7 +1649,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
                 )
 
-    def test_fp8_sched_emits_lse_variants(self):
+    def test_fp8_sched_emits_only_no_lse_variants(self):
         for dtype in ("fp8", "fp8bf16", "mxfp8"):
             with self.subTest(dtype=dtype):
                 _, kernels = get_fwd_blobs(
@@ -1663,10 +1663,68 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         {
                             (mask, lse): per_lse
                             for mask in ("s_no", "s_mask")
-                            for lse in ("f", "t")
+                            for lse in ("f",)
                         }
                     ),
                 )
+
+    def test_gfx125_fp8_has_no_lse_for_any_receipt(self):
+        for receipt, mask_impl in itertools.product(
+            (0, 1, 2, 3, 4, 5, 100, 200, 600, 700, 800, 801, 888),
+            ("simplified", "generic"),
+        ):
+            with self.subTest(receipt=receipt, mask_impl=mask_impl):
+                _, kernels = get_fwd_blobs(["gfx1250"], "*", receipt, [-1], mask_impl)
+                fp8 = [k for k in kernels if "fp8" in k.F_dtype]
+                self.assertTrue(all(k.F_pipeline.F_lse == "f" for k in fp8))
+                if receipt in (0, 1, 5, 100, 200, 600, 888):
+                    self.assertTrue(fp8)
+                if receipt == 0:
+                    self.assertEqual(
+                        {k.F_dtype for k in fp8},
+                        {"fp8", "fp8bf16", "mxfp8", "mxfp8bf16"},
+                    )
+                    self.assertTrue(
+                        any(
+                            k.F_dtype in ("fp16", "bf16") and k.F_pipeline.F_lse == "t"
+                            for k in kernels
+                        )
+                    )
+        for target, has_lse in (("gfx942", False), ("gfx950", True)):
+            _, kernels = get_fwd_blobs([target], "*fp8*", 0, [-1], "simplified")
+            self.assertTrue(kernels)
+            self.assertEqual(any(k.F_pipeline.F_lse == "t" for k in kernels), has_lse)
+
+    def test_fwd_filter_alternatives_preserve_bias_and_dropout_selection(self):
+        patterns = (
+            "*_fp16_*_nlogits*_ndropout*_nskip*",
+            "*_bf16_*_nlogits*_ndropout*_nskip*",
+            "*_fp8*_nlogits*_nbias*_nskip*",
+            "*_mxfp8*_nlogits*_nbias*_nskip*",
+        )
+        _, full = get_fwd_blobs(
+            ["gfx1250"], "*_nlogits*_nskip*", 0, [128], "simplified"
+        )
+        _, selected = get_fwd_blobs(
+            ["gfx1250"], "|".join(patterns), 0, [128], "simplified"
+        )
+        expected = {
+            k.name
+            for k in full
+            if (k.F_dtype in ("fp16", "bf16") and k.F_pipeline.F_dropout == "f")
+            or ("fp8" in k.F_dtype and k.F_pipeline.F_bias == "no")
+        }
+        self.assertEqual({k.name for k in selected}, expected)
+        self.assertEqual(len(selected), len(expected))
+        self.assertTrue(any(k.F_pipeline.F_bias == "bias" for k in selected))
+        self.assertTrue(any(k.F_pipeline.F_dropout == "t" for k in full))
+        self.assertTrue(
+            any("fp8" in k.F_dtype and k.F_pipeline.F_bias == "bias" for k in full)
+        )
+        # Overlapping alternatives emit each kernel once.
+        _, overlap = get_fwd_blobs(["gfx1250"], "*fp16*|*fp16*", 0, [128], "simplified")
+        _, single = get_fwd_blobs(["gfx1250"], "*fp16*", 0, [128], "simplified")
+        self.assertEqual([k.name for k in overlap], [k.name for k in single])
 
     def test_fp8_sched_emits_mask_variants(self):
         for mask_impl, masks in (
@@ -1679,7 +1737,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], mask_impl
                     )
                     sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-                    per_mask = 4 if dtype == "mxfp8" else 32
+                    per_mask = 2 if dtype == "mxfp8" else 16
                     self.assertEqual(
                         Counter(k.F_pipeline.F_mask for k in sched),
                         Counter({mask: per_mask for mask in masks}),

@@ -2542,45 +2542,42 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", qscale, mask, "f", "f", "f", F_constraint=sched_constraint))  # fmt: skip
 
         elif dtype in cls._DT_FP8_FP8BF16:
-            # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
+            # Neither LSE nor dropout is supported. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
             if (hdim, hdim_v) in ((128, 128), (64, 64)):
-                for logits, qscale, mask, bias, lse, sink in itertools.product(
+                for logits, qscale, mask, bias, sink in itertools.product(
                     ["f"],
                     ["no", "pertensor", "perhead", "blockscale"],
                     get_mask_map(mask_impl).keys(),
                     ["no", "bias"],
                     ["f", "t"],
-                    ["f", "t"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
 
             if (
                 dtype in cls._DT_QR_TDM_SCHED_FP8
                 and (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES
             ):
                 # Packed GQA decode first: the one-wavefront tile, then the full tile.
-                for mask, lse, qscale, sink in itertools.product(
+                for mask, qscale, sink in itertools.product(
                     get_mask_map(mask_impl).keys(),
-                    ["f", "t"],
                     ["no", "pertensor", "perhead", "blockscale"],
                     ["f", "t"],
                 ):
                     sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", "f", "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
                 # No alibi/dropout; bias runs one workgroup per CU. Dispatched ahead of qr_tdm.
-                for mask, lse, qscale, sink, bias in itertools.product(
+                for mask, qscale, sink, bias in itertools.product(
                     get_mask_map(mask_impl).keys(),
-                    ["f", "t"],
                     ["no", "pertensor", "perhead", "blockscale"],
                     ["f", "t"],
                     ["no", "bias"],
                 ):
                     sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, "f", "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
 
             for logits, qscale, mask, bias in itertools.product(
                 ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
@@ -2591,16 +2588,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # MX only on the scheduled FP8 pipeline: no bias/dropout.
             if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES:
                 # Packed GQA decode first, as for FP8.
-                for mask, lse, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
+                for mask, sink in itertools.product(
+                    get_mask_map(mask_impl).keys(), ["f", "t"]
                 ):
                     sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, "mx", sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
-                for mask, lse, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", "f", "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
+                for mask, sink in itertools.product(
+                    get_mask_map(mask_impl).keys(), ["f", "t"]
                 ):
                     sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, "mx", sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", "f", "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
         return pipelines
 
 
@@ -3059,6 +3056,7 @@ def get_product(receipt: int) -> Product:
 def get_fwd_blobs(
     targets: List[str], kernel_filter: Optional[str], receipt, optdim_list, mask_impl
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
+    filters = kernel_filter.split("|") if kernel_filter else ["*"]
     gen = list()
     generated_names = set()
     padding_replacements = {}
@@ -3107,7 +3105,9 @@ def get_fwd_blobs(
                     continue
 
                 kernel = create_kernel(factory.arch, problem_ctx, kernel_ctx)
-                if kernel_filter and not fnmatch.fnmatch(kernel.name, kernel_filter):
+                if not any(
+                    fnmatch.fnmatch(kernel.name, pattern) for pattern in filters
+                ):
                     continue
                 if (
                     factory is KernelComponentFactoryGfx125
