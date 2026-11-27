@@ -776,42 +776,88 @@ TYPED_TEST(matrix_csr, lu_solve)
         values_of(*out), upper_solve(D, ref.n, lower_solve(D, ref.n, b, true), false), tol<T>());
 }
 
-// The matrix is the lower triangle L of L L^T, with the diagonal last in each row
-TYPED_TEST(matrix_csr, ll_solve)
+// Both factors have rows longer than a 64-wide wavefront, so that the device solves walk
+// each row in more than one pass on wave32 and wave64. The off-diagonals do not decay with
+// the distance from the diagonal, so that the entries of a row beyond its first 64 change
+// the result by far more than the float tolerance.
+TYPED_TEST(matrix_csr, lu_solve_of_factors_with_long_rows)
 {
-    using T                = typename TypeParam::value_type;
-    const Csr<T>         L = filtered(spd<T>(8), [](int i, int j, T) { return j <= i; });
-    const std::vector<T> b = rhs<T>(L.n);
-    const std::vector<T> D = dense(L);
+    using T              = typename TypeParam::value_type;
+    const int n          = 200;
+    const int half_width = 80;
 
-    std::vector<T> Lt(D.size());
-    std::vector<T> inv_diag(L.n);
-    for(int i = 0; i < L.n; ++i)
+    Csr<T> ref(n);
+    for(int i = 0; i < n; ++i)
     {
-        inv_diag[i] = T(1) / D[i * L.n + i];
-        for(int j = 0; j < L.n; ++j)
+        for(int j = std::max(0, i - half_width); j <= std::min(n - 1, i + half_width); ++j)
         {
-            Lt[j * L.n + i] = D[i * L.n + j];
+            const double off
+                = j < i ? 0.002 * (1 + (i + 2 * j) % 7) : 0.003 * (1 + (2 * i + j) % 5);
+            ref.add(j, static_cast<T>(i == j ? 2.0 : off));
         }
+        ref.end_row();
     }
-    const std::vector<T> expected = upper_solve(Lt, L.n, lower_solve(D, L.n, b, false), false);
+    const std::vector<T> b = rhs<T>(n);
+    const std::vector<T> D = dense(ref);
 
-    auto A = this->make(L);
+    auto A = this->make(ref);
     ASSERT_NE(A, nullptr);
     auto in  = make_vector(TypeParam::backend, b);
-    auto inv = make_vector(TypeParam::backend, inv_diag);
+    auto out = make_vector(TypeParam::backend, std::vector<T>(n, T(-7)));
 
-    A->LLAnalyse();
+    A->LUAnalyse();
+    ASSERT_TRUE(A->LUSolve(*in, out.get()));
+    A->LUAnalyseClear();
 
-    auto out = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
-    ASSERT_TRUE(A->LLSolve(*in, out.get()));
-    expect_near(values_of(*out), expected, tol<T>());
+    expect_near(values_of(*out), upper_solve(D, n, lower_solve(D, n, b, true), false), tol<T>());
+}
 
-    auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
-    ASSERT_TRUE(A->LLSolve(*in, *inv, out_inv.get()));
-    expect_near(values_of(*out_inv), expected, tol<T>());
+// The matrix is the lower triangle L of L L^T, with the diagonal last in each row. The
+// lower triangle of a 10 x 10 five-point Laplacian has 100 rows with entries ten columns
+// before the diagonal, and is large enough that the HIP analysis of the L^T solve needs a
+// larger rocSPARSE buffer than the analysis of the L solve.
+TYPED_TEST(matrix_csr, ll_solve)
+{
+    using T             = typename TypeParam::value_type;
+    const auto   lower  = [](int i, int j, T) { return j <= i; };
+    const Csr<T> spd8   = filtered(spd<T>(8), lower);
+    const Csr<T> grid10 = filtered(grid<T>(10, 10, 1.0, 1.0, true), lower);
+    for(const Csr<T>* L : {&spd8, &grid10})
+    {
+        SCOPED_TRACE("n " + std::to_string(L->n));
+        const std::vector<T> b = rhs<T>(L->n);
+        const std::vector<T> D = dense(*L);
 
-    A->LLAnalyseClear();
+        std::vector<T> Lt(D.size());
+        std::vector<T> inv_diag(L->n);
+        for(int i = 0; i < L->n; ++i)
+        {
+            inv_diag[i] = T(1) / D[i * L->n + i];
+            for(int j = 0; j < L->n; ++j)
+            {
+                Lt[j * L->n + i] = D[i * L->n + j];
+            }
+        }
+        const std::vector<T> expected
+            = upper_solve(Lt, L->n, lower_solve(D, L->n, b, false), false);
+
+        auto A = this->make(*L);
+        ASSERT_NE(A, nullptr);
+        auto in  = make_vector(TypeParam::backend, b);
+        auto inv = make_vector(TypeParam::backend, inv_diag);
+
+        A->LLAnalyse();
+
+        auto out = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->LLSolve(*in, out.get()));
+        expect_near(values_of(*out), expected, tol<T>());
+
+        auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->LLSolve(*in, *inv, out_inv.get()));
+        expect_near(values_of(*out_inv), expected, tol<T>());
+
+        A->LLAnalyseClear();
+    }
 }
 
 // Only the triangle of the solve is read from the full matrix
@@ -884,6 +930,133 @@ TYPED_TEST(matrix_csr, iterative_triangular_solves)
     }
 }
 
+// The iterative L and U analyses of one matrix are alive together, in either order. A
+// unit diagonal needs a smaller buffer, so a second analysis may have to grow it. On HIP,
+// only the assert of a Debug build sees a buffer that was not grown: at 8 rows the
+// overrun stays inside the allocation.
+TYPED_TEST(matrix_csr, iterative_l_and_u_analyses_of_one_matrix_keep_their_solves)
+{
+    using T                  = typename TypeParam::value_type;
+    const int            it  = 100;
+    const Csr<T>         ref = dominant<T>(8);
+    const std::vector<T> b   = rhs<T>(ref.n);
+    const std::vector<T> D   = dense(ref);
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto in = make_vector(TypeParam::backend, b);
+
+    for(bool lower_first : {true, false})
+    {
+        for(bool unit_l : {false, true})
+        {
+            for(bool unit_u : {false, true})
+            {
+                SCOPED_TRACE(std::string(lower_first ? "U after L" : "L after U")
+                             + (unit_l ? ", unit L" : "") + (unit_u ? ", unit U" : ""));
+                if(lower_first)
+                {
+                    A->ItLAnalyse(unit_l);
+                    A->ItUAnalyse(unit_u);
+                }
+                else
+                {
+                    A->ItUAnalyse(unit_u);
+                    A->ItLAnalyse(unit_l);
+                }
+
+                auto x = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+                ASSERT_IN_LOOP(A->ItLSolve(it, 0.0, false, *in, x.get()));
+                expect_near(values_of(*x), lower_solve(D, ref.n, b, unit_l), iterative_tol<T>());
+
+                auto y = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+                ASSERT_IN_LOOP(A->ItUSolve(it, 0.0, false, *in, y.get()));
+                expect_near(values_of(*y), upper_solve(D, ref.n, b, unit_u), iterative_tol<T>());
+
+                A->ItLAnalyseClear();
+                A->ItUAnalyseClear();
+            }
+        }
+    }
+
+    // Analysing a triangle again with the other diagonal type, without a clear in
+    // between, replaces its analysis while the other triangle's analysis is alive
+    const auto expect_reanalysis_replaces = [&] {
+        for(bool lower_again : {true, false})
+        {
+            for(bool unit_first : {true, false})
+            {
+                SCOPED_TRACE(std::string(lower_again ? "L" : "U") + " analysed again "
+                             + (unit_first ? "without" : "with") + " a unit diagonal");
+                auto M = this->make(ref);
+                if(lower_again)
+                {
+                    M->ItLAnalyse(unit_first);
+                    M->ItUAnalyse(false);
+                    M->ItLAnalyse(!unit_first);
+                }
+                else
+                {
+                    M->ItUAnalyse(unit_first);
+                    M->ItLAnalyse(false);
+                    M->ItUAnalyse(!unit_first);
+                }
+                const bool unit_l = lower_again && !unit_first;
+                const bool unit_u = !lower_again && !unit_first;
+
+                auto v = make_vector(TypeParam::backend, b);
+                auto x = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+                ASSERT_IN_LOOP(M->ItLSolve(it, 0.0, false, *v, x.get()));
+                expect_near(values_of(*x), lower_solve(D, ref.n, b, unit_l), iterative_tol<T>());
+
+                auto y = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+                ASSERT_IN_LOOP(M->ItUSolve(it, 0.0, false, *v, y.get()));
+                expect_near(values_of(*y), upper_solve(D, ref.n, b, unit_u), iterative_tol<T>());
+
+                M->ItLAnalyseClear();
+                M->ItUAnalyseClear();
+            }
+        }
+    };
+    if(TypeParam::backend == Backend::Host)
+    {
+        expect_reanalysis_replaces();
+    }
+    else
+    {
+        KNOWN_BUG("HIP ItLAnalyse and ItUAnalyse analyse into the rocSPARSE info without "
+                  "clearing it, which keeps the first analysis of the triangle");
+        expect_in_child(expect_reanalysis_replaces);
+    }
+
+    KNOWN_BUG("ItLAnalyseClear and ItUAnalyseClear free the buffer that the iterative analysis "
+              "of the other triangle still uses");
+    for(bool clear_lower : {true, false})
+    {
+        SCOPED_TRACE(clear_lower ? "U after clearing L" : "L after clearing U");
+        expect_in_child([&] {
+            auto M = this->make(ref);
+            auto x = make_vector(TypeParam::backend, std::vector<T>(ref.n, T(3)));
+            M->ItLAnalyse(false);
+            M->ItUAnalyse(false);
+            if(clear_lower)
+            {
+                M->ItLAnalyseClear();
+                ASSERT_TRUE(
+                    M->ItUSolve(it, 0.0, false, *make_vector(TypeParam::backend, b), x.get()));
+                expect_near(values_of(*x), upper_solve(D, ref.n, b, false), iterative_tol<T>());
+            }
+            else
+            {
+                M->ItUAnalyseClear();
+                ASSERT_TRUE(
+                    M->ItLSolve(it, 0.0, false, *make_vector(TypeParam::backend, b), x.get()));
+                expect_near(values_of(*x), lower_solve(D, ref.n, b, false), iterative_tol<T>());
+            }
+        });
+    }
+}
+
 // The unit lower solve converges in one iteration, the upper solve needs more
 TYPED_TEST(matrix_csr, iterative_lu_solve_of_an_upper_triangular_matrix)
 {
@@ -902,41 +1075,60 @@ TYPED_TEST(matrix_csr, iterative_lu_solve_of_an_upper_triangular_matrix)
     expect_near(values_of(*out), upper_solve(dense(U), U.n, b, false), iterative_tol<T>());
 }
 
+// The second matrix is the lower triangle of a 10 x 10 five-point Laplacian, with entries
+// ten columns before the diagonal
 TYPED_TEST(matrix_csr, iterative_ll_solve)
 {
-    using T                = typename TypeParam::value_type;
-    const Csr<T>         L = filtered(spd<T>(8), [](int i, int j, T) { return j <= i; });
-    const std::vector<T> b = rhs<T>(L.n);
-    const std::vector<T> D = dense(L);
-
-    std::vector<T> Lt(D.size());
-    std::vector<T> inv_diag(L.n);
-    for(int i = 0; i < L.n; ++i)
+    using T             = typename TypeParam::value_type;
+    const auto   lower  = [](int i, int j, T) { return j <= i; };
+    const Csr<T> spd8   = filtered(spd<T>(8), lower);
+    const Csr<T> grid10 = filtered(grid<T>(10, 10, 1.0, 1.0, true), lower);
+    for(const Csr<T>* L : {&spd8, &grid10})
     {
-        inv_diag[i] = T(1) / D[i * L.n + i];
-        for(int j = 0; j < L.n; ++j)
+        SCOPED_TRACE("n " + std::to_string(L->n));
+        const std::vector<T> b = rhs<T>(L->n);
+        const std::vector<T> D = dense(*L);
+
+        std::vector<T> Lt(D.size());
+        std::vector<T> inv_diag(L->n);
+        for(int i = 0; i < L->n; ++i)
         {
-            Lt[j * L.n + i] = D[i * L.n + j];
+            inv_diag[i] = T(1) / D[i * L->n + i];
+            for(int j = 0; j < L->n; ++j)
+            {
+                Lt[j * L->n + i] = D[i * L->n + j];
+            }
         }
+        const std::vector<T> expected
+            = upper_solve(Lt, L->n, lower_solve(D, L->n, b, false), false);
+
+        auto A = this->make(*L);
+        ASSERT_NE(A, nullptr);
+        auto in  = make_vector(TypeParam::backend, b);
+        auto inv = make_vector(TypeParam::backend, inv_diag);
+
+        A->ItLLAnalyse();
+
+        auto out = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, out.get()));
+        expect_near(values_of(*out), expected, iterative_tol<T>());
+
+        auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, *inv, out_inv.get()));
+        expect_near(values_of(*out_inv), expected, iterative_tol<T>());
+
+        // A nonzero out converges too. Only the L^T sweep starts from out: the L sweep
+        // starts from the L solution of the previous solve, which ItLLSolve keeps. After
+        // the solve to the tolerance just before, the L sweep stops after one iteration,
+        // and the L^T sweep has to converge from out on its own.
+        auto warm_up = make_vector(TypeParam::backend, std::vector<T>(L->n, T(0)));
+        ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, warm_up.get()));
+        auto from_guess = make_vector(TypeParam::backend, std::vector<T>(L->n, T(3)));
+        ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, from_guess.get()));
+        expect_near(values_of(*from_guess), expected, iterative_tol<T>());
+
+        A->ItLLAnalyseClear();
     }
-    const std::vector<T> expected = upper_solve(Lt, L.n, lower_solve(D, L.n, b, false), false);
-
-    auto A = this->make(L);
-    ASSERT_NE(A, nullptr);
-    auto in  = make_vector(TypeParam::backend, b);
-    auto inv = make_vector(TypeParam::backend, inv_diag);
-
-    A->ItLLAnalyse();
-
-    auto out = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
-    ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, out.get()));
-    expect_near(values_of(*out), expected, iterative_tol<T>());
-
-    auto out_inv = make_vector(TypeParam::backend, std::vector<T>(L.n, T(0)));
-    ASSERT_TRUE(A->ItLLSolve(100, 1e-14, true, *in, *inv, out_inv.get()));
-    expect_near(values_of(*out_inv), expected, iterative_tol<T>());
-
-    A->ItLLAnalyseClear();
 }
 
 TYPED_TEST(matrix_csr, ilu0_factorize)
@@ -1959,11 +2151,9 @@ TYPED_TEST(host_matrix_csr, rows_and_columns_of_a_matrix_without_entries)
     expect_same(csr_of(B), from_dense(n, n, D));
 }
 
-// The iterative analyses share one buffer. A unit diagonal needs less of it, so an
-// analysis after one with a unit diagonal grows the buffer, and one after an
-// analysis with the same need reuses it.
-// The iterative L, U, LU and LL analyses share one buffer, which is not visible from
-// outside. Interleaved analyses and clears must keep every solve right.
+// The iterative L, LU and LL analyses share one buffer, which is not visible from
+// outside. A unit diagonal needs less of it, so an LU or LL analysis after a unit L
+// analysis grows the buffer, and one after a non-unit L analysis reuses it.
 TYPED_TEST(host_matrix_csr, iterative_analyses_in_any_order_keep_their_solves)
 {
     using T                  = typename TypeParam::value_type;
@@ -1971,38 +2161,11 @@ TYPED_TEST(host_matrix_csr, iterative_analyses_in_any_order_keep_their_solves)
     const Csr<T>         ref = dominant<T>(8);
     const std::vector<T> b   = rhs<T>(ref.n);
     const std::vector<T> D   = dense(ref);
-    const std::vector<T> l   = lower_solve(D, ref.n, b, false);
-    const std::vector<T> u   = upper_solve(D, ref.n, b, false);
     const std::vector<T> lu  = upper_solve(D, ref.n, lower_solve(D, ref.n, b, true), false);
 
     auto A  = ref.host_csr();
     auto in = host_vector(b);
 
-    auto expect_solves = [&](bool lower, const std::vector<T>& expected) {
-        auto out = host_vector(std::vector<T>(ref.n, T(0)));
-        ASSERT_TRUE(lower ? A->ItLSolve(it, 0.0, false, *in, out.get())
-                          : A->ItUSolve(it, 0.0, false, *in, out.get()));
-        expect_near(values_of(*out), expected, iterative_tol<T>());
-    };
-
-    {
-        SCOPED_TRACE("U after L");
-        A->ItLAnalyse(true);
-        A->ItUAnalyse(false);
-        A->ItLAnalyse(false);
-        expect_solves(true, l);
-        expect_solves(false, u);
-        A->ItLAnalyseClear();
-    }
-    {
-        SCOPED_TRACE("L after U");
-        A->ItUAnalyse(true);
-        A->ItLAnalyse(false);
-        A->ItUAnalyse(false);
-        expect_solves(true, l);
-        expect_solves(false, u);
-        A->ItUAnalyseClear();
-    }
     for(bool unit : {true, false})
     {
         SCOPED_TRACE(unit ? "LU after a unit L" : "LU after L");

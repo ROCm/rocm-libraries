@@ -1787,7 +1787,9 @@ TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
     LL->ItLLSolve(iters, 0, false, *make_local_vector(this->backend(), b), *inv, z.get());
     expect_close(s.apply(values_of(*z)), b, tol<T>());
 
-    // With a tolerance the iteration may stop early, at the requested accuracy
+    // With a tolerance the iteration may stop early, at the requested accuracy. The L
+    // sweep of ItLLSolve starts from the L solution of the previous solve, which it keeps,
+    // so here it stops after one iteration and the L^T sweep has to converge on its own.
     auto w = make_local_vector(this->backend(), std::vector<T>(ref.n, 0.0));
     LU->ItLUSolve(
         iters, scaled_tol<T>(1e-14), true, *make_local_vector(this->backend(), b), w.get());
@@ -1802,6 +1804,82 @@ TYPED_TEST(local_matrix, iterative_triangular_solves_converge)
     expect_close(ref.apply(values_of(*w)), b, loose_tol<T>(1e-10));
     expect_close(s.apply(values_of(*v)), b, loose_tol<T>(1e-10));
     expect_close(s.apply(values_of(*u)), b, loose_tol<T>(1e-10));
+}
+
+// A unit diagonal need not be stored. The strict triangles leave the first row of L
+// and the last row of U without entries, and with two off-diagonals a solve that reads
+// past the end of a row reads an entry that changes the result. The triangles of a
+// 10 x 10 five-point Laplacian have 100 rows with entries ten columns from the diagonal,
+// and are solved both without and with their diagonal.
+TYPED_TEST(local_matrix, triangular_solves_of_triangles_stored_without_and_with_their_diagonal)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> penta  = pentadiagonal<T>();
+    const Csr<T> grid10 = grid<T>(10, 10, 1.0, 1.0, true);
+
+    for(const Csr<T>* ref : {&penta, &grid10})
+    {
+        const std::vector<T> b     = rhs<T>(ref->n);
+        const std::vector<T> start = std::vector<T>(ref->n, 3.0);
+        const int            iters = 2 * ref->n;
+
+        for(bool unit : {true, false})
+        {
+            for(bool is_lower : {true, false})
+            {
+                SCOPED_TRACE("n " + std::to_string(ref->n) + (unit ? ", strict " : ", ")
+                             + (is_lower ? "lower triangle" : "upper triangle"));
+                const Csr<T> stored = is_lower ? lower(*ref, !unit) : upper(*ref, !unit);
+                const Csr<T> M      = unit ? unit_triangle(stored) : stored;
+                const char*  solve  = is_lower ? "LSolve" : "USolve";
+
+                // The direct solves overwrite start, the iterative ones start from it
+                auto A  = make_local_matrix(this->backend(), stored);
+                auto in = make_local_vector(this->backend(), b);
+                auto x  = make_local_vector(this->backend(), start);
+
+                std::string log;
+                if(is_lower)
+                {
+                    A->LAnalyse(unit);
+                    log = logged([&] { A->LSolve(*in, x.get()); });
+                    A->LAnalyseClear();
+                }
+                else
+                {
+                    A->UAnalyse(unit);
+                    log = logged([&] { A->USolve(*in, x.get()); });
+                    A->UAnalyseClear();
+                }
+                EXPECT_EQ(backend_of(*x), backend_name(this->backend()));
+                expect_solves(M, values_of(*x), b, tol<T>());
+                expect_fallback_warning(log, solve, implements(this->backend(), CSR, solve));
+
+                // Without and with a tolerance
+                auto y = make_local_vector(this->backend(), start);
+                auto z = make_local_vector(this->backend(), start);
+                if(is_lower)
+                {
+                    A->ItLAnalyse(unit);
+                    A->ItLSolve(iters, 0, false, *in, y.get());
+                    A->ItLSolve(iters, scaled_tol<T>(1e-14), true, *in, z.get());
+                    A->ItLAnalyseClear();
+                }
+                else
+                {
+                    A->ItUAnalyse(unit);
+                    A->ItUSolve(iters, 0, false, *in, y.get());
+                    A->ItUSolve(iters, scaled_tol<T>(1e-14), true, *in, z.get());
+                    A->ItUAnalyseClear();
+                }
+                EXPECT_EQ(backend_of(*y), backend_name(this->backend()));
+                expect_solves(M, values_of(*y), b, tol<T>());
+                expect_solves(M, values_of(*z), b, loose_tol<T>(1e-10));
+                expect_matrix(*A, stored, csr_format, this->backend());
+            }
+        }
+    }
 }
 
 TYPED_TEST(local_matrix, iterative_solves_of_other_formats_fall_back_to_csr)
@@ -3353,6 +3431,84 @@ TEST(local_matrix_DeathTest,
     EXPECT_FATAL_ERROR(A->LUAnalyseClear(), "base_matrix\\.cpp");
 }
 
+// An LL-analysed matrix moves to the host, also after LAnalyseClear, and is analysed and
+// solved again there and, after moving back, on the device
+TEST(local_matrix_moves, an_ll_analysed_matrix_is_analysed_again_after_moves)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>         s = spd<T>();
+        const std::vector<T> b = rhs<T>(s.n);
+
+        for(bool cleared : {true, false})
+        {
+            SCOPED_TRACE(cleared ? "LAnalyseClear before the move" : "no clear before the move");
+            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
+            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
+            L->ICFactorize(inv.get());
+
+            auto expect_ll_solve = [&](Backend on) {
+                auto x = make_local_vector(on, std::vector<T>(s.n, 0.0));
+                L->LLSolve(*make_local_vector(on, b), x.get());
+                EXPECT_EQ(backend_of(*x), backend_name(on));
+                expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
+            };
+
+            L->LLAnalyse();
+            expect_ll_solve(Backend::Accelerator);
+            if(cleared)
+            {
+                L->LAnalyseClear();
+            }
+            L->MoveToHost();
+
+            L->LLAnalyse();
+            expect_ll_solve(Backend::Host);
+            L->LLAnalyseClear();
+
+            L->MoveToAccelerator();
+            L->LLAnalyse();
+            expect_ll_solve(Backend::Accelerator);
+            L->LLAnalyseClear();
+            EXPECT_EQ(backend_of(*L), backend_name(Backend::Accelerator));
+        }
+    });
+}
+
+// The header pairs LLAnalyse with LLAnalyseClear, but the host also accepts LAnalyseClear
+// before the next LLAnalyse. Without asserts, HIP leaks a vector there, which the child
+// cannot see.
+TEST(local_matrix_analyses, an_l_analysis_clear_between_two_ll_analyses_on_the_accelerator)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    if(!hip_has_asserts)
+    {
+        GTEST_SKIP() << "only a build with asserts shows whether HIP accepts LAnalyseClear "
+                        "between two LLAnalyse calls";
+    }
+    KNOWN_BUG("after LLAnalyse, the HIP LAnalyseClear keeps tmp_vec_, and the next LLAnalyse "
+              "asserts on it, or without asserts leaks it");
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T>         s = spd<T>();
+        const std::vector<T> b = rhs<T>(s.n);
+        expect_in_child([&] {
+            auto L   = make_local_matrix(Backend::Accelerator, lower(s, true));
+            auto inv = make_local_vector(Backend::Accelerator, std::vector<T>());
+            L->ICFactorize(inv.get());
+            L->LLAnalyse();
+            L->LAnalyseClear();
+            L->LLAnalyse();
+            auto x = make_local_vector(Backend::Accelerator, std::vector<T>(s.n, 0.0));
+            L->LLSolve(*make_local_vector(Backend::Accelerator, b), x.get());
+            expect_close(s.apply(values_of(*x)), b, loose_tol<T>(1e-10));
+        });
+    });
+}
+
 // LocalStencil, the other local Operator, keeps the async moves and Sync of
 // BaseRocalution
 
@@ -3384,6 +3540,18 @@ TEST(local_stencil, async_moves_end_the_program_as_the_moves_do)
     S.SetGrid(2);
     EXPECT_FATAL_ERROR(S.MoveToAcceleratorAsync(), "local_stencil\\.cpp");
     EXPECT_FATAL_ERROR(S.MoveToHostAsync(), "local_stencil\\.cpp");
+}
+
+TEST(local_stencil_DeathTest, null_output_ends_the_program)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        rocalution::LocalStencil<T> S(rocalution::Laplace2D);
+        rocalution::LocalVector<T>  x;
+        EXPECT_ASSERT_DEATH(S.Apply(x, nullptr), "out != NULL");
+        EXPECT_ASSERT_DEATH(S.ApplyAdd(x, T(1), nullptr), "out != NULL");
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(formats,
