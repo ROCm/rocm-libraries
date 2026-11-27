@@ -152,7 +152,7 @@ run is re-measured without disturbing the requested sample count or the converge
 window, within a per-candidate budget that counts every negative reading in the pass.
 Because the Windows HIP runtime reads negative at a steady rate
 (ROCm/rocm-systems#12925), autotune allows one re-measurement per requested sample
-(at least two) in both stalled and unstalled passes. In a stalled pass, three
+(at least eight) in both stalled and unstalled passes. In a stalled pass, three
 consecutive negative readings or exhausting the total budget reruns every candidate
 unstalled, so that bad stalled readings do not remove the fastest candidates. An
 unstalled candidate that exhausts its budget fails. Ingestor benchmarking allows two

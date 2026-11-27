@@ -338,9 +338,12 @@ TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
 
 TEST(TestAutotune, RunUntilStableUnstalledPassBudgetsNegativesByMaxIterations)
 {
-    // The unstalled budget is maxIterations, not windowSize or the minimum budget of two:
-    // either of those would fail this candidate on its fourth negative reading.
-    ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, -4.0f, 10.0f, 10.0f, 10.0f}, -1, 0};
+    // The unstalled budget is maxIterations, not windowSize or the minimum budget of eight:
+    // either of those would fail this candidate on its ninth negative reading.
+    ScriptedTimer timer{
+        {-1.0f, -2.0f, -3.0f, -4.0f, -5.0f, -6.0f, -7.0f, -8.0f, -9.0f, 10.0f, 10.0f, 10.0f},
+        -1,
+        0};
     timer.quality = TimingQuality::UNSTALLED;
     auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
                                                     WINDOW_SIZE,
@@ -353,8 +356,8 @@ TEST(TestAutotune, RunUntilStableUnstalledPassBudgetsNegativesByMaxIterations)
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_FALSE(outcome.restartUnstalled);
     EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f, 10.0f, 10.0f}));
-    EXPECT_EQ(outcome.discardedNegativeSamples, 4);
-    EXPECT_EQ(timer.callCount, 7);
+    EXPECT_EQ(outcome.discardedNegativeSamples, 9);
+    EXPECT_EQ(timer.callCount, 12);
 }
 
 TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
@@ -378,24 +381,41 @@ TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
 TEST(TestAutotune, RunUntilStableStalledPassAbsorbsIsolatedNegativesUpToMaxIterations)
 {
     // Isolated negative readings spread across slots draw from the scaled total budget
-    // (maxIterations) rather than restarting the stalled pass after two total negatives.
-    ScriptedTimer timer{{-1.0f, 10.0f, -1.0f, 20.0f, -1.0f, 10.0f, -1.0f, 10.0f, 10.0f}, -1, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        /*maxIterations=*/5,
-        WINDOW_SIZE,
-        STABILITY_THRESHOLD,
-        /*stalled=*/true,
-        timer,
-        noopRunUntilStableLog);
+    // (maxIterations = 10 > floor of 8) rather than restarting the stalled pass early.
+    ScriptedTimer timer{{-1.0f,
+                         -1.0f,
+                         10.0f,
+                         -1.0f,
+                         -1.0f,
+                         20.0f,
+                         -1.0f,
+                         -1.0f,
+                         10.0f,
+                         -1.0f,
+                         -1.0f,
+                         20.0f,
+                         -1.0f,
+                         10.0f,
+                         10.0f,
+                         10.0f},
+                        -1,
+                        0};
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
 
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_FALSE(outcome.restartUnstalled);
     EXPECT_EQ(outcome.restartReason, StallRestartReason::NONE);
-    EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f, 20.0f, 10.0f, 10.0f, 10.0f}));
+    EXPECT_EQ(outcome.timings,
+              (std::vector<float>{10.0f, 20.0f, 10.0f, 20.0f, 10.0f, 10.0f, 10.0f}));
     EXPECT_EQ(outcome.finalQuality, TimingQuality::DEVICE_ONLY);
-    EXPECT_EQ(outcome.discardedNegativeSamples, 4);
-    EXPECT_EQ(timer.callCount, 9);
+    EXPECT_EQ(outcome.discardedNegativeSamples, 9);
+    EXPECT_EQ(timer.callCount, 16);
 }
 
 TEST(TestAutotune, RunUntilStableStalledPassRestartsAfterThreeConsecutiveNegativesWithBudgetLeft)
@@ -421,36 +441,42 @@ TEST(TestAutotune, RunUntilStableStalledPassRestartsAfterThreeConsecutiveNegativ
 
 TEST(TestAutotune, RunFixedAverageStalledPassRestartsOnceIsolatedNegativesExceedBudget)
 {
-    // Non-consecutive negatives never trigger the consecutive cap, but exceeding the
-    // scaled total budget (timedIterations = 3) still restarts the stalled pass unstalled.
-    ScriptedTimer timer{{-1.0f, 5.0f, -1.0f, -1.0f, 5.0f, -1.0f, 5.0f}, -1, 0};
+    // Non-consecutive negatives never trigger the consecutive cap (at most two per slot),
+    // but exceeding the total budget (max(5, 8) = 8) still restarts the stalled pass unstalled.
+    ScriptedTimer timer{
+        {-1.0f, -1.0f, 5.0f, -1.0f, -1.0f, 5.0f, -1.0f, -1.0f, 5.0f, -1.0f, -1.0f, 5.0f, -1.0f},
+        -1,
+        0};
     auto outcome = autotune::detail::runFixedAverage(
-        /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
+        /*timedIterations=*/5, /*stalled=*/true, timer, noopFixedAverageLog);
 
     EXPECT_FALSE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_TRUE(outcome.restartUnstalled);
     EXPECT_EQ(outcome.restartReason, StallRestartReason::NEGATIVE_BUDGET_EXHAUSTED);
-    EXPECT_EQ(outcome.timings, (std::vector<float>{5.0f, 5.0f}));
-    EXPECT_EQ(outcome.discardedNegativeSamples, 3);
-    EXPECT_EQ(timer.callCount, 6);
+    EXPECT_EQ(outcome.timings, (std::vector<float>{5.0f, 5.0f, 5.0f, 5.0f}));
+    EXPECT_EQ(outcome.discardedNegativeSamples, 8);
+    EXPECT_EQ(timer.callCount, 13);
 }
 
 TEST(TestAutotune, RunFixedAverageUnstalledPassReplacesAsManyNegativesAsRequestedSamples)
 {
     // An unstalled pass cannot restart and has no consecutive cap, so it absorbs one
-    // negative reading per requested sample even when they arrive back-to-back.
-    ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, 5.0f, 5.0f, 5.0f}, -1, 0};
+    // negative reading per requested sample (10 > floor of 8) even back-to-back.
+    ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, -4.0f, -5.0f, -6.0f, -7.0f, -8.0f, -9.0f, -10.0f,
+                         5.0f,  5.0f,  5.0f,  5.0f,  5.0f,  5.0f,  5.0f,  5.0f,  5.0f,  5.0f},
+                        -1,
+                        0};
     timer.quality = TimingQuality::UNSTALLED;
     auto outcome = autotune::detail::runFixedAverage(
-        /*timedIterations=*/3, /*stalled=*/false, timer, noopFixedAverageLog);
+        /*timedIterations=*/10, /*stalled=*/false, timer, noopFixedAverageLog);
 
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_FALSE(outcome.restartUnstalled);
-    EXPECT_EQ(outcome.timings, (std::vector<float>{5.0f, 5.0f, 5.0f}));
-    EXPECT_EQ(outcome.discardedNegativeSamples, 3);
-    EXPECT_EQ(timer.callCount, 6);
+    EXPECT_EQ(outcome.timings, std::vector<float>(10, 5.0f));
+    EXPECT_EQ(outcome.discardedNegativeSamples, 10);
+    EXPECT_EQ(timer.callCount, 20);
 }
 
 TEST(TestAutotune, RunFixedAverageFailsUnstalledPassOnceNegativesExceedRequestedSamples)
@@ -459,26 +485,39 @@ TEST(TestAutotune, RunFixedAverageFailsUnstalledPassOnceNegativesExceedRequested
     ScriptedTimer timer{{-1.0f}, -1, 0};
     timer.quality = TimingQuality::UNSTALLED;
     auto outcome = autotune::detail::runFixedAverage(
-        /*timedIterations=*/3, /*stalled=*/false, timer, noopFixedAverageLog);
+        /*timedIterations=*/10, /*stalled=*/false, timer, noopFixedAverageLog);
 
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
     EXPECT_FALSE(outcome.restartUnstalled);
     EXPECT_TRUE(outcome.timings.empty());
-    EXPECT_EQ(timer.callCount, 4);
+    EXPECT_EQ(outcome.discardedNegativeSamples, 10);
+    EXPECT_EQ(timer.callCount, 11);
 }
 
-TEST(TestAutotune, RunFixedAverageUnstalledBudgetIsNeverBelowTwo)
+TEST(TestAutotune, RunFixedAverageUnstalledBudgetIsNeverBelowEight)
 {
-    // One requested sample still gets two retries.
-    ScriptedTimer timer{{-1.0f, -2.0f, 5.0f}, -1, 0};
-    timer.quality = TimingQuality::UNSTALLED;
-    auto outcome = autotune::detail::runFixedAverage(
-        /*timedIterations=*/1, /*stalled=*/false, timer, noopFixedAverageLog);
+    // One requested sample still gets eight retries, and fails on the ninth negative.
+    ScriptedTimer succeedingTimer{
+        {-1.0f, -2.0f, -3.0f, -4.0f, -5.0f, -6.0f, -7.0f, -8.0f, 5.0f}, -1, 0};
+    succeedingTimer.quality = TimingQuality::UNSTALLED;
+    auto succeeded = autotune::detail::runFixedAverage(
+        /*timedIterations=*/1, /*stalled=*/false, succeedingTimer, noopFixedAverageLog);
 
-    EXPECT_FALSE(outcome.benchmarkFailed);
-    EXPECT_EQ(outcome.timings, (std::vector<float>{5.0f}));
-    EXPECT_EQ(timer.callCount, 3);
+    EXPECT_FALSE(succeeded.benchmarkFailed);
+    EXPECT_EQ(succeeded.timings, (std::vector<float>{5.0f}));
+    EXPECT_EQ(succeeded.discardedNegativeSamples, 8);
+    EXPECT_EQ(succeedingTimer.callCount, 9);
+
+    ScriptedTimer failingTimer{{-1.0f}, -1, 0};
+    failingTimer.quality = TimingQuality::UNSTALLED;
+    auto failed = autotune::detail::runFixedAverage(
+        /*timedIterations=*/1, /*stalled=*/false, failingTimer, noopFixedAverageLog);
+
+    EXPECT_TRUE(failed.benchmarkFailed);
+    EXPECT_TRUE(failed.timings.empty());
+    EXPECT_EQ(failed.discardedNegativeSamples, 8);
+    EXPECT_EQ(failingTimer.callCount, 9);
 }
 
 TEST(TestAutotune, RunFixedAverageKeepsExactRequestedCountAfterTransientRetry)

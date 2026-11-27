@@ -132,7 +132,9 @@ inline TimedSampleOutcome classifyTimedSample(const ExecutionTiming& timing, boo
 }
 
 // Minimum negative-reading retries per candidate, shared by stalled and unstalled passes.
-inline constexpr int K_MIN_EXTRA_ATTEMPTS_PER_CANDIDATE = 2;
+// Keeps small-sample runs (for example timedIterations = 1..3 on Windows GPUs with high
+// per-reading negative rates, ROCm/rocm-systems#12925) from exhausting retries prematurely.
+inline constexpr int K_MIN_EXTRA_ATTEMPTS_PER_CANDIDATE = 8;
 
 // Maximum consecutive negative-reading retries in a stalled pass before restarting
 // unstalled. A third consecutive negative reading signals a persistently unusable stalled
@@ -143,8 +145,8 @@ inline constexpr int K_STALLED_MAX_CONSECUTIVE_NEGATIVE_RETRIES = 2;
 // The Windows HIP runtime reads negative at a steady per-reading rate for both stalled
 // and unstalled spans (ROCm/rocm-systems#12925), so a fixed total budget fails or
 // restarts healthy candidates more often the more samples they take. Scaling the total
-// budget with the requested sample count caps total attempts at twice that count (three
-// when one sample is requested).
+// budget with the requested sample count (with a floor of K_MIN_EXTRA_ATTEMPTS_PER_CANDIDATE)
+// caps total attempts at sampleSlots + max(sampleSlots, 8).
 inline int negativeReadingRetryBudget(int sampleSlots)
 {
     return std::max(sampleSlots, K_MIN_EXTRA_ATTEMPTS_PER_CANDIDATE);
