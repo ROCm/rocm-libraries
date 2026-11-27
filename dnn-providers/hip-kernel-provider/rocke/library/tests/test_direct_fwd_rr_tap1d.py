@@ -270,6 +270,8 @@ def test_tap1d_reasons():
     assert "1 x S filters" in why(PAD=1)
     assert "1 x S filters" in why(stride=2)
     assert "width padding" in why(pad_w=3)
+    assert "pad_w must be -1" in why(pad_w=-2)
+    assert "pad_w must be -1" in why(pad_w=-5)
     assert "fp16/bf16" in why(dtype="fp32")
     assert "must be a multiple of bk" in why(kpg=100)
     assert "must be 32 or 64" in why(cpg=100)
@@ -515,6 +517,7 @@ def test_tap1d_describe_matches_python():
         dict(PAD=1),
         dict(stride=2),
         dict(pad_w=3),
+        dict(pad_w=-2),
         dict(dtype="fp32"),
         dict(kpg=100),
         dict(cpg=100),
@@ -626,6 +629,7 @@ def _check(y, p, x, w, dtype):
     assert rel < tol, rel
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize("row", _RR_ROWS, ids=lambda r: r[0])
 def test_rr_forward_matches_the_reference(row, dtype):
@@ -673,6 +677,7 @@ def test_rr_forward_matches_the_reference(row, dtype):
     _check(y.read(), p, x, w, dtype)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize("row", _TAP1D_ROWS, ids=lambda r: r[0])
 def test_tap1d_forward_matches_the_reference(row, dtype):

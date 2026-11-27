@@ -38,6 +38,7 @@ from rocke.core.ir import I32, I64, IRBuilder, KernelDef, Value
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    pad_w_reason,
     I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
@@ -156,6 +157,9 @@ def fwd_tap1d_mfma_reason(spec: FwdTap1dMfmaSpec, arch: str = "gfx950") -> "str 
     ):
         return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     why = problem_dims_reason(p)
+    if why is not None:
+        return why
+    why = pad_w_reason(p)
     if why is not None:
         return why
     if p.groups != 1:

@@ -205,6 +205,10 @@ extern "C" bool rocke_fwd_tap1d_mfma_is_valid_spec(const rocke_fwd_tap1d_mfma_sp
     {
         why = msg;
     }
+    else if(rocke_direct_conv_pad_w_reason(p, "", msg, sizeof msg))
+    {
+        why = msg;
+    }
     else if(p->groups != 1)
     {
         why = "groups must be 1";

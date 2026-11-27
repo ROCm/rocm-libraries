@@ -99,6 +99,7 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     _dgrad_fused_rule_block_groups,
     _helper_identity,
     _split_reduce_identity,
+    _rr_wfmt_knobs,
     rr_wfmt_identity,
     count_direct_jobs,
     dgrad_rtc_k_atoms,
@@ -610,11 +611,7 @@ def plan_for(
         entry = cache.entry_meta(wfmt_id)
         if entry is None:
             return None, f"missing cached {_RR_WFMT} helper (rebuild the cache)"
-        wfmt_knobs = {} if kw16 == 4 else {"kw16": kw16}
-        if fw != 3:
-            wfmt_knobs["fw"] = fw
-        if nwk != 2:
-            wfmt_knobs["nwk"] = nwk
+        wfmt_knobs = _rr_wfmt_knobs(kw16, fw, nwk)
         grid, block = make_spec(_RR_WFMT, problem, wfmt_knobs).launch_geometry()
         fmt = DirectStep(
             kernel_name=entry["kernel_name"],

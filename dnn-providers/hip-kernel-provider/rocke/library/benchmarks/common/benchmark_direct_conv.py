@@ -2361,7 +2361,13 @@ def _measure_plans(
                     launch_values(
                         st,
                         *_chunk_buffers(
-                            ptrs, sizes, inputs, out_name, plan_chunks(plan), i
+                            ptrs,
+                            sizes,
+                            inputs,
+                            out_name,
+                            plan_chunks(plan),
+                            i,
+                            clamp=_one_launch(plan),
                         ),
                     ),
                     LaunchConfig(grid=st.grid, block=st.block, stream=0),
@@ -2624,11 +2630,13 @@ def _batch_chunks(p, direction: str) -> List[int]:
     return [base + (i < extra) for i in range(n_steps)]
 
 
-def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
+def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i, clamp=False):
     """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
-    of ``chunks`` (images per chunk, in batch order)."""
+    of ``chunks`` (images per chunk, in batch order). ``clamp`` is set for a
+    one-launch plan only: any other plan keeps its true byte sizes, so the
+    kernarg packer still refuses an oversized buffer."""
     if len(chunks) == 1:
-        if all(v <= _I32_MAX for v in sizes.values()):
+        if not clamp or all(v <= _I32_MAX for v in sizes.values()):
             return ptrs, sizes
         # a one-launch plan (see _one_launch) rebases its activations per
         # image and never reads their byte sizes: the i32 kernargs

@@ -419,7 +419,9 @@ def build_fwd_rr_wfmt(spec: FwdRrWfmtSpec, *, arch: str = "gfx950") -> KernelDef
 
     With ``dg`` the conv is a dgrad via forward: ``A`` is the dgrad's filter
     ``[C][3][fw][K]`` (its own K, C are this conv's C, K), read flipped, and
-    each granule gathers its 8 channels one element at a time.
+    each granule gathers its 8 channels one element at a time. No plan in this
+    sweep sets ``dg`` (the dgrad-via-forward routing brings its caller); it is
+    held to Python/C++ byte parity only, with no label and no numeric case yet.
     """
     io_type = _io_type(spec.problem.dtype)
     dtype = spec.problem.dtype

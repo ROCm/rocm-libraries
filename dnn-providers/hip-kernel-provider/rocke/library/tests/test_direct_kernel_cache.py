@@ -1861,10 +1861,13 @@ def test_run_from_cache_batch_chunks_are_balanced():
         n0 += n
     # One launch over the whole batch (a plan that rebases its activations
     # per image): the i32 size kernargs take a clamped value.
-    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0, clamp=True) == (
         ptrs,
         {k: min(v, _TENSOR_LIMIT - 1) for k, v in sizes.items()},
     )
+    # Any other plan keeps its true sizes, so the kernarg packer still refuses
+    # an oversized buffer instead of launching on truncated bounds.
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
     small = {k: min(v, 4096) for k, v in sizes.items()}
     assert _chunk_buffers(ptrs, small, inputs, "y", [31], 0) == (ptrs, small)
 
@@ -1959,7 +1962,12 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
             hsaco_path=None, kernel_name=kernel_name, signature=None, grid=(1, 1, 1)
         )
         step.block = (64, 1, 1)
-        return SimpleNamespace(label=label, steps=(step,), zeroed=())
+        return SimpleNamespace(
+            label=label,
+            steps=(step,),
+            zeroed=(),
+            identity=SimpleNamespace(algorithm="direct_nongrouped"),
+        )
 
     plans = [plan("big", "too_big"), plan("fits", "fits")]
     results, rc = bdc._measure_plans(
@@ -2439,3 +2447,43 @@ def test_per_axis_pad_variants_drive_both_gates():
         assert one_padding == (variant not in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
         checked += 1
     assert checked > len(dv.PER_AXIS_PAD_VARIANTS)
+
+
+def _rr_plans(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_fwd_rr_mfma"]
+
+
+def test_rr_forward_plan_formats_the_weights_then_convolves(cache):
+    """The shipped rr route: step one writes the MFMA weight format into
+    ``ws_wf``, step two reads it as the conv's weights; the plan's workspace is
+    the spec's own ``workspace_bytes``."""
+    problem = _problem(N=8, H=56, W=56, groups=1, cpg=64, kpg=64)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    rr = _rr_plans(plans)
+    assert rr
+    for plan in rr:
+        fmt, conv = plan.steps
+        assert fmt.buffers == ("w", None, "ws_wf")
+        assert conv.buffers == ("x", "ws_wf", "y")
+        assert list(plan.workspaces) == ["ws_wf"]
+        assert plan.workspaces["ws_wf"] > 0
+        assert plan.identity.algorithm == "direct_fwd_rr_mfma"
+
+
+def test_one_by_s_forward_folds_to_an_unfolded_rr_plan(cache, monkeypatch):
+    """A 1x3 pad-0 problem is served by the rr kernel on its Sx1 fold
+    ([N*H, W, 1, C]); ROCKE_FOLD_1D=0 turns the route off."""
+    problem = _problem(
+        N=4, H=64, W=128, groups=1, cpg=128, kpg=256, KH=1, KW=3, PAD=0, pad_w=0
+    )
+    fold = dks.folded_1d_problem(problem)
+    assert (fold.N, fold.H, fold.W, fold.KH, fold.KW) == (256, 128, 1, 3, 1)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    folded = _rr_plans(plans)
+    assert folded
+    for plan in folded:
+        geom = plan.steps[-1].conv_args.geom
+        assert (geom.Ho, geom.Wo) == (fold.Ho, 1)
+    monkeypatch.setattr(dks, "FOLD_1D", False)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    assert _rr_plans(plans) == []
