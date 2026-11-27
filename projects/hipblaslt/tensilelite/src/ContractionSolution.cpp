@@ -5345,9 +5345,7 @@ namespace TensileLite
             // resolveStreamKSettings() produces what solve() launches: it runs
             // the same reduction selection, the same getPersistentGridImpl() call and
             // the same workspace-insufficient DP fallback requiredWorkspaceSize()
-            // reports on, and additionally applies StreamK::reconcileReduction()
-            // (see the note there for the SK4 / SK5-dynamic caveat, where query
-            // and launch can still differ).
+            // reports on, and additionally applies StreamK::reconcileReduction().
             launch = resolveStreamKSettings(
                 problem, hardware, sizeMapping.hasHybridAssignment() ? &effectiveDynamic : nullptr);
 
@@ -5894,21 +5892,8 @@ namespace TensileLite
                         = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
                     return size + partialTileSize(dyn.partialSlots());
                 }
-                // getSKReduction() decides here for every StreamK mode, unlike
-                // resolveStreamKSettings() / computeStreamKDecisions(), which run
-                // SK4 and SK5-dynamic tree unless the dynamic split above chose
-                // parallel (Hybrid), so this query can report the parallel size
-                // while the launch runs tree. That cannot overrun
-                // the caller's buffer: the launch reserves partial tiles only
-                // when they fit the workspace it is given and otherwise falls
-                // back to DP, so an under-report costs the partial-tile path,
-                // not memory safety. Absent a fixed grid (persistentFixedGrid == 0) the
-                // reconcile below erases the divergence for these modes anyway --
-                // they take the work-item branch of getPersistentGridImpl(), which
-                // ignores the strategy and yields skGrid <= tiles, so splitk < 2
-                // demotes the query to tree too. Under persistentFixedGrid the grid is
-                // the user's and the divergence can persist.
-                auto   reductionStrat = getSKReduction(problem, hardware);
+                auto reductionStrat
+                    = streamKLaunchReduction(problem, hardware, tiles, effectiveDynamic);
                 size_t skGrid = getPersistentGridImpl(*this,
                                               problem,
                                               hardware,
@@ -6602,18 +6587,7 @@ namespace TensileLite
         sk.totalTiles = tiles;
         sk.argsVersion = internalArgsSupport.persistentLoopArgsVersion;
 
-        // SK4 and SK5-resolved-dynamic run tree unless the dynamic split below
-        // chose parallel (Hybrid). That is a launch-site rule:
-        // requiredWorkspaceSize() always asks getSKReduction() for whole tiles, so
-        // a dynamic-queue launch can be sized for parallel and then run tree --
-        // see the note there on why that is not a memory-safety problem.
-        if(sizeMapping.hasDynamicAssignment())
-            sk.reduction = origami::reduction_t::tree;
-        else if(sizeMapping.hasHybridAssignment())
-            sk.reduction = effectiveDynamic ? origami::reduction_t::tree
-                                            : getSKReduction(problem, hardware);
-        else
-            sk.reduction = getSKReduction(problem, hardware);
+        sk.reduction = streamKLaunchReduction(problem, hardware, tiles, effectiveDynamic);
         sk.smCountTarget             = problem.getParams().smCountTarget();
         sk.grid = getPersistentGridImpl(*this,
                                 problem,
@@ -6624,13 +6598,11 @@ namespace TensileLite
                                 nullptr, nullptr, &sk.clusterGridClamp, &sk.selectedGrid);
         // The dynamic path reserves one partial tile per part of a split tile and
         // none for whole tiles, so it never falls back to grid = tiles (see
-        // streamKDynamicSizesPartials()); its decomposition already chose the
-        // reduction.
+        // streamKDynamicSizesPartials()).
         if(streamKDynamicSizesPartials(effectiveDynamic))
         {
             const StreamK::Dynamic::KernelArguments dyn
                 = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
-            sk.reduction      = dyn.reduction();
             sk.workspaceBytes = partialTileSize(dyn.partialSlots());
             return sk;
         }
@@ -7892,6 +7864,16 @@ namespace TensileLite
                && !handwrittenCustomKernel();
     }
 
+    origami::reduction_t ContractionSolution::streamKLaunchReduction(Problem const&  problem,
+                                                                     Hardware const& hardware,
+                                                                     size_t          tiles,
+                                                                     bool effectiveDynamic) const
+    {
+        if(StreamK::Dynamic::usesQueue(sizeMapping, effectiveDynamic))
+            return streamKDynamicDecomposition(problem, hardware, tiles).reduction();
+        return getSKReduction(problem, hardware);
+    }
+
     // Single source of truth for the StreamK launch decisions. The reduction, grid,
     // and workspace/DP fallback computed here are the values solve() launches with:
     // solve() reads them straight out of the returned snapshot into StreamKSettings
@@ -7953,18 +7935,9 @@ namespace TensileLite
             = (sizeMapping.hasHybridAssignment()) ? streamK5EffectiveDynamic(problem, hardware) : false;
         d.effectiveDynamic = effectiveDynamic;
 
-        // Reduction strategy. SK4 and SK5-resolved-dynamic are tree unless the
-        // dynamic split below chose parallel (Hybrid); everything else asks
-        // getSKReduction(). Note requiredWorkspaceSize() asks getSKReduction() for
-        // whole tiles and has no such special case -- see the note above.
-        origami::reduction_t reduction;
-        if(sizeMapping.hasDynamicAssignment())
-            reduction = origami::reduction_t::tree;
-        else if(sizeMapping.hasHybridAssignment())
-            reduction = effectiveDynamic ? origami::reduction_t::tree
-                                         : getSKReduction(problem, hardware);
-        else
-            reduction = getSKReduction(problem, hardware);
+        // Reduction strategy, as the launch settings pick it.
+        origami::reduction_t reduction
+            = streamKLaunchReduction(problem, hardware, tiles, effectiveDynamic);
 
         // Grid -- reuses getPersistentGridImpl (same call solve() makes), and captures the
         // fixed-grid / tree-bounds fallbacks plus the pre-tree-bounds "selected"

@@ -1386,6 +1386,16 @@ namespace TensileLite
         // keep the grid rule.
         bool streamKDynamicSizesPartials(bool effectiveDynamic) const;
 
+        // The reduction the launch runs: on the dynamic-queue path the
+        // decomposition's (StreamK::Dynamic::KernelArguments::reduction()),
+        // otherwise getSKReduction(). Grid selection reads it (the tree-fixup
+        // bound and the flag-region clamp), so the workspace query, launch
+        // settings and launch summary all pass it to getPersistentGridImpl().
+        origami::reduction_t streamKLaunchReduction(Problem const&  problem,
+                                                    Hardware const& hardware,
+                                                    size_t          tiles,
+                                                    bool            effectiveDynamic) const;
+
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
         // one clause that exists only at solve() (the pointer is not allocated

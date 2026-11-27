@@ -509,14 +509,11 @@ namespace TensileLite
             // sizing rules for bias-gradient and amaxD; this snapshot reports the
             // partials buffer only.
             //
-            // Reduction selection still differs: this snapshot and
-            // resolveStreamKSettings() force tree for SK4 and SK5-dynamic, while
-            // requiredWorkspaceSize() always asks getSKReduction(). A fixed-grid
-            // override can preserve that difference; see requiredWorkspaceSize().
-            // Sharing the byte formula does not imply identical decisions in every
-            // mode. Changes to any of these three paths must be checked against the
-            // other two, including the allocate-then-launch flow where the queried
-            // size becomes problem.workspaceSize().
+            // All three start from the same reduction,
+            // ContractionSolution::streamKLaunchReduction(). Changes to any of these
+            // three paths must be checked against the other two, including the
+            // allocate-then-launch flow where the queried size becomes
+            // problem.workspaceSize().
             size_t requiredWorkspaceBytes = 0;
             // recomputed: partials(+work-queue) bytes wanted, before the fit check against
             // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
@@ -643,12 +640,10 @@ namespace TensileLite
         // Both requiredWorkspaceSize() -- the workspace query the caller sizes
         // its allocation from -- and resolveStreamKSettings() -- what solve()
         // launches -- call this on the same (reduction, grid, tiles) triple
-        // immediately after getPersistentGridImpl(). For SK3 and SK5-static, where the
-        // two start from the same getSKReduction() answer, that keeps query and
-        // launch agreed on the reduction and so on the workspace. SK4 and
-        // SK5-dynamic run tree at the launch sites unless the dynamic split chose
-        // parallel (Hybrid); see requiredWorkspaceSize() for why the resulting
-        // divergence is bounded.
+        // immediately after getPersistentGridImpl(). Both start from the same
+        // streamKLaunchReduction() answer, so query and launch agree on the
+        // reduction and so on the workspace. The dynamic-queue path sizes its
+        // partials from its decomposition before reaching this.
         //
         // Unconditional, not uniform-summation-order enforcement: F < 2 is
         // unlaunchable for parallel whatever the mode, and solve() still throws

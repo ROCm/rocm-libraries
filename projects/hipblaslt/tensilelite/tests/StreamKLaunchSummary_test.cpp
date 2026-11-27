@@ -3423,6 +3423,67 @@ TEST_F(StreamKDynamicParallelSolveTest, ParallelNeedsTheCapability)
     EXPECT_TRUE(solution->uniformSummationOrderSupported(uso, device));
 }
 
+// The launch reports the reduction it runs -- tree for whole tiles and the
+// arrival fixup, parallel for the parallel split -- and the workspace query,
+// launch settings, launch summary and launch agree on it and its workspace.
+TEST_F(StreamKDynamicParallelSolveTest, LaunchReportsTheReductionItRuns)
+{
+    struct Case
+    {
+        char const*          name;
+        Shape                shape;
+        origami::reduction_t reduction;
+        bool                 split;
+    };
+    const Case cases[] = {
+        {"whole", {2560, 2560, 262144, 1}, origami::reduction_t::tree, false},
+        {"arrival", {1664, 640, 262144, 1}, origami::reduction_t::tree, true},
+        {"parallel", longKTiles(1), origami::reduction_t::parallel, true},
+    };
+    for(auto const& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        auto         problem = dynamicSplitGemm(c.shape);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        const auto   d       = solution->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_EQ(d.tiles > 0, c.split);
+        EXPECT_EQ(d.reduction(), c.reduction);
+
+        const size_t required = solution->requiredWorkspaceSize(problem, device);
+        EXPECT_EQ(required, solution->partialTileSize(d.partialSlots()));
+        const auto decided = solution->computeStreamKDecisions(problem, device);
+        EXPECT_EQ(decided.reduction, c.reduction);
+        EXPECT_EQ(decided.requiredWorkspaceBytes, required);
+        const auto launch = solution->resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.reduction, c.reduction);
+        EXPECT_EQ(launch.workspaceBytes, required);
+        EXPECT_EQ(launch.grid, decided.grid());
+
+        problem.setWorkspaceSize(required);
+        const auto invocations = solveWithFakeBuffers(*solution, problem, device);
+        EXPECT_EQ(invocations.size(), c.reduction == origami::reduction_t::parallel ? 2u : 1u)
+            << "PostGSU only for the parallel reduction";
+    }
+}
+
+// The tree-fixup 24-bit bound (getPersistentGridImpl) applies to tree
+// launches only, so a parallel split of a tile far past it keeps its grid:
+// one tile of 524288 iterations, 256 parts.
+TEST_F(StreamKDynamicParallelSolveTest, ParallelSplitIgnoresTheTreeFixupBound)
+{
+    auto         problem = dynamicSplitGemm({128, 128, 33554432, 1});
+    const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+    ASSERT_GE(problem.getItersPerTile(solution->sizeMapping), 65536u);
+    const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+    ASSERT_TRUE(d.parallel);
+    EXPECT_EQ(d.split, 256u);
+
+    const auto decided = solution->computeStreamKDecisions(problem, device);
+    EXPECT_FALSE(decided.treeBoundsFallbackFired);
+    EXPECT_EQ(decided.grid(), size_t{d.grid});
+    EXPECT_EQ(solution->resolvePersistentSettings(problem, device).grid, size_t{d.grid});
+}
+
 // The bias-gradient and amaxD stores of the parallel reduction assume one tile
 // per workgroup, so those problems take the arrival fixup.
 TEST_F(StreamKDynamicParallelSolveTest, ParallelExcludesBiasGradientAndAmaxD)
