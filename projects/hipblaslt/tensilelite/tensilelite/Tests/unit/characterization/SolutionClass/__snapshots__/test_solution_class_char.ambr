@@ -381,6 +381,7 @@
       'WorkGroupReduction',
       'WorkQueueStealing',
       'WorkspaceCheck',
+      '_BiasSumAfterLSU',
       '_DepthU',
       '_DepthUA',
       '_DepthUB',
