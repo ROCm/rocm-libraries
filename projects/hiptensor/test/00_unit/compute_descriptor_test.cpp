@@ -25,10 +25,11 @@
  *******************************************************************************/
 
 // The scaling factors of an operation take the scalar type its compute descriptor maps to, so
-// every operation descriptor create function must reject a compute descriptor without one
-// (HIPTENSOR_COMPUTE_DESC_NONE, the integer descriptors and unknown values) with
-// HIPTENSOR_STATUS_INVALID_VALUE, and must not hand back a descriptor. A floating point compute
-// descriptor is checked alongside them so that a failure cannot come from the tensors or modes.
+// every operation descriptor create function must reject a compute descriptor without one and
+// must not hand back a descriptor: the integer descriptors are valid but not supported
+// (HIPTENSOR_STATUS_NOT_SUPPORTED), while HIPTENSOR_COMPUTE_DESC_NONE and values that are not
+// enumerators are invalid (HIPTENSOR_STATUS_INVALID_VALUE). A floating point compute descriptor
+// is checked alongside them so that a failure cannot come from the tensors or modes.
 
 #include <gtest/gtest.h>
 #include <hiptensor/hiptensor.h>
@@ -68,12 +69,18 @@ namespace
             return "Unknown";
         }
     }
+
+    struct ComputeDescriptorCase
+    {
+        hiptensorComputeDescriptor_t descCompute;
+        hiptensorStatus_t            expected;
+    };
 } // namespace
 
 // Holds a handle and FP32 tensors {m,k} (A), {k,n} (B), {m,n}, {n,p}, {m,p} and {m}, enough to
 // build every kind of operation descriptor. The operation descriptor under test is released in
 // TearDown whatever the outcome of the case.
-class ComputeDescriptorTest : public ::testing::TestWithParam<hiptensorComputeDescriptor_t>
+class ComputeDescriptorTest : public ::testing::TestWithParam<ComputeDescriptorCase>
 {
 protected:
     void SetUp() override
@@ -112,17 +119,22 @@ protected:
         }
     }
 
-    // Checks the status of a create call for the compute descriptor under test.
+    hiptensorComputeDescriptor_t computeDesc() const
+    {
+        return GetParam().descCompute;
+    }
+
+    // Checks the status of a create call against the one expected for the compute descriptor
+    // under test.
     void checkCreate(hiptensorStatus_t status)
     {
-        if(GetParam() == HIPTENSOR_COMPUTE_DESC_32F)
+        EXPECT_EQ(status, GetParam().expected);
+        if(GetParam().expected == HIPTENSOR_STATUS_SUCCESS)
         {
-            EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
             EXPECT_NE(mOpDesc, nullptr);
         }
         else
         {
-            EXPECT_EQ(status, HIPTENSOR_STATUS_INVALID_VALUE);
             EXPECT_EQ(mOpDesc, nullptr);
         }
     }
@@ -166,8 +178,8 @@ TEST_P(ComputeDescriptorTest, CreateContraction)
                                              HIPTENSOR_OP_IDENTITY,
                                              mMN,
                                              mModesMN,
-                                             GetParam());
-    if(GetParam() == HIPTENSOR_COMPUTE_DESC_32F && status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+                                             computeDesc());
+    if(GetParam().expected == HIPTENSOR_STATUS_SUCCESS && status == HIPTENSOR_STATUS_ARCH_MISMATCH)
     {
         GTEST_SKIP() << "No FP32 contraction support on this device";
     }
@@ -192,8 +204,8 @@ TEST_P(ComputeDescriptorTest, CreateContractionTrinary)
                                                     HIPTENSOR_OP_IDENTITY,
                                                     mMP,
                                                     mModesMP,
-                                                    GetParam());
-    if(GetParam() == HIPTENSOR_COMPUTE_DESC_32F && status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+                                                    computeDesc());
+    if(GetParam().expected == HIPTENSOR_STATUS_SUCCESS && status == HIPTENSOR_STATUS_ARCH_MISMATCH)
     {
         GTEST_SKIP() << "No FP32 contraction support on this device";
     }
@@ -203,7 +215,7 @@ TEST_P(ComputeDescriptorTest, CreateContractionTrinary)
 TEST_P(ComputeDescriptorTest, CreatePermutation)
 {
     checkCreate(hiptensorCreatePermutation(
-        mHandle, &mOpDesc, mMN, mModesMN, HIPTENSOR_OP_IDENTITY, mMN, mModesMN, GetParam()));
+        mHandle, &mOpDesc, mMN, mModesMN, HIPTENSOR_OP_IDENTITY, mMN, mModesMN, computeDesc()));
 }
 
 TEST_P(ComputeDescriptorTest, CreateElementwiseBinary)
@@ -219,7 +231,7 @@ TEST_P(ComputeDescriptorTest, CreateElementwiseBinary)
                                                  mMN,
                                                  mModesMN,
                                                  HIPTENSOR_OP_ADD,
-                                                 GetParam()));
+                                                 computeDesc()));
 }
 
 TEST_P(ComputeDescriptorTest, CreateElementwiseTrinary)
@@ -239,7 +251,7 @@ TEST_P(ComputeDescriptorTest, CreateElementwiseTrinary)
                                                   mModesMN,
                                                   HIPTENSOR_OP_ADD,
                                                   HIPTENSOR_OP_ADD,
-                                                  GetParam()));
+                                                  computeDesc()));
 }
 
 TEST_P(ComputeDescriptorTest, CreateReduction)
@@ -255,20 +267,29 @@ TEST_P(ComputeDescriptorTest, CreateReduction)
                                          mM,
                                          mModesM,
                                          HIPTENSOR_OP_ADD,
-                                         GetParam()));
+                                         computeDesc()));
 }
 
 INSTANTIATE_TEST_SUITE_P(ScalarType,
                          ComputeDescriptorTest,
-                         ::testing::Values(HIPTENSOR_COMPUTE_DESC_32F),
-                         [](auto const& info) { return computeDescName(info.param); });
+                         ::testing::Values(ComputeDescriptorCase{HIPTENSOR_COMPUTE_DESC_32F,
+                                                                 HIPTENSOR_STATUS_SUCCESS}),
+                         [](auto const& info) { return computeDescName(info.param.descCompute); });
 
-INSTANTIATE_TEST_SUITE_P(NoScalarType,
+INSTANTIATE_TEST_SUITE_P(
+    Unsupported,
+    ComputeDescriptorTest,
+    ::testing::Values(
+        ComputeDescriptorCase{HIPTENSOR_COMPUTE_DESC_8U, HIPTENSOR_STATUS_NOT_SUPPORTED},
+        ComputeDescriptorCase{HIPTENSOR_COMPUTE_DESC_8I, HIPTENSOR_STATUS_NOT_SUPPORTED},
+        ComputeDescriptorCase{HIPTENSOR_COMPUTE_DESC_32U, HIPTENSOR_STATUS_NOT_SUPPORTED},
+        ComputeDescriptorCase{HIPTENSOR_COMPUTE_DESC_32I, HIPTENSOR_STATUS_NOT_SUPPORTED}),
+    [](auto const& info) { return computeDescName(info.param.descCompute); });
+
+INSTANTIATE_TEST_SUITE_P(Invalid,
                          ComputeDescriptorTest,
-                         ::testing::Values(HIPTENSOR_COMPUTE_DESC_NONE,
-                                           HIPTENSOR_COMPUTE_DESC_8U,
-                                           HIPTENSOR_COMPUTE_DESC_8I,
-                                           HIPTENSOR_COMPUTE_DESC_32U,
-                                           HIPTENSOR_COMPUTE_DESC_32I,
-                                           unknownComputeDesc),
-                         [](auto const& info) { return computeDescName(info.param); });
+                         ::testing::Values(ComputeDescriptorCase{HIPTENSOR_COMPUTE_DESC_NONE,
+                                                                 HIPTENSOR_STATUS_INVALID_VALUE},
+                                           ComputeDescriptorCase{unknownComputeDesc,
+                                                                 HIPTENSOR_STATUS_INVALID_VALUE}),
+                         [](auto const& info) { return computeDescName(info.param.descCompute); });
