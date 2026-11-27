@@ -22,7 +22,6 @@ GlobalParameters:
   Architecture: gfx1250-strict
   KeepBuildTmp: true
   PrintLevel: 1
-  CpuThreads: 1
   SkipSlowSolutionRatio: 0.0
   NumBenchmarks: 1
   NumWarmups: 0

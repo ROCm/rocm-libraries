@@ -14,7 +14,7 @@ at `$HEAD`, use the section on test tiers in that project's README or `TESTING.m
 
 | Tier | Holds | Budget | Runs in PR CI |
 |---|---|---|---|
-| `quick` | Ultra-fast CPU-only unit tests, and the smallest gross-breakage enablement set | Whole tier under 5 min | Yes: `standard` includes it; alone on run-all fallbacks and dispatches |
+| `quick` | Ultra-fast CPU-only unit tests, and the smallest gross-breakage enablement set | Whole tier under 5 min | Yes: `standard` includes it |
 | `standard` | The default: slower enablement and high-priority regression cases | Whole tier (quick included) under 30 min | Yes, every PR touching hipDNN |
 | `comprehensive` | Nightly breadth | Under 2 h | No |
 | `full` | Stress, exhaustive, cases redundant with lower-tier coverage, release testing | None (2 h or more) | No |

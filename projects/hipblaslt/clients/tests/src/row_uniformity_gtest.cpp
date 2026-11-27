@@ -64,6 +64,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <random>
 #include <string>
 #include <utility>
@@ -1325,6 +1326,13 @@ namespace
         int64_t     m = 4096;
     };
 
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6Case& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k
+            << " gfx950Pick=" << c.gfx950Pick << " tiledB=" << c.tiledB << " m=" << c.m << "}";
+    }
+
     // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
     bool onMXFp6RegisteredChip()
     {
@@ -1775,6 +1783,13 @@ namespace
         float       beta;
         bool        hasKernel;
     };
+
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6SelectionCase& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k << " tiledB=" << c.tiledB
+            << " alpha=" << c.alpha << " beta=" << c.beta << " hasKernel=" << c.hasKernel << "}";
+    }
 
     class RowUniformityMXFp6Selection_smoke
         : public ::testing::TestWithParam<MXFp6SelectionCase>

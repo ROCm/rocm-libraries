@@ -66,9 +66,10 @@ protected:
 
     void SetUp() override
     {
-        if(!meta.IsReady())
-            GTEST_SKIP() << "lgbm_model_meta.json not found in "
-                         << miopen::GetSystemDbPath().string();
+        // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing
+        // model asset is a packaging fault and must fail, not skip.
+        ASSERT_TRUE(meta.IsReady())
+            << "lgbm_model_meta.json not found in " << miopen::GetSystemDbPath().string();
     }
 };
 
@@ -125,8 +126,8 @@ protected:
 
     void SetUp() override
     {
-        if(!meta.IsReady())
-            GTEST_SKIP() << "LGBM metadata unavailable; picker disabled in this build";
+        ASSERT_TRUE(meta.IsReady())
+            << "lgbm_model_meta.json not found in " << miopen::GetSystemDbPath().string();
     }
 };
 
@@ -186,8 +187,8 @@ TEST_P(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
     EXPECT_EQ(GfxVocabCode(""), -1);
 
     const auto& forest = LgbmForest::GetRank();
-    if(!forest.IsReady())
-        GTEST_SKIP() << "rank model unavailable";
+    ASSERT_TRUE(forest.IsReady()) << "lgbm_rank.bin not found in "
+                                  << miopen::GetSystemDbPath().string();
 
     // Score every solver in the vocab on two fixed problem rows with the gfx_id column set from
     // GfxVocabCode, the same way PickSolverRanked fills it. gfx1250 and gfx1250-strict must
@@ -335,12 +336,14 @@ using CPU_LgbmForest_NONE = ::testing::TestWithParam<int>;
 TEST_P(CPU_LgbmForest_NONE, MatchesGoldenVectors)
 {
     const auto& forest = LgbmForest::GetRank();
-    if(!forest.IsReady())
-        GTEST_SKIP() << "rank model not found in " << miopen::GetSystemDbPath().string();
+    // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing model or
+    // fixture is a packaging fault and must fail, not skip.
+    ASSERT_TRUE(forest.IsReady()) << "lgbm_rank.bin not found in "
+                                  << miopen::GetSystemDbPath().string();
 
     const auto gpath = miopen::GetSystemDbPath() / "lgbm_rank_golden.json";
-    if(!miopen::fs::exists(gpath))
-        GTEST_SKIP() << "golden fixture not installed in " << miopen::GetSystemDbPath().string();
+    ASSERT_TRUE(miopen::fs::exists(gpath)) << "golden fixture lgbm_rank_golden.json not found in "
+                                           << miopen::GetSystemDbPath().string();
     std::ifstream in(gpath.string());
     ASSERT_TRUE(in.is_open()) << "cannot open golden fixture: " << gpath.string();
     nlohmann::json golden;

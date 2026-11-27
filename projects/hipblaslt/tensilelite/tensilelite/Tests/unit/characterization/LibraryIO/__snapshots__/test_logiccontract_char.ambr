@@ -76,7 +76,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -339,7 +338,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -590,7 +588,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -856,7 +853,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1139,7 +1135,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1402,7 +1397,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1679,7 +1673,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -1945,7 +1938,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2211,7 +2203,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2465,7 +2456,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2731,7 +2721,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),
@@ -2996,7 +2985,6 @@
       'MIArchVgpr': False,
       'MXLoadInst': 'Auto',
       'MXScaleFormat': 'Auto',
-      'MXScaleVgprInterleaveExtraVgpr': False,
       'MagicDivAlg': 2,
       'MatrixInstruction': list([
       ]),

@@ -54,6 +54,24 @@ inline std::vector<std::string> buildDefines()
     return defines;
 }
 
+template <typename OutputDataType,
+          typename Input0DataType,
+          typename Input1DataType,
+          typename MaskDataType,
+          unsigned int localSize>
+inline std::vector<std::string> buildTernaryDefines()
+{
+    std::vector<std::string> defines;
+    defines.emplace_back(std::string("-DOUTPUT_TYPE=") + HipRtcTypeName<OutputDataType>::VALUE);
+    defines.emplace_back(std::string("-DINPUT0_TYPE=") + HipRtcTypeName<Input0DataType>::VALUE);
+    defines.emplace_back(std::string("-DINPUT1_TYPE=") + HipRtcTypeName<Input1DataType>::VALUE);
+    defines.emplace_back(std::string("-DMASK_TYPE=") + HipRtcTypeName<MaskDataType>::VALUE);
+    // Required by GpuRefTypes.h; selection does not compute.
+    defines.emplace_back("-DCOMPUTE_TYPE=float");
+    defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(localSize));
+    return defines;
+}
+
 } // namespace detail
 
 class GpuReferencePointwise
@@ -77,10 +95,19 @@ public:
                                  const float lowerClip,
                                  const float upperClip,
                                  const float lowerSlope,
-                                 const float swishBeta = float{1})
+                                 const float swishBeta = float{1},
+                                 const float eluAlpha = float{1},
+                                 const float softplusBeta = float{1})
     {
-        executeUnaryParamOperation<OutputType, InputType, ComputeType>(
-            operation, output, input, lowerClip, upperClip, lowerSlope, swishBeta);
+        executeUnaryParamOperation<OutputType, InputType, ComputeType>(operation,
+                                                                       output,
+                                                                       input,
+                                                                       lowerClip,
+                                                                       upperClip,
+                                                                       lowerSlope,
+                                                                       swishBeta,
+                                                                       eluAlpha,
+                                                                       softplusBeta);
     }
 
     template <typename OutputType,
@@ -112,7 +139,50 @@ public:
             operation, output, input0, input1, lowerClip, upperClip, lowerSlope);
     }
 
+    // Ternary: only BINARY_SELECT, output = mask ? input0 : input1.
+    template <typename OutputType, typename Input0Type, typename Input1Type, typename MaskType>
+    static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                 hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                 hipdnn_data_sdk::utilities::TensorBase<MaskType>& mask)
+    {
+        executeTernaryOperation<OutputType, Input0Type, Input1Type, MaskType>(
+            operation, output, input0, input1, mask);
+    }
+
 private:
+    template <typename OutputType, typename Input0Type, typename Input1Type, typename MaskType>
+    static void
+        executeTernaryOperation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                hipdnn_data_sdk::utilities::TensorBase<MaskType>& mask)
+    {
+        validateTernaryTensors<OutputType, Input0Type, Input1Type, MaskType>(
+            output, input0, input1, mask);
+
+        auto defines = detail::
+            buildTernaryDefines<OutputType, Input0Type, Input1Type, MaskType, BLOCK_SIZE>();
+
+        launchTernary(operation,
+                      input0.memory().deviceData(),
+                      input0.dims(),
+                      input0.strides(),
+                      input1.memory().deviceData(),
+                      input1.dims(),
+                      input1.strides(),
+                      mask.memory().deviceData(),
+                      mask.dims(),
+                      mask.strides(),
+                      output.memory().deviceData(),
+                      output.dims(),
+                      output.strides(),
+                      defines);
+        output.memory().markDeviceModified();
+    }
+
     template <typename OutputType, typename InputType, typename ComputeType = double>
     static void executeUnaryOperation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                       hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -142,7 +212,9 @@ private:
                                    const float lowerClip,
                                    const float upperClip,
                                    const float lowerSlope,
-                                   const float swishBeta = float{1})
+                                   const float swishBeta = float{1},
+                                   const float eluAlpha = float{1},
+                                   const float softplusBeta = float{1})
     {
         validateTensors<OutputType, InputType, ComputeType>(output, input);
 
@@ -159,7 +231,9 @@ private:
                     lowerClip,
                     upperClip,
                     lowerSlope,
-                    swishBeta);
+                    swishBeta,
+                    eluAlpha,
+                    softplusBeta);
         output.memory().markDeviceModified();
     }
 
@@ -231,10 +305,51 @@ private:
     // --- Validators ---
 
     template <class T>
+    static constexpr bool IS_FP_DATA_TYPE = std::is_same_v<T, double> || std::is_same_v<T, float>
+                                            || std::is_same_v<T, hipdnn_data_sdk::types::half>
+                                            || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
+
+    // Binary operands and outputs may also be int32 or bool (CMP_GT takes int32 operands and
+    // produces bool, as on the CPU). This only checks the types: which modes accept them is decided
+    // by the plan builders and the signature key.
+    template <class T>
     static constexpr bool IS_SUPPORTED_DATA_TYPE
-        = std::is_same_v<T, double> || std::is_same_v<T, float>
-          || std::is_same_v<T, hipdnn_data_sdk::types::half>
-          || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
+        = IS_FP_DATA_TYPE<T> || std::is_same_v<T, int32_t> || std::is_same_v<T, bool>;
+
+    template <typename OutputType, typename Input0Type, typename Input1Type, typename MaskType>
+    static void validateTernaryTensors(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                       hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                       hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                       hipdnn_data_sdk::utilities::TensorBase<MaskType>& mask)
+    {
+        if(output.dims().size() > 5)
+        {
+            throw std::invalid_argument("Pointwise operations have a max dimension of 5");
+        }
+
+        const auto checkBroadcast = [&](const std::vector<int64_t>& dims, const char* name) {
+            if(!hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible(dims, output.dims()))
+            {
+                throw std::invalid_argument(
+                    std::string("Pointwise operations require ") + name
+                    + " tensor dimensions to be broadcastable to dimensions of output tensor.");
+            }
+        };
+        checkBroadcast(input0.dims(), "input0");
+        checkBroadcast(input1.dims(), "input1");
+        checkBroadcast(mask.dims(), "mask");
+
+        static_assert(IS_SUPPORTED_DATA_TYPE<Input0Type> && !std::is_same_v<Input0Type, bool>,
+                      "Ternary pointwise supports only double, float, half, bfloat16 and int32 "
+                      "input0 data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<Input1Type> && !std::is_same_v<Input1Type, bool>,
+                      "Ternary pointwise supports only double, float, half, bfloat16 and int32 "
+                      "input1 data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<OutputType> && !std::is_same_v<OutputType, bool>,
+                      "Ternary pointwise supports only double, float, half, bfloat16 and int32 "
+                      "output data types.");
+        static_assert(std::is_same_v<MaskType, bool>, "Ternary pointwise requires a bool mask.");
+    }
 
     template <typename OutputType, typename InputType, typename ComputeType>
     static void validateTensors(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -254,13 +369,13 @@ private:
         }
 
         static_assert(
-            IS_SUPPORTED_DATA_TYPE<InputType>,
+            IS_FP_DATA_TYPE<InputType>,
             "Pointwise supports only double, float, half, and bfloat16 input data types.");
         static_assert(
-            IS_SUPPORTED_DATA_TYPE<OutputType>,
+            IS_FP_DATA_TYPE<OutputType>,
             "Pointwise supports only double, float, half, and bfloat16 output data types.");
         static_assert(
-            IS_SUPPORTED_DATA_TYPE<ComputeType>,
+            IS_FP_DATA_TYPE<ComputeType>,
             "Pointwise supports only double, float, half, and bfloat16 compute data types.");
     }
 
@@ -290,19 +405,37 @@ private:
         }
         static_assert(
             IS_SUPPORTED_DATA_TYPE<Input0Type>,
-            "Pointwise supports only double, float, half, and bfloat16 input0 data types.");
+            "Pointwise supports only double, float, half, bfloat16, int32 and bool input0 data "
+            "types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<Input1Type>,
-            "Pointwise supports only double, float, half, and bfloat16 input1 data types.");
+            "Pointwise supports only double, float, half, bfloat16, int32 and bool input1 data "
+            "types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<OutputType>,
-            "Pointwise supports only double, float, half, and bfloat16 output data types.");
+            "Pointwise supports only double, float, half, bfloat16, int32 and bool output data "
+            "types.");
         static_assert(
-            IS_SUPPORTED_DATA_TYPE<ComputeType>,
+            IS_FP_DATA_TYPE<ComputeType>,
             "Pointwise supports only double, float, half, and bfloat16 compute data types.");
     }
 
     // --- Kernel launchers (defined in GpuReferencePointwise.cpp) ---
+
+    static void launchTernary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                              const void* input0Ptr,
+                              const std::vector<int64_t>& input0Dims,
+                              const std::vector<int64_t>& input0Strides,
+                              const void* input1Ptr,
+                              const std::vector<int64_t>& input1Dims,
+                              const std::vector<int64_t>& input1Strides,
+                              const void* maskPtr,
+                              const std::vector<int64_t>& maskDims,
+                              const std::vector<int64_t>& maskStrides,
+                              void* outputPtr,
+                              const std::vector<int64_t>& outputDims,
+                              const std::vector<int64_t>& outputStrides,
+                              std::vector<std::string>& defines);
 
     static void launchUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                             const void* inputPtr,
@@ -315,7 +448,9 @@ private:
                             float lowerClip = 0.f,
                             float upperClip = std::numeric_limits<float>::max(),
                             float lowerSlope = 0.f,
-                            float swishBeta = 1.f);
+                            float swishBeta = 1.f,
+                            float eluAlpha = 1.f,
+                            float softplusBeta = 1.f);
 
     static void launchBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                              const void* input0Ptr,
