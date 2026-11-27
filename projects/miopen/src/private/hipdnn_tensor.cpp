@@ -5,6 +5,9 @@
 
 #include "miopen_impl.h"
 
+#include <algorithm>
+#include <cstdint>
+
 namespace miopen {
 namespace wrapper {
 namespace hipdnn {
@@ -46,6 +49,15 @@ void AppendTensor(std::vector<int64_t>& out, const TensorInfo& tensor)
     out.push_back(static_cast<int64_t>(tensor.dataType));
     AppendList(out, tensor.dims);
     AppendList(out, tensor.strides);
+    out.push_back(tensor.alignment);
+}
+
+int64_t PointerAlignment(const void* pointer)
+{
+    const auto address = reinterpret_cast<std::uintptr_t>(pointer);
+    if(address == 0)
+        return 16;
+    return static_cast<int64_t>(std::min<std::uintptr_t>(address & (~address + 1), 16));
 }
 
 std::shared_ptr<fe::graph::TensorAttributes>
@@ -55,6 +67,7 @@ MakeTensor(const TensorInfo& info, fe::DataType dataType, int64_t uid)
                                         .set_dim(info.dims)
                                         .set_stride(info.strides)
                                         .set_data_type(dataType)
+                                        .set_alignment(info.alignment)
                                         .set_uid(uid));
 }
 

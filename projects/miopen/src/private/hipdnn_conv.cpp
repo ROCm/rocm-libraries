@@ -290,6 +290,7 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
     out->set_dim(outInfo.dims)
         .set_stride(outInfo.strides)
         .set_data_type(types[2])
+        .set_alignment(outInfo.alignment)
         .set_uid(kUidOut)
         .set_output(true);
     return true;
@@ -363,14 +364,19 @@ miopenStatus_t ReadPlainProblem(GraphKind kind,
     return miopenStatusSuccess;
 }
 
+// Declares each tensor's pointer alignment in `problem`, so a plan that needs more than this
+// call's pointers have is never chosen for it, then runs it.
 miopenStatus_t RunPlainProblem(miopenHandle_t handle,
-                               const ConvProblem& problem,
+                               ConvProblem& problem,
                                const void* aData,
                                const void* bData,
                                void* outData,
                                void* workspace,
                                size_t workspaceSize)
 {
+    problem.tensors[0].alignment = PointerAlignment(aData);
+    problem.tensors[1].alignment = PointerAlignment(bData);
+    problem.tensors[2].alignment = PointerAlignment(outData);
     VariantPack variantPack{
         {kUidA, const_cast<void*>(aData)},
         {kUidB, const_cast<void*>(bData)},
@@ -847,6 +853,10 @@ miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
         return RecordFailure(miopenStatusNotImplemented,
                              "only Activation Mode == miopenActivationRELU is supported");
 
+    problem.tensors[0].alignment = PointerAlignment(x);
+    problem.tensors[1].alignment = PointerAlignment(w);
+    problem.tensors[2].alignment = PointerAlignment(y);
+    problem.tensors[3].alignment = PointerAlignment(bias);
     VariantPack variantPack{
         {kUidA, const_cast<void*>(x)},
         {kUidB, const_cast<void*>(w)},

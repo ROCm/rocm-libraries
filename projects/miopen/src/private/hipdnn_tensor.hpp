@@ -29,7 +29,15 @@ struct TensorInfo
     std::vector<int64_t> strides;
     // Above 1 only for NCHWc4, NCHWc8, CHWNc4 and CHWNc8.
     int64_t vectorLength = 1;
+    // The byte alignment the call's pointer for this tensor has (PointerAlignment), declared in
+    // the graph so engines that need more decline. 16, hipDNN's default, when no pointer is
+    // known yet (size and solution queries).
+    int64_t alignment = 16;
 };
+
+// The largest power of two, up to 16, that divides the address: what hipDNN may assume about
+// the pointer. A null pointer counts as 16.
+int64_t PointerAlignment(const void* pointer);
 
 // Reads lengths and strides at full width (above INT_MAX too), which
 // miopenGetTensorDescriptor's int arrays cannot hold.
@@ -39,7 +47,7 @@ miopenStatus_t ReadTensor(miopenTensorDescriptor_t desc, TensorInfo& out);
 // flatten to the same sequence.
 void AppendList(std::vector<int64_t>& out, const std::vector<int64_t>& values);
 
-// Appends the data type, dims and strides of `tensor`.
+// Appends the data type, dims, strides and alignment of `tensor`.
 void AppendTensor(std::vector<int64_t>& out, const TensorInfo& tensor);
 
 std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>

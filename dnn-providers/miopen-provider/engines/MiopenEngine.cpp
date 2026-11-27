@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/NumericalNote.h>
@@ -88,10 +89,63 @@ int64_t MiopenEngine::id() const
     return _id;
 }
 
+namespace
+{
+
+// Bytes per element of a data type; sub-byte types are packed, so their buffers are byte-aligned.
+int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(dataType)
+    {
+    case DataType::DOUBLE:
+    case DataType::INT64:
+        return 8;
+    case DataType::FLOAT:
+    case DataType::INT32:
+        return 4;
+    case DataType::HALF:
+    case DataType::BFLOAT16:
+        return 2;
+    default:
+        return 1;
+    }
+}
+
+// MIOpen accepts any pointer aligned to its element size, so the engines take any declared
+// alignment of at least that; below it (an address inside an element) they decline. Ragged
+// tensors have no MIOpen equivalent.
+bool meetsMiopenTensorRules(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    for(const auto& [uid, tensor] : opGraph.getTensorMap())
+    {
+        if(tensor == nullptr || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor))
+        {
+            continue;
+        }
+        if(tensor->ragged_offset_tensor_uid().has_value()
+           || tensor->ragged_offset_multiplier() != 1)
+        {
+            return false;
+        }
+        if(tensor->alignment() < elementBytes(tensor->data_type()))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 bool MiopenEngine::isApplicable(
     HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    if(!meetsMiopenTensorRules(opGraph))
+    {
+        return false;
+    }
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
     for(const auto& planBuilder : _planBuilders)

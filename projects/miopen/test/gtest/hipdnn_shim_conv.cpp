@@ -479,6 +479,82 @@ TEST(GPU_HipdnnShimConvLessWorkspace_FP32, FindAndRunWithoutWorkspaceMatchCpuRef
     CheckMatchesCpuReference(x, w, y, geometry);
 }
 
+// Framework tensors are often views that start one element into an allocation (a complex
+// tensor's real and imaginary parts, a slice), so a pointer is element-aligned but not 16-byte
+// aligned. The call must run on such pointers and give the reference result.
+TEST(GPU_HipdnnShimConvElementAligned_FP32, ForwardOnElementAlignedPointersMatchCpuReference)
+{
+    auto& handle_deref    = get_handle();
+    miopenHandle_t handle = &handle_deref;
+
+    tensor<float> x{1, 4, 8, 8};
+    x.generate(tensor_elem_gen_integer{17});
+    tensor<float> w{4, 4, 3, 3};
+    w.generate(tensor_elem_gen_integer{17});
+    OwnedConvDescriptor conv;
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
+    std::vector<std::size_t> out_lengths;
+    ASSERT_NO_FATAL_FAILURE(OutputLengths(conv.handle, x, w, out_lengths));
+    tensor<float> y{out_lengths};
+
+    // Each buffer holds one extra element in front; the call gets the pointer past it.
+    const auto padded = [](const std::vector<float>& data) {
+        std::vector<float> out(data.size() + 1, 0.0f);
+        std::copy(data.begin(), data.end(), out.begin() + 1);
+        return out;
+    };
+    auto x_dev         = handle_deref.Write(padded(x.data));
+    auto w_dev         = handle_deref.Write(padded(w.data));
+    auto y_dev         = handle_deref.Write(padded(y.data));
+    float* const x_ptr = static_cast<float*>(x_dev.get()) + 1;
+    float* const w_ptr = static_cast<float*>(w_dev.get()) + 1;
+    float* const y_ptr = static_cast<float*>(y_dev.get()) + 1;
+
+    std::size_t workspace_size = 0;
+    ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
+                  handle, &w.desc, &x.desc, conv.handle, &y.desc, &workspace_size),
+              miopenStatusSuccess);
+    Workspace workspace{workspace_size};
+
+    int returned_algo_count = 0;
+    miopenConvAlgoPerf_t perf{};
+    ASSERT_EQ(miopenFindConvolutionForwardAlgorithm(handle,
+                                                    &x.desc,
+                                                    x_ptr,
+                                                    &w.desc,
+                                                    w_ptr,
+                                                    conv.handle,
+                                                    &y.desc,
+                                                    y_ptr,
+                                                    1,
+                                                    &returned_algo_count,
+                                                    &perf,
+                                                    workspace.ptr(),
+                                                    workspace.size(),
+                                                    false),
+              miopenStatusSuccess);
+    ASSERT_GT(returned_algo_count, 0);
+
+    ASSERT_EQ(miopenConvolutionForward(handle,
+                                       &kOne,
+                                       &x.desc,
+                                       x_ptr,
+                                       &w.desc,
+                                       w_ptr,
+                                       conv.handle,
+                                       perf.fwd_algo,
+                                       &kZero,
+                                       &y.desc,
+                                       y_ptr,
+                                       workspace.ptr(),
+                                       workspace.size()),
+              miopenStatusSuccess);
+
+    const auto all = handle_deref.Read<float>(y_dev, y.data.size() + 1);
+    std::copy(all.begin() + 1, all.end(), y.data.begin());
+    CheckMatchesCpuReference(x, w, y, ConvGeometry{});
+}
+
 void RunFusedCase(const FusedCase& config, const FusedScales& scales = {})
 {
     SCOPED_TRACE(config.name);

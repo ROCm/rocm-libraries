@@ -7,12 +7,14 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/NumericalNote.h>
@@ -659,4 +661,84 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsInternalErrorIfNoApplicab
     {
         EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
+}
+
+namespace
+{
+
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using TensorMap
+    = std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>;
+
+// One serialized tensor; the builder owns the storage the returned pointer reads.
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
+    makeTensor(flatbuffers::FlatBufferBuilder& builder,
+               DataType dataType,
+               int64_t alignment,
+               std::optional<int64_t> raggedOffsetUid = std::nullopt)
+{
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT tensor;
+    tensor.uid = 1;
+    tensor.data_type = dataType;
+    tensor.dims = {1, 8, 4, 4};
+    tensor.strides = {128, 16, 4, 1};
+    tensor.alignment = alignment;
+    if(raggedOffsetUid.has_value())
+    {
+        tensor.ragged_offset_tensor_uid = *raggedOffsetUid;
+    }
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::TensorAttributes::Pack(builder, &tensor));
+    return flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
+        builder.GetBufferPointer());
+}
+
+// Whether the engine, with a plan builder that accepts every graph, accepts a graph holding
+// only `tensor`.
+bool engineAccepts(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    ON_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+    MiopenEngine engine(0);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    const TensorMap tensors{{1, tensor}};
+    MockGraph mockGraph;
+    ON_CALL(mockGraph, getTensorMap()).WillByDefault(::testing::ReturnRef(tensors));
+    HipdnnMiopenHandle dummyHandle;
+    return engine.isApplicable(dummyHandle, mockGraph);
+}
+
+} // namespace
+
+// MIOpen takes any pointer aligned to its element size, so the engines take any declared
+// alignment of at least that, and decline below it.
+TEST(TestMiopenEngine, IsApplicableAcceptsElementAlignedTensors)
+{
+    SKIP_IF_NO_DEVICES();
+
+    flatbuffers::FlatBufferBuilder half2;
+    EXPECT_TRUE(engineAccepts(makeTensor(half2, DataType::HALF, 2)));
+    flatbuffers::FlatBufferBuilder float4;
+    EXPECT_TRUE(engineAccepts(makeTensor(float4, DataType::FLOAT, 4)));
+    flatbuffers::FlatBufferBuilder float16;
+    EXPECT_TRUE(engineAccepts(makeTensor(float16, DataType::FLOAT, 16)));
+}
+
+TEST(TestMiopenEngine, IsApplicableDeclinesAlignmentBelowTheElementSize)
+{
+    SKIP_IF_NO_DEVICES();
+
+    flatbuffers::FlatBufferBuilder half1;
+    EXPECT_FALSE(engineAccepts(makeTensor(half1, DataType::HALF, 1)));
+    flatbuffers::FlatBufferBuilder float2;
+    EXPECT_FALSE(engineAccepts(makeTensor(float2, DataType::FLOAT, 2)));
+}
+
+TEST(TestMiopenEngine, IsApplicableDeclinesRaggedTensors)
+{
+    SKIP_IF_NO_DEVICES();
+
+    flatbuffers::FlatBufferBuilder ragged;
+    EXPECT_FALSE(engineAccepts(makeTensor(ragged, DataType::HALF, 16, int64_t{2})));
 }

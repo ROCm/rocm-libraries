@@ -12,6 +12,7 @@
 
 #include <hipdnn_frontend.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <memory>
@@ -108,6 +109,7 @@ bool PopulateGraph(const BatchnormProblem& problem, fe::graph::Graph& graph)
     y->set_dim(problem.y.dims)
         .set_stride(problem.y.strides)
         .set_data_type(yType)
+        .set_alignment(problem.y.alignment)
         .set_uid(kUidY)
         .set_output(true);
     return true;
@@ -179,6 +181,14 @@ miopenStatus_t BatchNormalizationForwardInference(miopenHandle_t handle,
                                  "not forwarded to hipDNN");
     }
 
+    // One TensorInfo describes the four per-channel tensors, so it declares the alignment all
+    // four pointers have.
+    problem.x.alignment      = PointerAlignment(x);
+    problem.y.alignment      = PointerAlignment(y);
+    problem.params.alignment = std::min({PointerAlignment(bnScale),
+                                         PointerAlignment(bnBias),
+                                         PointerAlignment(estimatedMean),
+                                         PointerAlignment(estimatedVariance)});
     VariantPack variantPack{
         {kUidX, const_cast<void*>(x)},
         {kUidY, y},
