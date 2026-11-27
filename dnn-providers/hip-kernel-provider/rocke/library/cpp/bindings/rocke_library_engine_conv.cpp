@@ -1455,6 +1455,10 @@ rocke_direct_dgrad_wmma_spec_t ddgw_build_spec(const py::dict& d, std::deque<std
     s.pack_groups = dict_int(d, "pack_groups", s.pack_groups);
     s.split_barrier = dict_bool(d, "split_barrier", s.split_barrier);
     s.wave_epilogue = dict_bool(d, "wave_epilogue", s.wave_epilogue);
+    s.pingpong = dict_bool(d, "pingpong", s.pingpong);
+    s.pp_group = dict_int(d, "pp_group", s.pp_group);
+    s.row_ring = dict_bool(d, "row_ring", s.row_ring);
+    s.tap_ring = dict_bool(d, "tap_ring", s.tap_ring);
     return s;
 }
 

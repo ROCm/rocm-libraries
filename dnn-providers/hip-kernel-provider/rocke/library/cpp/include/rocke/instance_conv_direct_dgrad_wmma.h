@@ -16,7 +16,11 @@
  * `pack_groups` stages a block-diagonal super-group of small groups once
  * before the loop, `split_barrier` splits the per-chunk barrier into
  * s_barrier_signal / s_barrier_wait and `wave_epilogue` stores each wave's
- * tiles with its own TDM transfer.
+ * tiles with its own TDM transfer. `pingpong` runs the waves as two ranks one
+ * barrier apart (`pp_group` steps per barrier pair); with `row_ring` /
+ * `tap_ring` a weight slot holds one filter row / one tap and the halo keeps
+ * two slots. Rows and columns have their own padding at stride 1
+ * (problem.pad_w).
  *
  *   Python (conv_direct_dgrad_wmma.py)       C (this header)
  *   ------------------------------------     ---------------------------------------
@@ -73,6 +77,10 @@ extern "C" {
  *      pack_groups: int = 1          # groups per block-diagonal super-group
  *      split_barrier: bool = False   # s_barrier_signal / _wait per chunk
  *      wave_epilogue: bool = False   # per-wave LDS staging + TDM store
+ *      pingpong: bool = False        # two wave ranks one barrier apart
+ *      pp_group: int = 1             # steps per ping-pong barrier pair
+ *      row_ring: bool = False        # pingpong: one filter row per weight slot
+ *      tap_ring: bool = False        # pingpong: one tap per weight slot
  * ===================================================================== */
 typedef struct rocke_direct_dgrad_wmma_spec
 {
@@ -92,6 +100,10 @@ typedef struct rocke_direct_dgrad_wmma_spec
     int pack_groups; /* default 1 */
     bool split_barrier; /* default false */
     bool wave_epilogue; /* default false */
+    bool pingpong; /* default false */
+    int pp_group; /* default 1 */
+    bool row_ring; /* default false */
+    bool tap_ring; /* default false */
 } rocke_direct_dgrad_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */
@@ -107,9 +119,10 @@ long rocke_direct_dgrad_wmma_lds_bytes(const rocke_direct_dgrad_wmma_spec_t* spe
  * * n_c_tiles, 1, 1); the h / w tiles cover ceil(H / stride) x ceil(W / stride). */
 void rocke_direct_dgrad_wmma_grid(const rocke_direct_dgrad_wmma_spec_t* spec, int grid[3]);
 
-/* kernel_name(): kernel_name_join(name, f{KH}x{KW}, p{PAD}, wc{}, wp{}, tc{}, tp{},
- * tw{}, [tn{}], ck{}, st{}, [pf], [s{sched}], [str{stride}], [dil{dh}x{dw}],
- * [pg{G}c{cpg}k{kpg}], [sb], [we], [bf16]). */
+/* kernel_name(): kernel_name_join(name, f{KH}x{KW}, p{PAD}[x{PAD_W}], wc{}, wp{},
+ * tc{}, tp{}, tw{}, [tn{}], ck{}, st{}, [pf], [s{sched}], [str{stride}],
+ * [dil{dh}x{dw}], [pg{G}c{cpg}k{kpg}], [sb], [we], [pp], [pg{pp_group}], [rr],
+ * [tr], [bf16]). */
 rocke_status_t rocke_direct_dgrad_wmma_kernel_name(const rocke_direct_dgrad_wmma_spec_t* spec,
                                                    char* out,
                                                    size_t out_cap);

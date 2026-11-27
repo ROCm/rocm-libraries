@@ -546,6 +546,34 @@ DGRAD_WMMA_SB_KNOBS = (
     (2, 4, 6, 4, 16, 1, 32, 2, True, False),
     (2, 4, 6, 4, 16, 1, 32, 2, True, True),
 )
+# Ping-pong configurations of direct_dgrad_wmma (two wave ranks a barrier
+# apart, as FWD_WMMA_PP_KNOBS): (waves_c, waves_p, tiles_c, tiles_p, tile_w,
+# tile_n, ck, stages, pp_group, sched), all with pingpong=True, for the dense
+# stride-1 3x3 grid: the 128 x 128 block of 16- and 32-wide tiles (two images
+# on the latter) and tile_w 28 / 48 tiles for maps that are not a multiple of
+# 16 columns wide. Rows trimmed to measured winners.
+DGRAD_WMMA_PP_KNOBS = (
+    (2, 4, 4, 8, 16, 1, 32, 2, 1, "iterative-ilp"),
+    (2, 4, 4, 8, 16, 1, 32, 2, 1, None),
+    (2, 4, 4, 8, 32, 2, 32, 2, 1, "iterative-ilp"),
+    (2, 4, 4, 7, 28, 1, 32, 2, 2, "iterative-ilp"),
+    (2, 4, 4, 6, 48, 1, 32, 2, 1, "iterative-ilp"),
+)
+# Ping-pong with a weight ring (direct_dgrad_wmma row_ring / tap_ring) on the
+# dense stride-1 3x3 grid: (waves_c, waves_p, tiles_c, tiles_p, tile_w, ck,
+# stages, ring, pp_group), ring 1 = row_ring, 2 = tap_ring, all with the
+# iterative-ilp scheduler: 128 x 128 blocks with 64-channel chunks in a
+# 3-deep one-tap ring. Rows trimmed to measured winners.
+DGRAD_WMMA_PP_RING_KNOBS = (
+    (2, 4, 4, 8, 16, 64, 3, 2, 2),
+    (2, 4, 4, 8, 32, 64, 3, 2, 2),
+)
+# 3x1 / 1x3 "same" dgrad of direct_dgrad_wmma (8x8 maps, 384 channels):
+# whole 8x8 images per block, the DGRAD_WMMA_KNOBS layout. Rows trimmed to
+# measured winners.
+DGRAD_WMMA_RECT_LAYERS = ((3, 1, 1, 0), (1, 3, 0, 1))
+DGRAD_WMMA_RECT_KNOBS = ((2, 1, 4, 4, 8, 1, 32, 3, True),)
+
 # Grouped layers with fewer than 8 channels per group (or 16): direct_dgrad_wmma
 # packs 32 // cpg groups into one block-diagonal super-group, one dY chunk.
 DGRAD_WMMA_PACKED_CHANNELS = (4, 8, 16)
@@ -1705,6 +1733,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         + tuple(
             DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
             for pad, dh, dw in DGRAD_WMMA_DILATIONS
+        )
+        # 3x1 / 1x3 "same": per-axis padding.
+        + tuple(
+            DirectCaps(KH=kh, kw=kw, PAD=ph, pad_w=pw, stride=1, cpg=0, kpg=0)
+            for kh, kw, ph, pw in DGRAD_WMMA_RECT_LAYERS
         ),
     ),
     # LDS-DMA ping-pong dgrad on wave64 MFMA (gfx950): dense, stride 1, odd
@@ -2354,6 +2387,8 @@ def _knob_grid(
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_STRIDED_KNOBS)
         elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_DILATED_KNOBS)
+        elif caps is not None and caps.KW != caps.KH:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_RECT_KNOBS)
         else:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_KNOBS)
             for wc, wp, tc, tp, tw, tn, ck, st, pf, we in DGRAD_WMMA_SB_KNOBS:
@@ -2372,6 +2407,39 @@ def _knob_grid(
                 knobs.update(split_barrier=True)
                 if we:
                     knobs.update(wave_epilogue=True)
+                yield knobs
+            for wc, wp, tc, tp, tw, tn, ck, st, pg, sched in DGRAD_WMMA_PP_KNOBS:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    tile_w=tw,
+                    tile_n=tn,
+                    ck=ck,
+                    stages=st,
+                    pingpong=True,
+                )
+                if pg > 1:
+                    knobs.update(pp_group=pg)
+                if sched:
+                    knobs.update(sched=sched)
+                yield knobs
+            for wc, wp, tc, tp, tw, ck, st, ring, pg in DGRAD_WMMA_PP_RING_KNOBS:
+                knobs = dict(
+                    waves_c=wc,
+                    waves_p=wp,
+                    tiles_c=tc,
+                    tiles_p=tp,
+                    tile_w=tw,
+                    ck=ck,
+                    stages=st,
+                    pingpong=True,
+                    sched="iterative-ilp",
+                )
+                knobs.update({"row_ring" if ring == 1 else "tap_ring": True})
+                if pg > 1:
+                    knobs.update(pp_group=pg)
                 yield knobs
     elif variant == "direct_wgrad_tiled":
         for (wk16, wc16, wk, wc), (pf, ru), rps, tb, un in itertools.product(

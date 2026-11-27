@@ -18,6 +18,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import unittest
 
 import numpy as np
@@ -53,6 +54,7 @@ def _problem(
     dil_h=1,
     dil_w=1,
     KW=None,
+    pad_w=-1,
 ):
     return DirectConvProblem(
         N=N,
@@ -68,6 +70,7 @@ def _problem(
         dtype=dtype,
         dil_h=dil_h,
         dil_w=dil_w,
+        pad_w=pad_w,
     )
 
 
@@ -90,12 +93,19 @@ class TestDgradWmmaSpec(unittest.TestCase):
             why = dgrad_wmma_reason(DirectDgradWmmaSpec(problem=problem, **knobs))
             self.assertIsNotNone(why, knobs)
             self.assertIn(needle, why)
+        # Only dX channels need 16-byte rows; the dY tail is zero-filled.
+        for k in (36, 37):
+            self.assertIsNone(
+                dgrad_wmma_reason(DirectDgradWmmaSpec(problem=_problem(K=k)))
+            )
         p = DirectConvProblem(
             N=1, H=8, W=8, groups=1, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=3
         )
         self.assertIn("stride", dgrad_wmma_reason(DirectDgradWmmaSpec(problem=p)))
         for pkw, knobs, needle in (
             (dict(stride=2, dil_h=2, dil_w=2, PAD=2), {}, "strided dilated"),
+            (dict(KH=1, KW=3, PAD=0, pad_w=3), {}, "outside"),
+            (dict(C=128, K=32, groups=16), dict(pack_groups=2), "multiples of 8"),
             (dict(dil_h=2, dil_w=2, PAD=5), {}, "PAD"),
             (dict(C=32, K=32, groups=8), dict(pack_groups=3), "multiple"),
             (dict(C=24, K=24, groups=8), dict(pack_groups=8), "packed cpg"),
@@ -176,7 +186,9 @@ class TestDgradWmmaSpec(unittest.TestCase):
                 H=29,
                 W=37,
                 KH=caps.KH,
+                KW=caps.KW,
                 PAD=caps.PAD,
+                pad_w=caps.pad_w,
                 stride=caps.stride,
                 dil_h=caps.dil_h,
                 dil_w=caps.dil_w,
@@ -224,6 +236,24 @@ class TestDgradWmmaSpec(unittest.TestCase):
             (dict(C=32, K=32, groups=8), dict(pack_groups=4, wave_epilogue=True)),
             ({}, dict(tiles_p=1, waves_p=4, tile_w=32, wave_epilogue=True)),
             ({}, dict(tile_w=12)),
+            # Per-axis padding, ping-pong and the weight rings.
+            (dict(stride=2, pad_w=0), dict(tiles_c=2)),
+            (dict(pad_w=-2), {}),
+            (dict(KH=1, KW=3, PAD=0, pad_w=3), {}),
+            ({}, dict(pingpong=True, prefetch=True)),
+            ({}, dict(pingpong=True, split_barrier=True)),
+            (dict(stride=2), dict(pingpong=True, tiles_c=2)),
+            (dict(C=32, K=32, groups=8), dict(pingpong=True, pack_groups=4)),
+            ({}, dict(pingpong=True, waves_c=1, waves_p=3, tile_w=12)),
+            ({}, dict(pingpong=True, tile_w=8, tile_n=4)),
+            ({}, dict(pingpong=True, wave_epilogue=True)),
+            ({}, dict(pp_group=2)),
+            ({}, dict(pingpong=True, pp_group=0)),
+            ({}, dict(pingpong=True, tiles_c=4, tiles_p=8, pp_group=3)),
+            ({}, dict(tap_ring=True)),
+            ({}, dict(row_ring=True, prefetch=True)),
+            ({}, dict(pingpong=True, row_ring=True, tap_ring=True)),
+            (dict(C=512, K=512), dict(tiles_c=8, tiles_p=2, pingpong=True)),
         ):
             specs.append(DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs))
         n_rejected = 0
@@ -585,6 +615,11 @@ _CASES = (
     # Grouped, cpg 48 over 32-channel blocks: the weight load and the dX
     # store clip at the group boundary.
     (dict(N=2, H=9, W=12, C=96, K=64, groups=2), dict(tiles_c=1, tiles_p=2)),
+    # kpg not a multiple of 8: the last dY chunk is clipped and zero-filled
+    # by TDM, with 72-byte (and odd-element) pixel strides.
+    (dict(N=2, H=13, W=21, C=64, K=36), dict(tiles_c=1, tiles_p=2, ck=64)),
+    (dict(N=2, H=9, W=12, C=64, K=74, groups=2), dict(tiles_c=1, tiles_p=2)),
+    (dict(N=2, H=13, W=21, C=64, K=37, dtype="fp16"), dict(tiles_c=1, tiles_p=2)),
     # PAD = K - 1: no halo cell is left unwritten (no zero fill).
     (dict(N=2, H=9, W=12, C=32, K=32, PAD=2), dict(tiles_c=1, tiles_p=2)),
     (
@@ -684,6 +719,85 @@ _CASES = (
         dict(tiles_c=1, tiles_p=2, tile_w=8, wave_epilogue=True),
     ),
 )
+# Ping-pong (two wave ranks a barrier apart): one and several chunks, step
+# groups of 1-3 (the last group short), a 3-deep ring, two images per block,
+# PAD 0, grouped, and the 50-wide tile on a ragged map.
+_PP_CASES = (
+    (dict(), dict(waves_c=1, waves_p=4, tiles_c=1, tiles_p=1, pingpong=True)),
+    (
+        dict(N=1, H=18, W=33, C=256, K=160, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, pp_group=2),
+    ),
+    (
+        dict(N=1, H=18, W=33, C=128, K=192),
+        dict(tiles_c=2, tiles_p=2, stages=3, pingpong=True, pp_group=3),
+    ),
+    (
+        dict(N=3, H=7, W=9, C=64, K=96, PAD=0),
+        dict(tiles_c=2, tiles_p=2, tile_w=8, tile_n=2, pingpong=True),
+    ),
+    (
+        dict(N=2, H=9, W=12, C=96, K=64, groups=2),
+        dict(tiles_c=1, tiles_p=2, pingpong=True, sched="iterative-ilp"),
+    ),
+    (
+        dict(N=2, H=19, W=57, C=128, K=96),
+        dict(
+            waves_c=2,
+            waves_p=5,
+            tiles_c=4,
+            tiles_p=5,
+            tile_w=50,
+            pingpong=True,
+            pp_group=2,
+            sched="iterative-ilp",
+        ),
+    ),
+)
+
+# Ping-pong with a weight ring (tap_ring / row_ring): several chunks and ring
+# steps, ragged K and C, 3 stages, pp_group not dividing a step (row_ring:
+# 3 steps per slot), two images per block, fp16, a 256-channel tile, 1x3 /
+# 3x1 per-axis padding and PAD 0.
+_PP_RING_CASES = (
+    (
+        dict(N=2, H=13, W=21, C=64, K=96),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, tap_ring=True),
+    ),
+    (
+        dict(N=1, H=18, W=33, C=88, K=200, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, row_ring=True, stages=3, pp_group=2),
+    ),
+    (
+        dict(N=1, H=11, W=19, C=160, K=136),
+        dict(tiles_c=2, tiles_p=2, ck=64, pingpong=True, tap_ring=True, stages=3),
+    ),
+    (
+        dict(N=3, H=7, W=9, C=64, K=96, PAD=0),
+        dict(tiles_c=2, tiles_p=2, tile_w=8, tile_n=2, pingpong=True, row_ring=True),
+    ),
+    (
+        dict(N=1, H=12, W=20, C=384, K=96),
+        dict(
+            waves_c=2,
+            waves_p=4,
+            tiles_c=8,
+            tiles_p=2,
+            ck=32,
+            pingpong=True,
+            tap_ring=True,
+            pp_group=2,
+        ),
+    ),
+    (
+        dict(N=2, H=9, W=14, C=64, K=64, KH=1, KW=3, PAD=0, pad_w=1),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, tap_ring=True, stages=3),
+    ),
+    (
+        dict(N=2, H=9, W=14, C=64, K=96, KH=3, KW=1, PAD=1, pad_w=0, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=2, pingpong=True, row_ring=True),
+    ),
+)
 
 # Packed small groups at stride 2 with the widest pack: 8 groups of 4
 # channels per super-group (cpg = kpg = 4, pack_groups 8), one case per dtype
@@ -708,6 +822,188 @@ _PACK8_STRIDED_CASES = (
         ),
     ),
 )
+
+
+class TestDgradWmmaPingpong(unittest.TestCase):
+    def test_cases_validate_and_lower(self):
+        for pkw, knobs in _PP_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+                self.assertIsNone(dgrad_wmma_reason(spec, "gfx1250"))
+                self.assertIn("_pp", spec.kernel_name())
+                build_direct_dgrad_wmma(spec, "gfx1250")
+
+    def test_rejects(self):
+        pp = dict(pingpong=True)
+        for pkw, knobs, needle in (
+            ({}, dict(pp, split_barrier=True), "replaces"),
+            ({}, dict(pp, prefetch=True), "replaces"),
+            (dict(stride=2), dict(pp, tiles_c=2), "stride-1"),
+            (dict(C=32, K=32, groups=8), dict(pp, pack_groups=4), "stride-1"),
+            ({}, dict(pp, waves_c=1, waves_p=3), "even wave count"),
+            (
+                {},
+                dict(pp, waves_c=1, waves_p=5, tiles_c=1, tiles_p=1),
+                "even wave count",
+            ),
+            ({}, dict(pp, tile_w=8, tile_n=4), "rank 0"),
+            ({}, dict(pp, wave_epilogue=True), "block epilogue"),
+            ({}, dict(pp_group=2), "pp_group"),
+            ({}, dict(pp, pp_group=0), "pp_group"),
+            ({}, dict(pp, tiles_c=4, tiles_p=8, pp_group=3), "VGPRs"),
+        ):
+            why = dgrad_wmma_reason(
+                DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+            )
+            self.assertIsNotNone(why, (pkw, knobs))
+            self.assertIn(needle, why)
+
+
+class TestDgradWmmaPingpongRing(unittest.TestCase):
+    def test_cases_validate_and_lower(self):
+        for pkw, knobs in _PP_RING_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+                self.assertIsNone(dgrad_wmma_reason(spec, "gfx1250"))
+                self.assertRegex(spec.kernel_name(), "_pp.*_(rr|tr)")
+                build_direct_dgrad_wmma(spec, "gfx1250")
+
+    def test_ring_shrinks_the_weight_slots(self):
+        p = _problem(C=512, K=512)
+        knobs = dict(waves_c=2, waves_p=4, tiles_c=8, tiles_p=2, pingpong=True)
+        full = DirectDgradWmmaSpec(problem=p, **knobs)
+        tap = DirectDgradWmmaSpec(problem=p, tap_ring=True, **knobs)
+        self.assertEqual(full.wei_elems, 9 * tap.wei_elems)
+        self.assertIn("LDS", dgrad_wmma_reason(full))
+        self.assertIsNone(dgrad_wmma_reason(tap))
+
+    def test_rejects(self):
+        for pkw, knobs, needle in (
+            ({}, dict(tap_ring=True), "pingpong"),
+            (dict(stride=2), dict(pingpong=True, tap_ring=True, tiles_c=2), "stride-1"),
+            (
+                dict(C=32, K=32, groups=8),
+                dict(pingpong=True, row_ring=True, pack_groups=4),
+                "stride-1",
+            ),
+            ({}, dict(pingpong=True, tap_ring=True, row_ring=True), "exclusive"),
+        ):
+            why = dgrad_wmma_reason(
+                DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+            )
+            self.assertIsNotNone(why, (pkw, knobs))
+            self.assertIn(needle, why)
+
+
+class TestDgradWmmaNewKnobsStructure(unittest.TestCase):
+    """IR structure and builder refusals of per-axis padding, pingpong,
+    pp_group and the weight rings (CPU only)."""
+
+    @staticmethod
+    def _ops(spec):
+        from rocke.core.ir_serialize import serialize
+
+        text = serialize(build_direct_dgrad_wmma(spec, "gfx1250"))
+        return {
+            op: len(re.findall(rf"\b{op}\b", text))
+            for op in ("s_barrier_bare", "sched_barrier", "tensor_load_to_lds", "mma")
+        }
+
+    def test_pingpong_barrier_pairs(self):
+        """One barrier pair per group of pp_group steps (the 3x3 filter has
+        nine steps per 32-channel chunk), plus the rank-1 lead barrier and the
+        rank-0 catch-up barrier; the WMMA count does not change."""
+        base = dict(tiles_c=2, tiles_p=2)
+        plain = self._ops(DirectDgradWmmaSpec(problem=_problem(), **base))
+        self.assertEqual(plain["s_barrier_bare"], 0)
+        for pg in (1, 2, 3, 4):
+            with self.subTest(pp_group=pg):
+                ops = self._ops(
+                    DirectDgradWmmaSpec(
+                        problem=_problem(), pingpong=True, pp_group=pg, **base
+                    )
+                )
+                self.assertEqual(ops["s_barrier_bare"], 2 * -(-9 // pg) + 2)
+                self.assertEqual(ops["sched_barrier"], ops["s_barrier_bare"])
+                self.assertEqual(ops["mma"], plain["mma"])
+
+    def test_rings_issue_one_weight_slot_per_step(self):
+        """tap_ring refills one tap per ring step (nine weight transfers per
+        chunk), row_ring one filter row (three); each chunk issues one halo,
+        and the prologue the first halo plus stages - 1 weight steps."""
+        base = dict(tiles_c=2, tiles_p=2, pingpong=True)
+        for ring, steps in (("tap_ring", 9), ("row_ring", 3)):
+            for stages in (2, 3):
+                with self.subTest(ring=ring, stages=stages):
+                    ops = self._ops(
+                        DirectDgradWmmaSpec(
+                            problem=_problem(), stages=stages, **{ring: True}, **base
+                        )
+                    )
+                    loads = 1 + (stages - 1) + steps + 1
+                    self.assertEqual(ops["tensor_load_to_lds"], loads)
+
+    def test_per_axis_padding_names_and_plans(self):
+        """A column padding of its own is spelled in the kernel name and
+        moves the column plan only."""
+        spec = DirectDgradWmmaSpec(problem=_problem(KH=1, KW=3, PAD=0, pad_w=1))
+        self.assertIsNone(dgrad_wmma_reason(spec))
+        self.assertIn("_f1x3_p0x1_", spec.kernel_name())
+        self.assertEqual(spec.plan_w[2], 1)
+        self.assertEqual(spec.plan_h[2], 0)
+        same = DirectDgradWmmaSpec(problem=_problem(pad_w=1))
+        self.assertIn("_p1_", same.kernel_name())
+
+    def test_builder_refuses_with_the_reason(self):
+        """The Python builder raises ValueError carrying the validator's
+        reason for every new refusal."""
+        for pkw, knobs, reason in (
+            (
+                dict(stride=2, pad_w=0),
+                dict(tiles_c=2),
+                "a column padding of its own serves stride 1 only",
+            ),
+            (
+                {},
+                dict(pingpong=True, prefetch=True),
+                "pingpong replaces split_barrier and prefetch",
+            ),
+            ({}, dict(pp_group=2), "pp_group 2: >= 1, and > 1 only with pingpong"),
+            (
+                {},
+                dict(tap_ring=True),
+                "row_ring / tap_ring serve stride-1 unpacked pingpong tiles",
+            ),
+            (
+                {},
+                dict(pingpong=True, row_ring=True, tap_ring=True),
+                "row_ring and tap_ring are exclusive",
+            ),
+        ):
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+                self.assertEqual(dgrad_wmma_reason(spec), reason)
+                with self.assertRaisesRegex(ValueError, re.escape(reason)):
+                    build_direct_dgrad_wmma(spec, "gfx1250")
+
+    def test_engine_refuses_with_the_reason(self):
+        """The C++ engine refuses the same specs with Python's reason."""
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
+
+        for pkw, knobs in (
+            (dict(stride=2, pad_w=0), dict(tiles_c=2)),
+            ({}, dict(pingpong=True, prefetch=True)),
+            ({}, dict(pp_group=2)),
+            ({}, dict(tap_ring=True)),
+            ({}, dict(pingpong=True, row_ring=True, tap_ring=True)),
+        ):
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs)
+                reason = dgrad_wmma_reason(spec)
+                sd = conv_direct_dgrad_wmma_spec_to_dict(spec)
+                with self.assertRaisesRegex(RuntimeError, re.escape(reason)):
+                    eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch="gfx1250")
 
 
 class TestDgradWmmaPack8Strided(unittest.TestCase):
@@ -752,6 +1048,16 @@ class TestDgradWmmaGpu(unittest.TestCase):
 
     def test_cases(self):
         for pkw, knobs in _CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                self._check(pkw, knobs)
+
+    def test_pingpong_cases(self):
+        for pkw, knobs in _PP_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                self._check(pkw, knobs)
+
+    def test_pingpong_ring_cases(self):
+        for pkw, knobs in _PP_RING_CASES:
             with self.subTest(problem=pkw, knobs=knobs):
                 self._check(pkw, knobs)
 
