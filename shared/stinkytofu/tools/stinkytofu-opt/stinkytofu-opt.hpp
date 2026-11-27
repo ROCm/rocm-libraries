@@ -313,7 +313,13 @@ const std::vector<PassInfo> availablePasses = {
               hasPassArg(args, "sharedOrderCountFollowers"),
               hasPassArg(args, "xdlCountFromNextWmma"), hasPassArg(args, "ignoreWaitHide")});
      }},
-    {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
+    // InsertCoexecHazardPass accepts:
+    //   reportOnly — report broken in-place WMMA accumulation rules instead of stopping
+    {"InsertCoexecHazardPass",
+     [](const std::vector<std::string>& args) {
+         return createInsertCoexecHazardPass(/*abortOnInPlaceAccumulation=*/!hasPassArg(
+             args, "reportOnly"));
+     }},
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});

@@ -27,7 +27,10 @@
 #include <climits>
 #include <cstdint>
 #include <iostream>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #define DEBUG_TYPE "InsertCoexecHazardPass"
@@ -39,6 +42,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -86,6 +90,242 @@ bool wmmaToWmmaOverlap(const StinkyInstruction& prod, const StinkyInstruction& c
     return false;
 }
 
+//===----------------------------------------------------------------------===//
+// In-place WMMA accumulation (gfx1250). A WMMA that takes the previous WMMA's D
+// through the C fast-forward path must write a different accumulator, unless its
+// type allows the same one under InPlaceRule. Only WMMAs count toward "previous".
+// A broken rule stops codegen: switching the accumulator needs a free register
+// range that this pass cannot pick.
+//
+// Non-XDL WMMAs (FP32 input, gfx12-era 16x16x16) follow the same rules, but the
+// rule is unconfirmed for them, so they only warn. An XDL WMMA counts only XDL
+// WMMAs toward "previous", so a non-XDL one in between does not break its chain.
+//===----------------------------------------------------------------------===//
+
+enum class InPlaceRule {
+    Forbidden,
+    DifferentAB,  // K=128 f8xf8, f8xf4, f4xf8, f6xf4, f4xf6
+    Paired,       // f16, bf16, iu8, 16x16x128 f4xf4: WMMAs pair up, one 2xK tile each
+    Allowed,      // 32x16x128 f4
+};
+
+enum class SmallFloat { F8, F6, F4 };
+
+SmallFloat smallFloat(MatrixFmt fmt) {
+    if (fmt == MatrixFmt::FP6 || fmt == MatrixFmt::BF6) return SmallFloat::F6;
+    if (fmt == MatrixFmt::FP4) return SmallFloat::F4;
+    return SmallFloat::F8;  // NONE selects FP8
+}
+
+InPlaceRule inPlaceRule(const StinkyInstruction& wmma) {
+    const std::string_view m(wmma.getHwInstDesc()->mnemonic);
+    if (isSWMMA(wmma)) return InPlaceRule::Forbidden;
+    if (m.ends_with("_32x16x128_f4")) return InPlaceRule::Allowed;
+    if (m.ends_with("_16x16x128_f8f6f4")) {
+        const auto* fmt = wmma.getModifier<MatrixFmtModifiers>();
+        const SmallFloat a = fmt ? smallFloat(fmt->fmtA) : SmallFloat::F8;
+        const SmallFloat b = fmt ? smallFloat(fmt->fmtB) : SmallFloat::F8;
+        if (a == SmallFloat::F4 && b == SmallFloat::F4) return InPlaceRule::Paired;
+        const bool hasF6 = a == SmallFloat::F6 || b == SmallFloat::F6;
+        const bool hasF4 = a == SmallFloat::F4 || b == SmallFloat::F4;
+        return hasF6 && !hasF4 ? InPlaceRule::Forbidden : InPlaceRule::DifferentAB;
+    }
+    if (m.find("_16x16x128_") != std::string_view::npos)  // fp8/bf8 x fp8/bf8
+        return InPlaceRule::DifferentAB;
+    if (m.ends_with("_f16") || m.ends_with("_bf16") || m.ends_with("_iu8"))
+        return InPlaceRule::Paired;
+    return InPlaceRule::Forbidden;
+}
+
+// `cons` takes `prod`'s D as C and writes the same D. SWMMAC's C is its D.
+bool accumulatesInPlace(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty() || cons.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    if (!(d == cons.getDestRegs()[0])) return false;
+    if (isSWMMA(cons)) return true;
+    const auto& srcs = cons.getSrcRegs();
+    return srcs.size() > 2 && d == srcs[2];
+}
+
+bool abOverlap(const StinkyInstruction& wmma) {
+    const auto& s = wmma.getSrcRegs();
+    return s.size() > 1 && s[0].isOverlap(s[1]);
+}
+
+bool differentAB(const StinkyInstruction& x, const StinkyInstruction& y) {
+    const auto& xs = x.getSrcRegs();
+    const auto& ys = y.getSrcRegs();
+    return xs.size() > 1 && ys.size() > 1 && !xs[0].isOverlap(ys[0]) && !xs[1].isOverlap(ys[1]);
+}
+
+bool isAnyWmma(const StinkyInstruction& inst) {
+    return isWMMA(inst) || isSWMMA(inst) || isMXWMMA(inst);
+}
+
+// The WMMAs a chain counts: only XDL ones for an XDL chain, every WMMA otherwise.
+bool isChainWmma(const StinkyInstruction& inst, bool xdlChain) {
+    return xdlChain ? isXDLWMMA(inst) : isAnyWmma(inst);
+}
+
+const StinkyInstruction* adjacentWmmaInBlock(const StinkyInstruction& from, bool forward,
+                                             bool xdlChain) {
+    for (IRBase* node = forward ? from.getNext() : from.getPrev(); node;
+         node = forward ? node->getNext() : node->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(node);
+        if (!inst || isPseudoInst(inst)) continue;
+        if (isCall(*inst)) return nullptr;
+        if (isChainWmma(*inst, xdlChain)) return inst;
+    }
+    return nullptr;
+}
+
+// The nearest chain WMMA before `from` on every path; from the block end when null.
+void collectPrevWmmas(BasicBlock& bb, const StinkyInstruction* from, bool xdlChain,
+                      std::unordered_set<const BasicBlock*>& visited,
+                      std::vector<const StinkyInstruction*>& prev) {
+    for (IRBase* node = from ? from->getPrev() : bb.getTerminator(); node; node = node->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(node);
+        if (!inst || isPseudoInst(inst)) continue;
+        if (isCall(*inst)) return;
+        if (isChainWmma(*inst, xdlChain)) {
+            prev.push_back(inst);
+            return;
+        }
+    }
+    for (BasicBlock* pred : bb.getPredecessors())
+        if (visited.insert(pred).second) collectPrevWmmas(*pred, nullptr, xdlChain, visited, prev);
+}
+
+std::vector<const StinkyInstruction*> prevWmmas(BasicBlock& bb, const StinkyInstruction& wmma,
+                                                bool xdlChain) {
+    std::unordered_set<const BasicBlock*> visited;
+    std::vector<const StinkyInstruction*> prev;
+    collectPrevWmmas(bb, &wmma, xdlChain, visited, prev);
+    return prev;
+}
+
+// The in-place chain ending at `last`, oldest first. Empty when it continues from
+// another block, where its pairing cannot be checked.
+std::vector<const StinkyInstruction*> inBlockChain(BasicBlock& bb, const StinkyInstruction& last) {
+    const bool xdlChain = isXDLWMMA(last);
+    std::vector<const StinkyInstruction*> chain{&last};
+    for (;;) {
+        const StinkyInstruction& head = *chain.back();
+        const StinkyInstruction* prev = adjacentWmmaInBlock(head, /*forward=*/false, xdlChain);
+        if (!prev) {
+            for (const StinkyInstruction* p : prevWmmas(bb, head, xdlChain))
+                if (accumulatesInPlace(*p, head)) return {};
+            break;
+        }
+        if (!accumulatesInPlace(*prev, head)) break;
+        chain.push_back(prev);
+    }
+    std::reverse(chain.begin(), chain.end());
+    return chain;
+}
+
+// Null reason: allowed. Unconfirmed: a paired chain from another block, which the
+// check cannot follow.
+struct Verdict {
+    const char* reason = nullptr;
+    bool confirmed = true;
+};
+
+struct InPlaceReport {
+    int violations = 0;
+    int warnings = 0;
+    std::vector<std::string> printedKeys;
+};
+
+// Pairs are chain positions (0,1), (2,3), ... `wmma` needs different A and B from
+// the rest of its pair and from the previous pair, and a pair needs both halves.
+Verdict pairedVerdict(BasicBlock& bb, const StinkyInstruction& wmma) {
+    const auto chain = inBlockChain(bb, wmma);
+    if (chain.size() < 2)
+        return {"the pairs continue from another block and cannot be checked", false};
+    const size_t pos = chain.size() - 1;
+    const size_t pairStart = pos - pos % 2;
+    for (size_t i = pairStart < 2 ? 0 : pairStart - 2; i < pos; ++i)
+        if (!differentAB(*chain[i], wmma))
+            return {"needs different A and B from its pair and the previous pair"};
+    if (pos % 2 == 0) {
+        const StinkyInstruction* next =
+            adjacentWmmaInBlock(wmma, /*forward=*/true, isXDLWMMA(wmma));
+        if (!next || !accumulatesInPlace(wmma, *next)) return {"must be paired with the next WMMA"};
+    }
+    return {};
+}
+
+Verdict inPlaceVerdict(BasicBlock& bb, const StinkyInstruction& prev,
+                       const StinkyInstruction& wmma) {
+    const InPlaceRule rule = inPlaceRule(wmma);
+    if (rule == InPlaceRule::Forbidden || rule != inPlaceRule(prev))
+        return {"switch the accumulator"};
+    if (rule == InPlaceRule::Allowed) return {};
+    if (abOverlap(prev) || abOverlap(wmma)) return {"A and B of one WMMA must not overlap"};
+    if (rule == InPlaceRule::DifferentAB)
+        return differentAB(prev, wmma) ? Verdict{} : Verdict{"needs different A and B"};
+    return pairedVerdict(bb, wmma);
+}
+
+void printInPlaceDiagnostic(const Function& func, BasicBlock& bb, const StinkyInstruction& prev,
+                            const StinkyInstruction& wmma, const Verdict& verdict, bool confirmed,
+                            bool xdl) {
+    std::cerr << "[InsertCoexecHazardPass] " << (confirmed ? "violation" : "warning")
+              << ": WMMA in function \"" << func.getName() << "\" block \"" << bb.getLabel()
+              << "\" accumulates the previous WMMA's D in place: " << verdict.reason
+              << (xdl ? "" : "; the rule is unconfirmed for non-XDL WMMAs") << "\n";
+    prev.dump(std::cerr);
+    wmma.dump(std::cerr);
+}
+
+bool shouldPrintInPlaceDiagnostic(InPlaceReport& report, bool confirmed, bool xdl,
+                                  const Verdict& verdict) {
+    constexpr size_t maxPrintedDiagnostics = 3;
+    const std::string key = std::string(confirmed ? "violation:" : "warning:") + verdict.reason +
+                            (xdl ? "" : ":non-xdl");
+    if (std::find(report.printedKeys.begin(), report.printedKeys.end(), key) !=
+        report.printedKeys.end())
+        return false;
+    if (report.printedKeys.size() >= maxPrintedDiagnostics) return false;
+    report.printedKeys.push_back(key);
+    return true;
+}
+
+void checkInPlaceAccumulation(const Function& func, BasicBlock& bb, const StinkyInstruction& wmma,
+                              bool abortOnViolation, InPlaceReport* report) {
+    const bool xdl = isXDLWMMA(wmma);
+    for (const StinkyInstruction* prev : prevWmmas(bb, wmma, xdl)) {
+        if (!accumulatesInPlace(*prev, wmma)) continue;
+        const Verdict verdict = inPlaceVerdict(bb, *prev, wmma);
+        if (!verdict.reason) continue;
+        const bool confirmed = verdict.confirmed && xdl;
+        if (report) {
+            if (confirmed)
+                ++report->violations;
+            else
+                ++report->warnings;
+        }
+        if (abortOnViolation ||
+            (report && shouldPrintInPlaceDiagnostic(*report, confirmed, xdl, verdict)))
+            printInPlaceDiagnostic(func, bb, *prev, wmma, verdict, confirmed, xdl);
+        if (confirmed && abortOnViolation)
+            report_fatal_error("InsertCoexecHazardPass: in-place WMMA accumulation in '" +
+                               func.getName() + "': " + verdict.reason);
+        return;
+    }
+}
+
+void printInPlaceSummary(const Function& func, const InPlaceReport& report) {
+    const int total = report.violations + report.warnings;
+    if (total == 0) return;
+    std::cerr << "[InsertCoexecHazardPass] " << (report.violations ? "violation" : "warning")
+              << ": WMMA in function \"" << func.getName() << "\" has " << report.violations
+              << " in-place accumulation violation(s) and " << report.warnings
+              << " warning(s); printed " << report.printedKeys.size()
+              << " representative diagnostic(s)\n";
+}
+
 // WMMA producer D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst),
 // WAR (producer A/B, or SWMMAC index, -> consumer dst).
 bool wmmaToValuOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
@@ -122,7 +362,8 @@ bool transOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) 
 class InsertCoexecHazardPass : public StinkyInstPass {
    public:
     static char ID;
-    InsertCoexecHazardPass() = default;
+    explicit InsertCoexecHazardPass(bool abortOnInPlaceAccumulation)
+        : abortOnInPlaceAccumulation_(abortOnInPlaceAccumulation) {}
 
     const char* getName() const override {
         return "InsertCoexecHazardPass";
@@ -233,6 +474,8 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     void processFunction(Function& func) {
         // v_nops are stripped upstream by StinkyRemoveNopPass; this pass counts the
         // remaining (deliberate, scheduler-placed) fillers and tops up the shortfall.
+        InPlaceReport inPlaceReport;
+        InPlaceReport* report = abortOnInPlaceAccumulation_ ? nullptr : &inPlaceReport;
         for (BasicBlock& bb : func) {
             for (auto it = bb.begin(); it != bb.end();) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -240,6 +483,9 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                     ++it;
                     continue;
                 }
+
+                if (isGfx125(archId_) && isAnyWmma(*inst))
+                    checkInPlaceAccumulation(func, bb, *inst, abortOnInPlaceAccumulation_, report);
 
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
@@ -272,6 +518,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                 ++it;
             }
         }
+        if (report) printInPlaceSummary(func, *report);
     }
 
     int hazardFor(BasicBlock& bb, const StinkyInstruction& consumer, ProducerKind kind,
@@ -291,6 +538,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
 
     GfxArchID archId_ = GfxArchID{};
     const HWModel* hw_ = nullptr;
+    bool abortOnInPlaceAccumulation_;
 };
 
 char InsertCoexecHazardPass::ID = 0;
@@ -298,7 +546,7 @@ char InsertCoexecHazardPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertCoexecHazardPass() {
-    return std::make_unique<InsertCoexecHazardPass>();
+std::unique_ptr<Pass> createInsertCoexecHazardPass(bool abortOnInPlaceAccumulation) {
+    return std::make_unique<InsertCoexecHazardPass>(abortOnInPlaceAccumulation);
 }
 }  // namespace stinkytofu

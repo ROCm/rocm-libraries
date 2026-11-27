@@ -345,7 +345,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             gfx1250InsertWaitAluOptions(moduleOptions.EnableESM2TrackValuVsrc)));
     }
 
-    mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));
+    mpm.addPass(createFunctionToModuleAdaptor(
+        createInsertCoexecHazardPass(/*abortOnInPlaceAccumulation=*/false)));
 
     if (runScheduler) {
         mpm.addPass(createFunctionToModuleAdaptor(createInsertDelayAluPass(/*minWavesPerSimd=*/2)));
