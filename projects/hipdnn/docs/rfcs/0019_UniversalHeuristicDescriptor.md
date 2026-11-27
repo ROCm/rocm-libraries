@@ -1727,10 +1727,10 @@ the trainer, and the runtime compute the same number.
    | `LayernormAttributes` / `LayernormBackwardAttributes` | `5·x.numel` / `8·x.numel` | |
    | `RMSNormAttributes` / `RMSNormBackwardAttributes` | `3·x.numel` / `6·x.numel` | |
    | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
-   | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
+   | `ResampleBwdAttributes` | `dy.numel · Π window[i]`; `dy.numel` for `MAXPOOL` | Average pooling spreads each `dy` element over its window; max pooling routes it to the one input the forward picked (revision 2). |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
    | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. The deprecated `causal_mask` and `causal_mask_bottom_right` compose as cuDNN's setters do: a flag gives `right_bound` when it is ≥ 0, else 0; `causal_mask_bottom_right` forces bottom-right alignment, `causal_mask` keeps `diagonal_alignment`. `left_bound` of 0, a bound below -1, or both deprecated flags leave the work unknown: the frontend rejects the first two and the references the third. A `left_bound` below -1 and both flags were counted before this rule; they are dropped without a revision bump because no engine serves them and their training rows are re-collected. A paged cache's `Sk` is inferred as cuDNN does: `max_seq_len_kv` when stated, else a non-paged K's (then V's) sequence length, else the `attn_mask` last dim, else the `rng_dump` last dim, else the smaller of the two sides' page-table pages × page size. K or V may be paged alone, each with its own block size; the extent must fit every paged side's capacity and match a dense side's sequence extent, else the work is unknown. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
-   | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
+   | `SdpaBackwardAttributes` | `2·B·H·pairs·(3·D_qk + 2·D_v)` over the forward's band | Five products, each on its own head dimension: the `QKᵀ` recompute, `dQ` and `dK` over `D_qk`; `dP` and `dV` over `D_v`. FlashAttention's 2.5 × the forward when `D_qk = D_v`; revision 1 counted 2.5 × the forward for every head dimension. |
    | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
    | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
    | `GdnAttributes`, `KdaAttributes` | `6·T·HO·V·K` | Three `V × K` products per token and output head: `S k`, the rank-one update `β (v − S k) kᵀ` (`S (I − β k kᵀ) + β v kᵀ` is `S` plus that one product), and `S q`; decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
@@ -1748,7 +1748,10 @@ the trainer, and the runtime compute the same number.
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
      types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
      excluded, since keeping them out of memory is what fusion is for. A ragged tensor counts its
-     declared (padded) dims, as its work does. Absent when any non-virtual tensor's footprint is
+     declared (padded) dims, as its work does, and a paged KV cache `[blocks, heads, block size, D]`
+     counts `B × heads × keys × D` for the keys the graph declares (the work's keys), not its spare
+     blocks, which no sequence of the graph uses (revision 2; a cache whose keys cannot be inferred
+     counts in full). Absent when any non-virtual tensor's footprint is
      unknown — missing or negative dims, or an unset data type. A zero-extent tensor contributes 0.
    - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
      generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
@@ -1811,14 +1814,17 @@ byte-identical, and a model trained on the old values would score the new ones w
 feature-semantics revision covers that half of the contract.
 
 - **The constant.** `FEATURE_SEMANTICS_REVISION`
-  (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`) is an integer, 1 in this build, compiled into
+  (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`) is an integer, 2 in this build, compiled into
   everything built against the plugin SDK, with or without the kernel ingestor. Not yet built: the
   `hipdnn_uhd_features` evaluator. It reports the revision with every response, so the trainer takes
   the value from the build that computed its features rather than from a copy.
 - **The record.** Training stamps it into the UHD as `trained_against.feature_semantics_revision`, an
   integer ≥ 1, beside either provenance form ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
   It never satisfies `trained_against` on its own. **Absent means 1**, the revision the field was
-  introduced at, so every model trained before it stays valid without a restamp.
+  introduced at, so a model trained before the field existed reads as revision 1.
+- **The revisions.** 1: the work model as first published. 2: the SDPA backward counts each product
+  on its own head dimension, max-pool backward counts `dy.numel`, and `$graph.logical_bytes` counts a
+  paged KV cache at its declared keys (rules 5 and 6).
 - **The check is exact equality.** There is no additive component: a feature either means what the
   model was trained on or it does not, and a model newer than the build is as wrong as one older. A
   model that declares a `features_signature` and whose recorded revision differs from the build's is

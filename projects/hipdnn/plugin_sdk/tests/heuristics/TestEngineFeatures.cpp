@@ -1417,28 +1417,29 @@ GraphT backwardGraph(void (*vary)(SdpaBackwardAttributesT&))
                   sdpa);
 }
 
-// The backward counts 2.5x the forward over the same band; a bias gradient and inverse-scaled
-// dropout are elementwise, and valid lengths leave the declared extent.
+// The backward counts its five products over the same band, three over D_qk and two over D_v:
+// 2 * B (2) * H (8) * pairs * (3 * 16 + 2 * 32) = 3584 per pair. A bias gradient and
+// inverse-scaled dropout are elementwise, and valid lengths leave the declared extent.
 TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOperands)
 {
     using Variation = void (*)(SdpaBackwardAttributesT&);
     const std::vector<std::tuple<const char*, Variation, double, bool>> variations = {
-        {"causal", [](SdpaBackwardAttributesT&) {}, 23040.0, false},
+        {"causal", [](SdpaBackwardAttributesT&) {}, 21504.0, false},
         {"bias gradient and dropout",
          [](SdpaBackwardAttributesT& op) {
              op.dbias_tensor_uid = 10;
              op.dropout_scale_inv_tensor_uid = 11;
          },
-         23040.0,
+         21504.0,
          false},
-        // Rows 0-2 keep keys [0, 0], [0, 1], [1, 2]: 5 pairs, 2.5 x 7680.
-        {"causal window", [](SdpaBackwardAttributesT& op) { op.left_bound = 2; }, 19200.0, false},
+        // Rows 0-2 keep keys [0, 0], [0, 1], [1, 2]: 5 pairs.
+        {"causal window", [](SdpaBackwardAttributesT& op) { op.left_bound = 2; }, 17920.0, false},
         {"valid lengths",
          [](SdpaBackwardAttributesT& op) {
              op.seq_len_q_tensor_uid = 12;
              op.seq_len_kv_tensor_uid = 13;
          },
-         23040.0,
+         21504.0,
          true},
     };
     for(const auto& [name, vary, flops, dataDependent] : variations)
@@ -1472,7 +1473,7 @@ TEST(TestEngineFeatures, AttentionCountsKAndVWithTheirOwnHeadCounts)
     {
         SCOPED_TRACE(vHeads);
         EXPECT_DOUBLE_EQ(features(forward(vHeads)).at("graph.flops").get<double>(), 32256.0);
-        EXPECT_DOUBLE_EQ(features(backward(vHeads)).at("graph.flops").get<double>(), 23040.0);
+        EXPECT_DOUBLE_EQ(features(backward(vHeads)).at("graph.flops").get<double>(), 21504.0);
     }
     // K with more heads than V counts the same.
     auto moreKeyHeads = forward(2);
@@ -1484,6 +1485,71 @@ TEST(TestEngineFeatures, AttentionCountsKAndVWithTheirOwnHeadCounts)
         EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
         EXPECT_FALSE(published.contains("graph.flops"));
     }
+}
+
+// The conventions feature semantics revision 2 changed (RFC 0019 section 6.8):
+// - SDPA backward weighs each product by its own head dimension: MLA's 192/128 counts
+//   2 * pairs * (3 * 192 + 2 * 128), not 2.5x the forward's 2 * pairs * (192 + 128).
+// - Max-pool backward routes each dy element once; average pooling spreads it over the window.
+// - A paged KV cache's bytes are the keys the graph declares, not the cache's spare blocks.
+TEST(TestEngineFeatures, BackwardConventionsOfRevisionTwo)
+{
+    SdpaBackwardAttributesT sdpa;
+    sdpa.q_tensor_uid = 1;
+    sdpa.k_tensor_uid = 2;
+    sdpa.v_tensor_uid = 3;
+    sdpa.o_tensor_uid = 4;
+    sdpa.do_tensor_uid = 5;
+    sdpa.stats_tensor_uid = 6;
+    sdpa.dq_tensor_uid = 7;
+    sdpa.dk_tensor_uid = 8;
+    sdpa.dv_tensor_uid = 9;
+    // One batch and head, 2 queries against 2 keys: 4 pairs.
+    const auto mla = single({{1, 1, 2, 192},
+                             {1, 1, 2, 192},
+                             {1, 1, 2, 128},
+                             {1, 1, 2, 128},
+                             {1, 1, 2, 128},
+                             {1, 1, 2, 1},
+                             {1, 1, 2, 192},
+                             {1, 1, 2, 192},
+                             {1, 1, 2, 128}},
+                            sdpa);
+    const auto backward = features(mla).at("graph.flops").get<double>();
+    EXPECT_DOUBLE_EQ(backward, 2.0 * 4 * (3 * 192 + 2 * 128));
+    EXPECT_NE(backward, 2.5 * 2.0 * 4 * (192 + 128));
+
+    ResampleBwdAttributesT pool;
+    pool.dy_tensor_uid = 1;
+    pool.dx_tensor_uid = 2;
+    pool.window = {2, 2};
+    pool.stride = {2, 2};
+    pool.resample_mode = ResampleMode::MAXPOOL;
+    // dy [2, 8, 4, 4]: 256 elements, each routed once.
+    EXPECT_DOUBLE_EQ(
+        features(single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool)).at("graph.flops").get<double>(),
+        256.0);
+    pool.resample_mode = ResampleMode::AVGPOOL_EXCLUDE_PADDING;
+    EXPECT_DOUBLE_EQ(
+        features(single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool)).at("graph.flops").get<double>(),
+        1024.0);
+    // Max pooling still refuses a window the forward would refuse.
+    pool.resample_mode = ResampleMode::MAXPOOL;
+    pool.window = {2};
+    EXPECT_FALSE(features(single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool)).contains("graph.flops"));
+
+    // Both sides paged, 3 pages of 4 per sequence: 12 keys. Each cache holds 10 blocks of 4
+    // (40 slots) for the 2 sequences' 24 keys.
+    auto paged = attention();
+    paged.page_table_k_tensor_uid = 5;
+    paged.page_table_v_tensor_uid = 6;
+    const auto published
+        = features(pagedGraph(paged, {10, 2, 4, 16}, {10, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}));
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 2.0 * 2 * 8 * 3 * 12 * 48);
+    // Q (768), K at B (2) x heads (2) x keys (12) x D (16) = 768 rather than its 1280, V at
+    // 1536 rather than 2560, O (1536), the tables (6 each) and the mask (48), in half precision.
+    EXPECT_DOUBLE_EQ(published.at("graph.logical_bytes").get<double>(),
+                     (768.0 + 768.0 + 1536.0 + 1536.0 + 6.0 + 6.0 + 48.0) * 2.0);
 }
 
 /// The key a reference keeps for query row @p row, as CpuFpReferenceSdpa masks (SEM-001).
@@ -1681,8 +1747,10 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
     // FEATURE_SEMANTICS_REVISION. Publishing a value where none was (a band, dropout, a paged
     // cache) does not (RFC 0019 section 6.9). Bands outside hipDNN's domain, which the work
     // model once counted, are no longer counted without a bump: no engine serves them, and
-    // their training rows are re-collected (RFC 0019 section 6.8).
-    EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 1);
+    // their training rows are re-collected (RFC 0019 section 6.8). Revision 2 changed the SDPA
+    // backward count, max-pool backward and a paged cache's bytes
+    // (BackwardConventionsOfRevisionTwo).
+    EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 2);
     struct Case
     {
         const char* name;
@@ -1884,7 +1952,8 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{2, 8, 7, 7}, {2, 12, 5, 5}, {12, 4, 3, 3}}, conv);
          },
          43200.0},
-        // 2.5 * the causal top-left forward's 9216.
+        // The causal top-left band's 6 pairs: 3584 per pair (3 products over D_qk 16, 2 over
+        // D_v 32).
         {[] {
              SdpaBackwardAttributesT sdpa;
              sdpa.q_tensor_uid = 1;
@@ -1908,7 +1977,7 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
                             {2, 2, 7, 32}},
                            sdpa);
          },
-         23040.0},
+         21504.0},
         // One per output element, boolean or not.
         {[] {
              PointwiseAttributesT compare;
