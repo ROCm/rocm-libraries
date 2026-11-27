@@ -30,9 +30,8 @@ enum class MxOrder
     MN_CONTIGUOUS,
 };
 
-// How the plan hands block scales to hipBLASLt. selectMxScaleFormat picks NATURAL or
-// SWIZZLED_GFX1250 by device arch; SWIZZLED_GFX950 is used only when a caller asks
-// createMxMatmulPlan for it.
+// How the plan hands block scales to hipBLASLt. selectMxScaleFormat picks one from the
+// device arch and the MX input types and layouts (see mxScaleFormatFor).
 enum class MxScaleFormat
 {
     // VEC32_UE8M0 with unswizzled scales whose order follows the operand order

@@ -189,7 +189,9 @@ class TestGpuMxScaleKernel : public MxScaleLayoutGpuFixture<::testing::Test>
 };
 
 // hipBLASLt has no function for the swizzled layouts, so the provider's relayout
-// kernel writes them, one launch per scale, padding included.
+// kernel writes them, one launch per scale, padding included. A 48 x 5 scale takes 512
+// bytes in both formats: gfx950 pads it to 64 x 8, gfx1250 to 48 x 8 (384 bytes),
+// rounded up to WORKSPACE_ALIGNMENT.
 TEST_F(TestGpuMxScaleKernel, SwizzledFormatsUseTheRelayoutKernel)
 {
     for(const auto format : {MxScaleFormat::SWIZZLED_GFX950, MxScaleFormat::SWIZZLED_GFX1250})
@@ -199,7 +201,7 @@ TEST_F(TestGpuMxScaleKernel, SwizzledFormatsUseTheRelayoutKernel)
             MxScalePrep const prep(order, MxOrder::K_CONTIGUOUS, format, 48, 5);
             EXPECT_EQ(prep.method(), MxScalePrep::Method::RELAYOUT_KERNEL) << toString(format);
             EXPECT_EQ(prep.describe(), "relayout kernel");
-            EXPECT_GE(prep.workspaceSize(), mxScaleBytes(format, 48, 5)) << toString(format);
+            EXPECT_EQ(prep.workspaceSize(), 512u) << toString(format);
         }
     }
 }

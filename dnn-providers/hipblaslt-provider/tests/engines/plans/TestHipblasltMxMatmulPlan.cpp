@@ -27,9 +27,11 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipblasltUtils.hpp"
+#include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMxMatmulPlan.hpp"
+#include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
 #include "engines/plans/MxTestUtils.hpp"
 
@@ -67,6 +69,15 @@ MxNodeAttrs getMxNodeAttrs(const GraphWrapper& graph)
             .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes>(),
         graph.getNodeWrapper(2)
             .attributesAs<hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes>()};
+}
+
+// The graph's MX inputs: our A (dequant A's x) and our B (dequant B's x).
+std::pair<TensorAttributesWrapper, TensorAttributesWrapper> mxInputs(const GraphWrapper& graph)
+{
+    const auto attrs = getMxNodeAttrs(graph);
+    const auto& tensorMap = graph.getTensorMap();
+    return {hipblaslt_utils::findTensorAttributes(tensorMap, attrs.deqA.x_tensor_uid()),
+            hipblaslt_utils::findTensorAttributes(tensorMap, attrs.deqB.x_tensor_uid())};
 }
 
 bool onGfx950()
@@ -356,11 +367,60 @@ TEST(TestMxMatmulParams, KernelScaleFormatGuard)
 }
 #endif
 
-TEST(TestMxMatmulParams, ScaleFormatForArch)
+// The scale-format rule, one row per branch and per condition of the gfx950 branch.
+TEST(TestMxMatmulParams, ScaleFormatForArchTypesAndLayouts)
 {
-    EXPECT_EQ(mxScaleFormatForArch("gfx1250"), MxScaleFormat::SWIZZLED_GFX1250);
-    EXPECT_EQ(mxScaleFormatForArch("gfx1250-strict"), MxScaleFormat::SWIZZLED_GFX1250);
-    EXPECT_EQ(mxScaleFormatForArch("gfx950"), MxScaleFormat::NATURAL);
+    using F = MxScaleFormat;
+    using L = MxOperandLayout;
+    struct Row
+    {
+        const char* arch;
+        L layout;
+        DT a;
+        DT b; // UNSET: the same type as a
+        bool mnContiguousScales;
+        F expected;
+    };
+    const std::vector<Row> rows = {
+        {"gfx950", L::K_K, DT::FP4_E2M1, DT::UNSET, false, F::SWIZZLED_GFX950},
+        {"gfx950", L::K_K, DT::FP8_E4M3, DT::UNSET, false, F::SWIZZLED_GFX950},
+        {"gfx950", L::K_K, DT::FP4_E2M1, DT::UNSET, true, F::SWIZZLED_GFX950},
+        {"gfx950", L::K_K, DT::FP8_E4M3, DT::UNSET, true, F::SWIZZLED_GFX950},
+        {"gfx950:sramecc+:xnack-", L::K_K, DT::FP8_E4M3, DT::UNSET, false, F::SWIZZLED_GFX950},
+        {"gfx950", L::K_K, DT::FP4_E2M1, DT::FP8_E4M3, false, F::NATURAL},
+        {"gfx950", L::K_K, DT::FP8_E4M3, DT::FP4_E2M1, false, F::NATURAL},
+        {"gfx950", L::K_K, DT::FP8_E5M2, DT::UNSET, false, F::NATURAL},
+        {"gfx950", L::K_K, DT::FP6_E2M3, DT::UNSET, false, F::NATURAL},
+        {"gfx950", L::K_MN, DT::FP8_E4M3, DT::UNSET, false, F::NATURAL},
+        {"gfx950", L::MN_K, DT::FP8_E4M3, DT::UNSET, false, F::NATURAL},
+        {"gfx950", L::MN_MN, DT::FP8_E4M3, DT::UNSET, false, F::NATURAL},
+        {"gfx950", L::K_MN, DT::FP4_E2M1, DT::UNSET, false, F::NATURAL},
+        {"gfx950", L::MN_K, DT::FP4_E2M1, DT::UNSET, false, F::NATURAL},
+        {"gfx1250", L::K_K, DT::FP8_E4M3, DT::UNSET, false, F::SWIZZLED_GFX1250},
+        {"gfx1250", L::MN_MN, DT::FP8_E5M2, DT::UNSET, false, F::SWIZZLED_GFX1250},
+        {"gfx1250-strict", L::K_K, DT::FP4_E2M1, DT::UNSET, false, F::SWIZZLED_GFX1250},
+        {"gfx942", L::K_K, DT::FP8_E4M3, DT::UNSET, false, F::NATURAL},
+        {"gfx90a", L::K_K, DT::FP8_E4M3, DT::UNSET, false, F::NATURAL},
+    };
+    for(const auto& row : rows)
+    {
+        auto fb
+            = createMxGraphWithLayout(row.layout, row.a, DT::HALF, row.b, row.mnContiguousScales);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        const auto [xA, xB] = mxInputs(graph);
+        EXPECT_EQ(mxScaleFormatFor(row.arch, xA, xB), row.expected)
+            << row.arch << " " << toString(row.layout) << " "
+            << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(xA.dataType()) << " x "
+            << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(xB.dataType())
+            << " mnContiguousScales=" << row.mnContiguousScales;
+    }
+
+    // Padded K-contiguous A and B (packedMxOrder gives no order) are not eligible.
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {136, 1}, {128, 32}, {1, 136}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const auto [xA, xB] = mxInputs(graph);
+    EXPECT_EQ(mxScaleFormatFor("gfx950", xA, xB), F::NATURAL);
 }
 
 TEST(TestMxMatmulParams, PackedMxOrderRejectsPaddedMatrix)
@@ -490,15 +550,39 @@ TEST_F(TestGpuMxMatmulPlan, DefaultLayoutTransposesOnlyTheAScale)
     EXPECT_GE(plan.getWorkspaceSize(_handle), plan.bScalePrep().workspaceSize());
 }
 
-// On gfx950 the provider selects natural scales (rocRoller); the Tensile format
-// is used only when a caller asks createMxMatmulPlan() for it.
-TEST_F(TestGpuMxMatmulPlan, SelectsNaturalScalesOnGfx950)
+// On gfx950 the provider selects the Tensile format for fp4 x fp4 and e4m3 x e4m3 with
+// K-contiguous A and B, and natural scales (rocRoller) for everything else. The builder
+// builds its plan in the selected format, as createMxMatmulPlan() resolves it (after
+// the fallback when hipBLASLt has no Tensile kernel).
+TEST_F(TestGpuMxMatmulPlan, SelectsScaleFormatByProblemOnGfx950)
 {
     if(!onGfx950())
     {
         GTEST_SKIP() << "gfx950-only check";
     }
-    EXPECT_EQ(selectMxScaleFormat(_handle), MxScaleFormat::NATURAL);
+    HipblasltMxMatmulPlanBuilder const builder;
+    for(const auto& [layout, expected] :
+        {std::pair{MxOperandLayout::K_K, MxScaleFormat::SWIZZLED_GFX950},
+         std::pair{MxOperandLayout::MN_MN, MxScaleFormat::NATURAL}})
+    {
+        auto fb = createMxGraphWithLayout(layout);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        const auto [xA, xB] = mxInputs(graph);
+        EXPECT_EQ(selectMxScaleFormat(_handle, xA, xB), expected) << toString(layout);
+
+        const auto attrs = getMxNodeAttrs(graph);
+        const auto reference = createMxMatmulPlan(
+            _handle, attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap(), expected);
+        HipdnnEnginePluginExecutionContext ctx;
+        builder.buildPlan(_handle, graph, ctx);
+        EXPECT_EQ(dynamic_cast<const MxMatmulPlan&>(ctx.plan()).scaleFormat(),
+                  reference->scaleFormat())
+            << toString(layout);
+        if(layout == MxOperandLayout::K_K)
+        {
+            RecordProperty("k_k_reference_format", toString(reference->scaleFormat()));
+        }
+    }
 }
 
 // A layout other than hipBLAS TN cannot use the gfx950 swizzled format (the relayout
@@ -576,6 +660,9 @@ struct MxShape
 constexpr MxShape EXEC_SHAPE{64, 96, 256};
 // Small M and N with a large K: hipBLASLt asks for a workspace of its own.
 constexpr MxShape LARGE_K_SHAPE{16, 16, 8192};
+// M and N not multiples of 32 and K/32 not a multiple of 8: gfx950's pre-swizzled
+// scales are padded on both axes.
+constexpr MxShape MN_PADDED_SHAPE{16, 48, 384};
 // What C holds before execute(), far above the tolerance of the host reference.
 constexpr float INITIAL_C = 1e6f;
 
@@ -696,6 +783,10 @@ struct MxExecution
     bool scaleAPrepared = false; // our A's scale (hipBLAS B_SCALE)
     bool scaleBPrepared = false; // our B's scale (hipBLAS A_SCALE)
     size_t preparedScaleBytes = 0; // the two scale regions at the front of the workspace
+    size_t aScalePrepSize = 0; // workspace regions, see MxMatmulPlan
+    size_t bScalePrepOffset = 0;
+    size_t bScalePrepSize = 0;
+    size_t matmulWorkspaceOffset = 0;
     std::vector<uint8_t> preparedWhileHeld; // those regions read while the stream was held
     std::vector<uint8_t> c;
 };
@@ -769,7 +860,7 @@ private:
     hipStream_t _stream = nullptr;
 };
 
-// `format` defaults to the one the provider selects for the device.
+// `format` defaults to the one the provider selects for the device and the graph.
 std::unique_ptr<MxMatmulPlan> createExecutePlan(const HipdnnEnginePluginHandle& handle,
                                                 const MxStorage& s,
                                                 std::optional<MxScaleFormat> format = std::nullopt,
@@ -778,12 +869,13 @@ std::unique_ptr<MxMatmulPlan> createExecutePlan(const HipdnnEnginePluginHandle& 
     auto fb = createExecuteGraph(s, shape);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
+    const auto [xA, xB] = mxInputs(graph);
     return createMxMatmulPlan(handle,
                               attrs.deqA,
                               attrs.deqB,
                               attrs.matmul,
                               graph.getTensorMap(),
-                              format.value_or(selectMxScaleFormat(handle)));
+                              format.value_or(selectMxScaleFormat(handle, xA, xB)));
 }
 
 // `nullWorkspace` passes no workspace, as hipDNN does for a plan that needs none.
@@ -812,6 +904,10 @@ MxExecution execute(const HipdnnEnginePluginHandle& handle,
     result.scaleBPrepared = !plan->aScalePrep().isPassThrough();
     result.preparedScaleBytes
         = plan->aScalePrep().workspaceSize() + plan->bScalePrep().workspaceSize();
+    result.aScalePrepSize = plan->aScalePrep().workspaceSize();
+    result.bScalePrepOffset = plan->bScalePrepOffset();
+    result.bScalePrepSize = plan->bScalePrep().workspaceSize();
+    result.matmulWorkspaceOffset = plan->matmulWorkspaceOffset();
 
     auto a = upload(inMemoryOrder(in.a, m, k, s.aKContiguous));
     auto b = upload(inMemoryOrder(in.b, k, n, !s.bKContiguous));
@@ -925,6 +1021,28 @@ std::string describe(const MxStorage& s)
            + order(s.scaleAKContiguous) + ", scale_b " + order(s.scaleBKContiguous);
 }
 
+// The scale formats an execute test runs: on gfx950 both rocRoller (natural scales) and
+// Tensile (32x8 pre-swizzled); elsewhere the one the provider selects.
+std::vector<std::optional<MxScaleFormat>> formatsUnderTest()
+{
+    if(onGfx950())
+    {
+        return {MxScaleFormat::NATURAL, MxScaleFormat::SWIZZLED_GFX950};
+    }
+    return {std::nullopt};
+}
+
+// The workspace regions [A_SCALE prep | B_SCALE prep | hipBLASLt workspace] neither
+// overlap nor start off WORKSPACE_ALIGNMENT.
+void expectDisjointAlignedRegions(const MxExecution& run, const std::string& name)
+{
+    EXPECT_GE(run.bScalePrepOffset, run.aScalePrepSize) << name;
+    EXPECT_GE(run.matmulWorkspaceOffset, run.bScalePrepOffset + run.bScalePrepSize) << name;
+    EXPECT_EQ(run.bScalePrepOffset % hipblaslt_utils::WORKSPACE_ALIGNMENT, 0u) << name;
+    EXPECT_EQ(run.matmulWorkspaceOffset % hipblaslt_utils::WORKSPACE_ALIGNMENT, 0u) << name;
+    EXPECT_GE(run.workspaceSize, run.matmulWorkspaceOffset) << name;
+}
+
 } // namespace
 
 // Unlike TestGpuMxMatmulPlan this also runs on gfx1250, for the layouts hipBLASLt
@@ -936,15 +1054,16 @@ protected:
     // `scalePrepared` gives, per variant, whether scale_a and scale_b are rewritten
     // when the plan uses natural scales (rocRoller).
     void expectSameResult(const MxStorage& reference,
-                          const std::vector<std::pair<MxStorage, std::pair<bool, bool>>>& variants)
+                          const std::vector<std::pair<MxStorage, std::pair<bool, bool>>>& variants,
+                          std::optional<MxScaleFormat> format = std::nullopt)
     {
         const auto inputs = randomInputs();
-        const auto expected = execute(_handle, reference, inputs);
+        const auto expected = execute(_handle, reference, inputs, false, format);
         expectMatchesHostReference(expected, inputs, describe(reference));
 
         for(const auto& [storage, prepared] : variants)
         {
-            const auto actual = execute(_handle, storage, inputs);
+            const auto actual = execute(_handle, storage, inputs, false, format);
             if(actual.format == MxScaleFormat::NATURAL)
             {
                 EXPECT_EQ(actual.scaleAPrepared, prepared.first) << describe(storage);
@@ -956,15 +1075,24 @@ protected:
     }
 };
 
-// K-contiguous A and B (hipBLAS TN, every MX arch). With rocRoller the plan transposes
-// a scale in the other order (one hipblasLtMatrixTransform); on gfx1250 the relayout
-// kernel swizzles every scale from whichever order it has, both in one launch.
+// K-contiguous A and B (hipBLAS TN, every MX arch). The provider picks Tensile here on
+// gfx950 and gfx1250, where the relayout kernel swizzles every scale from whichever
+// order it has; on gfx950 rocRoller (natural scales) is also run, transposing a scale
+// in the other order (one hipblasLtMatrixTransform).
 TEST_F(TestGpuMxMatmulPlanExecute, KContiguousOperandsAnyScaleOrder)
 {
     expectSameResult({true, true, true, true},
                      {{{true, true, false, true}, {true, false}},
                       {{true, true, true, false}, {false, true}},
                       {{true, true, false, false}, {true, true}}});
+    if(onGfx950())
+    {
+        expectSameResult({true, true, true, true},
+                         {{{true, true, false, true}, {true, false}},
+                          {{true, true, true, false}, {false, true}},
+                          {{true, true, false, false}, {true, true}}},
+                         MxScaleFormat::NATURAL);
+    }
 }
 
 // M/N-contiguous A and B (hipBLAS NT, gfx950 only): a K-contiguous scale, as every
@@ -995,16 +1123,20 @@ TEST_F(TestGpuMxMatmulPlanExecute, MixedOperandOrdersPrepareEachScale)
 // With every scale already in the order hipBLASLt reads and a kernel that needs no
 // workspace (rocRoller without stream-K), the plan needs none, and hipDNN then
 // passes no workspace to execute().
+// On gfx950 rocRoller is forced: the provider's Tensile format always prepares scales.
 TEST_F(TestGpuMxMatmulPlanExecute, RunsWithoutWorkspaceWhenNoneIsNeeded)
 {
+    const auto format
+        = onGfx950() ? std::optional<MxScaleFormat>(MxScaleFormat::NATURAL) : std::nullopt;
     const MxStorage passThrough{true, true, true, true};
     const auto inputs = randomInputs();
-    const auto withWorkspace = execute(_handle, passThrough, inputs);
+    const auto withWorkspace = execute(_handle, passThrough, inputs, false, format);
     if(withWorkspace.workspaceSize != 0)
     {
         GTEST_SKIP() << "this plan needs " << withWorkspace.workspaceSize << " bytes of workspace";
     }
-    const auto withoutWorkspace = execute(_handle, passThrough, inputs, /*nullWorkspace=*/true);
+    const auto withoutWorkspace
+        = execute(_handle, passThrough, inputs, /*nullWorkspace=*/true, format);
     EXPECT_TRUE(withoutWorkspace.c == withWorkspace.c);
 }
 
@@ -1013,15 +1145,13 @@ TEST_F(TestGpuMxMatmulPlanExecute, RunsWithoutWorkspaceWhenNoneIsNeeded)
 // the prepared scales: placed over them, or left out, C changes. A format for which
 // hipBLASLt asks for no workspace is recorded and passed over; the test skips only
 // when that is so for every format.
+// The plan's region offsets are checked for every format.
 TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverlap)
 {
     const auto inputs = randomInputs(LARGE_K_SHAPE);
-    std::vector<std::optional<MxScaleFormat>> formats{std::nullopt};
-    if(onGfx950())
-    {
-        formats.emplace_back(MxScaleFormat::SWIZZLED_GFX950);
-    }
+    const auto formats = formatsUnderTest();
     std::string withoutWorkspace;
+    std::string formatsChecked;
     size_t checked = 0;
     for(const auto& format : formats)
     {
@@ -1029,6 +1159,8 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverl
         const auto actual = execute(_handle, {true, true, false, false}, inputs, false, format);
         const auto name = toString(actual.format);
         ASSERT_GT(actual.preparedScaleBytes, 0u) << name;
+        expectDisjointAlignedRegions(actual, name);
+        formatsChecked += std::string(name) + " ";
         if(actual.workspaceSize <= actual.preparedScaleBytes)
         {
             withoutWorkspace += withoutWorkspace.empty() ? "" : ", ";
@@ -1039,6 +1171,7 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverl
         EXPECT_TRUE(actual.c == expected.c)
             << name << ": prepared scales next to a hipBLASLt workspace give a different C";
     }
+    RecordProperty("formats_checked", formatsChecked);
     if(!withoutWorkspace.empty())
     {
         RecordProperty("formats_without_hipblaslt_workspace", withoutWorkspace);
@@ -1058,11 +1191,7 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesOnTheHandleStream)
 {
     const MxStorage bothScalesPrepared{true, true, false, false};
     const auto inputs = randomInputs();
-    std::vector<std::optional<MxScaleFormat>> formats{std::nullopt};
-    if(onGfx950())
-    {
-        formats.emplace_back(MxScaleFormat::SWIZZLED_GFX950);
-    }
+    const auto formats = formatsUnderTest();
     for(const auto& format : formats)
     {
         const auto expected = execute(_handle, bothScalesPrepared, inputs, false, format);
@@ -1081,24 +1210,38 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesOnTheHandleStream)
 }
 
 // Tensors of rank 3 and 4 with leading dims of 1, as the in-tree bundles have, are the
-// same GEMM: M, N, K and the scale extents come from the last two dims.
+// same GEMM: M, N, K, the scale extents and the selected scale format come from the
+// last two dims. On gfx950, force natural scales only for K-contiguous A and B.
 TEST_F(TestGpuMxMatmulPlanExecute, LeadingUnitDimsGiveTheSameResult)
 {
     std::vector<MxStorage> storages{{true, true, false, false}};
+    std::vector<std::optional<MxScaleFormat>> formats{std::nullopt};
     if(onGfx950())
     {
         storages.push_back({false, false, true, true});
+        formats.emplace_back(MxScaleFormat::NATURAL);
     }
     const auto inputs = randomInputs();
     for(const auto& storage : storages)
     {
-        const auto expected = execute(_handle, storage, inputs);
-        for(const int64_t leadingOnes : {1, 2})
+        for(const auto& format : formats)
         {
-            auto batched = inputs;
-            batched.shape.leadingOnes = leadingOnes;
-            EXPECT_TRUE(execute(_handle, storage, batched).c == expected.c)
-                << describe(storage) << " with " << leadingOnes << " leading dims of 1";
+            if(format == MxScaleFormat::NATURAL && (!storage.aKContiguous || !storage.bKContiguous))
+            {
+                // The default already uses natural scales for non-TN layouts.
+                continue;
+            }
+            const auto expected = execute(_handle, storage, inputs, false, format);
+            for(const int64_t leadingOnes : {1, 2})
+            {
+                auto batched = inputs;
+                batched.shape.leadingOnes = leadingOnes;
+                const auto actual = execute(_handle, storage, batched, false, format);
+                const auto name = describe(storage) + " (" + toString(expected.format) + ") with "
+                                  + std::to_string(leadingOnes) + " leading dims of 1";
+                EXPECT_EQ(actual.format, expected.format) << name;
+                EXPECT_TRUE(actual.c == expected.c) << name;
+            }
         }
     }
 }
@@ -1108,21 +1251,23 @@ TEST_F(TestGpuMxMatmulPlanExecute, LeadingUnitDimsGiveTheSameResult)
 TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesByFormat)
 {
     // Both scales stored in the other order, so both are prepared on any MX arch.
-    const auto plan = createExecutePlan(_handle, {true, true, false, false});
-    const auto expected = plan->scaleFormat() == MxScaleFormat::NATURAL
-                              ? MxScalePrep::Method::TRANSPOSE
-                              : MxScalePrep::Method::RELAYOUT_KERNEL;
-    for(const auto* prep : {&plan->aScalePrep(), &plan->bScalePrep()})
+    for(const auto& format : formatsUnderTest())
     {
-        EXPECT_EQ(prep->method(), expected)
-            << toString(plan->scaleFormat()) << ": " << prep->describe();
+        const auto plan = createExecutePlan(_handle, {true, true, false, false}, format);
+        const auto expected = plan->scaleFormat() == MxScaleFormat::NATURAL
+                                  ? MxScalePrep::Method::TRANSPOSE
+                                  : MxScalePrep::Method::RELAYOUT_KERNEL;
+        for(const auto* prep : {&plan->aScalePrep(), &plan->bScalePrep()})
+        {
+            EXPECT_EQ(prep->method(), expected)
+                << toString(plan->scaleFormat()) << ": " << prep->describe();
+        }
     }
 }
 
 // gfx950's Tensile kernels read 32x8 pre-swizzled scales, which only the relayout kernel
-// writes; the provider does not select this format on its own yet. Every scale order
-// is swizzled into the same bytes, so C matches the host reference and is bitwise
-// equal across them.
+// writes, padding included (MN_PADDED_SHAPE). Every scale order is swizzled into the
+// same bytes, so C matches the host reference and is bitwise equal across them.
 TEST_F(TestGpuMxMatmulPlanExecute, Gfx950SwizzledScalesAnyScaleOrder)
 {
     if(!onGfx950())
@@ -1130,22 +1275,41 @@ TEST_F(TestGpuMxMatmulPlanExecute, Gfx950SwizzledScalesAnyScaleOrder)
         GTEST_SKIP() << "gfx950-only check";
     }
     const MxStorage reference{true, true, true, true};
-    const auto inputs = randomInputs();
-    const auto swizzled
-        = execute(_handle, reference, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
-    if(swizzled.format != MxScaleFormat::SWIZZLED_GFX950)
+    std::string fellBack;
+    size_t ran = 0;
+    for(const auto& shape : {EXEC_SHAPE, MN_PADDED_SHAPE})
     {
-        GTEST_SKIP() << "hipBLASLt selected no gfx950 Tensile kernel for this GEMM";
-    }
-    expectMatchesHostReference(swizzled, inputs, describe(reference));
+        const auto inputs = randomInputs(shape);
+        const auto label = describe(reference) + " " + std::to_string(shape.m) + "x"
+                           + std::to_string(shape.n) + "x" + std::to_string(shape.k);
+        const auto swizzled
+            = execute(_handle, reference, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
+        if(swizzled.format != MxScaleFormat::SWIZZLED_GFX950)
+        {
+            fellBack += label + "; ";
+            continue;
+        }
+        ++ran;
+        expectMatchesHostReference(swizzled, inputs, label);
+        expectDisjointAlignedRegions(swizzled, label);
 
-    for(const auto& storage :
-        {MxStorage{true, true, false, true}, {true, true, true, false}, {true, true, false, false}})
+        for(const auto& storage : {MxStorage{true, true, false, true},
+                                   MxStorage{true, true, true, false},
+                                   MxStorage{true, true, false, false}})
+        {
+            const auto actual
+                = execute(_handle, storage, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
+            const auto name = describe(storage) + " " + label;
+            EXPECT_EQ(actual.format, MxScaleFormat::SWIZZLED_GFX950) << name;
+            EXPECT_TRUE(actual.c == swizzled.c) << name << " gives a different C";
+        }
+    }
+    if(!fellBack.empty())
     {
-        const auto actual
-            = execute(_handle, storage, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
-        EXPECT_EQ(actual.format, MxScaleFormat::SWIZZLED_GFX950) << describe(storage);
-        EXPECT_TRUE(actual.c == swizzled.c)
-            << describe(storage) << " gives a different C than " << describe(reference);
+        RecordProperty("shapes_without_tensile_kernel", fellBack);
+    }
+    if(ran == 0)
+    {
+        GTEST_SKIP() << "hipBLASLt selected no gfx950 Tensile kernel for " << fellBack;
     }
 }

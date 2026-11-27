@@ -464,12 +464,16 @@ void checkHipblasltConstraints(
     }
 }
 
-/// The scale format for this device (see selectMxScaleFormat), checked against
-/// the operand layouts.
+/// The scale format for this device and the graph's MX inputs (see
+/// mxScaleFormatFor), checked against the operand layouts.
 MxScaleFormat resolveScaleFormat(const HipdnnEnginePluginHandle& handle,
                                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
-    const auto scaleFormat = selectMxScaleFormat(handle);
+    auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(graph);
+    const auto& tensorMap = graph.getTensorMap();
+    const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
+    const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
+    const auto scaleFormat = selectMxScaleFormat(handle, tXA, tXB);
     checkMxLayoutForScaleFormat(graph, scaleFormat);
     return scaleFormat;
 }
@@ -530,8 +534,7 @@ void checkMxLayoutForScaleFormat(const hipdnn_flatbuffers_sdk::flatbuffer_utilit
     const auto& tensorMap = graph.getTensorMap();
     const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
     const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
-    if(packedMxOrder(tXA, 1) != MxOrder::K_CONTIGUOUS
-       || packedMxOrder(tXB, 2) != MxOrder::K_CONTIGUOUS)
+    if(!mxOperandsKContiguous(tXA, tXB))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -554,8 +557,9 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
         // Graph-property checks above need no device; the arch query comes after them.
         REJECT_IF_WORKAROUND_ISSUE_9962(handle);
 
-        // The scale format depends on the device, so it is resolved (and the plan,
-        // which queries hipBLASLt, built) only after the graph-only checks above.
+        // The scale format depends on the device and the MX input types and layouts,
+        // so it is resolved (and the plan, which queries hipBLASLt, built) only after
+        // the graph-only checks above.
         // No algorithm -> makeMxPlan throws -> the graph is reported unsupported
         // here rather than failing later in buildPlan()/execute().
         static_cast<void>(makeMxPlan(handle, opGraph));

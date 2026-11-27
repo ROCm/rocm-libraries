@@ -78,7 +78,8 @@
 // padded cases of IsApplicableRejectsNonPackedTensors,
 // IsApplicableRejectsNonPackedTensorsNt, DeclinesOutputThatIsNotPackedRowMajor and
 // DeclinesMatricesThatAreNotPacked then become accepted cases; keep a decline for a
-// C row stride below N. Drop the padded-leading-dimension sentence from
+// C row stride below N. The padded row of TestMxMatmulParams.ScaleFormatForArchTypesAndLayouts
+// then expects SWIZZLED_GFX950. Drop the padded-leading-dimension sentence from
 // docs/OperationSupport.md and projects/hipdnn/docs/user-guides/reference/hipblaslt.rst.
 // ----------------------------------------------------------------------------
 

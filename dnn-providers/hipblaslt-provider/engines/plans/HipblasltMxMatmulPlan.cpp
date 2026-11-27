@@ -10,6 +10,7 @@
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
@@ -166,8 +167,20 @@ std::optional<MxOrder> packedMxOrder(
     return std::nullopt;
 }
 
-MxScaleFormat mxScaleFormatForArch(std::string_view arch)
+bool mxOperandsKContiguous(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xB)
 {
+    return packedMxOrder(xA, 1) == MxOrder::K_CONTIGUOUS
+           && packedMxOrder(xB, 2) == MxOrder::K_CONTIGUOUS;
+}
+
+MxScaleFormat mxScaleFormatFor(
+    std::string_view arch,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xB)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     using hipdnn_plugin_sdk::archMatches;
     using hipdnn_plugin_sdk::ArchMatchMode;
     if(archMatches(arch, "gfx1250", ArchMatchMode::PREFIX)
@@ -175,12 +188,22 @@ MxScaleFormat mxScaleFormatForArch(std::string_view arch)
     {
         return MxScaleFormat::SWIZZLED_GFX1250;
     }
+    const auto type = xA.dataType();
+    if(archMatches(arch, "gfx950", ArchMatchMode::PREFIX) && type == xB.dataType()
+       && (type == DataType::FP4_E2M1 || type == DataType::FP8_E4M3)
+       && mxOperandsKContiguous(xA, xB))
+    {
+        return MxScaleFormat::SWIZZLED_GFX950;
+    }
     return MxScaleFormat::NATURAL;
 }
 
-MxScaleFormat selectMxScaleFormat(const HipdnnEnginePluginHandle& handle)
+MxScaleFormat selectMxScaleFormat(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xB)
 {
-    return mxScaleFormatForArch(hipdnn_plugin_sdk::getDeviceArch(handle.getStream()));
+    return mxScaleFormatFor(hipdnn_plugin_sdk::getDeviceArch(handle.getStream()), xA, xB);
 }
 
 MxMatmulParams::MxMatmulParams(
@@ -365,6 +388,16 @@ const MxScalePrep& MxMatmulPlan::aScalePrep() const
 const MxScalePrep& MxMatmulPlan::bScalePrep() const
 {
     return _bScalePrep;
+}
+
+size_t MxMatmulPlan::bScalePrepOffset() const
+{
+    return _bScalePrepOffset;
+}
+
+size_t MxMatmulPlan::matmulWorkspaceOffset() const
+{
+    return _matmulWorkspaceOffset;
 }
 
 void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
