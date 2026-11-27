@@ -45,9 +45,17 @@ struct BatchScores
     std::vector<uint8_t> stage;
     uint8_t stages = 0;
 
+    /// True when this holds one raw score for each of @p rows rows and, if staged, one stage
+    /// entry for each. A ranker checks this before indexing by row.
+    bool describes(size_t rows) const
+    {
+        return raw.size() == rows && (stage.empty() || stage.size() == rows);
+    }
+
+    /// False for a row whose stage entry is missing: nothing shows the whole model scored it.
     bool fullyScored(size_t index) const
     {
-        return stage.empty() || stage[index] == stages;
+        return stage.empty() || (index < stage.size() && stage[index] == stages);
     }
 };
 
