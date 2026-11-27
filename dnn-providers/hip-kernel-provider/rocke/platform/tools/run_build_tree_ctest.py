@@ -37,7 +37,6 @@ import getpass
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,13 +48,15 @@ if str(PLATFORM / "python") not in sys.path:
     sys.path.insert(0, str(PLATFORM / "python"))
 from rocke.tests.ctest_listing import list_ctest_entries
 from rocke.tests.host_cpus import available_cpus
-from rocke.tests.platform_build import build_platform_targets, configure_platform
+from rocke.tests.platform_build import (
+    BUILD_PROGRAMS,
+    build_platform_targets,
+    configure_platform,
+    missing_build_programs,
+)
 
 # Single- and multi-config generators both build and test this configuration.
 CONFIG = "Release"
-
-# The programs the runner starts itself; CMake finds the C++ compiler.
-REQUIRED_PROGRAMS = ("cmake", "ctest")
 
 # The platform alone: its tests, without the sibling library or install rules.
 PLATFORM_ONLY = (
@@ -80,11 +81,6 @@ def default_build_root() -> Path:
     key = f"{_user()}\0{PLATFORM}".encode()
     digest = hashlib.sha256(key).hexdigest()[:12]
     return Path(tempfile.gettempdir()) / f"rocke_build_tree_ctest_{digest}"
-
-
-def missing_programs() -> list[str]:
-    """The programs of ``REQUIRED_PROGRAMS`` that are not on PATH."""
-    return [program for program in REQUIRED_PROGRAMS if shutil.which(program) is None]
 
 
 def _exact_names(tests: Sequence[str]) -> str:
@@ -185,10 +181,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not (args.test or args.label):
         parser.error("name at least one --test or --label")
 
-    if missing := missing_programs():
+    if missing := missing_build_programs():
         print(
             f"error: build-tree CTest run failed - missing={missing!r}, expected "
-            f"{' and '.join(REQUIRED_PROGRAMS)} on PATH",
+            f"{' and '.join(BUILD_PROGRAMS)} on PATH",
             file=sys.stderr,
         )
         return 1

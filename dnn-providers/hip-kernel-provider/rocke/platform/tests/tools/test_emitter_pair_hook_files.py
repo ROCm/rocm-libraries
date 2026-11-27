@@ -33,7 +33,6 @@ entry's arguments only once its program is built.
 from __future__ import annotations
 
 import shlex
-import shutil
 from itertools import pairwise
 from pathlib import Path
 
@@ -74,10 +73,6 @@ pytestmark = [
             reason="reads the monorepo's pre-commit config, which only a monorepo "
             "checkout has",
         ),
-    ),
-    pytest.mark.skipif(
-        shutil.which("cmake") is None or shutil.which("ctest") is None,
-        reason="CMake and CTest required",
     ),
 ]
 
@@ -122,7 +117,7 @@ def hook_command(hook):
 
 
 @pytest.fixture(scope="module")
-def configured_tree(hook_command, tmp_path_factory):
+def configured_tree(build_programs, hook_command, tmp_path_factory):
     """The platform configured as the hook's runner configures it, unbuilt,
     with the CMake file API's replies."""
     runner_path, _, _ = hook_command

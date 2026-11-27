@@ -12,6 +12,7 @@ rules.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -291,3 +292,86 @@ def test_a_wrapped_hook_says_skip_and_passes_where_rocke_is_not_checked_out(
 def test_the_registry_hook_takes_the_files_it_reads_outside_rocke(rocke_hooks, path):
     (hook,) = [hook for hook in rocke_hooks if hook.hook_id == "rocke-pending-lanes"]
     assert hook.takes(path)
+
+
+def _pytest_test_files(hook) -> list[Path]:
+    """The test files ``hook`` runs through pytest, as monorepo paths."""
+    tokens = [*shlex.split(hook.entry), *hook.args]
+    if "pytest" not in tokens:
+        return []
+    return [
+        MONOREPO / token
+        for token in tokens
+        if token.startswith(ROCKE_DIR) and token.endswith(".py")
+    ]
+
+
+def test_a_hook_whose_tests_configure_the_platform_requires_cmake_and_ctest(
+    rocke_hooks,
+):
+    # A test that configures the platform takes the build_programs fixture,
+    # which skips it without cmake or ctest; a hook that ran it so would pass
+    # having checked nothing, so the hook makes the fixture fail instead.
+    configuring = {
+        hook.hook_id: hook
+        for hook in rocke_hooks
+        for test_file in _pytest_test_files(hook)
+        if "build_programs" in test_file.read_text(encoding="utf-8")
+    }
+    assert configuring, "no rocKE hook runs a test that takes build_programs"
+    lax = sorted(
+        hook_id
+        for hook_id, hook in configuring.items()
+        if "--require-build-programs" not in (*shlex.split(hook.entry), *hook.args)
+    )
+    assert not lax, (
+        "these rocKE hooks run tests that take build_programs without "
+        f"--require-build-programs, so a missing cmake would pass them: {lax}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("hook_option", "returncode", "outcome"),
+    [
+        ([], 0, "1 skipped"),
+        (
+            ["--require-build-programs"],
+            1,
+            (
+                "--require-build-programs: missing=['cmake', 'ctest'], expected "
+                "cmake and ctest on PATH"
+            ),
+        ),
+    ],
+)
+def test_a_test_that_configures_the_platform_fails_without_cmake_under_the_hook_option(
+    tmp_path, hook_option, returncode, outcome
+):
+    # One case of the build-tree runner's test that configures the platform,
+    # run with no cmake or ctest on PATH: it skips in a plain run and fails in
+    # a hook's run.
+    no_programs = tmp_path / "empty-path"
+    no_programs.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "--basetemp",
+            str(tmp_path / "basetemp"),
+            *hook_option,
+            str(Path(__file__).with_name("test_run_build_tree_ctest.py")),
+            "-k",
+            "test_an_unregistered_entry_is_refused_by_name",
+        ],
+        env={**os.environ, "PATH": str(no_programs)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == returncode, result.stdout + result.stderr
+    assert outcome in result.stdout, result.stdout

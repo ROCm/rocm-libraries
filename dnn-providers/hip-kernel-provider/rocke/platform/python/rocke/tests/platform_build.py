@@ -20,11 +20,22 @@ from ..assets import platform_root
 from .host_cpus import available_cpus
 
 __all__ = [
+    "BUILD_PROGRAMS",
     "build_platform_targets",
     "cmake_cache_entries",
     "configure_platform",
     "generator_arguments",
+    "missing_build_programs",
 ]
+
+# The programs a configure, build and CTest run of the platform start
+# themselves; CMake finds the C++ compiler.
+BUILD_PROGRAMS = ("cmake", "ctest")
+
+
+def missing_build_programs() -> list[str]:
+    """The programs of :data:`BUILD_PROGRAMS` that are not on PATH."""
+    return [program for program in BUILD_PROGRAMS if shutil.which(program) is None]
 
 
 def generator_arguments(build_root: Path) -> list[str]:

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import subprocess
 import sys
 
@@ -36,10 +35,6 @@ pytestmark = [
             SOURCE_TREE,
             reason="runs a platform tool, which an installed test layout omits",
         ),
-    ),
-    pytest.mark.skipif(
-        shutil.which("cmake") is None or shutil.which("ctest") is None,
-        reason="CMake and CTest required",
     ),
 ]
 
@@ -60,7 +55,7 @@ def runner():
 
 
 @pytest.fixture(scope="module")
-def configured_tree(runner, tmp_path_factory):
+def configured_tree(build_programs, runner, tmp_path_factory):
     """A platform build tree configured as the runner configures it, unbuilt."""
     build_root = tmp_path_factory.mktemp("build")
     configure_platform(build_root, *runner.PLATFORM_ONLY, config=runner.CONFIG)

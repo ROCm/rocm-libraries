@@ -23,6 +23,7 @@ if str(_PYROOT) not in sys.path:
 # GIT_INDEX_FILE, which would point every git command a test runs, even in a
 # scratch directory, at the repository being committed to.
 from rocke.tests.git_environment import drop_inherited_git_repository_variables
+from rocke.tests.platform_build import BUILD_PROGRAMS, missing_build_programs
 
 drop_inherited_git_repository_variables()
 
@@ -35,6 +36,30 @@ def pytest_addoption(parser):
         action="store_true",
         help="fail on every expired rocke.tests.pending_lanes entry",
     )
+    # The rocKE pre-commit hooks pass it: a hook whose test skipped for a
+    # missing cmake would pass having checked nothing.
+    parser.addoption(
+        "--require-build-programs",
+        action="store_true",
+        help="fail, rather than skip, a test that needs cmake and ctest on PATH "
+        "when either is missing (the build_programs fixture)",
+    )
+
+
+@pytest.fixture(scope="session")
+def build_programs(request):
+    """Use in a test, or a fixture, that configures, builds or lists the
+    platform with CMake: skips it where cmake or ctest is not on PATH, or fails
+    it, naming the missing programs, under ``--require-build-programs``.
+    Session-scoped, so it runs before the module fixtures that configure."""
+    if missing := missing_build_programs():
+        if request.config.getoption("--require-build-programs"):
+            pytest.fail(
+                f"--require-build-programs: missing={missing!r}, expected "
+                f"{' and '.join(BUILD_PROGRAMS)} on PATH",
+                pytrace=False,
+            )
+        pytest.skip("CMake and CTest required")
 
 
 @pytest.hookimpl(hookwrapper=True)
