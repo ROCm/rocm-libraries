@@ -235,10 +235,9 @@ rocke_library_pytest_entry(rocke_library_conv_ir_pytest
 # test_conv_direct_grouped_backend_parity.py runs in
 # rocke_library_conv_pytest, not here. Their own entries rather than part
 # of rocke_library_conv_pytest: the build-and-lower matrices take tens of
-# seconds, past that entry's per-test timeout. Both run in the standard and
-# ffm-quick tiers (ROCKE_ENGINE_test_categories_external.yaml), and both
-# bake in the standard label so `ctest -L standard` finds them without that
-# file's labelling.
+# seconds, past that entry's per-test timeout. Both run in the standard tier
+# (ROCKE_ENGINE_test_categories_external.yaml), and both bake in the standard
+# label so `ctest -L standard` finds them without that file's labelling.
 set(_ROCKE_LIBRARY_CONV_TF32_TESTS
     "test_conv_fwd_tf32.py"
     "test_conv_dgrad_tf32.py"

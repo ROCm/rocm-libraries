@@ -1145,10 +1145,10 @@ def test_installed_platform_pytest_parts_partition_the_suite(
 def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     """TheRock CI selects provider tests by tier label. The provider categories
     tier the parts by their name prefix, so every part, and a part a new CMake
-    group would add, gets the same labels, among them the standard and
-    ffm-quick tiers that the single entry ran in. They are not in the quick
-    tier, which holds only unit tests and basic enablement checks (TESTING.md
-    section 5.0.3). The tiling package's entries run
+    group would add, gets the same labels, among them the standard tier that
+    the single entry ran in. They are not in the quick tier, which holds only
+    unit tests and basic enablement checks (TESTING.md section 5.0.3), nor in
+    ffm-quick, which mirrors it. The tiling package's entries run
     tests outside tests/, so they are not parts and do not take their prefix;
     the categories tier each by its own name: rocke_tiling_pytest like the
     parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
@@ -1157,8 +1157,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     rocke_ctest_shard_pytest, rocke_tiling_backend_width_pytest,
     rocke_library_gdn_pytest, rocke_library_conv_fwd_aot_packaging_pytest and
     the GPU entries run in the standard, comprehensive and full tiers and not in
-    the quick tier. Another category keeps rocke_library_gdn_pytest and
-    rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
+    the quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
@@ -1186,8 +1185,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         tmp_path,
     )
     expected = labels.get(parts[0], set())
-    assert {"standard", "ffm-quick"} <= expected, expected
-    assert "quick" not in expected, expected
+    assert "standard" in expected, expected
+    assert not {"quick", "ffm-quick"} & expected, expected
     for name in [*parts, future_part, "rocke_tiling_pytest"]:
         assert labels.get(name) == expected, name
     library_gpu_labels = labels.get("rocke_library_gpu_pytest")
@@ -1208,13 +1207,27 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             name,
             standard_labels,
         )
-        assert "quick" not in standard_labels, (name, standard_labels)
-    assert "ffm-quick" not in labels.get("rocke_ctest_shard_pytest", set())
-    for name in [
-        "rocke_library_gdn_pytest",
-        "rocke_library_conv_fwd_aot_packaging_pytest",
-    ]:
-        assert "ffm-quick" in labels.get(name, set()), name
+        assert not {"quick", "ffm-quick"} & standard_labels, (name, standard_labels)
+
+
+@requires_cmake
+def test_the_ffm_quick_tier_runs_exactly_the_quick_entries(tmp_path):
+    """The provider categories give ffm-quick, the fast-feedback tier, the quick
+    list itself, so an installed entry is in one exactly when it is in the
+    other, and quick's rules (unit tests and enablement checks, its time
+    budget) hold for ffm-quick too."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+    )
+    names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
+    labels = provider_category_labels(names, tmp_path)
+    quick = {name for name in names if "quick" in labels.get(name, set())}
+    ffm_quick = {name for name in names if "ffm-quick" in labels.get(name, set())}
+    assert quick, "no installed entry runs in quick"
+    assert ffm_quick == quick, {
+        "ffm-quick only": sorted(ffm_quick - quick),
+        "quick only": sorted(quick - ffm_quick),
+    }
 
 
 @requires_cmake
