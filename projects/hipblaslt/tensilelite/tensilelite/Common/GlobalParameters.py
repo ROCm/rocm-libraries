@@ -100,6 +100,9 @@ globalParameters["BoundsCheck"] = 0  # Bounds check
 globalParameters["ValidationMaxToPrint"] = 4  # maximum number of mismatches to print
 globalParameters["ValidationPrintValids"] = False  # print matches too
 # steps
+globalParameters["ForceResultsFile"] = (
+    False  # write benchmark results CSVs even without LibraryLogic or Ductile, for external readers
+)
 globalParameters["ForceRedoBenchmarkProblems"] = (
     True  # if False and benchmarking already complete, then benchmarking will be skipped when TensileLite is re-run
 )
@@ -277,6 +280,9 @@ globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 # Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
 globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
+globalParameters["PrintRejectedPredicates"] = (
+    False  # client logs the evaluation of every predicate of solutions rejected by their predicates; needs ClientLogLevel >= 2
+)
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
 )
@@ -592,6 +598,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToLds": [0]},
     {"DirectToLdsMetadata": [1]},
     {"UseSubtileImpl": [False]},
+    {"StoreCachelineAlign": [True]},
     {"A2ASubRounds": [1]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},

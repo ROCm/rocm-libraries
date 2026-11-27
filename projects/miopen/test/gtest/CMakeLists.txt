@@ -190,7 +190,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (MIOPEN_TEST_ALL)
       set(MIOPEN_GTEST_PREFIX "")
     else()
-      set(MIOPEN_GTEST_PREFIX "Smoke")
+      set(MIOPEN_GTEST_PREFIX "Quick")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -237,7 +237,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (MIOPEN_TEST_ALL)
       set(MIOPEN_GTEST_PREFIX "")
     else()
-      set(MIOPEN_GTEST_PREFIX "Smoke")
+      set(MIOPEN_GTEST_PREFIX "Quick")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -257,8 +257,8 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX115X)
-        add_gtest_negative_filter("Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
-        add_gtest_negative_filter("Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+        add_gtest_negative_filter("Comprehensive/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+        add_gtest_negative_filter("Comprehensive/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
     endif()
 
@@ -594,7 +594,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     set(MIOPEN_WRAPPER_ROUTING_TEST miopen_gtest)
   endif()
   miopen_add_wrapper_check(wrapper_reentry_macro
-    COMMAND $<TARGET_FILE:${MIOPEN_WRAPPER_ROUTING_TEST}> --gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*
+    COMMAND $<TARGET_FILE:${MIOPEN_WRAPPER_ROUTING_TEST}> --gtest_filter=Quick/CPU_WrapperRoutingReentryMacro_NONE.*
     ENVIRONMENT "MIOPEN_HIPDNN_FORWARDING=1"
     ENVIRONMENT_MODIFICATION "MIOPEN_DISABLE_HIPDNN_FOR=unset:"
     PROPERTIES FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]|Running 0 tests")
@@ -643,6 +643,16 @@ else()
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${DATA_INSTALL_DIR}/bin
         COMPONENT clients)
+    # Golden-vector fixtures read by CPU_LgbmForest_NONE and CPU_LgbmPcfgForest_NONE through
+    # GetSystemDbPath(). The installed tests look in <prefix>/share/miopen/db, next to the model
+    # assets, and fail when a fixture is missing, so they ship with miopen_gtest.
+    if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+      install(FILES
+          ${PROJECT_SOURCE_DIR}/src/kernels/lgbm_rank_golden.json
+          ${PROJECT_SOURCE_DIR}/src/kernels/lgbm_pcfg_golden.json
+          DESTINATION ${DATABASE_INSTALL_DIR}
+          COMPONENT clients)
+    endif()
   endif()
 endif()
 
@@ -699,7 +709,7 @@ endif()
 # A missing hipDNN does not skip them.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   miopen_append_installed_wrapper_check(wrapper_reentry_macro
-    "\"--gtest_filter=CPU_WrapperRoutingReentryMacro_NONE.*\""
+    "\"--gtest_filter=Quick/CPU_WrapperRoutingReentryMacro_NONE.*\""
     " ENVIRONMENT \"MIOPEN_HIPDNN_FORWARDING=1\" ENVIRONMENT_MODIFICATION \"MIOPEN_DISABLE_HIPDNN_FOR=unset:\" FAIL_REGULAR_EXPRESSION \"\\\\[  SKIPPED \\\\]|Running 0 tests\""
     "../miopen_gtest${CMAKE_EXECUTABLE_SUFFIX}")
 endif()

@@ -260,8 +260,9 @@ The hermetic suite
 changes only logic YAML triggers no TensileLite lane, and the build-wired `--check-all` is scoped to
 the architectures that pull-request builds target. `Component CI: hipBLASLt Logic Corpus`
 ([`component-ci-logic-corpus.yml`](../../../.github/workflows/component-ci-logic-corpus.yml)) closes
-both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, or the corpus
-test plumbing, and runs `tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
+both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, the corpus
+test plumbing, or the SolutionUID codec (`tensilelite/SolutionIdGen.py`), and runs
+`tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
 every `@needs_logic_corpus` test with `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1`. The check covers the
 architectures whose logic the change touched, whether or not a pull-request build targets them, and
 the whole corpus when a validator or `known_bugs.yaml` changed or on a manual run. (The whole corpus
@@ -557,6 +558,14 @@ since the TheRock pin of 2026-10-02 both gfx942 and gfx950 run it per PR. gfx90a
 only in TheRock's own postsubmit and nightly runs. Measured in `preliminary`, the suite takes about
 an hour on gfx942 and about two on gfx950, and TheRock runs it unsharded.
 
+Selected common configs enable both CPU reference-reuse and GPU upload-skip verification:
+`reuse_verification.yaml` on gfx942 and gfx950, and `streamk/sk_mx32f4_quick.yaml` plus
+`ductile/gfx950/f8_tn_mx_subtile.yaml` on gfx950. Their `TestParameters` set
+`verify_reference_reuse: true` and `verify_upload_skip: true`; the artifact runner scopes
+both environment flags to each config and requires positive reference, input-upload, and
+batched-pointer verification counts. A successful client exit with no verified reuse fails
+these configs. The same checks run in local build/run and shared cached-artifact lanes.
+
 gfx1250 still gets no `Tests/common` coverage in TheRock. TheRock's own family matrix now names a
 gfx1250 runner, but the CI configuration overlay this repository uses leaves it empty, and both the
 `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. So its whole Test stage is
@@ -657,9 +666,11 @@ Each ordinary driver case has one registration, with an OpenMP thread limit of
 8. Each AMAX-D case has three configurations: the original name uses limit 8,
 and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
 `OMP_THREAD_LIMIT` and `OMP_NUM_THREADS`, disables dynamic teams, and accounts
-for the requested processors when scheduling tests. Limits constrain the
-reference's explicit request for 64 threads; they are numerical test settings,
-not measurements of the team used by every reference call.
+for the requested processors when scheduling tests. The reference uses the
+OpenMP runtime's thread setting. These are numerical test settings, not
+measurements of the team used by every reference call. Both requested paths
+validate D and AMAX-D; direct-reference gtests also check the maximum's
+epilogue stage and output-narrowing behavior against independent expected values.
 
 The Int8 option-rejection cases require exit code 1 and their expected diagnostic
 through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).

@@ -14,7 +14,6 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   Architecture: gfx1250
-  CpuThreads: 1
 
 BenchmarkProblems:
   #######################################
