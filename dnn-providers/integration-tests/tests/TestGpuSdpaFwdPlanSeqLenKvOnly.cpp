@@ -141,7 +141,7 @@ void expectSeqLenQIsDerived(const VllmProblem& p, float unseen)
 
 } // namespace
 
-TEST(TestGpuSdpaFwdPlanSeqLenKvOnly, SequsedKNeedsNoSeqLenQ)
+TEST(TestGpuSdpaFwdPlanSeqLenKvOnlyDevice, SequsedKNeedsNoSeqLenQ)
 {
     SKIP_IF_NO_DEVICES();
     for(const auto window : {FaWindow{}, FaWindow{-1, 0}, FaWindow{2, 0}})
@@ -158,7 +158,7 @@ TEST(TestGpuSdpaFwdPlanSeqLenKvOnly, SequsedKNeedsNoSeqLenQ)
     }
 }
 
-TEST(TestGpuSdpaFwdPlanSeqLenKvOnly, DenseKvUnderARaggedQueryNeedsNoSeqLenQ)
+TEST(TestGpuSdpaFwdPlanSeqLenKvOnlyDevice, DenseKvUnderARaggedQueryNeedsNoSeqLenQ)
 {
     SKIP_IF_NO_DEVICES();
     for(const auto window : {FaWindow{}, FaWindow{-1, 0}, FaWindow{3, 0}})

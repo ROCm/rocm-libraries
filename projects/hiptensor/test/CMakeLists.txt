@@ -554,6 +554,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
   "backend_seam_test|NONE"
+  "scalar_alignment_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "trinary_contraction_workspace_test|NONE"

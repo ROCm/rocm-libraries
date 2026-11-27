@@ -25,7 +25,8 @@ CPP_PATH = "projects/hipdnn/backend/src/HipdnnBackend.cpp"
 FAKE_PIN = "deadbeef1234"
 LOAD_CFG = (
     "def load_skip_ci_config(extension_config_path=None):\n"
-    '    return (["projects/hipdnn/docs/*", "projects/hipdnn/tools/*", "*.md"], set())\n'
+    '    return (["projects/hipdnn/docs/*", "projects/hipdnn/tools/*", "*.md",'
+    ' ".github/workflows/pre-commit.yml"], set())\n'
 )
 
 
@@ -95,6 +96,25 @@ def test_renamed_helper_is_found_and_reported_as_drift(tmp_path):
         TOOLS_PATH: "[skip]",
         CPP_PATH: "[ci]",
     }
+
+
+def test_renamed_helper_lookup_rejects_an_internal_workflow_allowlist(tmp_path):
+    # Sorts before the real replacement and agrees with it on the docs and .cpp
+    # samples, but applies a TheRock-style workflow allowlist, so it would mark
+    # the repo's multi-arch workflow as skip.
+    src = LOAD_CFG + (
+        "import fnmatch\n"
+        "def _apply_internal_allowlist(path, patterns):\n"
+        '    if path.startswith(".github/workflows/") and not path.endswith("/ci.yml"):\n'
+        "        return True\n"
+        "    return any(fnmatch.fnmatch(path, p) for p in patterns)\n"
+        "def _classify_path_v2(path, patterns):\n"
+        "    return any(fnmatch.fnmatch(path, p) for p in patterns)\n"
+    )
+    r = _run(tmp_path, src)
+    assert r.returncode == 0, r.stderr
+    assert "using _classify_path_v2" in r.stderr
+    assert "_apply_internal_allowlist" not in r.stderr
 
 
 def test_no_usable_helper_stops_without_classifying(tmp_path):

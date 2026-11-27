@@ -237,7 +237,7 @@ TEST(TestGpuSdpaRaggedFwdSignatureKey, Fp8NodeKeyAndRouting)
 // The executor end to end on a bf16 ragged graph the native ragged plan takes (see
 // ExecutorRoutesRaggedBf16NodeToRaggedPlan), against the same graph with an all-zero bias,
 // which every ragged plan declines and so runs through the dense rewrite.
-TEST(TestGpuSdpaRaggedFwdSignatureKey, ExecutorRaggedBf16PlanEqualsZeroBiasRewrite)
+TEST(TestGpuSdpaRaggedFwdSignatureKeyDevice, ExecutorRaggedBf16PlanEqualsZeroBiasRewrite)
 {
     SKIP_IF_NO_DEVICES();
     using hipdnn_data_sdk::types::bfloat16;

@@ -189,6 +189,10 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
             HIPTENSOR_ROCKE_TEST_TARGETS="${_ROCKE_TEST_TARGETS}")
     endforeach()
 endif()
+add_hiptensor_unit_test(scalar_alignment_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/scalar_alignment_test.cpp
+    )
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}
      # ${CMAKE_CURRENT_SOURCE_DIR}/interface_test.cpp

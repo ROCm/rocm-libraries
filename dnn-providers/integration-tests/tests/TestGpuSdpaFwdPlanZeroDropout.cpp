@@ -155,7 +155,7 @@ bool bitsEqual(const std::vector<float>& a, const std::vector<float>& b)
 
 } // namespace
 
-TEST(TestGpuSdpaFwdPlanZeroDropout, EqualsNoDropoutBitForBitAndTheCpuExecutor)
+TEST(TestGpuSdpaFwdPlanZeroDropoutDevice, EqualsNoDropoutBitForBitAndTheCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
     const auto noDropout = run(makeGraph(false, false), true);
@@ -285,7 +285,7 @@ TEST(TestGpuSdpaFwdPlanZeroDropout, CombinesWithFp8Scaling)
 }
 
 // O and both amax outputs are bit-identical to the scaled fp8 graph without dropout.
-TEST(TestGpuSdpaFwdPlanZeroDropout, Fp8ScalingEqualsNoDropoutBitForBit)
+TEST(TestGpuSdpaFwdPlanZeroDropoutDevice, Fp8ScalingEqualsNoDropoutBitForBit)
 {
     SKIP_IF_NO_DEVICES();
     fp8::SdpaGraphSpec spec;
