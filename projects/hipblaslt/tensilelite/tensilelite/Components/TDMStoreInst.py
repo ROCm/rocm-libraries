@@ -44,7 +44,10 @@ runs after the last batch, or after the CompactLoopStore loop.
 globalWriteElements hands a final-D store to generateBetaModules as one block where tdmStoreSinglePath
 holds, and generateBetaModules picks the TDM blocks of a cascade with tdmStoreBlocks; Solution checks a configuration
 with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
-tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers.
+tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers. Its columns are
+tdmStorePitch elements apart: MacroTile0 and the TDMStoreLdsPad pad rows, which lie outside the tensor, so the TDM
+store drops them and the C load fills them with zeros. TDMStoreLdsPad -1 asks Solution for the pad tdmStoreLdsPads
+derives from the kernel.
 """
 
 from math import log2
@@ -139,11 +142,17 @@ def tdmStoreRejectReason(state):
   StoreRemapVectorWidth applies to the blocks that keep buffer_store; a TDM block stages D itself and
   skips the remap. In a block whose stores run in the CompactLoopStore loop, the block sets up the staged tile and loads C
   before the loop, steps the staged tile's base by each iteration's rows and stores the tile after the loop.
-  The descriptors hold MacroTile0 in data_size units (tile_dim0) and the columns of a wave (tile_dim1) in 16 bits.
+  The descriptors hold the pitch of the staged tile in data_size units (tile_dim0) and the columns of a wave
+  (tile_dim1) in 16 bits. A TDMStoreLdsPad needs TDMStoreInst and a pad of whole DWORDs, or 1 with a 16-bit D, which
+  starts the odd columns at 2 mod 4 bytes; -1, which Solution resolves to a pad of tdmStoreLdsPads, and 0 always pass.
+  The pad moves column c of the staged tile by c * TDMStoreLdsPad elements, so
+  a pad whose bytes are not a multiple of the widest DS access of a staged vector, min(its bytes, 16), leaves that
+  access below its native alignment. It is then correct only in the UNALIGNED SH_MEM_CONFIG.alignment_mode, which the
+  KFD sets for the queues it creates, since the other modes clear the low address bits.
   The store vectors the block stages are checked by tdmStoreVectorRejectReason, once their widths are final.
   """
   if not state["TDMStoreInst"]:
-    return None
+    return "TDMStoreLdsPad requires TDMStoreInst" if state.get("TDMStoreLdsPad", 0) > 0 else None
 
   pt = state["ProblemType"]
   sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
@@ -185,6 +194,9 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires one free index per operand, not packed free indices"
   if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
     return "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
+  pad = state.get("TDMStoreLdsPad", 0)
+  if pad != -1 and (pad < 0 or pad * int(pt["DestDataType"].numBytes()) % 4 and not (sixteenBit and pad == 1)):
+    return "TDMStoreLdsPad requires -1 (derived) or a non-negative pad of whole DWORDs (TDMStoreLdsPad times the bytes of D a multiple of 4) or 1 with 16-bit D"
   return None
 
 
@@ -245,22 +257,51 @@ def _dataUnits(bpe):
   return bpe // min(bpe, 8)
 
 
+def tdmStoreLdsPads(state):
+  """The pads, in elements of D, that TDMStoreLdsPad -1 may resolve to, best first. Solution gives the kernel the first
+  one and steps down the list while the padded tile alone takes the kernel past MaxLDS, so a derived pad never rejects
+  a kernel that fits without it; an explicit TDMStoreLdsPad is kept as given and checked by tdmStoreRejectReason.
+
+  Without SourceSwap the 16 lanes of a half-wave stage 16 columns of the tile, VectorWidthB columns apart. Their
+  addresses then differ by a multiple of the pitch, MacroTile0 * bpe bytes, which is a multiple of the 256 bytes of the
+  64 four-byte LDS banks for the usual tiles, so all 16 lanes start in the same bank and their DS stores serialize. A
+  pad of 8 bytes per column moves neighbouring lanes VectorWidthB * 2 banks apart, so that for a VectorWidthB of up to
+  8 at most four of them share a bank; as a single value it measured fastest over the tile shapes swept, and 4 bytes is
+  the fallback. An element of 8 bytes or more pads by one element. With SourceSwap the lanes of a half-wave stage
+  consecutive rows of one column, 32 contiguous bytes, so no pitch changes their banks and a pad would only cost LDS
+  and TDM traffic: the pad is 0, as it is without TDMStoreInst. Every pad is a whole number of DWORDs, and a pad that
+  would take tile_dim0 past 16 bits is left out. A pad of 8 bytes leaves the 16-byte staging stores of odd columns
+  8-byte aligned, which is correct in the UNALIGNED alignment mode only (tdmStoreRejectReason)."""
+  if not state["TDMStoreInst"] or state["SourceSwap"]:
+    return [0]
+  bpe = int(state["ProblemType"]["DestDataType"].numBytes())
+  units = _dataUnits(bpe)
+  pads = [max(1, 8 // bpe)] + ([4 // bpe] if bpe <= 4 else [])
+  return [pad for pad in pads if (state["MacroTile0"] + pad) * units <= TDM_TILE_DIM_MAX] + [0]
+
+
+def tdmStorePitch(kernel):
+  """The elements from one column of the staged tile to the next: MacroTile0 and the TDMStoreLdsPad pad rows. -1, a
+  pad Solution has yet to resolve, counts as 0, the least it resolves to."""
+  return kernel["MacroTile0"] + max(kernel.get("TDMStoreLdsPad", 0), 0)
+
+
 def _tileDim0(kernel):
-  """tile_dim0 of the staged tile's descriptors: MacroTile0 in data_size units."""
-  return kernel["MacroTile0"] * _dataUnits(int(kernel["ProblemType"]["DestDataType"].numBytes()))
+  """tile_dim0 of the staged tile's descriptors: its pitch in data_size units."""
+  return tdmStorePitch(kernel) * _dataUnits(int(kernel["ProblemType"]["DestDataType"].numBytes()))
 
 
 def tdmStoreLdsBytes(state):
   """Return the LDS bytes of the D tile the TDM block stages in LDS (0 without TDMStoreInst).
 
   The reservation follows the parameter, not the store blocks tdmStoreBlocks picks for the kernel, and
-  covers the columns of every wave, MacroTile1 rounded up to a multiple of the number of waves.
-  Reserving too much costs LDS only; reserving too little would stage over live LDS.
+  covers the columns of every wave, MacroTile1 rounded up to a multiple of the number of waves, at the pitch
+  tdmStorePitch. Reserving too much costs LDS only; reserving too little would stage over live LDS.
   """
   if not state["TDMStoreInst"]:
     return 0
   waves = state["NumThreads"] // state["WavefrontSize"]
-  return state["MacroTile0"] * _waveColumns(state) * waves * int(state["ProblemType"]["DestDataType"].numBytes())
+  return tdmStorePitch(state) * _waveColumns(state) * waves * int(state["ProblemType"]["DestDataType"].numBytes())
 
 
 def storesFinalD(kernel, atomic):
@@ -326,9 +367,9 @@ def emitTDMStoreSetup(gwb) -> Module:
   """Fence the main-loop LDS when the staged tile lies over it, and compute this thread's byte address
   in the staged D tile.
 
-  The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors. It lies
-  over the main-loop buffers, so every wave must be done with them, including in-flight tensor_load_to_lds,
-  before the staged tile is written.
+  The tile is staged M-contiguous, its columns tdmStorePitch elements apart, from LDS offset _TDMStoreLdsOffset,
+  after the epilogue vectors. It lies over the main-loop buffers, so every wave must be done with them, including
+  in-flight tensor_load_to_lds, before the staged tile is written.
   """
   module = Module("TDMStoreSetup")
   kw = gwb.parentWriter
@@ -338,9 +379,10 @@ def emitTDMStoreSetup(gwb) -> Module:
   module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
   base = gwb.tdmStoreLdsBase
   mt0 = gwb.kernel["MacroTile0"]
+  pitch = tdmStorePitch(gwb.kernel)
   module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
   module.add(VSubU32(dst=vgpr(base), src0=vgpr(kw.vgprs.coord1), src1=sgpr(gwb.tmpS01), comment="tile column = coord1 - wg1*MT1"))
-  module.add(VMulLOU32(dst=vgpr(base), src0=vgpr(base), src1=mt0, comment="* MT0"))
+  module.add(VMulLOU32(dst=vgpr(base), src0=vgpr(base), src1=pitch, comment="* MT0" if pitch == mt0 else "* MT0 + pad"))
   module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kw.vgprs.coord0), comment="+ coord0"))
   module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
   module.add(VSubU32(dst=vgpr(base), src0=vgpr(base), src1=sgpr(gwb.tmpS01), comment="- wg0*MT0"))
@@ -374,7 +416,7 @@ def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0,
   """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile, and the fold tmpVgpr
   then holds. folded is the fold tmpVgpr already holds, base + folded, when the caller knows that nothing has written
   tmpVgpr since; an element with that fold reuses it."""
-  offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
+  offset = (coordOffset1 * tdmStorePitch(gwb.kernel) + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
   high, low = tdmStoreLdsSplit(offset, span)
   if not high:
     return gwb.tdmStoreLdsBase, low, folded
@@ -497,9 +539,10 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
 def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   """Fill the descriptor of this wave's columns of the tile of tensor tc (C or D) and of the staged tile.
 
-  Each wave covers ceil(MacroTile1/numWaves) consecutive columns: tile MT0 x those columns, M-contiguous
+  Each wave covers ceil(MacroTile1/numWaves) consecutive columns: tile tdmStorePitch x those columns, M-contiguous
   from the LDS address of its first column, global address Srd<tc> (SrdTD for the reduced tile of MultipleBufferSingleKernel) + (column*Stride<tc> + wg0*MT0)*bpe,
-  and tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the two tmp SGPRs is left
+  and tensor_dim0/1 the part of the tile inside SizeI and SizeJ, with a TDMStoreLdsPad tensor_dim0 at most MT0 so
+  that the pad rows lie outside the tensor. The first of the two tmp SGPRs is left
   at the first column of the wave. When MacroTile1 is not a multiple of the number of waves, the columns
   of the last waves reach past the tile, so tensor_dim1 ends at the column bound min(SizeJ, (wg1+1)*MT1),
   which the second tmp SGPR keeps. The LDS and global addresses are computed in their group0 words, and the
@@ -530,7 +573,7 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(VReadfirstlaneB32(dst=sgpr(col), src=vgpr("Serial"), comment="first thread id"))
   module.add(SLShiftRightB32(dst=sgpr(col), shiftHex=int(log2(ws)), src=sgpr(col), comment="waveId"))
   module.add(SMulI32(dst=sgpr(col), src0=sgpr(col), src1=colsPerWave, comment="first tile column of this wave"))
-  module.add(SMulI32(dst=sgpr(g0 + 1), src0=sgpr(col), src1=mt0 * bpe, comment="its LDS address"))
+  module.add(SMulI32(dst=sgpr(g0 + 1), src0=sgpr(col), src1=tdmStorePitch(gwb.kernel) * bpe, comment="its LDS address"))
   if gwb.kernel["_TDMStoreLdsOffset"]:
     module.add(SAddU32(dst=sgpr(g0 + 1), src0=sgpr(g0 + 1), src1=gwb.kernel["_TDMStoreLdsOffset"], comment="+ LDS offset of the staged tile"))
   module.add(SMulHIU32(dst=sgpr(g0 + 3), src0=sgpr(col), src1=sgpr(stride1), comment="hi(column*Stride%s)" % tc))
@@ -544,6 +587,10 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   # The type field, bits 30-31, is ORed in after the add, which cannot carry into it: the address is 57-bit.
   module.add(SOrB32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=hex(2 << 30), comment="set type field to 2(image)"))
   module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
+  if tdmStorePitch(gwb.kernel) > mt0:
+    # A transfer from LDS to memory ignores pad_enable, so the pad rows are part of the tile; past tensor_dim0 a store
+    # is dropped and a load reads zero.
+    module.add(SMinU32(dst=sgpr(dim), src0=sgpr(dim), src1=mt0, comment="at most MT0, so the pad rows lie outside the tensor"))
   if units > 1:
     module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=sgpr(dim), comment="tensor_dim0 in 8-byte units"))
   module.add(tdm.setTensorDim0(g1, dim, scratch))
@@ -576,7 +623,9 @@ def emitTDMStoreLoadC(gwb) -> Module:
   Each wave loads the columns it stores. tensor_dim0/1 clip the load at the end of C, so no load
   reads past it; a wave whose columns all lie at or past the column bound skips its load. Each thread then
   reads its C elements where it stages their D, so only the barrier after the loads is needed. The
-  load carries C's cache hints, as the buffer loads of C would.
+  load carries C's cache hints, as the buffer loads of C would. With a TDMStoreLdsPad it shares the store's
+  descriptor, pad rows included, and writes zeros to them, TDMStoreLdsPad / MacroTile0 of its LDS writes: pad_enable,
+  which inserts whole DWORDs, could skip them for some pads only, and the store cannot skip them at all.
   """
   from .TensorDataMover import TensorDataMoverStore
   module = Module("TDMStoreLoadC")

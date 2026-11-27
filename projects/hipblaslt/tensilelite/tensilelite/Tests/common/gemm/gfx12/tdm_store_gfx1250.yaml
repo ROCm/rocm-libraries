@@ -556,3 +556,56 @@ BenchmarkProblems:
           - Exact: [64, 65792, 1, 256]
           - Exact: [61, 65792, 1, 256]
           - Exact: [64, 262144, 1, 256]
+  ########################################
+  # TDMStoreLdsPad 0 and -1, bf16 MT256x256 at StoreVectorWidth 8 (ds_store_b128 staging), persistent StreamK 3 and
+  # GlobalSplitU 1: -1, the default, derives 8 bytes per column, 4 elements here, and 0 keeps the tile unpadded.
+  # The staged tile's columns are MacroTile0 + pad elements apart, tile_dim0 is that pitch and
+  # tensor_dim0 is clamped to MacroTile0, so the pad rows lie outside C and D. M = 512 and 520 have interior tiles,
+  # whose pad rows would otherwise land on the first rows of the next tile; 248 and 520 end in an M edge and N = 264
+  # in an N edge.
+  ########################################
+  -
+    - # ProblemType TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      UseBeta: True
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - TDMInst: [3]
+        - UseSubtileImpl: [False]
+        - SourceSwap: [False]
+        - StoreVectorWidth: [8]
+        - VectorWidthA: [1]
+        - StoreRemapVectorWidth: [0]
+        - Groups:
+          - - StreamK: [3]
+              GlobalSplitU: [0]
+            - StreamK: [0]
+              GlobalSplitU: [1]
+        - TDMStoreInst: [true]
+        - TDMStoreLdsPad: [0, -1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [248, 256, 1, 256]
+          - Exact: [248, 264, 1, 256]
+          - Exact: [512, 256, 1, 256]
+          - Exact: [512, 264, 1, 256]
+          - Exact: [520, 256, 1, 256]
+          - Exact: [520, 264, 1, 256]

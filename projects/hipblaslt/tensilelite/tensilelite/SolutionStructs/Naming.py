@@ -322,6 +322,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if not state.get("TDMStoreInst", False):
       requiredParametersTemp.discard("TDMStoreInst")
 
+    # TDMStoreLdsPad=0 keeps the staged tile's pitch at MacroTile0, so naming it would rename every kernel, and -1 is
+    # not a pad yet: Solution resolves it.
+    if state.get("TDMStoreLdsPad", 0) <= 0:
+      requiredParametersTemp.discard("TDMStoreLdsPad")
+
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
     # would rename every kernel that does not opt in. Any other value changes
     # the colouring (and mode 3 changes which kernels are accepted), so it

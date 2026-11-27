@@ -54,7 +54,7 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from ..Components.TDMStoreInst import emitTDMStoreFlush, emitTDMStoreLoadC, emitTDMStoreLoadCElement, emitTDMStoreSetup, emitTDMStoreStaging, \
-  storeRemapVectorWidth
+  storeRemapVectorWidth, tdmStorePitch
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
@@ -658,7 +658,7 @@ class GlobalWriteBatchWriter:
           # the look-ahead's row advance.
           rows = self.ss.elementAddr[len(self.batchElements) - 1].coordOffset1 + self.direct_next_rowInc
           module.add(VAddU32(dst=vgpr(self.tdmStoreLdsBase), src1=vgpr(self.tdmStoreLdsBase),
-                             src0=rows * self.kernel["MacroTile0"] * self.parentWriter.states.bpeCexternalGSU1,
+                             src0=rows * tdmStorePitch(self.kernel) * self.parentWriter.states.bpeCexternalGSU1,
                              comment="next iteration's rows of the staged tile"))
         module.add(SSubI32(dst=sgpr("CLSLoopCounter"), src0=sgpr("CLSLoopCounter"), src1=1))
         module.add(SCmpEQU32(src0=sgpr("CLSLoopCounter"), src1=0))

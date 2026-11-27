@@ -44,6 +44,7 @@ using TensileLite::Float8;
 using TensileLite::Float8_fnuz;
 using TensileLite::Half;
 using TensileLite::Client::FastPointwiseComparison;
+using TensileLite::Client::InvalidComparison;
 using TensileLite::Client::PointwiseComparison;
 
 namespace
@@ -248,4 +249,55 @@ TYPED_TEST(ResultComparisonTest, PrintMaxZero_MismatchStillFails)
 
     EXPECT_TRUE(slow.error());
     EXPECT_TRUE(fast.error());
+}
+
+namespace
+{
+    size_t countOccurrences(const std::string& text, const std::string& word)
+    {
+        size_t count = 0;
+        for(size_t pos = text.find(word); pos != std::string::npos; pos = text.find(word, pos + 1))
+            count++;
+        return count;
+    }
+} // namespace
+
+// Test: printMax caps the index lines of each guard region; every overwritten value still counts.
+TYPED_TEST(ResultComparisonTest, InvalidComparison_PrintMaxCapsIndexLines)
+{
+    using T = typename TestFixture::TypeParam;
+    const T              written = fromInt<T>(1);
+    InvalidComparison<T> compare(2, true);
+
+    auto output = captureStdout([&]() {
+        for(size_t i = 0; i < 5; i++)
+        {
+            compare.before(written, i, 5);
+            compare.inside(written, i, 5);
+            compare.after(written, i, 5);
+        }
+        compare.report();
+    });
+
+    EXPECT_EQ(countOccurrences(output, "Index "), 6u);
+    EXPECT_EQ(countOccurrences(output, "found 5 errors in 5 values checked."), 3u);
+    EXPECT_TRUE(compare.error());
+}
+
+// Test: printMax=0 prints nothing for the guard regions and still fails.
+TYPED_TEST(ResultComparisonTest, InvalidComparison_PrintMaxZero_StillFails)
+{
+    using T = typename TestFixture::TypeParam;
+    const T              written = fromInt<T>(1);
+    InvalidComparison<T> compare(0, false);
+
+    auto output = captureStdout([&]() {
+        compare.before(written, 0, 1);
+        compare.inside(written, 0, 1);
+        compare.after(written, 0, 1);
+        compare.report();
+    });
+
+    EXPECT_EQ(output, "");
+    EXPECT_TRUE(compare.error());
 }
