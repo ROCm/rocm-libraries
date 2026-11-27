@@ -64,6 +64,7 @@ def _kernel():
         ("StreamKAtomic", 1, "SKA1"),
         ("MbskPrefetchMethod", 1, "MPM1"),
         ("DebugPersistentKernelLoopForever", True, "DPKLF1"),
+        ("DebugDisableInstrMask", 5, "DDIM5"),
     ],
 )
 def test_code_changing_modes_have_distinct_names(parameter, value, tag):
@@ -83,6 +84,7 @@ def test_code_changing_modes_have_distinct_names(parameter, value, tag):
         ("StreamKAtomic", 1),
         ("MbskPrefetchMethod", 1),
         ("DebugPersistentKernelLoopForever", True),
+        ("DebugDisableInstrMask", 5),
     ],
 )
 def test_code_changing_modes_form_two_compile_groups(parameter, value):
@@ -95,6 +97,11 @@ def test_code_changing_modes_form_two_compile_groups(parameter, value):
     assert len(groups) == 2
     assert groups[0].baseName != groups[1].baseName
     assert all(len(group.aliases) == 1 for group in groups)
+
+
+def test_debug_disable_instr_mask_off_keeps_name():
+    kernel = _kernel()
+    assert "DDIM" not in getKernelNameMin(kernel, False)
 
 
 def test_runtime_internal_args_share_one_compile_group():
@@ -213,6 +220,10 @@ def test_metadata_fans_out_to_all_placement_aliases():
         pgr=2,
         mathclk=4,
         customKernelDef=None,
+        ldsNumBytes=1024,
+        loopIters=8,
+        subtileUnitScaleVgpr=5,
+        ldsOffsetBias=512,
     )
 
     passPostKernelInfoToSolution(
@@ -221,6 +232,14 @@ def test_metadata_fans_out_to_all_placement_aliases():
 
     assert [solution._state["CUOccupancy"] for solution in solutions] == [3, 3]
     assert [solution._state["PrefetchGlobalRead"] for solution in solutions] == [2, 2]
+    assert [solution._state["LdsNumBytes"] for solution in solutions] == [1024, 1024]
+    assert [solution._state["LoopIters"] for solution in solutions] == [8, 8]
+    # Values codegen leaves on the kernel it generated reach only that solution: in-process
+    # codegen does not touch the alias either.
+    assert solutions[0]._state["_subtileUnitScaleVgpr"] == 5
+    assert solutions[0]._state["LdsOffsetBias"] == 512
+    assert "_subtileUnitScaleVgpr" not in solutions[1]._state
+    assert "LdsOffsetBias" not in solutions[1]._state
 
 
 def test_thread_tile_distinguishes_non_matrix_kernels():

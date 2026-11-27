@@ -58,6 +58,9 @@ Datatypes:
         nan: 893
         norm_dist_one_special: 894
         uniform_low_precision: 999
+        maf1_0: 1000
+        maf2_0: 1001
+        maf2_0_unit_scale: 1002
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:
@@ -73,6 +76,12 @@ Datatypes:
         a: 1
         b: 2
         d: 3
+  - hipblaslt_uniform_check:
+      bases: [ c_int ]
+      attr:
+        none: 0
+        row: 1
+        column: 2
   - hipblaslt_scaling_format:
       bases: [ c_int ]
       attr:
@@ -645,6 +654,9 @@ Arguments:
   - streams: c_uint16
   - devices: c_uint8
   - a2a_world: c_uint8
+  - partitions: c_uint8
+  - split_dim: c_char
+  - part_place: c_char*8
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
@@ -658,6 +670,7 @@ Arguments:
   - skip_launch_solution: c_int32
   - integer_exact_pattern: c_char*16
   - allow_no_solution: c_int8
+  - require_solution_chip_ids: c_int32*4
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -697,6 +710,8 @@ Arguments:
   - use_gpu_timer: c_bool
   - skip_slow_solution_ratio: c_float
   - uniform_summation_order: c_int32
+  - uniform_check: hipblaslt_uniform_check
+  - uniform_check_inject: c_int8
   - gsu_vector: c_int32*32
   - wgm_vector: c_int32*32
   - print_solution_found: c_bool
@@ -738,6 +753,7 @@ Dictionary lists to expand:
 # cases with each of its elements.
 Lists to not expand:
   - e.g., an array argument not to be expanded
+  - require_solution_chip_ids
 
 # Defaults
 Defaults:
@@ -762,6 +778,9 @@ Defaults:
   streams: 0
   devices: 0
   a2a_world: 1
+  partitions: 1
+  split_dim: 'N'
+  part_place: 'SSSS'
   a2a_extent: 0
   gpu_arch: ''
   gpu_arch_exclude: ''
@@ -778,6 +797,7 @@ Defaults:
   skip_launch_solution: -1
   integer_exact_pattern: ''
   allow_no_solution: 0
+  require_solution_chip_ids: 0
   timing: 0
   iters: 10
   cold_iters: 2
@@ -797,7 +817,6 @@ Defaults:
   algo: 0
   solution_index: -1
   requested_solution_num: 1
-  workspace_size: 0
   initialization: rand_int
   category: nightly
   known_bug_platforms: ''
@@ -839,6 +858,8 @@ Defaults:
   use_gpu_timer: false
   skip_slow_solution_ratio: 0.0
   uniform_summation_order: -1
+  uniform_check: none
+  uniform_check_inject: 0
   gsu_vector: 0
   wgm_vector: 0
   print_solution_found: false

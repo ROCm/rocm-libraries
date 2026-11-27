@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <limits>
@@ -28,27 +29,51 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
                          "Failed to calculate batch count:expected at least 2 dimensions");
     return std::accumulate(dims.begin(), dims.end() - 2, int64_t{1}, std::multiplies<>());
 }
+
+// hipBLASLt flattens all batch dimensions into one count and takes a single batch
+// stride. That addresses the same elements as the tensor only when the batch axes nest
+// contiguously: each axis with extent above one must stride by the stride of the
+// innermost such axis times the extents inside it. An axis of extent one never
+// advances, so its stride is ignored. Returns the flattened batch stride, or 0 when
+// every batch axis has extent one.
+int64_t flattenedBatchStride(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
+{
+    const auto& dims = t.dims();
+    const auto& strides = t.strides();
+    const size_t batchRank = dims.size() - 2;
+
+    int64_t flattened = 0;
+    int64_t extentInside = 1;
+    bool anchored = false;
+    for(size_t i = batchRank; i-- > 0;)
+    {
+        if(dims[i] == 1)
+        {
+            continue;
+        }
+        if(!anchored)
+        {
+            anchored = true;
+            flattened = strides[i];
+            extentInside = dims[i];
+            continue;
+        }
+        PLUGIN_THROW_IF_TRUE(
+            strides[i] != flattened * extentInside,
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Matmul: batch strides of tensor " + t.name()
+                + " are not uniform; hipBLASLt supports one flattened batch stride");
+        extentInside *= dims[i];
+    }
+    return flattened;
+}
 } // namespace
 
 hipblasOperation_t MatmulParams::getTrans(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
 {
-    const auto& strides = t.strides();
-    PLUGIN_THROW_IF_FALSE(strides.size() > 1,
-                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                          "Unsupported stride for input matrix: " + t.name());
-    // Row-major storage: dims are swapped in layout, no additional transpose
-    if(strides[strides.size() - 1] == 1)
-    {
-        return HIPBLAS_OP_N;
-    }
-    // Column-major storage: dims not swapped, need transpose
-    if(strides[strides.size() - 2] == 1)
-    {
-        return HIPBLAS_OP_T;
-    }
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for input matrix: " + t.name());
+    return hipblaslt_utils::operandTranspose(t);
 }
 
 hipblasComputeType_t MatmulParams::getComputeDataType(
@@ -92,20 +117,19 @@ MatmulParams::MatmulParams(
     _matrixLayoutA = HipblasltMatrixLayout(tA);
     _matrixLayoutB = HipblasltMatrixLayout(tB);
 
+    // The plan writes the final output of the fused chain; the matmul output is a virtual
+    // intermediate in a fused graph. C/D take the final output's layout, which must be row-major.
+    auto tFinal = tC;
     if(activAttr != nullptr)
     {
-        _matrixLayoutC = HipblasltMatrixLayout(
-            hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid()));
+        tFinal = hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid());
     }
     else if(biasAttr != nullptr)
     {
-        _matrixLayoutC = HipblasltMatrixLayout(
-            hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid()));
+        tFinal = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid());
     }
-    else
-    {
-        _matrixLayoutC = HipblasltMatrixLayout(tC);
-    }
+    hipblaslt_utils::requireRowMajorOutput(tFinal);
+    _matrixLayoutC = HipblasltMatrixLayout(tFinal);
 
     const auto& aDims = tA.dims();
     const auto& bDims = tB.dims();
@@ -164,22 +188,25 @@ MatmulParams::MatmulParams(
 
     if(aDims.size() > 2)
     {
-        setBatchInfo(tA, tB, tC);
+        setBatchInfo(tA, tB, tC, tFinal);
     }
 }
 
 void MatmulParams::setBatchInfo(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tFinal)
 {
     // Batch support: we flatten all batch dimensions (all except last two) into a single batch count.
-    // hipBLASLt uses a single strided batch offset, so we can only support uniform batch strides.
+    // hipBLASLt uses a single strided batch offset, so we can only support uniform batch strides;
+    // batch axes of extent 1 are ignored.
     // Supported: [3, M, K] x [1, K, N] or [3, M, K] x [3, K, N] - single batch dimension, uniform stride.
     // Not supported: [3, 1, M, K] x [1, 3, K, N] - would require non-uniform stride pattern for broadcasting.
     const int64_t aBatch = getBatchCount(tA.dims());
     const int64_t bBatch = getBatchCount(tB.dims());
-    const int64_t cBatch = getBatchCount(tC.dims());
+    const auto cDims = tC.dims();
+    const int64_t cBatch = getBatchCount(cDims);
 
     if(aBatch != bBatch && aBatch != 1 && bBatch != 1)
     {
@@ -199,20 +226,42 @@ void MatmulParams::setBatchInfo(
 
     if(cBatch > 1)
     {
+        // The layout takes its batch count from the matmul output tensor and its batch offset
+        // from the final output, so the two must agree on the batch dimensions. The final
+        // output's batch stride may differ from the matmul output's (a padded output); its
+        // batch axes must still nest on one stride, and that stride must be at least the span
+        // of one output matrix so that batches do not overlap.
+        const auto finalDims = tFinal.dims();
+        PLUGIN_THROW_IF_TRUE(finalDims.size() != cDims.size()
+                                 || !std::equal(cDims.begin(), cDims.end() - 2, finalDims.begin()),
+                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                             "Matmul: final output batch dimensions must equal the matmul output "
+                             "batch dimensions");
+        const int64_t finalBatchStride = flattenedBatchStride(tFinal);
+        const int64_t outRows = finalDims[finalDims.size() - 2];
+        const int64_t outCols = finalDims[finalDims.size() - 1];
+        const int64_t matrixSpan
+            = (outRows - 1) * hipblaslt_utils::leadingDimension(tFinal) + outCols;
+        PLUGIN_THROW_IF_TRUE(
+            finalBatchStride < matrixSpan,
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Output batches overlap: batch stride " + std::to_string(finalBatchStride)
+                + " is smaller than one output matrix (" + std::to_string(matrixSpan)
+                + " elements). UID: " + std::to_string(tFinal.uid()));
+
         _matrixLayoutA.setBatchCount(cBatch);
         _matrixLayoutB.setBatchCount(cBatch);
         _matrixLayoutC.setBatchCount(cBatch);
 
-        size_t const rank = tA.dims().size();
         if(aBatch > 1)
         {
-            _matrixLayoutA.setStridedBatchOffset(tA.strides()[rank - 3]);
+            _matrixLayoutA.setStridedBatchOffset(flattenedBatchStride(tA));
         }
         if(bBatch > 1)
         {
-            _matrixLayoutB.setStridedBatchOffset(tB.strides()[rank - 3]);
+            _matrixLayoutB.setStridedBatchOffset(flattenedBatchStride(tB));
         }
-        _matrixLayoutC.setStridedBatchOffset(tC.strides()[rank - 3]);
+        _matrixLayoutC.setStridedBatchOffset(finalBatchStride);
     }
 }
 
@@ -223,43 +272,23 @@ void MatmulParams::setEpilogue(
     auto epilogueParams
         = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(activAttr, _biasUid.has_value());
 
-    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
-                                                               HIPBLASLT_MATMUL_DESC_EPILOGUE,
-                                                               &epilogueParams.epilogue,
-                                                               sizeof(epilogueParams.epilogue)));
+    _matmulDesc.setEpilogue(epilogueParams.epilogue);
     if(epilogueParams.act0 != 0.0f)
     {
-        THROW_ON_HIPBLASLT_FAILURE(
-            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
-                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
-                                            &epilogueParams.act0,
-                                            sizeof(epilogueParams.act0)));
+        _matmulDesc.setEpilogueActArg0(epilogueParams.act0);
     }
     if(epilogueParams.act1 != 0.0f)
     {
-        THROW_ON_HIPBLASLT_FAILURE(
-            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
-                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-                                            &epilogueParams.act1,
-                                            sizeof(epilogueParams.act1)));
+        _matmulDesc.setEpilogueActArg1(epilogueParams.act1);
     }
 
     if(_biasUid.has_value())
     {
-        THROW_ON_HIPBLASLT_FAILURE(
-            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
-                                            HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
-                                            &biasDataType,
-                                            sizeof(biasDataType)));
+        _matmulDesc.setBiasDataType(biasDataType);
 
         // hipBLASLt requires initialized bias pointer in matmul descriptor for algorithm search.
         // Since the pointer is unknown on this stage, we initialize it by dummy pointer to update it in execution stage.
-        void* dummyBiasPtr = reinterpret_cast<void*>(0x1);
-        THROW_ON_HIPBLASLT_FAILURE(
-            hipblasLtMatmulDescSetAttribute(_matmulDesc.matmulDesc(),
-                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                            static_cast<const void*>(&dummyBiasPtr),
-                                            sizeof(dummyBiasPtr)));
+        _matmulDesc.setBiasPointer(reinterpret_cast<const void*>(0x1));
     }
 }
 
@@ -350,16 +379,14 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     auto cBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.c().uid(), deviceBuffers, numDeviceBuffers);
 
-    // Update bias pointer in the descriptor if they are present.
+    // hipBLASLt writes per-call problem state through the descriptor and the bias pointer is
+    // per call, so a descriptor shared across concurrent execute() calls on this plan would race.
+    HipblasltMatmulDesc desc = _params.desc().clone();
     if(_params.biasUid().has_value())
     {
         auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
             _params.biasUid().value(), deviceBuffers, numDeviceBuffers);
-        THROW_ON_HIPBLASLT_FAILURE(
-            hipblasLtMatmulDescSetAttribute(_params.desc().matmulDesc(),
-                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                            static_cast<const void*>(&biasBuffer.ptr),
-                                            sizeof(biasBuffer.ptr)));
+        desc.setBiasPointer(biasBuffer.ptr);
     }
     // A, B and C matrices are row-major. But hipBLASLt works with column-major matrices
     // To work with row-major matrices, we transpose them.
@@ -367,7 +394,7 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     //  C = A * B => C^T = (A * B)^T => C^T = B^T * A^T
     // Due to this formula, we changed the order of A and B matrices in arguments
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
-                                               _params.desc().matmulDesc(),
+                                               desc.matmulDesc(),
                                                &ALPHA,
                                                bBuffer.ptr,
                                                _params.b().matrixLayout(),

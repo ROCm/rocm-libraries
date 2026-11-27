@@ -14,7 +14,6 @@
 #include <vector>
 
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
@@ -32,11 +31,15 @@ inline bool behaviorNotesMatch(const std::vector<BehaviorNote_t>& selected,
            && std::none_of(deselected.begin(), deselected.end(), hasNote);
 }
 
-// Positive claims only: hipDNN engines declare no numerical notes, so an engine
-// not named here must be treated as possibly non-deterministic.
-inline bool isDeterminismClaimed(int64_t engineId)
+inline bool numericalNotesMatch(const std::vector<NumericalNote_t>& selected,
+                                const std::vector<NumericalNote_t>& deselected,
+                                const std::vector<NumericalNote_t>& engineNotes)
 {
-    return engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
+    const auto hasNote = [&engineNotes](NumericalNote_t note) {
+        return std::find(engineNotes.begin(), engineNotes.end(), note) != engineNotes.end();
+    };
+    return std::all_of(selected.begin(), selected.end(), hasNote)
+           && std::none_of(deselected.begin(), deselected.end(), hasNote);
 }
 
 // Set once the OPENSOURCE warning has been logged in this process. Exposed so

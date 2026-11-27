@@ -5543,25 +5543,14 @@ def _fast_rank_candidates(
                 flush=True,
             )
             continue
-        if direction == "wgrad" and ident.streamk != "off":
-            # A stream-K binary partitions K over its CTA pool itself; the
-            # split-K kernarg is not its knob, so it ranks once.
-            degrees = (None,)
-        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
-            # A split-K forward binary takes its degree as a kernarg too, so
-            # it ranks once per degree like wgrad's.
-            degrees = _runtime_split_ks(
-                problem, ident, args.split_k, args.split_k_degrees
+        degrees = _fast_rank_degrees(direction, problem, ident, args)
+        if not degrees:
+            print(
+                f"  [skip] {ident.label()}: no split-K degree fits this "
+                f"problem (see --split-k)",
+                flush=True,
             )
-            if not degrees:
-                print(
-                    f"  [skip] {ident.label()}: no split-K degree fits this "
-                    f"problem (see --split-k)",
-                    flush=True,
-                )
-                continue
-        else:
-            degrees = (None,)
+            continue
         for split_k in degrees:
             items.append((ident, hsaco_path, meta, split_k))
 
@@ -6247,6 +6236,25 @@ def _fwd_cluster_split_pays(problem, ident) -> bool:
     )
 
 
+def _fast_rank_degrees(direction, problem, ident, args) -> tuple:
+    """Degrees ``--fast-rank`` ranks one cached binary at.
+
+    ``(None,)`` for a binary launched without a split-K degree; ``()`` when it
+    is a split-K binary no degree of which fits ``problem`` (the caller skips
+    it). A split-K wgrad or forward binary is one kernel for every degree > 1
+    (the degree is a kernarg), so it ranks at each degree it can use, as the
+    serial path times it. The forward one has no default degree to fall back
+    on: offered without one, its launch is refused and the binary skipped.
+    """
+    if direction == "wgrad" and ident.streamk != "off":
+        # A stream-K binary partitions K over its CTA pool itself; the
+        # split-K kernarg is not its knob, so it ranks once.
+        return (None,)
+    if direction in ("wgrad", "fwd") and ident.split_k > 1:
+        return _runtime_split_ks(problem, ident, args.split_k, args.split_k_degrees)
+    return (None,)
+
+
 def _runtime_split_ks(
     problem, ident, requested: int = 0, degrees: tuple = _SPLIT_K_AUTO
 ) -> tuple:
@@ -6426,7 +6434,9 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
             sl_ptrs,
             sl_sizes,
             *tail,
-            zero_dw=n0 == 0,
+            # dgrad slices write disjoint dX ranges, so each clears its own;
+            # wgrad slices share one dW, which only the first one clears.
+            zero_dw=direction == "dgrad" or n0 == 0,
         )
         if bound is None:
             return None
@@ -6461,7 +6471,8 @@ def _cached_bind(
 
     ``zero_dw=False`` leaves out the dW clear of the packed-atomic split-K
     wgrad launch: the later batch slices of a sliced wgrad problem add into
-    the dW the first slice zeroed (:func:`_cached_bind_batch`).
+    the dW the first slice zeroed (:func:`_cached_bind_batch`). Sliced dgrad
+    never passes it: each slice owns its dX range and clears it.
 
     ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
     launch config allocates is appended to ``live_extras`` (freed by
@@ -6511,7 +6522,7 @@ def _cached_bind(
     stream = resolve_stream(cfg.stream)
     if (
         zero_dw
-        and direction == "wgrad"
+        and direction in ("wgrad", "dgrad")
         and ident.split_k > 1
         and not ident.two_stage
         and ident.streamk == "off"

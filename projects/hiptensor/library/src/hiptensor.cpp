@@ -26,6 +26,8 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <new>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -38,6 +40,7 @@
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
+#include "plancache_autotune.hpp"
 #include "util.hpp"
 
 // The elementwise kernels walk a single index space defined by the output, so an input may only
@@ -123,25 +126,41 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     auto& logger = Logger::instance();
 
     // Log API access
-    char msg[128];
+    char msg[384];
     snprintf(
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorCreate", msg);
 
-    (*handle) = new hiptensorHandle;
-
-    if(*handle == nullptr)
+    if(handle == nullptr)
     {
-        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        auto errorCode = HIPTENSOR_STATUS_INVALID_VALUE;
         snprintf(msg,
                  sizeof(msg),
                  "Initialization Error : handle = nullptr (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_ALLOC_FAILED;
+        return errorCode;
+    }
+
+    *handle = nullptr;
+
+    auto newHandle = std::unique_ptr<hiptensorHandle>(new(std::nothrow) hiptensorHandle);
+    if(newHandle == nullptr)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization Error : cannot allocate handle (%s)",
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
     }
 
     auto hip_status = hipInit(0);
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+    }
 
     if(hip_status == hipErrorInvalidDevice)
     {
@@ -151,9 +170,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
                  "Initialization error: invalid device (%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_HIP_ERROR;
+        return errorCode;
     }
     else if(hip_status == hipErrorInvalidValue)
     {
@@ -161,9 +178,65 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         snprintf(
             msg, sizeof(msg), "Initialization error: (%s)", hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        delete *handle;
-        *handle = nullptr;
-        return HIPTENSOR_STATUS_INVALID_VALUE;
+        return errorCode;
+    }
+    else if(hip_status != hipSuccess)
+    {
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: hipInit failed: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
+    // The handle is bound to the device that is current on the calling thread.
+    hipDevice_t deviceId = -1;
+    hip_status           = hipGetDevice(&deviceId);
+    if(hip_status == hipSuccess)
+    {
+        hip_status = newHandle->initDevice(deviceId);
+    }
+
+    if(hip_status != hipSuccess)
+    {
+        hiptensor::clearHipError();
+        auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: cannot query current device: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+
+    auto device = newHandle->getDevice();
+    if(device.getGcnArch() == hiptensor::HipDevice::hipGcnArch_t::UNSUPPORTED_ARCH)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported architecture %s (%s)",
+                 (int)deviceId,
+                 device.getProperties().gcnArchName,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
+    }
+    else if(device.warpSize() == hiptensor::HipDevice::hipWarpSize_t::UNSUPPORTED_WARP_SIZE)
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d has unsupported warp size %d (%s)",
+                 (int)deviceId,
+                 device.getProperties().warpSize,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        return errorCode;
     }
 
     if(hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
@@ -173,11 +246,17 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
     }
     else
     {
-        (*handle)->setPlanCache(std::make_unique<hiptensor::PlanCache>());
+        newHandle->setPlanCache(std::make_unique<hiptensor::PlanCache>());
         snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
+    // hiptensorDestroy uses the autotune manager. Create it before returning the handle: a
+    // static object that owns the handle then finishes construction after the manager, so it
+    // is destroyed before the manager at exit.
+    hiptensor::PlancacheAutotuneMgr::instance();
+
+    *handle = newHandle.release();
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
@@ -192,6 +271,10 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorDestroy", msg);
 
+    if(handle != nullptr)
+    {
+        hiptensor::PlancacheAutotuneMgr::instance()->releasePlanCache(handle->getPlanCache());
+    }
     delete handle;
 
     return HIPTENSOR_STATUS_SUCCESS;
@@ -367,6 +450,88 @@ hiptensorStatus_t hiptensorDestroyOperationDescriptor(hiptensorOperationDescript
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
+// Checks the handle and the object whose attribute is accessed.
+static hiptensorStatus_t checkAttributeObject(char const*             apiFuncName,
+                                              const hiptensorHandle_t handle,
+                                              void const*             object,
+                                              char const*             objectName)
+{
+    if(handle != nullptr && object != nullptr)
+    {
+        return HIPTENSOR_STATUS_SUCCESS;
+    }
+
+    auto errorCode = HIPTENSOR_STATUS_NOT_INITIALIZED;
+    char msg[256];
+    snprintf(msg,
+             sizeof(msg),
+             "Initialization Error : %s = nullptr (%s)",
+             handle == nullptr ? "handle" : objectName,
+             hiptensorGetErrorString(errorCode));
+    hiptensor::Logger::instance()->logError(apiFuncName, msg);
+    return errorCode;
+}
+
+// Checks the buffer of an attribute accessor: it must not be null, and its size must be the
+// size of the attribute's value.
+static hiptensorStatus_t checkAttributeBuffer(
+    char const* apiFuncName, int attr, void const* buf, size_t sizeInBytes, size_t expectedSize)
+{
+    char msg[256];
+    if(buf == nullptr)
+    {
+        snprintf(msg, sizeof(msg), "Attribute %d: buf = nullptr", attr);
+        hiptensor::Logger::instance()->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    if(sizeInBytes != expectedSize)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Attribute %d: sizeInBytes is %zu but must be %zu",
+                 attr,
+                 sizeInBytes,
+                 expectedSize);
+        hiptensor::Logger::instance()->logError(apiFuncName, msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    return HIPTENSOR_STATUS_SUCCESS;
+}
+
+// The storage of an operation descriptor attribute and its size in bytes: one value for the
+// scalar attributes, one uint32_t per mode of the output tensor for PADDING_LEFT and
+// PADDING_RIGHT, and one element of the output tensor's data type for PADDING_VALUE. Empty for
+// an unknown attribute.
+static std::optional<std::pair<void*, size_t>>
+    operationDescriptorAttribute(hiptensorOperationDescriptor_t          desc,
+                                 hiptensorOperationDescriptorAttribute_t attr)
+{
+    switch(attr)
+    {
+    case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
+        return std::pair{static_cast<void*>(&desc->mTag), sizeof(desc->mTag)};
+    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
+        return std::pair{static_cast<void*>(&desc->mScalarType), sizeof(desc->mScalarType)};
+    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
+        return std::pair{static_cast<void*>(&desc->mFlops), sizeof(desc->mFlops)};
+    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
+        return std::pair{static_cast<void*>(&desc->mMovedBytes), sizeof(desc->mMovedBytes)};
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
+        return std::pair{static_cast<void*>(desc->mPaddingLeft.data()),
+                         desc->mPaddingLeft.size() * sizeof(uint32_t)};
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
+        return std::pair{static_cast<void*>(desc->mPaddingRight.data()),
+                         desc->mPaddingRight.size() * sizeof(uint32_t)};
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
+        return std::pair{static_cast<void*>(desc->mPaddingValue.data()),
+                         desc->mPaddingValue.size()};
+    default:
+        return std::nullopt;
+    }
+}
+
 hiptensorStatus_t
     hiptensorOperationDescriptorSetAttribute(const hiptensorHandle_t                 handle,
                                              hiptensorOperationDescriptor_t          desc,
@@ -374,37 +539,31 @@ hiptensorStatus_t
                                              const void*                             buf,
                                              size_t                                  sizeInBytes)
 {
-    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
-
-    switch(attr)
+    constexpr auto apiFuncName = "hiptensorOperationDescriptorSetAttribute";
+    if(auto status = checkAttributeObject(apiFuncName, handle, desc, "desc");
+       status != HIPTENSOR_STATUS_SUCCESS)
     {
-    case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
-        std::memcpy(&desc->mTag, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
-        std::memcpy(&desc->mScalarType, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
-        std::memcpy(&desc->mFlops, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
-        std::memcpy(&desc->mMovedBytes, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
-        std::memcpy(&desc->mPaddingLeft, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
-        std::memcpy(&desc->mPaddingRighT, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
-        std::memcpy(desc->mPaddingValue, buf, sizeInBytes);
-        break;
-    default:
-        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        break;
+        return status;
     }
 
-    return retStatus;
+    auto storage = operationDescriptorAttribute(desc, attr);
+    if(!storage)
+    {
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    auto [value, size] = *storage;
+    if(auto status = checkAttributeBuffer(apiFuncName, attr, buf, sizeInBytes, size);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    if(size > 0)
+    {
+        std::memcpy(value, buf, size);
+    }
+    return HIPTENSOR_STATUS_SUCCESS;
 }
 
 hiptensorStatus_t
@@ -414,37 +573,31 @@ hiptensorStatus_t
                                              void*                                   buf,
                                              size_t                                  sizeInBytes)
 {
-    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
-
-    switch(attr)
+    constexpr auto apiFuncName = "hiptensorOperationDescriptorGetAttribute";
+    if(auto status = checkAttributeObject(apiFuncName, handle, desc, "desc");
+       status != HIPTENSOR_STATUS_SUCCESS)
     {
-    case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
-        std::memcpy(buf, &desc->mTag, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
-        std::memcpy(buf, &desc->mScalarType, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
-        std::memcpy(buf, &desc->mFlops, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
-        std::memcpy(buf, &desc->mMovedBytes, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
-        std::memcpy(buf, &desc->mPaddingLeft, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
-        std::memcpy(buf, &desc->mPaddingRighT, sizeInBytes);
-        break;
-    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
-        std::memcpy(buf, desc->mPaddingValue, sizeInBytes);
-        break;
-    default:
-        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        break;
+        return status;
     }
 
-    return retStatus;
+    auto storage = operationDescriptorAttribute(desc, attr);
+    if(!storage)
+    {
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    auto [value, size] = *storage;
+    if(auto status = checkAttributeBuffer(apiFuncName, attr, buf, sizeInBytes, size);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    if(size > 0)
+    {
+        std::memcpy(buf, value, size);
+    }
+    return HIPTENSOR_STATUS_SUCCESS;
 }
 
 hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            handle,
@@ -493,13 +646,13 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
 
     *desc = new hiptensorOperationDescriptor();
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0.0f;
-    (*desc)->mMovedBytes   = 0.0f;
-    (*desc)->mPaddingLeft  = 0u;
-    (*desc)->mPaddingRighT = 0u;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0.0f;
+    (*desc)->mMovedBytes = 0.0f;
+    (*desc)->mPaddingLeft.assign(descB->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descB->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descB->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_PERMUTATION;
     (*desc)->mContractionOpId = 0;
@@ -580,14 +733,14 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
         }
     }
 
-    *desc                  = new hiptensorOperationDescriptor();
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0.0f;
-    (*desc)->mMovedBytes   = 0.0f;
-    (*desc)->mPaddingLeft  = 0u;
-    (*desc)->mPaddingRighT = 0u;
-    (*desc)->mPaddingValue = nullptr;
+    *desc                = new hiptensorOperationDescriptor();
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0.0f;
+    (*desc)->mMovedBytes = 0.0f;
+    (*desc)->mPaddingLeft.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descD->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_ELEMENTWISE_BINARY;
     (*desc)->mContractionOpId = 0;
@@ -676,14 +829,14 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
         }
     }
 
-    *desc                  = new hiptensorOperationDescriptor();
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0.0f;
-    (*desc)->mMovedBytes   = 0.0f;
-    (*desc)->mPaddingLeft  = 0u;
-    (*desc)->mPaddingRighT = 0u;
-    (*desc)->mPaddingValue = nullptr;
+    *desc                = new hiptensorOperationDescriptor();
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0.0f;
+    (*desc)->mMovedBytes = 0.0f;
+    (*desc)->mPaddingLeft.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descD->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_ELEMENTWISE_TRINARY;
     (*desc)->mContractionOpId = 0;
@@ -744,14 +897,14 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
         return checkResult;
     }
 
-    *desc                  = new hiptensorOperationDescriptor();
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0.0f;
-    (*desc)->mMovedBytes   = 0.0f;
-    (*desc)->mPaddingLeft  = 0u;
-    (*desc)->mPaddingRighT = 0u;
-    (*desc)->mPaddingValue = nullptr;
+    *desc                = new hiptensorOperationDescriptor();
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0.0f;
+    (*desc)->mMovedBytes = 0.0f;
+    (*desc)->mPaddingLeft.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descD->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_REDUCTION;
     (*desc)->mContractionOpId = 0;
@@ -796,7 +949,7 @@ hiptensorStatus_t hiptensorCreatePlanPreference(const hiptensorHandle_t    handl
     (*pref)->mJit              = jitMode;
 
     (*pref)->mSelectionAlgorithm = algo;
-    (*pref)->mSolution           = nullptr;
+    (*pref)->mSolution.store(nullptr);
 
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -807,39 +960,60 @@ hiptensorStatus_t hiptensorDestroyPlanPreference(hiptensorPlanPreference_t pref)
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
+// The storage of a plan preference attribute and its size in bytes. Empty for an unknown
+// attribute.
+static std::optional<std::pair<void*, size_t>>
+    planPreferenceAttribute(hiptensorPlanPreference_t pref, hiptensorPlanPreferenceAttribute_t attr)
+{
+    switch(attr)
+    {
+    case HIPTENSOR_PLAN_PREFERENCE_AUTOTUNE_MODE:
+        return std::pair{static_cast<void*>(&pref->mAutotuneMode), sizeof(pref->mAutotuneMode)};
+    case HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE:
+        return std::pair{static_cast<void*>(&pref->mCacheMode), sizeof(pref->mCacheMode)};
+    case HIPTENSOR_PLAN_PREFERENCE_INCREMENTAL_COUNT:
+        return std::pair{static_cast<void*>(&pref->mIncrementalCount),
+                         sizeof(pref->mIncrementalCount)};
+    case HIPTENSOR_PLAN_PREFERENCE_ALGO:
+        return std::pair{static_cast<void*>(&pref->mSelectionAlgorithm),
+                         sizeof(pref->mSelectionAlgorithm)};
+    case HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK:
+        return std::pair{static_cast<void*>(&pref->mKernelRank), sizeof(pref->mKernelRank)};
+    case HIPTENSOR_PLAN_PREFERENCE_JIT:
+        return std::pair{static_cast<void*>(&pref->mJit), sizeof(pref->mJit)};
+    default:
+        return std::nullopt;
+    }
+}
+
 hiptensorStatus_t hiptensorPlanPreferenceSetAttribute(const hiptensorHandle_t            handle,
                                                       hiptensorPlanPreference_t          pref,
                                                       hiptensorPlanPreferenceAttribute_t attr,
                                                       const void*                        buf,
                                                       size_t sizeInBytes)
 {
-    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
-    switch(attr)
+    constexpr auto apiFuncName = "hiptensorPlanPreferenceSetAttribute";
+    if(auto status = checkAttributeObject(apiFuncName, handle, pref, "pref");
+       status != HIPTENSOR_STATUS_SUCCESS)
     {
-    case HIPTENSOR_PLAN_PREFERENCE_AUTOTUNE_MODE:
-        std::memcpy(&pref->mAutotuneMode, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_PLAN_PREFERENCE_CACHE_MODE:
-        std::memcpy(&pref->mCacheMode, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_PLAN_PREFERENCE_INCREMENTAL_COUNT:
-        std::memcpy(&pref->mIncrementalCount, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_PLAN_PREFERENCE_ALGO:
-        std::memcpy(&pref->mSelectionAlgorithm, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK:
-        std::memcpy(&pref->mKernelRank, buf, sizeInBytes);
-        break;
-    case HIPTENSOR_PLAN_PREFERENCE_JIT:
-        std::memcpy(&pref->mJit, buf, sizeInBytes);
-        break;
-    default:
-        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        break;
+        return status;
     }
 
-    return retStatus;
+    auto storage = planPreferenceAttribute(pref, attr);
+    if(!storage)
+    {
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    auto [value, size] = *storage;
+    if(auto status = checkAttributeBuffer(apiFuncName, attr, buf, sizeInBytes, size);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    std::memcpy(value, buf, size);
+    return HIPTENSOR_STATUS_SUCCESS;
 }
 
 hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
@@ -848,18 +1022,27 @@ hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
                                             void*                    buf,
                                             size_t                   sizeInBytes)
 {
-    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
+    constexpr auto apiFuncName = "hiptensorPlanGetAttribute";
+    if(auto status = checkAttributeObject(apiFuncName, handle, plan, "plan");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     switch(attr)
     {
     case HIPTENSOR_PLAN_REQUIRED_WORKSPACE:
+        if(auto status = checkAttributeBuffer(
+               apiFuncName, attr, buf, sizeInBytes, sizeof(plan->mRequiredWorkspace));
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
         std::memcpy(buf, &plan->mRequiredWorkspace, sizeInBytes);
-        break;
+        return HIPTENSOR_STATUS_SUCCESS;
     default:
-        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        break;
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
-
-    return retStatus;
 }
 
 hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t              handle,
@@ -946,6 +1129,15 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
 
     newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
     newPlan->mPref   = newPlan->mOwnedPref.get();
+
+    // A reduction that keeps the rank reduces nothing: hiptensorReduce runs it as the
+    // elementwise binary operation D = alpha * A + beta * C. Set that operation here,
+    // while the plan is private to this call, so executions sharing the plan only read it.
+    if(desc->mOperationType == HIPTENSOR_REDUCTION && desc->mDescA != nullptr
+       && desc->mDescD != nullptr && desc->mDescA->mLengths.size() == desc->mDescD->mLengths.size())
+    {
+        newPlan->mOwnedOpDesc->mOpAC = HIPTENSOR_OP_ADD;
+    }
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {

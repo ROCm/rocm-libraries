@@ -10,6 +10,7 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 #include "PlatformUtils.hpp"
+#include "SdpaFwdOperationDescriptor.hpp"
 
 #include <functional>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -65,11 +66,30 @@ void GraphDescriptor::finalize()
                             _name,
                             hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
 
-    if(logging::GraphLogger::isEnabled())
+    // The graph dump is a diagnostic: a failure to write it is logged and never changes the
+    // result of finalize().
+    try
     {
-        auto serialized = getSerializedGraph();
-        logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
-                                       serialized.size);
+        if(logging::GraphLogger::isEnabled())
+        {
+            auto serialized = getSerializedGraph();
+            logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr),
+                                           serialized.size);
+        }
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_BACKEND_LOG_WARN("Failed to log graph \"{}\" with id {}: {}",
+                                _name,
+                                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId),
+                                e.what());
+    }
+    catch(...)
+    {
+        // Uncovered by tests: every throw on the graph-dump path derives from std::exception.
+        HIPDNN_BACKEND_LOG_WARN("Failed to log graph \"{}\" with id {}: unknown exception",
+                                _name,
+                                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
     }
 }
 
@@ -159,11 +179,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
             graph->tensors, [](const auto& tensor) { return tensor.get(); });
 
     const auto& requiredVersion
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(_isOverrideShapeEnabled,
-                                                                  anyRuntimePassByValue,
-                                                                  hasRaggedTensors(),
-                                                                  hasNonDefaultTensorAlignment(),
-                                                                  hasRaggedOffsetMultiplier());
+        = requiredEngineApiVersion(_isOverrideShapeEnabled, anyRuntimePassByValue);
     graph->min_required_engine_api_version
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
             hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
@@ -356,6 +372,10 @@ void GraphDescriptor::setOperations(hipdnnBackendAttributeType_t attributeType,
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "GraphDescriptor::setOperations: arrayOfElements is null");
+    THROW_IF_LT(elementCount,
+                0,
+                HIPDNN_STATUS_BAD_PARAM,
+                "GraphDescriptor::setOperations: elementCount is negative");
 
     auto descriptors = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
 
@@ -698,6 +718,36 @@ bool GraphDescriptor::hasRaggedOffsetMultiplier() const
             {
                 return true;
             }
+        }
+    }
+    return false;
+}
+
+const hipdnn_data_sdk::utilities::Version&
+    GraphDescriptor::requiredEngineApiVersion(bool isOverrideShapeEnabled,
+                                              bool isRuntimePassByValue) const
+{
+    return hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
+                                                                   isRuntimePassByValue,
+                                                                   hasRaggedTensors(),
+                                                                   hasNonDefaultTensorAlignment(),
+                                                                   hasRaggedOffsetMultiplier(),
+                                                                   hasCuSeqLen());
+}
+
+bool GraphDescriptor::hasCuSeqLen() const
+{
+    for(const auto& desc : _operations)
+    {
+        // Backend builds with -fno-rtti, so dispatch on the descriptor type and static_cast.
+        if(desc->getType() != HIPDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR)
+        {
+            continue;
+        }
+        const auto& data = static_cast<const SdpaFwdOperationDescriptor&>(*desc).getData();
+        if(data.cu_seq_len_q_tensor_uid.has_value() || data.cu_seq_len_kv_tensor_uid.has_value())
+        {
+            return true;
         }
     }
     return false;

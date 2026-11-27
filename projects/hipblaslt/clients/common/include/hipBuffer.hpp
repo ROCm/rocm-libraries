@@ -147,6 +147,7 @@ public:
         : requested(realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
                                                           : realDataTypeSize(dtype))
         , buffer(memory_pool<h_memory>::Get(requested))
+        , failed(!buffer.get())
     {
     }
 
@@ -154,6 +155,14 @@ public:
     {
         memory_pool<h_memory>::Restore(buffer);
     }
+
+    // Returns the memory to the pool early. Afterwards buf() is null, so a stray read crashes
+    // instead of reading stale data, and memcheck() reports a failure.
+    void release()
+    {
+        memory_pool<h_memory>::Restore(buffer);
+    }
+
     HipHostBuffer(const HipHostBuffer&)            = delete;
     HipHostBuffer(HipHostBuffer&&)                 = default;
     HipHostBuffer& operator=(const HipHostBuffer&) = delete;
@@ -196,10 +205,18 @@ public:
         return reinterpret_cast<const T*>(buf());
     }
 
-    // A failed pinned allocation leaves a null buffer rather than an error.
+    // A failed pinned allocation leaves a null buffer rather than an error. So does a move out of
+    // the buffer, which is not a failure; see allocation_failed().
     hipError_t memcheck() const
     {
         return buffer.get() ? hipSuccess : hipErrorOutOfMemory;
+    }
+
+    // True when the pinned allocation failed. A buffer emptied after a successful allocation did
+    // not fail.
+    bool allocation_failed() const
+    {
+        return failed;
     }
 
     std::size_t getRequestedBytes() const
@@ -210,12 +227,13 @@ public:
 private:
     std::size_t requested;
     h_memory    buffer;
+    bool        failed;
 };
 
 // Describes the failed allocation of `b`, or returns an empty string when it succeeded.
 inline std::string host_allocation_failure(const HipHostBuffer& b)
 {
-    if(b.memcheck() == hipSuccess)
+    if(!b.allocation_failed())
         return {};
     std::ostringstream s;
     s.precision(3);
@@ -244,15 +262,23 @@ inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
     if(block_count == 0)
         return hipErrorInvalidValue;
 
-    hipError_t hip_err;
+    const size_t blockBytes = dBuf.getNumBytes() / block_count;
+    auto*        firstBlock = dBuf.as<char>();
+    hipError_t   hip_err    = hipMemcpyAsync(firstBlock,
+                                        hBuf.as<char>(),
+                                        blockBytes,
+                                        dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+                                        stream);
+    if(hip_err != hipSuccess)
+        return hip_err;
 
-    // Perform async copy for all blocks
-    for(size_t i_block = 0; i_block < block_count; i_block++)
+    // Identical rotating blocks share one host upload. The stream orders device copies after it.
+    for(size_t i_block = 1; i_block < block_count; i_block++)
     {
-        hip_err = hipMemcpyAsync(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
-                                 hBuf.as<char>(),
-                                 dBuf.getNumBytes() / block_count,
-                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+        hip_err = hipMemcpyAsync(firstBlock + i_block * dBuf.getNumBytes() / block_count,
+                                 firstBlock,
+                                 blockBytes,
+                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyDeviceToDevice,
                                  stream);
 
         if(hip_err != hipSuccess)

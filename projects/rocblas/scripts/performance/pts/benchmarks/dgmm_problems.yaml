@@ -12,4 +12,6 @@ Tests:
     side: [ L, R ]
     matrix_size: *m_equals_n_range
     incx: 1
+    iters: 100
+    cold_iters: 20
 ...

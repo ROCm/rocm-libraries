@@ -26,7 +26,11 @@
 
 #include <Tensile/Debug.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <mutex>
+#include <string>
 
 #ifndef DEBUG_SM
 #define DEBUG_SM 0
@@ -130,6 +134,11 @@ namespace TensileLite
         return m_value & 0x400000;
     }
 
+    bool Debug::bypassUniformSummationOrderRefusals() const
+    {
+        return m_usoBypassRefusals;
+    }
+
     bool Debug::naivePropertySearch() const
     {
         return m_naivePropertySearch;
@@ -188,6 +197,11 @@ namespace TensileLite
     bool Debug::gridBasedBatchExp() const
     {
         return m_gridbasedBatchExp;
+    }
+
+    bool Debug::useMeshBasedLibrary() const
+    {
+        return m_meshbasedLib;
     }
 
     bool Debug::disableStaggerU() const
@@ -265,6 +279,10 @@ namespace TensileLite
         if(tensile_gridbased_batch_exp)
             m_gridbasedBatchExp = strtol(tensile_gridbased_batch_exp, nullptr, 0) != 0;
 
+        const char* tensile_meshbased_lib = std::getenv("TENSILE_USE_MESHBASED");
+        if(tensile_meshbased_lib)
+            m_meshbasedLib = strtol(tensile_meshbased_lib, nullptr, 0) != 0;
+
         const char* tensile_marker = std::getenv("TENSILE_ENABLE_MARKER");
         if(tensile_marker)
         {
@@ -279,6 +297,20 @@ namespace TensileLite
         const char* tensile_disable_staggerU = std::getenv("TENSILE_DISABLE_STAGGERU");
         if(tensile_disable_staggerU)
             m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
+
+        if(const char* bypass = std::getenv("HIPBLASLT_USO_BYPASS_REFUSALS"))
+        {
+            std::string v(bypass);
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            m_usoBypassRefusals = v == "1" || v == "on" || v == "true";
+            if(m_usoBypassRefusals)
+                std::fprintf(stderr,
+                             "hipBLASLt warning: HIPBLASLT_USO_BYPASS_REFUSALS is set: when "
+                             "uniform summation order is on, kernels it refuses are still "
+                             "selected and launched, and the guarantee no longer holds\n");
+        }
     }
 
     void Debug::reloadDebugBitsForTest()
@@ -298,6 +330,9 @@ namespace TensileLite
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
         }
+
+        const char* meshbasedLib = std::getenv("TENSILE_USE_MESHBASED");
+        m_meshbasedLib = meshbasedLib ? strtol(meshbasedLib, nullptr, 0) != 0 : false;
     }
 
 } // namespace TensileLite

@@ -82,6 +82,11 @@ struct SolverBase
     /// Must return true if a Solver has its own implementation of GetWorkspaceSize().
     virtual bool MayNeedWorkspace() const { return false; }
 
+    /// Must return true if the workspace of a solution depends on its performance config, so
+    /// that GetWorkspaceSize() (the maximum over configs) can exceed what the config that runs
+    /// needs. When false, GetWorkspaceSize() is the workspace of every config's solution.
+    virtual bool WorkspaceDependsOnConfig() const { return false; }
+
 protected:
     template <class Solver>
     static const std::string& GetSolverDbId()

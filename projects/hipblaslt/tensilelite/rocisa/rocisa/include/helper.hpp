@@ -25,12 +25,24 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using IsaVersion = std::array<int, 3>;
 
-std::pair<int, std::string>
-            run(const std::vector<char*>& cmd, const std::string& input, bool debug = false);
+// Runs cmd with input on its stdin and returns its exit code. In debug mode the
+// child writes to our stdout and stderr. Otherwise captureOutput returns what it
+// wrote to both; Windows captures this output regardless of captureOutput.
+std::pair<int, std::string> run(const std::vector<char*>& cmd,
+                                const std::string&        input,
+                                bool                      debug         = false,
+                                bool                      captureOutput = false);
+
+// The exit code run() returns on POSIX when it cannot execute cmd at all, because
+// it is missing or not executable: the status POSIX shells report for a command
+// they cannot find. On Windows run() throws instead.
+constexpr int execFailedExitCode = 127;
+
 std::string demangle(const char* name);
 std::string nullDevicePath();
 

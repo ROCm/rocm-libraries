@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Write the golden vectors the native hipkernel:Gfx950ConvDgradAot tests compare with.
+"""Write the golden vectors the native dgrad AOT engine tests compare with.
 
-The native pack (``packs/Gfx950ConvDgradGeometry.hpp``) ports the launch plan of the
+One tool for both dgrad engines (``hipkernel:Gfx950ConvDgradAot``,
+``hipkernel:Gfx1250ConvDgradAot``); the catalog's architecture picks the engine. The
+native pack (``packs/ConvDgradAotGeometry.hpp``) ports the launch plan of the
 rocKE adapter (``builders/common/convolution_backward_data.py``,
-``gfx950_conv_dgrad_aot_plan``). This tool runs the adapter over the shipped catalog
-(``configs/gfx950_conv_dgrad_aot_<dtype>.instances.json``) and a seeded set of
+``conv_dgrad_aot_plan``). This tool runs the adapter over an engine's shipped catalog
+(``configs/<arch>_conv_dgrad_aot_<dtype>.instances.json``) and a seeded set of
 synthetic problems, and writes, for the C++ tests:
 
 * every catalog instance's KMD metadata, as the descriptor states it;
 * the problems, and per problem the instances of its dtype that serve it with one
-  digest folding the digest (``Gfx950ConvDgradPlan.digest``) of each one's plan;
-* a few plans in full (``Gfx950ConvDgradPlan.serialize``), one of each kind, so a
+  digest folding the digest (``ConvDgradAotPlan.digest``) of each one's plan;
+* a few plans in full (``ConvDgradAotPlan.serialize``), one of each kind, so a
   mismatch can be read rather than only detected.
 
 Regenerate after a catalog or adapter change::
 
+    PACKS="$PROVIDER"/src/tests/engines/kernel_ingestor_engine/packs
     python tools/make_conv_dgrad_aot_test_vectors.py --rocke-root "$ROCKE" \\
         --instances configs/gfx950_conv_dgrad_aot_{fp16,bf16}.instances.json \\
-        --output "$PROVIDER"/src/tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestVectors.hpp
+        --output "$PACKS"/Gfx950ConvDgradTestVectors.hpp
+    python tools/make_conv_dgrad_aot_test_vectors.py --rocke-root "$ROCKE" \\
+        --instances configs/gfx1250_conv_dgrad_aot_{fp16,bf16}.instances.json \\
+        --output "$PACKS"/Gfx1250ConvDgradTestVectors.hpp
 """
 
 from __future__ import annotations
@@ -37,20 +43,24 @@ if str(_HERE) not in sys.path:
 import make_conv_dgrad_aot_config as _cfg  # noqa: E402
 
 _SEED = 950
-_STRING_FIELDS = (
-    "dtype",
-    "pipeline",
-    "epilogue",
-    "instance_id",
-    "layout",
-    "direct_variant",
-)
+#: The C++ namespace of an engine's vectors is ``<arch>_dgrad_test_vectors``: every
+#: header goes into one test binary. gfx950's shipped headers predate that and keep the
+#: legacy name; renaming it would mean renaming the C++ namespace, so only it is listed.
+_LEGACY_NAMESPACES = {"gfx950": "dgrad_test_vectors"}
+
+
+def namespace(arch: str) -> str:
+    """The C++ namespace of ``arch``'s vectors; a ValueError unless ``arch`` is one of
+    the adapter's ``TARGETS`` (so a legacy entry cannot outlive its engine)."""
+    if arch not in _cfg.arches():
+        raise ValueError(f"no packaged dgrad engine for arch {arch!r}")
+    return _LEGACY_NAMESPACES.get(arch, f"{arch}_dgrad_test_vectors")
 
 
 def _problem(**kw):
-    from builders.common.convolution_backward_data import Gfx950ConvDgradProblem
+    from builders.common.convolution_backward_data import ConvDgradAotProblem
 
-    return Gfx950ConvDgradProblem(**kw)
+    return ConvDgradAotProblem(**kw)
 
 
 def _shape(
@@ -130,6 +140,19 @@ def synthetic_problems(specs) -> list:
         _shape(1, 16, 288, 40, 40, 3, 3, 1, 1),
         _shape(2, 8, 8, 2, 2, 3, 3, 2, 1, g=8),
     ]
+    if {spec.ARCH for spec in specs} == {"gfx1250"}:
+        # gfx1250's WMMA stems on the graphs they were chosen for, at small batches:
+        # patch embeddings (4x4 / 16x16, C=3) and C <= 4 stems, dense and strided.
+        rows += [
+            _shape(2, 3, 128, 224, 224, 4, 4, 4, 0),
+            _shape(2, 3, 128, 224, 224, 4, 4, 4, 0, dtype="bf16"),
+            _shape(2, 3, 768, 224, 224, 16, 16, 16, 0),
+            _shape(1, 3, 1024, 224, 224, 16, 16, 16, 0, dtype="bf16"),
+            _shape(1, 4, 320, 128, 128, 3, 3, 1, 1),
+            _shape(2, 4, 320, 64, 96, 3, 3, 1, 1, dtype="bf16"),
+            _shape(2, 3, 32, 224, 224, 3, 3, 2, 1),
+            _shape(2, 3, 64, 224, 224, 7, 7, 2, 3, dtype="bf16"),
+        ]
     directs = [s for s in specs if s.is_direct and not s.is_helper]
     for spec in directs:
         for _ in range(2):
@@ -141,6 +164,10 @@ def synthetic_problems(specs) -> list:
                 groups = rng.choice(
                     (8, 16, 24, 32, 64, 96, 128, 144, 192, 256, 384, 512)
                 )
+            if spec.direct_variant in ("dgrad_smallc_wmma", "dgrad_patch_wmma"):
+                # Ungrouped stems; drawn after the others so the sequence the other
+                # families draw is unchanged.
+                groups = 1
             hw = rng.choice((4, 7, 8, 14, 16, 28, 32, 56, 64, 112))
             rows.append(
                 _shape(
@@ -192,20 +219,27 @@ def _cpp_int(value: int) -> str:
     return f"{value}LL" if not -(1 << 31) <= value < (1 << 31) else str(value)
 
 
-def _defaults() -> dict:
-    """The KMD fields with a default_value, and the default."""
+def _defaults(arch: str) -> dict:
+    """The KMD fields of ``arch``'s engine with a default_value, and the default."""
     return {
         field["name"]: field["default_value"]
-        for field in _cfg.kmd_fields()
+        for field in _cfg.kmd_fields(arch)
         if "default_value" in field
     }
 
 
+def _string_fields(arch: str) -> tuple:
+    """The KMD fields of ``arch``'s engine that hold strings, in KMD order."""
+    return tuple(
+        field["name"] for field in _cfg.kmd_fields(arch) if field["type"] == "string"
+    )
+
+
 def _instance_fields(spec) -> str:
     """Every KMD field as name=value;..., except those at their default_value."""
-    defaults = _defaults()
+    defaults = _defaults(spec.ARCH)
     parts = []
-    for field in _cfg.kmd_fields():
+    for field in _cfg.kmd_fields(spec.ARCH):
         name = field["name"]
         value = getattr(spec, name)
         if name in defaults and value == defaults[name]:
@@ -243,8 +277,11 @@ def _fold(digests) -> int:
 
 
 def render(specs, problems) -> str:
-    from builders.common.convolution_backward_data import gfx950_conv_dgrad_aot_plan
+    from builders.common.convolution_backward_data import conv_dgrad_aot_plan
 
+    (arch,) = {spec.ARCH for spec in specs}
+    cpp_namespace = namespace(arch)
+    string_fields = _string_fields(arch)
     by_dtype = {
         dtype: [s for s in specs if s.dtype == dtype] for dtype in ("fp16", "bf16")
     }
@@ -254,7 +291,7 @@ def render(specs, problems) -> str:
         served = []
         digests = []
         for spec in by_dtype[problem.dtype]:
-            plan, _ = gfx950_conv_dgrad_aot_plan(spec, problem)
+            plan, _ = conv_dgrad_aot_plan(spec, problem)
             served.append("1" if plan is not None else "0")
             if plan is None:
                 continue
@@ -285,13 +322,13 @@ def render(specs, problems) -> str:
         "// GENERATED test data, do not edit: projects/hipdnn/tools/IngestorGenerator/tools/",
         "// make_conv_dgrad_aot_test_vectors.py. The shipped catalog's KMD metadata, and the",
         "// launch plans of the rocKE adapter rocke/library/builders/common/",
-        "// convolution_backward_data.py (gfx950_conv_dgrad_aot_plan) on synthetic problems.",
+        "// convolution_backward_data.py (conv_dgrad_aot_plan) on synthetic problems.",
         "",
         "#include <array>",
         "#include <cstdint>",
         "#include <vector>",
         "",
-        "namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_test_vectors",
+        f"namespace hip_kernel_provider::kernel_ingestor_engine::{cpp_namespace}",
         "{",
         "",
         "/// N, C, K, Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW, groups.",
@@ -307,14 +344,14 @@ def render(specs, problems) -> str:
         "",
         "/// The KMD fields that hold strings; every other one is an int.",
         "inline constexpr std::array<const char*, "
-        + str(len(_STRING_FIELDS))
+        + str(len(string_fields))
         + "> STRING_FIELDS{"
-        + ", ".join(f'"{f}"' for f in _STRING_FIELDS)
+        + ", ".join(f'"{f}"' for f in string_fields)
         + "};",
         "",
         "/// The KMD fields with a default_value, as name=value;...",
         'inline constexpr const char* DEFAULT_FIELDS = "'
-        + ";".join(f"{k}={v}" for k, v in _defaults().items())
+        + ";".join(f"{k}={v}" for k, v in _defaults(arch).items())
         + '";',
         "",
         "inline const std::vector<CatalogInstance>& catalogInstances()",
@@ -354,7 +391,7 @@ def render(specs, problems) -> str:
         "    return s_rows;",
         "}",
         "",
-        "/// A plan in full (Gfx950ConvDgradPlan.serialize): servedMatrix()[row] with the",
+        "/// A plan in full (ConvDgradAotPlan.serialize): servedMatrix()[row] with the",
         "/// instance-th catalog instance of the row's dtype.",
         "struct FullPlan",
         "{",
@@ -376,7 +413,7 @@ def render(specs, problems) -> str:
         "    return s_plans;",
         "}",
         "",
-        "} // namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_test_vectors",
+        f"}} // namespace hip_kernel_provider::kernel_ingestor_engine::{cpp_namespace}",
         "",
     ]
     return "\n".join(out)
@@ -384,7 +421,12 @@ def render(specs, problems) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--rocke-root", type=Path, required=True)
+    parser.add_argument(
+        "--rocke-root",
+        type=Path,
+        default=_cfg.DEFAULT_ROCKE_ROOT,
+        help="rocKE tree (platform/, library/); default: the in-repo tree.",
+    )
     parser.add_argument("--instances", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=8)
@@ -403,9 +445,12 @@ def main(argv=None) -> int:
         if spec.instance_id not in seen:
             seen.add(spec.instance_id)
             specs.append(spec)
+    if len({spec.ARCH for spec in specs}) != 1:
+        print("the instances are of more than one engine", file=sys.stderr)
+        return 1
     specs.sort(key=lambda s: (s.dtype, s.instance_id))
     problems = synthetic_problems(specs)
-    args.output.write_text(render(specs, problems))
+    args.output.write_text(render(specs, problems), encoding="utf-8")
     print(f"{len(specs)} instances, {len(problems)} problems written to {args.output}")
     return 0
 

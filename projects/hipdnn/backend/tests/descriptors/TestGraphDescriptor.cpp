@@ -19,6 +19,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+
 using namespace hipdnn_backend;
 using hipdnn_backend::test_utilities::ScopedBackendDescriptor;
 
@@ -150,6 +153,27 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)
                                             static_cast<const void*>(&handle)));
 
     ASSERT_NO_THROW(descriptor.finalize());
+}
+
+TEST_F(TestGraphDescriptor, SetOperationsRejectsNegativeCountAndKeepsOperations)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_NO_THROW(descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()));
+
+    std::array<hipdnnBackendDescriptor_t, 1> ops = {nullptr};
+    ASSERT_THROW_HIPDNN_STATUS(descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                       -1,
+                                                       static_cast<const void*>(ops.data())),
+                               HIPDNN_STATUS_BAD_PARAM);
+
+    int64_t opsCount = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &opsCount, nullptr));
+    EXPECT_EQ(opsCount, 1);
 }
 
 TEST_F(TestGraphDescriptor, WillCorrectlySetGraphReverseOrder)
@@ -782,6 +806,25 @@ TEST_F(TestGraphDescriptor, BinaryDeserializeCorruptedData)
     EXPECT_EQ(rawDesc, nullptr);
 }
 
+TEST_F(TestGraphDescriptor, BinaryDeserializeRejectsConvBwdStrideInconsistentWithDims)
+{
+    // dy [4,4,4,4], w [4,4,1,1], dx [4,4,4,4], no padding: any width stride above 3
+    // implies a dy width of 1, so dy width 4 is inconsistent.
+    auto base = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    auto graphT = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
+    ASSERT_NE(graphT, nullptr);
+    graphT->nodes.at(0)->attributes.AsConvolutionBwdAttributes()->stride[1] = 1048577;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graphT.get()));
+
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
+        &rawDesc, builder.GetBufferPointer(), builder.GetSize());
+    const ScopedBackendDescriptor desc(rawDesc);
+    EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(rawDesc, nullptr);
+}
+
 // ============================================================================
 // Binary C API error-path tests
 // ============================================================================
@@ -1222,6 +1265,149 @@ TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
         GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
 
     EXPECT_TRUE(fromJson.hasRaggedTensors());
+}
+
+// ============================================================================
+// GraphDescriptor::hasCuSeqLen() (SDPA cumulative sequence lengths)
+// ============================================================================
+
+namespace
+{
+flatbuffers::FlatBufferBuilder
+    makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    const std::vector<int64_t> dims = {2, 8, 16, 64};
+    const std::vector<int64_t> strides = {8192, 1024, 64, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               DataType::HALF,
+                                                               DataType::FLOAT,
+                                                               /*withAttnMask=*/false,
+                                                               /*withScale=*/false,
+                                                               /*withStats=*/false,
+                                                               /*alibiMask=*/false,
+                                                               /*paddingMask=*/cuSeqLenSides
+                                                                   != CuSeqLenSides::NONE,
+                                                               /*causalMask=*/false,
+                                                               /*overrideShapeEnabled=*/false,
+                                                               DataType::UNSET,
+                                                               cuSeqLenSides);
+}
+
+hipdnn_data_sdk::utilities::Version stampedVersion(GraphDescriptor& descriptor)
+{
+    descriptor.buildSerializedGraph();
+    const auto serialized = descriptor.getSerializedGraph();
+    const auto* graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(
+        static_cast<const uint8_t*>(serialized.ptr));
+    return hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version());
+}
+} // namespace
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForEmptyDescriptor)
+{
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForSdpaGraphWithoutCuSeqLen)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::NONE);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+    EXPECT_LT(stampedVersion(descriptor),
+              hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForNonSdpaGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsCuSeqLenFloorForSdpaGraphWithCuSeqLen)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasCuSeqLen());
+    EXPECT_EQ(stampedVersion(descriptor),
+              hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+}
+
+// The frontend accepts the mixed forms (cu_seq_len on one side, seq_len on the other), so
+// either side alone must flag the graph and stamp the 1.6.0 floor; otherwise such a graph would
+// reach plugins that know nothing about cu_seq_len.
+TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsFloorWhenOnlyOneSideIsCumulative)
+{
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto builder = makeSdpaFwdGraph(sides);
+        auto serializedGraph = builder.Release();
+
+        GraphDescriptor descriptor;
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+        EXPECT_TRUE(descriptor.hasCuSeqLen());
+        EXPECT_EQ(
+            stampedVersion(descriptor),
+            hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+    }
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesSerializationRoundTrip)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(revived.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesJsonRoundTrip)
+{
+    auto builder = makeSdpaFwdGraph(hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    EXPECT_TRUE(fromJson.hasCuSeqLen());
 }
 
 // The ragged-offset aux must be re-emitted into the tensor list when the graph

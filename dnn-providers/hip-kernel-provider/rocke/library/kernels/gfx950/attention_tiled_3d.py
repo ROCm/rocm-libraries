@@ -40,7 +40,8 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import emit_lse_field, reduce_lse_store
+from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_max_segments,
@@ -225,8 +226,15 @@ class UnifiedAttention3DTiledSpec:
     # Right bound of the attention band; see ``UnifiedAttention2DTiledSpec.right_bound``
     # (0 = causal, R > 0 = R keys of lookahead, -1 = unbounded).
     right_bound: int = 0
+    # emit_lse: the module's reduce also writes the LSE (see
+    # ``UnifiedAttentionReduceTiledSpec.emit_lse``). The segment kernel never reads
+    # it, so its IR is the LSE-off IR; the field is here because a packaged module
+    # is built from this spec alone (``reduce_spec_for``). The runtime dispatcher
+    # leaves it off and passes the problem's value to the reduce directly.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
+        require_bool("emit_lse", self.emit_lse)
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
@@ -389,6 +397,7 @@ class UnifiedAttention3DTiledSpec:
                 if self.right_bound != 0
                 else ""
             ),
+            "lse" if self.emit_lse else "",
         )
 
 
@@ -1465,18 +1474,10 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
-    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
-    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
-    #   still differs from before LSE existed: the masked-segment merge fix below
-    #   applies with LSE on or off.)
-    emit_lse: bool = field(default=False, kw_only=True)
+    emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1696,22 +1697,16 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     if spec.emit_lse:
-        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
-        # lane writes. overall_max is in log2 units (segm_max carries
-        # scale*log2e); lse_store converts to natural log and writes -inf for a
-        # row with no mass (every segment empty, sum 0), whose O is already 0.
-        # A NaN sum (NaN query row) keeps NaN, as O does: the same !(l == 0)
-        # test the tiled 2D epilogues use, never l > 0.
-        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-            lse_index = b.add(b.mul(q_token, num_qh_p), q_head)
-            lse_store(
-                b,
-                lse,
-                lse_index,
-                overall_max,
-                overall_expsum,
-                row_has_mass=lse_row_has_mass(b, overall_expsum),
-            )
+        reduce_lse_store(
+            b,
+            lse,
+            tid=tid,
+            q_token=q_token,
+            q_head=q_head,
+            num_heads=num_qh_p,
+            overall_max=overall_max,
+            overall_expsum=overall_expsum,
+        )
 
     return b.kernel
 
@@ -1777,18 +1772,23 @@ def supports_tiled_reduce_spec(
 
 
 def reduce_spec_for(
-    spec: UnifiedAttention3DTiledSpec, *, emit_lse: bool = False
+    spec: UnifiedAttention3DTiledSpec, *, emit_lse: Optional[bool] = None
 ) -> UnifiedAttentionReduceTiledSpec:
     """The reduce kernel that pairs with segment kernel ``spec``.
 
     Every reduce field but ``emit_lse`` is a segment field, and the dispatcher builds its
     pair (``make_explicit_attention_3d_specs``) through the same derivation,
     ``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec``, so this is the
-    reduce it launches. ``emit_lse`` comes from the problem, not the segment spec: it
-    defaults off, so the module packs a reduce with ``emit_lse=False`` and no ``lse_ptr``.
+    reduce it launches. ``emit_lse`` defaults to ``spec.emit_lse``, which is how a
+    packaged module (built from the spec alone) gets an LSE reduce; the dispatcher,
+    whose segment specs leave it off, passes the problem's value explicitly. At decode
+    (``seqlen_q == 1``) the reduce's token-major [total_q, Hq, 1] LSE is also the
+    head-major [B, Hq, 1, 1] layout, so no layout field is needed.
     """
     return split_kv_reduce_spec(
-        UnifiedAttentionReduceTiledSpec, spec, emit_lse=emit_lse
+        UnifiedAttentionReduceTiledSpec,
+        spec,
+        emit_lse=spec.emit_lse if emit_lse is None else emit_lse,
     )
 
 
@@ -1800,7 +1800,7 @@ def build_unified_attention_3d_tiled_module(
     Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
     <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack, so a host that loaded
     the segment kernel finds the reduce in the same module by name. The reduce is
-    :func:`reduce_spec_for` ``(spec)``.
+    :func:`reduce_spec_for` ``(spec)``, so ``spec.emit_lse`` adds its trailing ``lse_ptr``.
     """
     from rocke.helpers import KernelModule
 

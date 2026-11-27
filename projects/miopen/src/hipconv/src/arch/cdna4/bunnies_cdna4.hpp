@@ -17,9 +17,9 @@ struct arch_cdna4
     //
     // A lane's whole operand, so the cross-lane reduction is what rounds and one instruction costs
     // K/block - 1 roundings rather than K - 1. Measured on gfx950, identical for fp16 and bf16
-    // operands; see docs/algorithms/direct/direct-wgrad-tolerance.md. The ISA documents neither
-    // this nor its uniformity across operand types, so other MFMA families (fp8, fp64) and other
-    // arches need their own measurement rather than inheriting this one.
+    // operands; see docs/algorithms/details/direct/direct-wgrad-tolerance.md. The ISA documents
+    // neither this nor its uniformity across operand types, so other MFMA families (fp8, fp64) and
+    // other arches need their own measurement rather than inheriting this one.
     static constexpr int mfma_f16_f16_f32_exact_block = 8;
 
     using buffer_t = __amdgpu_buffer_rsrc_t;
@@ -140,15 +140,16 @@ struct arch_cdna4
         }
     };
 
-    template <int Rows, int Cols, use Use>
-    struct matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use>
+    template <int Rows, int Cols, use Use, int Batch>
+    struct matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use, Batch>
     {
         using arch                     = arch_cdna4;
         static constexpr fpfmt fmt     = fpfmt::e8m10_e8m7x2split;
         static constexpr int rows      = Rows;
         static constexpr int cols      = Cols;
         static constexpr use use_      = Use;
-        static constexpr int num_items = Rows * Cols / wave_size;
+        static constexpr int batch     = Batch;
+        static constexpr int num_items = Rows * Cols * Batch / wave_size;
 
         using storage_t = storage_type_t<fpfmt::e8m7, num_items>;
         storage_t big;
@@ -394,6 +395,18 @@ struct arch_cdna4
             d.data = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(
                 std::bit_cast<int16x4>(a.data), std::bit_cast<int16x4>(b.data), c.data, 0, 0, 0);
         }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 4, 4, use::Acc, 16>& d,
+                                    matrix<fpfmt::e8m10_e8m7x2split, 4, 4, use::A, 16>& a,
+                                    matrix<fpfmt::e8m10_e8m7x2split, 4, 4, use::B, 16>& b,
+                                    matrix<fpfmt::e8m23, 4, 4, use::Acc, 16>& c)
+        {
+            d.data = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(
+                std::bit_cast<int16x4>(a.small), std::bit_cast<int16x4>(b.big), c.data, 0, 0, 0);
+            d.data = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(
+                std::bit_cast<int16x4>(a.big), std::bit_cast<int16x4>(b.small), d.data, 0, 0, 0);
+            d.data = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(
+                std::bit_cast<int16x4>(a.big), std::bit_cast<int16x4>(b.big), d.data, 0, 0, 0);
+        }
     };
 
     // 2:4 structured-sparse MFMA (V_SMFMAC_F32_16X16X64).
@@ -484,6 +497,22 @@ struct arch_cdna4
             {
                 static_assert(false, "BytesPerLane must be 2, 4, or 16");
             }
+        }
+    };
+
+    // Issues buffer_load_lds untracked by the compiler's wait-count insertion; the caller's vmcnt
+    // waits must cover it before LDS reads of the destination.
+    template <int BytesPerLane>
+    struct buffer_load_async_lds
+    {
+        static_assert(BytesPerLane == 16, "BytesPerLane must be 16");
+
+        __device__ static void load(buffer_t buffer, void* lds_ptr, int v_offset, int s_offset)
+        {
+#ifdef __gfx950__
+            __builtin_amdgcn_raw_ptr_buffer_load_async_lds(
+                buffer, lds_ptr, 16, v_offset, s_offset, 0, 0);
+#endif
         }
     };
 

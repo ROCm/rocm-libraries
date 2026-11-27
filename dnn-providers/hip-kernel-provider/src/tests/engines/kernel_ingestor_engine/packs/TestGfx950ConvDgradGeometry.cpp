@@ -13,8 +13,8 @@
 
 #include <gtest/gtest.h>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestCatalog.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvDgradTestCatalog.hpp"
 
 /**
  * @file TestGfx950ConvDgradGeometry.cpp
@@ -28,19 +28,11 @@
 namespace
 {
 
-namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad;
+namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot;
 namespace vectors = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_vectors;
 namespace catalog = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog;
 
-std::string describe(const dgrad::Problem& p)
-{
-    return "{N" + std::to_string(p.n) + " C" + std::to_string(p.c) + " K" + std::to_string(p.k)
-           + " " + std::to_string(p.hi) + "x" + std::to_string(p.wi) + " f" + std::to_string(p.y)
-           + "x" + std::to_string(p.x) + " s" + std::to_string(p.strideH) + "x"
-           + std::to_string(p.strideW) + " p" + std::to_string(p.padH) + "x"
-           + std::to_string(p.padW) + " d" + std::to_string(p.dilationH) + "x"
-           + std::to_string(p.dilationW) + " g" + std::to_string(p.groups) + "}";
-}
+using catalog::describe;
 
 /// A dense-path implicit-GEMM instance with the tile under test: a 2x2 warp grid, scalar
 /// widths, the grouped code path and the catalog's 1024-record table.
@@ -74,7 +66,7 @@ TEST(TestGfx950ConvDgradGeometry, EveryCatalogInstanceParses)
 
 TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
 {
-    // gfx950_conv_dgrad_aot_plan over every catalog instance of the problem's dtype: the same
+    // conv_dgrad_aot_plan over every catalog instance of the problem's dtype: the same
     // instances serve, and their plans fold to the adapter's digest. On a digest mismatch,
     // make_conv_dgrad_aot_test_vectors.py's render() names each serving plan's digest.
     std::map<std::string, size_t> servedByVariant;
@@ -83,7 +75,7 @@ TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
         const auto problem = catalog::toProblem(row.problem);
         const auto& entries = catalog::catalog(row.dtype);
         ASSERT_EQ(std::string_view(row.served).size(), entries.size());
-        uint64_t folded = 0xCBF29CE484222325ULL;
+        uint64_t folded = catalog::FNV_OFFSET;
         for(size_t i = 0; i < entries.size(); ++i)
         {
             const auto& entry = entries[i];
@@ -98,11 +90,7 @@ TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
                 continue;
             }
             const auto digest = dgrad::planDigest(*plan);
-            for(int byte = 0; byte < 8; ++byte)
-            {
-                folded ^= (digest >> (8 * byte)) & 0xFFU;
-                folded *= 0x100000001B3ULL;
-            }
+            catalog::foldPlanDigest(folded, digest);
             ++servedByVariant[entry.text("direct_variant")];
         }
         EXPECT_EQ(folded, row.digest) << describe(problem) << " " << row.dtype;
@@ -592,7 +580,7 @@ TEST(TestGfx950ConvDgradGeometry, UnknownOrIncompleteMetadataIsRefused)
     });
     for(const auto* entry : {&implicit, &fused})
     {
-        ASSERT_TRUE(dgrad::parseAotInstance(catalog::FieldsMetadata{entry->fields}));
+        ASSERT_TRUE(dgrad::parseAotInstance(catalog::FieldsMetadata{entry->fields}, dgrad::GFX950));
         for(const auto& [field, value] : std::vector<std::pair<std::string, catalog::FieldValue>>{
                 {"direct_variant", std::string("bogus")},
                 {"kernel_family", int64_t{3}},
@@ -604,7 +592,7 @@ TEST(TestGfx950ConvDgradGeometry, UnknownOrIncompleteMetadataIsRefused)
         {
             auto fields = entry->fields;
             fields[field] = value;
-            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}))
+            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}, dgrad::GFX950))
                 << entry->text("direct_variant") << " " << field;
         }
         for(const auto& [field, value] : entry->fields)
@@ -615,7 +603,7 @@ TEST(TestGfx950ConvDgradGeometry, UnknownOrIncompleteMetadataIsRefused)
             }
             auto fields = entry->fields;
             fields.erase(field);
-            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}))
+            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}, dgrad::GFX950))
                 << entry->text("direct_variant") << " without " << field;
         }
     }

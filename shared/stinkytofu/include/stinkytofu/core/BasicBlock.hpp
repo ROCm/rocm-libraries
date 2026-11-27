@@ -170,9 +170,9 @@ class BasicBlock : public IntrusiveListNode<BasicBlock, Function> {
     }
 
     /// Erase one IR node at position. Caller must not use the iterator after erase.
-    IRList::iterator eraseIR(IRList::iterator pos) {
-        return ir.erase(pos);
-    }
+    /// Out of line: it notifies the parent Function's erase observer first, and Function is
+    /// incomplete here.
+    IRList::iterator eraseIR(IRList::iterator pos);
 
     /// Remove IR node from this block (node must be in this block).
     void removeIR(IRBase* node) {

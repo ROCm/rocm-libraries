@@ -16,7 +16,7 @@ engine of its own (256, §5.6). Every target also ships the keep-mask writer and
 padding copy (one object each); §6.2 has the per-target ledger.
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels. Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx942, gfx90a and gfx11-generic, 509 each). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -137,7 +137,7 @@ Evaluated once per graph. Every one of these is a hard refusal.
 | x, y rank ≥ 2; scale rank ≥ 1; `dims` and `strides` both present and equal length | Rank ≥ 2 so there is a row to reduce over. The matcher runs on an *unvalidated* graph, so it must be total against null or mismatched dims. |
 | `sameShape(x, y)` | |
 | x, y, scale all **packed row-major**, ignoring the stride of any axis of extent 1 | The innermost stride is a compile-time literal 1 in the kernel and has no descriptor slot, and the launch passes the width as the row stride. The check is stronger than the descriptor strictly needs — it could carry a padded row stride — but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride has to describe all the leading axes at once. An axis of extent 1 is never stepped along, so its stride is not checked: hipdnn_torch describes an `F.rms_norm` weight with stride 0 on its unit axes, and the data SDK's packed test exempts them the same way. |
-| rows > 0 and columns > 0, and every element of x and y within 2³¹ − 1 bytes | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. |
+| rows > 0 and columns > 0, and every element of x, y and gamma within 2³¹ − 1 bytes, and in training inv_rms's 4 bytes per row too | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. Gamma is bounded on its own columns times its own element size, inv_rms on its row count times 4: at width 1 and 16-bit x, inv_rms reaches the bound before x does. |
 | gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The rule of `validateScaleNormalizedShape` in the frontend, but for rank: a gamma of lower rank than x, which the frontend rejects, is aligned at the innermost axis with its missing leading axes read as 1, so the matcher stays total. |
 | epsilon is one scalar: present, with dims, and extent 1 on every axis | The kernel takes one f32; a tensor of more elements would be read as its first. |
 | epsilon is runtime-user-supplied, **or** a finite, non-negative f32 | See below. |
@@ -227,7 +227,9 @@ virtual, pass-by-value or ragged); x, dy, dx one dtype; gamma and dgamma one dty
 or f32 beside 16-bit x; dx shaped as x and dgamma as gamma; inv_rms one f32 per row (the
 forward's rule); every row operand and gamma/dgamma packed and 16-byte aligned; gamma
 encoding the normalised shape; every element of x, dy and dx within 2³¹ − 1 bytes (the
-forward's bound); not override-shape. **The kernel matcher** pairs dtype and gamma
+forward's row-operand bound), and inv_rms's 4 bytes per row within it too (the backward
+matcher does not bound gamma or dgamma bytes);
+not override-shape. **The kernel matcher** pairs dtype and gamma
 form, and serves a baked width exactly or a generic one up to its `n_max`.
 
 ---
@@ -248,7 +250,7 @@ do not compute, declined rather than approximated.
 | **Gamma that does not encode a normalised shape** (e.g. `[1,2,1,3]` against `[1,2,3,3]`) | Not a broadcast the kernel performs; the frontend rejects it too. |
 | **Multi-node graphs, fused add+RMSNorm** | One node per kernel. Fusion would be its own pack. |
 | **Architectures outside gfx11-generic, gfx12-generic, gfx90a, gfx942 and gfx950** | Objects ship for the gfx11 generic family (gfx1100–gfx1103, gfx1150–gfx1153), the gfx12 one (gfx1200, gfx1201), and the CDNA targets gfx90a, gfx942 and gfx950. gfx1170/gfx1171 belong to `gfx11-7-generic`. With `GPU_TARGETS` naming no arch we ship kernels for, the integration reports dormant at configure time and stages nothing — it does not fail, and it does not silently produce an empty shard. Adding a family is a regeneration ([REGEN.md](REGEN.md) §3), not a code change. |
-| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward and the SDPA forward families (§5, §7), each an engine of its own. |
+| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward, the SDPA forward families (§5, §7) and the SDPA backward ops (§9), each engine its own. |
 
 ---
 
@@ -264,69 +266,126 @@ do not compute, declined rather than approximated.
 | The pack ships the generic tier for every dtype and gamma form and the specialized tier for the 16-bit ones, every kernel declares the 9-slot signature (epsilon last), and the engine's schema admits runtime epsilons | `TestFlydslRmsNormPacks` — and the shard census that runs it, which fails when the suite is green against an empty shard |
 | The pack ships the backward tiers per form, each object names its reduce kernel, and every kernel declares the 15-slot partial signature | `TestFlydslRmsNormBwdPacks` and its shard census |
 | The accept/refuse rules above hold | The matcher suites in `TestFlydslRmsNormEngine.cpp` and `TestFlydslRmsNormBwdEngine.cpp`. `TestFlydslRmsNormGraphMatcherRefusal` and `TestFlydslRmsNormBwdGraphMatcherRefusal` hold one host refusal case per gated field — forward: y dtype, shape and strides, pass-by-value operands, a second node, an alignment that is not a multiple of 16, strides of the wrong length, an inv_rms alignment that is not a multiple of 4; backward: dy and dgamma shape, per-operand packing, alignment and virtual-ness, two nodes. `TestFlydslRmsNormKernelMatcher` and `TestFlydslRmsNormBwdKernelMatcher` test each width rule in both directions (served and refused). The GPU suites there check y, inv_rms, dx and dgamma against host references and dgamma's determinism |
-| Every staged object computes what its name says | `TestGpuFlydslRmsNormObjects` (`TestFlydslRmsNormObjects.cpp`): launches each object by name through its pack's dispatch handler against an f64 host reference, into NaN-prefilled outputs, with a different scale per row, the backward twice and compared bit for bit. `OnePerForm` runs one object per (dtype, gamma form, inv_rms, tier) in every test tier, pre-merge included; `Full/...Every` runs all 153 objects of the device's target, in the full (nightly) tier only |
+| Every staged object computes what its name says | `TestGpuFlydslRmsNormObjects` (`TestFlydslRmsNormObjects.cpp`): launches each object by name through its pack's dispatch handler against an f64 host reference, into NaN-prefilled outputs, with a different scale per row, the backward twice and compared bit for bit. `Standard/...OnePerForm` runs one object per (dtype, gamma form, inv_rms, tier), the case every PR runs; `Full/...Every` runs all 153 objects of the device's target, in the full tier only |
 | The baked tier is faster than the generic one where both apply | `Full/TestGpuFlydslRmsNormTiers` (wall-clock comparison), full tier only |
 | A device case cannot pass by skipping on an arch FlyDSL ships for | Each GPU case that finds its objects unstaged **fails** on an arch the build ships FlyDSL for, and skips only on other arches |
 | `gen_descriptors.py --check` and `tools/check_shards.py` still refuse a tampered tree | CTest `hip-kernel-provider-flydsl-drift-guards` (pytest, `flydsl/tests/test_drift_guards.py`): copies the content tree and one packed shard, breaks one thing at a time, and requires each check to refuse it. Host-only, quick tier |
 
-Tiers: GTest names prefixed `Full/` are excluded from the quick, standard and
-comprehensive tiers by `HIP_MLOPS_ENGINE_test_categories.yaml` and run only in the full
-tier; names prefixed `Comprehensive` are excluded from the quick and standard tiers and run
-in the comprehensive and full tiers; every other case above runs in every tier.
+Tiers (`HIP_MLOPS_ENGINE_test_categories.yaml`, matched on the GTest full name
+`Suite.Case` or `Prefix/Suite.Case/Param`):
+
+| Tier | Runs |
+|---|---|
+| quick | Host unit tests only. Excludes every FlyDSL device suite (`TestGpuFlydsl*` and `IntegrationGpuFlydsl*`, bare or behind any instantiation prefix) and every `Standard*`, `Comprehensive*` and `Full*` instantiation |
+| standard | Quick plus the FlyDSL device suites: `Standard*` instantiations and the unprefixed `TestGpuFlydsl*` / `IntegrationGpuFlydsl*` cases. Excludes `Comprehensive*` and `Full*` |
+| comprehensive (nightly) | Standard plus the `Comprehensive*` instantiations. Excludes `Full*` |
+| full | Everything not disabled |
+
+A FlyDSL device suite that is parameterized takes its tier from the instantiation prefix, one
+of `Standard`, `Comprehensive` or `Full`, so no FlyDSL device test runs in quick. The five
+FlyDSL external integration lanes (`hipkernel_flydsl_*_test_categories_integration.yaml`)
+register standard, comprehensive and full only: they have no `quick` or `ffm-quick` category.
+The standard tier is the pre-merge one. Its device cases run small shapes that give one
+signal per feature (about 1.5 s per case or less, except the per-object suites
+`TestGpuFlydslSdpaObjects` and `TestGpuFlydslSdpaBwdObjects`, whose docblocks state the cost
+of one launch per form or per representative object); the comprehensive tier holds the rest
+of each sweep and the large shapes, with these exceptions. Standard CDNA cases built on
+`cdnaStandardSpec()` run 8 query and 2 KV heads, not the model shape's 32/8.
+Sixteen of them have no comprehensive twin and so run only that shape in every tier:
+`NonCausalMatchesTheReference`, `CausalMatchesTheReference`, `AppliesAScaleValue`,
+`ReadsARuntimeScaleAtExecute`, `ServesAnOddGroupSizeAtARaggedLength`,
+`WritesTheLogSumExpOfEachRow`, `ServesCrossAttentionWithBottomRightCausal`,
+`ServesTheDeprecatedCausalBooleansAlone`, `ServesMoreQueriesThanKeysWithRowsNoKeyReaches`,
+`ServesSlidingWindowsAtHeadDim64And256`, `ServesHalfAtHeadDim128`, `ReadsVThroughItsOwnLayout`,
+`WritesTheLseThroughItsOwnStrides`, `ServesBhsdLayout`, `AddsABiasPerHead` and
+`ServesADiagonalThatShowsEveryKeyOnTheNonCausalObjects`. In 11 cases with a comprehensive
+twin the twin runs the complementary points, so 21 standard points are not repeated at the
+model shape (`ServesSlidingWindows`, `ServesHeadDimsBetweenTheBuiltOnes`,
+`AddsABiasAtEveryHeadDim`, `AddsABiasThatMasksWholeTilesWithNegativeInfinity`,
+`AddsABiasInsideASlidingWindow`, `DecodesPaddedBatchesWithSplitKeys`,
+`DecodesWithSplitKeysAndPackedGroups`, `ServesAWidthInsideABucketThatIsNotAPowerOfTwo`,
+`ServesHeadDim256WhereShipped`, `ServesPackedQkvViews`,
+`AddsAPaddingMaskWithBottomRightCausalCrossAttention`). The frontend `EncoderWindowPacked`
+runs 96 x 96 with window 24/23 only.
 
 Which GPUs run which tier in CI (`.github/workflows/therock-multi-arch-ci.yml` and
-`therock-multi-arch-ci-nightly.yml`): pre-merge (standard tier) runs these tests on gfx94X on
-Linux and gfx110X on Windows; the nightly (comprehensive tier) on gfx94X on Linux and gfx1151 on
-Windows. Both workflows build gfx950, but neither runs the hip-kernel-provider or hipDNN tests
-there: the pre-merge gfx950 test jobs skip, and the nightly's gfx950 test shards run none of
-these suites. So a CDNA comprehensive case runs nightly on gfx942, the arch it ran on pre-merge,
-and gfx950's CDNA objects (the dual-wave kernel among them) are covered only by device runs
-outside CI, in either tier. An RDNA comprehensive case runs nightly on gfx1151 and no longer on
-gfx110X; both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"),
-so the nightly runs the moved RDNA cases on the objects gfx110X ships, on another member of
-the family. A runner that fails to stage the provider's content loads no FlyDSL descriptor
-set, so a shard that lands there fails its RDNA cases instead of running them. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201) either: the CDNA
-objects on gfx90a, and the gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs
-outside CI, in either tier, so the tier split changes nothing there or on gfx950. No feature
-lost its only CI arch to the move: every moved case is an RDNA prefill/decode or CDNA case.
+`therock-multi-arch-ci-nightly.yml`):
 
-The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
+| Tier | Linux | Windows |
+|---|---|---|
+| standard (every PR) | gfx94X | gfx110X |
+| comprehensive (nightly) | gfx94X | gfx1151 |
 
-- `Comprehensive/TestGpuFlydslSdpaObjects.*/OnePerNightlyForm`: one RDNA prefill and decode
-  object per form `isNightlyForm` names (a bias with a sink, a generic tier or a V head dim of
-  its own, or on prefill a split V; exact f32; V-mask pairs; the generic decode tiers split
-  four ways). `OnePerForm` keeps one object of every other form (44 per engine per target).
-  On the CDNA generic engine, the f16 and causal builds of the V-mask, bias-with-a-sink,
-  bucketed-bias, strided-f32-bias and split-V forms, split V beside a bias, bucket or V mask,
-  and exact f32 beyond its plain non-causal form (`isNightlyCdnaForm`); `OnePerForm` keeps 31
-  forms per target, the bf16 non-causal build of each of these features among them.
-- Each feature keeps one pre-merge dispatch case per family, and the frontend lanes keep
+Both workflows build gfx950, but its hip-kernel-provider test jobs do not run in this
+repository's CI: at the pinned TheRock family matrix gfx950 tests only on submodule bumps (a
+pull request touching `projects/hipblaslt/` adds a hipBLASLt-only gfx950 presubmit job), so
+the pre-merge gfx950 jobs run none of these suites and the nightly has no gfx950 test
+shards. No CI tier tests gfx90a, gfx120X (gfx1200, gfx1201) or gfx950 either, and no Linux
+gfx110X lane runs the
+nightly. A case demoted from standard to comprehensive therefore no longer runs on gfx90a,
+gfx120X or Linux gfx110X in CI (an accepted gap), and gfx950's CDNA objects (the dual-wave
+kernel among them) are covered only by device runs outside CI, in either tier: the cases
+that are the only coverage of a feature stay in standard, and the CDNA objects on gfx90a
+and gfx950 and the gfx12 RDNA prefill, decode and aiw objects are otherwise covered by device
+runs outside CI. An RDNA comprehensive case runs nightly on gfx1151 and not on gfx110X; both
+are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"), so the
+nightly runs the moved RDNA cases on the objects gfx110X ships, on another member of the
+family. A runner that fails to stage the provider's content loads no FlyDSL descriptor set,
+so a shard that lands there fails its RDNA cases instead of running them.
+
+The FlyDSL SDPA forward cases in standard and in comprehensive:
+
+- `Standard/TestGpuFlydslSdpaObjects.*/OnePerForm` launches one object per form. On the RDNA
+  prefill and decode engines and the CDNA generic one it runs the bf16 non-causal forms, minus
+  the forms `isNightlyForm` names; the dual-wave, CDNA decode and aiw engines run every form.
+  `Comprehensive/TestGpuFlydslSdpaObjects.*/OnePerNightlyForm` runs one object of each form
+  `isNightlyForm` names: every f16, f32 and causal form of those three engines; of the bf16
+  non-causal ones, on RDNA the V-mask pairs, a bias with a sink, a generic tier or a V head dim
+  of its own, a split V on prefill, and the generic decode tiers that split four ways; on CDNA
+  a split V beside a bias, a bucket or a V mask (`isNightlyCdnaForm`). `Full/...Every` runs all
+  objects.
+- Each feature keeps one standard dispatch case per family, and the frontend lanes keep
   theirs (`IntegrationGpuFlydslSdpaFrontendFeatures` / `IntegrationGpuFlydslSdpaFrontendParity`:
   left-only windows, V heads of their own, the parity extras, head dims off 8, dropout under
-  padding and over packed sequences, ragged origins). Pre-merge on both families: ragged
+  padding and over packed sequences, ragged origins). Standard on both families: ragged
   per-batch origins (`PacksSequencesAtOriginsInAnyOrder`, `MirrorsSequsedKAtKeyOriginsInAnyOrder`),
-  packed dropout (`DropsPackedSequencesWithTheDenseMask`), P rounding
-  (`KeepsOUnbiasedOverOneSignedValues` at bf16 with no mask, the shape a truncated P fails;
-  RDNA decode's `DecodesOUnbiasedOverOneSignedValues` and aiw's case run every shape), the
-  sharp softmax (`HoldsAotritonsBoundAtScale1Point2`, which a truncated P still passes, §5.7),
-  large logits (`KeepsLargeBf16ScoresFinite`) and determinism (`GivesTheSameBitsOnEveryLaunch`),
-  plus every dispatch case that takes under half a second in CI (gfx942 for CDNA, gfx1101 for
-  RDNA).
-- `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier` and
-  `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier` (the `TEST_P` cases of those suites in
-  `src/tests/engines/kernel_ingestor_engine/packs/TestFlydslSdpaCdnaEngine.cpp` and
-  `TestFlydslSdpaRdnaEngine.cpp` are the list): a feature's other dispatch cases, each half a
-  second or more in CI, and the rest of a sweep whose pre-merge case runs one point of it
-  (where a case's name appears in both the dispatch and the comprehensive suite, the
-  comprehensive one runs the shapes, head dims or values the pre-merge one leaves out). The
-  dual-wave shapes of `GivesTheSameBitsOnEveryLaunch` and `ServesHeadDim256OnTheDualwaveKernel`
-  run here where the build ships no dual-wave kernel for the device (pre-merge where it does).
+  packed dropout (`DropsPackedSequencesWithTheDenseMask`: on CDNA the unmasked bit-for-bit mask
+  and the bottom-right GQA case with the undropped LSE; on RDNA prefill and aiw every case but
+  the one-signed values), P rounding (`KeepsOUnbiasedOverOneSignedValues` at bf16 with no mask,
+  the shape a truncated P fails; RDNA decode's `DecodesOUnbiasedOverOneSignedValues` runs every
+  shape), the sharp softmax (`HoldsAotritonsBoundAtScale1Point2` at bf16: CDNA head dims 64 and
+  256, RDNA head dim 64 without a mask and top-left causal and head dim 256 without a mask, which
+  a truncated P still passes, §5.7), large logits (`KeepsLargeBf16ScoresFinite`) and determinism
+  (`GivesTheSameBitsOnEveryLaunch`, its dual-wave shapes small and gated on the build shipping a
+  dual-wave kernel for the device), at `cdnaStandardSpec()` or the other small shapes of the
+  suite.
+- `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier`,
+  `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`,
+  `Comprehensive/TestGpuFlydslSdpaAiwComprehensiveTier` and
+  `Comprehensive/TestGpuFlydslSdpaAiwClassesComprehensiveTier` (the `TEST_P` cases of those
+  suites in `src/tests/engines/kernel_ingestor_engine/packs/` are the list; the aiw class suite
+  is in `TestFlydslSdpaAiwClasses.cpp`, the others in `TestFlydslSdpaCdnaEngine.cpp` and
+  `TestFlydslSdpaRdnaEngine.cpp`): a feature's other dispatch cases and the rest of
+  a sweep whose standard case runs a few points of it (where a case's name appears in both the
+  dispatch and the comprehensive suite, the comprehensive one runs the shapes, head dims, dtypes
+  or values the standard one leaves out: for `HoldsAotritonsBoundAtScale1Point2` f16, head
+  dim 512 and causal at 256; for `KeepsValuesAtKeysNoRowSeesOutOfO` the infinities beside the
+  NaN; for packed dropout the one-signed values and the f32 cases). The large dual-wave shapes
+  of `GivesTheSameBitsOnEveryLaunch` and `ServesHeadDim256OnTheDualwaveKernel` run here on
+  every device whose build ships a dual-wave kernel.
 - `ComprehensiveThd/IntegrationGpuAsmSdpaForwardRagged`: the ASM group-mode kernels over
   packed sequences without a mask (the bottom-right causal cases run in every tier).
-- `ComprehensiveDualwaveHeadDim256/IntegrationGpuFlydslSdpaFrontendParity` off gfx950 (gfx950
-  runs `DualwaveHeadDim256` in every tier) and
-  `ComprehensiveAotriton/IntegrationGpuFlydslSdpaFrontendFeatures.*/AotritonScale1Point2HeadDim512*`
-  off CDNA (CDNA runs `Aotriton/` in every tier).
+- Frontend lane groups with a `Comprehensive*` counterpart: `StandardPaddedDropout` /
+  `ComprehensivePaddedDropout`, `StandardPackedDropout` / `ComprehensivePackedDropout` (the
+  top-left cases with a keyless batch or sequence), `StandardOddHeadDims` /
+  `ComprehensiveOddHeadDims` (head dim 23 packed, head dim 37 in f32, Q/K 64 with V 37),
+  `StandardBackfill` / `ComprehensiveBackfill` (f32 with lengths). The
+  `StandardDualwaveHeadDim256` cases run small shapes on gfx950, the arch they are pinned to;
+  `ComprehensiveDualwaveHeadDim256` runs the large shapes on every arch (gfx950 on the dual-wave
+  kernel, the others on their first-ranked engine). `StandardAotriton` runs the large-value cases
+  everywhere and `AotritonScale1Point2HeadDim512` on gfx9; `ComprehensiveAotriton` runs the
+  latter on the other arches, and `ComprehensiveAotritonCausal` runs
+  `AotritonScale1Point2HeadDim512Causal` on every arch.
 
 ---
 
@@ -495,7 +554,7 @@ One SDPA-forward node, and:
 | Scale: `attn_scale_value` (finite, \|scale\| ≤ 2²⁰: zero and negative included), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. Every FlyDSL SDPA family serves the same range (`FlydslSdpaShared.hpp` `isServableScale`, `MAX_SOFTMAX_SCALE`), as PyTorch and AOTriton take any scale: at most 2²⁰ in magnitude, beyond which each family overflows f32 at a different point, so all decline alike; NaN and ±inf decline. The RDNA prefill and decode objects without a bias keep their running max over unscaled scores and fold the scale into the exponent, which holds only for a positive, normal scale (`rawScoresServe`): a negative one reverses the order and turns a masked score's −inf into +inf, and zero (or a subnormal one, which flushes to it) turns it into NaN. Their bias objects scale first and mask after, so a graph without a bias whose scale -- a value or a constant tensor -- is zero, negative or subnormal runs on the query-dtype bias objects, reading a zero bias the engine writes into its workspace on the launch stream, at stride 0 on every axis (`runsOnAZeroBias`; packed sequences too). No object changed: such a graph pays what a bias object costs over its plain twin (§6.2), where scaling before the max in the plain objects would have cost every positive-scale graph a multiply per score. Where no bias twin serves the graph (the 576/512 and 512/512 decode objects; and on gfx11 a `head_dim` of 264-504 past one 16-row tile, since the bias objects of the decode tier up to 512 take one tile, §5.4) such a graph declines. The aiw objects scale every score before the max (correction (b)) and take any such scale on their plain objects. A pass-by-value scale is read from host memory at launch, after the object was chosen: one outside the range is refused there, and so is a zero, negative or subnormal one on a plain RDNA object (a bias object or an aiw object takes it). |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor, 4-byte aligned, positive strides on its axes longer than 1, no two elements at one address | The kernel writes the natural-log LSE of the scaled scores there, through its strides. |
 | Bias (`attn_mask`), if present: an f32 device tensor, or one in the query's dtype, declaring 16-byte alignment, of rank 1–4 whose dims, right-aligned to `[B, H, Sq, Skv]`, are each that extent or 1; positive strides on real axes; one (batch, head) slice under 2³⁰ elements | Added to the scaled scores before the mask, as the reference does; a size-1 or absent axis broadcasts. The kernel reads it through a 32-bit buffer descriptor with 32-bit offsets. |
-| `Sq`, `Skv` < 2²⁹; one (batch, kv head) slice of K or V under 2 GiB (and of Q, for f32); grid under 2³¹ | int32 mask arithmetic, and 32-bit bounds-checked buffer descriptors. |
+| `Sq`, `Skv` < 2²⁹; one (batch, kv head) slice of K or V under 2 GiB (and of Q, for f32); grid under 2³¹ workgroups, and under 2³² work-items on each axis (workgroups times workgroup size) | int32 mask arithmetic, and 32-bit bounds-checked buffer descriptors. HIP rejects a launch whose work-items on an axis pass the dispatch packet's 32-bit grid size. |
 
 Any sequence length is correct: K and V reads past `seq_len_kv` return zero and
 every such score is masked, so nothing is padded and nothing pads the softmax.
@@ -504,7 +563,7 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 
 **Graph schema.** Before a matcher runs, the ingestor declines a graph whose schema floor
 (hipDNN's `computeMinimumEnginePluginApiVersion`) is above the engine's UED `sdk_version`.
-Every FlyDSL SDPA engine (RDNA, aiw and CDNA alike) claims **1.4.0**, the newest version
+Every FlyDSL SDPA forward engine (RDNA, aiw and CDNA alike) claims **1.6.0**, the newest version
 the SDK defines (`K_MAX_SUPPORTED_API_VERSION`), so ragged graphs reach the matchers; each
 field the schema added up to it is gated:
 
@@ -515,10 +574,13 @@ field the schema added up to it is gated:
 | 1.3.0 | tensor `ragged_offset_tensor_uid` | Q/K/V/O: compact THD or cuDNN's packed form, else declined (§5.9, §7.10); the LSE: packed through Q's table or dense; every other tensor declines it |
 | 1.3.0 | tensor `alignment` | `declaresAlignment` wherever a device tensor is read: Q/K/V/O and the bias 16 bytes, LSE, lengths, offset tables, RNG dump and the (FLOAT) sink 4, seed and offset on the device 8 |
 | 1.4.0 | tensor `ragged_offset_multiplier` | a ragged tensor's must be its own sequence stride (`isPackedThrough`); on a tensor that is not ragged anything but 1 declines (`usesUnreadSchemaFields`) |
+| 1.6.0 | SDPA `cu_seq_len_q` / `cu_seq_len_kv` | declined in the CDNA and RDNA matchers before the varlen rules read the graph: the kernels read per-batch lengths (`seq_len_*`), not cumulative ones |
 
 `TestFlydslSdpaGraphSchema` pins the claim to the SDK's newest version: an SDK that adds one
-fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **Through
-hipDNN's backend:** the provider declares engine plugin API 1.4.0, the SDK's newest
+fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2), and the two
+backward engines at 1.4.0, the schema that introduced the last field they read: `cu_seq_len_*`
+exists on the forward node only. **Through
+hipDNN's backend:** the provider declares engine plugin API 1.6.0, the SDK's newest
 (`src/core/PluginPublic.cpp`), so the backend routes it ragged graphs; its schema guard
 (`src/core/GraphSchema.hpp`) declines a graph for every engine whose declared schema is below
 the graph's floor: built-in engines declare theirs in `Container.cpp`, ingestor engines their
@@ -671,6 +733,7 @@ RDNA).
 | V with a head count of its own (Hk ≠ Hv, each dividing Hq) | Each query head reads V's head `h / (Hq / Hv)`, as K's `h / (Hq / Hk)`; every family, padded and packed too (`ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes` runs one case list on each; on CDNA the bucket, pair and MLA objects serve it, §7.2) |
 | A left-only window (`left_bound` with no `right_bound`), either corner | Every key from the window's edge to the last one; a row the window leaves keyless (top-left, more queries than keys) O = 0, LSE = −inf. Every family, padded and packed too (`AppliesALeftOnlyWindowAsTheCpuReferenceDoes` runs one case list on each) |
 | Scale | Any finite one up to 2²⁰ in magnitude in every family (§5.2, §7): at zero every kept key weighs the same (O the mean of V over them, the LSE the log of their count; with a bias, softmax of the bias); a negative scale reverses the scores' order |
+| Stats | the f32 `[B, H, Sq, 1]` stats tensor through its actual strides, padded dense strides included (SS-1; beyond AOTriton's dense stats); ragged stats packed (H, T) or (T, H) with its own offset when Q is ragged (SS-4, SS-5) | alignment below 16 bytes, stricter than the forward's f32 check, so a graph the forward serves with a 4 or 8 byte stats alignment declines (SS-3) [operand]; a negative stride or overlapping elements, or a head's rows beyond 32-bit byte offsets (SS-1) [layout]; ragged stats beside a dense Q or the reverse (SS-4) [varlen]; ragged strides that are neither packed form (SS-5) [layout] |
 
 What differs, and why:
 
@@ -698,6 +761,10 @@ What differs, and why:
   rows that see it. Matching that would cost a select per P·V element; such a V is outside
   the contract, as a NaN anywhere in the inputs is. Paged caches are not served yet; paging
   must keep reading no key no row sees.
+  On gfx950 a NaN in the bias propagates to dK and dV: the 16-bit-bias dK/dV kernels' exponent
+  clamp is NaN-propagating (`minimum`); the f32-bias kernel has no clamp. The `*NanBias*`
+  device cases hold dK and dV non-finite where the reference is. A NaN in K or LSE is not
+  tested. A NaN input is still outside the contract.
 - **P in 16 bits.** Each family rounds P to the input dtype before the P·V product, as
   AOTriton does, and every family rounds bf16 P to nearest. gfx950's CDNA objects use
   `v_cvt_pk_bf16_f32` (ties to even). gfx942's and gfx90a's CDNA generic and decode objects
@@ -982,19 +1049,23 @@ table, the sequence extent still the longest sequence.
   beside the ragged Q declines (hipDNN's references serve it). Tested by
   `TestFlydslSdpaSequsedK*` (the binding, the objects that run it, a decline per field) and on
   the device by `MirrorsSequsedKWithoutSeqLenQ` (RDNA prefill, aiw, CDNA: the `seqused_k` cases
-  above without `seq_len_q`, against the per-sequence and CPU references),
+  above without `seq_len_q`, against the per-sequence and CPU references; the CDNA case in the
+  comprehensive tier),
   `MirrorsSequsedKAtKeyOriginsInAnyOrder` (the same with K's origins out of order) and the
-  frontend lane's `PackedWithSeqLenKvAlone` and `RaggedOrigins/*`.
+  frontend lane's `PackedWithSeqLenKvAlone` and `StandardRaggedOrigins/*`.
 - **Per-batch origins in any order** (SEM-026's ragged layout rules; RDNA modification 37,
-  CDNA modification 47): `TestGpuFlydsl*Dispatch.PacksSequencesAtOriginsInAnyOrder` (RDNA
-  prefill, CDNA) and `...MirrorsSequsedKAtKeyOriginsInAnyOrder` (RDNA prefill, aiw, CDNA) put
+  CDNA modification 47): `TestGpuFlydslSdpaRdnaDispatch.PacksSequencesAtOriginsInAnyOrder` and
+  `TestGpuFlydslSdpaCdnaDispatch.PacksSequencesAtOriginsInAnyOrder` (RDNA prefill, CDNA) and
+  `MirrorsSequsedKAtKeyOriginsInAnyOrder` (the `TestGpuFlydslSdpa{Rdna,Aiw,Cdna}Dispatch`
+  cases) put
   Q's and K's sequences out of order with gaps between them and a last table entry of 0; the
   harnesses check every token no sequence owns keeps its fill. The `...AtAHeadDimOffEight`
-  variants (RDNA prefill and CDNA both forms, aiw the `seqused_k` one) run them at head dim 53,
+  variants (RDNA prefill and CDNA both forms, aiw the `seqused_k` one; the CDNA ones in
+  `TestGpuFlydslSdpaCdnaComprehensiveTier`) run them at head dim 53,
   over the head-dim padding copies (§7.12), which copy each sequence's own length from its
   table entry in and back; the copies before they took the lengths, which sized a sequence by
   `offset[b + 1] − offset[b]`, fail them. The frontend lane's
-  `RaggedOrigins/*` cases run the same forms through `Graph::sdpa` against hipDNN's CPU
+  `StandardRaggedOrigins/*` cases run the same forms through `Graph::sdpa` against hipDNN's CPU
   reference graph executor, which addresses each batch at its origin for its length. The
   objects before modifications 37 and 47, which clamped a length to `offset[b + 1] −
   offset[b]`, fail these cases. What stays declined, each with a decline case
@@ -1074,7 +1145,9 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
 - **Seed and offset:** `[1, 1, 1, 1]`, INT64 on the device (8-byte aligned; the kernel reads
   it there, as PyTorch passes it), or INT64/INT32 by value (widened on the host; a seed given by
   value is written to 8 bytes of workspace with two memsets on the launch stream, so the
-  launch stays capturable). INT32 on the device, a seed or offset without a probability, a
+  launch stays capturable). By value still needs rank-4 dims and strides: `set_value()` resets
+  them to `{1}`, so call `set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1})` after it. INT32 on
+  the device, a seed or offset without a probability, a
   probability outside [0, 1), and the mask-and-scale form decline.
 - **The RNG dump** (`rng_dump`, `FlydslSdpaRngDump.hpp`): the keep mask the launch applied,
   FLOAT `[B, Hq, Sq, Skv]`, 1 kept and 0 dropped, which hipDNN's references apply as the
@@ -1147,12 +1220,17 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   hipDNN's keep-rate check and O against the CPU reference with the dump; a seed and offset by
   value; one table for every operand; slots with per-batch lengths; and one-signed U[0, 1)
   values in both 16-bit dtypes with O's mean signed error bounded (a P truncated to bf16 fails
-  it). The same cases but the one-signed ones run in f32 on the f32 dropout objects
-  (`packedF32DropoutSpecs`, `TestGpuFlydslSdpa{Rdna,Cdna}Dispatch.DropsF32PackedSequencesWithTheDenseMask`;
+  it). The standard tier runs the CDNA case at the unmasked bit-for-bit mask and the
+  bottom-right GQA case with the undropped LSE, the RDNA prefill and aiw ones at every case but
+  the one-signed values (`TestGpuFlydslSdpaRdnaComprehensiveTier.DropsPackedSequencesOverOneSignedValues`);
+  `TestGpuFlydslSdpaCdnaComprehensiveTier.DropsPackedSequencesWithTheDenseMask` runs the whole
+  list. The same cases but the one-signed ones run in f32 on the f32 dropout objects
+  (`packedF32DropoutSpecs`, `TestGpuFlydslSdpaRdnaDispatch.DropsF32PackedSequencesWithTheDenseMask`
+  and `TestGpuFlydslSdpaCdnaComprehensiveTier.DropsF32PackedSequencesWithTheDenseMask`;
   on gfx12 the only RDNA prefill dropout objects). The references also run
   `TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump` and
   `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`, and the frontend-built lane
-  `PackedDropout/IntegrationGpuFlydslSdpaFrontendParity`.
+  `StandardPackedDropout/IntegrationGpuFlydslSdpaFrontendParity`.
 - **Dropout with a strided mask and at `head_dim` 96 on gfx12:** the gfx12 dropout objects gained builds that read a mask one
   key at a time (24, so a mask broadcast along the keys or at any key stride drops on gfx12 as on
   gfx11) and the padded 96 tier's dropout builds (12, `head_dim` 96 and the multiples of 8 below
@@ -1273,13 +1351,27 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-No trained UHD model is installed for the FlyDSL SDPA engines (`sdpa_*`), whose catalog
-this provider changed. Each SDPA engine orders its kernels by descriptor `priority` (the
-native ranker), its engine estimate is the `default` slot the loader disables, and
-autotune measures the order. SDPA models trained on this catalog are a follow-up:
-`gen_descriptors.py` binds each one per arch once it is installed under `heuristics/`
-([README](README.md)). The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their
-trained models; their catalog is unchanged.
+Trained UHD models are installed for the FlyDSL SDPA engines on these architectures
+(under each op's `heuristics/`, bound per arch by `gen_descriptors.py`, see the
+[README](README.md)):
+
+| Engine | Engine estimate (`predict_engine`) | Kernel ranker (`sort_kernel_catalog`) |
+|---|---|---|
+| `sdpa_aiw` | gfx1201 | gfx1201 |
+| `sdpa_cdna` | gfx90a, gfx942, gfx950 | gfx942 |
+| `sdpa_cdna_decode` | gfx90a, gfx942, gfx950 | -- |
+| `sdpa_cdna_dualwave` | gfx950 | -- |
+| `sdpa_rdna` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+| `sdpa_rdna_decode` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+
+Elsewhere an SDPA engine orders its kernels by descriptor `priority` (the native ranker),
+its engine estimate is the `default` slot the loader disables, and autotune measures the
+order. Each installed model records the selector revision it was trained against, which
+digests the engine's kernel catalog and ranker: a change to an SDPA catalog, its kernel
+fields or a ranker makes those models refused at run time, so such a change retrains or
+re-stamps them in the same pull request. `TestFlydslModelBinding` (the census) fails the
+build on a stale stamp. The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their trained
+models; their catalog is unchanged.
 
 ### 6.1 Runtime features audited against compiled-out builds
 
@@ -1394,7 +1486,8 @@ a class's "default" and "companions", ranking applies within one engine: the gen
 kernel's tiles against each other, by descriptor `priority` plus a bonus where a tier's
 measured rule prefers it (the engine's interim native ranker). That static order is
 provisional: autotune times every object the engine admits for a graph and caches the
-measured order, and a trained UHD ranker replaces the static one. Which engine runs a
+measured order, and a trained UHD ranker replaces the static one where one is installed
+(`sdpa_cdna` on gfx942, §6). Which engine runs a
 graph several serve is the engine-level heuristic's (UHD), or autotune's; `priority`
 never compares objects of different engines. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
@@ -1537,7 +1630,7 @@ One SDPA-forward node, and:
 | Dropout, if present: a probability in [0, 1) with an INT64 device or INT64/INT32 by-value seed and offset (§7.9); above 0 without a sink, padded or not, packed or not (packed without a bias), with or without a bias the vectorized objects read | Above 0, served by the generic `has_dropout` objects (modification 33) at `head_dim` 64, 128, 256, packed too, and their bias builds; 0 is the undropped result every object computes. |
 | Packed THD, if present: compact, Q/O and K/V ragged through INT32 `[B + 1, 1, 1, 1]` token tables, the LSE packed through Q's, optionally with both per-batch lengths or `seq_len_kv` alone; without a bias, with or without dropout (§7.10) | Served on the generic prefill objects (modification 34), with dropout on their `has_dropout` objects; the dual-wave, decode and `kv_align` 64 objects decline it. |
 | Declined outright: the dropout mask-and-scale form (the RNG dump of a dropping graph is served, §7.9), paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
-| Batch pitch and grid within int32 | 32-bit addressing. |
+| Batch pitch and grid within int32; under 2³² work-items on each launch axis (workgroups times workgroup size) | 32-bit addressing; HIP rejects a launch whose work-items on an axis pass the dispatch packet's 32-bit grid size. |
 
 ### 7.3 What comes next, and the rule it follows
 
@@ -1595,9 +1688,11 @@ shapes at every head dim, a bias with a sink (both bias dtypes) in every combina
 diagonals that pass the keys at every head dim, the bucket bias head dims, the f32 lowest-finite
 bias rows, the FLOAT sink's other cases, the VAE mid-block at head dim 512, dropout with a bias
 at every head dim, and the padded bias at every key length, head dim and edge row; and the head
-dims 264-504 and the head-dim pairs at every bucket edge, both dtypes and masks. The quick
-tier keeps one configuration of each behavior (each moved case keeps a quick case of the same
-name), so the unit binary fits its 300 s quick-tier budget on a CDNA runner.
+dims 264-504 and the head-dim pairs at every bucket edge, both dtypes and masks. The standard
+tier keeps one configuration of each behavior in `TestGpuFlydslSdpaCdnaDispatch` at
+`cdnaStandardSpec()` (a quarter of the model's heads, the GQA group kept), and the comprehensive
+tier the rest in `TestGpuFlydslSdpaCdnaComprehensiveTier` (§4's tier note); no CDNA device case
+runs in quick.
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -1833,6 +1928,16 @@ the harness's own bias. The measurements are kept outside the repository.
     `generators/_sdpa_cdna_build.py`, keyed by arch, dtype, head dim, rows, causal, mask, bias,
     dropout and key alignment). The open work: a per-object schedule for the rest, or a
     rounding folded into an instruction the softmax already issues.
+28. *One shared null-safe Philox loader for the forward.* Three loaders read the Philox
+    seed and offset pointers, and all three skip the load for a null pointer (a branch, not
+    a select) and read an 8-byte-aligned i64: `_load_u64_or_zero` of
+    `attention_rdna4/fmha_common_gfx1201.py` (the RDNA4 forward and, through
+    `attention_bwd_cdna/fmha_common_gfx1201.py`, both backward packages), and the forward's
+    own copies in `attention_rdna/flash_attn_func_rdna.py` and `dropout_mask/sdpa_dropout_mask.py`.
+    They differ in form only: the copies import `scf` inside the function and build the
+    pointer type inline, where the shared one uses the module's `_scf` and
+    `_i64_global_ptr_ty()`. Sharing one loader belongs with the next forward object
+    regeneration (it changes forward sources).
 
 ### 7.6 How the instance set was chosen
 
@@ -1888,8 +1993,8 @@ What came out of it:
 
 The rules were fitted on bf16 and the f16 objects share them. Bias classes are
 rare in the corpus and ship their default tier only. The process is repeated as
-features land; the rules are coarse by design, and a trained heuristic replaces
-them when the ingestor gains one.
+features land; the rules are coarse by design, and a trained ranker replaces them
+where one is installed (gfx942, §6).
 
 ### 7.7 gfx90a (MI210, MI250)
 
@@ -1977,7 +2082,7 @@ modification 32): 0 new objects.
   beforehand. A bias at key lengths of every residue mod 4 and mod 8, NaN past each batch's keys,
   rows at the lowest finite value, −inf and NaN, on every vectorized and strided object the
   matcher admits, against hipDNN's CPU reference too
-  (`PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns`: the quick tier runs the length set with
+  (`PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns`: the standard tier runs the length set with
   the 63-key batch, `Full/TestGpuFlydslSdpaCdnaFullTier` all of it); with the objects before
   modification 37 it fails on the last real row of the 63-key batch. Every gate:
   `Padding/TestFlydslSdpaCdnaFieldDeclines`,
@@ -2226,9 +2331,11 @@ changed.
 - **Tested:** `TestFlydslSdpaHeadPad` (the routing, the padded graph, the plan, the declines),
   `TestGpuFlydslSdpaRdnaDispatch.*OffEight*` and `PaddedCopiesReadAndWriteOnlyTheHeadDims` (NaN in
   every row gap of Q, K and V, O's gaps checked unwritten), `TestGpuFlydslSdpaAiwDispatch.DropsAtHeadDimsOffEight`,
-  `TestGpuFlydslSdpaCdnaDispatch.*OffEight*`: D 7, 23, 53, 113, 241 at a compact (odd) pitch, plain,
+  `TestGpuFlydslSdpaCdnaDispatch.*OffEight*` (the `TestGpuFlydslSdpa{Rdna,Cdna}ComprehensiveTier`
+  `*OffEight*` cases hold the rest): D 7, 23, 53, 113, 241 at a compact (odd) pitch, plain,
   causal, AOTriton's bias, a zero scale, dropout through the RNG dump, f32, padded, packed and a V
-  head dim of its own, against the references; the frontend lane's `OddHeadDims` cases on every
+  head dim of its own, against the references; the frontend lane's `StandardOddHeadDims` and
+  `ComprehensiveOddHeadDims` cases on every
   family; every gate mutation-checked.
 
 ---
@@ -2240,3 +2347,200 @@ Approved for this integration.
 | Deviation | What FlyDSL does instead | Status |
 |---|---|---|
 | **Two-launch objects name their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`. | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second, in the same packed object. The native `prepare()` loads both and `launch()` runs them in order on the plan stream. The generators verify both symbols exist in the object, with their recorded argument layouts, before writing it; the packer and the state manager's launch-set check see only the first symbol. | This is the form RFC 0021 §3 (kernel slots, draft) names as an accepted alternative to `sources` for dependent kernels: one UKD whose code object holds them, launched by its native handler through symbol names its KMD records, with a split-KV kernel and its reduction as the example. Optional later move: `hsaco` entries in `sources`, once the packer accepts them (proposed in #14215), which would bring both kernels under the packer's and loader's launch-set checks. The objects would not change. |
+
+---
+
+## 9. SDPA backward — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
+
+Split and merged ship for gfx950; split alone also ships for gfx942, gfx90a and gfx11-generic. Both engines share one graph matcher
+([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
+a pure function of the graph that either computes the problem or says why it declines; what
+belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.
+
+| Engine | Launches | Ops (rows) |
+|---|---|---|
+| `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (325) |
+| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,329), `sdpa_bwd_dq` (962); `sdpa_bwd_split` carries the descriptors only |
+
+Backward rows exist for gfx950, gfx942, gfx90a and gfx11-generic (the merged engine on gfx950 only); the forward engines also run on gfx12. The table's split columns cover gfx950 and gfx11-generic; on gfx942 and gfx90a the split engine serves head dims up to 512, as on gfx950. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
+
+| Variant | Split gfx950 | Split gfx11 | Merged gfx950 | Also served by: FlyDSL forward / cuDNN / AOTriton |
+|---|---|---|---|---|
+| bf16, f16 | yes | yes | yes | yes / yes / yes |
+| f32 | yes | yes | no (DT-2) | yes / no / yes |
+| Head dims, Dqk = Dv | up to 512 | up to 256 | 64 to 256 in steps of 32 (no f16 160), or both up to 32 | up to 512 / up to 256 on SM9x / up to 512 |
+| Dqk != Dv | yes (DT-5) | yes, up to 256 | only both up to 32 | yes / ? / yes |
+| Head dim not a multiple of 8 (4 for f32) | padded pitch only (DT-8, LY-3) | padded pitch only | padded pitch, up to 32 | yes, at any pitch / no / padded pitch only |
+| GQA, any group size | yes | yes | yes | yes / yes / yes |
+| `Hk != Hv` (no bias, not f32, not ragged) | head dims 64, 128 | head dims 1 to 128 | no | yes / ? / untested |
+| Causal, top-left or bottom-right; window (not a `left_bound` of 0, MW-9; not with bottom-right alignment under `padding_mask`, MW-13) | yes | yes | yes | yes / yes (not `Sq > Skv` with bottom-right or a window and no `padding_mask`) / causal and a top-left window |
+| ALiBi | no (MW-12) | no | no | no / yes / untested |
+| Bias of rank 1 to 4 broadcast over batch or head, with or without dBias (BI-1, BI-3) | yes | yes | yes, staged bias in Q's dtype only; no dBias at bf16 160 or on the padded 32 tile | yes / yes / a full-matrix bias, with and without dBias |
+| Bias broadcast over query rows, without dBias | yes | yes | yes, except one bias object | yes / yes / untested |
+| dBias with a bias broadcast over query rows (BI-4) | no | no | no | ? / ? / untested |
+| f32 bias beside 16-bit Q/K/V (BI-2) | head dims 64, 128 | head dims 1 to 128 | no | yes / ? / untested |
+| 16-bit bias with an unaligned row pitch | 1 to 512 | 1 to 256 | no | ? / ? / untested |
+| Bias with a causal or window mask (MW-10) | no | no | no | yes / yes (top-left) / untested |
+| Bias or dBias with `padding_mask`, or a ragged bias or dBias (PV-8, PV-10) | no | no | no | yes (padding) / yes / untested |
+| Dropout, probability in [0, 1) | yes | yes | yes | yes / yes, other random stream / yes |
+| Dropout with a bottom-right causal mask (MW-11) | yes | yes | yes | ? / no / untested |
+| Dropout mask tensor (DR-7) | no | no | no | no / yes / untested |
+| `padding_mask` with both `seq_len` tensors; ragged offsets | yes | yes | yes | yes / yes / yes |
+| `seq_len` tensors without `padding_mask`; `seq_len_kv` alone over ragged Q (PV-2) | no | no | no | yes / no / untested |
+| Attention sink, dSink | no: the backward node has no sink input | no | no | sink at head dims 64, 128 / ? / untested |
+
+Neither engine's plans can be serialized: the merged engine's dispatch handler does not
+implement plan saving, and the split engine is slotted (RFC 0021). A
+broadcast dBias is summed by the dBias reduce kernel, launched as the `dbias_reduce` entry of
+the row's `sources` (RFC 0017 §15.1). On gfx950 (and for the fp32 combined bias rows of gfx942 and gfx90a) that entry names the row's own object and the
+reduce symbol, a second kernel of the same code object; on gfx11-generic (and for the 16-bit rows of gfx942 and gfx90a) it names a standalone object
+(the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
+fp32 family has its own); the dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
+pins). Neither ships content: the reduce kernels ride inside the objects that launch them. The 16-bit families cover bf16 and f16;
+fp32 is a native f32 MFMA family. The 32 gfx950 prep objects with a sink are for sink support in a future addition; the matcher does not select them today. A graph none of the shipped rows can compute is
+declined with a named cause (data type, operand layout, mask, workspace overflow), so
+another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
+backward engine). The kernels and how the shipped objects are pinned are in
+[`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
+the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+
+**Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
+([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`),
+the shipped object is the pin of every row except the main kernels of the combined (dB-storing bias) objects and gfx950's standalone reduce
+kernels, and `tests/data/sdpa_bwd_pin_functions.csv` holds those pins' function digests. A rebuild is byte-identical to the shipped
+object except where the nondeterministic list (`tests/data/sdpa_bwd_nondeterministic.csv`) or the pinned-exception list ships a pin instead.
+Composing a new catalogue from the sweep is the maintainers' step and is not needed to reproduce what ships.
+
+### 9.1 What the matcher accepts and declines
+
+The rule IDs below are the ones in the doc comments of the check functions of
+[`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp);
+the decline cause in brackets is the one a refused graph reports.
+
+| Feature | Accepted | Declined |
+|---|---|---|
+| Data type | f16 or bf16 on every tensor (DT-1); f32 on the split engine only (DT-2) | FP8 and mixed types, and f32 on the merged engine (DT-2, DT-3) [data_type] |
+| Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8); on the split engine, V with a head count of its own, `Hk != Hv` (SH-1, see 9.2) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key or value heads (DT-6, SH-1) [gqa]; `Hk != Hv` on the merged engine, or with a bias, fp32 data or a ragged tensor (SH-1) [shape] |
+| Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3), a per-head slab of any data tensor, bias, dBias or the stats beyond 32-bit byte offsets (DT-9: the rows the kernels address past the sequence count: `Sq` rounded up to 64 plus 192 on the query axis, the larger of 256 and `Skv` rounded up to 128 on the key axis) [layout] |
+| Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); any `left_bound` of 0 (MW-9) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
+| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are zeroed, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are neither iterated nor written, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
+| Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3); a bias in Q's dtype, and on the split engine an f32 bias beside f16 or bf16 Q/K/V with an f32 dBias (BI-2); a bias row pitch that is not a multiple of 16 bytes (split engine, 9.2) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; a dBias stride that is not a multiple of 16 bytes (BI-9) [layout]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen]; on the merged engine, an f32 bias [attn_mask] and a bias layout outside the LDS staging contract, which includes an unaligned pitch (BI-8) [bias] |
+| Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); probability 0 is no dropout, both engines serve it with the plain rows and the CPU and GPU references compute it as no dropout, and a seed or offset it names is gated as above and not read (DR-9); padded and packed (ragged) graphs, where the mask follows SEM-015's counter layout (GQA-packed dK/dV objects are dense only); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
+| Stats | the f32 `[B, H, Sq, 1]` stats tensor through its actual strides; padded dense strides are served (SS-1), which AOTriton's dense stats are not; ragged stats packed (H, T) or (T, H) with its own offset when Q is ragged (SS-4, SS-5) | alignment below 16 bytes (SS-3), stricter than the forward's f32 check, so a graph the forward serves with a 4 or 8 byte stats alignment declines [operand]; a negative stride or overlapping elements, or a head's rows beyond 32-bit byte offsets (SS-1) [layout]; ragged stats beside a dense Q or the reverse (SS-4) [varlen]; ragged strides that are neither packed form (SS-5) [layout] |
+| Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
+| Launch grid | x under 2^31 workgroups and under 2^32 work-items (workgroups times workgroup size); y and z at most 65535 | an x extent past either bound; a y or z extent past 65535 |
+
+Six accepted forms are ones cuDNN's backward node rejects: dropout with a bottom-right
+causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` and no
+`padding_mask` (the matcher has no rule against it); head dims that are not a multiple of
+8 (DT-8); head dims above 256 up to 512 (cuDNN v1.24.0 rejects above 256 on SM9x);
+`s_q = s_kv = 1` (the matcher has no rule against it); f32
+data (DT-2, split engine; cuDNN documents its SDPA backward for FP16 and BF16 only, see
+[KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md#hipdnn-extensions)). The declines of ALiBi, a bias with a top-left causal or window
+mask, bias or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor, a
+device scale tensor (SC-2) and a window with bottom-right alignment under `padding_mask`
+(MW-13) are graphs cuDNN serves. cuDNN rejects a bottom-right causal mask with a bias, so
+that decline is no gap. No other hipDNN engine serves SDPA backward on gfx950 or gfx11
+(asm_sdpa's backward builder is gfx942 only).
+
+The engines differ on those head dims. The gfx950 split engine serves every head dim up to 512 (a dim that is not a multiple of 8 only with a padded pitch, LY-3, DT-8). The merged engine serves Dqk = Dv at 64 to 256 in steps of 32, or both dims up to 32, and nothing above 256. The gfx11 split engine serves up to 256.
+
+Dropout follows hipDNN's SDPA dropout contract, not cuDNN's random stream: the kernel
+regenerates the mask with Philox from seed and offset, and the gradient is correct only when
+the forward drew its mask under the same contract
+([SEM-015](../../../projects/hipdnn/docs/SdpaSemanticsRegister.md#sem-015-dropout),
+[KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md#sdpa-dropout-random-stream)).
+The host oracle checks the plane product's 64-bit arithmetic above 2^31 and 2^32; the kernels
+are not exercised at that size.
+
+### 9.2 f32 bias, unaligned bias pitch, separate V heads and row-broadcast bias
+
+The split engine serves five graph families the merged engine declines, so a graph that
+PyTorch's forward serves also trains. Each has its own rows; no input is converted.
+
+| Graph | Split engine | Merged engine |
+|---|---|---|
+| f32 bias beside f16 or bf16 Q/K/V, f32 dBias (BI-2) | served, rows below | declines [attn_mask] |
+| 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
+| `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
+| Row-broadcast bias with a `Sq` that is not a multiple of the query tile, bf16 head dim 64 with dropout | served | the one bias object that keeps its pre-clamp bytes declines it; every other merged bias object serves it |
+| A bias with dBias, with or without baked dropout, at head dim 160 (bf16, f16) or on the padded 32 tile (below head dim 32) | served | declines: merged holds no dB-storing row for these cells (merged has no f16 tile-160 row of any class, so f16 160 graphs go to split; bf16 160 and the padded 32 tile hold only `store_db=0` bias rows), so a graph that asks for dBias finds none |
+| dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
+
+A graph the forward engines serve can still decline in the backward, deliberately and as cuDNN does:
+
+- a head dim that is not a multiple of 8 at a compact pitch (LY-3; the forward pads it through `FlydslSdpaHeadPad.hpp`);
+- `seq_len_q` and `seq_len_kv` without `padding_mask` (PV-2, SEM-008);
+- `seq_len_kv` alone over a ragged Q (PV-2, SEM-028);
+- a stats tensor that declares 4 or 8 bytes of alignment, which the forward accepts and the backward requires 16 (SS-3).
+
+On gfx12 the forward runs and no FlyDSL backward exists.
+
+**Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
+gfx11-generic, for f16 and bf16, with and without baked dropout.
+
+| | gfx950 | gfx11-generic |
+|---|---|---|
+| f32 bias and `Hk != Hv` (plain and causal) | head dims 64 and 128 only | head dims 1 to 128 |
+| 16-bit bias, unaligned pitch | exact tiles at 64 and 128, otherwise the padded 256 and 512 tile rows, which do more work than an exact tile: 1 to 512 | every row reads the bias directly: 1 to 256 |
+
+New table rows: gfx950 79 (dQ 16-bit direct 7, dQ f32 bias 16, dK/dV f32 bias 8, dK-only 16, dV-only 16, dQ V-head 16),
+gfx11-generic 72 (the same without the 16-bit direct rows), and one V-head tail-zero object per arch
+(`tailzero_hv`; its f16 and bf16 entries name the same bytes). The gfx950 tables hold 2,702 rows and ship 2,707 object files (5 tail-zero companions); the gfx11-generic tables hold 501 rows and ship 509 (8 companions).
+
+A graph at other head dims is declined by the ingestor, with a coverage line in the engine's log. Head dims
+outside the rows above, with an f32 bias or `Hk != Hv`, are graphs the forward serves and the backward does not
+(gfx950 outside 64 and 128; gfx11-generic above 128).
+
+**Bias staging rule.** A dQ row's `bias_stage_resolved` is `lds` (the bias is staged through LDS), `direct` (the bias is
+read from memory and a staged row serves the same graphs), `direct_only` (read directly, no staged row exists) or `na`.
+A bias inside the staging contract (16-byte base, strides multiples of 16 bytes, last row padded to a whole 16-byte
+chunk) goes to an `lds` row; a bias outside it goes to a `direct` row. Where no staged row exists (the 256 and 512 tiles,
+an f32 bias, fp32 data) the `direct_only` row serves any bias. An aligned bias thus never lands on a direct row
+that has a staged alternative.
+
+**Own symbols and packs.** Rows with separate V heads take `num_head_v`, so they are separate kernels
+(`fmha_bwd_dq_u2_gfx950_kernel`, `fmha_bwd_dkdv_u2_gfx950_kernel`; gfx11 likewise) in their own packs: the dK-only/dV-only
+dK/dV pair launches through `<arch>.u2.kdp.json` (dispatch `dkdv_u2`), and the V-head dQ row with the V-head tail-zero
+object through `<arch>.dq_u2.kdp.json` (dispatch `dq_u2`). f32-bias rows keep the existing kernel signatures and packs.
+
+**Merged versus split.** Split outranks merged by default. The backend orders applicable engines by engine id, and the
+split engine's id sorts first. Merged admits a subset of split's graphs, so it runs by default only when split declines
+(workspace or tail-zero proof) and otherwise only when selected explicitly. The order rests on the id hash; renaming an
+engine reopens it.
+
+**Known costs.** The new rows are inside the nondeterminism policy (REGEN.md): seven gfx950 rows (V-head) are `dual_object` and
+ship their pins. Residual resource cells, none with a correctness effect:
+
+| Arch | Rows | Cost |
+|---|---|---|
+| gfx950 | dQ f32 bias, dropout, dB stored (f16 d64) | 7 SGPR spills against 6 for its twin |
+| gfx950 | dK/dV f32 bias, bf16 d64, dropout | 4 more VGPRs than its twin |
+| gfx11-generic | dK-only and dV-only rows | SGPR spills to VGPR lanes (48 to 134) against none for the shared-head twin; no scratch; highest on baked-dropout rows |
+| gfx11-generic | dK/dV f32 bias, f16 d128 and bf16 d128 | 6 and 2 VGPR spills (twin 4 and 0) |
+| gfx11-generic | dQ f32 bias, bf16 d128, dropout | 1 more SGPR spill than its twin |
+
+### 9.3 Known issues
+
+- **Neither engine's plans can be serialized.** The merged engine's dispatch handler does
+  not implement plan saving (SDK default `supportsSaving()` is false), and an object computing a
+  broadcast dBias uses a second (reduce) launch. The split engine is slotted, and RFC 0021 defers saving a
+  slot program, so a save of its plan is refused.
+- **gfx11-generic is verified on device on gfx1101 (V710) only.** The support claims keyed to
+  gfx1100 have not run on a gfx1100 device. The other members it ships to (gfx1100, gfx1102,
+  gfx1103, gfx1150 to gfx1153) run the same object and have no device run of their own.
+- **Padded graphs.** With `padding_mask`, a launch after the gradient launches zeroes the
+  dense dQ rows at or past `seq_len_q` and the dense dK/dV rows at or past `seq_len_kv`, on
+  gfx950, gfx942, gfx90a and gfx11-generic, as the references and cuDNN define them. A ragged output is not
+  written past a length: that storage belongs to a gap or to the next sequence, and gap rows
+  are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
+  `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
+  `padneq_window_br` decline by rule (PV-10, MW-13).
+- **gfx90a f16 subnormal operands.** The gfx90a MFMA flushes fp16 subnormal operands (below 2^-14).
+  Where the softmax probabilities fall below that (the plain `x06` bundle case, Sq 64 x Skv 65536,
+  P about 1.5e-5) dV is 0 against a reference of about 4e-2, as in AOTriton. The in-tree device
+  harness compares f16 graphs on gfx90a against a flush-aware reference (`usesFlushAwareReference`);
+  the bundle lane has none, so that one case is skipped on gfx90a by the split engine's static test
+  config and carries no claim there. Scaling P into the normal range for the dV GEMM would remove it.
+- **Support claims on CDNA.** The split engine carries gfx942 and gfx90a claims over the SdpaBackward bundle graphs; the merged engine
+  has no CDNA content and no CDNA claims.

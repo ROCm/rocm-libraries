@@ -17,6 +17,9 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     int_field("prefetch_rows", cfg.prefetch_rows, /*default=*/2);
     int_field("elem_bytes", cfg.elem_bytes, /*default=*/2);
     int_field("rows_per_tile", cfg.rows_per_tile, /*default=*/0);
+    bool_field("no_splits", cfg.no_splits, /*default=*/false);
+    bool_field("row_segments", cfg.row_segments, /*default=*/false);
+    bool_field("exchange_hw", cfg.exchange_hw, /*default=*/false);
 }
 
 } // namespace hipconv::cdna4::direct_wgrad

@@ -23,6 +23,13 @@ void ConvolutionBwdOperationDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "ConvolutionBwdOperationDescriptor::finalize() failed: DX tensor not set");
     validateConvolutionFinalize(_data, _computeDataType, "ConvolutionBwdOperationDescriptor");
+    validateConvolutionSpatialShape(_data,
+                                    _dxDesc->getData().dims,
+                                    _wDesc->getData().dims,
+                                    _dyDesc->getData().dims,
+                                    "dx",
+                                    "dy",
+                                    "ConvolutionBwdOperationDescriptor");
 
     HipdnnBackendDescriptorImpl<ConvolutionBwdOperationDescriptor>::finalize();
 }

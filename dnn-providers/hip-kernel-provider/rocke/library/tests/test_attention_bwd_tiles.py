@@ -42,7 +42,8 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
-from .test_attention_bwd_ir import _walk, lds_hazards, step_bodies, traced_spec
+from ._attention_bwd_lds_model import lds_hazards, traced_spec
+from .test_attention_bwd_ir import _walk, step_bodies
 
 ARCHS = ("gfx942", "gfx950")
 HEADS = (64, 128)

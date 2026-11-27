@@ -34,6 +34,11 @@ stages.
   indices that reference validation checks.
 - [Tensor layouts](include/roc/hostnumerics/layout.hpp), which map coordinates
   to element offsets, and the Python `Layout` docstrings.
+- [Physical layouts](include/roc/hostnumerics/reshape_permutation.hpp), described by tiling or by padding,
+  reshaping, and permuting factors, with a [compiled tutorial](tests/reshape_permutation_test.cpp).
+- [AMD GPU MX scale layouts](include/roc/hostnumerics/amd_gpu_layout/mx.hpp),
+  which copy scales into the physical storage orders that AMD GPU kernels
+  read, with tutorials in the [MX scale layout tests](tests/amd_gpu_mx_layout_test.cpp).
 
 ## Contributing
 

@@ -129,4 +129,62 @@ namespace SwizzleScaleTest
             CHECK(not mergeables.empty());
         }
     }
+
+    TEST_CASE("SwizzleScale requires wave64", "[kernel-graph][graph-transforms]")
+    {
+        using namespace rocRoller;
+        using namespace rocRoller::KernelGraph;
+        using namespace rocRoller::KernelGraph::ControlGraph;
+        using namespace rocRoller::Operations;
+
+        auto target = GENERATE(GPUArchitectureTarget{GPUArchitectureGFX::GFX950},
+                               GPUArchitectureTarget{GPUArchitectureGFX::GFX1201},
+                               GPUArchTargetGFX1250Rev1);
+        DYNAMIC_SECTION(target.toString())
+        {
+            auto context = TestContext::ForTarget(target);
+            auto example = rocRollerTest::Graphs::GEMM(
+                DataType::FP6, DataType::FP6, DataType::Float, DataType::Float);
+
+            example.setTileSize(128, 128, 128);
+            example.setMFMA(16, 16, 128, 1);
+            example.setUseLDS(true, true, false);
+            example.setTranspose("T", "N");
+            example.setPrefetch(true, 2, 2, false);
+            example.setScaling(
+                ScaleMode::Separate, ScaleMode::Separate, DataType::E8M0, DataType::E8M0, 32);
+            example.setSwizzle(64, 64, 8, 1, true);
+
+            auto graph  = example.getKernelGraph();
+            auto params = example.getCommandParameters();
+
+            graph = transform<IdentifyParallelDimensions>(graph);
+            graph = transform<OrderMemory>(graph, true);
+            graph = transform<UpdateParameters>(graph, params);
+            graph = transform<AddLDS>(graph, params, context.get());
+            graph = transform<LowerLinear>(graph, context.get());
+            graph = transform<LowerTile>(graph, params, context.get());
+            graph = transform<LowerTensorContraction>(graph, params, context.get());
+            graph = transform<Simplify>(graph);
+            graph = transform<ConstantPropagation>(graph);
+            graph = transform<FuseExpressions>(graph);
+            graph = transform<ConnectWorkgroups>(graph, context.get());
+            graph = transform<UnrollLoops>(graph, params, context.get());
+            graph = transform<FuseLoops>(graph);
+            graph = transform<RemoveDuplicates>(graph);
+            graph = transform<OrderEpilogueBlocks>(graph);
+            graph = transform<Simplify>(graph);
+            graph = transform<CleanLoops>(graph);
+
+            if(context->kernel()->wavefront_size() == 64)
+            {
+                graph = transform<SwizzleScale>(graph, params, context.get());
+                CHECK(not graph.control.getNodes<Exchange>().empty());
+            }
+            else
+            {
+                CHECK_THROWS_AS(transform<SwizzleScale>(graph, params, context.get()), FatalError);
+            }
+        }
+    }
 }

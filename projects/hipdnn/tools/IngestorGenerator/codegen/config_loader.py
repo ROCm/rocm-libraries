@@ -225,6 +225,16 @@ def load_config(path: Path) -> IngestorConfig:
         behavior_notes=_require_sequence(
             engine_raw.get("behavior_notes"), "engine.behavior_notes"
         ),
+        numerical_notes=(
+            _require_sequence(
+                engine_raw["numerical_notes"],
+                "engine.numerical_notes",
+                "numerical note names",
+                allow_null=False,
+            )
+            if "numerical_notes" in engine_raw
+            else None
+        ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
@@ -407,6 +417,7 @@ def load_config(path: Path) -> IngestorConfig:
                     pack_raw.get("arch", []), f"pack '{pack_raw['name']}' arch"
                 ),
                 discriminator=pack_raw.get("discriminator", ""),
+                dispatch=_pack_dispatch(pack_raw),
                 slot=pack_raw.get("slot", ""),
             )
         )
@@ -451,6 +462,9 @@ def load_config(path: Path) -> IngestorConfig:
         specialization=dict(specialization_raw),
         reduction=dict(raw.get("reduction") or {}),
         slots=slots,
+    )
+    config.engine.trained_catalog_sha256 = _load_trained_catalog_sha256(
+        engine_raw, config.engine.heuristics
     )
 
     _validate_config(config)
@@ -756,10 +770,14 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
     return expanded
 
 
-def _require_sequence(value, scope: str, what: str = "field names") -> list:
+def _require_sequence(
+    value, scope: str, what: str = "field names", allow_null: bool = True
+) -> list:
     """Require a list of names: a bare string is valid YAML and iterates as
-    characters, so ``policy_knobs: use_exp2_fast`` is never recognised."""
-    if value is None:
+    characters, so ``policy_knobs: use_exp2_fast`` is never recognised. A null is an
+    empty list unless ``allow_null`` is False, for a key where only absence means
+    "no list"."""
+    if value is None and allow_null:
         return []
     if isinstance(value, str) or not isinstance(value, (list, tuple)):
         raise ConfigError(
@@ -1422,6 +1440,35 @@ def _require_config_shapes(raw: dict) -> None:
             _require_mapping(pack_raw["kernel_template"], f"{where} kernel_template")
 
 
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _load_trained_catalog_sha256(engine_raw: dict, heuristics: dict) -> dict:
+    """Read ``engine.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
+    hash of the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under
+    that arch were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
+    exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
+    which gates nothing."""
+    raw = engine_raw.get("trained_catalog_sha256")
+    if raw is None:
+        return {}
+    scope = "engine.trained_catalog_sha256"
+    trained = set(heuristics.get("sort_kernel_catalog", {}))
+    _require_mapping(raw, scope)
+    if set(raw) != trained:
+        raise ConfigError(
+            f"{scope} keys {sorted(raw)} must equal the arch keys bound under "
+            f"engine.heuristics.sort_kernel_catalog ({sorted(trained)})."
+        )
+    for arch, digest in raw.items():
+        if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+            raise ConfigError(
+                f"{scope}.{arch} must be 64 lowercase hex digits "
+                f"(tools/catalog_fingerprint.py); got {digest!r}."
+            )
+    return dict(raw)
+
+
 #: Every key each level of the config understands. Closed on purpose -- see
 #: `_reject_unknown_keys`.
 _KNOWN_TOP = frozenset(
@@ -1444,13 +1491,16 @@ _KNOWN_ENGINE = frozenset(
         "name",
         "sdk_version",
         "behavior_notes",
+        "numerical_notes",
         "knobs",
         "heuristic",
+        "native_symbols_from",
         "census_name_symbol",
         "native_symbols_from",
         "shared_workspace",
         "slug",
         "heuristics",
+        "trained_catalog_sha256",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
@@ -1463,6 +1513,7 @@ _KNOWN_PACK = frozenset(
         "kernels",
         "kernel_defaults",
         "discriminator",
+        "dispatch",
         "slot",
         "axes",
         "kernel_template",
@@ -1856,15 +1907,24 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
 
 
 #: What ``hipdnn_data_sdk::utilities::Version``'s constructor accepts: three
-#: separate integers parsed with ``istringstream >>``, which skips surrounding
-#: whitespace and stops at the first character that cannot continue the number,
-#: so a sign is legal and trailing text ignored. Matched exactly rather than
-#: tightened: a stricter check would reject a config the runtime loads.
-_SDK_VERSION_PATTERN = re.compile(r"\s*([+-]?\d+)\s*\.\s*([+-]?\d+)\s*\.\s*([+-]?\d+)")
-#: The range each component is read into (``int``), and the range a descriptor's
-#: ``priority`` is read into (``int64_t``, via ``requireInt64``).
-_INT_MIN, _INT_MAX = -(2**31), 2**31 - 1
+#: unsigned decimal integers separated by '.', with no sign or whitespace,
+#: optionally followed by '.' and an alphanumeric tweak that it ignores. Matched
+#: with ``fullmatch`` so trailing text fails here as it fails in the loader.
+_SDK_VERSION_PATTERN = re.compile(
+    r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[A-Za-z0-9]+)?", re.ASCII
+)
+#: The largest value a version component is read into (``int``), and the range a
+#: descriptor's ``priority`` is read into (``int64_t``, via ``requireInt64``).
+_INT_MAX = 2**31 - 1
 _INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
+
+
+def _version_component_fits(part: str) -> bool:
+    """Whether a run of decimal digits fits ``int`` as ``std::from_chars`` reads it:
+    any number of leading zeros, a value of at most ``_INT_MAX``. The length bound
+    comes before ``int()``, which refuses strings longer than 4300 digits."""
+    digits = part.lstrip("0") or "0"
+    return len(digits) <= len(str(_INT_MAX)) and int(digits) <= _INT_MAX
 
 
 def _reject_repeats(values: list, what: str, where: str) -> None:
@@ -1888,8 +1948,9 @@ def _reject_repeats(values: list, what: str, where: str) -> None:
 def _check_engine_declaration(config: IngestorConfig) -> None:
     """Check the engine block as ``parseEngineDescriptor`` reads it:
     ``sdk_version`` through ``requireString`` (260-266) and the ``Version``
-    constructor (770-781), ``knobs`` and ``behavior_notes`` for repeats (750,
-    753). Arch lists are exempt; `_unique_arch` collapses their repeats."""
+    constructor (770-781), ``knobs``, ``behavior_notes`` and ``numerical_notes``
+    for repeats (750, 753). Arch lists are exempt; `_unique_arch` collapses their repeats.
+    """
     version = config.engine.sdk_version
     if not isinstance(version, str):
         raise ConfigError(
@@ -1898,19 +1959,23 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
             f"float, and the loader's requireString refuses a number outright. "
             f"Quote it, with all three components: '1.0.0'."
         )
-    match = _SDK_VERSION_PATTERN.match(version)
-    if not match or not all(
-        _INT_MIN <= int(part) <= _INT_MAX for part in match.groups()
-    ):
+    match = _SDK_VERSION_PATTERN.fullmatch(version)
+    if not match or not all(_version_component_fits(part) for part in match.groups()):
         raise ConfigError(
             f"engine.sdk_version '{version}' is not a version the loader can "
-            f"parse. hipdnn_data_sdk::utilities::Version reads three integers "
-            f"'<major>.<minor>.<patch>' and throws on anything else, which fails "
-            f"the engine descriptor and loads none of its packs. Use e.g. '1.0.0'."
+            f"parse. hipdnn_data_sdk::utilities::Version reads three unsigned "
+            f"integers '<major>.<minor>.<patch>' with no sign or whitespace and "
+            f"throws on anything else, which fails the engine descriptor and "
+            f"loads none of its packs. Use e.g. '1.0.0'."
         )
     _reject_repeats(config.engine.knobs, "knob", "engine.knobs")
     _reject_repeats(
         config.engine.behavior_notes, "behavior note", "engine.behavior_notes"
+    )
+    _reject_repeats(
+        config.engine.numerical_notes or [],
+        "numerical note",
+        "engine.numerical_notes",
     )
 
 
@@ -2438,39 +2503,55 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                 )
 
 
+#: A pack's ``dispatch`` name becomes part of a native symbol.
+_PACK_DISPATCH_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _pack_dispatch(pack_raw: dict) -> str:
+    """The pack's ``dispatch`` name, "" for the engine's own handler."""
+    name = pack_raw.get("dispatch", "")
+    if name and (not isinstance(name, str) or not _PACK_DISPATCH_NAME.match(name)):
+        raise ConfigError(
+            f"pack '{pack_raw['name']}' dispatch {name!r} must be a lowercase "
+            f"identifier (it names the native symbol "
+            f"'<namespace>.{{dispatch}}_dispatch')."
+        )
+    return name
+
+
 def _check_launch_names_agree(config: IngestorConfig) -> None:
     """Every kernel of an engine, or of a slot for a slotted engine, names the
     same set of launches.
 
-    The engine (a slot, when slotted) has one dispatch handler, and the handler
-    declares the one set of launch names it launches (``launchNames()``, which
-    the generated native stub emits). The state manager drops a kernel whose set
-    differs from it, so a config mixing single-launch and multi-launch kernels,
-    or two different sets, would generate cleanly and ship kernels that are
-    dropped at load. Slots have separate handlers, so they may differ from one
-    another (RFC 0021 §4).
+    A dispatch handler declares the one set of launch names it launches
+    (``launchNames()``, which the generated native stub emits). The state manager
+    drops a kernel whose set differs from its handler's, so a config mixing
+    single-launch and multi-launch kernels on one handler, or two different sets,
+    would generate cleanly and ship kernels that are dropped at load. For an
+    unslotted engine the packs share its handler unless a pack names its own
+    (``dispatch``); for a slotted engine each slot has its own handler, so slots
+    may differ from one another (RFC 0021 §4).
     """
     scopes: dict = {}
     for pack in config.packs:
-        scope = pack.slot if config.is_slotted else None
+        scope = pack.slot if config.is_slotted else pack.dispatch
         for kernel in pack.kernels:
             names = frozenset(kernel.kernel_source.launches)
             where = f"pack '{pack.name}' kernel '{kernel.name}'"
             expected, first = scopes.setdefault(scope, (names, where))
             if names != expected:
-                owner = (
-                    f"One slot ('{scope}') has one dispatch handler"
-                    if config.is_slotted
-                    else "One engine has one dispatch handler"
-                )
+                if config.is_slotted:
+                    owner = f"One slot ('{scope}') has one dispatch handler"
+                    split_into = "slots"
+                else:
+                    owner = "One dispatch handler"
+                    split_into = "a pack that names its own dispatch"
                 raise ConfigError(
                     f"{where} names launches {sorted(names) or 'none'}, but "
                     f"{first} names {sorted(expected) or 'none'}. {owner}, which "
                     f"declares one set of launch names, and a kernel whose set "
-                    f"differs is dropped when the catalog loads. Split the "
-                    f"kernels into "
-                    f"{'slots' if config.is_slotted else 'engines'} by launch "
-                    f"set."
+                    f"differs is dropped when the catalog loads. Put the kernels "
+                    f"of another launch set in {split_into}."
                 )
 
 
@@ -2950,6 +3031,16 @@ def _validate_config(config: IngestorConfig) -> list[str]:
                 f"engine.behavior_notes names '{note}', which is not in the "
                 f"closed vocabulary {BEHAVIOR_NOTES}. The loader hard-rejects "
                 f"anything else."
+            )
+
+    for note in config.engine.numerical_notes or []:
+        from .models import NUMERICAL_NOTES
+
+        if note not in NUMERICAL_NOTES:
+            raise ConfigError(
+                f"engine.numerical_notes names '{note}', which is not in the "
+                f"closed vocabulary {NUMERICAL_NOTES}. The loader hard-rejects "
+                f"anything else, including a name in the wrong case."
             )
 
     return warnings_out

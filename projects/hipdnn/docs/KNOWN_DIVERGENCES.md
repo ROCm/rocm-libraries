@@ -1,6 +1,6 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. It also lists where hipDNN's SDPA engines differ from cuDNN (dropout random stream, SDPA backward gaps and extensions), outside the shim. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -8,13 +8,15 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` uses hipDNN's default engine selection and logs a warning on its first use in a process. Plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted and forwarded as the backend heuristic mode: `A` as `HIPDNN_HEUR_MODE_A`, `B` as `HIPDNN_HEUR_MODE_B`, `FALLBACK` as `HIPDNN_HEUR_MODE_FALLBACK`. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `FALLBACK` is hipDNN's model-free static (fallback) order, as cuDNN's `FALLBACK` is its non-heuristic order. `OPENSOURCE` is treated as `FALLBACK` and also logs a warning on its first use in a process. Where no applicable engine has a trained model, `A` and `FALLBACK` rank alike. Plan choice and performance can differ from cuDNN.
 
-The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's default engine selection; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the requested policy and every mode orders alike.
+A list of modes follows cudnn-frontend: one heuristic query per mode, in the order given, results concatenated; an engine an earlier mode already returned is not repeated, because hipDNN returns one configuration per engine. `{A, FALLBACK}` is therefore `A`'s ranking, since every mode returns the same applicable engines. An empty list is rejected with `INVALID_VALUE` before any query; cudnn-frontend v1.33.0 accepts it in `create_execution_plans()` and fails later, at `check_support()`. Upstream cudnn-frontend has no default for the mode list; hipDNN defaults it to `{HeuristicMode::A}` (and `{HeurMode_t::A}` in the compatibility layer) as a convenience, so a call that names no mode ranks by `A`. Pass `{FALLBACK}` for the static order.
+
+The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's model-free static (fallback) order; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the policy list the requested mode selects and every mode orders alike.
 
 ## Note filters
 
-hipDNN has no per-plan numerical-note metadata and reports only its own behavior notes, so the shim triages each note by what ignoring it could do. These tables are canonical; `detail/note_triage.h` and `TestCudnnShimNoteTriageTable` follow them.
+hipDNN engines report numerical notes (in-tree engines report `NONDETERMINISTIC` or none) and their own behavior notes, per engine and not per plan. The shim filters on `NONDETERMINISTIC` and on the behavior notes hipDNN reports, and triages every other note by what ignoring it could do. These tables are canonical; `detail/note_triage.h` and `TestCudnnShimNoteTriageTable` follow them.
 
 | Action | Effect |
 |---|---|
@@ -32,12 +34,23 @@ hipDNN has no per-plan numerical-note metadata and reports only its own behavior
 | `DOWN_CONVERT_INPUTS` | warn | error | excluding it is a precision guarantee the shim cannot check |
 | `REDUCED_PRECISION_REDUCTION` | warn | error | excluding it is a precision guarantee the shim cannot check |
 | `FFT` | warn | warn | algorithm class |
-| `NONDETERMINISTIC` | warn | map | deselect keeps only engines that claim determinism (see [Determinism](#determinism)) |
+| `NONDETERMINISTIC` | map | map | select keeps engines that report it; deselect keeps only engines that do not (see [Determinism](#determinism)) |
 | `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13` | warn | warn | algorithm class |
 | `STRICT_NAN_PROP` | error | warn | selecting it is a NaN-propagation guarantee the shim cannot check; excluding it only relaxes |
 | out-of-range value | error | error | unclassifiable |
 
-Deselecting an out-of-range value is an error here but a no-op in cuDNN: without numerical metadata the shim cannot show the exclusion excludes nothing.
+Deselecting an out-of-range value is an error here but a no-op in cuDNN: the shim filters only on `NONDETERMINISTIC`, so it cannot show the exclusion excludes nothing.
+
+No in-tree engine reports a precision note (`DOWN_CONVERT_INPUTS`, `REDUCED_PRECISION_REDUCTION`), so the numerical-note rows other than `NONDETERMINISTIC` never take effect.
+
+Every engine defaults to `NONDETERMINISTIC`, which means its results are not guaranteed bitwise reproducible, as in cuDNN; a provider reports an empty list only for an engine a test proves reproducible. The native `Graph::get_numerical_notes_for_engine` and the v8 `hasNumericalNote` therefore return `{NONDETERMINISTIC}` for an engine whose provider omitted the field. Both also read `NOT_SUPPORTED` from an older same-major backend, which lacks the attribute, as `{NONDETERMINISTIC}`; so do the v9 filters and the Python binding, which use the native getter. With a newer frontend on an older same-major backend that lacks the attribute, every engine, including `MIOPEN_ENGINE_DETERMINISTIC`, therefore reads `{NONDETERMINISTIC}`, so deselecting `NONDETERMINISTIC` leaves no engine (`GRAPH_NOT_SUPPORTED` in v9, an empty filtered list in v8). The frontend getter and the v8 reader drop note values they do not know, so a list holding only unknown values reads as empty, without `NONDETERMINISTIC`. See [RFC 0025](./rfcs/0025_NumericalNotes.md).
+
+Other differences a cuDNN program can observe:
+
+- A buffer smaller than the note count fails `hipdnnBackendGetAttribute` with `BAD_PARAM`; `cudnnBackendGetAttribute` truncates to the requested count.
+- The note type `hipdnnBackendNumericalNote_t` is an `int32_t`, not a C enum, so a value a newer plugin reports passes through an older backend unchanged.
+- `Graph::get_numerical_notes_for_engine` is a hipDNN extension; cuDNN's graph API has no per-engine numerical-note getter.
+- A UED `numerical_notes` accepts the ten cuDNN note names; a descriptor that names an unknown tag fails to load.
 
 ### Behavior notes
 
@@ -61,21 +74,62 @@ Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_
 
 ### Determinism
 
-`deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
+`deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines whose reported numerical notes omit `NONDETERMINISTIC`. A provider claims determinism with an explicit empty list; an engine that declares nothing is reported `NONDETERMINISTIC`, so a missing claim proves nothing. A failed note query for an engine fails the filter instead of passing it.
+
+A claim is made for the engine ID and the finalized graph, never per plan, configuration or knob.
+
+The hip-kernel-provider SDPA engines report these claims. A claim rests on a source trace (no atomics, every split or cross-workgroup combine in a fixed order, every output byte written by one writer or by writers that store the same value), on the engine declining every output and stats tensor whose strides map two logical elements to one address, and on a device test that runs every launch structure of the engine on one device per code-object target it ships. The claim also covers the target's other devices, which run the same code objects and have no device run of their own: gfx11-generic is proven on gfx1100 (gfx1101 to gfx1103 and gfx1150 to gfx1153 not run), gfx12-generic on gfx1201 (gfx1200 not run), gfx942 on MI300X and MI325X (MI308X and MI300A not run), gfx90a on MI210 (MI250 and MI250X not run).
+
+`flydsl_sdpa_cdna`, `flydsl_sdpa_rdna` and `flydsl_sdpa_aiw` are not claimed: their head-pad copy, which pads a head dim that is not a multiple of 8, sizes its buffers from the tensor shape and can still write past a packed operand's region when per-batch origins run past `B*S` tokens. The three engines keep the default `NONDETERMINISTIC` note until that copy is fixed.
+
+| Engine | Operation | Claim | Basis | Targets proven (device) |
+|---|---|---|---|---|
+| `hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx942AttentionUnified2D`, `hipkernel:Gfx942AttentionUnified3d` | forward | `[]` | source trace, repeat test | gfx942 (MI300X; repeated on MI325X) |
+| `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx950AttentionUnified2D`, `hipkernel:Gfx950AttentionUnified3D` | forward | `[]` | source trace, repeat test | gfx950 (MI355X) |
+| `hipkernel:Gfx1151WmmaAttention`, `hipkernel:Gfx1151WmmaAttentionDecode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_cdna_decode` | forward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X) |
+| `hipkernel:flydsl_sdpa_cdna_dualwave` | forward | `[]` | source trace, repeat test | gfx950 (MI355X) |
+| `hipkernel:flydsl_sdpa_rdna_decode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_rdna`, `hipkernel:flydsl_sdpa_aiw` | forward | absent (`{NONDETERMINISTIC}`) | not claimed: the head-pad copy that pads a head dim not a multiple of 8 sizes its buffers from the tensor shape and can write past a packed operand's region when a per-batch origin runs past `B*S` tokens | none |
+| `hipkernel:flydsl_sdpa_bwd_merged` | backward | `[]` | source trace, repeat test | gfx950 (MI355X) |
+| `hipkernel:flydsl_sdpa_bwd_split` | backward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI355X), gfx11-generic (gfx1100) |
+| `ASM_SDPA_ENGINE` | backward | absent (`{NONDETERMINISTIC}`) | dQ is accumulated with atomics (fp32 under the default a32 accumulator, 16-bit under a16), so repeated launches of one plan can give different dQ bytes; measured nondeterministic dQ on gfx942 with A32 (dK and dV identical in the measured rows); gfx950 and A16 unmeasured. The engine serves backward on gfx942 and gfx950; neither is claimed | none |
+| `ASM_SDPA_ENGINE` | forward | absent (`{NONDETERMINISTIC}`) | not claimed: the engine declines an O or stats tensor whose strides map two logical elements to one address (`checkFwdIoLayouts`, `isNonOverlappingView`, `checkStatsTensor` in `SdpaFwdPlanBuilder.cpp`), but not every forward object class it ships has a passing device repeat test; MI308X objects have not run | none |
+| `HIP_FLASH2_ENGINE` | forward | absent (`{NONDETERMINISTIC}`) | held: the engine accepts an O tensor whose strides map two logical elements to one address, and its variant objects (`HIP_FLASH2_BUILD_VARIANTS`) have not run. Every repeat test of the legacy object on a layout without aliasing gives identical bytes | none |
+
+A claim for the `ASM_SDPA_ENGINE` forward needs a passing repeat test of every object it ships, including MI308X. A claim for `HIP_FLASH2_ENGINE` needs the engine to decline an aliasing O layout too, and a passing repeat test of every variant object it ships.
+
+A claim is run-to-run: repeated launches of one plan on the same inputs, on one device and one runtime, give the same output bytes, as cuDNN's reproducibility statement is per architecture and runtime. Byte equality across devices, architectures or runtime versions is not part of the claim. On devices and compute-unit counts other than those run, run-to-run reproducibility is source-traced, not device-tested; several engines choose their launch shape from the device's compute-unit count (for example the split count of `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode` and `Gfx1151WmmaAttentionDecode`, the segment count of `Gfx942AttentionUnified3d`, and whether `Gfx942AttentionDense` ranks its persistent kernels first), so such a device may run split or segment counts the test did not. The device test launches each plan 20 times in one process on an otherwise idle GPU, poisons the outputs and workspace with NaN before each launch, and compares bytes. It does not test:
+
+- concurrent GPU load from other work;
+- fresh allocations between launches (every launch reuses the same buffers);
+- plan rebuild or graph replay (one built plan is launched each time);
+- runs in separate processes;
+- race-detection tooling;
+- ragged offset tables whose sequences overlap (the offsets are device data that no host check reads);
+- aliasing between the buffers of different tensors (no engine checks it).
+- sliding-window graphs for `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode`, `hipkernel:Gfx1151WmmaAttention`, `flydsl_sdpa_bwd_merged` and `flydsl_sdpa_bwd_split`, and keyless-row graphs for `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode` and `hipkernel:Gfx1151WmmaAttention`: source-traced, not device-tested. `hipkernel:Gfx1151WmmaAttentionDecode`'s window is device-tested (`Bf16Hd128CausalWindow2048LseHq8Kv2B1S1x8192`, gfx1100 and gfx1201).
 
 ## Engine filtering
 
-`deselect_engines`, the behavior-note filters, and the determinism filter are applied to the applicable engines after plan creation. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, or `build_plan_at_index()`, including for plans already created.
+The native `Graph` keeps cuDNN's filter semantics: filters persist until changed, `check_support()` answers "is this supported with these filters?", and `build_plans()` builds the best plan that passes them ([RFC 0025](rfcs/0025_NumericalNotes.md) §4 lists the differences). The shim reapplies its own filters (`deselect_engines`, the behavior-note filters, and the determinism filter) to the applicable engines after plan creation, as native `deselect_engines`, which replaces its list. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, `build_plan_at_index()`, or `autotune()`, including for plans already created.
 
-If the filters bar only some engines, `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan, as cuDNN does, instead of failing because the top-ranked engine was barred.
+If the filters bar only some engines, `build_plans(HEURISTICS_CHOICE)` builds the first plan that passes them, as cuDNN does, instead of failing because the top-ranked engine was barred. It calls the native `build_plans`, which walks past the plans the shim's filters remove.
 
-hipDNN's native `build_plans(HEURISTICS_CHOICE)` falls back on any plan-build failure. If the active plan fails to finalize, it logs a WARN with the engine ID and the failure, then tries the other ranked plans (scanning the ranked list from the top) and logs a WARN for each that also fails; the first plan that builds becomes the active plan. Plans barred by filters, descriptor-invalid plans, deselected engines, and plans over the workspace limit are skipped with an INFO line. When no plan builds, the error code is `GRAPH_EXECUTION_PLAN_CREATION_FAILED` and its message lists every attempted engine's failure, in attempt order; this includes a graph with a single plan. An active plan that builds but whose workspace exceeds the `deselect_workspace_greater_than` limit is an error, not skipped. A preferred engine (`set_preferred_engine_id_ext`) is a soft preference: if its plan fails to build, the fallback applies. `build_plans(ALL)` and `build_plan_at_index` do not fall back. When the shim's own filters bar the active plan, the shim retargets with `build_plan_at_index`, which does not walk the fallback: if the retarget target fails to build, its error is returned.
+hipDNN's native `build_plans(HEURISTICS_CHOICE)` falls back on any plan-build failure. If the active plan is removed by a filter or fails to finalize, it tries the other ranked plans (scanning the ranked list from the top); the first plan that passes the filters and builds becomes the active plan. It logs a WARN with the engine ID and the failure for each plan that fails to finalize, and an INFO line, `plan index i (engine e) skipped: <reason>`, for each plan a filter removes. The workspace limit is judged on each plan's engine-config workspace before the plan is finalized; a plan that finalizes over the limit despite its engine config is rejected with a WARN, and the walk moves on. When no plan builds, the error code is `GRAPH_EXECUTION_PLAN_CREATION_FAILED` and its message lists every skipped or failed engine and its reason, in attempt order; this includes a graph with a single plan. A repeated `HEURISTICS_CHOICE` call after a plan was built returns OK and changes nothing, as in cuDNN. A repeated `ALL` call keeps the active plan, builds only the plans not yet built, and returns OK. The shim skips its survivor check on a repeat build, for either policy.
 
-If no created plan survives, the next plan creation (`create_execution_plans`, `create_execution_plan`), `check_support()`, `build_plans()`, or `build_plan_at_index()` returns `GRAPH_NOT_SUPPORTED`; cuDNN returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes `deselect_engines` alone barring every applicable engine.
+If the shim's own filters bar every created plan, the next plan creation (`create_execution_plans`, `create_execution_plan`), `check_support()`, `build_plans()`, or `build_plan_at_index()` returns `GRAPH_NOT_SUPPORTED`; cuDNN returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes `deselect_engines` alone barring every applicable engine. The exception is a repeat `build_plans()` after a successful build, which returns OK and keeps the built plan. When only the workspace limit leaves no plan, `check_support()`, `build_plans()` and `build_plan_at_index()` return `GRAPH_EXECUTION_PLAN_CREATION_FAILED`, as cuDNN does.
+
+Differences from cuDNN that follow from the shim's filter handling:
+
+- `check_support()` marks no plan, so clearing a filter re-admits a plan in hipDNN. In cuDNN a plan `check_support()` removed stays removed.
+- After plans are recreated, a repeat `build_plans` builds one of the new plans. cuDNN keeps the earlier candidate.
+- A failed note read fails a repeat `build_plans` and `autotune`. cuDNN's repeat `build_plans` returns OK without reading notes.
+- After `deserialize`, `check_support()` and `build_plan_at_index()` on a plan whose engine matches a name kept by `deselect_engines` return `GRAPH_NOT_SUPPORTED`. cuDNN keeps the names across `deserialize` too, and its `check_support()` fails there for lack of engine configs.
 
 ## Engine indices
 
-Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
+Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines, which is the static (fallback) order (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension. It shares one list with the name overload: the last call of either kind replaces the list, and an empty list clears it. In C++ a clearing call spells the type, for example `deselect_engines(std::vector<std::string>{})`, because `{}` matches both overloads.
 
 ## Knobs
 
@@ -94,6 +148,19 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | `deselect_workspace_greater_than` | Forwarded; reapplied after plan creation. |
 | `deselect_shared_mem_greater_than` | `0`: no-op. Non-zero: records `GRAPH_NOT_SUPPORTED` (no shared-memory metadata). |
 
+## SDPA cumulative sequence lengths
+
+`SDPA_attributes` is hipDNN's `SdpaAttributes`, so it exposes `set_cu_seq_len_q` / `set_cu_seq_len_kv` and the getters although the shim targets v1.24.0, which has none (cuDNN added them in v1.25.0). They differ from cuDNN as follows:
+
+| Aspect | cuDNN (v1.25.0) | hipDNN |
+|---|---|---|
+| Data type | `INT32` or `INT64` | `INT32` only |
+| 1-D `(B+1)` tensor | Promoted to `(B+1,1,1,1)` in `infer_properties_node` | Promoted in place during validation, so either call order works; the tensor keeps its uid and handle |
+| Mixed per-side form (`cu_seq_len_*` on one side, `seq_len_*` on the other) | Rejected by cudnn-frontend v1.25.0 and v1.26.0; accepted from v1.27.0 | Accepted (`SdpaFwdNode` Rule 6c) |
+| `padding_mask` | Must be `true` whenever any length tensor (`seq_len_*` or `cu_seq_len_*`) is set | Required for `cu_seq_len_*` only; `seq_len_*` with `padding_mask=false` still validates |
+| Paged K/V with `cu_seq_len_*` | Accepted by cudnn-frontend v1.25.0 | Rejected: `SdpaFwdNode::validatePagedKv` requires `seq_len_q` and `seq_len_kv` for paged K/V |
+| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer. The hip-kernel-provider ASM SDPA engine serves `cu_seq_len_q` and `cu_seq_len_kv` together on ragged Q, K, V and O (gfx942, gfx950); no other in-tree engine or reference implements them yet |
+
 ## Build and execute
 
 - `build_operation_graph()` without a handle succeeds only for a graph with no nodes.
@@ -106,16 +173,47 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
 - A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
+- `validate()` and `build_operation_graph()` reject a tensor, or its attached ragged-offset tensor, with a negative stride on any axis with `INVALID_VALUE`; cuDNN frontend v1.24.0 accepts one.
+
+## Graph validation
+
+`validate()` runs hipDNN's node checks. Those that the v8 builders also reach are listed in the "hipDNN operation validation" row under [Operation graphs](#operation-graphs) and apply to the graph API too. These differ from cuDNN as well:
+
+- Shape terms are checked for `int64` overflow. A convolution (forward, data gradient or weight gradient) checks the dilated kernel size `dilation·(kernel−1)+1`, the padded extent minus that span `extent+pre_padding+post_padding−span` and the strided extent `numerator/stride+1`, both when it checks caller-set dimensions and when it infers Y. A resample forward that infers Y checks the padded extent minus its window and the strided extent. A term that does not fit is rejected with `INVALID_VALUE`. cuDNN's frontend does not check these terms: it infers no dimensions for data or weight gradient, and its forward convolution subtracts the kernel span before adding the padding, so hipDNN can reject a graph whose terms, computed in cuDNN's order, fit (divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later).
+- Block-scale quantize and dequantize scales must have X's rank, and each dequantize scale dimension must be at least ceil(X's dimension / its block size), the block sizes applying to X's trailing dimensions. cuDNN's frontend does not check these shapes; its backend reference lists a shape mismatch between X, the scale and Y as `BAD_PARAM` at finalize.
+- A MoE grouped matmul in `SCATTER` mode must route as many rows as the token tensor has (the shapes cuDNN documents for its MoE tensors: S·topK rows for the token and token-index tensors) (divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later).
+- A ragged-offset tensor (`set_ragged_offset`) is validated as a tensor of its own and does not take the graph's data types, so its data type must be set. cuDNN's frontend never fills it either and its backend requires a data type on every tensor, so cuDNN rejects the same graph at build (parity, reported earlier).
+- An SDPA bias must broadcast to the score `[B, H_q, S_q, S_kv]`, its dimensions aligned from the last: batch B or 1, heads H_q or 1. cuDNN's pointwise broadcast rejects the same bias at validation with `SHAPE_DEDUCTION_FAILED`; hipDNN reports `INVALID_VALUE`, as for the bias's last two dimensions (the rejection is parity; the status is a divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later).
+- When only one of layer-norm scale and bias has dimensions, the set one must equal the dimensions inferred for the other: X's, with the first set to 1, or with all but the last k set to 1 when `normalized_dim_count` k is set. cuDNN infers the unset one as X's dimensions with the first set to 1 and never compares the two (divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later).
+- Channels-first layer norm (x `[N,C,H,W]`, scale `[1,C,1,1]`) is rejected with `INVALID_VALUE` although cuDNN accepts it: no hipDNN provider normalizes non-trailing axes (the HIP MLops and rocKE layer-norm kernels normalize trailing dimensions only), and earlier hipDNN read out of bounds for this shape.
+- A tensor data type, pointwise mode, resample mode or padding mode that hipDNN cannot represent, which cuDNN accepts, fails validation with `INVALID_VALUE`. hipDNN cannot lower such a value, so no graph that uses one builds. The v8 builders reject the same values at `build()` (see [Parameter descriptors](#parameter-descriptors) and [Tensors](#tensors)).
+
+## SDPA dropout random stream
+
+Seeded dropout (`dropout_probability`, seed, offset) in every hipDNN SDPA engine that serves it, forward and backward, draws hipDNN's Philox mask, not cuDNN's random stream. Forward and backward must use the same contract: a gradient is correct only when the forward drew its mask under it. The contract is [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
+
+A `dropout_probability` of 0 is the graph without dropout, forward and backward: seed and offset may be given or absent and are not read. cuDNN frontend v1.24.0's backward builds its random-number node from seed and offset whatever the probability, so a cuDNN backward graph at probability 0 needs them. hipDNN treats probability 0 as the graph without dropout in both directions, following the forward, so seed and offset are optional; graphs cuDNN accepts still work. See [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
+
+## SDPA backward engine gaps
+
+The hip-kernel-provider's FlyDSL SDPA backward engines (`hipkernel:flydsl_sdpa_bwd_merged`, `hipkernel:flydsl_sdpa_bwd_split`) are a first version:
+
+- They decline some graphs cuDNN frontend v1.24.0 serves: ALiBi, a bias with a top-left causal or window mask, a window with bottom-right alignment under `padding_mask`, a bias or dBias with `padding_mask`, an explicit dropout mask, a ragged bias or dBias, and a device-resident attention scale. Another engine may serve them. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
+- Their plans cannot be serialized. See [COVERAGE.md 9.3](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#93-known-issues).
+
+On gfx90a, `hipkernel:flydsl_sdpa_bwd_split` serves fp16 graphs with the gfx90a MFMA, which flushes fp16 subnormal operands (below 2^-14). Where a softmax probability or dS falls below that, it contributes 0 to dV, dK and dQ, while cuDNN computes it exactly: for example, the plain bundle case `x06_b1h1k1v1_64x65536_d128_fp16` (every probability about 1.5e-5) gives dV exactly 0 against a reference of about 4e-2. AOTriton on MI200 behaves the same. Scope: the split engine, fp16, gfx90a; bf16 and fp32 are unaffected, as are the other architectures. The in-tree device harness compares fp16 graphs on gfx90a against a flush-aware reference, and that bundle case is skipped on gfx90a by the engine's test configuration and carries no support claim there.
 
 ## hipDNN extensions
 
-- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
+- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {A})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
 - `Graph::get_name`, `get_io_data_type`, `get_compute_data_type`, `get_intermediate_data_type`.
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
 - SDPA forward with a ragged Q over non-paged K/V validates with `seq_len_kv` alone (PyTorch's varlen `seqused_k`); the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well; cuDNN 9.25 spells the form `cu_seq_len_q` + `seq_len_kv`. See [SEM-028](./SdpaSemanticsRegister.md#sem-028-ragged-q-with-seq_len_kv-alone-non-paged-kv).
+- SDPA backward with FP32 Q, K, V, O, dO and gradients: served by the hip-kernel-provider's `hipkernel:flydsl_sdpa_bwd_split` engine. cuDNN documents its SDPA backward for FP16 and BF16 only. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
+- SDPA backward graphs cuDNN frontend v1.24.0 rejects: dropout with a bottom-right causal mask; a bottom-right causal mask or a window with `Sq > Skv` and no `padding_mask`; head dims that are not a multiple of 8, or from 257 to 512; and `s_q = s_kv = 1`. The gfx950 split engine serves them (a head dim that is not a multiple of 8 only with a padded pitch). The merged engine serves such head dims only up to 32 and none above 256, the gfx11 split engine serves up to 256, and the gfx942 and gfx90a split engines serve up to 512 (one padded 512 tile above 256). See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
 
-Code that must also compile against NVIDIA cuDNN cannot use these.
+Code that must also compile or run against NVIDIA cuDNN cannot use these.
 
 ## Versions
 
@@ -137,7 +235,7 @@ Every `cudnnCreate()` call maps cuDNN FE logging environment variables to hipDNN
 | `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=stdout` or `stderr` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE` unset; both log to stderr |
 | any other combination, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` set to a non-zero value | `HIPDNN_LOG_LEVEL=off`, `HIPDNN_LOG_FILE` unset |
 
-Nothing changes when none of these variables is set. The level applies immediately. hipDNN picks the log destination (file or stderr) once, when its logging initializes: if that happens before `cudnnCreate()` (for example, on an earlier hipDNN call), the file mapping is ignored, and if the level was off at that point there is no console output either. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.
+Nothing changes when none of these variables is set. The level applies immediately. hipDNN picks the log destination (file or stderr) once, the first time its logging is enabled: if logging was already on before `cudnnCreate()` (for example, `HIPDNN_LOG_LEVEL` was set and an earlier hipDNN call logged), the file mapping is ignored. While logging is off, no log file is opened. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.
 
 ## cuDNN v8 API
 
@@ -243,7 +341,7 @@ These differ from cuDNN:
 | Several tensors with one UID | accepted when they agree; `BAD_PARAM` naming the UID when data type, dimensions, strides, virtualness, by-value or constant value, or ragged offset differ. Differing byte alignments use the smallest |
 | One UID written by two operations; a cycle | `BAD_PARAM` |
 | A constant value (`setConstValue`) on a tensor whose type is not `FLOAT`, `DOUBLE`, `HALF`, `BFLOAT16`, `UINT8`, `INT32`, `INT64` or `BOOLEAN` | `NOT_SUPPORTED` at graph build |
-| hipDNN operation validation | Graph build runs hipDNN's own checks. Beyond cuDNN's: epsilon and the exponential-average factor must be single-element by-value tensors (`setByValue`); batch-norm scale, bias and statistics must be per-channel `[1,C,1,…]` (no per-activation mode) with N·spatial > 1 when training; a reduction must reduce at least one dimension; a max-pool index must be `INT8` or `INT32`; RMS-norm scale must match the trailing dimensions of X. A rejection is `BAD_PARAM` naming the operation type, except "no engine supports this graph", which is `NOT_SUPPORTED`. Backend failures during lowering, allocation included, also report `BAD_PARAM` with hipDNN's message |
+| hipDNN operation validation | Graph build runs hipDNN's own checks. Beyond cuDNN's: epsilon and the exponential-average factor must be single-element by-value tensors (`setByValue`); batch-norm scale, bias and statistics must be per-channel `[1,C,1,…]` (no per-activation mode) with N·spatial > 1 when training, and the scale's channel count must match X (divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later); a matmul output must have A's rank, the broadcast batch dimensions of A and B, A's rows and B's columns (divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later); layer-norm scale and bias must match the normalized trailing dimensions of X and its statistics the remaining leading dimensions (divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later); a reduction must reduce at least one dimension, so its output dimensions must be set (cuDNN infers an output equal to X); a max-pool index must be `INT8` or `INT32`; RMS-norm scale must match the trailing dimensions of X; a convolution (forward, data gradient or weight gradient) whose shape terms overflow `int64` is rejected (the terms checked and cuDNN's behavior are under [Graph validation](#graph-validation); divergence, approved in review on 2026-11-20 because it prevents an out-of-bounds read or a graph that is guaranteed to fail later). A rejection is `BAD_PARAM` naming the operation type, except "no engine supports this graph", which is `NOT_SUPPORTED`. Backend failures during lowering, allocation included, also report `BAD_PARAM` with hipDNN's message |
 | Engine count (`getEngineCount()`) | computed on the graph's first engine query (`getEngineCount()`, heuristics or `EngineBuilder`) by running hipDNN heuristics, which needs a HIP device; a failure returns its status and the next query retries. It counts only engines hipDNN reports as applicable whose default configuration finalizes; an engine that fails is logged and left out, so every counted index builds. The result is a per-graph snapshot: later changes to the heuristic configuration or autotune cache do not affect an existing graph |
 | Engine indices | `0 … getEngineCount()-1` enumerate the applicable hipDNN engines in ascending (signed) hipDNN engine-ID order, not cuDNN's global engine numbering. They change if the set of applicable engines changes (provider added, removed or upgraded, different GPU) |
 
@@ -253,18 +351,18 @@ These differ from cuDNN:
 
 | Case | Compatibility layer behavior |
 |---|---|
-| Heuristic mode (`setHeurMode`) | `A` and `INSTANT` rank the graph's engines by hipDNN's `ModeA` policy, `B` by `ModeB`, `FALLBACK` by hipDNN's fallback rank; every mode returns the same engines. Each mode queries hipDNN once per graph, on its first use, so the first `INSTANT` (the builder's default) or `A`/`B` query of a graph costs a second heuristic run. See [Heuristic modes](#heuristic-modes) |
+| Heuristic mode (`setHeurMode`) | `A` and `INSTANT` rank the graph's engines by hipDNN's `ModeA` policy, `B` by `ModeB`, `FALLBACK` by hipDNN's static (fallback) order; every mode returns the same engines. Each mode queries hipDNN once per graph, on its first use, so the first `INSTANT` (the builder's default) or `A`/`B` query of a graph costs a second heuristic run. See [Heuristic modes](#heuristic-modes) |
 | Heuristic results of `A`, `B` and `INSTANT` | ranked by the policy, but every result uses the engine's default configuration: mode B's predicted knob settings and the ranking metric the policies attach to their configurations are not carried |
 | `EngineHeuristics::getEngineConfig(count)` | returns the first `count` results (at most `getEngineConfigCount()`): objects fixed at `build()`, the same on every call. Upstream also returns at most `count` results, but refills its descriptors from cuDNN on each call. Every result for a given engine of a graph, from any heuristics or fallback list, shares that engine's default hipDNN configuration: their `get_raw_desc()` is equal |
 | Matmul on gfx115x under Windows | hipBLASLt declines every matmul there (a hipBLASLt GEMM crash workaround), and no other provider runs matmul, so a v8 matmul graph has no engine |
 | Engine indices in errata and in consumer code | errata rules and hard-coded engine numbers (for example PyTorch's cuDNN engines 5, 23, 58 and 63) name NVIDIA engines. Under the compatibility layer the same number selects an unrelated hipDNN engine, or none. At `CUDNN_VERSION` 92200 only the 3-D `ConvBwdData` engine-23 rule is active, and it applies only to a graph with more than 23 applicable engines |
-| Numerical notes (`hasNumericalNote`, `ExecutionPlan::getNumericNotes`) | `NONDETERMINISTIC` for every engine except those known to be deterministic (today `MIOPEN_ENGINE_DETERMINISTIC`); no other numerical note is reported, so filters on notes such as `DOWN_CONVERT_INPUTS` or `TENSOR_CORE` never match. Deterministic-only selection keeps only the known-deterministic engines |
+| Numerical notes (`hasNumericalNote`, `ExecutionPlan::getNumericNotes`, `ExecutionPlan::getAllNumericNotes`) | read from the backend's per-engine numerical notes. An engine that declares none is reported `NONDETERMINISTIC`; no in-tree engine reports another numerical note, so filters on notes such as `DOWN_CONVERT_INPUTS` or `TENSOR_CORE` never match. Only `hasNumericalNote` answers false when the query fails; for `getNumericNotes`, `getAllNumericNotes` and the plan build, a failed numerical-note query fails `ExecutionPlanBuilder::build()`, as upstream, except that `NOT_SUPPORTED` from an older same-major backend that lacks the attribute reads as `{NONDETERMINISTIC}`. Deterministic-only selection keeps only the engines that claim determinism |
 | Behavior notes (`hasBehaviorNote`, `ExecutionPlan::getBehaviorNotes`) | hipDNN behavior notes with a cuDNN counterpart, matched by name; others (for example `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`) are not reported |
 | Engine knobs (`Engine::getSupportedKnobs`) | lists only hipDNN knobs that project onto a cuDNN knob type (see [Knobs](#knobs): int64 value, plain minimum/maximum/stride, no list of valid values). A cuDNN type that two of an engine's knobs map onto is not listed (the v9 `get_knobs_for_engine` lists both) |
 | Knob choices (`EngineConfigBuilder`) | checked at `EngineConfigBuilder::build()`: a type the engine does not list is `NOT_SUPPORTED`; a type chosen twice, or a value outside the knob's range or off its stride, is `BAD_PARAM`. The same `build()` creates the hipDNN configuration, so a failure there is also reported by `EngineConfigBuilder::build()`, not by `ExecutionPlanBuilder::build()`. A choice of `-1` means "unset" (upstream's `EngineConfigBuilder` sends `-1` for every knob it was not asked to set once one is set): it is ignored (not checked, not applied, not counted as a repeat, not in the plan JSON `"knobs"`) unless the knob is listed and its range accepts `-1`; the plan tag keeps it, also after a JSON round trip (the plan JSON records it under `"requestedKnobs"`). A configuration whose choices are all ignored uses the engine's default hipDNN configuration |
-| Plan JSON format (`getJsonRepresentation`, `loadFromJson`) | the compatibility layer's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, knob choices, the requested choices when some were ignored (`"requestedKnobs"`) and, when hipDNN can serialize the plan, a base64 payload. Notes and knob types are the compatibility layer's enum values. JSON written by cuDNN or by another tool makes `loadFromJson` fail with `BAD_PARAM` |
+| Plan JSON format (`getJsonRepresentation`, `loadFromJson`) | the compatibility layer's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, numerical notes (always written), knob choices, the requested choices when some were ignored (`"requestedKnobs"`) and, when hipDNN can serialize the plan, a base64 payload. Behavior notes, numerical notes and knob types are all stored as the compatibility layer's own enum values (`detail/c_types.h`; numerical notes are alphabetical, so `NONDETERMINISTIC` is 2), not NVIDIA's numbering; numerical notes map to and from hipDNN's by name. JSON without `numericalNotes` loads as `{NONDETERMINISTIC}`. The format `version` is `1` with `numericalNotes`; a build without that key rejects such a plan (unknown engine key). JSON written by cuDNN or by another tool makes `loadFromJson` fail with `BAD_PARAM` |
 | Loading a plan without `"payload"` | `NOT_SUPPORTED` from `loadFromJson`; engines whose plans hipDNN cannot serialize cannot be reloaded |
-| Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it |
+| Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes, numerical notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it |
 | `ExecutionPlan::getWorkspaceSize()` | can differ between builds of the same engine configuration: with the MIOpen provider it follows MIOpen's user find-db, which executions fill. Allocate each plan's workspace from that plan's `getWorkspaceSize()`, not from a size cached by plan tag or engine configuration |
 | `cudnnBackendExecute` handle | not checked by the compatibility layer: hipDNN runs the plan on the handle it is given, with that handle's stream, including a handle other than the one the plan's graph was built on or, for a loaded plan, the one it was loaded with. A handle on another device than the one the plan was built or loaded on is rejected by hipDNN's `hipdnnBackendExecute` with `BAD_PARAM` before any provider call. `ExecutionPlanBuilder::setHandle` is ignored by `build()`, as upstream never sends it, and required by `loadFromJson` |
 | Variant packs (`VariantPackBuilder::build()`) | the hipDNN variant pack is built here; missing or empty data pointers or UIDs, or the two with different element counts, are `BAD_PARAM` |

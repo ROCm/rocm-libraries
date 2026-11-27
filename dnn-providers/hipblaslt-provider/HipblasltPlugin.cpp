@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <iostream>
+#include <memory>
+#include <mutex>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
@@ -31,7 +33,9 @@ using namespace hipblaslt_plugin;
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
 
+// Shared by every live plugin handle; the mutex guards every read and write of the weak pointer.
 static std::weak_ptr<HipblasltContainer> hipblasltContainerLifecyclePtr;
+static std::mutex hipblasltContainerMutex;
 
 extern "C" {
 
@@ -163,30 +167,14 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* ha
 
         hipblaslt_plugin::HipblasltHandleFactory::createHipblasltHandle(handle);
 
+        std::lock_guard<std::mutex> const lock(hipblasltContainerMutex);
         auto hipblasltContainerPtr = hipblasltContainerLifecyclePtr.lock();
-        if(hipblasltContainerPtr != nullptr)
+        if(hipblasltContainerPtr == nullptr)
         {
-            (*handle)->hipblasltContainer = hipblasltContainerPtr;
+            hipblasltContainerPtr = std::make_shared<HipblasltContainer>();
+            hipblasltContainerLifecyclePtr = hipblasltContainerPtr;
         }
-        else
-        {
-            static std::mutex s_hipblasltContainerMutex;
-            std::lock_guard<std::mutex> const lock(s_hipblasltContainerMutex);
-
-            // if we do have a race condition that results in threads getting locked, we want to
-            // ensure that we only create one instance.  Therefore, the second thread to get
-            // through will just read from the weak pointer rather than create a new instance.
-            hipblasltContainerPtr = hipblasltContainerLifecyclePtr.lock();
-            if(hipblasltContainerPtr != nullptr)
-            {
-                (*handle)->hipblasltContainer = hipblasltContainerPtr;
-            }
-            else
-            {
-                (*handle)->hipblasltContainer = std::make_shared<HipblasltContainer>();
-                hipblasltContainerLifecyclePtr = (*handle)->hipblasltContainer;
-            }
-        }
+        (*handle)->hipblasltContainer = hipblasltContainerPtr;
 
         LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
     });
