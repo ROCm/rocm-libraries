@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* _mfma_32x32_c_col */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 #define B (ctx->b)
@@ -163,6 +164,53 @@ void rocke_gfx942_attn2d_emit_loop_bounds_and_inits(rocke_gfx942_attn2d_build_ct
     ctx->lane_rg_is0_v = rocke_b_cmp_eq(B, lane_rg, rocke_b_const_i32(B, 0));
     ctx->lane_rg_is1_v = rocke_b_cmp_eq(B, lane_rg, rocke_b_const_i32(B, 1));
     ctx->lane_rg_is2_v = rocke_b_cmp_eq(B, lane_rg, rocke_b_const_i32(B, 2));
+
+    /* ---- dropout row counters (Python drop_rows) ----
+     * Mask row counters, once per CTA, for the rows this lane masks: one per
+     * PV A atom, or the transposed 32x32x8 body's S^T column. All in-warp rows
+     * first, as Python's list. */
+    ctx->drop_rows_count = 0;
+    if(ctx->spec->dropout)
+    {
+        rocke_value_t* in_warp_rows[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE / 4];
+        int n_rows;
+        if(ctx->USE_MFMA_32X32)
+        {
+            in_warp_rows[0] = rocke__mfma_32x32_c_col(B, ctx->lane, 0);
+            n_rows = 1;
+        }
+        else
+        {
+            n_rows = ctx->M_ATOMS_PER_WARP;
+            for(int atom = 0; atom < n_rows; ++atom)
+            {
+                rocke_value_t* atom_row = rocke_b_const_i32(B, atom * 16);
+                in_warp_rows[atom] = rocke_b_add(B, atom_row, ctx->lane_col_v);
+            }
+        }
+        for(int i = 0; i < n_rows; ++i)
+        {
+            rocke_value_t* row = rocke_b_add(B, ctx->wave_row_base, in_warp_rows[i]);
+            rocke_value_t* nqk = rocke_b_const_i32(B, ctx->NQK);
+            rocke_value_t* head_base = rocke_b_mul(B, ctx->kv_head_idx, nqk);
+            rocke_value_t* nqk2 = rocke_b_const_i32(B, ctx->NQK);
+            rocke_value_t* head_in = rocke_b_mod(B, row, nqk2);
+            rocke_value_t* head = rocke_b_add(B, head_base, head_in);
+            rocke_value_t* nqk3 = rocke_b_const_i32(B, ctx->NQK);
+            rocke_value_t* q_in = rocke_b_div(B, row, nqk3);
+            rocke_value_t* query = rocke_b_add(B, ctx->qb_start_pos, q_in);
+            rocke_dropout_query_counter(B,
+                                        &ctx->drop,
+                                        ctx->seq_idx,
+                                        head,
+                                        query,
+                                        ctx->num_qh_p,
+                                        ctx->drop_max_sq,
+                                        ctx->drop_max_sk,
+                                        ctx->drop_rows[i]);
+        }
+        ctx->drop_rows_count = n_rows;
+    }
 
     /* ---- m_inits / l_inits (2113-2136) ---- */
     rocke_value_t* neg_inf = sc_neg_inf(ctx);

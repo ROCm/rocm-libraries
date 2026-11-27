@@ -395,6 +395,38 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->kv_cache_policy = "all";
         s->use_k_hbm_direct = true;
         break;
+
+    /* --- idx24-29: dropout on P (lockstep with the Python _CONFIGS[24..29]),
+     *     each an existing config plus dropout. 24: transposed 32x32x8 (5);
+     *     25: transposed + cfvst (18);
+     *     26: transposed + LSE (13); 27: 16x16 register-PV (7); 28: 27 with
+     *     block_m_per_warp=32; 29: 16x16 P_lds fp16 (1). */
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    {
+        static const int base[] = {5, 18, 13, 7, 7, 1};
+        make_spec(base[idx - 24], s);
+        if(idx == 28)
+            s->block_m_per_warp = 32;
+        s->dropout = true;
+        break;
+    }
+    /* 30: 16x16 register-PV D256, GQA 8, tile 32, LSE (7's geometry). */
+    case 30:
+        make_spec(7, s);
+        s->head_size = 256;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->num_seqs = 1;
+        s->tile_size = 32;
+        s->use_i64_kv_addr = false;
+        s->emit_lse = true;
+        s->dropout = true;
+        break;
     default:
         return -1;
     }

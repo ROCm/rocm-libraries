@@ -157,6 +157,8 @@ def _fastkv_register_p_spec_error(spec: UnifiedAttention2DTiledSpec) -> str | No
         return "fastKV register-P experiment requires use_fast_paged_kv_desc"
     if not (spec.use_mfma_32x32 and spec.use_transposed_qk_32x32):
         return "fastKV register-P experiment requires transposed R4"
+    if spec.dropout:
+        return "fastKV register-P experiment does not support dropout"
     if spec.kv_storage_dtype is not None:
         return "fastKV register-P experiment does not support FP8 KV cache"
     return None

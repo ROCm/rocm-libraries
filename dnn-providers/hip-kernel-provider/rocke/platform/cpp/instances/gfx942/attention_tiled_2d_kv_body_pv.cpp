@@ -35,6 +35,7 @@
 #include "rocke/helper_rocke.helpers.schedule.h" /* ROCKE_SCHED_DS_READ / ROCKE_SCHED_MFMA, T8 */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ============================================================ *
  *  local builder aliases (mirror the Python ``b.<op>`` surface)
@@ -69,6 +70,34 @@ static rocke_value_t* lane_col32_of(rocke_gfx942_attn2d_build_ctx_t* ctx)
     if(ctx->lane_col32_v != NULL)
         return ctx->lane_col32_v;
     return rocke_b_mod(B, ctx->lane, rocke_b_const_i32(B, 32));
+}
+
+/* Python _pv_a_operand_key: the key, within its 16-key PV K step, of slot
+ * `slot` of this lane's PV A operand (the dropout slot_key of the 16x16 body). */
+static rocke_value_t* pv_a_key(void* user, int slot)
+{
+    rocke_gfx942_attn2d_build_ctx_t* ctx = (rocke_gfx942_attn2d_build_ctx_t*)user;
+    rocke_value_t* four = rocke_b_const_i32(B, 4);
+    rocke_value_t* key0 = rocke_b_mul(B, lane_rg_of(ctx), four);
+    if(slot == 0)
+        return key0;
+    rocke_value_t* off = rocke_b_const_i32(B, slot);
+    return rocke_b_add(B, key0, off);
+}
+
+/* Python _drop_a: zero the dropped elements of one 16x16x16 PV A operand. */
+static rocke_value_t*
+    drop_a(rocke_gfx942_attn2d_build_ctx_t* ctx, rocke_value_t* a_vec, rocke_value_t* const* keep)
+{
+    rocke_value_t* zero_f32 = rocke_b_const_f32(B, 0.0);
+    rocke_value_t* zero = rocke_b_cast_f32_to(B, zero_f32, DT);
+    rocke_value_t* comps[4];
+    for(int e = 0; e < 4; ++e)
+    {
+        rocke_value_t* elem = rocke_b_vec_extract(B, a_vec, e);
+        comps[e] = rocke_b_select(B, keep[e], elem, zero);
+    }
+    return rocke_b_vec_pack(B, comps, 4, DT);
 }
 
 static bool dtype_is(const rocke_type_t* dt, const char* nm)
@@ -625,6 +654,30 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
         }
     }
 
+    /* Dropout keep flags of each (k, atom) A operand, drawn once per KV tile
+     * and shared by the N tiles. PV_K_STEP is 16 on gfx942: one Philox call
+     * (g = 0) per operand. */
+    rocke_value_t* drop_keep[ROCKE_GFX942_ATTN2D_MAX_K_ITERS]
+                            [ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE / 4][4];
+    const bool has_drop_keep = ctx->spec->dropout && !ctx->USE_MFMA_32X32;
+    if(has_drop_keep)
+    {
+        if(PV_K_ITERS > ROCKE_GFX942_ATTN2D_MAX_K_ITERS || ctx->PV_K_STEP != 16)
+        {
+            rocke_i_set_err(B, ROCKE_ERR_VALUE, "dropout: PV K geometry out of range");
+            return;
+        }
+        rocke_dropout_slot_key_t slot_key = {pv_a_key, ctx};
+        for(int atom = 0; atom < M_ATOMS; ++atom)
+        {
+            rocke_value_t* tile_ctr[2];
+            rocke_dropout_tile_counter(B, ctx->drop_rows[atom], in->tile_off, slot_key, tile_ctr);
+            for(int k = 0; k < PV_K_ITERS; ++k)
+                rocke_dropout_keep_run(
+                    B, &ctx->drop, tile_ctr, k, 0, slot_key, ctx->PV_K_STEP, drop_keep[k][atom]);
+        }
+    }
+
     /* Narrow 16x16x16 PV consumer (lines 4875-5031). Loop bound is 0 when the
      * 32x32 path already filled new_acc. */
     {
@@ -691,6 +744,8 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
                         rocke_value_t* pidx[2] = {p_row, p_off};
                         A_p = rocke_b_smem_load_vN(B, ctx->P_lds, pidx, 2, DT, 4);
                     }
+                    if(has_drop_keep)
+                        A_p = drop_a(ctx, A_p, drop_keep[k][atom]);
                     acc_per_atom[atom] = mfma_16x16x16(ctx, A_p, B_v, acc_per_atom[atom]);
                 }
             }

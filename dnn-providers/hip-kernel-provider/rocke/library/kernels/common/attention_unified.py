@@ -599,7 +599,7 @@ def _reject_lse(
     return None
 
 
-_DROPOUT_ARCHES = ("gfx950",)
+_DROPOUT_ARCHES = ("gfx942", "gfx950")
 
 
 def _reject_dropout(
@@ -622,6 +622,9 @@ def _reject_dropout(
 _GFX942_4WARP_LSE_REFUSAL = (
     "LSE output is not implemented on the gfx942 4-warp GQA builder (finite "
     "-1e30 max sentinel, no l == 0 guard, fixed 17-argument ABI)"
+)
+_GFX942_4WARP_DROPOUT_REFUSAL = (
+    "dropout is not implemented on the gfx942 4-warp GQA builder"
 )
 
 
@@ -1194,6 +1197,8 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> boo
         # l == 0 guard, fixed 17-argument ABI): an LSE request takes the
         # default gfx942 builder, which does.
         and not problem.emit_lse
+        # Nor dropout: it follows LSE (training) onto the default builder.
+        and not problem.dropout
     )
 
 

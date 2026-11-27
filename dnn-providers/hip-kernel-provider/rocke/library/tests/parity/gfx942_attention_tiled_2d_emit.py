@@ -411,6 +411,31 @@ _CONFIGS = {
     },
 }
 
+# --- idx24-29: dropout on P, each an existing config plus dropout.
+#   idx24: transposed 32x32x8 (idx5).
+#   idx25: transposed 32x32x8 + cfvst (idx18).
+#   idx26: transposed 32x32x8 + LSE (idx13).
+#   idx27: 16x16 register-PV (idx7); idx28: idx27 with block_m_per_warp=32.
+#   idx29: 16x16 P_lds fp16 (idx1).
+_CONFIGS[24] = {**_CONFIGS[5], "dropout": True}
+_CONFIGS[25] = {**_CONFIGS[18], "dropout": True}
+_CONFIGS[26] = {**_CONFIGS[13], "dropout": True}
+_CONFIGS[27] = {**_CONFIGS[7], "dropout": True}
+_CONFIGS[28] = {**_CONFIGS[7], "block_m_per_warp": 32, "dropout": True}
+_CONFIGS[29] = {**_CONFIGS[1], "dropout": True}
+#   idx30: 16x16 register-PV D256, GQA 8, tile 32, LSE (idx7 geometry).
+_CONFIGS[30] = {
+    **_CONFIGS[7],
+    "head_size": 256,
+    "num_query_heads": 16,
+    "num_kv_heads": 2,
+    "num_seqs": 1,
+    "tile_size": 32,
+    "use_i64_kv_addr": False,
+    "emit_lse": True,
+    "dropout": True,
+}
+
 
 def _kernel(idx: int):
     if idx not in _CONFIGS:

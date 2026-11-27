@@ -371,6 +371,31 @@ GFX942_ATTENTION_TILED_2D = [
         "use_k_hbm_direct": True,
     },
 ]
+# idx24-29: dropout on P, each an existing config plus dropout: transposed
+# 32x32x8 (5; 18 with cfvst; 13 with LSE), 16x16 register-PV
+# (7; 7 + block_m_per_warp=32) and 16x16 P_lds fp16 (1).
+GFX942_ATTENTION_TILED_2D += [
+    {**GFX942_ATTENTION_TILED_2D[5], "dropout": True},
+    {**GFX942_ATTENTION_TILED_2D[18], "dropout": True},
+    {**GFX942_ATTENTION_TILED_2D[13], "dropout": True},
+    {**GFX942_ATTENTION_TILED_2D[7], "dropout": True},
+    {**GFX942_ATTENTION_TILED_2D[7], "block_m_per_warp": 32, "dropout": True},
+    {**GFX942_ATTENTION_TILED_2D[1], "dropout": True},
+]
+# idx30: 16x16 register-PV D256, GQA 8, tile 32, LSE (7's geometry).
+GFX942_ATTENTION_TILED_2D += [
+    {
+        **GFX942_ATTENTION_TILED_2D[7],
+        "head_size": 256,
+        "num_query_heads": 16,
+        "num_kv_heads": 2,
+        "num_seqs": 1,
+        "tile_size": 32,
+        "use_i64_kv_addr": False,
+        "emit_lse": True,
+        "dropout": True,
+    }
+]
 
 GFX950_ATTENTION_TILED_2D = [
     {

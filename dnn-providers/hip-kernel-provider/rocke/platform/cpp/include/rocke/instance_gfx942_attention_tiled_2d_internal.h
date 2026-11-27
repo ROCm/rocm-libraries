@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                     */
 #include "rocke/helper_rocke.helpers.attention.h" /* binary_search / softmax reduces     */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_dropout_internal.h" /* rocke_dropout_state_t */
 #include "rocke/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -185,6 +186,11 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* sliding_window_p;
     /* Trailing lse_ptr (F32*), declared only when spec->emit_lse; else NULL. */
     rocke_value_t* lse;
+    /* spec->dropout only: the resolved dropout state and the declared extents
+     * (dropout_max_seqlen_q / _k kernargs). */
+    rocke_dropout_state_t drop;
+    rocke_value_t* drop_max_sq;
+    rocke_value_t* drop_max_sk;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
@@ -273,6 +279,11 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* lane_rg_is0_v;
     rocke_value_t* lane_rg_is1_v;
     rocke_value_t* lane_rg_is2_v;
+    /* spec->dropout only: mask row counters (lo, hi) of the rows this lane
+     * masks, one per PV A atom (16x16 body) or one for the transposed 32x32x8
+     * body's S^T column (Python drop_rows). */
+    rocke_value_t* drop_rows[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE / 4][2];
+    int drop_rows_count;
 
     /* ---- SSA constants (lines 1891-1912) ---- */
     rocke_value_t* zero_f;
@@ -625,6 +636,8 @@ typedef struct rocke_gfx942_attn2d_pv_inputs
     rocke_value_t* safe_tile1;
     rocke_value_t* nxt_buf;
     rocke_value_t* cur_buf;
+    /* kv_tile_iv * T: the first key of the tile (dropout counters). */
+    rocke_value_t* tile_off;
 } rocke_gfx942_attn2d_pv_inputs_t;
 
 /* PV MFMA + carry yield bucket (Python lines 4540-5041). */

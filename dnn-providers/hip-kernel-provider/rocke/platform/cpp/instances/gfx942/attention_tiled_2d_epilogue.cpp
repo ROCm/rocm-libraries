@@ -139,6 +139,12 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
      * exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O. */
     for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         ctx->rcp_l[r] = rocke_b_rcp(b, ctx->l_final[r]);
+    if(ctx->spec->dropout)
+    {
+        /* 1 / (1 - p) folded into 1 / l; LSE keeps the pre-dropout l. */
+        for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
+            ctx->rcp_l[r] = rocke_b_fmul(b, ctx->rcp_l[r], ctx->drop.scale);
+    }
     for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         ctx->l_zero[r] = rocke_b_fcmp(b, "oeq", ctx->l_final[r], zero_f);
 
@@ -193,6 +199,8 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
                 = epilogue_q_desc_offset(ctx, op_token_t, op_qh_t, rocke_b_const_i32(b, 0));
 
             rocke_value_t* inv_l_t = rocke_b_rcp(b, ctx->l_final[0]);
+            if(ctx->spec->dropout)
+                inv_l_t = rocke_b_fmul(b, inv_l_t, ctx->drop.scale);
             rocke_value_t* l_zero_t = rocke_b_fcmp(b, "oeq", ctx->l_final[0], zero_f);
             if(ctx->spec->emit_lse)
             {

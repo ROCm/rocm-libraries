@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Dropout of the gfx950 unified tiled 2D kernel, on the host.
+"""Dropout of the gfx942 and gfx950 unified tiled 2D kernels, on the host.
 
-The 16x16 body's PV A-operand map (rows and keys of each lane) runs through the
+The 16x16 bodies' PV A-operand map (rows and keys of each lane) runs through the
 integer IR evaluator against the mask oracle (``rocke.numeric.philox_dropout``);
-the transposed 32x32 body uses the C-layout map the dense tests check. The spec
+the transposed 32x32 bodies use the C-layout map the dense tests check. The spec
 and problem refusals, the name, cache key, ABI, IR and the runner's launch
 arguments are checked without a device.
 """
@@ -26,7 +26,8 @@ from kernels.common._attention_dropout import (
     dropout_query_counter,
     dropout_tile_counter,
 )
-from kernels.gfx950 import attention_tiled_2d as t2
+from kernels.gfx942 import attention_tiled_2d as t2_942
+from kernels.gfx950 import attention_tiled_2d as t2_950
 from rocke.core.ir import I32, IRBuilder
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import philox_dropout as oracle
@@ -36,7 +37,7 @@ from rocke.tests.host_arrays import HostArray
 from rocke.tests.int_eval import evaluate_int_ops
 
 M32 = 0xFFFFFFFF
-_ARCH = "gfx950"
+_KERNELS = {"gfx942": t2_942, "gfx950": t2_950}
 # The params the kernel appends for dropout, in ABI order.
 PARAM_NAMES = [name for name, _ in DROPOUT_PARAMS] + [
     "dropout_max_seqlen_q",
@@ -46,11 +47,13 @@ PARAM_NAMES = [name for name, _ in DROPOUT_PARAMS] + [
 
 class PvOperandCounterMapTest(unittest.TestCase):
     def test_a_operand_map_matches_oracle(self):
-        for pv_k_step in (32, 16):
-            with self.subTest(pv_k_step=pv_k_step):
-                self._check(pv_k_step)
+        # gfx942 has only the K=16 PV atom.
+        for arch, pv_k_step in (("gfx950", 32), ("gfx950", 16), ("gfx942", 16)):
+            with self.subTest(arch=arch, pv_k_step=pv_k_step):
+                self._check(arch, pv_k_step)
 
-    def _check(self, pv_k_step):
+    def _check(self, arch, pv_k_step):
+        t2 = _KERNELS[arch]
         # Skv not a multiple of 4 or of the tile; the offset's low word wraps.
         B, Hq, Sq, Skv, p = 2, 3, 70, 203, 0.35
         seed, offset = 0x0123456789ABCDEF, (1 << 32) - 9
@@ -61,11 +64,15 @@ class PvOperandCounterMapTest(unittest.TestCase):
             b.param(n, I32) for n in names
         )
         lane, tile = b.param("lane", I32), b.param("tile", I32)
-        st = DropoutState(seed_lo, seed_hi, off_lo, off_hi, thr, scale=None, mad64=True)
+        st = DropoutState(
+            seed_lo, seed_hi, off_lo, off_hi, thr, scale=None, mad64=arch == "gfx950"
+        )
         lane_rg = b.div(lane, b.const_i32(16))
         lane_col = b.mod(lane, b.const_i32(16))
 
         def slot_key(slot):
+            if arch == "gfx942":
+                return t2._pv_a_operand_key(b, lane_rg, slot)
             return t2._pv_a_operand_key(b, lane_rg, pv_k_step, slot)
 
         flat, rows = [], []
@@ -153,26 +160,67 @@ def _problem(**kw):
     return au.UnifiedAttentionProblem(**base)
 
 
-# A problem per body: transposed 32x32, 16x16 with P in registers, 16x16 from LDS.
+_GFX942_PREFILL = dict(
+    total_q=1024,
+    num_seqs=1,
+    num_query_heads=32,
+    num_kv_heads=8,
+    block_size=64,
+    max_seqlen_q=1024,
+    max_seqlen_k=1024,
+    num_kv_blocks=16,
+)
+# A problem per body: transposed 32x32, 16x16 with P in registers, 16x16 from
+# LDS; on gfx942 also the transposed body with the sliced-K ring and the
+# conflict-free V store, and the D256 register-PV body the D256 prefill rows
+# take. gfx942 tiled 2D takes causal masks only.
 _BODIES = {
-    "t32": dict(total_q=600, max_seqlen_q=300, max_seqlen_k=128),
-    "regpv": {},
-    "plds": dict(dtype="fp16"),
+    "gfx950": {
+        "t32": dict(total_q=600, max_seqlen_q=300, max_seqlen_k=128),
+        "regpv": {},
+        "plds": dict(dtype="fp16"),
+    },
+    "gfx942": {
+        "t32": dict(_GFX942_PREFILL, right_bound=0),
+        "t32ring": dict(_GFX942_PREFILL, dtype="fp16", right_bound=0),
+        "regpv": dict(right_bound=0),
+        "regpv_d256": dict(
+            head_size=256,
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=16,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            num_kv_blocks=128,
+            right_bound=0,
+        ),
+        "plds": dict(dtype="fp16", right_bound=0),
+    },
 }
 
 
-def _spec_for(body, **kw):
-    spec = au._tiled_spec_from_problem(_problem(**_BODIES[body], **kw), _ARCH)
-    got = (
-        "t32" if spec.use_mfma_32x32 else ("regpv" if spec.use_register_pv else "plds")
-    )
-    assert got == body, (body, got)
+def _body_of(spec):
+    if spec.use_mfma_32x32 or getattr(spec, "use_mfma_32x32x8", False):
+        return "t32ring" if getattr(spec, "use_k_sliced_ring", False) else "t32"
+    if spec.use_register_pv:
+        return "regpv_d256" if spec.head_size == 256 else "regpv"
+    return "plds"
+
+
+def _spec_for(arch, body, **kw):
+    problem = _problem(**{**_BODIES[arch][body], **kw})
+    spec = au._tiled_spec_from_problem(problem, arch)
+    assert _body_of(spec) == body, (arch, body, _body_of(spec))
     return spec
+
+
+def _arch_bodies():
+    return [(arch, body) for arch in _BODIES for body in _BODIES[arch]]
 
 
 class DropoutSpecTest(unittest.TestCase):
     def test_refusals(self):
-        off = _spec_for("t32")
+        off = _spec_for("gfx950", "t32")
         cases = [
             (
                 dict(use_transposed_qk_32x32=False),
@@ -193,32 +241,44 @@ class DropoutSpecTest(unittest.TestCase):
                     dataclasses.replace(off, dropout=True, **kw)
         with self.assertRaisesRegex(ValueError, "dropout must be a bool"):
             dataclasses.replace(off, dropout=1)
+        # gfx942 needs no grouped-KV2 or fp8 dropout cases: its spec refuses both
+        # with dropout off too.
+        with self.assertRaisesRegex(
+            ValueError,
+            r"^dropout is not supported with the non-transposed 32x32x8 body$",
+        ):
+            dataclasses.replace(
+                _spec_for("gfx942", "t32"),
+                use_transposed_qk_32x32=False,
+                dropout=True,
+            )
 
     def test_name_cache_key_and_abi(self):
-        for body in _BODIES:
-            with self.subTest(body=body):
-                self._check(body)
+        for arch, body in _arch_bodies():
+            with self.subTest(arch=arch, body=body):
+                self._check(arch, body)
 
-    def _check(self, body):
-        on = _spec_for(body, dropout=True, emit_lse=True)
+    def _check(self, arch, body):
+        t2 = _KERNELS[arch]
+        on = _spec_for(arch, body, dropout=True, emit_lse=True)
         off = dataclasses.replace(on, dropout=False)
         self.assertNotIn("_do", off.kernel_name())
         self.assertRegex(on.kernel_name(), r"_do(_|$)")
-        problem = _problem(**_BODIES[body], emit_lse=True)
+        problem = _problem(**_BODIES[arch][body], emit_lse=True)
         self.assertNotEqual(
-            au._tiled_cache_key(dataclasses.replace(problem, dropout=True), _ARCH),
-            au._tiled_cache_key(problem, _ARCH),
+            au._tiled_cache_key(dataclasses.replace(problem, dropout=True), arch),
+            au._tiled_cache_key(problem, arch),
         )
         n = len(PARAM_NAMES)
-        sig_on = au._tiled_2d_signature(_ARCH, "bf16", emit_lse=True, dropout=True)
-        sig_off = au._tiled_2d_signature(_ARCH, "bf16", emit_lse=True)
+        sig_on = au._tiled_2d_signature(arch, "bf16", emit_lse=True, dropout=True)
+        sig_off = au._tiled_2d_signature(arch, "bf16", emit_lse=True)
         self.assertEqual([a["name"] for a in sig_on[-n:]], PARAM_NAMES)
         self.assertEqual(sig_on[:-n], sig_off)
         kernel = t2.build_unified_attention_2d_tiled(on)
         self.assertEqual([p.name for p in kernel.params][-n:], PARAM_NAMES)
-        ir_on = lower_kernel_to_llvm(kernel, arch=_ARCH)
+        ir_on = lower_kernel_to_llvm(kernel, arch=arch)
         ir_off = lower_kernel_to_llvm(
-            t2.build_unified_attention_2d_tiled(off), arch=_ARCH
+            t2.build_unified_attention_2d_tiled(off), arch=arch
         )
         self.assertNotIn("dropout", ir_off)
         # The mask reads the threshold and the epilogue the scale: a body that
@@ -237,15 +297,25 @@ class DropoutCppEngineTest(unittest.TestCase):
 
     def test_cpp_engine_emits_the_same_llvm_ir(self):
         engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
-        for body in _BODIES:
-            with self.subTest(body=body):
+        # The gfx942 C twin has no sliced-K ring, and its transposed body
+        # differs from Python on the dispatch's flash knobs with dropout off
+        # too; the parity configs cover the transposed mask instead.
+        cases = [
+            (arch, body)
+            for arch, body in _arch_bodies()
+            if not (arch == "gfx942" and body.startswith("t32"))
+        ]
+        for arch, body in cases:
+            with self.subTest(arch=arch, body=body):
                 # The C++ spec has no right_bound: causal specs only.
-                spec = _spec_for(body, dropout=True, emit_lse=True, right_bound=0)
+                spec = _spec_for(arch, body, dropout=True, emit_lse=True, right_bound=0)
                 expected = lower_with_engine(
-                    t2.build_unified_attention_2d_tiled(spec), _ARCH, engine="python"
+                    _KERNELS[arch].build_unified_attention_2d_tiled(spec),
+                    arch,
+                    engine="python",
                 )
-                got = engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), _ARCH)
-                self.assertEqual(got, expected)
+                lower = getattr(engine, f"{arch}_attention_tiled_2d_lower_llvm")
+                self.assertEqual(lower(asdict(spec), arch), expected)
 
 
 class DropoutProblemTest(unittest.TestCase):
@@ -255,20 +325,20 @@ class DropoutProblemTest(unittest.TestCase):
         on = _problem(dropout=True)
         cases = [
             (
-                au.supports_native_unified_attention_3d_tiled(on, _ARCH),
+                au.supports_native_unified_attention_3d_tiled(on, "gfx950"),
                 "dropout is not implemented on the split-KV attention path",
             ),
             (
-                au.supports_native_unified_attention(on, _ARCH),
+                au.supports_native_unified_attention(on, "gfx950"),
                 "dropout is not implemented on the scalar 2D attention path",
             ),
             (
-                au.supports_native_unified_attention_tiled(on, "gfx942"),
-                "dropout is not implemented on gfx942 tiled 2D attention",
+                au.supports_native_unified_attention_tiled(on, "gfx1250"),
+                "dropout is not implemented on gfx1250 tiled 2D attention",
             ),
             (
                 au.supports_native_unified_attention_tiled(
-                    _problem(dropout=True, use_fp8=True), _ARCH
+                    _problem(dropout=True, use_fp8=True), "gfx950"
                 ),
                 "dropout is not implemented with FP8 K/V",
             ),
@@ -276,21 +346,58 @@ class DropoutProblemTest(unittest.TestCase):
         for got, msg in cases:
             with self.subTest(msg=msg):
                 self.assertEqual(got, (False, msg))
-        self.assertTrue(au.supports_native_unified_attention_tiled(on, _ARCH)[0])
+        for arch in _BODIES:
+            with self.subTest(arch=arch):
+                causal = _problem(dropout=True, right_bound=0)
+                self.assertTrue(
+                    au.supports_native_unified_attention_tiled(causal, arch)[0]
+                )
         with self.assertRaisesRegex(ValueError, "dropout must be a bool"):
             _problem(dropout=1)
+
+    def test_gfx942_4warp_builder_declines(self):
+        # The 4-warp GQA builder has no dropout; its D256 cohort takes the
+        # default tiled 2D builder instead.
+        d256 = _problem(
+            head_size=256,
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=16,
+            num_kv_heads=2,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            num_kv_blocks=128,
+            right_bound=0,
+        )
+        self.assertIsNotNone(au._gfx942_4warp_route(d256, "gfx942"))
+        on = dataclasses.replace(d256, dropout=True)
+        self.assertIsNone(au._gfx942_4warp_route(on, "gfx942"))
+        spec4 = dataclasses.replace(
+            au._tiled_spec_from_problem(d256, "gfx942"), dropout=True
+        )
+        self.assertEqual(
+            t2_942.supports_gfx942_4warp_gqa_spec(spec4),
+            (False, au._GFX942_4WARP_DROPOUT_REFUSAL),
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "^dropout is not implemented on the gfx942 4-warp"
+        ):
+            t2_942.build_gfx942_4warp_gqa(spec4)
+        self.assertEqual(au.select_auto_path(on, "gfx942"), "2d")
+        spec = au._tiled_spec_from_problem(on, "gfx942")
+        self.assertTrue(spec.dropout)
 
 
 class DropoutLaunchBindingTest(unittest.TestCase):
     """The runner binds exactly the params of the kernel it builds."""
 
     def test_runner_binds_the_kernel_params(self):
-        for body in _BODIES:
-            with self.subTest(body=body):
-                self._check_binding(body)
+        for arch, body in _arch_bodies():
+            with self.subTest(arch=arch, body=body):
+                self._check_binding(arch, body)
 
-    def _check_binding(self, body):
-        problem = _problem(**_BODIES[body], dropout=True, compile_backend="llvm")
+    def _check_binding(self, arch, body):
+        problem = _problem(**_BODIES[arch][body], dropout=True, compile_backend="llvm")
         built, bound = [], []
 
         def compile_kernel(kernel, *, arch, **_):
@@ -305,15 +412,15 @@ class DropoutLaunchBindingTest(unittest.TestCase):
         dt = problem.dtype
         arrays = dict(
             q=HostArray((problem.total_q, hq, d), dt),
-            k=HostArray((problem.num_kv_blocks, 16, hkv, d), dt),
-            v=HostArray((problem.num_kv_blocks, 16, hkv, d), dt),
+            k=HostArray((problem.num_kv_blocks, problem.block_size, hkv, d), dt),
+            v=HostArray((problem.num_kv_blocks, problem.block_size, hkv, d), dt),
             out=HostArray((problem.total_q, hq, d), dt),
             cu_seqlens_q=HostArray((problem.num_seqs + 1,), "i32"),
             seqused_k=HostArray((problem.num_seqs,), "i32"),
             block_table=HostArray((problem.num_seqs, 64), "i32"),
         )
         with mock.patch.object(
-            au, "_resolve_attention_arch", lambda: _ARCH
+            au, "_resolve_attention_arch", lambda: arch
         ), mock.patch.object(au, "compile_kernel", compile_kernel), mock.patch.object(
             au, "KernelLauncher", launcher
         ), mock.patch.object(

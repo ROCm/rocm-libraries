@@ -1195,8 +1195,13 @@ _CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
 #   idx81: 16x16 P_lds fp16, four PV K steps (idx23).
 #   idx82: 16x16 PV_K_STEP=16 (idx3); idx83: idx82 + LSE (idx66).
 #   idx84: 16x16 with two M atoms per warp (idx5 + block_m_per_warp=32).
-for _idx, _base in zip(range(77, 84), (68, 64, 44, 29, 23, 3, 66)):
-    _CONFIGS[_idx] = {**_CONFIGS[_base], "dropout": True}
+_CONFIGS[77] = {**_CONFIGS[68], "dropout": True}
+_CONFIGS[78] = {**_CONFIGS[64], "dropout": True}
+_CONFIGS[79] = {**_CONFIGS[44], "dropout": True}
+_CONFIGS[80] = {**_CONFIGS[29], "dropout": True}
+_CONFIGS[81] = {**_CONFIGS[23], "dropout": True}
+_CONFIGS[82] = {**_CONFIGS[3], "dropout": True}
+_CONFIGS[83] = {**_CONFIGS[66], "dropout": True}
 _CONFIGS[84] = {**_CONFIGS[5], "block_m_per_warp": 32, "dropout": True}
 
 

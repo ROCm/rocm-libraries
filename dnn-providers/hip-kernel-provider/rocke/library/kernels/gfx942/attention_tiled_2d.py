@@ -38,6 +38,13 @@ from dataclasses import dataclass, field
 import os
 from typing import ClassVar, Optional, Tuple
 
+from kernels.common._attention_dropout import (
+    apply_dropout_tile,
+    declare_dropout_params,
+    dropout_keep_run,
+    dropout_query_counter,
+    dropout_tile_counter,
+)
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common._spec_checks import require_bool
@@ -148,6 +155,21 @@ def _mfma_32x32_c_col(b, lane, n_tile32: int = 0):
     if n_tile32 == 0:
         return col
     return b.add(b.const_i32(n_tile32 * 32), col)
+
+
+def _pv_a_operand_row(b, lane_col, atom: int):
+    """In-warp P row of a lane's 16x16x16 PV A operand in atom ``atom``.
+
+    Module level so the host test of the dropout counter map uses the kernel's
+    own lane-to-element map.
+    """
+    return b.add(b.const_i32(atom * 16), lane_col)
+
+
+def _pv_a_operand_key(b, lane_rg, slot: int):
+    """Key, within its 16-key PV K step, of slot ``slot`` of a lane's A operand."""
+    key0 = b.mul(lane_rg, b.const_i32(4))
+    return key0 if slot == 0 else b.add(key0, b.const_i32(slot))
 
 
 # Backwards-compatible aliases. The 3D tiled kernel currently imports these
@@ -515,9 +537,21 @@ class UnifiedAttention2DTiledSpec:
     #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
     #   Off by default; off emits no new IR, so shipped kernels are unchanged.
     emit_lse: bool = field(default=False, kw_only=True)
+    # dropout: dropout on P (kernels.common._attention_dropout) with the
+    #   dropout params and the declared extents max_sq / max_sk as the last
+    #   kernargs.
+    dropout: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
         require_bool("emit_lse", self.emit_lse)
+        require_bool("dropout", self.dropout)
+        # The mask follows the 16x16x16 PV A operand (P from LDS or registers)
+        # and the transposed 32x32x8 body's S^T; the non-transposed 32x32x8 body
+        # holds P otherwise.
+        if self.dropout and self.use_mfma_32x32x8 and not self.use_transposed_qk_32x32:
+            raise ValueError(
+                "dropout is not supported with the non-transposed 32x32x8 body"
+            )
         # The K and V read sources: a truthy non-bool such as "false" must be
         # refused, not read as True.
         for flag in ("use_k_hbm_direct", "use_v_hbm_direct"):
@@ -1065,6 +1099,7 @@ class UnifiedAttention2DTiledSpec:
             "cmps" if self.use_causal_mask_phase_split else "",
             "k1buf" if self.use_k_single_buffer else "",
             "lse" if self.emit_lse else "",
+            "do" if self.dropout else "",
         )
 
 
@@ -1596,6 +1631,12 @@ def build_unified_attention_2d_tiled(
         if spec.emit_lse
         else None
     )
+    if spec.dropout:
+        drop = declare_dropout_params(b)
+        drop_max_sq = b.param("dropout_max_seqlen_q", I32)
+        drop_max_sk = b.param("dropout_max_seqlen_k", I32)
+    else:
+        drop = None
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -2317,6 +2358,38 @@ def build_unified_attention_2d_tiled(
         if USE_MFMA_32X32 and not TRANSPOSED_QK_32X32:
             return _mfma_32x32_c_row(b, lane, r)
         return _in_warp_row(r)
+
+    def _pv_a_row(atom: int) -> Value:
+        return _pv_a_operand_row(b, lane_col, atom)
+
+    def _pv_a_key(slot: int) -> Value:
+        return _pv_a_operand_key(b, lane_rg, slot)
+
+    drop_rows = []
+    if drop is not None:
+        # Mask row counters, once per CTA, for the rows this lane masks: one
+        # per PV A atom, or the transposed 32x32x8 body's S^T column.
+        if USE_MFMA_32X32:
+            drop_in_warp = [_mfma_32x32_c_col(b, lane, 0)]
+        else:
+            drop_in_warp = [_pv_a_row(atom) for atom in range(M_ATOMS_PER_WARP)]
+        for in_warp in drop_in_warp:
+            row = b.add(wave_row_base, in_warp)
+            drop_rows.append(
+                dropout_query_counter(
+                    b,
+                    drop,
+                    batch=seq_idx,
+                    head=b.add(
+                        b.mul(kv_head_idx, b.const_i32(NQK)),
+                        b.mod(row, b.const_i32(NQK)),
+                    ),
+                    query=b.add(qb_start_pos, b.div(row, b.const_i32(NQK))),
+                    num_heads=num_qh_p,
+                    seqlen_q=drop_max_sq,
+                    seqlen_kv=drop_max_sk,
+                )
+            )
 
     def _bit2(v: Value, bit: int) -> Value:
         return b.land(b.lshr(v, b.const_i32(bit)), b.const_i32(1))
@@ -4642,6 +4715,23 @@ def build_unified_attention_2d_tiled(
                             )
                             PT32_groups[group_idx][n][reg] = p_t
                             st_l_local = b.fadd(st_l_local, p_t)
+                if drop is not None:
+                    # After the row sum: l stays pre-dropout. S^T slot ``reg``
+                    # of sub-tile n holds key n * 32 + C row of ``reg``.
+                    PT32_groups = [
+                        apply_dropout_tile(
+                            b,
+                            drop,
+                            drop_rows[0],
+                            p_group,
+                            tile_key0=group_tile_off,
+                            slot_key=lambda slot: _mfma_32x32_c_row(b, lane, slot),
+                            sub_keys=32,
+                        )
+                        for p_group, (_regs, group_tile_off) in zip(
+                            PT32_groups, st_groups
+                        )
+                    ]
                 PT32_n = PT32_groups[0]
                 if GROUPED_KV2:
                     PT32_n_g1 = PT32_groups[1]
@@ -5371,6 +5461,35 @@ def build_unified_attention_2d_tiled(
                         B_v32 = b.vec_concat(B32_r0, B32_r1)
                         acc32 = _mfma_32x32x16(b, dtype, A_p32, B_v32, acc32)
                     new_acc[n] = acc32
+        # Dropout keep flags of each (k, atom) A operand, drawn once per KV tile
+        # and shared by the N tiles.
+        drop_keep = {}
+        if drop is not None and not USE_MFMA_32X32:
+            for atom in range(M_ATOMS_PER_WARP):
+                tile_ctr = dropout_tile_counter(b, drop_rows[atom], tile_off, _pv_a_key)
+                for k in range(PV_K_ITERS):
+                    drop_keep[k, atom] = dropout_keep_run(
+                        b,
+                        drop,
+                        tile_ctr,
+                        nsub=k,
+                        g=0,
+                        slot_key=_pv_a_key,
+                        sub_keys=PV_K_STEP,
+                    )
+
+        def _drop_a(a_vec: Value, k: int, atom: int) -> Value:
+            if not drop_keep:
+                return a_vec
+            zero = b.cast_f32_to(b.const_f32(0.0), dtype)
+            return b.vec_pack(
+                [
+                    b.select(f, b.vec_extract(a_vec, e), zero)
+                    for e, f in enumerate(drop_keep[k, atom])
+                ],
+                dtype,
+            )
+
         for n in range(0 if USE_MFMA_32X32 else PV_N_TILES):
             # Per-atom: scale the inherited acc by per-row alpha, then add P @ V.
             acc_per_atom: list[Value] = []
@@ -5514,7 +5633,7 @@ def build_unified_attention_2d_tiled(
                     # gfx950-only ds_read_b64_tr_b16. ``_strided_v_b_operand``
                     # reproduces the transpose read's exact per-lane (row, col)
                     # mapping for this 16x16x16 atom.
-                    p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
+                    p_off = b.add(b.const_i32(k * 16), _pv_a_key(0))
                     B_v = _strided_v_b_operand(k)
                     for atom in range(M_ATOMS_PER_WARP):
                         if REGISTER_PV:
@@ -5522,12 +5641,10 @@ def build_unified_attention_2d_tiled(
                                 [p_regs_f32[atom * 4 + r][k] for r in range(4)]
                             )
                         else:
-                            p_row = b.add(
-                                wave_row_base, b.add(b.const_i32(atom * 16), lane_col)
-                            )
+                            p_row = b.add(wave_row_base, _pv_a_row(atom))
                             A_p = b.smem_load_vN(P_lds, p_row, p_off, dtype=dtype, n=4)
                         acc_per_atom[atom] = _mfma_16x16x16(
-                            b, dtype, A_p, B_v, acc_per_atom[atom]
+                            b, dtype, _drop_a(A_p, k, atom), B_v, acc_per_atom[atom]
                         )
             for atom in range(M_ATOMS_PER_WARP):
                 new_acc[n * M_ATOMS_PER_WARP + atom] = acc_per_atom[atom]
@@ -5628,6 +5745,9 @@ def build_unified_attention_2d_tiled(
     # Per-row reciprocal of L (computed once, reused across stripes). Only an
     # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
     rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
+    if drop is not None:
+        # 1 / (1 - p) folded into 1 / l; LSE keeps the pre-dropout l.
+        rcp_l = [b.fmul(r, drop.scale) for r in rcp_l]
     l_zero = [b.fcmp("oeq", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
 
     def _store_row_lse(row: Value, slot: int, writer: Value) -> None:
@@ -5687,6 +5807,8 @@ def build_unified_attention_2d_tiled(
                 dim=b.const_i32(0),
             )
             inv_l_t = b.rcp(l_final[0])
+            if drop is not None:
+                inv_l_t = b.fmul(inv_l_t, drop.scale)
             l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
             if spec.emit_lse:
                 # One query row per lane (lane % 32); lanes l and l^32 hold the
@@ -6267,13 +6389,18 @@ def build_gfx942_4warp_gqa(
 ) -> KernelDef:
     """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
     from ..common.attention_arch import require_tiled_attention_arch
-    from ..common.attention_unified import _GFX942_4WARP_LSE_REFUSAL
+    from ..common.attention_unified import (
+        _GFX942_4WARP_DROPOUT_REFUSAL,
+        _GFX942_4WARP_LSE_REFUSAL,
+    )
 
     require_tiled_attention_arch(arch)
     if spec.emit_lse:
         # This body has no LSE store; refuse rather than build a kernel that
         # carries the "lse" name but takes no lse_ptr and writes nothing.
         raise NotImplementedError(_GFX942_4WARP_LSE_REFUSAL)
+    if spec.dropout:
+        raise NotImplementedError(_GFX942_4WARP_DROPOUT_REFUSAL)
     if spec.use_i64_kv_addr:
         # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
         # under a spec that claims i64; dispatch keeps the flag off through
@@ -6881,6 +7008,10 @@ def supports_gfx942_4warp_gqa_spec(
 ) -> Tuple[bool, str]:
     """:func:`supports_tiled_2d_spec` for ``build_gfx942_4warp_gqa``, the
     ``use_d256_fast=True`` path."""
+    if spec.dropout:
+        from ..common.attention_unified import _GFX942_4WARP_DROPOUT_REFUSAL
+
+        return False, _GFX942_4WARP_DROPOUT_REFUSAL
     return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=True)
 
 

@@ -53,6 +53,14 @@
  *  These mirror lines 1892-1910 + 2014-2017 of the Python prologue 1:1.
  * ===================================================================== */
 
+/* Dropout slot_key of the transposed 32x32x8 body: the key slot `slot` of S^T
+ * holds within its 32-key sub-tile is its MFMA C row. */
+static rocke_value_t* transposed_c_row_key(void* user, int slot)
+{
+    rocke_gfx942_attn2d_build_ctx_t* ctx = (rocke_gfx942_attn2d_build_ctx_t*)user;
+    return rocke__mfma_32x32_c_row(ctx->b, ctx->lane, slot);
+}
+
 static rocke_value_t* fh_neg_inf(rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
     /* b.const_f32(float("-inf")) -- created once in the prologue (line 1892)
@@ -684,6 +692,22 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 }
             }
         }
+        if(ctx->spec->dropout)
+        {
+            /* After the row sum: l stays pre-dropout. S^T slot reg of sub-tile n
+             * holds key n * 32 + C row of reg. */
+            rocke_dropout_slot_key_t slot_key = {transposed_c_row_key, ctx};
+            for(int group_idx = 0; group_idx < n_groups; ++group_idx)
+                rocke_apply_dropout_tile(b,
+                                         &ctx->drop,
+                                         ctx->drop_rows[0],
+                                         (group_idx == 0) ? pt32_g0 : pt32_g1,
+                                         QK_N_TILES,
+                                         16,
+                                         (group_idx == 0) ? tile_off : tile_off_g1,
+                                         slot_key,
+                                         32);
+        }
         /* l_sum = l_local + lane^32 (Python 2876-2877). */
         rocke_value_t* st_l_remote = rocke_b_warp_shuffle_xor(b, st_l_local, 32);
         rocke_value_t* st_l_sum = rocke_b_fadd(b, st_l_local, st_l_remote);
@@ -1304,6 +1328,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                   : (ctx->K_SINGLE_BUF ? ctx->cur_buf
                                        : rocke_b_sub(b, rocke_b_const_i32(b, 1), ctx->cur_buf));
         pv_in.safe_tile1 = safe_tile1;
+        pv_in.tile_off = tile_off;
         rocke_gfx942_attn2d_emit_pv_bucket(ctx, &pv_in);
     }
 

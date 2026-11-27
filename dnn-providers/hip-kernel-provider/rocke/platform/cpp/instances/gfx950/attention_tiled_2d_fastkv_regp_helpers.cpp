@@ -360,6 +360,13 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
                 b, ROCKE_ERR_VALUE, "fastKV register-P experiment requires transposed R4");
             return NULL;
         }
+        /* if spec.dropout: raise ValueError(...) */
+        if(spec->dropout)
+        {
+            rocke__fastkv_regp_set_err(
+                b, ROCKE_ERR_VALUE, "fastKV register-P experiment does not support dropout");
+            return NULL;
+        }
         /* if spec.kv_storage_dtype is not None: raise ValueError(...) */
         if(spec->kv_storage_dtype != NULL)
         {

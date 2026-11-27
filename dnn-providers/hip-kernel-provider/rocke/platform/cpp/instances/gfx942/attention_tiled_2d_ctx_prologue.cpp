@@ -140,13 +140,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         snprintf(b->err, ROCKE_ERR_MSG_CAP, "lse_layout='head_major' is gfx950-only");
         return false;
     }
-    /* The gfx942 spec has no dropout: refuse rather than build without it. */
-    if(spec->dropout)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        snprintf(b->err, ROCKE_ERR_MSG_CAP, "dropout is gfx950-only");
-        return false;
-    }
 
     /* ---- narrow 16x16x16 atom select (lines 1147-1159) ---- */
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
@@ -441,6 +434,15 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
             o.align = 4;
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
+        }
+        /* Trailing dropout params and declared extents (Python: after lse_ptr).
+         * Off -> no param, ABI unchanged. Neither xor3 nor mad64, as the
+         * gfx942 dense kernel. */
+        if(spec->dropout)
+        {
+            rocke_declare_dropout_params(b, /*xor3=*/false, /*mad64=*/false, &ctx->drop);
+            ctx->drop_max_sq = rocke_b_param(b, "dropout_max_seqlen_q", rocke_i32(), NULL);
+            ctx->drop_max_sk = rocke_b_param(b, "dropout_max_seqlen_k", rocke_i32(), NULL);
         }
     }
 

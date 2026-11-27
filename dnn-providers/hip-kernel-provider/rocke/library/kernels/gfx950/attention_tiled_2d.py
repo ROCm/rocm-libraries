@@ -1970,8 +1970,7 @@ def build_unified_attention_2d_tiled(
     drop_rows = []
     if drop is not None:
         # Mask row counters, once per CTA, for the rows this lane masks: one
-        # per PV A atom, or the transposed 32x32 body's S^T column. Block row r
-        # is query qb_start_pos + r // NQK of query head kv_head * NQK + r % NQK.
+        # per PV A atom, or the transposed 32x32 body's S^T column.
         if USE_MFMA_32X32:
             drop_in_warp = [_mfma_32x32_c_col(b, lane, 0)]
         else:

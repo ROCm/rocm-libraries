@@ -316,9 +316,8 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
 
     /* ---- dropout row counters (Python drop_rows) ----
      * Mask row counters, once per CTA, for the rows this lane masks: one per
-     * PV A atom (in-warp row atom * 16 + lane_col), or the transposed 32x32
-     * body's S^T column. Block row r is query qb_start_pos + r / NQK of query
-     * head kv_head * NQK + r % NQK. All in-warp rows first, as Python's list. */
+     * PV A atom, or the transposed 32x32 body's S^T column. All in-warp rows
+     * first, as Python's list. */
     ctx->drop_rows_count = 0;
     if(ctx->spec->dropout)
     {

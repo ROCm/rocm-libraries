@@ -117,6 +117,16 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
+    /* The mask follows the 16x16x16 PV A operand (P from LDS or registers) and
+     * the transposed 32x32x8 body's S^T; the non-transposed 32x32x8 body holds
+     * P otherwise. */
+    if(s->dropout && s->use_mfma_32x32x8 && !s->use_transposed_qk_32x32)
+    {
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "dropout is not supported with the non-transposed 32x32x8 body");
+        return false;
+    }
+
     /* gfx950-only experimental knobs rejected up front on gfx942.
      * NOTE: use_agpr_alloc_zero is NOT an ISA feature -- it is a backend codegen
      * hint ("amdgpu-agpr-alloc"="0,0" + -amdgpu-mfma-vgpr-form) that keeps MFMA
