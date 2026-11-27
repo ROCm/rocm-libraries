@@ -1940,11 +1940,11 @@ namespace TensileLite
         ConstantVariant              beta  = static_cast<float>(0);
         std::vector<ConstantVariant> activationArgs;
 
-        std::vector<FusedA2APeerFields> fusedA2APeers;
-        void*                           fusedA2ACounter = nullptr;
-        uint32_t                        fusedA2AMyRank  = 0;
-        uint32_t                        fusedA2ADrain   = 0;
-        void*                           a2aBuf          = nullptr;
+        FusedA2APeerTable fusedA2APeers   = {};
+        void*             fusedA2ACounter = nullptr;
+        uint32_t          fusedA2AMyRank  = 0;
+        uint32_t          fusedA2ADrain   = 0;
+        void*             a2aBuf          = nullptr;
 
         // Workspace
         void* ws = nullptr;
