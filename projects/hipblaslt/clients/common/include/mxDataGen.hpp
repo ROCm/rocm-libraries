@@ -109,4 +109,33 @@ void applyMXScaleLayoutInPlace(uint8_t*      scale,
                                size_t        fastDim,
                                size_t        mxBlock);
 
+// The compact canonical scale generateMXInput(..., MXScaleLayout::None) writes for these
+// arguments (`elements` one-byte scales) and the {mnExtent, kBlocks} grid its
+// MXScaleLayout::GFX950 output swizzles that scale as: swizzleScaleGFX950(scale, grid) on the
+// compact scale gives the GFX950 call's scale. The scale does not depend on the leading
+// dimension: the generator sizes it from the logical row x col matrix.
+struct MXScaleGrid
+{
+    size_t elements;
+    size_t mnExtent;
+    size_t kBlocks;
+    // K runs along the stored rows (transposed A, non-transposed B); otherwise the compact
+    // scale is [K block][MN].
+    bool   kIsRows;
+    size_t kExtent;
+    size_t elementsPerMXBlock;
+};
+
+MXScaleGrid mxScaleGridGFX950(uint64_t  row,
+                              uint64_t  col,
+                              bool      isTranspose,
+                              int const scaleBlockRowSize,
+                              int const scaleBlockColSize,
+                              bool      isMatrixA);
+
+// The scale generateMXInput(..., MXScaleLayout::GFX950) writes, from the compact canonical
+// scale (grid.elements scales) of the same arguments and their mxScaleGridGFX950 grid.
+std::vector<uint8_t> swizzleScaleGFX950(std::vector<uint8_t> const& scaleBytes,
+                                        MXScaleGrid const&          grid);
+
 #endif
