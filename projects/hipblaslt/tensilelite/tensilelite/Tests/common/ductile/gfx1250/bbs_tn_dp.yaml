@@ -47,6 +47,7 @@ BenchmarkProblems:
     ForkParameters:
     - WavefrontSize: [32] # Default Value: [-1] # Range: [-1, 32, 64]
     - TDMInst: [3] # Default Value: [0] # Range: [0, 1, 2, 3]
+    - TDMFuse: [1] # Default Value: [0] # Range: [0, 1, 2, 3]
     - PrefetchLocalRead: [1] # Default Value: [1] # Range: [0, 1, ..., 127, 128]
     - PrefetchGlobalRead: [2] # Default Value: [1] # Range: [0, 1, ..., 15, 16]
     - PrefetchGlobalReadA: [-1]
@@ -159,15 +160,19 @@ BenchmarkProblems:
           ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.02344 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 16, 1, 1024)]
           WorkGroup: [32, 2, 2]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00586 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00586 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   2 - LSU  2 - totalGranularity  0.01562 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
           WorkGroup: [32, 2, 2]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
@@ -184,8 +189,10 @@ BenchmarkProblems:
           ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   2 - LSU  1 - totalGranularity  0.00391 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   2 - LSU  1 - totalGranularity  0.00391 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00586 - TilesPerCU:  0.01172 - TotalTiles:        3 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   1 - LSU  2 - totalGranularity  0.00781 - TilesPerCU:  0.00781 - TotalTiles:        2 -- sizes [(32, 16, 1, 1024)]
@@ -195,8 +202,10 @@ BenchmarkProblems:
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   1 - LSU  1 - totalGranularity  0.00195 - TilesPerCU:  0.00781 - TotalTiles:        2 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   1 - LSU  1 - totalGranularity  0.00195 - TilesPerCU:  0.00781 - TotalTiles:        2 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+          TDMFuse: 0 # one wave: each tensor has its own TDM descriptor
         - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   1 - LSU  1 - totalGranularity  0.00195 - TilesPerCU:  0.00391 - TotalTiles:        1 -- sizes [(32, 16, 1, 1024)]
           ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
     BenchmarkJoinParameters: 
