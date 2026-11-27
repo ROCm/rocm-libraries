@@ -1002,15 +1002,12 @@ from ...instances.common import batchnorm2d_ro as _ro  # noqa: E402
 
 RO_REGS = (2, 4, 8, 16, 32)
 RO_BLOCKS = (256, 512)
-RO_NHWC_TX = (2, 4, 8, 16)
-RO_NHWC_REGS = (4, 8, 16, 32)
 _RO_SN_REQ = (1, 2, 3, 4, 6, 8, 12, 16, 24, 32)
 _RO_SH_REQ = (1, 2, 4, 8, 16, 32)
 
 # Admission rule of the NCHW / NCDHW read-once plans: f16 / f32 data, an x tensor of at least
 # ``RO_MIN_BYTES`` and a per-channel split of ``RO_MIN_SPLIT <= sn * sh <= RO_MAX_SPLIT`` work
-# items.  ``rule=False`` on ``plans`` gives the full sweep space.  NHWC read-once stays out of
-# the shipped set (``dynamic_batchnorm_nhwc_ro_candidates`` is a sweep-only space).
+# items.  ``rule=False`` on ``plans`` gives the full sweep space.
 RO_MIN_BYTES = 8_000_000
 RO_MIN_SPLIT = 2
 RO_MAX_SPLIT = 16
@@ -1060,49 +1057,11 @@ class BatchNormRoCandidate:
         return out
 
 
-@dataclass(frozen=True)
-class BatchNormNhwcRoCandidate:
-    """NHWC (fp16 / bf16) read-once training forward or backward."""
-
-    block_size: int
-    tx: int
-    vec: int
-    regs: int
-    backward: bool = False
-
-    @property
-    def name(self) -> str:
-        kind = "bwd" if self.backward else "train"
-        return f"batchnorm2d_nhwc_ro_{kind}_b{self.block_size}_tx{self.tx}_v{self.vec}_r{self.regs}"
-
-    def spec(self, dtype: str, arch: str = "gfx950") -> _ro.BatchNorm2DNhwcRoSpec:
-        return _ro.BatchNorm2DNhwcRoSpec(
-            block_size=self.block_size, tx=self.tx, vec=self.vec, regs=self.regs,
-            dtype={"fp16": "f16", "fp32": "f32"}.get(dtype, dtype),
-        )
-
-    def build(self, spec):
-        return _ro.build_batchnorm2d_nhwc_ro_bwd(spec) if self.backward else _ro.build_batchnorm2d_nhwc_ro_train(spec)
-
-    def plans(self, dtype: str, n: int, c: int, h: int, w: int, max_resident: int):
-        spec = self.spec(dtype)
-        if not _ro.is_valid_nhwc_ro_spec(spec)[0]:
-            return []
-        return list(_ro.batchnorm2d_nhwc_ro_plans(spec, n, c, h, w, max_resident=max_resident))
-
-
 def dynamic_batchnorm_ro_candidates(backward: bool, dtype: str = "f16") -> Tuple[BatchNormRoCandidate, ...]:
     vecs = (4, 2) if dtype in ("f32", "fp32") else (8, 4)
     return tuple(
         BatchNormRoCandidate(bs, v, r, False, backward)
         for bs in RO_BLOCKS for v in vecs for r in RO_REGS
-    )
-
-
-def dynamic_batchnorm_nhwc_ro_candidates(backward: bool) -> Tuple[BatchNormNhwcRoCandidate, ...]:
-    return tuple(
-        BatchNormNhwcRoCandidate(bs, tx, v, r, backward)
-        for bs in RO_BLOCKS for tx in RO_NHWC_TX for v in (8, 4) for r in RO_NHWC_REGS
     )
 
 
