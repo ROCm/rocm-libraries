@@ -88,9 +88,10 @@ bool IsSmallBatchNhwcBackwardExcluded(const std::string& device_name,
        !miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }))
         return false;
     // Only exclude GEMM where the ASM Xdlops fallback can address the tensors, so selection
-    // reverts to a fast implicit-GEMM solver. Reuses ASM's own size gate, which is direction-aware:
-    // wrw drops out above the 32-bit byte-offset limit (keep GEMM), while bwd-data stays
-    // addressable via batch split.
+    // reverts to a fast implicit-GEMM solver. Reuses ASM's own size gate at its default int32
+    // bound, which is direction-aware: wrw keeps GEMM above INT_MAX bytes, while bwd-data stays
+    // addressable via batch split. On gfx942 the ASM wrw solver accepts FP32 activations up to
+    // 4 GiB, so GEMM also stays a candidate for FP32 between INT_MAX and 4 GiB.
     return !igemm_tensor_size_exceeds_asm_gtc_addressing(problem);
 }
 

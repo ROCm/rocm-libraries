@@ -34,8 +34,9 @@
 // the base pointer per batch-split, so activations of any size are handled by the split
 // mechanism. Only the per-group weight size has to fit the window. Backward-weights never
 // splits, because 292 of its 900 kernels ignore the batch-split dimension
-// (ROCm/rocm-libraries#11805). On gfx950 its FP32 activations may use the whole 4 GiB
-// window; FP16/BF16 and other devices keep the int32 bound.
+// (ROCm/rocm-libraries#11805). On gfx942 and gfx950 its FP32 activations in a uniform NCHW or
+// NHWC layout may use the whole 4 GiB window. Mixed layouts, FP16/BF16 and other devices keep
+// the int32 bound.
 //
 // The first two cases share geometry and differ only in batch size N, so the byte
 // count crosses the INT_MAX boundary and isolates the gate. The gate checks the
@@ -50,7 +51,7 @@
 // 4.50 GiB per group, over the 4 GiB window, while its activations stay small so the weight
 // term is isolated.
 //
-// GetFp32WeightsOverInt32ConvCase() pins the other half of that bound. The gfx950 window is for
+// GetFp32WeightsOverInt32ConvCase() pins the other half of that bound. The 4 GiB window is for
 // the activations: fp32 NHWC weights of 8192x8192x3x3 are 2,415,919,104 bytes, over INT_MAX and
 // under the window, and backward-weights has to stay gated on every device while its 6 MiB
 // activations keep every other term out of the way.
@@ -60,11 +61,19 @@
 //     N=71 -> 4,334,321,664 bytes, over it
 //
 // The fp32 NCHW cases cover the same window on the IsLayoutDefault() branch. That is the layout
-// of every gfx950 fp32 find-db row this bound restores, and the layout the ResNet recovery runs
+// of nearly every fp32 find-db row this bound restores, and the layout the ResNet recovery runs
 // in. They use one of those restored shapes, x = 256x64x64 with a 1024x256x1x1 filter, whose
 // larger activation is N * 1024 * 64 * 64 * 4 bytes, so N alone moves it across both ends:
 //     N=128 -> 2,147,483,648 bytes, one byte over INT_MAX, inside the window
 //     N=256 -> 4,294,967,296 bytes, one byte over the window
+//
+// GetFp32NchwResNetLayerConvCase() is a ResNet-50 batch-1024 layer, x = 256x56x56 with a
+// 128x256x1x1 filter. x is 3,288,334,336 bytes, inside the window, and dy is half of that.
+//
+// GetFp32MixedLayoutOverInt32ConvCase() is the N=128 NCHW shape with 3x3 NHWC weights and
+// padding 1, so dy is again one byte over INT_MAX. Mixed layouts keep the int32 bound on every
+// device, so it is gated where the uniform NCHW case is applicable. The weights are not 1x1
+// because a 1x1 weight tensor fits both layouts, and the problem is then read as uniform NCHW.
 //
 // The backward-weights batch-padding cases cover the hazard behind ROCM-31718. The fp16
 // kernels with filter padding read batch rows in packs of 4 or 8 and rely on the buffer range
@@ -88,7 +97,7 @@
 // is 4,294,184,960 bytes, 782,336 under the window. The config the usual heuristic picks splits
 // gemm-k unevenly and reads dy row 130, which starts at 4,294,184,960 and ends at
 // 4,327,217,152; the fallback finds a config whose splits are exact and that reads rows 0 to
-// 129 only, so gfx950 keeps the solver.
+// 129 only, so gfx942 and gfx950 keep the solver.
 
 namespace {
 
@@ -164,6 +173,24 @@ auto GetFp32NchwOverWindowConvCase()
                         {{0, 0}, {1, 1}, {1, 1}}};
 }
 
+auto GetFp32NchwResNetLayerConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNCHW, {1024, 256, 56, 56}},
+                        {miopenFloat, miopenTensorNCHW, {128, 256, 1, 1}},
+                        miopenFloat,
+                        {{0, 0}, {1, 1}, {1, 1}}};
+}
+
+auto GetFp32MixedLayoutOverInt32ConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenFloat, miopenTensorNCHW, {128, 256, 64, 64}},
+                        {miopenFloat, miopenTensorNHWC, {1024, 256, 3, 3}},
+                        miopenFloat,
+                        {{1, 1}, {1, 1}, {1, 1}}};
+}
+
 auto GetBatchPaddingWrapsUnderInt32ConvCase()
 {
     using miopen::unit_tests::ConvTestCase;
@@ -226,10 +253,11 @@ auto GetGatedParams()
     return p;
 }
 
-// within the 4 GiB window but above INT_MAX: backward-weights is applicable on gfx950 only.
-auto GetGfx950WindowParams()
+// within the 4 GiB window but above INT_MAX: backward-weights is applicable on gfx942 and gfx950
+// only.
+auto GetFp32WindowParams()
 {
-    auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx950);
+    auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950);
     p.CheckXnackDisabled();
     return p;
 }
@@ -311,7 +339,7 @@ INSTANTIATE_TEST_SUITE_P(StandardOverInt32,
 
 INSTANTIATE_TEST_SUITE_P(StandardFp32InWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
-                         testing::Combine(testing::Values(GetGfx950WindowParams()),
+                         testing::Combine(testing::Values(GetFp32WindowParams()),
                                           testing::Values(GetFp32InWindowConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(StandardFp32OverWindow,
@@ -321,13 +349,23 @@ INSTANTIATE_TEST_SUITE_P(StandardFp32OverWindow,
 
 INSTANTIATE_TEST_SUITE_P(StandardFp32NchwInWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
-                         testing::Combine(testing::Values(GetGfx950WindowParams()),
+                         testing::Combine(testing::Values(GetFp32WindowParams()),
                                           testing::Values(GetFp32NchwInWindowConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(StandardFp32NchwOverWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32NchwOverWindowConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(StandardFp32NchwResNetLayer,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetFp32WindowParams()),
+                                          testing::Values(GetFp32NchwResNetLayerConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(StandardFp32MixedLayoutOverInt32,
+                         CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetGatedParams()),
+                                          testing::Values(GetFp32MixedLayoutOverInt32ConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(StandardFp32WeightsOverInt32,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
@@ -352,7 +390,7 @@ INSTANTIATE_TEST_SUITE_P(StandardFp32NchwBatchPaddingWraps,
 
 INSTANTIATE_TEST_SUITE_P(StandardFp32NchwPaddingFallback,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
-                         testing::Combine(testing::Values(GetGfx950WindowParams()),
+                         testing::Combine(testing::Values(GetFp32WindowParams()),
                                           testing::Values(GetFp32NchwPaddingFallbackConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(StandardBatchPaddingFits,

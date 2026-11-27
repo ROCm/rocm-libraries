@@ -1050,8 +1050,9 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    // The full 4 GiB window was validated against a GPU reference on gfx950 only.
-    const auto max_wrw_bytes = device_name == "gfx950"
+    // The full 4 GiB window was validated against a GPU reference on gfx950 and on
+    // MI300X (gfx942, 304 CUs). Other gfx942 devices share this gate without that check.
+    const auto max_wrw_bytes = (device_name == "gfx942" || device_name == "gfx950")
                                    ? static_cast<std::size_t>(0xffffffffULL)
                                    : static_cast<std::size_t>(std::numeric_limits<int>::max());
     if(igemm_tensor_size_exceeds_asm_gtc_addressing(problem, max_wrw_bytes))

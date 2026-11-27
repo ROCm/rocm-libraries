@@ -53,6 +53,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] On gfx942, `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC` now accepts FP32 NCHW or NHWC
+  activations up to 4 GiB (previously 2 GiB), as on gfx950. The FP32 gfx942 (MI300X) find-db rows
+  removed by the 2 GiB bound are restored where the tuned config passes the batch-padding check.
+  This restores ResNet-50 FP32 batch-1024 backward-weights speed on MI300X. FP16/BF16 keep the
+  2 GiB bound, and so does the weight tensor in every case.
 * [Conv] Fixed convolution solution queries trusting the workspace size stored in the find-db.
   `miopenConvolution*GetSolution`, Hybrid and Fast Find, and TrustVerify now use the size the
   solver requires: Find checks the buffer against the workspace of the configuration that runs
