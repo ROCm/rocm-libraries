@@ -1473,17 +1473,38 @@ def test_committed_entry_times_have_a_source_and_seconds_per_column() -> None:
 
 
 def test_committed_ceilings_only_go_down() -> None:
-    """Ceilings are ratchets. This guard pins the committed values, so raising
-    one means editing this test as well, in plain view of review; lowering one
-    (``lower-ceiling``) only needs the bound here moved down with it."""
+    """Ceilings are ratchets. This guard pins the committed values, so adding
+    or raising one means editing this test as well, in plain view of review."""
     ceilings = {
         name: column.get("ceilings", {})
         for name, column in check.load_entry_times().items()
     }
-    # The Linux standard tier fits its budget, so it has no ceiling.
-    assert ceilings["linux"] == {}
-    assert ceilings["windows"].keys() == {"standard"}
-    assert ceilings["windows"]["standard"] <= 540.0
+    # No tier is held over its budget by a ceiling on either system.
+    assert ceilings == {"linux": {}, "windows": {}}
+    assert not check.ceiling_breaches(check.load_entry_times())
+
+
+@pytest.mark.parametrize("ceiling", [540.0, 500.0], ids=["at-budget", "below"])
+def test_a_ceiling_not_above_the_budget_fails(ceiling: float) -> None:
+    entry_times = _column({"standard": ceiling}, rocke_pytest_core=100.0)
+    assert check.ceiling_breaches(entry_times, [STANDARD]) == [
+        (
+            f"linux standard: ceiling {ceiling:.0f} s is not above the 540 s "
+            "budget, so it holds nothing; remove it from entry_times.json"
+        )
+    ]
+    entries = check.registered_entries(
+        [_test("rocke_pytest_core", ["standard"], WHOLE_COMMAND)]
+    )
+    verdicts = check.evaluate_tiers(entries, entry_times, tiers=[STANDARD])
+    assert check.tier_breaches(entries, entry_times, verdicts, tiers=[STANDARD]) == (
+        check.ceiling_breaches(entry_times, [STANDARD])
+    )
+
+
+def test_a_ceiling_above_the_budget_passes() -> None:
+    entry_times = _column({"standard": 541.0}, rocke_pytest_core=100.0)
+    assert check.ceiling_breaches(entry_times, [STANDARD]) == []
 
 
 def _standard_verdict(seconds: float, ceiling: float | None):

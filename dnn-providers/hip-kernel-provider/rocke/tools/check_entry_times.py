@@ -50,7 +50,8 @@ A tier fails when an entry alone is over the tier's budget on a shard, or when
 a shard's sum is over the tier's limit: its budget, or the ceiling
 ``entry_times.json`` records for that tier and operating system. A ceiling
 holds a tier that is already over budget where it is today, so it cannot grow
-further while the fix lands. Ceilings only go down: lower one with
+further while the fix lands; one not above its budget holds nothing and fails
+the check. Ceilings only go down: lower one with
 ``lower-ceiling`` as the tier gets cheaper (it refuses to raise one, and drops
 it once the tier's slowest shard fits its budget); ``record`` keeps them as
 they are. Each run prints every shard's projection, the margin of the slowest
@@ -157,6 +158,7 @@ __all__ = [
     "RegisteredEntry",
     "TierLayout",
     "TierVerdict",
+    "ceiling_breaches",
     "collect_entry_keys",
     "entry_seconds_from_ctest_logs",
     "evaluate_tiers",
@@ -235,8 +237,10 @@ class TierLayout:
 # Shard counts and the 30-minute step are TheRock's test configuration for the
 # provider (fetch_test_configurations.py and test_component.yml). The budgets
 # are TESTING.md's Q1, Q2 and S4 (section 5.0.3 says what each tier is for and
-# why). The budgets are ratchets: fix a breach at its source (a cheaper test, a
-# smaller shard key, a different tier), never by raising them.
+# why). Fix a breach at its source (a cheaper test, a smaller shard key, a
+# different tier), not by raising a budget. A budget changes only together with
+# its TESTING.md row and the reason given there, as S4 did from 420 s to 540 s
+# to stay under a third of the step.
 CI_TIERS = (
     TierLayout(
         "quick",
@@ -658,6 +662,26 @@ def item_budget_breaches(
     return found
 
 
+def ceiling_breaches(
+    entry_times: Mapping[str, Mapping], tiers: Sequence[TierLayout] = CI_TIERS
+) -> list[str]:
+    """One failure per column and tier whose recorded ceiling is not above the
+    tier's budget. A ceiling only holds a tier that is over its budget, so one
+    at or below the budget constrains nothing the budget does not (or holds
+    the tier tighter than its own rule) and is removed instead."""
+    found = []
+    for column, recorded in entry_times.items():
+        ceilings = recorded.get("ceilings", {})
+        found += [
+            f"{column} {tier.label}: ceiling {ceilings[tier.label]:.0f} s is not "
+            f"above the {tier.budget_seconds:.0f} s budget, so it holds nothing; "
+            "remove it from entry_times.json"
+            for tier in tiers
+            if tier.label in ceilings and ceilings[tier.label] <= tier.budget_seconds
+        ]
+    return found
+
+
 def gpu_allowlist_breaches(
     allowlist: Mapping[str, str] = GPU_ENTRY_ALLOWLIST,
 ) -> list[str]:
@@ -712,12 +736,14 @@ def tier_breaches(
     tier runs with no time (:func:`untimed_entries`), an item over its tier's
     item budget (:func:`item_budget_breaches`), a GPU entry in a tier that runs
     none (:func:`gpu_entry_breaches`), an allowlist that is not one entry with
-    a reason (:func:`gpu_allowlist_breaches`) and each shard over its limits
+    a reason (:func:`gpu_allowlist_breaches`), a ceiling that holds nothing
+    (:func:`ceiling_breaches`) and each shard over its limits
     (:meth:`TierVerdict.breaches` of ``verdicts``, the :func:`evaluate_tiers`
     of the same entries, data and tiers)."""
     entries = list(entries)
     return [
         *untimed_entries(entries, entry_times, tiers),
+        *ceiling_breaches(entry_times, tiers),
         *item_budget_breaches(entries, entry_times, tiers),
         *gpu_entry_breaches(entries, tiers),
         *gpu_allowlist_breaches(),

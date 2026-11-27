@@ -698,9 +698,6 @@
       "rocke_workgroup_size": 0.18,
       "rocke_xf32_bf16x3_lowering": 0.15,
       "rocke_yield_rules": 0.18
-    },
-    "ceilings": {
-      "standard": 540.0
     }
   }
 }
