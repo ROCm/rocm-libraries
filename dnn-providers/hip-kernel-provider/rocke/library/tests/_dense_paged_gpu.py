@@ -77,3 +77,52 @@ def run_dispatched_paged(
     ).launch()
     torch.cuda.synchronize()
     return result, q, k, v, out
+
+
+def check_one_single_sequence_kernel_serves_two_caches(
+    make_spec, run, reference, tolerance, launcher_for
+):
+    """Two single-sequence fp16 launches whose length and cache size differ run on
+    one compiled kernel (``launcher_for(spec)`` returns the same launcher after
+    both), and both match ``reference(q, k, v, scale)``. ``make_spec`` is the arch
+    test's shipped-spec factory."""
+    import dataclasses
+    import math
+
+    import torch
+
+    d, hq, hkv, block_size = 128, 16, 4, 16
+    scale = 1.0 / math.sqrt(d)
+    launchers, sizes = [], []
+    for sq in (1024, 2048):
+        torch.manual_seed(0)
+        q, k, v = (
+            torch.randn(1, sq, h, d, device="cuda", dtype=torch.float16)
+            for h in (hq, hkv, hkv)
+        )
+        k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, block_size)
+        spec = dataclasses.replace(
+            make_spec(
+                "fp16", d, hq, hkv, False, sq=sq, sk=sq, kv_block_size=block_size
+            ),
+            num_kv_blocks=k_cache.shape[0],
+        )
+        out = torch.full_like(q, float("nan"))
+        run(
+            spec=spec,
+            q=q,
+            k=k_cache,
+            v=v_cache,
+            out=out,
+            scale=scale,
+            block_tables=block_tables,
+            kv_lens=kv_lens,
+        )
+        torch.cuda.synchronize()
+        max_abs = (reference(q, k, v, scale) - out.float()).abs().max().item()
+        assert max_abs < tolerance("fp16"), f"sq{sq}: max_abs={max_abs:.3e}"
+        sizes.append(k_cache.shape[0])
+        launchers.append(launcher_for(spec))
+    assert sizes[0] != sizes[1]
+    assert launchers[0] is not None
+    assert launchers[0] is launchers[1], "a second compile for another cache size"

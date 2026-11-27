@@ -644,21 +644,7 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             num,
                             (unsigned long long)ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES);
         }
-        if(s->varlen)
-        {
-            /* Top-left aligns every sequence's diagonal at its first key, which is right
-             * only for q_len == kv_len; bottom-right shifts it per sequence. */
-            if(s->seqlen_q != s->seqlen_kv && !s->causal_bottom_right)
-                ROCKE_SPEC_FAIL(reason,
-                                cap,
-                                "paged varlen top-left is self-attention prefill (q_len == "
-                                "kv_len per sequence): seqlen_q must equal seqlen_kv, got %d != %d",
-                                s->seqlen_q,
-                                s->seqlen_kv);
-            /* emit_lse is an arch field this port does not carry: only the Python
-             * arch spec refuses it with paged varlen. */
-        }
-        else if(s->batch != 1)
+        if(!s->varlen && s->batch != 1)
             ROCKE_SPEC_FAIL(reason,
                             cap,
                             "paged multi-sequence (batch>1) needs varlen=True (packed Q + "
@@ -879,7 +865,9 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
     if(s->paged)
     {
         add("pgd%d", s->block_size);
-        /* The cache size is baked exactly when the shape is. */
+        /* Python names nb when num_kv_blocks is not a runtime param; every arch
+         * body takes it as a kernarg together with the shape, so that is exactly
+         * when the shape parts are on. */
         if(np->shape_parts)
             add("nb%d", s->num_kv_blocks);
         if(s->use_i64_kv_addr)

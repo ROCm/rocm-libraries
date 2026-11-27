@@ -18,6 +18,14 @@ PAGED_VARLEN_EDGES = [256, 1, 17, 63, 65, 0, 512, 48]
 # A ragged batch for the i64 page-base checks: a long sequence ending inside a Q
 # and a KV tile, a two-page one, an empty one and a tile-aligned one.
 PAGED_VARLEN_RAGGED = [1000, 17, 0, 512]
+# Top-left paged varlen with q_len != kv_len, as (kv_lens, q_lens): unequal maxima
+# both ways, equal maxima over mixed sequences, sequences without keys (kv_len 0),
+# and under a window, rows past kv_len + window that see no key.
+PAGED_VARLEN_TOP_LEFT_CROSS = {
+    "q_lt_kv": ([512, 300, 17, 65], [256, 300, 1, 64]),
+    "q_gt_kv": ([256, 17, 0, 100], [512, 64, 33, 100]),
+    "equal_maxima": ([512, 256, 0], [256, 512, 40]),
+}
 _PAD_ID = 0x7FFF_FFFF
 _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
@@ -85,7 +93,8 @@ def check_paged_varlen(
     """One packed launch of ``lens`` against ``reference(q, k, v, scale, window)``
     per sequence ([1, S, H, D] tensors). ``make_spec(lens, block_size, d, dtype,
     num_kv_blocks, window=...)`` builds the arch's varlen spec. ``q_lens``: query
-    lengths that differ from the KV lengths ``lens`` (bottom-right). ``sinks``:
+    lengths that differ from the KV lengths ``lens`` (any under top-left,
+    ``q_len <= kv_len`` under bottom-right). ``sinks``:
     per-head sink logits go to the launch and to ``reference(..., sinks=...)``."""
     torch.manual_seed(0)
     scale = 1.0 / math.sqrt(d)
@@ -137,8 +146,36 @@ def check_paged_varlen(
         )[0]
         max_abs = (ref - got.float()).abs().max().item()
         assert max_abs < tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        keyless = (ref == 0).flatten(1).all(dim=1)
+        assert not got[keyless].any(), f"{name}: a row without keys is not zero"
     # For negative controls against other references.
     return q, ks, vs, out, cu, scale
+
+
+def check_top_left_cross_length(
+    run, make_spec, reference, tolerance, case, block_size, d, dtype, window, sinks
+):
+    """:func:`check_paged_varlen` over a :data:`PAGED_VARLEN_TOP_LEFT_CROSS` case;
+    the spec's query maximum comes from the query lengths."""
+    kv_lens, q_lens = PAGED_VARLEN_TOP_LEFT_CROSS[case]
+
+    def make_cross_spec(lens, *args, **kw):
+        spec = make_spec(lens, *args, **kw)
+        return dataclasses.replace(spec, seqlen_q=max(q_lens))
+
+    check_paged_varlen(
+        run,
+        make_cross_spec,
+        reference,
+        tolerance,
+        kv_lens,
+        block_size,
+        d,
+        dtype,
+        window,
+        q_lens=q_lens,
+        sinks=sinks,
+    )
 
 
 def check_one_kernel_serves_two_caches(

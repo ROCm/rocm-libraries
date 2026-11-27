@@ -430,7 +430,8 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
 
 def dense_paged_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     """:func:`dense_auto_order` with the body that measures faster on paged K/V
-    moved to the front. Sinks keep wide DMA out: no test covers that pair.
+    moved to the front. Sinks keep wide DMA out: that pair is tested but not
+    measured.
     """
     order = dense_auto_order(req)
     if int(req.hdim_q) == 64:

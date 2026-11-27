@@ -328,20 +328,7 @@ class AttentionDenseSpec:
                     f"paged cache {paged_cache_bytes(self)} B is past the i32 K/V "
                     f"buffer range ({I32_KV_BUFFER_BYTES:#x} B): set use_i64_kv_addr"
                 )
-            if self.varlen:
-                # Top-left aligns every sequence's diagonal at its first key, which
-                # is right only for q_len == kv_len; bottom-right shifts it per
-                # sequence (q_len <= kv_len, checked with the other BR rules above).
-                if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
-                    raise ValueError(
-                        "paged varlen top-left is self-attention prefill (q_len == "
-                        "kv_len per sequence): seqlen_q must equal seqlen_kv, got "
-                        f"{self.seqlen_q} != {self.seqlen_kv}"
-                    )
-                # emit_lse is declared by the arch specs.
-                if getattr(self, "emit_lse", False):
-                    raise ValueError("emit_lse is not yet supported with paged varlen")
-            elif self.batch != 1:
+            if not self.varlen and self.batch != 1:
                 raise ValueError(
                     "paged multi-sequence (batch>1) needs varlen=True "
                     "(packed Q + cu_seqlens_q)"
@@ -601,9 +588,10 @@ class AttentionDenseSpec:
             parts.append("varlen")
         if self.paged:
             parts.append(f"pgd{self.block_size}")
-            # The cache size is baked exactly when the shape is: the arch bodies
-            # read num_kv_blocks from a kernarg together with the shape.
-            if self._shape_name_parts():
+            # Named exactly when the cache key keeps it. The C port gates the token
+            # on its shape-parts flag: every arch body takes num_kv_blocks as a
+            # kernarg together with the shape.
+            if "num_kv_blocks" not in self.runtime_param_fields:
                 parts.append(f"nb{self.num_kv_blocks}")
             if self.use_i64_kv_addr:
                 parts.append("i64kv")
@@ -715,8 +703,8 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
     divisibility its own DMA imposes). A check belongs HERE only if it reads
     base-spec fields only AND its verdict is the same for every dense body -- which
     is why the LDS budget stays per-arch (it needs the arch capacity and the body's
-    tile math) and the mode rejections stay per-arch (gfx942 defers varlen, gfx950
-    ships it).
+    tile math) and the mode rejections stay per-arch (gfx942 refuses contiguous
+    varlen and ragged, which gfx950 ships).
 
     The four checks, in a load-bearing order:
 

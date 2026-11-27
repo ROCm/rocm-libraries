@@ -190,11 +190,6 @@ _VALUES = [
         dict(kv_lens=I32DeviceTensor([1000, 17, -1])),
         r"kv_lens\[2\]=-1 outside",
     ),
-    (
-        "q_len_ne_kv_len",
-        dict(cu_seqlens_q=I32DeviceTensor([0, 1000, 1016, 1017])),
-        r"q_len=16 != kv_lens\[1\]=17",
-    ),
     ("used_block_id", dict(block_tables=_bad_table()), f"block id {_NB} outside"),
 ]
 
@@ -243,14 +238,14 @@ def test_single_sequence_spec_refuses_cu_seqlens(arch):
         )
 
 
-# Bottom-right: each sequence's diagonal is shifted by its own kv_len - q_len,
-# so query lengths may be shorter than the KV lengths _LENS.
+# Query lengths other than the KV lengths _LENS: bottom-right shifts each
+# sequence's diagonal by its own kv_len - q_len.
 _BR_CU = [0, 600, 617, 617]
 
 
-def _bottom_right_inputs(**overrides):
-    packed = CacheStandIn((_BR_CU[-1], _HQ, _D))
-    call = dict(q=packed, out=packed, cu_seqlens_q=I32DeviceTensor(list(_BR_CU)))
+def _packed_inputs(cu=_BR_CU, **overrides):
+    packed = CacheStandIn((cu[-1], _HQ, _D))
+    call = dict(q=packed, out=packed, cu_seqlens_q=I32DeviceTensor(list(cu)))
     call.update(overrides)
     return _inputs(**call)
 
@@ -258,19 +253,29 @@ def _bottom_right_inputs(**overrides):
 @pytest.mark.parametrize("arch", _ARCHES)
 def test_bottom_right_allows_shorter_queries(arch):
     spec = dataclasses.replace(_spec(arch), causal_bottom_right=True)
-    _assert_reaches_compile(arch, spec=spec, **_bottom_right_inputs())
+    _assert_reaches_compile(arch, spec=spec, **_packed_inputs())
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
 def test_bottom_right_refuses_a_query_longer_than_its_keys(arch):
     spec = dataclasses.replace(_spec(arch), causal_bottom_right=True)
-    bad = _bottom_right_inputs(kv_lens=I32DeviceTensor([1000, 16, 0]))
+    bad = _packed_inputs(kv_lens=I32DeviceTensor([1000, 16, 0]))
     with pytest.raises(ValueError, match=r"q_len=17 > kv_lens\[1\]=16"):
         _launch(arch, spec=spec, **bad)
     _assert_reaches_compile(arch, spec=spec, **bad, validate_paged=False)
 
 
+# Top-left: every sequence's diagonal starts at its first key, whatever its
+# lengths; rows past kv_len + window, and a sequence with no keys, output zeros.
 @pytest.mark.parametrize("arch", _ARCHES)
-def test_top_left_still_needs_equal_lengths(arch):
-    with pytest.raises(ValueError, match=r"q_len=600 != kv_lens\[0\]=1000"):
-        _launch(arch, **_bottom_right_inputs())
+@pytest.mark.parametrize(
+    "cu,kv_lens",
+    [
+        pytest.param(_BR_CU, [1000, 17, 0], id="q_lt_kv"),
+        pytest.param([0, 1000, 1017, 1027], [600, 17, 0], id="q_gt_kv_and_no_keys"),
+    ],
+)
+def test_top_left_allows_unequal_lengths(arch, cu, kv_lens):
+    _assert_reaches_compile(
+        arch, **_packed_inputs(cu, kv_lens=I32DeviceTensor(kv_lens))
+    )

@@ -407,6 +407,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
         require_bool("emit_lse", self.emit_lse)
+        if self.emit_lse and self.paged and self.varlen:
+            raise ValueError("emit_lse is not yet supported with paged varlen")
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -986,6 +988,11 @@ def build_attention_dense(
     # Packed sequences over a paged cache: per-sequence Q and KV tails, so bounded Q
     # loads, a ceil KV tile count, zeroed V tail rows and a guarded O store.
     PAGED_VARLEN = varlen and spec.paged
+    # Top-left paged varlen: a row past its sequence's kv_len reaches the partial
+    # last KV tile, whose keys past kv_len causal no longer hides (it does only for
+    # q_len <= kv_len). The causal bound is clamped to kv_len - 1 and that tile kept
+    # out of the mask-free phases.
+    KV_CLAMP = PAGED_VARLEN and causal and not spec.causal_bottom_right
     RAGGED = spec.ragged
     PAGED_I64 = spec.paged and spec.use_i64_kv_addr
     LAZY_RESCALE = spec.lazy_rescale
@@ -1625,6 +1632,8 @@ def build_attention_dense(
         win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         # upper bound key: q + RIGHT (the window anchor above stays unshifted)
         up_tok = b.add(query_tok, b.const_i32(RIGHT)) if RIGHT else query_tok
+        if KV_CLAMP:
+            up_tok = b.smin(up_tok, b.sub(seqlen_kv_b, b.const_i32(1)))
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
@@ -1843,9 +1852,8 @@ def build_attention_dense(
     # shift is non-negative and the div below rounds like a shift.
     diag_off_rt = b.sub(seqlen_kv_b, seqlen_q_b) if BR_RUNTIME else None
     if PAGED_VARLEN:
-        # Ceil: the partial last tile is visited. Its keys past kv_len lie above
-        # every live row's diagonal (row q < q_len sees keys up to
-        # q + kv_len - q_len < kv_len), so causal masks their scores.
+        # Ceil: the partial last tile is visited; the upper mask drops its keys past
+        # kv_len (KV_CLAMP; bottom-right rows never reach them).
         n_ktiles_val = b.div(b.add(seqlen_kv_b, b.const_i32(BN - 1)), b.const_i32(BN))
     elif varlen:
         n_ktiles_val = b.div(seqlen_kv_b, b.const_i32(BN))
@@ -1875,6 +1883,14 @@ def build_attention_dense(
     else:
         n_upper = n_ktiles_val
 
+    def _below_kv_tail(tile):
+        """``tile`` capped at the first KV tile that holds a key past kv_len, for
+        the bounds of the mask-free phases."""
+        if not KV_CLAMP:
+            return tile
+        full = b.div(seqlen_kv_b, b.const_i32(BN))
+        return b.select(b.cmp_lt(tile, full), tile, full)
+
     # Sliding-window: first KV tile any row in this block attends to. Valid band
     # is [start_tile, n_upper); tiles < start_tile are fully outside the window
     # (all -inf) so they are never visited (the KV-loop prune). W==0 keeps
@@ -1896,6 +1912,12 @@ def build_attention_dense(
         # the clamp must always be emitted since any windowed run shape can be empty.
         if spec.runtime_shape:
             _last_tile = b.sub(n_ktiles_val, b.const_i32(1))
+            if KV_CLAMP:
+                # A sequence without keys (kv_len 0) can still have query rows here;
+                # its prologue loads tile 0, never buffer -1.
+                _last_tile = b.select(
+                    b.cmp_lt(_last_tile, b.const_i32(0)), b.const_i32(0), _last_tile
+                )
             start_tile = b.select(
                 b.cmp_lt(start_tile, _last_tile), start_tile, _last_tile
             )
@@ -2084,7 +2106,7 @@ def build_attention_dense(
             return x
 
         mid_lo = _clamp(left_end, a, n_upper)
-        mid_hi = _clamp(diag_start, mid_lo, n_upper)
+        mid_hi = _clamp(_below_kv_tail(diag_start), mid_lo, n_upper)
 
         phL = b.scf_for_iter(a, mid_lo, b.const_i32(1), iter_args, iv_name="swl")
         with phL as (j, carry):
@@ -2112,6 +2134,7 @@ def build_attention_dense(
         elif BR_RUNTIME:
             # Floor: a tile holding the shifted diagonal stays in the masked tail.
             diag_start = b.add(diag_start, b.div(diag_off_rt, b.const_i32(BN)))
+        diag_start = _below_kv_tail(diag_start)
         if KVS > 1:
             body_upper = b.select(b.cmp_lt(diag_start, seg_lo1), seg_lo1, diag_start)
             body_upper = b.select(b.cmp_lt(body_upper, seg_hi), body_upper, seg_hi)
@@ -2240,9 +2263,13 @@ def build_attention_dense(
     # The exact per-row "sees at least one key" predicate. LSE always needs it. A
     # runtime_shape window kernel also needs it for the O store: one binary serves
     # shapes with and without keyless rows (WINDOW_EMPTY, not baked EMPTY_ROWS), and
-    # for a shape without them the predicate keeps every row.
+    # for a shape without them the predicate keeps every row. So does top-left paged
+    # varlen, whose runtime lengths can leave a row without keys (kv_len 0, or a
+    # window past the sequence's last key: SEM-010 wants O = 0); bottom-right has
+    # q_len <= kv_len, so every row sees its diagonal key.
     row_has_key = None
-    if spec.emit_lse or (WINDOW_EMPTY and spec.runtime_shape):
+    paged_keyless = PAGED_VARLEN and not spec.causal_bottom_right
+    if spec.emit_lse or (WINDOW_EMPTY and spec.runtime_shape) or paged_keyless:
         row_has_key = dense_row_has_key(
             b,
             qtok,

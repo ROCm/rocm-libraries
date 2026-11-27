@@ -198,8 +198,9 @@ def validate_paged_launch(
     Always (metadata only), as the unified binding checks its paged inputs:
     ``block_tables`` [batch, >= pages] and ``kv_lens`` [batch] are int32 tensors with
     unit inner stride on the K/V device, and the K/V caches are contiguous GPU tensors
-    on one device with the spec's shape. The kernel bakes the cache layout and the
-    cache extent: the i32 form bounds its loads by the whole cache
+    on one device with the spec's shape. The kernel bakes the cache layout and takes
+    the cache extent ``num_kv_blocks`` from the spec (a kernel argument on the
+    runtime-shape bodies): the i32 form bounds its loads by the whole cache
     (:func:`paged_cache_bytes`), the i64 form clamps the page id to ``num_kv_blocks``
     and bounds each page (:func:`paged_page_rsrc`). Either way a strided view or a
     smaller cache would be read at the wrong addresses or past the allocation. Paged varlen also needs
@@ -209,8 +210,8 @@ def validate_paged_launch(
     dereferences must be in ``[0, num_kv_blocks)``. A single sequence needs
     ``kv_lens[0] == seqlen_kv``, since the kernel visits all ``seqlen_kv`` keys;
     paged varlen needs ``cu_seqlens_q`` to span the packed Q in order, and each
-    sequence's lengths within the spec maxima with ``q_len == kv_len``
-    (``q_len <= kv_len`` under ``causal_bottom_right``).
+    sequence's lengths within the spec maxima (``q_len <= kv_len`` under
+    ``causal_bottom_right``, where a negative shift would hide keys).
     Without ``validate_paged`` nothing checks the contents: the caller guarantees
     them, and a violation reads wrong pages without a fault.
     """
@@ -300,20 +301,11 @@ def validate_paged_launch(
                     f"paged kv_lens[{i}]={kv_len} outside [0, seqlen_kv="
                     f"{spec.seqlen_kv}]: the table holds only that many keys"
                 )
-            if spec.causal_bottom_right:
-                # A negative shift would hide keys the row should see.
-                if q_lens[i] > kv_len:
-                    raise ValueError(
-                        f"paged varlen sequence {i}: q_len={q_lens[i]} > "
-                        f"kv_lens[{i}]={kv_len}; bottom-right causal needs "
-                        "q_len <= kv_len per sequence"
-                    )
-            elif q_lens[i] != kv_len:
+            if spec.causal_bottom_right and q_lens[i] > kv_len:
                 raise ValueError(
-                    f"paged varlen sequence {i}: q_len={q_lens[i]} != "
-                    f"kv_lens[{i}]={kv_len}; the kernel aligns each sequence's "
-                    "causal diagonal at the top left, which is only right for "
-                    "q_len == kv_len"
+                    f"paged varlen sequence {i}: q_len={q_lens[i]} > "
+                    f"kv_lens[{i}]={kv_len}; bottom-right causal needs "
+                    "q_len <= kv_len per sequence"
                 )
             # Columns past the sequence's own pages are never read: any value.
             live_pages = -(-kv_len // spec.block_size)

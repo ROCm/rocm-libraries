@@ -192,13 +192,13 @@ def test_gfx942_paged_layout_picks_default_body(overrides, persistent):
 
 
 @pytest.mark.parametrize("use_sinks", [False, True])
-def test_gfx942_paged_several_windowed_d128_sequences_stay_on_unified(use_sinks):
+def test_gfx942_paged_several_windowed_d128_sequences_take_dense(use_sinks):
     result = dispatch_attention(
         _request(
             "gfx942", layout="paged", batch=4, sliding_window=1024, use_sinks=use_sinks
         )
     )
-    assert result.candidate.name == "attention_unified_2d"
+    assert result.candidate.name == "attention_gfx942_dense"
 
 
 def test_gfx942_dense_layout_picks_dense():
@@ -267,15 +267,26 @@ def test_fp8_keeps_the_unified_route_off_the_dense_layout():
         # Paged dense is causal-only, with or without sinks.
         pytest.param({"use_sinks": True, "mask_type": 0}, id="non_causal_sinks"),
         pytest.param({"seqlen_q": 1, "mask_type": 0}, id="decode"),
-        # Several sequences whose queries are fewer than their keys under the
-        # top-left mask: dense computes it only for q_len == kv_len.
-        pytest.param({"batch": 4, "seqlen_q": 512}, id="multiseq_top_left_q_lt_kv"),
         pytest.param({"batch": 4, "emit_lse": True}, id="multiseq_lse"),
     ],
 )
 def test_paged_outside_dense_falls_back_to_unified(arch, overrides):
     result = dispatch_attention(_request(arch, layout="paged", **overrides))
     assert result.candidate.name in ("attention_unified_2d", "attention_unified_3d")
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "lengths",
+    [{"seqlen_q": 512}, {"seqlen_k": 1024}],
+    ids=["q_lt_kv", "q_gt_kv"],
+)
+def test_paged_top_left_cross_length_routes_to_dense(arch, lengths):
+    # gfx942 unified folds top-left into bottom-right (normalize_band), so dense is
+    # the only correct body there.
+    result = dispatch_attention(_request(arch, layout="paged", batch=4, **lengths))
+    spec = result.spec.kernel_spec
+    assert spec.paged and spec.varlen and not spec.causal_bottom_right
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])

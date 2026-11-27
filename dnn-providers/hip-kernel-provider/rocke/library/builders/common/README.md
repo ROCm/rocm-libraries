@@ -239,7 +239,7 @@ tuning bindings take the bias as `tensors["attn_bias"]`
 K/V block offset into a 64-bit buffer base, so only the in-block offset stays in
 the 32-bit field; without it a load past the i32 K/V buffer range returns zero.
 Set from the cache size by `kv_cache_needs_i64_addr` in
-[`attention_unified.py`](../../kernels/common/attention_unified.py): above
+[`_spec_checks.py`](../../kernels/common/_spec_checks.py): above
 `0x7FFF0000` bytes, the `num_records` the i32 path bounds its K/V resources at.
 `num_kv_blocks == 0` (size unknown) keeps the i32 path.  The unified specs take
 it from `_enable_i64_kv_addr` / `_enable_i64_kv_addr_3d` (kernels with no i64

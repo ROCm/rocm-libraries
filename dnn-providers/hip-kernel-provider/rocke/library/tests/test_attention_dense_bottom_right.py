@@ -184,11 +184,11 @@ def test_bottom_right_varlen_keeps_its_baked_maxima():
     assert dataclasses.replace(spec, seqlen_kv=2496).kernel_name() != spec.kernel_name()
 
 
-def test_paged_varlen_top_left_still_needs_equal_maxima():
-    """Top-left aligns every sequence at its first key: right only when
-    q_len == kv_len, so the maxima must match too."""
-    with pytest.raises(ValueError, match="seqlen_q must equal seqlen_kv"):
-        _spec(**_PAGED, varlen=True)
+def test_paged_varlen_top_left_allows_unequal_maxima():
+    """Top-left starts every sequence's diagonal at its first key, whatever its
+    lengths."""
+    spec = _spec(**_PAGED, varlen=True)
+    assert spec.seqlen_q != spec.seqlen_kv and not spec.causal_bottom_right
 
 
 def test_gfx942_supports_paged_varlen_bottom_right():

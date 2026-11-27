@@ -1607,8 +1607,8 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_dense_paged_varlen_spec_admission(self):
         """Paged varlen: any number of packed sequences, maxima that need not be tile
-        multiples (each sequence's tails are handled in the kernel), q_len == kv_len
-        so seqlen_q == seqlen_kv; sinks admitted; LSE and persistent stay refused."""
+        multiples (each sequence's tails are handled in the kernel), unequal maxima
+        under top-left too; sinks admitted; LSE and persistent stay refused."""
         for arch in ("gfx942", "gfx950"):
             with self.subTest(arch=arch):
                 self._check_dense_paged_varlen_spec_admission(arch)
@@ -1640,6 +1640,8 @@ class TestAttentionHelpers(unittest.TestCase):
             dict(dtype="bf16"),
             dict(sliding_window=256),
             dict(seqlen_q=4096, seqlen_kv=4096),
+            dict(seqlen_kv=1024),
+            dict(seqlen_q=2048, sliding_window=256),
             dict(block_size=64),
             dict(use_sinks=True),
         ):
@@ -1647,7 +1649,6 @@ class TestAttentionHelpers(unittest.TestCase):
                 ok, why = supports_attention_dense(AttentionDenseSpec(**{**base, **kw}))
                 self.assertTrue(ok, why)
         for kw, error in (
-            (dict(seqlen_kv=1024), "seqlen_q must equal seqlen_kv"),
             (dict(emit_lse=True), "emit_lse"),
             (dict(persistent=True), "persistent"),
             (dict(causal=False), "causal"),

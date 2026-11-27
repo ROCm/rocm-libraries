@@ -234,6 +234,10 @@ _CASES: tuple[dict, ...] = (
     ),
     dict(paged=True, block_size=16, num_kv_blocks=1 << 20, use_i64_kv_addr=True),
     dict(use_i64_kv_addr=True),
+    # The i32 K/V bound itself (8 KiB pages): a cache of exactly
+    # I32_KV_BUFFER_BYTES stays on i32 pages, one page more needs i64.
+    dict(paged=True, block_size=16, num_kv_blocks=262136),
+    dict(paged=True, block_size=16, num_kv_blocks=262137),
     # Paged K/V is bounded by its cache, not the logical extent: a short chunk over
     # 2 GiB of keys is valid on i64 pages, refused contiguous.
     dict(
@@ -249,6 +253,17 @@ _CASES: tuple[dict, ...] = (
     dict(paged=True, block_size=16, num_kv_blocks=64, batch=2),
     dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True, seqlen_kv=1024),
+    # Top-left paged varlen with longer queries than keys, windowed: rows past
+    # kv_len + window have no key.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        batch=2,
+        seqlen_q=1024,
+        sliding_window=256,
+    ),
     # Paged varlen: lengths are maxima (no whole-tile rule), and several sequences
     # take the head-band order, or qb_minor when the heads do not fill the XCDs.
     dict(
@@ -931,6 +946,27 @@ def test_hook_tables_match_the_current_python():
             )
 
 
+def test_nb_name_token_follows_the_cache_key():
+    """Python names ``nb`` when the cache key keeps ``num_kv_blocks``; the C port
+    gates it on its shape parts instead, so both conditions must agree on every
+    paged spec of each subclass, baked shape and runtime shape alike."""
+    seen = set()
+    for cls, overrides in _HOOK_CASES.items():
+        # A partial Q tile keeps the paged shape baked.
+        for extra in (*overrides, dict(ragged=True, seqlen_q=500)):
+            kw = {**_BASE, **extra, "paged": True, "block_size": 16}
+            kw.setdefault("num_kv_blocks", 64)
+            try:
+                spec = cls(**kw)
+            except ValueError:
+                continue
+            baked = "num_kv_blocks" not in spec.runtime_param_fields
+            assert baked == bool(spec._shape_name_parts()), (cls.__name__, extra)
+            assert (f"_nb{spec.num_kv_blocks}_" in spec.kernel_name()) == baked
+            seen.add(baked)
+    assert seen == {True, False}
+
+
 def _reject_sites() -> tuple[set, set]:
     """(file, line) of every reject the C++ port mirrors, as two sets.
 
@@ -1027,13 +1063,10 @@ def test_cases_reach_every_reject_site():
     # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
     # The C struct's ``paged`` and ``use_i64_kv_addr`` are bools, so the Python-only
     # type checks have no C counterpart.
-    # emit_lse is an arch field (gfx950), so no base spec has it; the arch validator
-    # refuses it there.
     unreachable = (
         "paged not yet implemented for dtype",
         "paged must be a bool",
         "use_i64_kv_addr must be a bool",
-        "emit_lse is not yet supported with paged varlen",
     )
     all_sites, divisions = _reject_sites()
     sites = {

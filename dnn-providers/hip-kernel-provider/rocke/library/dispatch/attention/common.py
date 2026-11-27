@@ -1200,11 +1200,14 @@ class AttentionTuningSpec:
     def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
         """Retarget a paged spec to the physical cache once it is known.
 
-        Both paths pick i32/i64 K/V addressing from it; dense paged also bakes the
-        cache extent itself as its K/V buffer bound, so each cache size is its own
-        binary. Either way this is a runtime specialization, not a configuration:
-        it changes :meth:`identity` (a different binary) but never ``tuning_id``,
-        so an id recorded after binding still replays from the request.
+        Both paths pick i32/i64 K/V addressing from it; dense paged also bounds its
+        K/V loads by the cache extent. The runtime-shape dense bodies take that
+        extent as a kernel argument, so one binary serves every cache size; a
+        baked-shape body bakes it, so there each size is its own binary. Either
+        way this is a runtime specialization, not a configuration: it can change
+        :meth:`identity` (i64 addressing, or a baked extent) but never
+        ``tuning_id``, so an id recorded after binding still replays from the
+        request.
         """
         count = int(num_kv_blocks)
         if count < 0:
@@ -1212,9 +1215,10 @@ class AttentionTuningSpec:
         if self.path == "dense":
             if not self.kernel_spec.paged:
                 return self  # contiguous K/V: nothing to retarget
-            # The paged kernel bakes the cache extent: as its K/V buffer bound, or
-            # past the i32 range as the page-id clamp of its per-page resources.
-            # A spec forced onto the i64 path stays there on a small cache.
+            # The paged kernel bounds its loads by the cache extent: as its K/V
+            # buffer bound, or past the i32 range as the page-id clamp of its
+            # per-page resources. A spec forced onto the i64 path stays there on a
+            # small cache.
             use_i64 = self.kernel_spec.use_i64_kv_addr or kv_cache_needs_i64_addr(
                 count, paged_page_bytes(self.kernel_spec)
             )

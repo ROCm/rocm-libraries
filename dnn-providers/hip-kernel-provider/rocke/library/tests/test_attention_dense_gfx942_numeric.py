@@ -37,10 +37,12 @@ from kernels.gfx942.attention_dense import (
 from ._dense_paged_varlen_inputs import (
     PAGED_VARLEN_EDGES,
     PAGED_VARLEN_RAGGED,
+    PAGED_VARLEN_TOP_LEFT_CROSS,
     check_bad_block_id_reads_the_last_block,
     check_i64_matches_i32,
     check_one_kernel_serves_two_caches,
     check_paged_varlen,
+    check_top_left_cross_length,
     check_whole_tile_sequences,
     paged_varlen_lengths,
 )
@@ -50,7 +52,11 @@ from _gpu_gate import requires_gpu
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
-from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
+from ._dense_paged_gpu import (  # noqa: E402
+    check_one_single_sequence_kernel_serves_two_caches,
+    paged_cache,
+    run_dispatched_paged,
+)
 
 
 requires_gfx942_gpu = requires_gpu("gfx942")
@@ -2260,6 +2266,16 @@ class TestDensePagedNumeric:
 
     @requires_gfx942_gpu
     @pytest.mark.gpu
+    def test_one_kernel_serves_two_cache_sizes(self):
+        def reference(q, k, v, scale):
+            return _lse_reference(q, k, v, scale, causal=True)[0]
+
+        check_one_single_sequence_kernel_serves_two_caches(
+            _spec, run_attention_dense_torch, reference, _tolerance, _launcher_for
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
     @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])
@@ -2744,6 +2760,38 @@ class TestDensePagedVarlenNumeric:
             dtype,
             window,
             sinks=True,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("case", list(PAGED_VARLEN_TOP_LEFT_CROSS))
+    @pytest.mark.parametrize(
+        "dtype,window,d,sinks",
+        [
+            ("fp16", 0, 128, False),
+            ("bf16", 128, 64, False),
+            ("fp16", 256, 128, False),
+            ("fp16", 128, 128, True),
+        ],
+    )
+    def test_paged_varlen_top_left_cross_length(self, case, dtype, window, d, sinks):
+        """Top-left starts each sequence's diagonal at its first key whatever its
+        lengths; rows without keys output zeros (SEM-010)."""
+
+        def reference(q, k, v, scale, window, **kw):
+            return _lse_reference(q, k, v, scale, causal=True, window=window, **kw)[0]
+
+        check_top_left_cross_length(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            case,
+            16,
+            d,
+            dtype,
+            window,
+            sinks,
         )
 
     @staticmethod

@@ -431,14 +431,6 @@ def _make_spec(
             else Alignment(int(req.diagonal_alignment))
         )
         bottom_right = alignment is Alignment.BOTTOM_RIGHT
-    if paged and int(req.batch) == 1 and sq % bm and sq != sk and not bottom_right:
-        # The varlen body that bounds the tile is self-attention only, or
-        # bottom-right.
-        raise ValueError(
-            "gfx942 paged K/V with a partial Q tile needs seqlen_q == seqlen_k "
-            f"(no ragged body on gfx942): seqlen_q={sq} is not a multiple of "
-            f"block_m={bm}, seqlen_k={sk}"
-        )
     if paged and _paged_varlen(
         int(req.batch), sq, sk, bm, bn, bottom_right=bottom_right
     ):
@@ -507,14 +499,14 @@ def _paged_persistent(req: AttentionRequest) -> bool:
 
 
 def dense_paged_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
-    """Candidate names for an unpinned paged request; empty leaves it to unified.
+    """Candidate names for an unpinned paged request; a request the candidate
+    refuses goes to unified.
 
     One candidate, as for contiguous requests: its default spec picks the body
-    (grid or persistent). Unified stays ahead on several sequences under a
-    sliding window at D128.
+    (grid or persistent). Unified serves top-left with its bottom-right body
+    (wrong for any sequence with q_len != kv_len) or, for unequal maxima, its
+    scalar kernel, so dense keeps every paged request it supports.
     """
-    if int(req.batch) > 1 and int(req.sliding_window) > 0 and int(req.hdim_q) == 128:
-        return ()
     return (CANDIDATE_NAME,)
 
 

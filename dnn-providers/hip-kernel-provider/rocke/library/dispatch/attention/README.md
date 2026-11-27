@@ -171,10 +171,11 @@ length × Hkv × D × 2 B) must still stay below 2 GiB, as must its Q extent (be
 
 `q`/`out` may be packed `[total_q, Hq, D]` with `cu_seqlens_q`, as for the
 unified path. A request with `batch > 1` builds a varlen spec: its lengths are
-the maxima, and each sequence's query and KV lengths must be equal. Plain causal
-at bottom-right alignment (`mask_type` 2, or `diagonal_alignment` 1) relaxes
-that to `q_len <= kv_len` (prefix caching, chunked prefill) on both arches,
-whose varlen bodies shift each sequence's diagonal by its own `kv_len - q_len`;
+the maxima, and top-left takes any per-sequence query and KV lengths (each
+sequence's diagonal starts at its first key). Plain causal at bottom-right
+alignment (`mask_type` 2, or `diagonal_alignment` 1) needs `q_len <= kv_len`
+(prefix caching, chunked prefill) on both arches, whose varlen bodies shift each
+sequence's diagonal by its own `kv_len - q_len`;
 dispatch keeps that body even at equal maxima, since the sequences may still
 differ, and takes it for one sequence with `seqlen_q < seqlen_k` too. That body
 anchors a window or lookahead top-left, so bottom-right with either is declined
@@ -196,8 +197,8 @@ value checks. It is only for trusted callers that guarantee the dense kernel's
 contract themselves: block ids in `[0, num_kv_blocks)` over each sequence's
 first `ceil(kv_len / block_size)` table columns, and `kv_lens[0] == seqlen_kv` on the single-sequence body
 (it does not mask keys past `kv_lens`), or `cu_seqlens_q` spanning the packed Q in
-order with `q_len == kv_len <= seqlen_kv` per sequence on the varlen body
-(bottom-right: `q_len <= kv_len <= seqlen_kv`). The cohort is the kernel's own
+order with `q_len <= seqlen_q` and `kv_len <= seqlen_kv` per sequence on the varlen
+body (bottom-right also `q_len <= kv_len`). The cohort is the kernel's own
 `supports_attention_dense`.
 
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example

@@ -126,17 +126,9 @@ def test_pinned_persistent_refuses_paged_varlen(arch, spec_id, knobs):
     "overrides,error",
     [
         (dict(mask_type=0, sliding_window=0), "causal-only"),
-        (
-            dict(seqlen_q=512, seqlen_k=1000),
-            "seqlen_q must equal seqlen_kv, got 512 != 1000",
-        ),
-        (
-            dict(batch=3, seqlen_q=512),
-            f"seqlen_q must equal seqlen_kv, got 512 != {_SQ}",
-        ),
         (dict(kv_block_size=8), "must be >= 16"),
     ],
-    ids=["non_causal", "partial_kv_tile_sq_ne_skv", "multi_seq_sq_ne_skv", "page_8"],
+    ids=["non_causal", "page_8"],
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
     with pytest.raises(ValueError, match=error):
@@ -150,11 +142,31 @@ def test_lse_is_refused_with_paged_varlen(arch, spec_id):
         dispatch_attention(pinned(req, spec_id))
 
 
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        dict(seqlen_q=512, seqlen_k=1000),
+        dict(batch=3, seqlen_q=512),
+        dict(batch=3, seqlen_q=1000, seqlen_k=512),
+    ],
+    ids=["partial_kv_tile_sq_lt_skv", "multi_seq_sq_lt_skv", "multi_seq_sq_gt_skv"],
+)
+def test_paged_top_left_cross_length_keeps_its_lengths(arch, spec_id, overrides):
+    """Top-left needs no q_len == kv_len: the request's maxima reach the spec
+    unchanged, still top-left."""
+    req = _request(arch, **overrides)
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert spec.paged and not spec.causal_bottom_right
+    assert (spec.seqlen_q, spec.seqlen_kv) == (req.seqlen_q, req.seqlen_k)
+
+
 @pytest.mark.parametrize("seqlen_q", [1000, 2600])
-def test_gfx942_paged_partial_q_tile_needs_equal_lengths(seqlen_q):
+def test_gfx942_paged_partial_q_tile_cross_length_takes_varlen(seqlen_q):
+    """No ragged body on gfx942: the varlen body bounds the partial Q tile."""
     req = _request("gfx942", seqlen_q=seqlen_q, sliding_window=0)
-    with pytest.raises(ValueError, match="partial Q tile needs seqlen_q == seqlen_k"):
-        dispatch_attention(pinned(req, "gfx942_dense"))
+    spec = dispatch_attention(pinned(req, "gfx942_dense")).spec.kernel_spec
+    assert spec.paged and spec.varlen and not spec.causal_bottom_right
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)

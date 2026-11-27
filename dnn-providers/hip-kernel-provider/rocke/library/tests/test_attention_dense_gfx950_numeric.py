@@ -31,10 +31,12 @@ from kernels.gfx950.attention_dense import (
 from ._dense_paged_varlen_inputs import (
     PAGED_VARLEN_EDGES,
     PAGED_VARLEN_RAGGED,
+    PAGED_VARLEN_TOP_LEFT_CROSS,
     check_bad_block_id_reads_the_last_block,
     check_i64_matches_i32,
     check_one_kernel_serves_two_caches,
     check_paged_varlen,
+    check_top_left_cross_length,
     check_whole_tile_sequences,
     paged_varlen_lengths,
 )
@@ -44,7 +46,11 @@ from _gpu_gate import requires_gpu
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
-from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
+from ._dense_paged_gpu import (  # noqa: E402
+    check_one_single_sequence_kernel_serves_two_caches,
+    paged_cache,
+    run_dispatched_paged,
+)
 
 
 requires_gfx950_gpu = requires_gpu("gfx950")
@@ -2470,6 +2476,16 @@ class TestDensePagedNumeric:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
+    def test_one_kernel_serves_two_cache_sizes(self):
+        def reference(q, k, v, scale):
+            return _lse_reference(q, k, v, scale, causal=True)[0]
+
+        check_one_single_sequence_kernel_serves_two_caches(
+            _spec, run_attention_dense_torch, reference, _tolerance, _launcher_for
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
     @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])
@@ -2503,10 +2519,26 @@ class TestDensePagedNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 0)])
-    def test_paged_wide_dma_matches_dense_bit_exact(self, dtype, sq, window):
+    @pytest.mark.parametrize(
+        "sinks,emit_lse", [(False, False), (False, True), (True, True)]
+    )
+    def test_paged_wide_dma_matches_dense_bit_exact(
+        self, dtype, sq, window, sinks, emit_lse
+    ):
         """Paged on the wide-DMA body (one page per KV tile): the same bits as
-        contiguous K/V there."""
-        self._check_paged(dtype, 64, sq, sq, window, 128, persistent=True, wide=True)
+        contiguous K/V there, the LSE and sink epilogues included."""
+        self._check_paged(
+            dtype,
+            64,
+            sq,
+            sq,
+            window,
+            128,
+            persistent=True,
+            wide=True,
+            sinks=sinks,
+            emit_lse=emit_lse,
+        )
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
@@ -2635,7 +2667,6 @@ class TestDensePagedNumeric:
             knobs = dict(persistent=True, wide_lds_dma=wide)
             paged_spec = dataclasses.replace(paged_spec, **knobs)
             dense_spec = dataclasses.replace(dense_spec, **knobs)
-        assert sinks or not emit_lse, "the LSE checks below run with sinks only"
         knobs = dict(use_sinks=sinks, emit_lse=emit_lse)
         paged_spec = dataclasses.replace(paged_spec, **knobs)
         dense_spec = dataclasses.replace(dense_spec, **knobs)
@@ -2674,9 +2705,9 @@ class TestDensePagedNumeric:
         )
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
-        if sinks:
-            # Every row has the sink's mass, so the reference is defined everywhere:
-            # a row with no key is O = 0 and LSE = the sink logit.
+        if sinks or emit_lse:
+            # The FP32 reference defines every row: a row with no key is O = 0, its
+            # LSE the sink logit (sinks) or -inf.
             ref, ref_lse = _lse_reference(
                 q, k, v, scale, causal=True, window=window, sinks=sink
             )
@@ -2690,7 +2721,9 @@ class TestDensePagedNumeric:
                 assert worst == 0.0, f"{name}: keyless rows: {worst}"
             if emit_lse:
                 assert torch.equal(paged_lse, dense_lse), f"{name}: LSE bits differ"
-                lse_gap = (ref_lse - paged_lse).abs().max().item()
+                mass = torch.isfinite(ref_lse)
+                assert torch.equal(paged_lse[~mass], ref_lse[~mass]), f"{name}: LSE"
+                lse_gap = (ref_lse - paged_lse)[mass].abs().max().item()
                 assert lse_gap < 1e-2, f"{name}: LSE max_abs={lse_gap:.3e}"
             return
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
@@ -2770,6 +2803,38 @@ class TestDensePagedVarlenNumeric:
             dtype,
             window,
             sinks=True,
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("case", list(PAGED_VARLEN_TOP_LEFT_CROSS))
+    @pytest.mark.parametrize(
+        "dtype,window,d,sinks",
+        [
+            ("fp16", 0, 128, False),
+            ("bf16", 128, 64, False),
+            ("fp16", 256, 128, False),
+            ("fp16", 128, 128, True),
+        ],
+    )
+    def test_paged_varlen_top_left_cross_length(self, case, dtype, window, d, sinks):
+        """Top-left starts each sequence's diagonal at its first key whatever its
+        lengths; rows without keys output zeros (SEM-010)."""
+
+        def reference(q, k, v, scale, window, **kw):
+            return _lse_reference(q, k, v, scale, causal=True, window=window, **kw)[0]
+
+        check_top_left_cross_length(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            case,
+            16,
+            d,
+            dtype,
+            window,
+            sinks,
         )
 
     @staticmethod
