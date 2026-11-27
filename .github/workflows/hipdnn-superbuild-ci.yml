@@ -684,6 +684,127 @@ jobs:
             LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
+  # ALMIOPEN-3066: the HIP MLOps operations served by the kernel ingestor, one engine per
+  # operation, in place of HIP_MLOPS_ENGINE. The two options are exclusive and the lanes
+  # above keep the default (the hand-written engine), so without this job nothing in CI
+  # compiles HipMlopsNative.cpp, packs the HipMlops bundle or runs its engines. Only
+  # hipDNN, the integration harness and hip-kernel-provider are built, from the default
+  # production root (rocKE and FlyDSL off, so no DVC content is needed) and with the ASM
+  # SDPA engine off, which this path does not touch.
+  hipdnn-linux-mlops-ingestor:
+    name: HipDNN Linux HIP MLOps Ingestor
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: azure-linux-scale-rocm
+    env:
+      GPU_TARGET: gfx942
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github
+            cmake
+            dnn-providers
+            projects/hipdnn
+            shared/ctest
+            test
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Set environment
+        run: |
+          V="${{ runner.temp }}/rocm_wheels"
+          echo "VENV_PATH=$V" >> "$GITHUB_ENV"
+          echo "VENV_PYTHON=$V/bin/python" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      - name: Install ROCm wheels
+        run: |
+          python -m venv "$VENV_PATH"
+          source "$VENV_PATH/bin/activate"
+          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$GPU_TARGET]"
+          rocm-sdk init
+          SITE_PACKAGES=$("$VENV_PYTHON" -c "import site; print(site.getsitepackages()[0])")
+          echo "ROCM_SDK_PATH=$SITE_PACKAGES/_rocm_sdk_devel" >> "$GITHUB_ENV"
+
+      # The same pinned packer as the Linux lane; see that step for the checkout.
+      - name: Install rocm_kpack
+        run: |
+          set -euo pipefail
+          KPACK_SRC="${RUNNER_TEMP}/rocm-systems-kpack"
+          rm -rf "$KPACK_SRC"
+          mkdir -p "$KPACK_SRC"
+          git -C "$KPACK_SRC" init -q .
+          git -C "$KPACK_SRC" remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C "$KPACK_SRC" sparse-checkout init --cone
+          git -C "$KPACK_SRC" sparse-checkout set shared/kpack
+          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          git -C "$KPACK_SRC" checkout -q FETCH_HEAD
+          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
+          test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
+          "$VENV_PYTHON" -m pip install "$KPACK_SRC/shared/kpack"
+          KPACK_PYTHON_DIR=$("$VENV_PYTHON" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
+          echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
+
+      # Must precede configure, as in the Linux lane: descriptor-packaging registers its
+      # pytest suite under this interpreter.
+      - name: Install Python dependencies
+        run: |
+          "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
+
+      - name: Configure superbuild
+        run: |
+          cmake --preset hipdnn-providers-all -GNinja \
+            -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hipdnn-integration-tests;hip-kernel-provider" \
+            -DROCM_PATH="$ROCM_SDK_PATH" \
+            -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
+            -DGPU_TARGETS="$GPU_TARGET" \
+            -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DENABLE_CLANG_TIDY=OFF \
+            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DENABLE_HIP_MLOPS_ENGINE=OFF \
+            -DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON \
+            -DENABLE_ASM_SDPA_ENGINE=OFF \
+            -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
+            -DPython_EXECUTABLE="$VENV_PYTHON" \
+            -DPython3_EXECUTABLE="$VENV_PYTHON"
+
+      - name: Build
+        run: cmake --build build
+
+      # Configure skips, with a STATUS message, the lane of an engine the product root does
+      # not offer, so count them: one per engine in HKP_MLOPS_INGESTOR_ENGINES.
+      - name: Check every HIP MLOps ingestor engine has a lane
+        run: |
+          set -euo pipefail
+          lanes=$(ctest --test-dir build -N -L '^full$' -R '^hip-kernel-provider-mlops-' \
+            | grep -o 'hip-kernel-provider-mlops-[a-z0-9-]*-external-integration' \
+            | grep -v -- '-graph-capture-' | sort -u || true)
+          echo "$lanes"
+          test "$(printf '%s\n' "$lanes" | grep -c .)" -eq 9 || { echo "expected 9 HIP MLOps ingestor lanes" >&2; exit 1; }
+
+      # The provider's unit and integration suites (the HipMlops pack tests compile only in
+      # this mode) and every hip-kernel-provider-mlops-<op> lane, graph capture included.
+      # `full` selects each binary once, as in the Linux lane.
+      - name: Run tests
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' \
+            -R '^(hip_kernel_provider_tests|hip_kernel_provider_integration_tests|hip-kernel-provider-mlops-)'
+
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary
     if: always()
@@ -691,6 +812,7 @@ jobs:
       - changes
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
+      - hipdnn-linux-mlops-ingestor
     runs-on: ubuntu-24.04
     steps:
       - name: Report results
