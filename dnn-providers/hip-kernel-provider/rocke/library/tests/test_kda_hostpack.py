@@ -120,6 +120,54 @@ def test_unpack_inverts_v_pack():
     np.testing.assert_array_equal(got, v)
 
 
+def test_pack_places_every_element_where_the_fused_kernel_reads_it():
+    """Each packed row is one (batch * head, V partition, chunk): Q, K and g
+    rows hold that chunk's ``C`` tokens of ``DK`` channels and beta its ``C``
+    gates, the same in every partition; V rows hold the partition's ``head_v``
+    channels of each token; the initial state holds the partition's channels
+    transposed, ``[head_v, DK]``. Every input element is distinct, so a swapped
+    axis or a wrong row base puts a value where another one is expected."""
+    B, H, T, DK, DV, C, head_v = 2, 3, 32, 4, 8, 16, 4
+    count = B * H * T
+
+    def distinct(*shape: int, start: int) -> np.ndarray:
+        return np.arange(start, start + np.prod(shape), dtype=np.float32).reshape(shape)
+
+    q = distinct(B, H, T, DK, start=0)
+    k = distinct(B, H, T, DK, start=count * DK)
+    g = distinct(B, H, T, DK, start=2 * count * DK)
+    v = distinct(B, H, T, DV, start=3 * count * DK)
+    beta = distinct(B, H, T, start=3 * count * DK + count * DV)
+    h0 = distinct(B, H, DK, DV, start=0)
+    packed = pack_v_partitions(C, head_v, q, k, v, g, beta)
+    parts, chunks = DV // head_v, T // C
+    state = pack_initial_state(head_v, h0, parts)
+    for b in range(B):
+        for h in range(H):
+            for part in range(parts):
+                for d in range(DK):
+                    for e in range(head_v):
+                        assert (
+                            state[(b * H + h) * parts + part, e, d]
+                            == h0[b, h, d, part * head_v + e]
+                        )
+                for chunk in range(chunks):
+                    row = ((b * H + h) * parts + part) * chunks + chunk
+                    for t in range(C):
+                        token = chunk * C + t
+                        assert packed.beta[row, t] == beta[b, h, token]
+                        for d in range(DK):
+                            column = t * DK + d
+                            assert packed.q[row, column] == q[b, h, token, d]
+                            assert packed.k[row, column] == k[b, h, token, d]
+                            assert packed.g[row, column] == g[b, h, token, d]
+                        for e in range(head_v):
+                            assert (
+                                packed.v[row, t * head_v + e]
+                                == v[b, h, token, part * head_v + e]
+                            )
+
+
 @pytest.mark.parametrize("parts", (1, 2, 4))
 def test_pack_returns_writable_owned_buffers(parts):
     """Every packed field must be uploadable, at any partition count.
