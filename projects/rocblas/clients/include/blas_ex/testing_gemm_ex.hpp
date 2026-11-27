@@ -554,8 +554,9 @@ void testing_gemm_ex_run(const Arguments& arg)
                     // exact check, which accepts both rounding modes and whose own rounding is far
                     // coarser than this accumulation error.
                     const double tol
-                        = K * sum_error_tolerance<Tc>
-                          * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
+                        = K
+                          * sum_error_tolerance<
+                              Tc> * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
                     near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_1, tol);
                 }
                 else
@@ -598,8 +599,9 @@ void testing_gemm_ex_run(const Arguments& arg)
                     // exact check, which accepts both rounding modes and whose own rounding is far
                     // coarser than this accumulation error.
                     const double tol
-                        = K * sum_error_tolerance<Tc>
-                          * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
+                        = K
+                          * sum_error_tolerance<
+                              Tc> * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
                     near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_2, tol);
                 }
                 else
