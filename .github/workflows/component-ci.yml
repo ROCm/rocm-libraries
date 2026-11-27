@@ -27,6 +27,7 @@ jobs:
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       logic-corpus: ${{ steps.configure.outputs.hipblaslt_logic_corpus }}
       hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
+      hipblaslt-jit: ${{ steps.configure.outputs.hipblaslt_jit }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -105,6 +106,12 @@ jobs:
     if: needs.changes.outputs.hipblaslt-rocjitsu-scripts == 'true'
     uses: ./.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml
 
+  hipblaslt-jit:
+    name: "hipBLASLt JIT"
+    needs: changes
+    if: needs.changes.outputs.hipblaslt-jit == 'true'
+    uses: ./.github/workflows/component-ci-hipblaslt-jit.yml
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -119,6 +126,7 @@ jobs:
       - tensilelite-coverage
       - logic-corpus
       - hipblaslt-rocjitsu-scripts
+      - hipblaslt-jit
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

@@ -9,6 +9,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - tensilelite_coverage=true/false
   - hipblaslt_logic_corpus=true/false
   - hipblaslt_rocjitsu_scripts=true/false
+  - hipblaslt_jit=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered. A component may also list exclusions:
@@ -73,6 +74,29 @@ COMPONENTS = {
         "projects/hipblaslt/clients/scripts/rocjitsu/**",
         ".github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh",
         ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
+    ],
+    # GPU build and tests of the JIT library. The workflow itself selects the
+    # gfx942 and gfx950 runners.
+    "hipblaslt_jit": [
+        "projects/hipblaslt/library/src/amd_detail/hipblaslt-jit-*",
+        "projects/hipblaslt/CMakeLists.txt",
+        "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt",
+        "projects/hipblaslt/clients/tests/jit/**",
+        "projects/hipblaslt/scripts/jit/**",
+        "projects/hipblaslt/tensilelite/include/Tensile/AMDGPUPredicates.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/CachingLibrary.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/ExactLogicLibrary.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/LocalKernelIndex.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/Tensile.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/ContractionProblem.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/ContractionSolution.hpp",
+        "projects/hipblaslt/tensilelite/include/Tensile/Serialization/**",
+        "projects/hipblaslt/tensilelite/include/Tensile/msgpack/**",
+        "projects/hipblaslt/tensilelite/src/ContractionProblem.cpp",
+        "projects/hipblaslt/tensilelite/src/ContractionSolution.cpp",
+        "projects/hipblaslt/tensilelite/src/msgpack/**",
+        "projects/hipblaslt/tensilelite/tensilelite/Common/GlobalParameters.py",
+        ".github/workflows/component-ci-hipblaslt-jit.yml",
     ],
 }
 
