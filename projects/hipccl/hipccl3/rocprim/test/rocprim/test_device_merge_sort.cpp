@@ -703,6 +703,8 @@ struct non_default_constructible_key
 };
 static_assert(!std::is_default_constructible<non_default_constructible_key>::value,
               "non_default_constructible_key must not be default constructible");
+static_assert(std::is_trivially_copyable<non_default_constructible_key>::value,
+              "non_default_constructible_key must be trivially copyable");
 
 template<class Config>
 void test_sort_non_default_constructible()

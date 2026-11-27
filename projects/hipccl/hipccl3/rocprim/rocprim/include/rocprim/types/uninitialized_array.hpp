@@ -111,13 +111,23 @@ struct default_init_array
     }
 };
 
+/// \brief Fallback storage for per-thread items of types that are not default constructible.
+/// \note Callers fill the items by assignment rather than `emplace`, so only trivially copyable
+/// types are supported.
+template<typename T, unsigned int Count>
+struct non_default_constructible_items_array : uninitialized_array<T, Count>
+{
+    static_assert(std::is_trivially_copyable<T>::value,
+                  "Types that are not default constructible must be trivially copyable.");
+};
+
 /// \brief Storage for per-thread items that does not require `T` to be default constructible.
-/// Uses a plain array when `T` is default constructible, so codegen is unchanged for such types,
-/// and falls back to `uninitialized_array` otherwise.
+/// Uses a plain array when `T` is default constructible, so codegen is unchanged for such types.
+/// Otherwise falls back to `uninitialized_array`, which requires `T` to be trivially copyable.
 template<typename T, unsigned int Count>
 using thread_items_array = std::conditional_t<std::is_default_constructible<T>::value,
                                               default_init_array<T, Count>,
-                                              uninitialized_array<T, Count>>;
+                                              non_default_constructible_items_array<T, Count>>;
 
 } // namespace detail
 #endif // DOXYGEN_SHOULD_SKIP_THIS
