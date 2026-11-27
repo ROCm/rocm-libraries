@@ -62,6 +62,8 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_direct_fwd_pp_mfma.py` | `FwdPpMfmaSpec` (gfx950 LDS-DMA ping-pong forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_pp_mfma.py` | `PpMfmaSpec` (the ping-pong pipeline the two specs above share) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_flex_mfma.py` | `FwdFlexMfmaSpec` (gfx950 flattened-pixel implicit-GEMM forward, any filter/stride/dilation/padding) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_rr_mfma.py` | `FwdRrMfmaSpec`, `FwdRrWfmtSpec` (gfx950 rows-in-registers 3x3 / 3x1 forward and its weight-format helper) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_tap1d_mfma.py` | `FwdTap1dMfmaSpec` (gfx950 1-D tap-reuse `1 x S` forward, any width dilation) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_gstream_wmma.py` | `FwdGstreamWmmaSpec` (gfx1250 small-group forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `library/kernels/conv/docs/convolution.md` |
@@ -262,6 +264,8 @@ From `helpers/README.md`:
 | conv_fwd_small_mfma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads with sentinel offsets |
 | conv_direct_fwd_pp_mfma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), `async_buffer_load_lds`, `s_setprio`, `sched_barrier`, `lds_alias_scopes` |
 | conv_direct_fwd_flex_mfma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), `async_buffer_load_lds`, `permlane32_swap`, `s_setprio`, `sched_barrier`, `lds_alias_scopes` |
+| conv_direct_fwd_rr_mfma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), `async_buffer_load_lds`, `permlane32_swap`, `s_setprio`, `sched_barrier`, `lds_alias_scopes` |
+| conv_direct_fwd_tap1d_mfma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), `async_buffer_load_lds`, `sched_barrier`, `lds_alias_scopes` |
 | conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | the windowed depthwise Toeplitz builder of `conv_direct_grouped` (wave32 `fwd` form): `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
 | conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
 | conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |
