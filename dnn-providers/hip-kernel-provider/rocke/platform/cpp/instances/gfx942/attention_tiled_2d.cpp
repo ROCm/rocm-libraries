@@ -567,9 +567,9 @@ bool rocke_unified_attention_2d_tiled_config_from_spec(
  * arena-allocated off the *current build's* rocke_ir_builder. When that builder is
  * freed at the end of a build, this pointer dangles; reusing it on the next
  * build feeds freed memory into calculate_x. So the cache is per-build, not
- * process-lifetime: rocke_attn2d_c32_dist_reset() clears it at each build entry
- * (see the gfx942/gfx950 public entries). */
-static const rocke_tile_distribution_t* g_c32_dist = NULL;
+ * process-lifetime: rocke_attn2d_c32_dist_reset() clears it at each build entry.
+ * Concurrent native builders must not share pointers into each other's arenas. */
+static thread_local const rocke_tile_distribution_t* g_c32_dist = NULL;
 
 /* Re-entrancy reset: drop the dangling per-build cache before a new build. */
 void rocke_attn2d_c32_dist_reset(void)

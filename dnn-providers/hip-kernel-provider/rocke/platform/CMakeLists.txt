@@ -946,12 +946,19 @@ if(ROCKE_INSTALL_TESTS)
     # LLVM IR at each LLVM flavor (the flavor is a lowering argument, so one host
     # checks all of them) and canonical IR. tests/instances/differential/golden/README.md.
     set(_ROCKE_RUN_DIFF "${ROCKE_TEST_CTEST_REL}tests/instances/differential/run_diff.py")
+    # The dense gfx950 matrix runs in rocke_library_gfx950_dense_builder_pytest
+    # when its native emitter is installed. That standard entry compares both
+    # engines and checks these same golden hashes, one sharded item per config.
+    set(_rocke_standard_goldens "")
+    if(TARGET rocke_gfx950_dense_parity_emit)
+      set(_rocke_standard_goldens " --exclude attention_dense_gfx950")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor all --rocke-shard-from-gtest-env)\n")
+           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor all${_rocke_standard_goldens} --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden --rocke-shard-from-gtest-env)\n")
+           "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden${_rocke_standard_goldens} --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 

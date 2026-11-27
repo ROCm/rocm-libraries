@@ -1149,6 +1149,7 @@ PENDING: tuple[PendingTest, ...] = (
         "(rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build it",
         _LIBRARY,
+        "library/tests/test_attention_dense_gfx950_binding.py",
         "library/tests/test_dgrad_stem_wmma.py",
         "library/tests/test_direct_dgrad_wmma.py",
         "library/tests/test_direct_dw_fwd_wmma.py",

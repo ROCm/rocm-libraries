@@ -386,9 +386,40 @@ D64 paging without a sliding window. For FP8 K/V with attention sinks, the
 vectors also pin which rejection wins: an invalid KV segment count or an
 incompatible tile is reported before the unsupported sinks.
 
-This port is host metadata only. The gfx950 dense C++ GPU builders and their
-paired IR emitters are separate work; these tests do not establish builder
-byte identity or GPU numerical correctness.
+## gfx950 dense builder parity
+
+`rocke_gfx950_build_attention_dense_new` (in `ckc::rocke_library`, header
+`rocke/instance_gfx950_attention_dense_builder.h`) emits the ordinary or
+persistent kernel from the same spec, without Python. Its returned kernel is
+arena-owned: free the supplied builder after use, even on refusal. The
+optional `rocke_library_engine` exposes `gfx950_attention_dense_serialize_ir`,
+`gfx950_attention_dense_lower_llvm` and `gfx950_attention_dense_verify`.
+The library test `test_attention_dense_gfx950_binding.py` compares all three
+calls with Python on the indexed specs and checks strict input refusals. It
+runs in `rocke_library_engine_parity_pytest` when the module is installed;
+the independent C-emitter check below does not need the module.
+
+The library's `attention_dense_gfx950_emit.{py,c}` pair feeds the same indexed
+inputs to the two independent builders. Run from `platform/`:
+
+```bash
+ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py --only attention_dense_gfx950
+```
+
+The installed standard entry `rocke_library_gfx950_dense_builder_pytest` shards
+the matrix **by config**, separately from the other attention CPU checks.
+It compares native and Python serialized IR and all four LLVM flavors against
+each other and checks the library differential hashes. The test build compiles
+the `.c` emitter with a C11-capable C compiler and links the C++ library. CTest
+supplies the installed executable via `ROCKE_GFX950_DENSE_EMITTER`; no compiler
+or pybind is needed at test time. A missing executable fails. One additional
+item checks that both emitters reject the first index outside the matrix.
+The quick Python-only golden entries do not duplicate this standard matrix
+when its native emitter is built. Regenerate intended output changes with
+`python tools/golden.py rerecord differential --only attention_dense_gfx950`
+from the rocKE root. `rocke_gfx950_attention_dense_builder_host` separately
+checks native refusal precedence and arena reuse/concurrent builds. These are
+host tests of emitted code, not GPU numerical tests.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 

@@ -291,6 +291,18 @@ test_categories:
       - "toolchain"
       - "generated-artifact"
 
+  native-standard:
+    description: "rocKE native host checks that start at the standard tier, not quick"
+    test_patterns:
+      - "rocke_gfx950_attention_dense_builder_host"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "ckc"
+      - "hip-kernel-provider"
+
   python-standard:
     description: "rocKE Python checks that start at the standard tier, not quick"
     test_patterns:
@@ -306,6 +318,7 @@ test_categories:
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_attention_cpu_pytest"
+      - "rocke_library_gfx950_dense_builder_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       - "rocke_library_mla_pytest"

@@ -15,6 +15,7 @@
  *   - rocke_wave_reduce_stages    (wave_reduce_stages -- pure host-side selector)
  *   - rocke_warp_xor_reduce_sum   (warp_xor_reduce_sum)
  *   - rocke_dequant_fp8x8_to_dtype (dequant_fp8x8_to_dtype)
+ *   - rocke_pv32_v_load_paired    (pv32_v_load_paired)
  *
  * Each IR-emitting helper reproduces its Python counterpart's rocke_b_* builder-
  * call sequence byte-faithfully (same ops, same order, same operands), binding
@@ -144,6 +145,16 @@ rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
                                             rocke_value_t* fp8_vec,
                                             rocke_value_t* scale,
                                             const rocke_type_t* dtype);
+
+/* Paired ds_read_tr16_b64 V reads for a 32x32x16 PV step. */
+rocke_value_t* rocke_pv32_v_load_paired(rocke_ir_builder_t* b,
+                                        rocke_value_t* V_lds,
+                                        rocke_value_t* v_buf,
+                                        int n,
+                                        int k,
+                                        rocke_value_t* lane_half32,
+                                        rocke_value_t* lane_col32,
+                                        const rocke_type_t* dtype);
 
 #ifdef __cplusplus
 } /* extern "C" */

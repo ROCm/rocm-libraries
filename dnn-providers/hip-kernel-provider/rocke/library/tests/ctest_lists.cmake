@@ -391,6 +391,20 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
+# The native builder matrix launches its own emitter. Run it in a separate
+# sharded entry so its CPU load cannot time out the attention suite's long
+# golden items. No pybind/GPU needed; a missing staged emitter is an error.
+if(TARGET rocke_gfx950_dense_parity_emit)
+  rocke_cxx_test_installed_name(_dense_emit_name rocke_gfx950_dense_parity_emit)
+  set(_dense_emit_path "${ROCKE_CXX_TEST_CTEST_REL}${_dense_emit_name}${CMAKE_EXECUTABLE_SUFFIX}")
+  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+         "add_test(rocke_library_gfx950_dense_builder_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_gfx950_builder.py\" -v -rs --timeout=30)\n"
+         "set_tests_properties(rocke_library_gfx950_dense_builder_pytest PROPERTIES\n"
+         "  LABELS \"ckc;python;attention;host;standard\"\n"
+         "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_GFX950_DENSE_EMITTER=${_dense_emit_path}\"\n"
+         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+endif()
+
 # The rest of test_attention_builds.py (no GPU): the attention builders' compile
 # smoke tests and the HSACO resource budgets of the built kernels (scratch,
 # LDS, waves per SIMD), read with llvm-readelf / llvm-objdump. The entry takes
@@ -687,10 +701,10 @@ else()
 endif()
 
 # The C++/Python engine parity checks of library kernels: the gfx950 tiled-2D
-# selector, and the LLVM IR of the attention, MLA prefill and GDN/KDA decode
-# kernels. They run the C++ engine through its Python modules (rocke_engine),
-# which a provider build installs beside the rocke package when its configure
-# sets ROCKE_BUILD_PYBIND=ON; without them every case skips, and
+# selector, the gfx950 dense builder binding and its input refusals, and the
+# LLVM IR of the attention, MLA prefill and GDN/KDA decode kernels. The
+# provider installs the Python modules beside the rocke package when configured
+# with ROCKE_BUILD_PYBIND=ON. Without the modules the binding cases skip;
 # rocke_engine_modules_check says why. The selector's full grid (its exhaustive
 # items) runs in the comprehensive entry below. The GDN/KDA decode case takes
 # about 20 s on one host core (it lowers 341 kernels at four LLVM flavors with
@@ -700,6 +714,7 @@ endif()
 # every case would skip.
 set(_ROCKE_LIBRARY_ENGINE_PARITY_TEST_RELPATHS
     "tests/library/tests/test_selector_cpp_parity.py"
+    "tests/library/tests/test_attention_dense_gfx950_binding.py"
     "tests/library/tests/test_attention_ir_cpp_parity.py"
     "tests/library/tests/test_gdn_decode_ir_cpp_parity.py")
 set(_ROCKE_LIBRARY_ENGINE_PARITY_TESTS "")

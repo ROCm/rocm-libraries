@@ -5,6 +5,16 @@
 # installed exactly like the engine's own C++ tests (platform/tests), so the
 # installed CTest file lists them with the rest.
 
+# Compile the installed emitter as a C client of the C++ library. Only the
+# test build needs a C compiler; the engine itself remains C++-only.
+enable_language(C)
+add_executable(rocke_gfx950_dense_parity_emit ../../tests/parity/attention_dense_gfx950_emit.c)
+target_compile_features(rocke_gfx950_dense_parity_emit PRIVATE c_std_11)
+target_link_libraries(rocke_gfx950_dense_parity_emit PRIVATE rocke_library_core)
+rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx950_dense_parity_emit)
+set_target_properties(rocke_gfx950_dense_parity_emit PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+install(TARGETS rocke_gfx950_dense_parity_emit RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+
 # Stream-K wgrad host helpers and validator gates (auto CTA pool per arch,
 # grid, workspace layout, reject reasons): also invisible to the byte-identity
 # gate, and the Python-vs-C pytest needs the pybind module CI does not build,
@@ -143,6 +153,23 @@ install(TARGETS rocke_conv_direct_wgrad_refusals_host
         RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
 set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
              rocke_conv_direct_wgrad_refusals_host)
+
+# Native gfx950 dense attention builder ownership and concurrent emission.
+find_package(Threads REQUIRED)
+add_executable(rocke_gfx950_attention_dense_builder_host gfx950_attention_dense_builder_host.cpp)
+target_link_libraries(rocke_gfx950_attention_dense_builder_host PRIVATE rocke_library_core Threads::Threads)
+if(UNIX)
+  target_link_libraries(rocke_gfx950_attention_dense_builder_host PRIVATE m)
+endif()
+add_test(NAME rocke_gfx950_attention_dense_builder_host COMMAND rocke_gfx950_attention_dense_builder_host)
+set_tests_properties(rocke_gfx950_attention_dense_builder_host PROPERTIES LABELS "ckc;unit;host")
+rocke_cxx_test_installed_name(_rocke_installed_name rocke_gfx950_attention_dense_builder_host)
+set_target_properties(rocke_gfx950_attention_dense_builder_host
+                      PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+install(TARGETS rocke_gfx950_attention_dense_builder_host
+        RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+             rocke_gfx950_attention_dense_builder_host)
 
 # YAML tier labels (ROCKE_ENGINE_test_categories_external.yaml lists every
 # test above) and the cpu timeout. Both reach only tests add_test()'d in the

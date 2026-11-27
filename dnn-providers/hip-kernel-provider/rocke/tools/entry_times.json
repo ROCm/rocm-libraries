@@ -1,10 +1,11 @@
 {
   "linux": {
-    "source": "Linux gfx942 CI test job run in emulation of the combined testing lanes (5e247e462e2), 2026-11-26: two runs of the standard shards (the fourth shard once, with a retry) and one run of the quick shard with pytest --durations=0 --durations-min=0; entries those logs do not show passing keep their earlier time",
+    "source": "Linux gfx942 CI test job run in emulation of the combined testing lanes (5e247e462e2), 2026-11-26: two runs of the standard shards (the fourth shard once, with a retry) and one run of the quick shard with pytest --durations=0 --durations-min=0; entries those logs do not show passing keep their earlier time; rocke_gfx950_attention_dense_builder_host and rocke_library_gfx950_dense_builder_pytest timed unsharded on an installed Linux gfx950 provider, without pybind; rocke_attention_dense_gfx950_spec and rocke_sha256 timed in an installed Linux host run",
     "seconds": {
       "rocke_arch_domain_refusal": 0.0,
       "rocke_arch_domain_reproducibility": 12.31,
       "rocke_arch_target_identity": 0.0,
+      "rocke_attention_dense_gfx950_spec": 0.02,
       "rocke_attention_dense_spec": 0.0,
       "rocke_barrier_fence": 0.0,
       "rocke_buffer_rsrc_hip": 0.01,
@@ -40,6 +41,7 @@
       "rocke_gfx1250_wmma_ops": 0.0,
       "rocke_gfx12_wmma_ops": 0.05,
       "rocke_gfx942_attention_tiled_2d_hbm_knobs": 0.03,
+      "rocke_gfx950_attention_dense_builder_host": 0.0,
       "rocke_gfx950_f8f6f4_mfma_ops": 0.3,
       "rocke_global_access_alignment": 0.0,
       "rocke_global_load_index_width": 0.0,
@@ -66,6 +68,7 @@
       "rocke_library_dsa_pytest": 2.19,
       "rocke_library_engine_parity_pytest": 31.94,
       "rocke_library_gdn_pytest": 63.75,
+      "rocke_library_gfx950_dense_builder_pytest": 6.27,
       "rocke_library_gpu_pytest": 604.24,
       "rocke_library_host_pytest": 3.92,
       "rocke_library_mla_pytest": 12.86,
@@ -105,6 +108,7 @@
       "rocke_sdpa_gpu_gfx942_pytest": 11.28,
       "rocke_sdpa_gpu_gfx950_pytest": 0.55,
       "rocke_sdpa_reference_unit_pytest": 3.94,
+      "rocke_sha256": 0.0,
       "rocke_smem_access_alignment": 0.01,
       "rocke_spec_refusal_guards": 0.0,
       "rocke_storage": 0.0,
