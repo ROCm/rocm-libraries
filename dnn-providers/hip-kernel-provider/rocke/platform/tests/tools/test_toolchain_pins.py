@@ -92,6 +92,40 @@ def test_the_allowlist_is_sorted_one_canonical_line_per_file():
             {FLAVOR_PIN},
         ),
         ("import os\nok = os.environ['ROCKE_LLVM_FLAVOR'] == 'llvm22'\n", {FLAVOR_PIN}),
+        ("FIRST, SECOND = 'llvm22', 1\n", {FLAVOR_PIN}),
+        (
+            (
+                "def test_it(monkeypatch):\n"
+                "    monkeypatch.setenv('ROCKE_LLVM_FLAVOR', 'llvm22')\n"
+            ),
+            {FLAVOR_PIN},
+        ),
+        (
+            "import os\ndef test_it():\n    os.environ['ROCKE_LLVM_FLAVOR'] = 'llvm23'\n",
+            {FLAVOR_PIN},
+        ),
+        (
+            (
+                "import os\nfrom unittest import mock\n"
+                "patched = mock.patch.dict(os.environ, {'ROCKE_LLVM_FLAVOR': 'llvm23'})\n"
+            ),
+            {FLAVOR_PIN},
+        ),
+        (
+            "import os\nenv = dict(os.environ, ROCKE_LLVM_FLAVOR='llvm22')\n",
+            {FLAVOR_PIN},
+        ),
+        (
+            "import os\nflavor = os.environ.get('ROCKE_LLVM_FLAVOR', 'llvm20')\n",
+            {FLAVOR_PIN},
+        ),
+        (
+            (
+                "def test_it(monkeypatch):\n"
+                "    monkeypatch.setenv('ROCKE_COMGR_LIB', '/opt/rocm-7.1.0/lib/x.so')\n"
+            ),
+            {ROCM_PIN},
+        ),
         ('GATE_COMGR_ROCM = "7.2"\n', {ROCM_PIN}),
         ("REFERENCE_ROCM = (7, 2)\n", {ROCM_PIN}),
         ('COMGR = "/opt/rocm-7.1.0/lib/libamd_comgr.so"\n', {ROCM_PIN}),
@@ -101,6 +135,13 @@ def test_the_allowlist_is_sorted_one_canonical_line_per_file():
             (
                 "from rocke.runtime.comgr import resolved_lib_rocm_version\n"
                 "release = resolved_lib_rocm_version()\n"
+            ),
+            {ROCM_VERSION},
+        ),
+        (
+            (
+                "from rocke.runtime.comgr import resolved_lib_rocm_version as rv\n"
+                "release = rv()\n"
             ),
             {ROCM_VERSION},
         ),
@@ -141,6 +182,10 @@ def test_each_kind_of_pin_is_found(source, kinds):
         '"""Calibrated on llvm22 with the ROCm 7.2 comgr."""\n',
         "# GATE_FLAVOR = 'llvm22'\nx = 1\n",
         "VERSION = (7, 2)\n",
+        # A flavor chosen for offline emission, and a mapping that is no
+        # environment (lower-case keys).
+        "spec = {'llvm_flavor': 'llvm22'}\n",
+        "def test_it(monkeypatch):\n    monkeypatch.delenv('ROCKE_LLVM_FLAVOR')\n",
         "from rocke.runtime.comgr import loaded_compiler_info\n",
         "from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm\n",
         "from rocke.core.llvm_profile import measured_flavor_for_llvm\n",
@@ -173,13 +218,14 @@ def test_source_that_does_not_parse_is_an_error_not_a_clean_file():
         ("platform/tests/core/test_example.py", {FLAVOR_PIN, ROCM_PIN, ROCM_VERSION}),
         ("platform/python/rocke/tests/comgr.py", {FLAVOR_PIN, ROCM_PIN, ROCM_VERSION}),
         ("platform/tests/conftest.py", {FLAVOR_PIN, ROCM_PIN, ROCM_VERSION}),
+        ("platform/tests/test_compiler_detection.py", set()),
         ("platform/python/rocke/runtime/comgr.py", set()),
         ("platform/tools/check_byte_identity.py", set()),
     ],
 )
-def test_test_and_library_code_is_checked_and_private_names_in_library_only(
-    path, kinds
-):
+def test_library_code_is_held_to_every_kind_and_platform_tests_to_the_pins(path, kinds):
+    """The platform's tests may test its private helpers, and its detector unit
+    tests check what the detector reports, so they are not read."""
     assert checked_kinds(path) == kinds
 
 
@@ -249,6 +295,18 @@ LISTED = {"library/tests/listed.py": AllowlistEntry(frozenset({FLAVOR_PIN}), "AI
             (
                 "library/kernels/new.py: new toolchain pin: line 2 rocm_version: "
                 "comgr.resolved_lib_rocm_version()"
+            ),
+        ),
+        (
+            "platform/tests/test_new.py",
+            (
+                "from rocke.runtime.comgr import resolved_lib_rocm_version\n"
+                "def test_it():\n"
+                "    release = resolved_lib_rocm_version()\n"
+            ),
+            (
+                "platform/tests/test_new.py: new toolchain pin: line 3 rocm_version: "
+                "resolved_lib_rocm_version()"
             ),
         ),
         (

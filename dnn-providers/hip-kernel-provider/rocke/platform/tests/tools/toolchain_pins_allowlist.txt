@@ -60,6 +60,7 @@ library/tests/test_attention_bwd_sched_body.py: private_import  # AICK-3410
 library/tests/test_attention_bwd_sinks.py: private_import  # AICK-3410
 library/tests/test_attention_bwd_split.py: private_import  # AICK-3410
 library/tests/test_attention_bwd_split_sched.py: private_import  # AICK-3410
+library/tests/test_attention_bwd_sweep.py: flavor_pin  # AICK-3410
 library/tests/test_attention_bwd_transpose_probe.py: private_import  # AICK-3410
 library/tests/test_attention_bwd_unified.py: private_import  # AICK-3410
 library/tests/test_attention_bwd_unit_ops.py: private_import  # AICK-3410
@@ -85,12 +86,14 @@ library/tests/test_benchmark_tf32_plumbing.py: flavor_pin  # AICK-3410
 library/tests/test_conv_dgrad_correctness.py: private_import  # AICK-3410
 library/tests/test_conv_dgrad_depthwise_windowed.py: private_import  # AICK-3410
 library/tests/test_conv_direct_grouped_backend_parity.py: private_import  # AICK-3410
+library/tests/test_conv_engine_bridge_sched.py: flavor_pin  # AICK-3410
+library/tests/test_conv_fwd_split_k.py: flavor_pin  # AICK-3410
 library/tests/test_conv_reference_contract.py: flavor_pin  # AICK-3410
 library/tests/test_conv_wgrad_correctness.py: private_import  # AICK-3410
 library/tests/test_conv_wgrad_streamk.py: private_import  # AICK-3410
 library/tests/test_conv_wgrad_streamk_gpu.py: private_import  # AICK-3410
 library/tests/test_conv_wgrad_tf32.py: private_import  # AICK-3410
-library/tests/test_convolution_backward_data_aot_packaging.py: private_import  # AICK-3410
+library/tests/test_convolution_backward_data_aot_packaging.py: flavor_pin private_import  # AICK-3410
 library/tests/test_d256_gfx942_fast_routing.py: private_import  # AICK-3410
 library/tests/test_dsa_indexer_gfx942_spec.py: private_import  # AICK-3410
 library/tests/test_dtype_dispatch.py: private_import  # AICK-3410
@@ -105,16 +108,22 @@ library/tests/test_kda_gfx942_golden.py: private_import  # AICK-3410
 library/tests/test_kda_gfx950_golden.py: private_import  # AICK-3410
 library/tests/test_kernel_label.py: flavor_pin  # AICK-3410
 library/tests/test_lse_store_ir.py: private_import  # AICK-3410
-library/tests/test_mla_prefill_gfx942.py: private_import  # AICK-3410
+library/tests/test_mla_prefill_gfx942.py: flavor_pin private_import  # AICK-3410
 library/tests/test_mla_prefill_gfx942_golden.py: private_import  # AICK-3410
 library/tests/test_mla_prefill_gfx942_numeric.py: private_import  # AICK-3410
-library/tests/test_strided_kv_lds.py: private_import  # AICK-3410
+library/tests/test_strided_kv_lds.py: flavor_pin private_import  # AICK-3410
+platform/python/rocke/portable_ir/tests/test_recording_builder.py: flavor_pin  # AICK-3410
+platform/tests/core/test_compile_target_selection.py: flavor_pin  # AICK-3410
+platform/tests/core/test_compile_target_with_this_hosts_compiler.py: flavor_pin  # AICK-3410
 platform/tests/core/test_fp8_scale_conversion_gate.py: flavor_pin  # AICK-3410
 platform/tests/core/test_gfx1250_scaled_wmma_operand_forms.py: flavor_pin  # AICK-3410
 platform/tests/core/test_scf_for_yields.py: flavor_pin  # AICK-3410
 platform/tests/core/test_scf_if_else_results.py: flavor_pin  # AICK-3410
+platform/tests/instances/differential/test_check_byte_identity_progress.py: flavor_pin  # AICK-3410
+platform/tests/instances/differential/test_gate_verdict.py: flavor_pin  # AICK-3410
+platform/tests/instances/test_differential_golden_routing.py: flavor_pin  # AICK-3410
 platform/tests/instances/test_gemm_tdm_traits_cpp_engine.py: flavor_pin  # AICK-3410
-platform/tests/instances/test_gfx1250_moe.py: rocm_version  # AICK-3410
-platform/tests/test_compiler_detection.py: flavor_pin  # AICK-3410
-platform/tests/test_driver_compiler_policy.py: rocm_pin rocm_version  # AICK-3410
+platform/tests/portable_ir/test_recipe_roller.py: flavor_pin  # AICK-3410
 platform/tests/test_rocke.py: rocm_version  # AICK-3410
+platform/tests/tools/test_arch_domain_artifact.py: flavor_pin  # AICK-3410
+platform/tests/tools/test_dsl_probes.py: flavor_pin  # AICK-3410

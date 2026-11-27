@@ -1,8 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Find toolchain pins in rocKE's test and library code: the one checker behind
-the toolchain-pins gate.
+"""Find toolchain pins in test and library code: the toolchain-pins gate's checker.
 
 Tests use the compiler rocKE's discovery loads; the rule's one home is
 ``dsl_docs/reference/env_flags.md``, "Compiler detection and provenance". Code
@@ -17,19 +16,28 @@ in strings, comments and docstrings is not code::
 
     GATE_FLAVOR = "llvm22"                    # FLAVOR_PIN: a constant
     if current_flavor() == "llvm22": ...      # FLAVOR_PIN: what the compiler reports
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")  # FLAVOR_PIN: the environment
     for flavor in LLVM_FLAVORS:
         if flavor == "llvm20": ...            # nothing: one of every flavor, in turn
     GATE_COMGR_ROCM = "7.2"                   # ROCM_PIN: a constant named for ROCm
-    if comgr_vintage < (7, 2): ...            # ROCM_PIN: compared with a release
+    if rocm_release < (7, 2): ...             # ROCM_PIN: compared with a release
     resolved_lib_rocm_version()               # ROCM_VERSION
     from rocke.core.lower_llvm import _detect_llvm_flavor  # PRIVATE_IMPORT
 
 Test code is every file under a ``tests`` directory, and every ``test_*.py`` and
 ``conftest.py``; library code is every file under ``library/``. Both are held to
 the first three kinds. PRIVATE_IMPORT applies to library code only: the
-platform's own tests may test its private helpers.
+platform's own tests may test its private helpers. The platform's unit tests of
+compiler detection (:data:`DETECTOR_TESTS`) stub the compiler and check what the
+detector reports, which is the detector's contract rather than a pin, so they
+are not read.
 
-    python -m rocke.tests.toolchain_pins      # each file's kinds, allowlist format
+What the checker does not see: a flavor read kept in a local variable and
+compared later, a ``match`` on a flavor, names reached through ``getattr`` or
+``importlib.import_module``, and a copy of the flavor list (several flavors in
+one constant), which is a second home of ``LLVM_FLAVORS`` rather than a pin.
+
+    python -m rocke.tests.toolchain_pins      # each file's kinds; add the issue
 """
 
 from __future__ import annotations
@@ -38,14 +46,17 @@ import argparse
 import ast
 import enum
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from ..assets import platform_root
 from . import source_allowlist
+from .source_allowlist import AllowlistEntry
+from .source_ast import dotted_name, string_constant
 
 __all__ = [
+    "DETECTOR_TESTS",
     "ToolchainPin",
     "ToolchainPinKind",
     "allowlist_breaches",
@@ -61,18 +72,21 @@ class ToolchainPinKind(enum.Enum):
     """What a pin ties to one toolchain; the gate allowlists kinds per file."""
 
     FLAVOR_PIN = "flavor_pin"
-    """A module- or class-level constant set to one LLVM flavor (``"llvm22"``,
-    or a collection holding only it), or a comparison of one, or of a collection
-    of them, with what the loaded compiler or the environment reports: a call
-    whose name says ``flavor`` and that is given no flavor, or a read of an
-    environment variable whose name says ``FLAVOR``."""
+    """One LLVM flavor (``"llvm22"``, or a collection holding only it) set as a
+    module- or class-level constant; or one or more compared with what the
+    loaded compiler or the environment reports (a call whose name says
+    ``flavor`` and that is given no flavor, or a read of an environment variable
+    whose name says ``FLAVOR``); or written to such a variable, or given as the
+    default of a read of one."""
     ROCM_PIN = "rocm_pin"
-    """A module- or class-level constant set to one ROCm release (a string naming
-    ``rocm<release>``, or a version set to a name that says ``rocm``), or a
-    comparison with one."""
+    """One ROCm release set as a module- or class-level constant (a string
+    naming ``rocm<release>``, or a version bound to a name that says ``rocm``);
+    or compared with code that says ``rocm``; or a string naming a release
+    written to an environment variable."""
     ROCM_VERSION = "rocm_version"
-    """A call of ``resolved_lib_rocm_version``: a decision on the ROCm release
-    of the loaded comgr rather than on what the compiler reports."""
+    """A call of ``resolved_lib_rocm_version``, under its name or an alias: a
+    decision on the ROCm release of the loaded comgr rather than on what the
+    compiler reports."""
     PRIVATE_IMPORT = "private_import"
     """An underscore name of ``rocke.runtime`` (or a module under it) or of
     ``rocke.core.lower_llvm``, imported or read as an attribute (library code
@@ -88,6 +102,13 @@ class ToolchainPin:
     detail: str
 
 
+#: The platform's unit tests of compiler detection, which the gate does not read.
+DETECTOR_TESTS = frozenset(
+    {
+        "platform/tests/test_compiler_detection.py",
+        "platform/tests/test_driver_compiler_policy.py",
+    }
+)
 _PINS_IN_TESTS = frozenset(
     {
         ToolchainPinKind.FLAVOR_PIN,
@@ -102,6 +123,7 @@ _ROCM_RELEASE_TEXT = re.compile(r"rocm[-_]?\d+\.\d+", re.IGNORECASE)
 _VERSION_TEXT = re.compile(r"\d+\.\d+(?:\.\d+)?")
 _ROCM_WORD = re.compile(r"rocm", re.IGNORECASE)
 _FLAVOR_WORD = re.compile(r"flavor", re.IGNORECASE)
+_ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
 _ROCM_VERSION_CALL = "resolved_lib_rocm_version"
 _GUARDED_MODULES = ("rocke.runtime", "rocke.core.lower_llvm")
 # Text every pin of a kind holds; a source without it is not parsed.
@@ -112,12 +134,16 @@ _MARKERS = {
     ToolchainPinKind.PRIVATE_IMPORT: "rocke",
 }
 _ENVIRONMENT_READS = frozenset({"os.environ.get", "os.getenv", "environ.get", "getenv"})
+_ENVIRONMENT_SETTERS = frozenset({"setenv", "putenv", "setdefault"})
 
 
 def checked_kinds(path: str) -> frozenset[ToolchainPinKind]:
     """The kinds the gate checks in ``path`` (relative to the rocke directory,
-    ``/`` separators): none outside test and library code."""
+    ``/`` separators): none outside test and library code, and none in
+    :data:`DETECTOR_TESTS`."""
     parts = PurePosixPath(path)
+    if path in DETECTOR_TESTS:
+        return frozenset()
     if parts.parts and parts.parts[0] == _LIBRARY_ROOT:
         return _PINS_IN_LIBRARY
     if "tests" in parts.parts[:-1] or parts.name.startswith("test_"):
@@ -127,25 +153,9 @@ def checked_kinds(path: str) -> frozenset[ToolchainPinKind]:
     return frozenset()
 
 
-def _dotted(node: ast.AST) -> str:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
-
-
-def _string(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
 def _is_flavor_literal(node: ast.AST) -> bool:
     """One LLVM flavor (``"llvm22"``), or a collection of them."""
-    text = _string(node)
+    text = string_constant(node)
     if text is not None:
         return bool(_FLAVOR_LITERAL.fullmatch(text))
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and node.elts:
@@ -154,20 +164,19 @@ def _is_flavor_literal(node: ast.AST) -> bool:
 
 
 def _is_one_flavor(node: ast.AST) -> bool:
-    """One LLVM flavor, alone or as the only member of a collection: a constant
-    listing several is a copy of the flavor list, not a pin."""
+    """One LLVM flavor, alone or as the only member of a collection."""
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         return len(node.elts) == 1 and _is_flavor_literal(node.elts[0])
     return _is_flavor_literal(node)
 
 
 def _names_rocm_release(node: ast.AST) -> bool:
-    text = _string(node)
+    text = string_constant(node)
     return text is not None and bool(_ROCM_RELEASE_TEXT.search(text))
 
 
 def _is_version_literal(node: ast.AST) -> bool:
-    text = _string(node)
+    text = string_constant(node)
     if text is not None:
         return bool(_VERSION_TEXT.fullmatch(text))
     return (
@@ -180,36 +189,44 @@ def _is_version_literal(node: ast.AST) -> bool:
     )
 
 
+def _is_flavor_variable(name: str | None) -> bool:
+    """Whether ``name`` is an environment variable that says FLAVOR."""
+    return (
+        name is not None
+        and bool(_ENVIRONMENT_NAME.fullmatch(name))
+        and "FLAVOR" in name
+    )
+
+
 def _reads_flavor(node: ast.AST) -> bool:
     """Whether ``node`` is what the loaded compiler or the environment says the
-    flavor is: a call whose name says flavor, or an environment read of a
-    variable whose name says FLAVOR."""
+    flavor is: a call whose name says flavor and that is given no flavor, or an
+    environment read of a variable whose name says FLAVOR."""
     if isinstance(node, ast.Call):
-        function = _dotted(node.func)
+        function = dotted_name(node.func)
         if function in _ENVIRONMENT_READS:
-            key = _string(node.args[0]) if node.args else None
-            return key is not None and bool(_FLAVOR_WORD.search(key))
+            return bool(node.args) and _is_flavor_variable(
+                string_constant(node.args[0])
+            )
         given_a_flavor = any(map(_is_flavor_literal, node.args)) or any(
             _is_flavor_literal(keyword.value) for keyword in node.keywords
         )
         return not given_a_flavor and bool(
             _FLAVOR_WORD.search(function.rsplit(".", 1)[-1])
         )
-    if isinstance(node, ast.Subscript) and _dotted(node.value).endswith("environ"):
-        key = _string(node.slice)
-        return key is not None and bool(_FLAVOR_WORD.search(key))
+    if isinstance(node, ast.Subscript) and dotted_name(node.value).endswith("environ"):
+        return _is_flavor_variable(string_constant(node.slice))
     return False
 
 
 def _constant_targets(
     tree: ast.Module, nodes: Sequence[ast.AST]
-) -> list[tuple[str, ast.AST, int]]:
+) -> Iterator[tuple[str, ast.AST, int]]:
     """``(name, value, line)`` of each assignment to a name in a module or class
-    body (``nodes`` are every node of ``tree``): the module's and its classes'
-    constants."""
+    body (``nodes`` are every node of ``tree``), a tuple unpacked name by name:
+    the module's and its classes' constants."""
     bodies: list[list[ast.stmt]] = [tree.body]
     bodies.extend(node.body for node in nodes if isinstance(node, ast.ClassDef))
-    found = []
     for body in bodies:
         for statement in body:
             if isinstance(statement, ast.Assign):
@@ -220,8 +237,15 @@ def _constant_targets(
                 continue
             for target in targets:
                 if isinstance(target, ast.Name):
-                    found.append((target.id, value, statement.lineno))
-    return found
+                    yield target.id, value, statement.lineno
+                elif (
+                    isinstance(target, ast.Tuple)
+                    and isinstance(value, ast.Tuple)
+                    and len(target.elts) == len(value.elts)
+                ):
+                    for element, element_value in zip(target.elts, value.elts):
+                        if isinstance(element, ast.Name):
+                            yield element.id, element_value, statement.lineno
 
 
 def _constant_pins(tree: ast.Module, nodes: Sequence[ast.AST]) -> list[ToolchainPin]:
@@ -249,6 +273,68 @@ def _comparison_pins(node: ast.Compare) -> list[ToolchainPin]:
     ):
         pins.append(ToolchainPin(node.lineno, ToolchainPinKind.ROCM_PIN, detail))
     return pins
+
+
+def _environment_entries(node: ast.AST) -> Iterator[tuple[str | None, ast.AST]]:
+    """``(variable, value)`` of each environment write ``node`` makes, and of the
+    default of an environment read: ``setenv(name, value)``, ``environ[name] =
+    value``, a ``name: value`` dict entry or ``name=value`` keyword (an
+    environment mapping built or updated), ``environ.get(name, default)``."""
+    if isinstance(node, ast.Call):
+        function = dotted_name(node.func)
+        last = function.rsplit(".", 1)[-1]
+        if (last in _ENVIRONMENT_SETTERS or function in _ENVIRONMENT_READS) and len(
+            node.args
+        ) >= 2:
+            yield string_constant(node.args[0]), node.args[1]
+        for keyword in node.keywords:
+            yield keyword.arg, keyword.value
+    elif isinstance(node, ast.Dict):
+        for key, value in zip(node.keys, node.values):
+            yield string_constant(key), value
+    elif isinstance(node, ast.Assign):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript) and dotted_name(target.value).endswith(
+                "environ"
+            ):
+                yield string_constant(target.slice), node.value
+
+
+def _environment_pins(node: ast.AST) -> list[ToolchainPin]:
+    pins = []
+    for variable, value in _environment_entries(node):
+        if variable is None or not _ENVIRONMENT_NAME.fullmatch(variable):
+            continue
+        detail = f"{variable}={ast.unparse(value)}"
+        if _is_flavor_variable(variable) and _is_one_flavor(value):
+            pins.append(ToolchainPin(node.lineno, ToolchainPinKind.FLAVOR_PIN, detail))
+        elif _names_rocm_release(value):
+            pins.append(ToolchainPin(node.lineno, ToolchainPinKind.ROCM_PIN, detail))
+    return pins
+
+
+def _rocm_version_names(nodes: Sequence[ast.AST]) -> frozenset[str]:
+    """The names ``resolved_lib_rocm_version`` is called by: its own and each
+    alias an import binds it to."""
+    names = {_ROCM_VERSION_CALL}
+    for node in nodes:
+        if isinstance(node, ast.ImportFrom):
+            names.update(
+                imported.asname
+                for imported in node.names
+                if imported.name == _ROCM_VERSION_CALL and imported.asname
+            )
+    return frozenset(names)
+
+
+def _rocm_version_calls(nodes: Sequence[ast.AST]) -> list[ToolchainPin]:
+    names = _rocm_version_names(nodes)
+    return [
+        ToolchainPin(node.lineno, ToolchainPinKind.ROCM_VERSION, ast.unparse(node))
+        for node in nodes
+        if isinstance(node, ast.Call)
+        and dotted_name(node.func).rsplit(".", 1)[-1] in names
+    ]
 
 
 def _is_guarded(module: str) -> bool:
@@ -312,15 +398,13 @@ def _private_imports(nodes: Sequence[ast.AST]) -> list[ToolchainPin]:
                         )
                     )
         elif isinstance(node, ast.Attribute) and _is_private(node.attr):
-            owner = _dotted(node.value)
-            root, _, rest = owner.partition(".")
+            root, _, rest = dotted_name(node.value).partition(".")
             if root not in bindings:
                 continue
-            expanded = ".".join(filter(None, (bindings[root], rest)))
-            if _is_guarded(expanded):
+            if _is_guarded(".".join(filter(None, (bindings[root], rest)))):
                 pins.append(
                     ToolchainPin(
-                        node.lineno, ToolchainPinKind.PRIVATE_IMPORT, _dotted(node)
+                        node.lineno, ToolchainPinKind.PRIVATE_IMPORT, dotted_name(node)
                     )
                 )
     return pins
@@ -345,15 +429,9 @@ def toolchain_pins_in_python(
     for node in nodes:
         if isinstance(node, ast.Compare):
             pins.extend(_comparison_pins(node))
-        elif (
-            isinstance(node, ast.Call)
-            and _dotted(node.func).rsplit(".", 1)[-1] == _ROCM_VERSION_CALL
-        ):
-            pins.append(
-                ToolchainPin(
-                    node.lineno, ToolchainPinKind.ROCM_VERSION, ast.unparse(node)
-                )
-            )
+        pins.extend(_environment_pins(node))
+    if ToolchainPinKind.ROCM_VERSION in kinds:
+        pins.extend(_rocm_version_calls(nodes))
     if ToolchainPinKind.PRIVATE_IMPORT in kinds:
         pins.extend(_private_imports(nodes))
     return sorted(
@@ -381,7 +459,7 @@ def tree_toolchain_pins(root: Path) -> dict[str, list[ToolchainPin]]:
     return found
 
 
-def read_allowlist(path: Path) -> dict[str, source_allowlist.AllowlistEntry]:
+def read_allowlist(path: Path) -> dict[str, AllowlistEntry]:
     """The allowlist at ``path``: one ``file: kind kind  # ISSUE`` line per file,
     the issue the one that removes the line
     (:func:`rocke.tests.source_allowlist.read_allowlist`)."""
@@ -390,14 +468,17 @@ def read_allowlist(path: Path) -> dict[str, source_allowlist.AllowlistEntry]:
 
 def allowlist_breaches(
     found: Mapping[str, Sequence[ToolchainPin]],
-    allowed: Mapping[str, source_allowlist.AllowlistEntry],
+    allowed: Mapping[str, AllowlistEntry],
 ) -> list[str]:
     """What breaks the allowlist, one line per file, sorted by file
-    (:func:`rocke.tests.source_allowlist.allowlist_breaches`)."""
+    (:func:`rocke.tests.source_allowlist.allowlist_breaches`): a file with a pin
+    that is not listed, a kind its line does not list, and a line or kind the
+    tree no longer has."""
     return source_allowlist.allowlist_breaches(found, allowed, subject="toolchain pin")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Print each file's kinds of pin as an allowlist line without its issue."""
     parser = argparse.ArgumentParser(
         prog="python -m rocke.tests.toolchain_pins",
         description=__doc__.splitlines()[0],
