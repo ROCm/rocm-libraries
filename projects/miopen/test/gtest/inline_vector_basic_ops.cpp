@@ -30,7 +30,9 @@
 #include <miopen/inline_vector.hpp>
 #include <miopen/tensor.hpp>
 
-TEST(CPU_InlineVectorSizeAndAccumulate_NONE, Test)
+using CPU_InlineVectorSizeAndAccumulate_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorSizeAndAccumulate_NONE, Test)
 {
     miopen::InlineVector<int, 5> in_v1{4, 2, 1};
     std::vector<int> v1{4, 2, 1};
@@ -48,7 +50,11 @@ TEST(CPU_InlineVectorSizeAndAccumulate_NONE, Test)
     EXPECT_EQ(sum_in_v1, sum_v1);
 }
 
-TEST(CPU_InlineVectorFindIfAndDistance_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorSizeAndAccumulate_NONE, testing::Values(0));
+
+using CPU_InlineVectorFindIfAndDistance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorFindIfAndDistance_NONE, Test)
 {
     std::initializer_list<size_t> init_list_2{4, 1, 2, 2};
     miopen::InlineVector<size_t, 5> in_v2 = init_list_2;
@@ -65,7 +71,11 @@ TEST(CPU_InlineVectorFindIfAndDistance_NONE, Test)
     EXPECT_EQ(*first_not_one_in_v2, *first_note_one_v2);
 }
 
-TEST(CPU_InlineVecotrTie_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorFindIfAndDistance_NONE, testing::Values(0));
+
+using CPU_InlineVecotrTie_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVecotrTie_NONE, Test)
 {
     std::initializer_list<size_t> init_list_3{4, 1, 2, 2};
     miopen::InlineVector<size_t, 5> in_v3 = init_list_3;
@@ -82,7 +92,11 @@ TEST(CPU_InlineVecotrTie_NONE, Test)
     }
 }
 
-TEST(CPU_InlineVectorCapacityAndEmpty_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVecotrTie_NONE, testing::Values(0));
+
+using CPU_InlineVectorCapacityAndEmpty_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorCapacityAndEmpty_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v4{};
     std::vector<size_t> v4{};
@@ -93,7 +107,11 @@ TEST(CPU_InlineVectorCapacityAndEmpty_NONE, Test)
     EXPECT_EQ(in_v4.begin(), in_v4.end());
 }
 
-TEST(CPU_InlineVectorIteratorsConstructor_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorCapacityAndEmpty_NONE, testing::Values(0));
+
+using CPU_InlineVectorIteratorsConstructor_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorIteratorsConstructor_NONE, Test)
 {
     std::vector<size_t> vv = {1, 2, 4, 1};
     miopen::InlineVector<size_t, 5> in_v5(vv.begin(), vv.end());
@@ -105,7 +123,11 @@ TEST(CPU_InlineVectorIteratorsConstructor_NONE, Test)
     }
 }
 
-TEST(CPU_InlineVectorConstructorException_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorIteratorsConstructor_NONE, testing::Values(0));
+
+using CPU_InlineVectorConstructorException_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorConstructorException_NONE, Test)
 {
     std::initializer_list<size_t> init_list_v6{1, 2, 3, 4, 5, 6};
     auto constructor_1 = [init_list_v6]() {
@@ -116,7 +138,11 @@ TEST(CPU_InlineVectorConstructorException_NONE, Test)
     ASSERT_ANY_THROW(constructor_2());
 }
 
-TEST(CPU_InlineVectorAllOf_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorConstructorException_NONE, testing::Values(0));
+
+using CPU_InlineVectorAllOf_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorAllOf_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v7({3, 1, 1});
     std::vector<size_t> v7{3, 2, 1};
@@ -127,7 +153,11 @@ TEST(CPU_InlineVectorAllOf_NONE, Test)
     EXPECT_EQ(all_of_in_v7, all_of_v7);
 }
 
-TEST(CPU_InlineVectorResize_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorAllOf_NONE, testing::Values(0));
+
+using CPU_InlineVectorResize_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorResize_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v8({2, 2, 2, 2, 2});
     in_v8.resize(2);
@@ -146,7 +176,11 @@ TEST(CPU_InlineVectorResize_NONE, Test)
     }
 }
 
-TEST(CPU_InlineVectorPushBackPopBack_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorResize_NONE, testing::Values(0));
+
+using CPU_InlineVectorPushBackPopBack_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorPushBackPopBack_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v9 = {8, 7, 6};
     std::vector<size_t> v9{8, 7, 6, 5};
@@ -173,7 +207,11 @@ TEST(CPU_InlineVectorPushBackPopBack_NONE, Test)
     EXPECT_ANY_THROW({ in_v9.push_back(3); });
 }
 
-TEST(CPU_InlineVectorAt_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorPushBackPopBack_NONE, testing::Values(0));
+
+using CPU_InlineVectorAt_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorAt_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v10{2, 4, 6};
     std::vector<size_t> v10{2, 4, 6};
@@ -183,7 +221,11 @@ TEST(CPU_InlineVectorAt_NONE, Test)
     EXPECT_EQ(in_v10.at(1), v10.at(1));
 }
 
-TEST(CPU_InlineVectorFrontBack_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorAt_NONE, testing::Values(0));
+
+using CPU_InlineVectorFrontBack_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorFrontBack_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v11{};
 
@@ -194,9 +236,15 @@ TEST(CPU_InlineVectorFrontBack_NONE, Test)
     EXPECT_EQ(in_v11.front(), in_v11.back());
 }
 
-TEST(CPU_InlineVectorClear_NONE, Test)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorFrontBack_NONE, testing::Values(0));
+
+using CPU_InlineVectorClear_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_InlineVectorClear_NONE, Test)
 {
     miopen::InlineVector<size_t, 5> in_v12{1, 2, 3, 4, 5};
     in_v12.clear();
     EXPECT_EQ(in_v12.size(), 0);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_InlineVectorClear_NONE, testing::Values(0));

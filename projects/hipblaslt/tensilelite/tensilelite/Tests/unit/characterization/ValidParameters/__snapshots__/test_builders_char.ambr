@@ -1501,6 +1501,7 @@
     'StaggerUStride',
     'StinkyTofuParameters',
     'StinkyTofuRegisterAllocation',
+    'StoreCachelineAlign',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1551,6 +1552,7 @@
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
+    'WaveTileContiguousA',
     'WavefrontSize',
     'WorkAssignment',
     'WorkGroup',
@@ -2728,6 +2730,14 @@
       'type': 'int',
       'value': -1,
     }),
+    'StoreCachelineAlign': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'StorePriorityOpt': dict({
       'head': list([
         False,
@@ -3163,6 +3173,14 @@
       'type': 'list',
     }),
     'WaveSplitK': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'WaveTileContiguousA': dict({
       'head': list([
         False,
         True,

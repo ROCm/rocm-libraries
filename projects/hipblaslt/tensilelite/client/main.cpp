@@ -58,6 +58,7 @@
 
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
+#include "TensileLiteClientVersion.hpp"
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
@@ -74,12 +75,19 @@
 #include <elf.h>
 #include <limits> // std::numeric_limits<> sentinel
 #endif
+#if defined(__linux__)
+#include <cerrno>
+#include <linux/mempolicy.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <numeric>
 #include <sstream>
+#include <string_view>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -242,6 +250,7 @@ namespace TensileLite
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
                 ("split-align",            po::value<std::string>()->default_value("auto"), "With --split-devices, how the share of the split dimension is rounded so each device's slice of the split operand, C and D starts on a multiple of 256 bytes, the same rule as hipBLASLt PartitionedGemm: auto = round up when the balance changes by at most 1%; off = always size/N (to measure the misaligned case); force = always round up, as long as the last device keeps work.")
                 ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. Only the operand the split does not cut (B for --split-dim M, A for --split-dim N) and D can be shared; a shared operand is the copy of the last device, and the other devices validate against its data. A shared D is the one of device-idx, and every device writes its slice into it.")
+                ("split-free-run",         po::value<bool>()->default_value(false), "With --split-devices, do not join the devices after every launch. By default each launch ends with a join (every device's stream writes a counter after its slice and waits for the other devices' counters), so a launch starts only when the one before it has finished on every device, as successive launches of one kernel on one stream do; that is the time to compare with an unsplit run. With this option the devices run their launches back to back, each at its own pace, and are only waited for at the end of a group of enqueues.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -274,6 +283,8 @@ namespace TensileLite
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
+                ("verify-reference-reuse",   po::value<bool>()->default_value(false), "Recompute the CPU reference even when its inputs are unchanged and fail if the result differs (also: TENSILELITE_VERIFY_REFERENCE_REUSE=1)")
+                ("verify-upload-skip",       po::value<bool>()->default_value(false), "Read back every GPU input upload skipped because the GPU copy is current and fail if it differs from the host data, and every skipped batched-pointer array upload and fail if it differs from the recomputed pointers (also: TENSILELITE_VERIFY_UPLOAD_SKIP=1)")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
                 ("check-synchronizer",       po::value<bool>()->default_value(true),
@@ -307,6 +318,7 @@ namespace TensileLite
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
                 ("fused-a2a-sdma-rotate",    po::value<int>(), "Fused A2A, gfx942 and gfx950: move each remote peer SDMA queue this many steps along the even xGMI engines 2,4,...,14 from its KFD recommendation; nonzero requires 14 xGMI SDMA engines. Ignored on other architectures, which spread the remote peer queues over the recommended engines. The loopback queue uses engine 0. Defaults to -1.")
+                ("numa-bind",                po::value<int>(), "nonzero: the process allocates with MPOL_LOCAL (memory stays on the node it is first touched from, out of automatic NUMA balancing); 0: system default policy. Defaults to 1 with --fused-a2a, else 0.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -328,6 +340,9 @@ namespace TensileLite
                 ("csv-export-extra-cols",    po::value<bool>()->default_value(false), "CSV exports winner information")
                 ("csv-merge-same-problems",  po::value<bool>()->default_value(false), "CSV merge rows of same problem id")
                 ("PrintWinnersOnly",         po::value<bool>()->default_value(false), "PrintWinnersOnly")
+                ("print-rejected-predicates", po::value<bool>()->default_value(false), "Log the evaluation of every predicate of "
+                                                                                       "solutions rejected by their predicates (needs "
+                                                                                       "log-level Verbose or Debug).")
 
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")
@@ -378,6 +393,7 @@ namespace TensileLite
                                                                                        "running library solution 0.")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
+                ("no-results-file",          po::value<bool>()->default_value(false),                "Write no results file (results-file is ignored).")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
                 ("log-file-append",          po::value<bool>()->default_value(false),                "Append to log file.")
                 ("log-level",                po::value<LogLevel>()->default_value(LogLevel::Debug),  "Log level")
@@ -872,11 +888,51 @@ namespace TensileLite
 #endif
         }
 
+        // Sets MPOL_LOCAL on the calling thread; only threads created after this inherit it.
+        void useLocalMemoryPolicy()
+        {
+#if defined(__linux__)
+            if(syscall(SYS_set_mempolicy, MPOL_LOCAL, nullptr, 0) == 0)
+            {
+                std::clog << "NUMA: mempolicy=local" << std::endl;
+                std::ifstream status("/proc/self/status");
+                for(std::string line; std::getline(status, line);)
+                    if(line.rfind("Threads:", 0) == 0 && std::stoi(line.substr(8)) > 1)
+                        std::cerr << "warning: other threads were already running and keep the"
+                                  << " default NUMA policy" << std::endl;
+                return;
+            }
+            const int err = errno;
+            std::cerr << "warning: set_mempolicy(MPOL_LOCAL) -> errno " << err
+                      << "; automatic NUMA balancing still applies"
+                      << " (in a container, add --cap-add SYS_NICE)" << std::endl;
+#endif
+        }
+
     } // namespace Client
 } // namespace TensileLite
 
 int main(int argc, const char* argv[])
 {
+    // One-line identity queries. They touch no GPU, so callers can run them
+    // anywhere, under a short timeout, before using the client.
+    if(argc == 2)
+    {
+        std::string_view const query(argv[1]);
+        char const*            answer = nullptr;
+        if(query == "--version")
+            answer = TENSILELITE_CLIENT_VERSION;
+        else if(query == "--source-revision")
+            answer = TENSILELITE_CLIENT_SOURCE_REVISION;
+        else if(query == "--build-rocm")
+            answer = TENSILELITE_CLIENT_BUILD_ROCM;
+        if(answer)
+        {
+            std::cout << answer << '\n';
+            return 0;
+        }
+    }
+
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
@@ -907,6 +963,10 @@ int main(int argc, const char* argv[])
 
     auto args = parse_args(argc, argv);
     auto const argsParsed = TimingClock::now();
+
+    if(args.count("numa-bind") ? args["numa-bind"].as<int>() != 0
+                               : args["fused-a2a"].as<FusedA2A>() != FusedA2A::Disabled)
+        useLocalMemoryPolicy();
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
@@ -1254,9 +1314,52 @@ int main(int argc, const char* argv[])
     // Pointer-array batches: the kernels take one pointer per batch (batchA/B/C/D) instead of the
     // scalar pointers, so every redirected D also needs its own pointer array on the device.
     std::vector<std::vector<std::shared_ptr<void>>> fullBatchD; // [device][rotating slot]
-    // One host word per device: the target of the stream write that publishes a device's writes
-    // into another device's D (see launchAll).
-    std::vector<std::shared_ptr<void>> publishWords; // [device]
+    // One counter per device, in host memory every device can reach. Joined run (the default):
+    // after its slice of a launch a device's stream writes the launch number into its counter,
+    // then waits until the other devices' counters have reached it (see launchAll). That write
+    // also publishes the device's stores into another device's D. With --split-free-run there is
+    // no join and the write is only the publish. Created here and not at the first launch, so that
+    // a launch only enqueues.
+    std::vector<std::shared_ptr<void>> joinCounters; // [device]
+    uint64_t                           joinLaunch = 0;
+    const bool joinSplit = problemFactory.numSlices() > 1 && !args["split-free-run"].as<bool>();
+    if(problemFactory.numSlices() > 1)
+        for(auto const& ctx : devices)
+        {
+            ScopedDevice device(ctx->deviceId);
+            int          canWait = 0;
+            HIP_CHECK_EXC(hipDeviceGetAttribute(
+                &canWait, hipDeviceAttributeCanUseStreamWaitValue, ctx->deviceId));
+            if(joinSplit && !canWait)
+                throw std::runtime_error(
+                    "--split-devices joins the devices with hipStreamWaitValue64, which device "
+                    + std::to_string(ctx->deviceId) + " does not support; use --split-free-run");
+            void* word = nullptr;
+            HIP_CHECK_EXC(hipHostMalloc(
+                &word, sizeof(uint64_t), hipHostMallocCoherent | hipHostMallocPortable));
+            *static_cast<uint64_t*>(word) = 0;
+            joinCounters.emplace_back(word, [](void* q) { static_cast<void>(hipHostFree(q)); });
+        }
+    // The batch of each device: write its own counter, then wait for every other device's. Built
+    // once; a launch only fills in the launch number. A split run uses all the devices.
+    std::vector<std::vector<hipStreamBatchMemOpParams>> joinOps(joinCounters.size());
+    for(size_t d = 0; d < joinCounters.size(); d++)
+    {
+        auto& ops = joinOps[d];
+        ops.resize(joinCounters.size());
+        ops[0].writeValue.operation = hipStreamMemOpWriteValue64;
+        ops[0].writeValue.address   = joinCounters[d].get();
+        size_t k                    = 1;
+        for(size_t other = 0; other < joinCounters.size(); other++)
+        {
+            if(other == d)
+                continue;
+            ops[k].waitValue.operation = hipStreamMemOpWaitValue64;
+            ops[k].waitValue.address   = joinCounters[other].get();
+            ops[k].waitValue.flags     = hipStreamWaitValueGte;
+            k++;
+        }
+    }
     auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
         if(problemFactory.numSlices() < 2)
             return;
@@ -1710,21 +1813,8 @@ int main(int argc, const char* argv[])
                                 auto       publish = [&](size_t d) {
                                     if(!peerD && !(sharedD && d > 0))
                                         return;
-                                    if(publishWords.size() < active.size())
-                                        publishWords.resize(active.size());
-                                    if(!publishWords[d])
-                                    {
-                                        void* word = nullptr;
-                                        HIP_CHECK_EXC(hipHostMalloc(&word,
-                                                                    sizeof(uint64_t),
-                                                                    hipHostMallocCoherent
-                                                                        | hipHostMallocMapped));
-                                        publishWords[d] = std::shared_ptr<void>(word, [](void* q) {
-                                            static_cast<void>(hipHostFree(q));
-                                        });
-                                    }
                                     HIP_CHECK_EXC(hipStreamWriteValue64(
-                                        active[d]->stream, publishWords[d].get(), 1, 0));
+                                        active[d]->stream, joinCounters[d].get(), 1, 0));
                                 };
 
                                 // One counter across warmups, the profiler run and every sync.
@@ -1746,7 +1836,27 @@ int main(int argc, const char* argv[])
                                         else
                                             HIP_CHECK_EXC(ctx.adapter->launchKernels(
                                                 launch[d], ctx.stream, nullptr, nullptr));
-                                        publish(d);
+                                        if(!joinSplit)
+                                            publish(d);
+                                    }
+                                    // Join the devices: the next launch starts on every device
+                                    // only when this one has finished on all of them, as
+                                    // successive launches of an unsplit problem do on one stream.
+                                    // One batch per stream; its write comes first, so no stream
+                                    // can block another.
+                                    if(!joinSplit || active.size() < 2)
+                                        return;
+                                    ++joinLaunch;
+                                    for(size_t d = 0; d < active.size(); d++)
+                                    {
+                                        auto& ops                 = joinOps[d];
+                                        ops[0].writeValue.value64 = joinLaunch;
+                                        for(size_t k = 1; k < active.size(); k++)
+                                            ops[k].waitValue.value64 = joinLaunch;
+                                        HIP_CHECK_EXC(hipStreamBatchMemOp(active[d]->stream,
+                                                                          unsigned(active.size()),
+                                                                          ops.data(),
+                                                                          0));
                                     }
                                 };
 

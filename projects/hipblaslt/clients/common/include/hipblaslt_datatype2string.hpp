@@ -56,12 +56,16 @@ enum class hipblaslt_initialization
     // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
     uniform_low_precision  = 999,
     // MAF1.0 data init: A = sin(idx), B and C = cos(idx), idx = i + j * rows + batch * rows * cols
-    // of the stored matrix, rounded once from double; --scaleA/B 1/2 scales are 0.5
+    // of the stored matrix, rounded once from double; block-scaled (MX) operands get every block
+    // scale 0.5 with the unscaled codes (value = 0.5 * code), and --scaleA/B 1/2 scales are 0.5
     maf1_0 = 1000,
-    // MAF2.0 data init: N(0,1) for the non-scaled types (FP64, FP32, FP16, BF16, FP8);
-    // deterministic, mxDataGenerator-style seeding
+    // MAF2.0 data init: N(0,1) for the non-scaled types (FP64, FP32, FP16, BF16, FP8); for
+    // block-scaled (MX) operands, mxDataGenerator Maf2_0 (E8M0 scales: 2^Binomial, FP4 with UE4M3
+    // or UE5M3 scales: N(0.34375, 0.08); data uniform over the encodings); deterministic,
+    // mxDataGenerator-style seeding
     maf2_0 = 1001,
-    // MAF2.0 X=1 rows: non-scaled operands are filled as maf2_0
+    // MAF2.0 X=1 rows: block-scaled (MX) FP8 and FP4 operands get every block scale 1.0 and N(0,1)
+    // data rounded to the element type; other operands are filled as maf2_0
     maf2_0_unit_scale = 1002,
 };
 
@@ -81,6 +85,14 @@ typedef enum class _hipblaslt_bias_source
     b = 2,
     d = 3,
 } hipblaslt_bias_source;
+
+// The direction hipblaslt-bench checks D for uniformity in.
+typedef enum class _hipblaslt_uniform_check
+{
+    none   = 0,
+    row    = 1,
+    column = 2,
+} hipblaslt_uniform_check;
 
 inline hipDataType scaleDataType(hipblaslt_scaling_format s)
 {
@@ -310,6 +322,24 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
     return os;
 }
 
+inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
+                                              hipblaslt_uniform_check     check)
+{
+    switch(check)
+    {
+    case hipblaslt_uniform_check::none:
+        os << "none";
+        break;
+    case hipblaslt_uniform_check::row:
+        os << "row";
+        break;
+    case hipblaslt_uniform_check::column:
+        os << "column";
+        break;
+    }
+    return os;
+}
+
 constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
 {
     switch(init)
@@ -407,6 +437,15 @@ inline const hipblaslt_bias_source string_to_hipblaslt_bias_source(const std::st
            : value == "b" ? hipblaslt_bias_source::b
            : value == "d" ? hipblaslt_bias_source::d
                           : static_cast<hipblaslt_bias_source>(0);
+}
+
+// -1 for an unknown string, since none is 0.
+inline hipblaslt_uniform_check string_to_hipblaslt_uniform_check(const std::string& value)
+{
+    return value == "none"     ? hipblaslt_uniform_check::none
+           : value == "row"    ? hipblaslt_uniform_check::row
+           : value == "column" ? hipblaslt_uniform_check::column
+                               : static_cast<hipblaslt_uniform_check>(-1);
 }
 
 // Convert hipblaslt_activation_type to string

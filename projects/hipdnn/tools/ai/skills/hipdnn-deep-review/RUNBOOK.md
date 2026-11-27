@@ -122,7 +122,9 @@ all have returned, dispatch `SYNTH`.
 **Gate:** every area whose scout did not fail twice has `orient/<slug>.md` whose `Describes` sha is `$BASE`,
 `CONTEXT.md` exists, and `partition.py orient-gate` exits 0: every repository path they cite in
 backticks exists at `$BASE` or is a `files.txt` path absent at `$BASE` (a file the change adds);
-it prints `not at base: <path>` for any other.
+a citation of `orient/<slug>.md` itself, which can appear anywhere in CONTEXT.md or orient/*.md, is
+checked against this round's own `orient/` directory instead. It prints `not at base: <path> (cited
+at <file>:<line>, <file>:<line>, ...)`, listing every citation site, for any other.
 
 Fix each `not at base` citation by hand or re-dispatch the scout. Then publish `CONTEXT.md`
 and `orient/*.md` to `$KNOWLEDGE/<KEY>-r<N>/` (the store's own conventions win), replacing
@@ -161,6 +163,7 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `CORR<k>` | [correctness](lanes/correctness.md) | Logic, error paths, ownership, code quality of one partition | Non-documentation file changes |
 | `TESTQ` | [test-quality](lanes/test-quality.md) | Whether each test fails on a plausible bug | Non-documentation file changes |
 | `TESTB` | [test-breadth](lanes/test-breadth.md) | Which changed behaviors have tests at all | Non-documentation file changes |
+| `TIER` | [test-tiers](lanes/test-tiers.md) | Which tier each added test lands in, and what runtime it adds to that tier; `quick` stays ultra-fast. Its measured costs against `RUN` are the follow-up `TIER-f1` | A test source, bundle, test registration or `*test_categories*.yaml` file changes |
 | `AUTH` | [author-testing](lanes/author-testing.md) | What the author and CI ran against what the change needs; M4, M5, PR bot. Its claims reconciliation against what `RUN` executed is the follow-up `AUTH-f1` | Always |
 | `BUILD` | [build-packaging](lanes/build-packaging.md) | CMake targets, option defaults and registration, install rules, exported config, CI files | `CMakeLists.txt`, `*.cmake`, `*.cmake.in`, any `CMakePresets.json`, `*test_categories*.yaml`, `.github/` or `version.json` changes |
 | `DEPS` | [dependencies](lanes/dependencies.md) | New dependencies and boundary crossings | CMake, `pyproject.toml`, `requirements*.txt`, `.github/` or C/C++/HIP source (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, `.hxx`, `.hip`, `.cu`, `.cuh`) changes |
@@ -184,13 +187,13 @@ host's agent limit requires it; split a concern lane over ~4000 changed lines by
 . <evidence dir>/r<N>/env.sh
 partition.py plan [--sampled <file>]       # writes owners.tsv; edit it for judgment
 partition.py gate                          # after every edit of owners.tsv
-partition.py packets [--sampled <file>] --lanes TESTQ,TESTB,AUTH,... [--parent <PR number>]
+partition.py packets [--sampled <file>] --lanes TESTQ,TESTB,TIER,AUTH,... [--parent <PR number>]
 ledger.py seed "$EVIDENCE" <N> --lane 'DEPS=N/A (no manifest or source changes)' --lane ...
 ```
 
 `packets` writes `packets/<LANE>.md` ([lanes/common.md](lanes/common.md) *Context packet*) for
 each lane of `owners.tsv` and each concern lane in `--lanes` (changed files in scope with their
-`numstat` rows, areas and Orient paths; BUILD, DEPS, IMPACT and APPL scope to their trigger files, and DESIGN to the non-documentation files; each prints
+`numstat` rows, areas and Orient paths; BUILD, DEPS, IMPACT, APPL and TIER scope to their trigger files, and DESIGN to the non-documentation files; each prints
 `<LANE>: no changed file in scope, N/A` when none; `DRIFT` adds `drift.txt` and prints
 `DRIFT: N/A (<reason>)` when its trigger is `no` (give that reason to `seed` with `--lane`); every other concern lane takes all changed
 files, so name only lanes whose trigger holds; `--parent` is the stack parent). In round 2 on,
@@ -271,14 +274,15 @@ waits; the answer resumes the round (*Iterate*, same head).
 A follow-up dispatch (approved request, decision, Handoff) carries the lane's report path and
 the item only, and writes `lanes/<LANE>-f<k>.md`, numbering IDs after the lane's last `p<n>`.
 
-`AUTH`, `TESTQ`, `DRIFT`, `IMPACT` and `APPL` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
+`AUTH`, `TESTQ`, `TIER`, `DRIFT`, `IMPACT` and `APPL` run in the first fan-out without waiting for `RUN`. When `RUN` returns, dispatch
 `AUTH-f1` with the `AUTH` and `RUN` report paths: it reconciles the claims and the
 **Consumers** list against `RUN`'s executed counts ([lanes/author-testing.md](lanes/author-testing.md)).
 When `TESTQ` wrote `M1: UNVERIFIED`, also dispatch `TESTQ-f1` with the `TESTQ` and `RUN` report paths: it settles M1 from
 `RUN`'s regression-test runs ([lanes/test-quality.md](lanes/test-quality.md)). When `ROCK` wrote a `Timing-base:` line, also dispatch
 `ROCK-f1` with the `ROCK` and `RUN` report paths: it projects each entry's per-shard time from `ROCK`'s CI baselines and `RUN`'s case
-times ([lanes/therock.md](lanes/therock.md) section 6). A lane's newest follow-up report wins when
-`ledger.py mlines` reads an `M<n>:` line. Re-dispatch each follow-up that ran (`AUTH-f1`, `TESTQ-f1`, `ROCK-f1`) when `RUN` is re-dispatched with an approval.
+times ([lanes/therock.md](lanes/therock.md) section 6). When `TIER` wrote a `Tier:` line, also dispatch `TIER-f1` with the `TIER`, `RUN` and
+`ROCK` report paths: it replaces the static costs with `RUN`'s case times ([lanes/test-tiers.md](lanes/test-tiers.md)). A lane's newest follow-up report wins when
+`ledger.py mlines` reads an `M<n>:` line. Re-dispatch each follow-up that ran (`AUTH-f1`, `TESTQ-f1`, `ROCK-f1`, `TIER-f1`) when `RUN` is re-dispatched with an approval.
 
 An agent that fails, times out or returns a non-conforming report twice is `FAILED
 (<reason>)` in the Lanes table; split an over-large lane by area before the second attempt.

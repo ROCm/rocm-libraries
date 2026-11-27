@@ -245,6 +245,15 @@ void graphBindings(nb::module_& m)
         .def("validate", &graph::Graph::validate)
         .def("checkNoDuplicateTensorIds", &graph::Graph::checkNoDuplicateTensorIds)
         .def("topologicallySortGraph", &graph::Graph::topologicallySortGraph)
+        .def("checkTensorUidsSet", &graph::Graph::checkTensorUidsSet)
+        .def("getTensorsByUid",
+             &graph::Graph::getTensorsByUid,
+             "Return a dict mapping tensor UID to TensorAttributes for every tensor in "
+             "the graph.")
+        .def("getTensorsByName",
+             &graph::Graph::getTensorsByName,
+             "Return a dict mapping tensor name to TensorAttributes for every named "
+             "tensor in the graph. Unnamed tensors are omitted.")
         .def(
             "build_operation_graph",
             [](graph::Graph& g, const nb::object& handle) {
@@ -257,7 +266,7 @@ void graphBindings(nb::module_& m)
             "Build the operation graph with the given handle")
         .def("create_execution_plans",
              &graph::Graph::create_execution_plans,
-             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
              "Create execution plans with specified heuristic modes")
         .def("create_execution_plan_ext",
              &graph::Graph::create_execution_plan_ext,
@@ -295,7 +304,7 @@ void graphBindings(nb::module_& m)
                 }
                 return ids;
             },
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             "Get ranked engine IDs for the built operation graph. Requires "
             "build_operation_graph() to have been called first.")
         .def(
@@ -344,19 +353,54 @@ void graphBindings(nb::module_& m)
             },
             nb::arg("engine_id"),
             "Get numerical notes for an engine applicable to the built operation graph.")
-        .def("check_support", &graph::Graph::check_support)
+        .def("check_support",
+             &graph::Graph::check_support,
+             "Check that the graph is supported. With no engine filter set, checks that an "
+             "execution plan exists. With a filter set (deselect_engines, a note filter, "
+             "deselect_workspace_greater_than), returns OK when at least one created plan "
+             "passes the filters, in ranked order, and otherwise an error with code "
+             "GRAPH_EXECUTION_PLAN_CREATION_FAILED that lists each skip reason, or the error "
+             "of a failed note read. Finalizes nothing and marks nothing.")
         .def("build_plans",
              &graph::Graph::build_plans,
              nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-             "Finalize execution plans. HEURISTICS_CHOICE compiles the active plan (the "
-             "preferred engine's plan when it is among the ranked candidates, otherwise the "
-             "top-ranked plan). If that plan fails to finalize for any reason, the other "
-             "ranked plans are tried, from the top of the list; the first that finalizes "
-             "becomes active. Candidates barred by deselect_engines() or over the "
-             "deselect_workspace_greater_than() limit are skipped. If no plan finalizes, an "
-             "error listing every attempted engine and its failure is returned and the active "
-             "plan is unchanged. An active plan that finalizes but is over the workspace limit "
-             "is an error. ALL compiles every plan, skipping any that fail.")
+             "Finalize execution plans. Every engine filter applies (deselect_engines, the "
+             "note filters, deselect_workspace_greater_than against the engine-config "
+             "workspace); a plan a filter removes is never finalized. HEURISTICS_CHOICE "
+             "compiles the active plan (the preferred engine's plan when it is among the "
+             "ranked candidates, otherwise the top-ranked plan). If a filter removes it or "
+             "it fails to finalize for any reason, the other ranked plans are tried, from "
+             "the top of the list; the first that passes the filters and finalizes becomes "
+             "active, so a filter can replace the preferred engine. A plan that finalizes "
+             "over the workspace limit despite its engine config is rejected and the walk "
+             "moves on. If no plan is built, an error with code "
+             "GRAPH_EXECUTION_PLAN_CREATION_FAILED lists every skipped or failed engine and "
+             "its reason, and the active plan is unchanged. A repeated HEURISTICS_CHOICE call "
+             "after a plan is built returns success and leaves the active plan unchanged. "
+             "ALL evaluates every plan's filters, then compiles the plans that pass, "
+             "skipping any that fail; a plan built earlier stays active and is not built "
+             "again. It succeeds whenever a plan is active afterwards, even if a new filter "
+             "removes that plan.")
+        .def(
+            "build",
+            [](graph::Graph& g,
+               const nb::object& handle,
+               const std::vector<HeuristicMode>& modes,
+               BuildPlanPolicy policy) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                return g.build(rawHandle, modes, policy);
+            },
+            nb::arg("handle"),
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
+            "One-shot graph build: validates, builds the operation graph, creates "
+            "execution plans from the given heuristic modes, runs check_support(), "
+            "and finalizes with the given policy. Equivalent to calling validate(), "
+            "build_operation_graph(), create_execution_plans(), check_support(), and "
+            "build_plans() in sequence. Returns an Error after add_engine_*() specs "
+            "have been added, since those require the plan-spec autotune path instead.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -495,7 +539,7 @@ void graphBindings(nb::module_& m)
                 }
                 return configs;
             },
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             nb::arg("handle") = nb::none(),
             "Discover engine metadata (id, name, knobs, workspace estimate) for the built "
             "operation graph. Requires build_operation_graph() to have been called first. "
@@ -567,23 +611,63 @@ void graphBindings(nb::module_& m)
              "Add the Cartesian product of each EngineSweepSpec's knob axes as plan specs.")
         .def("add_all_engines",
              &graph::Graph::add_all_engines,
-             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
              "Add every engine applicable to the built operation graph as a plan spec.")
         .def("deselect_workspace_greater_than",
              &graph::Graph::deselect_workspace_greater_than,
              nb::arg("workspace"),
              nb::rv_policy::reference_internal,
-             "Bar plans whose compiled workspace exceeds this many bytes.")
+             "Bar plans whose engine-config workspace exceeds this many bytes, or whose "
+             "engine-config workspace cannot be read while the limit is set. Replaces the "
+             "previous limit; a negative value means no limit. The limit persists, applies to "
+             "plans created later, and is not reset by creating plans. A plan an earlier "
+             "evaluation barred stays barred when a filter is relaxed or cleared, until the "
+             "plans are recreated (create_execution_plans(), create_execution_plan_ext(), "
+             "rebuilding the operation graph, deserialization or plan-spec autotune()).")
         .def("deselect_engines",
              nb::overload_cast<const std::vector<std::string>&>(&graph::Graph::deselect_engines),
              nb::arg("engine_names"),
              nb::rv_policy::reference_internal,
-             "Bar plans belonging to these engine names.")
+             "Bar plans belonging to these engine names. Replaces the list it shares with the "
+             "ID overload (the last call of either kind wins) and an empty list clears it. "
+             "Persists until changed or the Graph is destroyed, and applies to plans created "
+             "later. A plan an earlier evaluation barred stays barred until the plans are "
+             "recreated.")
         .def("deselect_engines",
              nb::overload_cast<const std::vector<int64_t>&>(&graph::Graph::deselect_engines),
              nb::arg("engine_ids"),
              nb::rv_policy::reference_internal,
-             "Bar plans belonging to these engine IDs.")
+             "Bar plans belonging to these engine IDs. Replaces the list it shares with the "
+             "name overload (the last call of either kind wins) and an empty list clears it. "
+             "Persists until changed or the Graph is destroyed, and applies to plans created "
+             "later. A plan an earlier evaluation barred stays barred until the plans are "
+             "recreated.")
+        .def("select_numeric_notes",
+             &graph::Graph::select_numeric_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Keep only engines that report every one of these NumericalNotes. Appends to "
+             "the selected notes; an empty list is a no-op. Engines are read only when a "
+             "note filter is set. Returns the graph (cuDNN returns None). Persists until the "
+             "Graph is destroyed and applies to plans created later.")
+        .def("deselect_numeric_notes",
+             &graph::Graph::deselect_numeric_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Drop engines that report any of these NumericalNotes. Appends to the "
+             "deselected notes. See select_numeric_notes for the match rule and lifetime.")
+        .def("select_behavior_notes",
+             &graph::Graph::select_behavior_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Keep only engines that report every one of these BehaviorNotes (hipDNN's own "
+             "members). See select_numeric_notes for the match rule and lifetime.")
+        .def("deselect_behavior_notes",
+             &graph::Graph::deselect_behavior_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Drop engines that report any of these BehaviorNotes. See select_numeric_notes "
+             "for the match rule and lifetime.")
         .def("autotune",
              &autotunePy,
              nb::arg("handle"),
@@ -891,6 +975,58 @@ void graphBindings(nb::module_& m)
             nb::arg("dO"),
             nb::arg("stats"),
             nb::arg("attributes"))
+        .def("set_override_shape_enabled",
+             &graph::Graph::set_override_shape_enabled,
+             nb::arg("enabled"),
+             nb::rv_policy::reference_internal,
+             "Enable or disable runtime tensor shape and stride overrides during "
+             "execution. Must be set before build(). When enabled, the execute overload "
+             "accepting override UIDs, shapes, and strides becomes usable.")
+        .def("is_override_shape_enabled",
+             &graph::Graph::is_override_shape_enabled,
+             "Query whether runtime shape override mode is enabled.")
+        .def(
+            "execute",
+            [](const graph::Graph& g,
+               const nb::object& handle,
+               const nb::dict& variantPack,
+               const nb::object& workspace,
+               const std::vector<int64_t>& overrideUids,
+               const std::vector<std::vector<int64_t>>& overrideShapes,
+               const std::vector<std::vector<int64_t>>& overrideStrides) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+                void* workspacePtr = workspace.is_none()
+                                         ? nullptr
+                                         : hipdnn_python::toDataPointer(workspace, "workspace");
+
+                Error err;
+                {
+                    const nb::gil_scoped_release release;
+                    err = g.execute(rawHandle,
+                                    cppVariantPack,
+                                    workspacePtr,
+                                    overrideUids,
+                                    overrideShapes,
+                                    overrideStrides);
+                }
+                return err;
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace"),
+            nb::arg("override_uids"),
+            nb::arg("override_shapes"),
+            nb::arg("override_strides"),
+            "Execute the graph with runtime tensor shape and stride overrides. "
+            "Requires set_override_shape_enabled(True) before build(). "
+            "override_uids, override_shapes, and override_strides must have the same "
+            "length; each entry overrides the shape and stride of the tensor with the "
+            "corresponding UID. variant_pack and workspace accept the same keys and "
+            "values as execute().")
 #endif
         .def(
             "resample",
@@ -1024,7 +1160,36 @@ void graphBindings(nb::module_& m)
             nb::arg("data"),
             "Deserialize graph structure from binary without a handle.\n"
             "Only restores the graph topology and attributes (nodes, tensors, parameters).\n"
-            "Call build_operation_graph(handle) after to finalize for execution.");
+            "Call build_operation_graph(handle) after to finalize for execution.")
+        .def(
+            "to_compiled_plan_binary",
+            [](const graph::Graph& g) {
+                auto [data, err] = g.to_compiled_plan_binary();
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to serialize compiled plan: "
+                                             + err.get_message());
+                }
+                return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+            },
+            "Serialize the compiled execution plan to binary bytes. The graph must "
+            "have been built and a plan must be active. The result can be passed to "
+            "from_compiled_plan_binary() to restore the plan without recompilation.")
+        .def(
+            "from_compiled_plan_binary",
+            [](graph::Graph& g, const nb::object& handle, const nb::bytes& data) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                const auto* ptr = reinterpret_cast<const uint8_t*>(data.c_str());
+                const std::vector<uint8_t> vec(ptr, ptr + data.size());
+                return g.from_compiled_plan_binary(rawHandle, vec);
+            },
+            nb::arg("handle"),
+            nb::arg("data"),
+            "Deserialize and restore a compiled execution plan from binary bytes "
+            "previously obtained from to_compiled_plan_binary(). The graph is ready "
+            "for execute() after this call without recompilation.");
 
     // cuDNN spellings and call shapes. Each is registered after every existing
     // overload of its name, and either repeats that overload with only the

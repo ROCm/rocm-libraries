@@ -58,6 +58,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
 
     wheel = next(tmp_path.glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
+        archived_names = set(archive.namelist())
         metadata = archive.read(
             next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         ).decode("utf-8")
@@ -65,11 +66,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
 
-    component_version = re.search(
-        r'^__version__ = "([^"]+)"$',
-        (_PROJECT_ROOT / "tensilelite/__init__.py").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    ).group(1)
+    component_version = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     version = re.search(r"^Version: (.+)$", metadata, re.MULTILINE).group(1)
     # A source build is a development build: labelled with the commit when git
     # knows it, unlabelled otherwise. It never claims a ROCm release.
@@ -95,7 +92,10 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         "TensileGetPath": "tensilelite:PrintTensileRoot",
         "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
         "TensileRetuneLibrary": "tensilelite.retune_library:main",
+        "tensilelite-configure-client": "tensilelite_configure_client:main",
     }
+    assert "_tensilelite_client_binding.py" in archived_names
+    assert "tensilelite_configure_client.py" in archived_names
 
 
 def test_removed_source_autobuild_option_is_not_referenced():

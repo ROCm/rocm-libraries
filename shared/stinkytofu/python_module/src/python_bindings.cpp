@@ -190,7 +190,8 @@ NB_MODULE(_stinkytofu, m) {
         .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
         .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
         .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
-        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses)
+        .value("EndOfPipeline", PipelineExtensionPoint::EndOfPipeline);
 
     // ------------------------------------------------------------------------
     // Bind GirFrameContract: the GIR facts that belong to NO instruction -- the generation table,
@@ -920,10 +921,15 @@ NB_MODULE(_stinkytofu, m) {
     // The generated comment-only overload remains available for the default form.
     m.def(
         "SBarrier",
-        [](bool separate, bool wait, bool clusterBarrier, const std::string& comment) {
-            return makeLogicalInstructionShared(SBarrier(separate, wait, clusterBarrier, comment));
+        [](bool separate, bool wait, bool clusterBarrier, const std::string& comment,
+           int tensorcnt) {
+            if (tensorcnt < -1 || tensorcnt > 63)
+                throw nb::value_error("SBarrier tensorcnt must be -1 or in [0, 63]");
+            return makeLogicalInstructionShared(
+                SBarrier(separate, wait, clusterBarrier, comment, tensorcnt));
         },
         nb::arg("separate"), nb::arg("wait"), nb::arg("clusterBarrier"), nb::arg("comment") = "",
+        nb::arg("tensorcnt") = -1,
         "Create an SBarrier instruction with explicit barrier semantics");
 
     // MFMA - Matrix Fused Multiply-Add

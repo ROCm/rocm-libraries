@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from geko.bench.log import ADAPTIVE_ROW_KEYS
 from geko.library import Library, LibraryCollection
 from geko.library.library import SUPPORTED_INITIALIZATIONS
 
@@ -72,6 +73,30 @@ def test_create_bench_input_generates_bench_and_verify(tmp_path: Path) -> None:
     assert Path(bench_file).is_file()
     assert verify_file is not None
     assert Path(verify_file).is_file()
+
+
+def test_create_bench_input_adaptive_by_default_and_verify_has_no_adaptive_keys(tmp_path: Path) -> None:
+    lib = _mk_lib()
+    bench_file, verify_file = lib.create_bench_input(tmp_path, verify=True, duration=0.5)
+    bench_rows = yaml.safe_load(Path(bench_file).read_text())
+    assert bench_rows[0]["adaptive"] is True
+    assert bench_rows[0]["measure_time"] == pytest.approx(500.0)
+    assert "iters" in bench_rows[0]
+
+    verify_rows = yaml.safe_load(Path(verify_file).read_text())
+    assert verify_rows[0]["iters"] == 1
+    assert verify_rows[0]["cold_iters"] == 0
+    for key in ADAPTIVE_ROW_KEYS:
+        assert key not in verify_rows[0]
+
+
+def test_create_bench_input_non_adaptive_has_no_adaptive_keys(tmp_path: Path) -> None:
+    lib = _mk_lib()
+    bench_file, _ = lib.create_bench_input(tmp_path, verify=False, duration=0.5, adaptive=False)
+    rows = yaml.safe_load(Path(bench_file).read_text())
+    for key in ADAPTIVE_ROW_KEYS:
+        assert key not in rows[0]
+    assert "iters" in rows[0]
 
 
 def test_create_bench_input_no_compute_dtype_path(tmp_path: Path) -> None:
@@ -184,7 +209,144 @@ def test_trim_removes_duplicate_size_entries() -> None:
     assert lib.sizes[0][1][0] == 0
 
 
+def test_trim_merges_identical_solutions() -> None:
+    """Solutions with the same parameters (ignoring SolutionIndex) are merged."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64, "MacroTile0": 128, "MacroTile1": 128},
+        {"SolutionIndex": 1, "DepthU": 64, "MacroTile0": 128, "MacroTile1": 128},
+        {"SolutionIndex": 2, "DepthU": 128, "MacroTile0": 256, "MacroTile1": 256},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+        [[64, 64, 1, 128], [2, 300.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.trim()
+    assert len(lib.solutions) == 2
+    assert [s[1][0] for s in lib.sizes] == [0, 0, 1]
+    assert [s["SolutionIndex"] for s in lib.solutions] == [0, 1]
+
+
+def test_trim_keeps_unique_solutions() -> None:
+    """When all solutions are unique, nothing is removed."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 128},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.trim()
+    assert len(lib.solutions) == 2
+    assert [s[1][0] for s in lib.sizes] == [0, 1]
+
+
+def test_trim_merge_ignores_bookkeeping_keys() -> None:
+    """SolutionNameMin, KernelNameMin, BaseName differences don't prevent dedup."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64, "SolutionNameMin": "name_a", "KernelNameMin": "kern_a"},
+        {"SolutionIndex": 1, "DepthU": 64, "SolutionNameMin": "name_b", "KernelNameMin": "kern_b"},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.trim()
+    assert len(lib.solutions) == 1
+    assert [s[1][0] for s in lib.sizes] == [0, 0]
+
+
+def test_trim_merge_fills_library_defaults() -> None:
+    """A solution that spells out a library default equals one that omits it."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 64, "WorkGroupMapping": 8},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.default_solution = {"WorkGroupMapping": 8}
+    lib.trim()
+    assert len(lib.solutions) == 1
+
+
+def test_trim_merge_uses_tensile_name_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With TensileLite the key is the solution name, whatever else differs."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 128},
+        {"SolutionIndex": 2, "DepthU": 256},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 100.0]],
+        [[32, 32, 1, 64], [1, 200.0]],
+        [[64, 64, 1, 64], [2, 300.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    monkeypatch.setattr(Library, "_solution_keyer", lambda self: lambda sol: sol["DepthU"] < 200)
+    lib.trim()
+    assert len(lib.solutions) == 2
+    assert [s[1][0] for s in lib.sizes] == [0, 0, 1]
+
+
+def test_trim_drops_unused_solutions_and_merges_duplicates() -> None:
+    """Unused solutions are dropped before duplicates are merged."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 32},
+        {"SolutionIndex": 1, "DepthU": 64},
+        {"SolutionIndex": 2, "DepthU": 64},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [1, 100.0]],
+        [[32, 32, 1, 64], [2, 200.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.trim()
+    assert [s["DepthU"] for s in lib.solutions] == [64]
+    assert [s[1][0] for s in lib.sizes] == [0, 0]
+
+
+def test_trim_deduplicates_solutions_after_size_dedup() -> None:
+    """Duplicate sizes pointing at duplicate solutions collapse to one size and one solution."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 64},
+        {"SolutionIndex": 2, "DepthU": 128},
+    ]
+    sizes = [
+        [[16, 16, 1, 64], [0, 50.0]],
+        [[16, 16, 1, 64], [1, 100.0]],
+        [[32, 32, 1, 128], [2, 300.0]],
+    ]
+    lib = _mk_lib(solutions=sols, sizes=sizes)
+    lib.trim()
+    assert len(lib.solutions) == 2
+    assert len(lib.sizes) == 2
+
+
+def test_trim_without_sizes_only_deduplicates_solutions() -> None:
+    """With sizes None nothing is dropped as unused; duplicate solutions are merged."""
+    sols = [
+        {"SolutionIndex": 0, "DepthU": 64},
+        {"SolutionIndex": 1, "DepthU": 64},
+        {"SolutionIndex": 2, "DepthU": 128},
+    ]
+    lib = _mk_lib(solutions=sols)
+    lib.data[7] = None
+    lib.trim()
+    assert [s["DepthU"] for s in lib.solutions] == [64, 128]
+    assert [s["SolutionIndex"] for s in lib.solutions] == [0, 1]
+    assert lib.sizes is None
+
+
 def test_library_setters_validate_types() -> None:
+
     lib = _mk_lib()
     with pytest.raises(TypeError, match="Must be a list"):
         lib.solutions = "bad"

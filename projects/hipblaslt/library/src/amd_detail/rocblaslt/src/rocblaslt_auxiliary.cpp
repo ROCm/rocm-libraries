@@ -41,6 +41,7 @@
 #include <cstring>
 #endif
 
+#include "OnlineTuner.hpp"
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -770,19 +771,20 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
     if(index < 0 && !countMiss)
         return index;
 
-    auto& counters = TensileLite::TuningCounters::instance();
-    if(index >= 0)
-        counters.hits++;
-    else
-        counters.misses++;
-
     const int tally = index >= 0 ? 2 : 1;
     int       told  = candidates->tallied.load(std::memory_order_relaxed);
     while(told < tally && !candidates->tallied.compare_exchange_weak(told, tally))
     {
     }
     if(told < tally)
-        TensileLite::recordTuningLookup(key, index >= 0);
+        static_cast<void>(TensileLite::recordTuningLookup(key, index >= 0));
+
+    // Calls, in every mode, like hits.
+    auto& counters = TensileLite::TuningCounters::instance();
+    if(index >= 0)
+        counters.hits++;
+    else
+        counters.misses++;
 
     log_lookup(__func__, key, index >= 0, index);
     return index;
@@ -980,6 +982,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_prologue      = matmul_descr->fused_prologue;
     problem.fused_a2a_world     = handle ? handle->device_comm_world : 0;
     problem.fused_a2a_rank      = handle ? handle->device_comm_rank : 0;
     problem.fused_a2a_peer_flag = handle ? handle->device_comm_peer_flags : nullptr;
@@ -2287,15 +2290,28 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
             case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
                 // Stored as a non-owning handle. The stage-level validation lives in the
                 // hipBLASLt C-API layer, which is where the descriptor's contents are visible.
-                if(sizeof(const hipblasLtFusedEpilogueDescriptor*) <= sizeInBytes)
+                if(sizeof(const hipblasLtFusionDescriptor*) <= sizeInBytes)
                 {
-                    const hipblasLtFusedEpilogueDescriptor* fused = nullptr;
+                    const hipblasLtFusionDescriptor* fused = nullptr;
                     memcpy(&fused, buf, sizeof(fused));
                     matmulDesc->fused_epilogue = fused;
                 }
                 else
                 {
                     log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+                if(sizeof(const hipblasLtFusionDescriptor*) <= sizeInBytes)
+                {
+                    const hipblasLtFusionDescriptor* fused = nullptr;
+                    memcpy(&fused, buf, sizeof(fused));
+                    matmulDesc->fused_prologue = fused;
+                }
+                else
+                {
+                    log_error(__func__, "invalid fused_prologue buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
                 break;
@@ -2735,13 +2751,23 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
             case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
                 if(sizeWritten)
-                    *sizeWritten = sizeof(const hipblasLtFusedEpilogueDescriptor*);
-                if(sizeInBytes < sizeof(const hipblasLtFusedEpilogueDescriptor*))
+                    *sizeWritten = sizeof(const hipblasLtFusionDescriptor*);
+                if(sizeInBytes < sizeof(const hipblasLtFusionDescriptor*))
                 {
                     log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
+                break;
+            case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(const hipblasLtFusionDescriptor*);
+                if(sizeInBytes < sizeof(const hipblasLtFusionDescriptor*))
+                {
+                    log_error(__func__, "invalid fused_prologue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->fused_prologue, sizeof(matmulDesc->fused_prologue));
                 break;
 #endif
             case ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT:
@@ -3101,9 +3127,11 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
             return gate;
-        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+        if(auto gate = rocblaslt_validate_fusion_dispatch(handle, matmul_descr, matB, matD);
            gate != rocblaslt_status_success)
             return gate;
+        if(fused_a2a_lacks_sdma_queues(prob))
+            return rocblaslt_status_invalid_value;
 #endif
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 
@@ -3241,6 +3269,10 @@ rocblaslt_status
         }
 #endif
 
+        // Before the file lookup, so it is reported whether or not a row answers.
+        if(rocblaslt::OnlineTuner::getInstance().enabled())
+            TensileLite::noteOnlineScopeEvent(TensileLite::OnlineScopeEvent::HeuristicQuery);
+
         const auto tuningFile       = TensileLite::selectTuningFile();
         bool       override_success = false;
 
@@ -3272,6 +3304,8 @@ rocblaslt_status
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
                                       pref->max_workspace_bytes,
+                                      SolutionLookup::Heuristic,
+                                      nullptr,
                                       &layoutRuledOut);
         }
 
@@ -3939,6 +3973,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     TensileLite::TuningModeSingleton::getInstance().reloadForTest();
     TensileLite::OverrideMap::getMap().resetForTest();
     OverrideSingleton::getInstance().reloadForTest();
+    rocblaslt::OnlineTuner::getInstance().reloadForTest();
     TensileLite::resetTuningDiagnosticsForTest();
     TensileLite::resetReplayLoadForTest();
     ReplayCandidatesByKey::instance().clear();
@@ -3951,6 +3986,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.tuned         = 0;
     counters.skipped       = 0;
     counters.attempts      = 0;
+    counters.unrecorded    = 0;
 
     tuningInjectFailureForTest(0);
     static_cast<void>(tuningLastLaunchedIndexForTest());
@@ -4156,4 +4192,11 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_adaptive_reselections_for_test(void
     return matmulDesc
                ? adaptiveReselectionCount(static_cast<rocblaslt_matmul_desc>(matmulDesc)->m_data)
                : 0;
+}
+
+// Test support: the flag the HIPBLASLT_CHECK_NUMERICS scanner claims with
+// atomicCAS, or null when checking is off for the handle.
+extern "C" HIPBLASLT_EXPORT void* hipblaslt_check_numerics_flag_for_test(void* handle)
+{
+    return handle ? static_cast<rocblaslt_handle>(handle)->check_numerics_flag : nullptr;
 }

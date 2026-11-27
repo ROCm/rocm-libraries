@@ -26,7 +26,9 @@
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
+#include <memory>
 #include <queue>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -124,6 +126,10 @@ struct RegionDependencies {
     // and drops any that would close a cycle. Writable through a const RegionDependencies&:
     // the constness is the struct's, not the vector's.
     std::vector<HardSchedulingConstraint>& requestedConstraints;
+
+    // IN: `GirFrameAnalysis::Result::storageRing` -- which ring (operand) each LDS memtoken is a
+    // slot of, so a rule can ask whether two barriers name one buffer set. Null without GIR.
+    const std::unordered_map<int, int>* storageRing = nullptr;
 };
 
 // A Layer 2 overlap is only safe to publish after every ordering requested for
@@ -215,6 +221,21 @@ class ReadyQueue {
     virtual void push(DAGNode* node) = 0;
 
     virtual bool empty() const = 0;
+
+    // Fixed-order issue timing, used by EstimateAsmCyclesPass to replay the final instruction
+    // order. A queue that models timing overrides modelsIssueTiming() and replayIssue(). The
+    // base has no model, so replayIssue does nothing and elapsedCycles stays 0.
+    virtual void replayIssue(const StinkyInstruction& inst) {
+        (void)inst;
+    }
+
+    virtual bool modelsIssueTiming() const {
+        return false;
+    }
+
+    virtual int elapsedCycles() const {
+        return 0;
+    }
 
     // Hook for derived classes to do something when the first group of instructions are ready to
     // issue.
@@ -349,6 +370,10 @@ inline DAGNode* ReadyQueueByDAGid::pickOne() {
     queue.pop();
     return node;
 }
+
+// Arch switch shared by the scheduler and EstimateAsmCyclesPass. Defined in
+// StinkyDAGSchedulerPass.cpp, the only TU that includes each CDNA*.hpp.
+std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx);
 
 struct MFMAIssueConfig {
     int latency = 0;                // original mfma latency

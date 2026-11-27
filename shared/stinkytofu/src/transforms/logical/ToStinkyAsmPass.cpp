@@ -181,6 +181,11 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         if (!irInst->comment.empty()) {
             asmInst->addModifier(CommentData(irInst->comment));
         }
+        // A fence can be a GIR block's ONLY content -- an arm that moves nothing still has to be
+        // a block the frame graph can name -- so it carries the action naming that block.
+        if (irInst->giraction.has_value()) {
+            asmInst->addModifier<GirActionData>(irInst->giraction.value());
+        }
         return asmInst;
     }
     // ====================================================================
@@ -337,7 +342,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     // operands: the carry-out is a second dest (dst1) and, for the _ci form, the
     // carry-in is a trailing src. rocisa emits these (dst1=VCC / src2=VCC) and the
     // rocisa->asm converter keeps them, so the DAG scheduler and wait passes see
-    // the VCC def/use. The logical factory (and adaptor's to_stinky_logical) drop
+    // the VCC def/use. The logical factory drops
     // them, which left the scheduler blind to the VCC hazard and relied on a text
     // post-process to re-insert vcc *after* scheduling. Re-attach them here so the
     // asm IR matches the native converter (dst, vcc, src0, src1[, vcc]).
@@ -345,8 +350,8 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         const logical::Opcode op = irInst->getOpcode();
         if (op == logical::VAddCOU32 || op == logical::VSubCoU32 || op == logical::VAddCCOU32) {
             const StinkyRegister vcc = StinkyRegister::getVCCRegister(getWaveFrontSize(arch));
-            // Add VCC only when the operand list does not already carry it. The factory /
-            // adaptor logical path DROPS VCC, so it must be re-attached here. But the
+            // Add VCC only when the operand list does not already carry it. The logical
+            // factory DROPS VCC, so it must be re-attached here. But the
             // rocisa->logical converter KEEPS it (CommonInstruction::getDstParams returns
             // {dst, dst1=VCC} and getSrcParams keeps the _ci carry-in), so re-adding
             // unconditionally would emit a duplicate "vcc_lo" operand and diverge from
@@ -593,6 +598,11 @@ class ToStinkyAsmPassImpl : public Pass {
                     // Insert assembly instruction before the logical instruction
                     bb.insertIR(it, asmInst);
 
+                    // removeIR/safeErase bypass the erase observer, so a group endpoint
+                    // on the logical node would dangle; hand it to its replacement.
+                    if (Function* parent = bb.getParent(); parent && parent->eraseObserver())
+                        parent->eraseObserver()(logicalInst, asmInst, asmInst);
+
                     // Remove the logical instruction from IRList
                     auto toRemove = it;
                     ++it;  // Move to next before removing
@@ -638,6 +648,9 @@ class ToStinkyAsmPassImpl : public Pass {
                         // s_barrier_wait -1 exists as a distinct instruction for
                         // InsertClusterBarrierPass to anchor its Rule 3/4 handshakes on.
                         if (barrierData) {
+                            if (barrierData->tensorcnt >= 0)
+                                asmInst->addModifier<SWaitTensorCntData>(SWaitTensorCntData{
+                                    static_cast<int8_t>(barrierData->tensorcnt)});
                             const int barrierId = barrierData->clusterBarrier ? -3 : -1;
                             legalizeBarrier(asmInst, irBuilder, arch, barrierId,
                                             barrierData->separate, barrierData->wait);

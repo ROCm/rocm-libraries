@@ -98,8 +98,8 @@ def _tdm_plr0_config(prefetch_global_read):
         {"ScheduleIterAlg": [3]},
     ]
     if prefetch_global_read == 1:
-        # LDSTrInst with PGR1 is only supported with one LDS buffer and no pointer swap.
-        fork_parameters += [{"1LDSBuffer": [1]}, {"ExpandPointerSwap": [False]}]
+        # TDM requires 1LDSBuffer=0, and LDSTrInst with 1LDSBuffer=0 needs ExpandPointerSwap off.
+        fork_parameters += [{"1LDSBuffer": [0]}, {"ExpandPointerSwap": [False]}]
     return {
         "GlobalParameters": {"Architecture": "gfx1250", "PrintLevel": 0},
         "BenchmarkProblems": [[
@@ -255,3 +255,26 @@ def test_sia4_loop_skip_sync_needs_two_prefetched_local_reads(num_iters_plr, exp
     kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
 
     assert KernelWriter._needsLoopSkipPGRSync(writer, kernel) is expected
+
+
+def test_sia4_loop_skip_sync_survives_disable_asm_comments(tmp_path):
+    # The planner keeps the PGR bypass barriers by their comment, and the hipblaslt build
+    # passes --disable-asm-comments, which drops comments from str(): the sync must not.
+    from rocisa import rocIsa
+    ri = rocIsa.getInstance()
+    opts = ri.getOutputOptions()
+    previous = opts.outputNoComment
+    opts.outputNoComment = True
+    ri.setOutputOptions(opts)
+    try:
+        assembly = _emit_one(tmp_path, _bf16_tn_pgr2_config(2), "sia4_loop_skip_plr2_nocomment.yaml")
+    finally:
+        opts = ri.getOutputOptions()
+        opts.outputNoComment = previous
+        ri.setOutputOptions(opts)
+    edge = re.search(
+        r"s_cbranch_scc0 label_AfterLoopSkipPGRSync_\d+.*\n((?:.*\n)*?)s_branch label_LoopEnd\w*",
+        assembly)
+    assert edge, "no loop-skip edge"
+    body = [l.split("//")[0].strip() for l in edge.group(1).splitlines() if l.split("//")[0].strip()]
+    assert "s_wait_tensorcnt 0" in body and body[-2:] == ["s_barrier_signal -1", "s_barrier_wait -1"], body

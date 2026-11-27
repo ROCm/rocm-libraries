@@ -224,34 +224,34 @@ TEST_P(CPU_UnitTestConvSolverConvGenericDepthwiseFwd2DDevApplicability_FP16,
     this->RunTest(miopen::solver::conv::ConvGenericDepthwiseFwd2D{});
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverConvGenericDepthwiseFwd2D_FP16,
                          testing::Combine(testing::Values(GetGenericTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::Values(GetConvGenericTestCases(miopenHalf)[0],
                                                           GetConvGenericTestCases(miopenHalf)[1])));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverConvGenericDepthwiseFwd2D_FP16,
                          testing::Combine(testing::Values(GetGenericTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvGenericTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverConvGenericDepthwiseFwd2D_BFP16,
     testing::Combine(testing::Values(GetGenericTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::Values(GetConvGenericTestCases(miopenBFloat16)[1])));
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Standard,
     GPU_UnitTestConvSolverConvGenericDepthwiseFwd2D_BFP16,
     testing::Combine(testing::Values(GetGenericTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvGenericTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverConvGenericDepthwiseFwd2DDevApplicability_FP16,
                          testing::Combine(testing::Values(GetGenericTestParams()),
                                           testing::Values(GetConvGenericTestCases(miopenHalf)[0])));
@@ -274,14 +274,14 @@ TEST_P(CPU_UnitTestConvSolverConvGenericDepthwiseFwd2DLimitDevApplicability_FP16
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverConvGenericDepthwiseFwd2DLimit_FP16,
     testing::Combine(testing::Values(GetGenericTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvGenericIndexLimitTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverConvGenericDepthwiseFwd2DLimitDevApplicability_FP16,
     testing::Combine(testing::Values(GetGenericTestParams()),
                      testing::ValuesIn(GetConvGenericIndexLimitTestCases(miopenHalf))));
