@@ -50,7 +50,12 @@ from .pending_lanes import (
     quarantined_test,
 )
 
-__all__ = ["QUARANTINE_ENV", "register_quarantine", "skip_quarantined_items"]
+__all__ = [
+    "QUARANTINE_ENV",
+    "quarantine_plugin_name",
+    "register_quarantine",
+    "skip_quarantined_items",
+]
 
 # Set to "ignore" to run quarantined tests.
 QUARANTINE_ENV = "ROCKE_QUARANTINE"
@@ -77,12 +82,20 @@ class _SkipQuarantinedItems:
         skip_quarantined_items(items, self._tree_root, self._tree_path)
 
 
+def quarantine_plugin_name(tree_path: str) -> str:
+    """The name :func:`register_quarantine` registers the quarantine of the
+    tree ``tree_path`` under. A session that collects the tests of several
+    roots holds one quarantine per tree, each under its own name."""
+    _require_quarantine_tree("quarantine_plugin_name", tree_path)
+    return f"{_PLUGIN_NAME_PREFIX}{tree_path}"
+
+
 def register_quarantine(config: pytest.Config, tree_root: Path, tree_path: str) -> None:
     """Skip the quarantined tests under ``tree_root`` in this pytest session,
     once per tree; ``tree_path`` is ``tree_root`` relative to the rocke
     directory, one of ``pending_lanes.QUARANTINE_TREES``."""
     _require_quarantine_tree("register_quarantine", tree_path)
-    plugin_name = f"{_PLUGIN_NAME_PREFIX}{tree_path}"
+    plugin_name = quarantine_plugin_name(tree_path)
     if config.pluginmanager.has_plugin(plugin_name):
         return
     config.pluginmanager.register(

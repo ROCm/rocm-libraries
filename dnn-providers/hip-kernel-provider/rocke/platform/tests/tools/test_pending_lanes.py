@@ -105,7 +105,11 @@ from rocke.tests.pending_lanes import (
     waiting_entry,
 )
 from rocke.tests.provider_categories import provider_category_labels
-from rocke.tests.quarantine import register_quarantine, skip_quarantined_items
+from rocke.tests.quarantine import (
+    quarantine_plugin_name,
+    register_quarantine,
+    skip_quarantined_items,
+)
 from rocke.tests.reference_artifacts import (
     ARTIFACT_CLI,
     published_reference_variants,
@@ -1167,6 +1171,10 @@ def test_only_a_quarantine_tree_skips_quarantined_tests(request):
         register_quarantine(
             request.config, ROCKE / "platform/python", "platform/python"
         )
+    with pytest.raises(
+        ValueError, match="quarantine_plugin_name failed .* expected one of"
+    ):
+        quarantine_plugin_name("platform/python")
 
 
 def test_a_tiling_test_can_be_quarantined():
@@ -1174,23 +1182,45 @@ def test_a_tiling_test_can_be_quarantined():
     assert _quarantined(f"{tiling}/test_x.py::test_y").path == f"{tiling}/test_x.py"
 
 
-def _quarantine_hook_impls(config: pytest.Config) -> list:
+def _quarantine_hook_impls(config: pytest.Config, tree_path: str) -> list:
     """The collection hook implementations ``rocke.tests.quarantine`` installed
-    in this session."""
+    in this session for the tree ``tree_path``. A session that also collects
+    another root's tests (``library/tests``) holds that tree's as well."""
+    name = quarantine_plugin_name(tree_path)
     return [
         impl
         for impl in config.pluginmanager.hook.pytest_collection_modifyitems.get_hookimpls()
-        if type(impl.plugin).__module__ == "rocke.tests.quarantine"
+        if impl.plugin_name == name
     ]
 
 
 def test_a_tree_registers_its_quarantine_once(request):
     """This session's root (``platform/tests``) registered its quarantine; a
     second registration of the same tree adds no second hook."""
-    registered = _quarantine_hook_impls(request.config)
+    registered = _quarantine_hook_impls(request.config, "platform/tests")
     assert len(registered) == 1, registered
     register_quarantine(request.config, ROCKE / "platform/tests", "platform/tests")
-    assert _quarantine_hook_impls(request.config) == registered
+    assert _quarantine_hook_impls(request.config, "platform/tests") == registered
+
+
+def test_each_tree_keeps_its_own_quarantine_in_one_session(request):
+    """A session that collects two roots' tests holds one quarantine per tree,
+    each found by its tree's name: the library tree's beside this root's
+    leaves this root's single hook as it was."""
+    pluginmanager = request.config.pluginmanager
+    library_plugin = quarantine_plugin_name("library/tests")
+    registered_here = not pluginmanager.has_plugin(library_plugin)
+    platform_hooks = _quarantine_hook_impls(request.config, "platform/tests")
+    assert len(platform_hooks) == 1, platform_hooks
+    try:
+        register_quarantine(request.config, ROCKE / "library/tests", "library/tests")
+        assert len(_quarantine_hook_impls(request.config, "library/tests")) == 1
+        assert (
+            _quarantine_hook_impls(request.config, "platform/tests") == platform_hooks
+        )
+    finally:
+        if registered_here:
+            pluginmanager.unregister(name=library_plugin)
 
 
 def test_a_root_marks_its_items_before_the_quarantine_skips_them(request):
@@ -1200,7 +1230,7 @@ def test_a_root_marks_its_items_before_the_quarantine_skips_them(request):
     ``-m gpu``) before it is skipped."""
     from rocke.tests.helpers.tiling import conftest as tiling_conftest
 
-    (quarantine_impl,) = _quarantine_hook_impls(request.config)
+    (quarantine_impl,) = _quarantine_hook_impls(request.config, "platform/tests")
     assert not quarantine_impl.tryfirst
     assert tiling_conftest.pytest_collection_modifyitems.pytest_impl["tryfirst"]
 
