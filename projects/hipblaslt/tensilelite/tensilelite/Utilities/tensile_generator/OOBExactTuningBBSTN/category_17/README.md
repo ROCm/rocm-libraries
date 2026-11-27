@@ -1,6 +1,6 @@
 # OOB BBS TN exact tuning, category 17: Small batch (gfx1250, BF16 in/out, FP32 compute, TN)
 
-Two variants are provided for this category: `fused` and `pure_lda`.
+Three variants are provided for this category: `fused`, `pure_lda` and `tdmsi_tf`.
 
 ## fused: fused GEMM, no 256 B alignment
 
@@ -82,7 +82,49 @@ Category mean: speedup vs OOB **+99.9%**, vs MAIDAS **39.7% -> 63.2%** (speedup 
 
 `*`: not a multiple of 256 B.
 
+## tdmsi_tf: TDM store + tail folding, fused GEMM with CompactLoopStore, 256 B aligned leading dimensions
+
+Winners of the TDM store re-tune (`TDMStoreInst` in the search space, [#15133](https://github.com/ROCm/rocm-libraries/pull/15133)) on a build with tail folding ([#16312](https://github.com/ROCm/rocm-libraries/pull/16312)), re-tuned with a wider `DepthU` list, then rebuilt as fused GEMM (Bias (f32) + ScaleAlphaVec, ActivationFuncCall) with `CompactLoopStore` on. Leading dimensions padded for 256 B alignment (same as `pure_lda`), RotatingBufferSize 384.
+
+- `tdmsi_tf/tuning/Problem_<nn>_40_<category>_batch_m_<m>_n_<n>_batch_<b>_k_<k>_exact.yaml`: the TDM store tuning yaml of one size, pure GEMM (no Bias / ScaleAlphaVec / activation), `TDMStoreInst: [false, true]`, `Exact: [M, N, batch, K, LDD, LDC, LDA, LDB]`. The logic winners come from re-tuning these yamls with a wider `DepthU` list (e.g. `[128, 256, 512]` instead of `[128]`, where LDS allows); the yamls here do not contain it (only P12, in category 18, does).
+- `tdmsi_tf/logic/gfx1250_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.yaml`: merged ExactLogic for the 10 sizes below; the winners with the epilogue added and `CompactLoopStore: true`.
+
+### Results (hipblaslt-bench C++ API, GPU0, fused GEMM + CompactLoopStore, 256 B aligned leading dimensions, tuned winner vs OOB)
+
+Category mean: speedup vs OOB **+110.1%**, vs MAIDAS **48.0% -> 79.3%** (speedup = (OOB us - tuned us) / tuned us; vs MAIDAS = MAIDAS us / measured us).
+
+| # | size (MxNxBatchxK) | MAIDAS us | OOB us | tuned us | speedup vs OOB | OOB vs MAIDAS | tuned vs MAIDAS |
+|---|---|---|---|---|---|---|---|
+| P01 | 3264x2416x7x400 | 23.79 | 131.22 | 40.70 | +222.4% | 18.1% | 58.4% |
+| P02 | 1392x4656x13x5488 | 313.61 | 562.00 | 375.50 | +49.7% | 55.8% | 83.5% |
+| P03 | 6592x4848x26x2080 | 1127.82 | 2088.50 | 1328.50 | +57.2% | 54.0% | 84.9% |
+| P04 | 4928x6656x40x16 | 182.26 | 1513.43 | 274.29 | +451.8% | 12.0% | 66.4% |
+| P05 | 5280x7616x58x7232 | 9902.51 | 15388.00 | 12025.00 | +28.0% | 64.4% | 82.3% |
+| P06 | 4016x7792x60x1200 | 1606.54 | 4611.00 | 2042.00 | +125.8% | 34.8% | 78.7% |
+| P07 | 6896x6208x80x2848 | 6062.45 | 10665.00 | 7146.00 | +49.2% | 56.8% | 84.8% |
+| P08 | 3504x7760x86x2784 | 4136.66 | 7509.00 | 4908.00 | +53.0% | 55.1% | 84.3% |
+| P09 | 4704x3440x102x7040 | 6763.73 | 9982.00 | 8175.00 | +22.1% | 67.8% | 82.7% |
+| P10 | 3856x5088x105x3680 | 4704.23 | 7719.00 | 5443.00 | +41.8% | 60.9% | 86.4% |
+
+### Winner key parameters
+
+`TDMStore1` = `TDMStoreInst: true` (TDM store), `TDMStore0` = buffer store.
+
+| # | size | winner |
+|---|---|---|
+| P01 | 3264x2416x7x400 | MT256x256x64, AG0, CD1_2, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW8, VWA8, VWB8, WG32_4_1, TDMStore1 |
+| P02 | 1392x4656x13x5488 | MT256x256x128, AG0, CD1_1, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB4, WG32_4_1, TDMStore1 |
+| P03 | 6592x4848x26x2080 | MT256x256x128, AG0, CD2_1, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB4, WG32_4_1, TDMStore1 |
+| P04 | 4928x6656x40x16 | MT128x128x32, AG1, CD1_1, CLS1, MIWT8_4, PAP0, PGR0, PLR0, RAP0, SS1, SVW8, VWA8, VWB4, WG16_4_1, TDMStore0 |
+| P05 | 5280x7616x58x7232 | MT256x256x128, AG0, CD2_2, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB4, WG32_4_1, TDMStore1 |
+| P06 | 4016x7792x60x1200 | MT256x256x128, AG0, CD1_1, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB4, WG32_4_1, TDMStore1 |
+| P07 | 6896x6208x80x2848 | MT256x240x128, AG0, CD1_1, CLS1, MIWT4_15, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB1, WG64_2_1, TDMStore1 |
+| P08 | 3504x7760x86x2784 | MT256x256x64, AG1, CD2_2, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW8, VWA8, VWB8, WG32_4_1, TDMStore0 |
+| P09 | 4704x3440x102x7040 | MT256x256x128, AG0, CD1_1, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB4, WG32_4_1, TDMStore1 |
+| P10 | 3856x5088x105x3680 | MT256x256x128, AG0, CD2_2, CLS1, MIWT8_8, PAP0, PGR2, PLR1, RAP0, SS1, SVW4, VWA4, VWB4, WG32_4_1, TDMStore1 |
+
 ## Notes
 
 - The `fused` results above are measured with hipblaslt-bench on GPU0: tuned winner vs OOB baseline, fused GEMM (Bias + ScaleAlphaVec), LDA = LDB = K.
 - The `pure_lda` results above are measured with hipblaslt-bench on GPU0: tuned winner vs OOB baseline, pure GEMM, 256 B aligned leading dimensions.
+- The `tdmsi_tf` results above are measured with hipblaslt-bench (C++ API) on GPU0: tuned winner vs OOB baseline, fused GEMM with CompactLoopStore, 256 B aligned leading dimensions, build develop + #15133 (84a8b39, includes tail folding).

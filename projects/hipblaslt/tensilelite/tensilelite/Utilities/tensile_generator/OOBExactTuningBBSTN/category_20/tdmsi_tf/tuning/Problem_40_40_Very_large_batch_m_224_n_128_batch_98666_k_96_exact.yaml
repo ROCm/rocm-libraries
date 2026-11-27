@@ -1,0 +1,150 @@
+# round5: MI x ClusterDim x DepthU hand-designed per problem (see README.md); one benchmark section per ClusterDim, every MI tile annotated with its CU / CD-adjusted CU / total granularity for that ClusterDim; every other fork is BASE.
+# round4 tried: AdaptiveGemm [0, 1] (tuned + benchmarked on GPU2): round winner is slower (exact 2361 us) than the
+# BASE winner's tensile time (835 us), but the BASE winner outputs NaN (hipblaslt-bench --verify_strict fails), so no
+# valid comparison; BASE kept for now. Re-check BASE's winner correctness before retrying.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+GlobalParameters:
+  NumElementsToValidate: 0
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  Architecture: gfx1250
+  RotatingBufferSize: 384
+  CpuThreads: 64  # cap kernel-gen workers: -1 (=256 on this host) used >80 GB host RAM; ~0.7 GB/worker measured, 64 keeps anon+page cache < 100 GiB cgroup cap
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # DataInitTypeBias: 0
+  # DataInitTypeA: 1
+  # DataInitTypeB: 2
+  # DataInitTypeScaleAlphaVec: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
+  # GenerateSourcesAndExit: True
+  KeepBuildTmp: False
+  NumWarmups: 2
+  EnqueuesPerSync: 2
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      # per_problem_v3: epilogue stripped: no bias / activation / scaleAlphaVec -> UseBias=0, UseScaleAlphaVec=0, Activation=False, ActivationType=none
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      ActivationType: none
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+      UseBias: 0
+      UseScaleAlphaVec: 0
+    - # Problem 40/40 - Very large batch - m=224, n=128, batch=98666, k=96
+      # round5: hand-designed MI/CD/DepthU for this problem (see README.md); single section
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # Pruned per problem from this problem's own benchmark/ results (measured on GPU1, 2026-11-04):
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        # EXCEPTION (this yaml): round2 additionally hand-narrowed the space. Removals that say "narrowed by round2 to reduce tuning time" were NOT measured >20% slower; the measured Nx is given for each.
+        - MatrixInstruction:
+          # round2: history winner MT32x64 DU128 CD4_1 (pp_old, 280k GF) vs v2 MT224x128 CD1_1 (200k GF); v2 had CD fixed [1,1]; SK/SU32/HPLR!=0 were bad; CD[2,2] known incorrect on this shape
+          - [16, 16, 32, 1, 1, 2, 2, 1, 2]  # MT32x64  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 100.0%]
+          # - [16, 16, 32, 1, 1, 4, 1, 1, 2]  # MT64x32  round5: pruned, best kernel with any CD = 49% of problem best  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 87.5%]
+          # - [16, 16, 32, 1, 1, 4, 2, 1, 2]  # MT64x64  round5: pruned, best kernel with any CD = 72% of problem best  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 87.5%]
+          - [16, 16, 32, 1, 1, 2, 4, 1, 2]  # MT32x128  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 100.0%]
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 2]  # MT112x64  round5: pruned, best kernel with any CD = 68% of problem best  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 100.0%]
+          - [16, 16, 32, 1, 1, 7, 4, 1, 2]  # MT112x128  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 100.0%]
+          # - [16, 16, 32, 1, 1, 7, 4, 2, 2]  # MT224x128  round5: pruned, best kernel with any CD = 83% of problem best  [round5 CD[1,1]: CU gran 99.8% / CD-adj CU gran 99.8% / total gran 99.8%]
+          # - [16, 16, 32, 1, 1, 15, 2, 1, 4]  # MT240x128  pruned: best kernel 2.92x of problem best
+          # - [16, 16, 32, 1, 1, 8, 4, 2, 2]  # MT256x128  pruned: best kernel 1.59x of problem best
+          # - [16, 16, 32, 1, 1, 7, 5, 2, 2]  # MT224x160  pruned: narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.03x of problem best (< 20%); see the "# round2" note
+          # - [16, 16, 32, 1, 1, 4, 9, 4, 1]  # MT256x144  pruned: best kernel 1.61x of problem best
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 4]  # MT112x128  pruned: narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.04x of problem best (< 20%); see the "# round2" note
+          # - [16, 16, 32, 1, 1, 7, 2, 2, 2]  # MT224x64  pruned: narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.07x of problem best (< 20%); see the "# round2" note
+          # - [16, 16, 32, 1, 1, 7, 1, 1, 2]  # MT112x32  pruned: best kernel 1.29x of problem best
+          - [16, 16, 32, 1, 1, 1, 4, 1, 2]  # MT16x128  round5: NEW tile, no line in BASE's yaml  [round5 CD[1,1]: CU gran 100.0% / CD-adj CU gran 100.0% / total gran 100.0%]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]  # OOB baseline majority (32/40); not forked
+        - ClusterLocalRead: [0]  # OOB baseline majority (22/40); not forked
+        - PrefetchGL2: [0]  # round2
+        # pruned PrefetchGL2: 1 [narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.02x of problem best (< 20%); see the "# round2" note]
+        # pruned PrefetchGL2: 2 [narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.01x of problem best (< 20%); see the "# round2" note]
+        - HalfPLR: [0]  # round2
+        # pruned HalfPLR: 1 [best kernel 2.12x of problem best]
+        # pruned HalfPLR: 2 [best kernel 1.20x of problem best]
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [64, 128]  # round2
+        # pruned DepthU: 32 [narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.00x of problem best (< 20%); see the "# round2" note]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]  # round2
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMStoreInst: [false, true]  # tdm_store_v2: was [0, 1, 2, 3] (tdm_store); PR 15133 final form is a 0/1 switch
+        # pruned TDMStoreInst: 2, 3 [tdm_store_v2: invalid after PR 15133 (TDMStoreInst is a 0/1 switch)]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]  # round2
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0]  # round2
+        # pruned LDSSegmentInterleave: 1 [best kernel 1.62x of problem best]
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        - ClusterDim: [[1, 1]]  # round5 (BASE: [[1, 1], [2, 1], [4, 1], [8, 1], [1, 2]])
+        # pruned ClusterDim: 2_1 [round5: best kernel with this ClusterDim = 86% of problem best]
+        # pruned ClusterDim: 4_1 [round5: best kernel with this ClusterDim = 85% of problem best]
+        # pruned ClusterDim: 8_1 [round5: best kernel with this ClusterDim = 100% of problem best]
+        # pruned ClusterDim: 1_2 [round5: best kernel with this ClusterDim = 83% of problem best]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0]  # round2
+        # pruned StreamK: 3 [narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.05x of problem best (< 20%); see the "# round2" note]
+        - ActivationFuncCall: [False, True]  # round2: new knob
+        - WorkGroupMapping: [1, 8, 16]  # round2
+        - StaggerU: [0]  # round2
+        # pruned StaggerU: 32 [narrowed by round2 to reduce tuning time, NOT measured slower: v1 best kernel 1.01x of problem best (< 20%); see the "# round2" note]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # per_problem_v3: ldd = ldc = 224 (M = 224), lda = ldb = 128 (K = 96) from workloads.csv
+          # per_problem_v3: Exact = [m, n, batch, k, ldd, ldc, lda, ldb]
+          - Exact: [224, 128, 98666, 96, 224, 224, 128, 128]
+
+LibraryLogic:
+  ScheduleName: gfx1250
+  ArchitectureName: gfx1250
+  LibraryType: Equality
