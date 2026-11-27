@@ -29,7 +29,7 @@ the kernel's ``block_size`` field. A row records the answer for each of 16, 32
 and 64.
 
 The build generates the table into the build tree through
-gen_gfx942_attention_unified_3d_table.py (kernel_ingestor_engine/CMakeLists.txt);
+gen_rocke_table.py (kernel_ingestor_engine/CMakeLists.txt);
 it is never committed. To print it by hand, from the provider root:
 
     cd rocke/library && PYTHONPATH=.:../platform/python python3 \\
