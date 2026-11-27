@@ -1250,27 +1250,49 @@ def _writesVgpr(code, reg):
   return dst == reg or bool(m and reg[1:].isdigit() and int(m.group(1)) <= int(reg[1:]) <= int(m.group(2)))
 
 
-@pytest.mark.parametrize("stinkytofu", [True, False])
+# StinkyTofu's hardware model for gfx1250 (HWModel waitHide.vmVsrcLds): this many later LDS instructions prove that an
+# earlier one has read its VGPRs, so InsertWaitAlu waits for VM_VSRC only before that.
+_VM_VSRC_LDS_FOLLOWERS = 10
+_VM_VSRC_OPS = ("ds_", "global_", "buffer_", "flat_", "scratch_")
+
+
+def _waitCovers(lines, start, end, field, younger):
+  """Whether an s_wait_alu between lines[start] and lines[end] waits on `field` with a count no larger than the
+  instructions starting with `younger` that issued after lines[start] and before the wait, so that lines[start] is
+  no longer outstanding."""
+  for n in range(start + 1, end):
+    counts = re.findall(field + r"\((\d+)\)", lines[n]) if lines[n].startswith("s_wait_alu") else []
+    issued = sum(1 for m in range(start + 1, n) if lines[m].startswith(younger) and not lines[m].startswith("v_nop"))
+    if any(int(count) <= issued for count in counts):
+      return True
+  return False
+
+
+@pytest.mark.parametrize("stinkytofu,sia", [(True, 3), (False, 3), (True, 4)],
+                         ids=["stinkytofu-sia3", "plain-sia3", "stinkytofu-sia4"])
 def test_tdm_staging_fold_waited_under_expert_scheduling(gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch,
-                                                         stinkytofu):
-  """ExpertSchedulingMode 2 turns off the hardware VA_VDST and VM_VSRC checks. So the VALU that folds a staged-tile
-  offset above 64 KiB into tmpVgpr must be waited for before the DS access that reads it, and a C read or staging
-  store that reads tmpVgpr as its address must be waited for before the next write of tmpVgpr, whichever code makes
-  it. StinkyTofu re-derives the VA_VDST wait, and without the StinkyTofu backend the TDM block emits both. MT256x256 bf16
-  stages 128 KiB, and with vector widths of 1 a thread's elements span more than 128 of its columns, so both the C
-  read-back of beta and the staging fold."""
+                                                         stinkytofu, sia):
+  """Expert scheduling mode 2 turns off the hardware VA_VDST and VM_VSRC checks; ExpertSchedulingMode 2 sets it at
+  ScheduleIterAlg 3, and StinkyTofu sets it in every kernel it schedules. So the VALU that folds a staged-tile offset
+  above 64 KiB into tmpVgpr must be done before the DS access that reads it, and a C read or staging store that reads
+  tmpVgpr as its address must be done before the next write of tmpVgpr, whichever code makes it. Without the
+  StinkyTofu backend the TDM block emits both waits. StinkyTofu derives them, with a count that lets the younger
+  instructions stay outstanding, and leaves out the VM_VSRC wait once enough later LDS instructions have issued.
+  MT256x256 bf16 stages 128 KiB, and with vector widths of 1 a thread's elements span more than 128 of its columns, so
+  both the C read-back of beta and the staging fold."""
   import rocisa
   if not stinkytofu:
     monkeypatch.setattr(rocisa, "isSupportedByStinkyTofu", lambda version: False)
-  # ExpertSchedulingMode 2 requires _ScheduleIterAlg 3, which ScheduleIterAlg 4 maps to 0, so both arms stay on
-  # ScheduleIterAlg 3: the only scheduling that reaches these waits.
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ScheduleIterAlg=3, VectorWidthA=1, VectorWidthB=1,
+  # ExpertSchedulingMode 2 requires _ScheduleIterAlg 3, which ScheduleIterAlg 4 maps to 0: at ScheduleIterAlg 4 only
+  # StinkyTofu's own mode 2 is on, and the TDM block emits no wait of its own.
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ScheduleIterAlg=sia, VectorWidthA=1, VectorWidthB=1,
                        StoreVectorWidth=1, ProblemType={"UseBeta": True})
   assert sol.get("Valid"), capsys.readouterr().out
-  assert sol["ExpertSchedulingMode"] == 2
+  assert sol["ExpertSchedulingMode"] == (2 if sia == 3 else 0)
   assert ("STINKY_TOTAL_INST_BYTES" in asm) == stinkytofu
   raw = asm.splitlines()
   lines = [_code(line) for line in raw]
+  assert any(re.fullmatch(r"s_setreg_imm32_b32 hwreg\(26, ?0, ?2\), (0x)?2", line, re.I) for line in lines)
   folds = [i for i, line in enumerate(raw) if "LDS offset above 64 KiB" in line]
   assert folds
   kinds = set()
@@ -1278,14 +1300,16 @@ def test_tdm_staging_fold_waited_under_expert_scheduling(gp_gfx1250, gfx1250_iim
     reads = re.compile(r"(?<![\w\[])" + re.escape(dst) + r"(?!\w)")
     for i in (i for i in folds if lines[i].split()[1].rstrip(",") == dst):
       j = next(k for k in range(i + 1, len(lines)) if lines[k].startswith("ds_") and reads.search(lines[k]))
-      assert any(re.match(r"s_wait_alu\b.*va_vdst\(0\)", lines[k]) for k in range(i + 1, j)), raw[i:j + 1]
+      assert _waitCovers(lines, i, j, "va_vdst", ("v_",)), raw[i:j + 1]
     accesses = [i for i, line in enumerate(lines) if line.startswith("ds_") and reads.search(line)
                 and ("load C element" in raw[i] or "stage D element" in raw[i])]
     kinds.update(raw[i].rpartition("//")[2].split()[0] for i in accesses)
-    for i in ([] if stinkytofu else accesses):
-      k = next((k for k in range(i + 1, len(lines)) if _writesVgpr(lines[k], dst)), None)
-      if k is not None:
-        assert any(re.match(r"s_wait_alu\b.*vm_vsrc\(0\)", lines[n]) for n in range(i + 1, k)), raw[i:k + 1]
+    writes = {next((k for k in range(i + 1, len(lines)) if _writesVgpr(lines[k], dst)), None) for i in accesses}
+    for k in sorted(writes - {None}):
+      read = max(i for i in accesses if i < k)
+      hidden = stinkytofu and sum(1 for n in range(read + 1, k)
+                                  if lines[n].startswith("ds_")) >= _VM_VSRC_LDS_FOLLOWERS
+      assert hidden or _waitCovers(lines, read, k, "vm_vsrc", _VM_VSRC_OPS), raw[read:k + 1]
   assert kinds == {"load", "stage"}, kinds
 
 
