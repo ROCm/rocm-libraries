@@ -9,6 +9,10 @@ subtrees:
       title: Install hipCCL
     - file: install/build
       title: Build from source
+  - caption: How to
+    entries:
+    - file: how-to/use-hipccl
+      title: Use hipCCL in a project
   - caption: Concepts
     entries:
     - file: conceptual/hipccl-layout

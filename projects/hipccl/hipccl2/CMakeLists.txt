@@ -31,7 +31,7 @@
 # (HIPCCL_BUILD_ROCPRIM/HIPCUB/ROCTHRUST/ALL, etc.) as building the unified
 # hipccl3 project. The difference is purely which copies of rocPRIM/hipCUB/
 # rocThrust get built - this copy's library/algorithm code is the frozen,
-# compatibility snapshot (see ../README.md), not actively kept in sync with
+# compatibility snapshot (see README.md), not actively kept in sync with
 # upstream the way hipccl3's copies are intended to be.
 #
 # NOTE: unlike hipccl3, there is no libhipcxx here - hipccl2 never included a
@@ -44,7 +44,7 @@ cmake_minimum_required(VERSION 3.25.2)
 # find_package(hipccl) - NOT the individual components, which keep their own
 # 4.x line (see the Component versioning note below). hipccl2 is the CCCL
 # 2.x snapshot, so this tracks the CCCL 2.8 line (matching
-# HIPCUB_CCCL_VERSION_*); hipccl3 is versioned 3.0.0 for the CCCL 3.0 line.
+# HIPCUB_CCCL_VERSION_*); hipccl3 is versioned 3.1.0 for the CCCL 3.1 line.
 set(HIPCCL_VERSION_MAJOR 2)
 set(HIPCCL_VERSION_MINOR 8)
 set(HIPCCL_VERSION_PATCH 0)
@@ -93,7 +93,8 @@ option(BUILD_DOCS "Build hipCCL project documentation (requires sphinx)" OFF)
 # (the CPack package and find_package(hipccl)) only. rocprim/hipcub/rocthrust
 # keep their own independent VERSION_STRING (4.7.0) and their own
 # find_package(rocprim) etc. versions - this root deliberately does NOT force
-# them to match. See ../README.md; the short version is that those components
+# them to match. See ../docs/migration-notes.md ("Versioning: umbrella vs
+# components"); the short version is that those components
 # have already shipped at 4.x, so pulling them down to the umbrella version
 # would be a backwards version move for already-released packages and would
 # break downstream find_package(rocprim 4.x) consumers.
@@ -182,8 +183,6 @@ endif()
 #
 # NOT YET DONE / needs real review before treating this as more than a
 # starting point:
-#  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ./LICENSE) is a
-#    best-effort placeholder, not a verified legal/compliance declaration.
 #  - Maintainer email is a placeholder, not a real assigned address/alias.
 set(HIP_RUNTIME_MINIMUM 4.5.0)
 rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")

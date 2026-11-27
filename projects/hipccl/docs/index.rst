@@ -23,6 +23,10 @@ The hipCCL project is located in `ROCm/rocm-libraries <https://github.com/ROCm/r
 .. grid:: 2
   :gutter: 3
 
+  .. grid-item-card:: How to
+
+    * :doc:`Use hipCCL in a project <how-to/use-hipccl>`
+
   .. grid-item-card:: Concepts
 
     * :doc:`hipCCL project layout <conceptual/hipccl-layout>`

@@ -5,75 +5,82 @@ versioned, and packaged as a single project, mirroring the role
 [NVIDIA/cccl](https://github.com/NVIDIA/cccl) plays for CUB, Thrust, and libcudacxx.
 
 > [!IMPORTANT]
-> This is a first-pass scaffold living inside `rocm-libraries` at
-> `projects/hipccl/hipccl3/`, and stays there - the earlier plan to extract
-> hipCCL into its own `ROCm/hipCCL` repository (see
-> [`../../../docs/hipccl-repository-split-proposal.md`](../../../docs/hipccl-repository-split-proposal.md))
-> has been dropped; that document is kept for historical context only.
-> A sibling directory, `projects/hipccl/hipccl2/`, exists purely for backward
-> compatibility (a loose, unbound copy of rocPRIM/hipCUB/rocThrust as they exist
-> in `rocm-libraries` today) and is intentionally *not* unified the way this
-> directory is. Eventually only one of the two will remain.
+> This directory lives in `rocm-libraries` at `projects/hipccl/hipccl3/`, and
+> stays there; hipCCL is not being extracted into its own repository.
+> A sibling directory, [`../hipccl2/`](../hipccl2/), is a frozen pre-CCCL 3.x
+> compatibility snapshot of rocPRIM/hipCUB/rocThrust. Eventually only one of
+> the two will remain.
 
 ## Structure
 
 ```
 hipccl3/
-  rocprim/        # rocPRIM, tip of rocm-libraries develop (same commit as hipccl2)
-  hipcub/         # hipCUB, tip of rocm-libraries develop (same commit as hipccl2)
-  rocthrust/      # rocThrust, tip of rocm-libraries develop (same commit as hipccl2)
-  libhipcxx/      # ROCm/libhipcxx @ 5ac455d737937ba2dfd1a4e85ad13f19a775f692 (amd-develop)
+  rocprim/        # rocPRIM 5.1.0
+  hipcub/         # hipCUB 5.1.0 (tracks CCCL 3.1.4)
+  rocthrust/      # rocThrust 5.1.0
+  libhipcxx/      # git submodule: ROCm/libhipcxx (amd-develop), see .gitmodules
   cmake/          # shared cmake modules/toolchains, copied from rocm-libraries root
   CMakeLists.txt  # unified superbuild (see HIPCCL_BUILD_* options below)
   CMakePresets.json
-  docs/           # hipCCL-level docs; each component keeps its own docs/ too
-  .github/        # CI scaffold ported from rocm-libraries' .github (see .github/README.md)
+  docs/           # placeholder README only; the hipCCL docs live in ../docs/ and each component keeps its own docs/
 ```
 
-`rocprim`, `hipcub`, and `rocthrust` are currently on the same commit as their
-`rocm-libraries` (`develop`) counterparts and as the `hipccl2` copies. `libhipcxx`
-does not yet track the same "CCCL 3.0" alignment as the other three - it was
-imported as a starting point and is expected to be merged forward along with the
-others once the CCCL 3.0 rebase work happens.
+rocPRIM, hipCUB, and rocThrust carry their own history and are developed in
+this directory. The `hipccl2` copies are at 4.7.0.
 
 ## Building
 
+hipCUB and rocThrust require libhipcxx 3.4 or later on the ROCm platform.
+Provide it in one of two ways:
+
+- Install libhipcxx so that `find_package(libhipcxx)` can locate it
+  (`CMAKE_PREFIX_PATH` or `ROCM_ROOT`). This is the recommended way; see the
+  known issue below.
+- Build it from the submodule with `-DHIPCCL_BUILD_LIBHIPCXX=ON`.
+
 ```sh
+# From projects/hipccl/hipccl3, with libhipcxx installed
 cmake --preset hipccl-all
 cmake --build build
 cmake --install build
+
+# Or build libhipcxx from the submodule instead. Initialize it from the repo root:
+git submodule update --init projects/hipccl/hipccl3/libhipcxx
+cmake --preset hipccl-all -DHIPCCL_BUILD_LIBHIPCXX=ON   # from projects/hipccl/hipccl3
 ```
+
+`HIPCCL_BUILD_ALL` (and so the `hipccl-all` preset) does not build libhipcxx;
+`HIPCCL_BUILD_LIBHIPCXX` is off unless you set it. The same applies to the
+single-component presets.
+
+> [!WARNING]
+> **Known issue:** libhipcxx built from the submodule is used for the build only
+> and is not installed. The installed hipCUB and rocThrust CMake packages declare
+> a dependency on a `libhipcxx` package, so a project that calls
+> `find_package(hipcub)`, `find_package(rocthrust)` or `find_package(hipccl)`
+> needs libhipcxx 3.4 or later installed separately, in the same prefix or on its
+> `CMAKE_PREFIX_PATH`. See [`../docs/install/build.rst`](../docs/install/build.rst).
 
 This installs headers under `<prefix>/include/hipccl/<component>` (e.g.
 `/opt/rocm/include/hipccl/thrust`, `/opt/rocm/include/hipccl/rocprim`) and uses
-one `HIPCCL_VERSION` (`3.0.0`, see `CMakeLists.txt`) for the hipCCL package
-itself; rocprim/hipcub/rocthrust keep their own component versions.
+one `HIPCCL_VERSION` (set in `CMakeLists.txt`) for the hipCCL package itself;
+rocprim/hipcub/rocthrust keep their own component versions.
 
 To build a single component instead, use the matching preset (`rocprim`,
 `hipcub`, `rocthrust`) or set `HIPCCL_BUILD_ROCPRIM`/`HIPCCL_BUILD_HIPCUB`/
 `HIPCCL_BUILD_ROCTHRUST` directly.
 
-**libhipcxx is not yet wired into this superbuild** (`HIPCCL_BUILD_LIBHIPCXX`
-exists as an option but errors out if enabled). It's a header-only project with
-its own lit-based test harness that doesn't fit the `add_subdirectory()` pattern
-the other three use; see the `NOTE(hipccl3)` comments in `CMakeLists.txt` for
-what's left to do.
+For the full option list, see [`../docs/install/build.rst`](../docs/install/build.rst).
 
-## Known first-pass gaps
+## Known gaps
 
-- **libhipcxx build integration**: present in-tree, not yet buildable/testable
-  from the root `CMakeLists.txt`.
+- **libhipcxx packaging**: libhipcxx can be built from the superbuild, but it is
+  not part of the unified `hipccl` CPack package or the `find_package(hipccl)`
+  config.
 - **Versioning**: `HIPCCL_VERSION` versions only the hipCCL umbrella package.
   rocprim/hipcub/rocthrust keep their own `VERSION_STRING`. libhipcxx's own
   versioning has not been looked at.
-- **Unified packaging**: done - see [`../README.md`](../README.md#hipccl3-unified-build-versioning-and-packaging)
+- **Unified packaging**: done - see
+  [`../docs/migration-notes.md`](../docs/migration-notes.md#unified-packaging-make-package--cpack)
   for how the single `hipccl` CPack package and the `find_package(hipccl)`
-  CMake config work. License aggregation there is still a best-effort
-  placeholder pending real legal review.
-- **CI**: see `.github/README.md` - the workflows here are a staged copy, not
-  yet live (GitHub Actions only reads `.github/` at the repository root, and
-  this directory is currently nested inside `rocm-libraries`).
-- **Math CI**: Math CI (Jenkins, `math-ci.amd.com`) has no in-repo config
-  anywhere in `rocm-libraries` (it's configured entirely on the Jenkins side),
-  so there is nothing to port here; new jobs would need to be created there
-  once hipCCL exists as its own repository.
+  CMake config work.

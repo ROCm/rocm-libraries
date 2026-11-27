@@ -27,21 +27,19 @@
 # root project that can build all four components together, with one unified
 # version and one unified install layout (<prefix>/include/hipccl/<component>).
 #
-# STATUS: first-pass scaffold. See inline NOTE(hipccl3) comments for the
-# specific pieces that are known-incomplete placeholders rather than fully
-# validated behavior.
+# See the inline NOTE(hipccl3) comments for pieces that are not finished yet.
 
 cmake_minimum_required(VERSION 3.25.2)
 
 # --- hipCCL umbrella version ---
 # NOTE(hipccl3): this versions the hipCCL umbrella only - the CPack package
 # and find_package(hipccl) - NOT the individual components, which keep their
-# own 4.x line (see the Component versioning note below). It tracks the CCCL
-# major line this layout snapshots (3.0, matching HIPCUB_CCCL_VERSION_*), so
-# find_package(hipccl 3.0.0) lines up with find_package(CCCL 3.0.0). hipccl2
+# own version lines (see the Component versioning note below). It tracks the CCCL
+# major.minor line this layout snapshots (3.1, matching HIPCUB_CCCL_VERSION_*), so
+# find_package(hipccl 3.1.0) lines up with find_package(CCCL 3.1.0). hipccl2
 # is the CCCL 2.x snapshot and is versioned 2.8.0.
 set(HIPCCL_VERSION_MAJOR 3)
-set(HIPCCL_VERSION_MINOR 0)
+set(HIPCCL_VERSION_MINOR 1)
 set(HIPCCL_VERSION_PATCH 0)
 set(HIPCCL_VERSION "${HIPCCL_VERSION_MAJOR}.${HIPCCL_VERSION_MINOR}.${HIPCCL_VERSION_PATCH}")
 
@@ -89,10 +87,11 @@ option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
 # --- Component versioning ---
 # NOTE(hipccl3): HIPCCL_VERSION above versions the hipCCL *umbrella* package
 # (the CPack package and find_package(hipccl)) only. rocprim/hipcub/rocthrust
-# keep their own independent VERSION_STRING (4.7.0) and their own
+# keep their own independent VERSION_STRING (5.1.0) and their own
 # find_package(rocprim) etc. versions - this root deliberately does NOT force
-# them to match. See ../README.md; the short version is that those components
-# have already shipped at 4.x, so pulling them down to the umbrella version
+# them to match. See ../docs/migration-notes.md ("Versioning: umbrella vs
+# components"); the short version is that those components
+# have already shipped at 4.x and 5.x, so pulling them down to the umbrella version
 # would be a backwards version move for already-released packages and would
 # break downstream find_package(rocprim 4.x) consumers. hipCUB's existing
 # HIPCUB_CCCL_VERSION_* variables are the same pattern: "my version" and "the
@@ -177,7 +176,8 @@ if(HIPCCL_BUILD_LIBHIPCXX)
             "(projects/hipccl/hipccl3/libhipcxx) does not look initialized. "
             "Run 'git submodule update --init projects/hipccl/hipccl3/libhipcxx' "
             "(or 'git submodule update --init --recursive' from the "
-            "repository root) and re-configure."
+            "repository root) and re-configure, or configure with "
+            "-DHIPCCL_BUILD_LIBHIPCXX=OFF to use an installed libhipcxx."
         )
     endif()
 
@@ -272,10 +272,10 @@ endif()
 #
 # NOT YET DONE / needs real review before treating this as more than a
 # starting point:
-#  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ./LICENSE) is a
-#    best-effort placeholder, not a verified legal/compliance declaration.
-#  - libhipcxx isn't part of this package yet (not wired into the build at
-#    all - see HIPCCL_BUILD_LIBHIPCXX above).
+#  - libhipcxx isn't part of this package yet. It can be built from the
+#    superbuild (see HIPCCL_BUILD_LIBHIPCXX above) but is not installed, so
+#    the installed hipcub/rocthrust configs need a separately installed
+#    libhipcxx.
 #  - Maintainer email is a placeholder, not a real assigned address/alias.
 set(HIP_RUNTIME_MINIMUM 4.5.0)
 rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")

@@ -20,6 +20,9 @@ CUB/Thrust/libcudacxx.
   * Including
     [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang)
     compiler
+* For the default `hipccl3` layout, [libhipcxx](https://github.com/ROCm/libhipcxx)
+  3.4 or later, installed or built from the submodule. See
+  [`docs/install/build.rst`](docs/install/build.rst).
 * C++17
 
 ## Build and install

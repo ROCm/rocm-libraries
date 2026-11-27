@@ -32,13 +32,12 @@ flag, `HIPCCL_BUILD_LEGACY` (default `OFF`, meaning "build the unified
 [The `projects/hipccl` layout selector](#the-projectshipccl-layout-selector)
 below for details.
 
-Both currently pin rocPRIM/hipCUB/rocThrust to the same commit (tip of
-`rocm-libraries`' `develop` as of the initial migration); `hipccl3`
-additionally includes libhipcxx, pinned to
-`ROCm/libhipcxx@5ac455d737937ba2dfd1a4e85ad13f19a775f692` (`amd-develop`).
-`hipccl3`'s rocPRIM/hipCUB/rocThrust copies are expected to be merged forward
-to align with upstream CCCL 3.0 at a later time; libhipcxx was brought in as
-a starting point for that same effort.
+At the initial migration both layouts held the same rocPRIM/hipCUB/rocThrust
+commit. They have since diverged: `hipccl2` is frozen at component version
+4.7.0 (hipCUB tracking CCCL 2.8.2), while `hipccl3` is at 5.1.0 (hipCUB
+tracking CCCL 3.1.4). `hipccl3` additionally includes libhipcxx as a git
+submodule tracking `ROCm/libhipcxx`'s `amd-develop` branch (the pinned commit
+is the submodule entry in the repository, see `.gitmodules`).
 
 `hipccl3`'s copies of rocPRIM, hipCUB, and rocThrust carry their real,
 preserved commit history (via `git filter-repo`), not just a flat snapshot -
@@ -98,11 +97,12 @@ for why that isn't just rocm-cmake's `rocm_install_symlink_subdir()`.
 hipCCL deliberately keeps **two independent version numbers**, and it is
 important not to collapse them into one:
 
-- **The hipCCL umbrella version** (`HIPCCL_VERSION`: `3.0.0` in hipccl3 and
-  `2.8.0` in hipccl2, the CCCL major line each layout snapshots) versions the
+- **The hipCCL umbrella version** (`HIPCCL_VERSION`, set in each layout's root
+  `CMakeLists.txt`: `3.1.0` in hipccl3 and `2.8.0` in hipccl2, the CCCL line
+  each layout snapshots) versions the
   unified CPack package and `find_package(hipccl)`.
-- **The component API versions** (`VERSION_STRING`, currently `4.7.0` in
-  rocPRIM/hipCUB/rocThrust) version `find_package(rocprim)`,
+- **The component API versions** (`VERSION_STRING`: `4.7.0` in hipccl2 and
+  `5.1.0` in hipccl3 for rocPRIM/hipCUB/rocThrust) version `find_package(rocprim)`,
   `find_package(hipcub)`, and `find_package(rocthrust)`, exactly as they
   always have.
 
@@ -110,17 +110,18 @@ Neither root forces the components to adopt `HIPCCL_VERSION`.
 
 **Why they must stay separate.** The plan is for `HIPCCL_VERSION` to
 eventually track the CCCL version it corresponds to, so that
-`find_package(hipccl 3.0.0)` lines up with `find_package(CCCL 3.0.0)`. But
-rocPRIM/hipCUB/rocThrust have *already shipped* at 4.7.0. Pulling them down to
-a 3.x umbrella version would be a **backwards version move on
+`find_package(hipccl 3.1.0)` lines up with `find_package(CCCL 3.1.0)`. But
+rocPRIM/hipCUB/rocThrust have *already shipped* at 4.x and 5.x. Pulling them down to
+the umbrella version would be a **backwards version move on
 already-released packages**: package managers would treat it as a downgrade,
 and every downstream consumer with `find_package(rocprim 4.x REQUIRED)` would
 break. Because the `hipccl` package name is brand new, the umbrella can start
 at whatever number matches CCCL without regressing anything, while the
-components keep moving forward on their own 4.x line.
+components keep moving forward on their own lines.
 
 hipCUB already uses this same pattern internally - its `VERSION_STRING`
-(4.7.0) and its `HIPCUB_CCCL_VERSION_MAJOR/MINOR/PATCH` (2.8.2) are separate
+(4.7.0 in hipccl2, 5.1.0 in hipccl3) and its
+`HIPCUB_CCCL_VERSION_MAJOR/MINOR/PATCH` (2.8.2 and 3.1.4) are separate
 values, because "my version" and "the CCCL version I correspond to" are
 different things.
 
@@ -182,9 +183,7 @@ files at all.
 **License aggregation:** `hipccl3/LICENSE` combines rocPRIM's MIT license,
 hipCUB's BSD-3-Clause license, and rocThrust's Apache-2.0 license into one
 file with clear per-component sections, and `CPACK_RPM_PACKAGE_LICENSE` is set
-to `"MIT and BSD and ASL 2.0"`. **Both are best-effort placeholders, not
-verified legal/compliance declarations** - get them reviewed before treating
-this as more than a starting point.
+to `"MIT and BSD and ASL 2.0"`.
 
 ### Unified CMake package config (`find_package(hipccl)`)
 
@@ -318,23 +317,24 @@ normally on their own.
 
 ### Known gaps
 
-- **License aggregation** needs real legal/compliance review (see above).
-- **libhipcxx** isn't part of any of this yet - not wired into the build, the
-  CPack package, or the `find_package(hipccl)` config. All three would need
-  updating once it is.
+- **libhipcxx** is buildable from the `hipccl3` superbuild
+  (`HIPCCL_BUILD_LIBHIPCXX`, off by default and not included in
+  `HIPCCL_BUILD_ALL`), and hipCUB and rocThrust require libhipcxx 3.4 or later
+  on ROCm. It is not part of the CPack package or the `find_package(hipccl)`
+  config yet. Because the nested libhipcxx build doesn't install, the installed
+  hipCUB and rocThrust CMake packages (which declare a `libhipcxx` dependency)
+  need a separately installed libhipcxx; see the known issue in
+  `install/build.rst`.
 - **Maintainer email** (`hipccl-maintainer@amd.com`) is a placeholder, not a
   real assigned address.
 - **No Windows support `rmake.py`-equivalent** exists for hipccl3 or the
   `projects/hipccl` layout selector yet (each of rocPRIM/hipCUB/rocThrust has
   its own convenience wrapper script today); unifying those is separate
   follow-up work.
-- **`HIPCCL_VERSION` is `3.0.0` (hipccl3) and `2.8.0` (hipccl2).** These
-  identify the CCCL major line each layout snapshots (hipCUB's
-  `HIPCUB_CCCL_VERSION_*` is `3.0.3` and `2.8.2` respectively); see
+- **`HIPCCL_VERSION` identifies the CCCL line each layout snapshots**
+  (hipCUB's `HIPCUB_CCCL_VERSION_*` is `3.1.4` in hipccl3 and `2.8.2` in
+  hipccl2); see
   [Versioning: umbrella vs components](#versioning-umbrella-vs-components).
   The `#define CCCL_VERSION HIPCCL_VERSION` compatibility glue downstream
   consumers have asked for has **not** been added yet, so nothing should derive
   `#if CCCL_VERSION >= ...` feature checks from `HIPCCL_VERSION` yet.
-- **AI-authorship/license-aggregation legal review is still pending** with
-  AMD Legal/OSPO - see the license aggregation note above; this is the same
-  category of open question.
