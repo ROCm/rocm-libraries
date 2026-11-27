@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until_reason
+from rocke.tests.lanes import SOURCE_TREE, skip_until_reason
 
 CPP = Path(__file__).resolve().parents[2] / "cpp"
 GLUE = CPP / "instances" / "gfx950" / "attention_tiled_2d_public_entry_glue.cpp"
@@ -27,7 +27,7 @@ GLUE = CPP / "instances" / "gfx950" / "attention_tiled_2d_public_entry_glue.cpp"
 pytestmark = pytest.mark.skipif(
     not GLUE.exists(),
     reason=skip_until_reason(
-        SOURCE_TREE_CASES,
+        SOURCE_TREE,
         reason="reads the platform sources, which an installed test layout omits",
     ),
 )

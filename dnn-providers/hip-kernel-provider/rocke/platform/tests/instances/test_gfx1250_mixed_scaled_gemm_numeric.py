@@ -9,6 +9,8 @@ import pytest
 
 from rocke.tests.subprocess_launcher import rocke_python_command
 
+pytestmark = pytest.mark.gpu
+
 _MODULE = "rocke.examples.gfx1250.gemm.mixed_scaled_gemm"
 
 # Every ordered mixed pair with E8M0 through both compiler routes.

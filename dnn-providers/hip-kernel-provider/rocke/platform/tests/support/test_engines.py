@@ -209,14 +209,14 @@ def test_a_lane_that_must_not_fall_back_clears_an_inherited_quiet_setting(
     assert _QUIET_FALLBACK not in os.environ
 
 
-def test_a_missing_engine_module_waits_for_the_binding_lane_and_nothing_else():
+def test_a_missing_engine_module_waits_for_the_build_variant_and_nothing_else():
     from rocke.core.backend import BackendError, import_engine
 
     with pytest.raises(BackendError) as missing:
         import_engine("a_module_that_is_not_installed")
     with pytest.raises(pytest.skip.Exception) as skipped:
         engines.skip_without_cpp_engine(missing.value, "no engine")
-    assert skipped.value.msg == "waits for binding-lane: no engine"
+    assert skipped.value.msg == "waits for build-variant: no engine"
     # A BackendError for another cause (an unknown backend, or a module that is
     # built but fails to load) declares no lane.
     with pytest.raises(pytest.skip.Exception) as plain:
@@ -229,9 +229,9 @@ def test_a_missing_engine_module_waits_for_the_binding_lane_and_nothing_else():
     assert broken_build.value.msg == "broken build"
 
 
-def test_a_missing_shared_engine_waits_for_the_shared_library_lane(monkeypatch):
+def test_a_missing_shared_engine_waits_for_the_build_variant(monkeypatch):
     """Without the shared engine, the cpp backend's BackendError skips the case
-    as waiting for the shared-library lane."""
+    as waiting for the build-variant lane."""
     from rocke.core.backend import BackendError, _lower_via_cpp_engine
     from rocke.tests.lanes import REQUIRE_CPP_ENGINE_ENV
 
@@ -241,7 +241,7 @@ def test_a_missing_shared_engine_waits_for_the_shared_library_lane(monkeypatch):
         _lower_via_cpp_engine(serialize(_empty_kernel()), "gfx942", "llvm20")
     with pytest.raises(pytest.skip.Exception) as skipped:
         engines.skip_without_cpp_engine(missing.value, "no engine")
-    assert skipped.value.msg == "waits for shared-library-lane: no engine"
+    assert skipped.value.msg == "waits for build-variant: no engine"
 
 
 def test_a_required_engine_fails_a_cpp_case_when_it_is_missing(monkeypatch):
@@ -279,9 +279,7 @@ def test_a_missing_engine_skips_where_the_run_does_not_require_it(monkeypatch):
     monkeypatch.delenv(REQUIRE_CPP_ENGINE_ENV, raising=False)
     monkeypatch.setenv(CPP_STRICT_ENV, "1")
     engines.hide_shared_engine(monkeypatch)
-    with pytest.raises(
-        pytest.skip.Exception, match=r"^waits for shared-library-lane: "
-    ):
+    with pytest.raises(pytest.skip.Exception, match=r"^waits for build-variant: "):
         engines.native_engine_or_skip()
     assert engines.available_engines() == ("python",)
 

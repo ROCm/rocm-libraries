@@ -18,7 +18,7 @@ It is strongest for kernels whose performance depends on explicit CK Tile-style 
 
 ## Architecture
 
-Current default and most-tested target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also runs on the other CDNA target `gfx942` (and `gfx940` for the atoms that exist there), and on the RDNA targets `gfx1151` (RDNA3.5, wave32 WMMA) and `gfx1201` (RDNA4, wave32 WMMA, including attention). Backends are registered in `core/isa/backend.py` (`backend_for`).
+Current default and most-tested target: `amdgcn-amd-amdhsa--gfx950` (CDNA4). The DSL also runs on the other CDNA target `gfx942` (and `gfx940` for the atoms that exist there), and on the RDNA targets `gfx1151` (RDNA3.5, wave32 WMMA) and `gfx1201` (RDNA4, wave32 WMMA, including attention). Backends are registered in `core/isa/backend.py` (`backend_for`).
 
 Risk areas when changing architecture:
 

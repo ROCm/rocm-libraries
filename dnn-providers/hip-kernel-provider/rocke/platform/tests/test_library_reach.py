@@ -96,10 +96,10 @@ def test_platform_library_imports_only_shrink():
     if not _IS_SOURCE_CHECKOUT:
         # Imported here: the pre-commit hook runs this file without rocke on
         # its path, in a source checkout, where this branch is not taken.
-        from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+        from rocke.tests.lanes import SOURCE_TREE, skip_until
 
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="audits the platform sources, which an installed test layout "
             "omits",
         )

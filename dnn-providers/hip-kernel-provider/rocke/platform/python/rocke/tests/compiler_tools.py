@@ -6,7 +6,7 @@
 A test that compiles a kernel through COMGR or reads a code object with the LLVM tools depends on
 the host: the tools must be installed and able to build for the test's arch. Without them the test
 skips, because that is a fact about the host, not a defect in the kernel, as waiting for the CI
-test environment to supply them (``rocke.tests.lanes.CI_TEST_TOOLS``). A run that sets
+test environment to supply them (``rocke.tests.lanes.BUILD_VARIANT``). A run that sets
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` (a CI lane that supplies the tools) fails instead: a gate that
 skips everywhere looks green and checks nothing.
 """
@@ -18,7 +18,7 @@ import unittest
 from typing import NoReturn
 
 from ..analysis.isa import missing_hsaco_tools
-from .lanes import CI_TEST_TOOLS, skip_until_reason
+from .lanes import BUILD_VARIANT, skip_until_reason
 
 __all__ = ["REQUIRE_COMPILER_TOOLS_ENV", "require_hsaco_tools", "require_tools_or_skip"]
 
@@ -29,14 +29,14 @@ REQUIRE_COMPILER_TOOLS_ENV = "ROCKE_REQUIRE_COMPILER_TOOLS"
 
 def require_tools_or_skip(reason: str) -> NoReturn:
     """Skip the running test for ``reason``, as waiting for the CI test environment's tools
-    (``CI_TEST_TOOLS``), or fail it with ``AssertionError`` when
+    (``BUILD_VARIANT``), or fail it with ``AssertionError`` when
     ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` says the tools must be there.
 
     The skip is raised as ``unittest.SkipTest``, which pytest test functions and fixtures and a
     ``unittest`` ``setUpClass`` all report as a skip."""
     if os.environ.get(REQUIRE_COMPILER_TOOLS_ENV) == "1":
         raise AssertionError(f"{REQUIRE_COMPILER_TOOLS_ENV}=1 but {reason}")
-    raise unittest.SkipTest(skip_until_reason(CI_TEST_TOOLS, reason=reason))
+    raise unittest.SkipTest(skip_until_reason(BUILD_VARIANT, reason=reason))
 
 
 def require_hsaco_tools() -> None:

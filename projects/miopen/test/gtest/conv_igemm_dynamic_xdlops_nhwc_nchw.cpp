@@ -301,10 +301,10 @@ TEST_P(GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16,
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP32,
                          testing::Values(GetTestCases("--float")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16,
                          testing::Values(GetTestCases("--half")));

@@ -12,16 +12,16 @@
   "predict_engine": {
     "default": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5",
     "gfx1100": [
-      "64e2c397-6110-4d62-a94b-1465d58a4741"
+      "8c5be896-58d4-4be5-acb9-1ae01f1f5e79"
     ],
     "gfx1101": [
-      "c472baba-16a2-4d69-af87-f4e0f1cc5dd1"
+      "dd9804c1-4a4e-4af3-ac98-17550213bd0b"
     ],
     "gfx1151": [
       "64c14275-9c65-4eeb-ac5c-b298bf3f2259"
     ],
     "gfx1201": [
-      "a5fd7fbb-52ed-4856-b65f-65a98a69d799"
+      "cd452fac-f4e4-464c-b810-12855bcf8f4a"
     ]
   },
   "metadata": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",

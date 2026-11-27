@@ -116,8 +116,7 @@ from rocke.tests.hip_outcomes import (
     python_hip_outcome_of_kernel,
 )
 from rocke.tests.lanes import (
-    BINDING_LANE,
-    SHARED_LIBRARY_LANE,
+    BUILD_VARIANT,
     cpp_engine_required,
     import_or_skip_until,
     skip_until,
@@ -275,14 +274,14 @@ def instance_llvm_from_all_engines(
 
 def _require_native_engine() -> ModuleType:
     """The ``rocke_engine`` binding; skip the calling test, as waiting for the
-    binding lane, when it is not built."""
-    return import_or_skip_until("rocke_engine", BINDING_LANE)
+    build-variant lane, when it is not built."""
+    return import_or_skip_until("rocke_engine", BUILD_VARIANT)
 
 
 def native_engine_or_skip() -> ModuleType:
     """:mod:`rocke.core.native_engine`, the C++ engine's serialized-IR
     lowering. When no shared library is found, skip the calling test (or
-    module, at import) as waiting for the shared-library lane, or, where
+    module, at import) as waiting for the build-variant lane, or, where
     ``ROCKE_REQUIRE_CPP_ENGINE`` requires the C++ engine, fail it. A library
     that is found but does not load, or is from another build, fails the
     test."""
@@ -711,10 +710,10 @@ def _native_status_refusal(status: int, message: str) -> HipRefusal:
 def skip_without_cpp_engine(error: Exception, reason: str) -> NoReturn:
     """Skip the calling test, for ``reason``, after the C++ engine raised
     ``error`` (a ``rocke.core.backend.BackendError``): as waiting for the
-    shared-library lane when no shared library was found (the error's cause is
+    build-variant lane when no shared library was found (the error's cause is
     ``rocke.core.native_engine.SharedEngineNotFound``; failing instead where
     ``ROCKE_REQUIRE_CPP_ENGINE`` requires the C++ engine), as waiting for the
-    binding lane when an engine module is not installed (the cause is the
+    build-variant lane when an engine module is not installed (the cause is the
     ``ModuleNotFoundError`` ``import_engine`` raises it from), else as a plain
     skip, so an engine that is built but fails to load is not booked as waiting
     for a lane."""
@@ -722,13 +721,13 @@ def skip_without_cpp_engine(error: Exception, reason: str) -> NoReturn:
     if isinstance(error.__cause__, native_engine.SharedEngineNotFound):
         skip_until_shared_engine(reason)
     if isinstance(error.__cause__, ModuleNotFoundError):
-        skip_until(BINDING_LANE, reason=reason)
+        skip_until(BUILD_VARIANT, reason=reason)
     pytest.skip(reason)
 
 
 def skip_without_native_hip_lowering() -> None:
     """Skip the calling test, or the module when called at import, as waiting
-    for the shared-library lane, unless the C++ HIP lowering can run: the
+    for the build-variant lane, unless the C++ HIP lowering can run: the
     shared library is found, or ``ROCKE_IR_LOWER_CLI`` names the
     ``rocke_ir_lower_cli`` program. Where ``ROCKE_REQUIRE_CPP_ENGINE`` requires
     the C++ engine, only the shared library counts, and its absence fails."""
@@ -777,7 +776,7 @@ def ir_lower_cli_hip_outcomes(
     program = os.environ.get(IR_LOWER_CLI_ENV)
     if not program:
         skip_until(
-            SHARED_LIBRARY_LANE,
+            BUILD_VARIANT,
             reason=f"set {IR_LOWER_CLI_ENV} to a built rocke_ir_lower_cli",
         )
     path = Path(program).resolve()

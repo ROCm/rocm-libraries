@@ -33,6 +33,8 @@ from rocke.instances.common.topk_softmax import (
 from rocke.numeric import storage
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 
+pytestmark = pytest.mark.gpu
+
 # The arches this test has run green on; add one once it has.
 _RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
 

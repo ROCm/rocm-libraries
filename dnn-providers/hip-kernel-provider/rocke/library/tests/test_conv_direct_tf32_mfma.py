@@ -41,7 +41,7 @@ import numpy as np
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
-from rocke.tests.lanes import BINDING_LANE, CI_TEST_TOOLS, skip_until, skip_until_reason
+from rocke.tests.lanes import BUILD_VARIANT, skip_until, skip_until_reason
 from rocke.tests.llc import find_llvm_tool
 
 from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
@@ -573,7 +573,7 @@ def _disassemble(kernel, arch: str):
     objdump = find_llvm_tool("llvm-objdump")
     readelf = find_llvm_tool("llvm-readelf")
     if objdump is None or readelf is None:
-        skip_until(CI_TEST_TOOLS, reason="llvm-objdump / llvm-readelf not found")
+        skip_until(BUILD_VARIANT, reason="llvm-objdump / llvm-readelf not found")
     hsaco, _ = comgr.build_hsaco_from_llvm_ir(
         lower_kernel_to_llvm(kernel, arch=arch), isa=isa
     )
@@ -893,7 +893,7 @@ _BACKEND_KIND = {build_direct_conv_16c: "16c", build_direct_conv: "generic"}
 @unittest.skipIf(
     importlib.util.find_spec("rocke_library_engine") is None,
     skip_until_reason(
-        BINDING_LANE, reason="rocke_library_engine extension not importable"
+        BUILD_VARIANT, reason="rocke_library_engine extension not importable"
     ),
 )
 class TestDirectF32CrossEngine(unittest.TestCase):

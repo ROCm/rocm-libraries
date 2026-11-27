@@ -15,8 +15,10 @@ test tolerances are in the
 
 **Basis.** File and line anchors refer to `develop` at
 [4f60c1a74e0](https://github.com/ROCm/rocm-libraries/commit/4f60c1a74e0ca0d5f355386905fc59b5eded703d)
-(2026-11-19). Behaviour that exists only on an open branch is marked
-**pending** and listed once, in [Pending changes](#pending-changes).
+(2026-11-19). `helpers/quant.py` and `instances/common/mx_gemm.py` changed
+after that commit, so links into them name the function instead of lines.
+Behaviour that exists only on an open branch is marked **pending** and listed
+once, in [Pending changes](#pending-changes).
 
 ## How to use this folder
 
@@ -58,7 +60,7 @@ libraries" before Tests where there are any. The dispatch table is the union of 
 Spellings are those accepted by `normalize_dtype`
 ([core/dtypes.py:17-57](../../python/rocke/core/dtypes.py)), the IR type names
 ([core/ir.py:72-91](../../python/rocke/core/ir.py)), the quantization aliases
-([helpers/quant.py:90-111](../../python/rocke/helpers/quant.py)), the SDPA
+(`_QUANT_TYPE_ALIAS` in [helpers/quant.py](../../python/rocke/helpers/quant.py)), the SDPA
 dispatch dtypes and hipDNN names
 ([library/dispatch/sdpa/common.py:61-80](../../../library/dispatch/sdpa/common.py),
 [library/dispatch/sdpa/hipdnn.py:32-52](../../../library/dispatch/sdpa/hipdnn.py)),
@@ -138,22 +140,20 @@ smallest subnormal too; it also matches the rocKE host decode tables in
 The same byte means different values on different targets. The matrix cores
 and the conversion instructions of a target read and write one family.
 
-| target | fp8e4m3 | bf8e5m2 | in rocKE's table on develop |
+| target | fp8e4m3 | bf8e5m2 | in rocKE's table |
 |---|---|---|---|
 | gfx942 | e4m3 FNUZ | e5m2 FNUZ | yes |
 | gfx950 | OCP e4m3 | OCP e5m2 | yes |
-| gfx1201, gfx12-generic | OCP e4m3 | OCP e5m2 | no (also not in the pending table) |
+| gfx1250 | OCP e4m3 | OCP e5m2 | yes |
+| gfx1201, gfx12-generic | OCP e4m3 | OCP e5m2 | no: refused |
 
-rocKE's table on develop is `mx_gemm_element_format`
-([instances/common/mx_gemm.py:103-115](../../python/rocke/instances/common/mx_gemm.py)),
-built from the format constants in
-[helpers/mx_scale.py:89-95](../../python/rocke/helpers/mx_scale.py) (C++ twin:
-`cpp/helpers/mx_scale.cpp`). The gfx12 rows come from the public ROCm
-precision-support page
+rocKE's table is `fp8_element_format(dtype, arch)` in
+[helpers/fp8_encoding.py](../../python/rocke/helpers/fp8_encoding.py) (C++
+twin: `cpp/helpers/fp8_encoding.cpp`), the one home that `quant_max_abs` and
+`mx_gemm_element_format` read; it refuses any target it does not list. The
+gfx12 rows come from the public ROCm precision-support page
 (https://rocm.docs.amd.com/en/latest/reference/precision-support.html), which
 maps the FNUZ HIP types to gfx942 only and the OCP types to gfx950 and gfx12.
-The pending per-target table ([Pending changes](#pending-changes)) covers
-gfx942, gfx950 and one newer OCP target, and refuses the gfx12 targets.
 
 ### rocKE's f32 -> narrow policy at a glance
 
@@ -163,8 +163,7 @@ each class of input. Details and the reasons are in each type's file.
 | destination | NaN | +-inf | finite above max | rounding |
 |---|---|---|---|---|
 | f16, bf16 (`cast_f32_to`) | NaN | +-inf | +-inf | RNE |
-| fp8e4m3, bf8e5m2, decided policy (**pending**) | NaN | +-max of the target encoding | +-max | RNE |
-| fp8e4m3, bf8e5m2, develop today | see [datatype_fp8_e4m3.md](./datatype_fp8_e4m3.md#develop-today) | | | RNE |
+| fp8e4m3, bf8e5m2 (`quantize_scalar_f32`) | NaN | +-max of the target encoding | +-max | RNE |
 | i8 (`quantize_scalar_f32`) | -127 | +-127 | +-127 | RNE |
 | u8 (`cvt_f32_to_u8_sat`) | 0 | 0, 255 | 0, 255 | RNE |
 
@@ -298,9 +297,7 @@ in the [runbook](../optimization/optimization_runbook.md#14-dtypes-and-numerics)
 The single list of numerics behaviour that is decided but not yet on
 `develop`. When one lands, update the type's file and delete its row here.
 
-| change | where | affects |
-|---|---|---|
-| `quantize_scalar_f32` saturates fp8 / bf8 to the target's bound (240 / 57344 on gfx942, 448 / 57344 on gfx950) and keeps NaN; `quant_max_abs` takes the target; the per-target encoding table moves to one home, `rocke.helpers.fp8_encoding`. The packed routes that apply no clamp keep relying on the scale (see the fp8 file). On gfx950 the branch passes its Python tests (the C++ engine-binding tests were skipped) and the fused-MoE fp8 GPU test, and `quantize_scalar_f32` measured NaN kept, +-inf at +-bound and finite overflow at +-bound (for bf8 only positive overflow was measured). | branch `users/cgmillette/rocke/fp8-fnuz-bounds` | [datatype_fp8_e4m3.md](./datatype_fp8_e4m3.md), [datatype_bf8_e5m2.md](./datatype_bf8_e5m2.md), [datatype_int8_uint8.md](./datatype_int8_uint8.md) (`quant_max_abs` gains an `arch` argument) |
+None at present.
 
 ## Standards cited
 

@@ -12,6 +12,7 @@ from types import ModuleType
 
 import pytest
 from rocke.assets import library_root, platform_root
+from rocke.tests.cmake_embedding import configure_embedded_rocke
 
 pytestmark = pytest.mark.integration
 
@@ -34,6 +35,16 @@ def rocke(platform: Path) -> Path:
     return root
 
 
+# Every configure in this file installs the test content without GPU references.
+_TEST_INSTALL_OPTIONS = (
+    "-DBUILD_TESTING=OFF",
+    "-DROCKE_BUILD_PYENV=OFF",
+    "-DROCKE_INSTALL_TESTS=ON",
+    "-DROCKE_INSTALL_PYTHON_TESTS=ON",
+    "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+)
+
+
 def _configure(
     source: Path, build: Path, *options: str
 ) -> subprocess.CompletedProcess[str]:
@@ -44,11 +55,7 @@ def _configure(
             str(source),
             "-B",
             str(build),
-            "-DBUILD_TESTING=OFF",
-            "-DROCKE_BUILD_PYENV=OFF",
-            "-DROCKE_INSTALL_TESTS=ON",
-            "-DROCKE_INSTALL_PYTHON_TESTS=ON",
-            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+            *_TEST_INSTALL_OPTIONS,
             *options,
         ],
         capture_output=True,
@@ -60,17 +67,10 @@ def _configure(
 def _configure_embedded(
     rocke: Path, build: Path, repository: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
-    embedding = build.parent / "embedding source"
-    embedding.mkdir(parents=True, exist_ok=True)
-    (embedding / "CMakeLists.txt").write_text(
-        "cmake_minimum_required(VERSION 3.25.2)\n"
-        "project(rocke_embedding_contract LANGUAGES C CXX)\n"
-        f'add_subdirectory("{rocke.as_posix()}" rocke)\n'
-    )
     options = ["-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"]
     if repository is not None:
         options.append(f"-DROCM_LIBRARIES_ROOT={repository}")
-    return _configure(embedding, build, *options)
+    return configure_embedded_rocke(rocke, build, *_TEST_INSTALL_OPTIONS, *options)
 
 
 def _hipdnn_assets_module() -> ModuleType:

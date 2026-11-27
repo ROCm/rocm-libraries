@@ -43,6 +43,7 @@ from rocke.instances.common.matmul_nbits import (
     pack_i4_weights_for_matmul_nbits,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
+from rocke.tests.lanes import skip_needing_arch
 
 # The arches this test has run green on. MatMulNBits targets gfx1151 and
 # gfx1201 only; enable each once the test has run there.
@@ -134,11 +135,14 @@ def test_the_optimized_body_is_refused_off_gfx1201():
         build_matmul_nbits(spec, arch="gfx1151")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("name", sorted(_CASES))
 def test_matmul_nbits_matches_the_exact_product_on_gpu(gpu_arch, name):
     case = _CASES[name]
     if case.optimized and gpu_arch != "gfx1201":
-        pytest.skip(f"the optimized body is refused on {gpu_arch}")
+        skip_needing_arch(
+            ("gfx1201",), reason=f"the optimized body is refused on {gpu_arch}"
+        )
     spec = _spec(case)
     rng = np.random.default_rng(0x4B)
     a = rng.integers(-2, 3, (case.M, case.K)).astype(np.float16)

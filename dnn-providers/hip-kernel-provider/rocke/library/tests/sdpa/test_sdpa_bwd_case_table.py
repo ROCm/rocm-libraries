@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from rocke.numeric.sdpa_reference import sdpa_reference_bwd
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 from tests.sdpa import bwd_cases as BC
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
@@ -496,7 +496,7 @@ def test_reference_bwd_for_by_id():
 
 
 def test_to_torch_bwd_roundtrip_if_torch_available():
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
     for cid in (
         "bwd_layout_packed_qkv_mha_d128",
         "bwd_layout_strided_bshd_fp16_causal_tl",

@@ -25,7 +25,7 @@ import pytest
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.tests.gpu import current_device_arch_in
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_flex_mfma import (
     FwdFlexMfmaSpec,
@@ -348,7 +348,7 @@ def test_run_side_revalidation_refuses_split_c_too_large():
 def test_engines_agree_on_specs():
     """The C++ engine's validator, kernel name, grid and workspace bytes match
     Python's over the AOT grid and a set of rejected specs."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_fwd_flex_mfma_spec_to_dict
 
     specs = []
@@ -406,7 +406,7 @@ def test_engines_agree_on_specs():
 
 def test_binding_rejects_bad_input():
     """A missing, mistyped or partial problem raises in the binding."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_fwd_flex_mfma_spec_to_dict
 
     good = conv_direct_fwd_flex_mfma_spec_to_dict(FwdFlexMfmaSpec(problem=_problem()))
@@ -436,7 +436,7 @@ def test_binding_rejects_bad_input():
 
 def test_backend_lowers_through_both_engines():
     """``lower_conv_direct_fwd_flex_mfma`` gives the same .ll on both backends."""
-    import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import lower_conv_direct_fwd_flex_mfma
 
     spec = FwdFlexMfmaSpec(problem=_problem(), bk=128, split_c=1)
@@ -498,6 +498,7 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
     "kh,kw,pad,pad_w,stride,dil_h,dil_w,bk,split_c,N,H,W,C,K",

@@ -393,3 +393,31 @@ def test_named_argtype_compares_go_through_mask_helper():
         "named SCmpEQU32(sgpr(\"ArgType\"), ...) must go through cmpNamedArgTypeEq "
         "(mask 0xFF). Hits: %s" % hits
     )
+
+
+
+# The GL2 prefetch of a StreamK work item has to start at the work item's own
+# first K iteration, StreamKLocalStart unroll steps into the tile, as its TDM
+# loads do. StreamK forces GlobalSplitU=0, so without this offset the prefetch
+# starts at K=0 for every split of the tile. DataParallel work items always start
+# at K=0 and do not allocate StreamKLocalStart.
+_GL2_PREFETCH_TENSORS = ("A", "B", "MXSA", "MXSB")
+
+
+def _gl2_kstart_mul_re(tc):
+    return re.compile(
+        r"s_mul_i32\s+s\d+,\s*s\[sgprStreamKLocalStart\],\s*s\[sgprGL2PrefetchInc%s\]" % tc
+    )
+
+
+def test_streamk_gl2_prefetch_starts_at_work_item_k_start(emitted):
+    """Each prefetched tensor's start address adds StreamKLocalStart * GL2PrefetchInc."""
+    for r in emitted:
+        variant, src = r["variant"], r["src"]
+        offsetExpected = "PGL1" in variant and "StrategyStreamK" in variant
+        for tc in _GL2_PREFETCH_TENSORS:
+            found = _gl2_kstart_mul_re(tc).search(src) is not None
+            assert found == offsetExpected, (
+                f"{variant}: GL2 prefetch K-start offset for {tc} "
+                f"{'missing' if offsetExpected else 'unexpectedly emitted'}"
+            )

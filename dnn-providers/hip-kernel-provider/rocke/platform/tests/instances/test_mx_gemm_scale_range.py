@@ -61,7 +61,7 @@ from rocke.tests.engines import (
     lower_spec_with_all_engines,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.llvm_ir import KernelIR
 
 _NAN_CODE = 255
@@ -263,6 +263,7 @@ _RANDOM_SHAPES = (
 )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 @pytest.mark.parametrize(
     "M, N, K, tile_m, tile_n",
@@ -349,6 +350,7 @@ def _special_case(arch, mantissa):
     return table, a, a_codes, b, b_codes
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
     table, a, a_codes, b, b_codes = _special_case(mx_gpu_arch, mantissa)
@@ -368,6 +370,7 @@ def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
     assert not overflows[27, 28] and np.isfinite(got[27, 28])
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 def test_mx_gemm_codes_at_the_safe_bound_on_gpu(mx_gpu_arch, mantissa):
     """Every A and B code at the largest code the scaled MFMA takes directly,
@@ -818,7 +821,7 @@ def test_both_engines_refuse_invalid_specs(fields, message):
     with pytest.raises(ValueError, match=re.escape(message)):
         build_mx_gemm(spec, arch="gfx950")
     if not engine_modules_available():
-        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
+        skip_until(BUILD_VARIANT, reason="needs the rocke_engine binding")
     with pytest.raises(RuntimeError, match=re.escape(message)):
         lower_mx_gemm(spec, arch="gfx950", backend="cpp")
 

@@ -123,11 +123,11 @@ head_size=256, bf16, sliding-window extremes, bias combinations), `fmha`
 `tile_engine/ops/fmha/ck_fmha_testing_matrix.yaml` subset that fits the
 paged-attention constraints), and `all` (`default` + `creative`).
 
-## Latest results (MI355X, gfx950, ROCm 7.2 / torch 2.12)
+## Latest results (gfx950, ROCm 7.2 / torch 2.12)
 
 > ### Measurement conditions (read first — every number below depends on these)
 >
-> * **Only same-session A/B ratios are load-bearing.** This MI355X
+> * **Only same-session A/B ratios are load-bearing.** This gfx950
 >   auto-clocks within roughly **±25-30%** (no clock-lock is available on this
 >   node), so absolute microsecond values drift run-to-run and **cross-session
 >   absolute ms are NOT comparable**. Every ratio in the tables below is a
@@ -151,7 +151,7 @@ paged-attention constraints), and `all` (`default` + `creative`).
 > * **Re-measured 2026-06-19** on verified llvm22, `--attempts 30 --warmup 10`,
 >   median of 3 same-session runs.
 
-> **Re-baselined 2026-06-19 on this MI355X / gfx950 box, verified llvm22 /
+> **Re-baselined 2026-06-19 on this gfx950 box, verified llvm22 /
 > comgr 7.2** (torch imported first; `resolved_lib_rocm_version()==(7,2)`),
 > median of 3 same-session runs. Against AITER's Triton `unified_attention`
 > **on each backend's own selector**: geomean **1.04x (auto)** / **1.20x
@@ -205,7 +205,7 @@ under-measured CK lanes for some shapes.
 
 The numbers below were produced on **2026-06-19** with
 ``--attempts 30 --warmup 10`` and are the **per-cell median of 3 full
-harness runs** on this box (the MI355X is perf-noisy under load, so the
+harness runs** on this box (the gfx950 is perf-noisy under load, so the
 median rejects the occasional outlier launch). Re-running may shift any
 single cell by a few percent; the geomeans are stable.
 
@@ -601,7 +601,7 @@ limiter read (MFMA-busy ≈5%→18%), and the occupancy table (nw2 296 VGPR /
 Modes 0/1 (`iglp_opt` at the loop top) are ported to the gfx950 C twin; mode
 2 is Python-only and rejected by the C path.
 
-Measured on gfx950 MI355X (comgr llvm22, same-session vs the shipped auto
+Measured on gfx950 (comgr llvm22, same-session vs the shipped auto
 path across the gap-doc cohort), correctness `max_abs = 0.0` vs the shipped
 kernel on every shape. The speedup bundles the interleave hint **and** the
 nw2→nw4 widening vs the shipped nw2 baseline:
@@ -625,7 +625,7 @@ mutual-exclusion with `use_sched_barrier`), so it is *technically* legal on
 d64, multi-seq d128, sliding-window d128, and d256. It was measured on all
 of them. The hint is a pure scheduling change (`max_abs = 0.0` vs the same
 spec with it off), so the only question is timing. Adding **only** the hint
-to each cohort's **shipped** geometry (MI355X, vs the production baseline):
+to each cohort's **shipped** geometry (gfx950, vs the production baseline):
 
 | cohort (shipped geometry) | S1024 | S2048 | S4096 |
 |---------------------------|------:|------:|------:|

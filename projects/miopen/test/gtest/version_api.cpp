@@ -8,7 +8,9 @@
 
 // The reported version comes from the loaded library, the expected one from the headers
 // this test compiled against; a mismatch means the two were not built together.
-TEST(CPU_VersionApi_NONE, ReportedVersionMatchesHeader)
+using CPU_VersionApi_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_VersionApi_NONE, ReportedVersionMatchesHeader)
 {
     std::size_t major = 0, minor = 0, patch = 0;
     ASSERT_EQ(miopenGetVersion(&major, &minor, &patch), miopenStatusSuccess);
@@ -16,3 +18,5 @@ TEST(CPU_VersionApi_NONE, ReportedVersionMatchesHeader)
     EXPECT_EQ(minor, static_cast<std::size_t>(MIOPEN_VERSION_MINOR));
     EXPECT_EQ(patch, static_cast<std::size_t>(MIOPEN_VERSION_PATCH));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_VersionApi_NONE, testing::Values(0));

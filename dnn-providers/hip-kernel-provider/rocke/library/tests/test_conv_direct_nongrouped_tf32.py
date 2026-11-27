@@ -31,11 +31,12 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import BINDING_LANE, CI_TEST_TOOLS, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.llc import find_llvm_tool
 
 from builders.common.conv_reference import (
@@ -340,7 +341,7 @@ class TestNongroupedF32Build(unittest.TestCase):
 
         if importlib.util.find_spec("rocke_library_engine") is None:
             skip_until(
-                BINDING_LANE, reason="rocke_library_engine extension not importable"
+                BUILD_VARIANT, reason="rocke_library_engine extension not importable"
             )
         for arch, atoms in (
             ("gfx950", ("32x32x16", "16x16x32")),
@@ -415,7 +416,7 @@ def _disassemble(hsaco: bytes):
     objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
         skip_until(
-            CI_TEST_TOOLS, reason="llvm-objdump not found; cannot inspect the ISA"
+            BUILD_VARIANT, reason="llvm-objdump not found; cannot inspect the ISA"
         )
     readelf = find_llvm_tool("llvm-readelf")
     with tempfile.TemporaryDirectory() as tmp:
@@ -636,6 +637,7 @@ class TestNongroupedF32Gpu(unittest.TestCase):
                     )
                     self.assertTrue(ok, f"{case.id} {dt}: rel_err {rel:.3e}")
 
+    @pytest.mark.exhaustive
     def test_sweep_candidates(self):
         for dt in _F32_DTYPES:
             p = _problem(dt, N=2, W=48, kpg=128)

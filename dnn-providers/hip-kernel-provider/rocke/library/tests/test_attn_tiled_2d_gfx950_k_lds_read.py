@@ -38,7 +38,7 @@ from kernels.gfx950.attention_tiled_2d import (
     build_unified_attention_2d_tiled,
 )
 from rocke.tests.engines import lower_with_engine
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
 
@@ -374,7 +374,7 @@ def test_cpp_engine_emits_the_same_llvm_ir(path):
     # The C++ builder serves these kernels without Python; it must read and
     # scale fp8 K exactly as the Python builder does. Developer builds only:
     # CI does not build the rocke_engine binding.
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     spec = UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **FP8_K_IN_LDS)
     expected = lower_with_engine(
         build_unified_attention_2d_tiled(spec, arch="gfx950"), "gfx950", engine="python"
@@ -390,7 +390,7 @@ def test_cpp_engine_refuses_the_python_only_k_knobs(knob):
     # probe knob the Python builder reads off a spec subclass); it refuses each
     # rather than lower an unpadded, unswizzled K read. Developer builds only
     # (see the module note).
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     spec = UnifiedAttention2DTiledSpec(
         **_BASE, **_TRANSPOSED, **_LAID_OUT_K_PAD, use_q_reread=True
     )

@@ -43,7 +43,7 @@ were actually built -- no kernel-name parsing.
 
 - **ROCm**: HIP >= 6.0.3 (for gfx950: HIP >= 6.0.4)
 - **Python**: 3.10+ with `pandas`, `pyarrow`
-- **GPU**: ROCm-capable AMD GPU (MI250X, MI300X, MI355X, etc.)
+- **GPU**: ROCm-capable AMD GPU (gfx90a / gfx942 / gfx950, etc.)
 - **rocke**: importable on `PYTHONPATH` (the generator drives `rocke.sweep`
   and `rocke.sweep_bench` directly; no separate binary build is required)
 

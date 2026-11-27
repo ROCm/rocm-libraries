@@ -327,6 +327,7 @@ def _run(blob, kernel_name, x):
     return buffers[0], y, z
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_offset_pointers(route):
     arch = _gpu_arch()

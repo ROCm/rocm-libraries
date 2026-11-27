@@ -49,6 +49,7 @@ LIBRARY = ROCKE / "library"
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 from rocke.tests.host_cpus import available_cpus
+from rocke.tests.platform_build import generator_arguments
 
 # The rolled gate verifies one parametric recipe per axis at several values,
 # sampled and held out. Pinning the count here rather than in the CI workflow
@@ -128,14 +129,8 @@ def build_shared_engine(build_root: Path) -> tuple[Path, Path] | None:
         "-DCMAKE_BUILD_TYPE=Release",
         "-DROCKE_BUILD_SHARED_ENGINE=ON",
         "-DBUILD_TESTING=ON",
+        *generator_arguments(build_root),
     ]
-    # Ninja if it is available and this build tree has not already been
-    # configured with something else, since generators cannot be swapped.
-    if not (build_root / "CMakeCache.txt").exists():
-        from shutil import which
-
-        if which("ninja"):
-            configure.append("-GNinja")
     try:
         subprocess.run(configure, check=True, stdout=subprocess.DEVNULL)
         subprocess.run(

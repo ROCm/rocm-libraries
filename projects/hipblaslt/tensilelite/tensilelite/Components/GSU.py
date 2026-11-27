@@ -34,6 +34,7 @@ from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemain
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
 from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -228,6 +229,13 @@ class GSUOff(GSU):
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
         m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
+        # Swizzled-TDM operand: one K step of DepthU spans MI rows of the pre-swizzled layout,
+        # so the per-iteration advance is MI * DepthU * bpe (same factor GSUOn.graIncrements
+        # applies). Persistent data-parallel kernels select GSUOff (SingleBuffer), so without
+        # it the TDM address advances by a single row's worth and every K step re-reads the
+        # wrong data.
+        if tP.get("isSwizzledTDM"):
+          m *= SWIZZLE_BLOCK_ROWS     # the host swizzle blocks 16 rows whatever the WMMA shape
         if isMirrorIdx:
           m = -m
 
@@ -429,8 +437,15 @@ class GSUOn(GSU):
         module.add(gsucLabel)
         gsuOffsetStr = "gsuOffset = DepthU*accumulatedNumOfLoopCounterL"
         loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
-        module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
-                                    comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
+        if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+            # tail folding: GSU distributes ceil(K / DepthU) k-tiles (the partial one included)
+            module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr("SizesSum"), src1=depthU - 1, \
+                               comment="TailFolding: SizesSum + DepthU - 1"))
+            module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr(loopCounterName), shiftHex=log2(depthU), \
+                                        comment="TailFolding: s[%s] = ceil(s[sgprSizesSum] / %s)"%(loopCounterName, depthU)))
+        else:
+            module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
+                                        comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
         tmpSgprInfo = ContinuousRegister(idx=stmp, size=2)
         module.add(writer.calculateLoopNumIterOffsetGsu(kernel, loopCounterName, tmpSgprInfo))
         module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthUDiv, comment=gsuOffsetStr))

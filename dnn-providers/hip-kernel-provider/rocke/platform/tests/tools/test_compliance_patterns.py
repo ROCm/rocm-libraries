@@ -6,20 +6,22 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def _load_patterns_module() -> ModuleType:
     path = Path(__file__).resolve().parents[3] / "tools" / "compliance_patterns.py"
     if not path.is_file():
-        pytest.skip(
-            "rocke/tools/compliance_patterns.py is absent from this tree",
-            allow_module_level=True,
+        skip_until(
+            SOURCE_TREE,
+            reason="rocke/tools/compliance_patterns.py is absent from this tree",
         )
     spec = importlib.util.spec_from_file_location(
         "compliance_patterns_under_test", path
@@ -48,6 +50,47 @@ patterns = _load_patterns_module()
         ("dashboard on perf.example." + "amd.com:8080", "internal-company-host"),
         ("ran as Slurm " + "job 4242", "cluster-job-id"),
         ("card on bus id " + "0x83", "device-bus-id"),
+        ("measured on an M" + "I300X", "product-name"),
+        ("the NUM_XCDS_M" + "I350X constant", "product-name"),
+        ("a Rad" + "eon card", "product-name"),
+        ("an AMD Inst" + "inct accelerator", "product-name"),
+        ("the R" + "X 9070 board", "product-name"),
+        # GPU codenames.
+        ("a Na" + "vi 48 board", "chip-codename"),
+        ("the Ald" + "ebaran die", "chip-codename"),
+        ("an Arc" + "turus card", "chip-codename"),
+        ("the Aqua Van" + "jaram package", "chip-codename"),
+        ("a Sienna Cich" + "lid board", "chip-codename"),
+        ("a Navy Floun" + "der board", "chip-codename"),
+        ("a Dimgrey Cave" + "fish board", "chip-codename"),
+        ("a Beige Go" + "by board", "chip-codename"),
+        ("a Plum Bon" + "ito board", "chip-codename"),
+        ("a Wheat N" + "as board", "chip-codename"),
+        ("a Ve" + "ga 20 card", "chip-codename"),
+        # APU and CPU codenames that are not ordinary words.
+        ("a Str" + "ix Halo node", "chip-codename"),
+        ("a Str" + "ix Point laptop", "chip-codename"),
+        ("a Kra" + "ckan laptop", "chip-codename"),
+        ("a Hawk Po" + "int laptop", "chip-codename"),
+        ("a Dragon Ra" + "nge laptop", "chip-codename"),
+        ("a Fire Ra" + "nge laptop", "chip-codename"),
+        ("a Granite Ri" + "dge desktop", "chip-codename"),
+        # Codenames that are also ordinary words: capitalized, after AMD or
+        # before a hardware noun.
+        ("a Pho" + "enix APU", "chip-codename"),
+        ("a Gor" + "gon Point laptop", "chip-codename"),
+        ("a Med" + "usa Point APU", "chip-codename"),
+        ("a Rem" + "brandt laptop", "chip-codename"),
+        ("a Rap" + "hael CPU", "chip-codename"),
+        ("the Tur" + "in server", "chip-codename"),
+        ("a Gen" + "oa node", "chip-codename"),
+        ("Berg" + "amo cores", "chip-codename"),
+        ("a Si" + "ena platform", "chip-codename"),
+        ("AMD Ven" + "ice", "chip-codename"),
+        ("a Pol" + "aris GPU", "chip-codename"),
+        # Internal sites and node names.
+        ("only the Mar" + "kham nodes share $HOME", "internal-site-name"),
+        ("srun --nodelist=ct" + "r-node-b01-02", "internal-site-name"),
     ],
 )
 def test_each_rule_finds_its_leak(text: str, rule_id: str) -> None:
@@ -63,6 +106,19 @@ def test_each_rule_finds_its_leak(text: str, rule_id: str) -> None:
         "mail to someone@amd.com",
         "a public CI run: https://github.com/ROCm/example/actions/runs/1",
         "ran on gfx942",
+        "the 304-CU gfx942 part has 8 XCDs",
+        "an instinctive answer; reorder-cost instincts",
+        "clang built from https://github.com/Rad" + "eonOpenCompute/llvm-project",
+        "Tensile token M" + "I16x16x1 packs one MFMA atom",
+        "a semi-structured name: semi" + "300",
+        # Ordinary words that are also codenames, outside a hardware context.
+        "the old design rose like a phoenix from its ashes",
+        "lower-case phoenix server and turin node",
+        "a conference in Venice; the Polaris star; Medusa in the myth",
+        "Raphael painted it; Genoa and Siena are cities",
+        "a vegan meal; navigate the tree; the Turing machine",
+        "fire ranges and a hawk pointer",
+        "srun --nodelist=<node> on the <login-host>",
     ],
 )
 def test_public_text_has_no_hits(text: str) -> None:
@@ -143,6 +199,30 @@ def test_the_committed_agent_files_hold_no_compliance_hit() -> None:
     rocke = Path(patterns.__file__).resolve().parents[1]
     agents = rocke / "agents"
     if not agents.is_dir():
-        pytest.skip("rocke/agents is absent from this tree")
+        skip_until(SOURCE_TREE, reason="rocke/agents is absent from this tree")
     found = patterns.scan_paths([agents, rocke / "tools"], patterns.load_rules())
+    assert found == [], [hit.describe(str(path)) for path, hit in found]
+
+
+def test_the_tracked_rocke_tree_holds_no_compliance_hit() -> None:
+    """Every git-tracked file of the rocke tree passes the scan, so a new leak, a product
+    name included, fails this test wherever it is added. Untracked files (local notes,
+    build trees) are not scanned."""
+    rocke = Path(patterns.__file__).resolve().parents[1]
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    listed = subprocess.run(
+        [git, "-C", str(rocke), "ls-files", "-z", "."],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if listed.returncode != 0:
+        pytest.skip(f"rocke is not a git checkout: {listed.stderr.strip()}")
+    tracked = [rocke / name for name in listed.stdout.split("\0") if name]
+    present = [path for path in tracked if path.is_file()]
+    assert present, "git ls-files listed no file under rocke"
+    found = patterns.scan_paths(present, patterns.load_rules())
     assert found == [], [hit.describe(str(path)) for path, hit in found]
