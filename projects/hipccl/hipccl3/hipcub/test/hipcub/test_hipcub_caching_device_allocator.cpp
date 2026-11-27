@@ -30,10 +30,12 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/util_allocator.hpp"
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <hipcub/util_allocator.hpp>
 
 #if __has_include(<valgrind/valgrind.h>)
@@ -61,6 +63,12 @@
 // both the HIP and CUDA backends.
 struct stream_blocker
 {
+    // Upper bound on how long a stream stays blocked. It only matters if unblock() is never
+    // called, e.g. when HIP_CHECK calls exit() without running destructors. Without it the
+    // runtime's callback thread would wait forever and the process could hang at exit.
+    // It must be much longer than any intended blocked window in the test.
+    static constexpr std::chrono::seconds max_block_time{60};
+
     stream_blocker(const hipStream_t& stream)
         : m_stream(stream), m_state(std::make_shared<state>())
     {}
@@ -95,12 +103,17 @@ struct stream_blocker
 
     void unblock()
     {
+        bool timed_out;
         {
             std::lock_guard<std::mutex> lock(m_state->mutex);
             m_state->released = true;
+            timed_out         = std::exchange(m_state->timed_out, false);
         }
         m_state->cv.notify_all();
         printf("Unblocking Stream %lld\n", (long long) m_stream);
+        // If the wait gave up early, the stream ran ahead while the test thought it was
+        // blocked, so any checks made in that window are meaningless.
+        EXPECT_FALSE(timed_out) << "stream_blocker released the stream after timing out";
     }
 
 private:
@@ -109,6 +122,7 @@ private:
         std::mutex              mutex;
         std::condition_variable cv;
         bool                    released{true};
+        bool                    timed_out{false};
     };
 
     // Runs on a runtime thread: must not call any HIP/CUDA API.
@@ -117,7 +131,10 @@ private:
         std::unique_ptr<std::shared_ptr<state>> ref(static_cast<std::shared_ptr<state>*>(user_data));
         state& s = **ref;
         std::unique_lock<std::mutex> lock(s.mutex);
-        s.cv.wait(lock, [&s] { return s.released; });
+        if(!s.cv.wait_for(lock, max_block_time, [&s] { return s.released; }))
+        {
+            s.timed_out = true;
+        }
     }
 
     hipStream_t             m_stream{0};
