@@ -1086,12 +1086,19 @@ hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t            
                                              const hiptensorOperationDescriptor_t desc,
                                              const hiptensorPlanPreference_t      pref,
                                              uint64_t workspaceSizeLimit);
+hiptensorStatus_t elementwiseCheckPlan(const hiptensorOperationDescriptor_t desc);
 hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t*                     plan,
                                       const hiptensorOperationDescriptor_t desc,
                                       const hiptensorPlanPreference_t      pref,
                                       uint64_t                             workspaceSizeLimit)
 {
+    // Checked before the plan is allocated, so a failure leaves *plan unchanged.
+    if(auto status = elementwiseCheckPlan(desc); status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     (*plan)                     = new hiptensorPlan();
     hiptensorPlan_t newPlan     = *plan;
     newPlan->mRequiredWorkspace = workspaceSizeLimit;
