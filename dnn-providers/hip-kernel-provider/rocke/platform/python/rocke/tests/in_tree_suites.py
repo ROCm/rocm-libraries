@@ -20,8 +20,9 @@ SUITES: dict[str, tuple[str, ...]] = {
     "rocke.benchmark.gemm.tests": (),
     "rocke.benchmark.perf.tests": (),
 }
-# ``rocke.heuristics.tests`` and ``test_wavescope_pmc.py`` run in no lane;
-# ``rocke.tests.pending_lanes`` records why and what they wait for.
+# ``rocke.heuristics.tests`` runs in rocke_heuristics_pytest, a comprehensive-tier
+# entry, with packages rocKE does not depend on. ``test_wavescope_pmc.py`` runs in
+# no lane. ``rocke.tests.pending_lanes`` records what they wait for.
 # ``test_fp16_rcr_multigpu.py`` runs from its installed copy under ``tests/benchmark``,
 # which the installed ``rocke_pytest_*`` entries collect, so it is not run a second time.
 EXCLUDED_FILES: tuple[str, ...] = ("test_wavescope_pmc.py", "test_fp16_rcr_multigpu.py")

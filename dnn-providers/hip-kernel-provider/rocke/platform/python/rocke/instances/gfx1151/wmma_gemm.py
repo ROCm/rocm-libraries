@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""WMMA GEMM for gfx1151 (RDNA3.5 / Strix Halo) — the first RDNA kernel.
+"""WMMA GEMM for gfx1151 (RDNA3.5) — the first RDNA kernel.
 
 This is an **arch-specific** instance (hybrid layout): RDNA has no MFMA, so the
 algorithm is built around the gfx11 ``wmma_f32_16x16x16_f16`` instruction and a

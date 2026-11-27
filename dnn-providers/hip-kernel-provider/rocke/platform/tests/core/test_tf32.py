@@ -41,7 +41,7 @@ from rocke.instances.gfx942.tf32_mma_probe import (
     Tf32MmaProbeSpec,
     build_tf32_mma_probe,
 )
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until, skip_until
 
 pytestmark = pytest.mark.filterwarnings(
     "error::rocke.core.lower_llvm.ArchDomainWarning"
@@ -217,7 +217,7 @@ def test_probe_rejects_incompatible_result_layout(m, mode, field):
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 def test_both_builders_and_lowerers(m, mode):
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec(m, mode))
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
@@ -540,7 +540,10 @@ def tf32_recipe_replay_cli():
 
     resolved = online.resolve_replay_cli_path(build=False)
     if resolved is None:
-        pytest.skip("Set ROCKE_REPLAY_CLI to the prebuilt native replay CLI")
+        skip_until(
+            BUILD_VARIANT,
+            reason="Set ROCKE_REPLAY_CLI to the prebuilt native replay CLI",
+        )
     return Path(resolved)
 
 

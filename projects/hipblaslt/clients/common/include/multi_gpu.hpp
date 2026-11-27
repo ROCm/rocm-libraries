@@ -268,14 +268,6 @@ namespace hipblaslt_bench
         std::vector<int> m_peers;
     };
 
-    inline hipblasStatus_t rendezvous_allgather_trampoline(void*       userData,
-                                                           const void* sendbuf,
-                                                           void*       recvbuf,
-                                                           size_t      bytesPerRank)
-    {
-        return static_cast<TcpRendezvous*>(userData)->allgather(sendbuf, recvbuf, bytesPerRank);
-    }
-
     inline CollectiveAgreement make_agreement(TcpRendezvous& rendezvous, uint32_t world)
     {
         CollectiveAgreement agreement;

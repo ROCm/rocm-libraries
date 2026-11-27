@@ -676,13 +676,7 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
     op_name = concrete_name;
     if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_NOTIMPL,
-                      "%s requires llvm23 (ROCm 7.13+), got %s",
-                      op_name,
-                      rocke_llvm_flavor_name(L->flavor));
-    }
+        rocke_ll_refuse_llvm23_matrix_op(L, spec->op_id);
     if(op->num_operands != 5 || op->num_results != 1)
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_name);

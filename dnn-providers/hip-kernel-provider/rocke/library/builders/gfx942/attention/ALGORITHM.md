@@ -1,6 +1,6 @@
 # gfx942 unified attention, from the math up
 
-A derivation of what the **gfx942 (CDNA3 / MI300X) tiled SDPA-forward** kernels
+A derivation of what the **gfx942 (CDNA3) tiled SDPA-forward** kernels
 compute, and *why they are shaped the way they are* — the online-softmax
 recurrence, the paged-KV layout the example feeds them, and the CDNA3-specific
 matmul choice (the transposed-x8 flash regime) that the harness exercises.

@@ -78,7 +78,7 @@ $$
 **Intensity $\approx M$.** A tall, dense matmul (large $M$) reuses each weight
 across many rows and is compute-bound; a decode matmul ($M=2$) reuses each weight
 across only 2 rows, so it is **pinned at intensity $\approx 2$ FLOP/byte** — far
-below the part's compute:bandwidth ratio. On MI355X (≈8 TB/s HBM, ≈2.5 PFLOP/s
+below the part's compute:bandwidth ratio. On gfx950 (≈8 TB/s HBM, ≈2.5 PFLOP/s
 bf16) the crossover intensity is ~300 FLOP/byte; at 2 we are ~150× below it. The
 matmul *cannot* be compute-bound. **The whole campaign is therefore about
 streaming $B$'s 32 MiB as fast as the part allows, and nothing else moves the
@@ -209,7 +209,7 @@ neutral-to-negative, but it frees the VGPRs that let `tile_k` reach 1024 — and
 deep-K is what cuts the K-loop trip count. DTLA is enabling, not directly winning.
 
 ### 7.2 — Chiplet swizzle, §7
-MI355X has **8 XCDs**, each with its own L2. The default WG dispatch scatters
+gfx950 has **8 XCDs**, each with its own L2. The default WG dispatch scatters
 consecutive CTAs across XCDs, so each XCD's L2 sees uncorrelated traffic. At
 $M=2$ the **same 16 KiB $A$ tile is reused by every CTA in the M-row** — exactly
 the cross-CTA reuse an L2 can hold. The swizzle (`chiplet_aware_super_tile_dynamic`,

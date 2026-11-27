@@ -21,7 +21,9 @@ namespace rocke_conv_bind
 {
 
 /* Overwrite the fields of `p` present in the "problem" sub-dict `d`; an absent
- * key keeps the value already in `p`. */
+ * key keeps the value already in `p`. A key set to None is refused (dict_int
+ * casts it to int): Python has no None default for these fields either, and a
+ * None there fails its build. */
 inline void fill_conv_problem(rocke_conv_problem_t* p, const pybind11::dict& d)
 {
     using rocke_bind::dict_bool;

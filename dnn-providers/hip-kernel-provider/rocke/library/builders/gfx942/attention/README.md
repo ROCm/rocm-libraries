@@ -1,7 +1,7 @@
 # gfx942 unified attention — parity + benchmark harness
 
-A torch-reference **parity + latency** harness for the **gfx942 (CDNA3 /
-MI300X)** unified-attention SDPA-forward kernels: `attention_tiled_2d` for
+A torch-reference **parity + latency** harness for the **gfx942 (CDNA3)**
+unified-attention SDPA-forward kernels: `attention_tiled_2d` for
 prefill and `attention_tiled_3d` for the split-KV decode path, both in
 `kernels.gfx942.attention_tiled_2d` / `..._tiled_3d`. Unlike the gfx950
 attention harness it has **no Triton/AITER dependency** — the oracle is an fp32
@@ -28,7 +28,7 @@ torch reference — so it runs on any box with torch + a gfx942 GPU.
 
 ## Prerequisites
 
-- A gfx942 (CDNA3 / MI300X) GPU and a ROCm PyTorch build (`torch.cuda` must
+- A gfx942 (CDNA3) GPU and a ROCm PyTorch build (`torch.cuda` must
   resolve to the HIP device).
 - The repo's `python/` on `PYTHONPATH` (commands below set it).
 - No numpy required: the harness uses plain Python lists for the block tables so
@@ -201,7 +201,7 @@ echoed at startup):
   slightly different masking and are reported for context only.
 - **Full sweeps are slow.** `final_shapes_check.py` runs the full set × 4 timing
   cells × `--reps` × `--iters`, plus the fp32 reference on large (up to `S8192`)
-  shapes — tens of minutes on a single MI300X. Scope it with `--groups`,
+  shapes — tens of minutes on a single gfx942 GPU. Scope it with `--groups`,
   `--iters`, and `--reps`. Cells whose spread exceeds ~10% are flagged `noisy`.
 - **`SKIP (unsupported on gfx942)`.** `parity_unified_attention.py` raises
   `NotImplementedError` (and skips) when a *narrow*-path shape fails the

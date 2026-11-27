@@ -79,7 +79,7 @@ def current_device_arch() -> str:
 
 def current_device_arch_in(arches: Collection[str], subject: str = "this test") -> str:
     """The current GPU's arch when it is one of `arches`; otherwise skip, naming `subject`
-    and the GPU found, as waiting for the runner lanes of `arches` when no CI runner has
+    and the GPU found, as waiting for the runner hardware when no CI runner has
     any of them (``rocke.tests.lanes.arch_skip_reason``). Fails instead when
     ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch in `arches` and the current GPU is not
     that arch (see the module docstring)."""

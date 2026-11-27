@@ -5,7 +5,7 @@
 
 Direct port of CK Tile's ``BatchedTransposePipeline``
 (``include/ck_tile/ops/batched_transpose``) "pipeline=0" path that
-the reference C++ kernel measures at ~5.5 TB/s on MI355X for a
+the reference C++ kernel measures at ~5.5 TB/s on gfx950 for a
 4096x4096 fp16 transpose. The win comes from a single observation:
 
     A square sub-tile owned by one lane can be transposed entirely
@@ -75,7 +75,7 @@ This v2 replaces the manual address arithmetic with a CK Tile-style
   ``ds_swizzle_xor``-family proposal below.)
 
 Measured perf vs CK Tile's ``tile_example_batched_transpose
--pipeline=0`` on MI355X (gfx950, fp16, square shapes, 2000-iter tight
+-pipeline=0`` on gfx950 (fp16, square shapes, 2000-iter tight
 loop, ``no_fence`` launches so per-call overhead doesn't dominate):
 
 ==================== ============== ============== ===========

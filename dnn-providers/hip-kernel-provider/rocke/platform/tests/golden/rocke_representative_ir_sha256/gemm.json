@@ -1,6 +1,6 @@
 {
   "aliases": {},
-  "fingerprint": "2e4946c15e9d354a4561a8d2a0154baf7f006f437854245b37df54fcfa5502f0",
+  "fingerprint": "9a3fd1c41c4e3059f07ac4db2bf84cb5c7b0c240d79bae8feefd630c93d05bc5",
   "flavors": {
     "llvm20": {
       "cases": {
@@ -208,35 +208,35 @@
       "expected_failures": {
         "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/bf16/k128": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/bf16/k256": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/fp16/k128": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/fp16/k256": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm20",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         }
       }
     },
@@ -446,35 +446,35 @@
       "expected_failures": {
         "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/bf16/k128": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/bf16/k256": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/fp16/k128": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         },
         "gemm/gfx1250/nvfp4/fp16/k256": {
           "message": "tile.wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16 requires llvm23 (ROCm 7.13+), got llvm22",
-          "type": "NotImplementedError"
+          "type": "LlvmProfileRefusal"
         }
       }
     },

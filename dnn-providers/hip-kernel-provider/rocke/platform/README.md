@@ -52,7 +52,7 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 
 ```bash
 export ROCKE=$(pwd)        # run from this rocke/platform/ directory
-export PYTHONPATH=$ROCKE/Python
+export PYTHONPATH=$ROCKE/python
 ```
 
 ## Build
@@ -77,7 +77,7 @@ cmake -S "$ROCKE/cpp/bindings" -B /tmp/rocke_pybind -DCMAKE_BUILD_TYPE=Release \
   -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
   -DPYTHON_EXECUTABLE="$(which python)"
 cmake --build /tmp/rocke_pybind -j$(nproc)
-export PYTHONPATH="$ROCKE/Python:/tmp/rocke_pybind"   # so `import rocke_engine` resolves
+export PYTHONPATH="$ROCKE/python:/tmp/rocke_pybind"   # so `import rocke_engine` resolves
 ```
 
 The default `cpp` backend lowers through the shared engine `librocke` (the
@@ -139,7 +139,7 @@ cmake -S "$ROCKE" -B /tmp/rocke && cmake --build /tmp/rocke -j$(nproc)
 ctest --test-dir /tmp/rocke --output-on-failure
 
 # 4) On-GPU numeric (needs a HIP device; use sudo -E on a shared box)
-sudo -n -E env PYTHONPATH="$ROCKE/Python" python \
+sudo -n -E env PYTHONPATH="$ROCKE/python" python \
   "$ROCKE/tests/instances/differential/numeric.py" --arch gfx950
 ```
 

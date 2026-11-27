@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_gfx1151_deep_fused_conv_pool.h -- PUBLIC C99 API for the gfx1151
- * (RDNA3.5 / Strix Halo, wave32, WMMA 16x16x16) GENUINE-int8/int4 deep-fused
+ * (RDNA3.5, wave32, WMMA 16x16x16) GENUINE-int8/int4 deep-fused
  * conv0 -> conv1 -> 2x2/s2 maxpool kernel, ported from
  *   rocke/instances/gfx1151/deep_fused_conv_pool.py  (3238 LOC).
  *

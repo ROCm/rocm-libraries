@@ -42,7 +42,10 @@ from rocke.core.ir import (
 )
 from rocke.core.isa import backend as isa_backend
 from rocke.core.isa.backend import BUILDER_ONLY_MMA_OP_IDS
-from rocke.core.isa.matrix_call_lowering import emit_matrix_call
+from rocke.core.isa.matrix_call_lowering import (
+    emit_matrix_call,
+    llvm23_matrix_op_refusal,
+)
 from rocke.core.isa.matrix_calls import (
     MATRIX_CALLS,
     Imm,
@@ -857,7 +860,9 @@ def _call_argument_types(text: str, intrinsic: str) -> list[str]:
 @pytest.mark.parametrize("op_id", sorted(MATRIX_CALLS))
 def test_every_entry_lowers_to_its_declaration_in_both_engines(op_id, flavor):
     """For every table entry: the module declares the derived text and the call
-    passes each argument as the type that declaration names."""
+    passes each argument as the type that declaration names. At a flavor the
+    entry does not lower at (``MatrixCall.lowers_at``), both engines refuse it
+    with the same message instead."""
     call = MATRIX_CALLS[op_id]
     arch = next(a for a in known_arches() if ArchTarget.from_gfx(a).mma.by_op_id(op_id))
     op = ArchTarget.from_gfx(arch).mma.by_op_id(op_id)
@@ -868,6 +873,15 @@ def test_every_entry_lowers_to_its_declaration_in_both_engines(op_id, flavor):
         *(_value_of(b, _operand_type(call.form(x), flavor)) for x in (A, B, C)),
     )
     b.global_store(out, b.thread_id_x(), b.vec_extract(result, 0))
+    if not call.lowers_at(flavor):
+        assert_both_engines_reject(
+            b.kernel,
+            arch,
+            NotImplementedError,
+            llvm23_matrix_op_refusal(op_id, flavor),
+            flavor,
+        )
+        return
     text = lower_with_both_engines(b.kernel, arch, flavor)
 
     assert call.declaration(flavor) in text.splitlines()

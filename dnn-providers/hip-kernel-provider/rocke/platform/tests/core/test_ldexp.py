@@ -182,6 +182,7 @@ _CASES = [
 ]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_results_equal_numpy_ldexp(route):
     arch = current_device_arch()

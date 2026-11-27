@@ -29,6 +29,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     is_valid_spec,
 )
 from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import TICKET, skip_until
 
 
 def _scaled_atom(dtype="fp8", scale16=False):
@@ -103,7 +104,7 @@ def _assert_scaled_lowering_rejects(kernel, message, engine, *, hip_message=None
     neutral = any(op.name == "tile.mma" for op in kernel.body.ops)
     if engine == "native":
         if not neutral:
-            pytest.skip("native LLVM uses neutral MMA dispatch")
+            skip_until(TICKET, reason="native LLVM uses neutral MMA dispatch")
         native = native_engine_or_skip()
         with pytest.raises(RuntimeError) as caught:
             native.lower_serialized_ir(ir, arch="gfx1250", flavor="llvm23")

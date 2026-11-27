@@ -27,7 +27,7 @@ from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
 from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
-from rocke.tests.lanes import CI_TEST_TOOLS, skip_until_reason
+from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 from . import _attention_bwd_resources, _parallel_compile
 from ._attention_bwd_resources import compile_or_skip
@@ -42,7 +42,7 @@ OPTION = "-amdgpu-mfma-vgpr-form"
 REFUSAL = f"kernel 'probe' needs the compiler option '-mllvm {OPTION}'"
 SKIP_REASON = f"loaded compiler cannot build this kernel: {REFUSAL}"
 # A missing or refusing tool skips as waiting for the CI test environment.
-TOOLS_SKIP = skip_until_reason(CI_TEST_TOOLS, reason=SKIP_REASON)
+TOOLS_SKIP = skip_until_reason(BUILD_VARIANT, reason=SKIP_REASON)
 
 
 def _compiler(llvm_major: int) -> CompilerInfo:
@@ -207,7 +207,7 @@ def test_other_value_errors_propagate_from_the_processor_policy(
             unittest.SkipTest,
             "^"
             + skip_until_reason(
-                CI_TEST_TOOLS, reason="HSACO introspection unavailable: missing tool"
+                BUILD_VARIANT, reason="HSACO introspection unavailable: missing tool"
             ),
         ),
         (

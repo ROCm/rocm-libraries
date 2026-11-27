@@ -3,9 +3,8 @@
 
 """Grid / workgroup-id remapping helpers for chiplet locality.
 
-The AMD MI300X/MI325X/MI350X are multi-die chiplet GPUs: the global L2
-(and on MI350X, the L3) is partitioned across XCDs (Accelerated Compute
-Dies). The default linear-blockIdx assignment round-robins workgroups
+gfx942 and gfx950 GPUs are multi-die chiplet GPUs: the L2 is
+partitioned across XCDs (Accelerated Compute Dies). The default linear-blockIdx assignment round-robins workgroups
 across XCDs (WG 0 -> XCD 0, WG 1 -> XCD 1, ...), which is the WORST case
 for L2 reuse — two consecutive output tiles (which usually share input
 rows) end up on different XCDs and have to refetch the same data
@@ -31,11 +30,10 @@ from typing import Tuple
 from ..core.ir import IRBuilder, Value
 
 
-# Default chiplet counts per AMDGPU family. Override at the call site
-# for other GPUs.
-NUM_XCDS_MI300X = 8  # CDNA3
-NUM_XCDS_MI325X = 8  # CDNA3
-NUM_XCDS_MI350X = 8  # CDNA4 (note: physical XCDs may be more)
+# XCD (chiplet) count per gfx target. NUM_XCDS_GFX942 is the 304-CU gfx942
+# part; the 228-CU gfx942 part has 6 XCDs, so pass num_xcds=6 there.
+NUM_XCDS_GFX942 = 8
+NUM_XCDS_GFX950 = 8
 
 
 def chiplet_transform_chunked(
@@ -43,7 +41,7 @@ def chiplet_transform_chunked(
     wgid: Value,
     *,
     num_wgs: int,
-    num_xcds: int = NUM_XCDS_MI300X,
+    num_xcds: int = NUM_XCDS_GFX942,
     chunk_size: int = 64,
 ) -> Value:
     """Remap a linear WGID so every ``chunk_size`` consecutive WGs land
@@ -73,8 +71,8 @@ def chiplet_transform_chunked(
     num_xcds
         XCD count for the GPU. Use one of the ``NUM_XCDS_*`` constants.
     chunk_size
-        WGs per XCD per block. 64 is a good default for MI300X /
-        MI350X; smaller values give finer locality at the cost of
+        WGs per XCD per block. 64 is a good default for gfx942 /
+        gfx950; smaller values give finer locality at the cost of
         more cross-XCD spills.
 
     Returns
@@ -186,7 +184,7 @@ def chiplet_transform_chunked_dynamic(
     wgid: Value,
     *,
     num_wgs: Value,
-    num_xcds: int = NUM_XCDS_MI300X,
+    num_xcds: int = NUM_XCDS_GFX942,
     chunk_size: int = 64,
 ) -> Value:
     """Runtime variant of :func:`chiplet_transform_chunked`.
@@ -441,7 +439,7 @@ def chiplet_aware_super_tile_dynamic(
     num_pid_m: Value,
     num_pid_n: Value,
     wgm: int = 8,
-    num_xcds: int = NUM_XCDS_MI300X,
+    num_xcds: int = NUM_XCDS_GFX942,
     chunk_size: int = 64,
 ) -> SuperTileSwizzleResult:
     """Runtime composition of chiplet remap + super-tile swizzle.
@@ -475,7 +473,7 @@ def chiplet_aware_super_tile(
     num_pid_m: int,
     num_pid_n: int,
     wgm: int = 8,
-    num_xcds: int = NUM_XCDS_MI300X,
+    num_xcds: int = NUM_XCDS_GFX942,
     chunk_size: int = 64,
 ) -> SuperTileSwizzleResult:
     """One-shot composition: chiplet remap then super-tile swizzle.
@@ -510,7 +508,7 @@ def python_chiplet_transform_chunked(
     wgid: int,
     *,
     num_wgs: int,
-    num_xcds: int = NUM_XCDS_MI300X,
+    num_xcds: int = NUM_XCDS_GFX942,
     chunk_size: int = 64,
 ) -> int:
     """Pure-Python reference for :func:`chiplet_transform_chunked`.

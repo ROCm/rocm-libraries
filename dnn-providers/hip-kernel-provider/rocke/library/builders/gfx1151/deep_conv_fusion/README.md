@@ -1,7 +1,7 @@
 # gfx1151 Deep-Fused Conv + MaxPool (genuine int8/int4)
 
 A single-kernel, on-chip fusion of the `encoder_0` image-encoder block for
-**gfx1151** (Strix Halo, Radeon 8060S, RDNA3.5, wave32, `wmma_f32_16x16x16_f16`),
+**gfx1151** (RDNA3.5, wave32, `wmma_f32_16x16x16_f16`),
 the wave32/WMMA sibling of the gfx950 (CDNA/MFMA/wave64) prototype in
 `../../gfx950/deep_conv_fusion/`. It computes the entire chain in one launch and
 never writes the conv0 or conv1 intermediate to HBM:
@@ -167,7 +167,7 @@ ledger and the same-session-only discipline behind every percentage.
 
 ## Arch notes
 
-- **Target `gfx1151`** (Strix Halo / Radeon 8060S, RDNA3.5, wave32). The CLI
+- **Target `gfx1151`** (RDNA3.5, wave32). The CLI
   accepts only `gfx1151` or `gfx11-generic` and rejects others with exit code 2.
 - **Board ELFs are built as `gfx11-generic`**, not `gfx1151` — the `--emit-hsaco`
   / board path uses `gfx11-generic`.

@@ -17,8 +17,8 @@ Ranges are in the [Quick values](./README.md#integer-formats) table.
 
 ## f32 -> i8 quantization
 
-`quantize_scalar_f32(b, x, *, inv_scale, qdtype="i8")`
-([helpers/quant.py:167-232](../../python/rocke/helpers/quant.py)):
+`quantize_scalar_f32(b, x, *, inv_scale, qdtype="i8", arch)` in
+[helpers/quant.py](../../python/rocke/helpers/quant.py):
 
 ```text
 scaled  = x * inv_scale
@@ -33,8 +33,8 @@ q       = cvt_f32_to_i8_sat(clamped)      # RNE, then [-128, 127]
 | finite in range | round to nearest, ties to even |
 
 The range is the symmetric -127 .. 127 of CK Tile's SmoothQuant, not the
-type's -128, so `-q` never overflows. The bound comes from `quant_max_abs("i8")`
-(pending: `quant_max_abs("i8", arch=...)`, still 127).
+type's -128, so `-q` never overflows. The bound comes from
+`quant_max_abs("i8", arch=...)`, 127 on every target.
 
 ### The raw conversion is defined only in range
 
@@ -81,7 +81,7 @@ must be avoided, unsigned wraps, the matrix accumulator wraps.
 
 `dequantize_scalar_to_f32(b, q, *, scale)`: sign-extend to i32, `sitofp`
 (exact for every i8), multiply by the forward scale
-([helpers/quant.py:235-274](../../python/rocke/helpers/quant.py)).
+(`dequantize_scalar_to_f32` in [helpers/quant.py](../../python/rocke/helpers/quant.py)).
 
 ## Tests
 
@@ -89,7 +89,7 @@ must be avoided, unsigned wraps, the matrix accumulator wraps.
 |---|---|
 | u8 ops lower to their unsigned forms; GPU results match numpy `uint8` | [tests/core/test_u8_arith.py](../../tests/core/test_u8_arith.py) |
 | SmoothQuant and RMSNorm-quant emission in both engines | [tests/instances/parity/smoothquant_emit.py](../../tests/instances/parity/smoothquant_emit.py), [tests/instances/parity/add_rmsnorm2d_rdquant_emit.py](../../tests/instances/parity/add_rmsnorm2d_rdquant_emit.py) |
-| **pending**: the i8 path clamps without a NaN select and NaN gives -127 on the GPU | `tests/core/test_dtypes.py` on the pending branch |
+| the i8 path clamps without a NaN select and NaN gives -127 on the GPU | [tests/core/test_dtypes.py](../../tests/core/test_dtypes.py) (`test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu`) |
 
 ## How to decide
 

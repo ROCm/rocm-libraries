@@ -32,7 +32,7 @@ The sort benchmarked here is the *dynamic* path overhead.
 Key constraint: A3B has 128 experts → sort_block_size must be ≥ 128.
 The default is 64; setting sort_block_size=128 is required.
 
-Results (MI355X / gfx950, T=2, E=128, K=8)
+Results (gfx950, T=2, E=128, K=8)
 --------------------------------------------
   Backend                      Latency   vs AITER
   AITER moe_sorting_opus_fwd    6.1µs      1.00×

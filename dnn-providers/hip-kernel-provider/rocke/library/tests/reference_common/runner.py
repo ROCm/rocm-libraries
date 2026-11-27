@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .numeric import write_json
-from .session import _ACTIVE, _NO_TORCH
+from .session import _ACTIVE, _NO_TORCH, REQUEST_TIMEOUT_SECONDS
 
 
 def run_worker(
@@ -25,7 +25,7 @@ def run_worker(
     library: Path | None,
     work: Path,
     module: str,
-    timeout: float = 300,
+    timeout: float | None = None,
 ) -> tuple[list[np.ndarray], dict]:
     work.mkdir(parents=True, exist_ok=False)
     request = dict(request, platform_root=str(platform.resolve()))
@@ -71,7 +71,7 @@ def run_worker(
             env=env,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=REQUEST_TIMEOUT_SECONDS if timeout is None else timeout,
         )
         if completed.returncode:
             raise RuntimeError(

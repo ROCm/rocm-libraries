@@ -1,7 +1,7 @@
 # The square GEMM, from the math up
 
 This is the algorithm the kernel computes and *why* its operand-streaming
-schedule is shaped the way it is on **MI355X / gfx950 (CDNA4)**. The
+schedule is shaped the way it is on **gfx950 (CDNA4)**. The
 [`README.md`](README.md) is the runnable field guide and the optimization ladder;
 this file is the specification, the data layout, and the precise reasoning behind
 each streaming lever — especially the LDS bank-conflict arithmetic, which is the

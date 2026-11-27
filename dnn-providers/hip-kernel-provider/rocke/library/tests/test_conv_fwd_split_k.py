@@ -19,8 +19,9 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import pytest
 from rocke.tests.lanes import (
-    BINDING_LANE,
+    BUILD_VARIANT,
     arch_skip_reason,
     skip_until,
 )
@@ -1026,7 +1027,7 @@ def _engine_or_skip(case):
         import rocke_library_engine  # type: ignore
     except ModuleNotFoundError:
         skip_until(
-            BINDING_LANE,
+            BUILD_VARIANT,
             reason="rocke_library_engine (the conv C++ extension) is not built",
         )
     return rocke_library_engine
@@ -1208,7 +1209,7 @@ class TestSplitKReduceEngine(unittest.TestCase):
             import rocke_library_engine  # type: ignore
         except ModuleNotFoundError:
             skip_until(
-                BINDING_LANE,
+                BUILD_VARIANT,
                 reason="rocke_library_engine (the conv C++ extension) is not built",
             )
         spec = dict(dtype_d="bf16", vec=4, name="x" * 300)
@@ -1523,6 +1524,7 @@ _MFMA_CASES = [
 ]
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKNumerics(unittest.TestCase):
     def test_cases(self):
@@ -1542,6 +1544,7 @@ class TestSplitKNumerics(unittest.TestCase):
                             )
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKPrefetchGlobalRegsNumerics(unittest.TestCase):
     """The MFMA split on the register-prefetch K loop (prefetch_global_regs).
@@ -1623,6 +1626,7 @@ _CLUSTER_CASES = [
 ]
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_CLUSTER_SKIP, _GPU_CLUSTER_SKIP)
 class TestClusterSplitKNumerics(unittest.TestCase):
     def test_cases(self):

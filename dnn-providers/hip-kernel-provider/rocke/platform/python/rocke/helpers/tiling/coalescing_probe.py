@@ -39,8 +39,8 @@ __all__ = [
 # raises. Values are the L2 line size for the CDNA parts we have measured against; re-verify before adding a
 # new arch (do not assume gfx90a carries over -- the user's standing rule).
 ARCH_LINE_BYTES = {
-    "gfx90a": 128,  # MI210/MI250 (CDNA2)
-    "gfx942": 128,  # MI300 (CDNA3)
+    "gfx90a": 128,  # CDNA2
+    "gfx942": 128,  # CDNA3
 }
 
 

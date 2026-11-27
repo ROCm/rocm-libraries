@@ -57,6 +57,24 @@ def _spec(idx: int) -> Img2ColSpec:
             block_tile_k=128,
             vec_k=4,
         )
+    if idx == 6:
+        # Grouped: both engines' spec checks refuse it (single group only).
+        return Img2ColSpec(
+            problem=ConvProblem(N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, groups=2),
+            block_tile_m=8,
+            block_tile_k=128,
+            vec_k=4,
+        )
+    if idx == 7:
+        # 3-D: both engines' spec checks refuse it (2-D only).
+        return Img2ColSpec(
+            problem=ConvProblem(
+                N=1, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, Di=4, Z=3, sD=1, pD=0, dD=1
+            ),
+            block_tile_m=4,
+            block_tile_k=64,
+            vec_k=1,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

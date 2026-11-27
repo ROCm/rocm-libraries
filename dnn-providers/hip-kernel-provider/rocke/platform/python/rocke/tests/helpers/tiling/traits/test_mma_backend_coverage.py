@@ -54,8 +54,11 @@ import pytest
 from rocke.assets import platform_root
 from rocke.core.arch import ArchTarget, MmaOp
 from rocke.core.arch.mfma_scale import gfx950_scaled_mfma, matrix_layout
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, IRBuilder, PtrType, VectorType, dtype_to_ir_type
+from rocke.core.isa.matrix_calls import MATRIX_CALLS
+from rocke.core.llvm_profile import LlvmProfileRefusal, supports_llvm23_target_ops
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.helpers.mma_io import mma_operand_ir_type
 from rocke.helpers.tiling.fragments import fragment_length
@@ -81,7 +84,7 @@ from rocke.tests.ir_validity import (
     require_arbiter_llvm_flavor,
 )
 from rocke.tests.lane_maps import lane_placements
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 _CATALOG = load_mma_traits()
 _ROWS = sorted(_CATALOG.by_op_id.values(), key=lambda row: row.op_id)
@@ -98,7 +101,7 @@ def _catalog_tool() -> ModuleType:
     tools = platform_root() / "tools"
     if not (tools / "check_mma_catalog.py").is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="platform/tools is not installed beside rocke (source tree only)",
         )
     if str(tools) not in sys.path:
@@ -505,17 +508,21 @@ class _CompileJob:
 
 def _compile_target(
     flavor: str, target: str, jobs: list[_CompileJob]
-) -> dict[tuple, tuple[Verdict, str]] | str:
+) -> tuple[dict[tuple, tuple[Verdict, str]], set[tuple]] | str:
     """The arbiter's verdict on each job's module for ``target`` (``key -> (verdict, text)``,
-    :func:`rocke.tests.ir_validity.arbiter_verdict`), or, when it cannot judge them here, the
-    reason it gives."""
+    :func:`rocke.tests.ir_validity.arbiter_verdict`) and the keys of the jobs the lowering refuses
+    at ``flavor`` for its emission profile (``LlvmProfileRefusal``), which this compiler cannot
+    judge; or, when it cannot judge any of them here, the reason it gives."""
     name = _catalog_tool().compiler_names([target], flavor)[target]
     if name is None:
         return f"host clang cannot target {target}: an {flavor} compiler accepts neither it nor a generic target for it"
 
-    def judge(job: _CompileJob) -> tuple[Verdict, str]:
+    def judge(job: _CompileJob) -> tuple[Verdict, str] | None:
+        """The job's verdict, or None for a profile refusal; any other refusal fails."""
         try:
             module = lower_pair(job.row, job.op, target, flavor)
+        except LlvmProfileRefusal:
+            return None
         except NotImplementedError as error:
             raise AssertionError(
                 f"recorded pair {job.key} does not lower at {flavor}: {error}"
@@ -523,11 +530,22 @@ def _compile_target(
         return arbiter_verdict(module, name)
 
     with cf.ThreadPoolExecutor(os.cpu_count() or 1) as pool:
-        verdicts = dict(zip([job.key for job in jobs], pool.map(judge, jobs)))
+        judged = dict(zip([job.key for job in jobs], pool.map(judge, jobs)))
+    refused = {key for key, verdict in judged.items() if verdict is None}
+    verdicts = {key: verdict for key, verdict in judged.items() if verdict is not None}
     for verdict, text in verdicts.values():
         if verdict == "cannot_judge":
             return text
-    return verdicts
+    return verdicts, refused
+
+
+def _needs_llvm23(op_id: str) -> bool:
+    """Whether backend op ``op_id``'s call is the LLVM 23 form: a matrix call that requires the
+    LLVM 23 target-op profile, or a gfx1250 scaled WMMA."""
+    call = MATRIX_CALLS.get(op_id)
+    if call is not None:
+        return call.requires_llvm23
+    return gfx1250_scaled_wmma(op_id) is not None
 
 
 def _entry_key(op_id: str, target: str, entry: CoverageEntry) -> tuple:
@@ -551,9 +569,24 @@ def test_backend_coverage_compiles(target: str) -> None:
         _CompileJob(key, _CATALOG.get(key[0]), ops[entry.backend_op])
         for key, entry in sorted(recorded.items())
     ]
-    verdicts = _compile_target(flavor, target, jobs)
-    if isinstance(verdicts, str):
-        pytest.skip(verdicts)
+    judged = _compile_target(flavor, target, jobs)
+    if isinstance(judged, str):
+        pytest.skip(judged)
+    verdicts, refused = judged
+    # The lowering refuses exactly the pairs whose call is the LLVM 23 form, and only below it.
+    expected = (
+        set()
+        if supports_llvm23_target_ops(flavor)
+        else {job.key for job in jobs if _needs_llvm23(job.op.op_id)}
+    )
+    assert (
+        refused == expected
+    ), f"refused at {flavor}: {sorted(refused)}; the LLVM 23-form pairs: {sorted(expected)}"
+    if jobs and not verdicts:
+        pytest.skip(
+            f"every recorded pair needs the LLVM 23 target-op profile, which the {flavor} "
+            f"compiler lacks: {sorted(refused)}"
+        )
     now_issuable = sorted(
         key
         for key, (verdict, _) in verdicts.items()

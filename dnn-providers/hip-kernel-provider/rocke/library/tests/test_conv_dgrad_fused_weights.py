@@ -42,6 +42,7 @@ import unittest
 from dataclasses import replace
 
 import numpy as np
+import pytest
 from rocke.numeric import storage
 from rocke.numeric.conv import conv_dgrad
 from rocke.runtime.hip_module import get_device_arch
@@ -479,6 +480,9 @@ if GPU_ARCH == "gfx950":
 
 @unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP or "gpu")
 class TestFusedWeightNumerics(unittest.TestCase):
+    # Every case and mode in one test: rough gfx942 CI seconds, so the CI shards
+    # and their workers place it by cost (rocke.tests.ctest_shard).
+    @pytest.mark.rocke_shard_cost(12)
     def test_modes(self):
         for p, knobs in _CASES:
             kw = {"block_groups": 2 if p.groups % 2 == 0 else 1, **knobs}

@@ -36,7 +36,7 @@ from rocke.tests.lanes import skip_needing_arch
 _ARCH = generic_arch_from_target_id(get_device_arch() or "")
 _NEEDS_RDNA = pytest.mark.skipif(
     _ARCH not in ("gfx11-generic", "gfx12-generic"),
-    reason="needs an RDNA3/3.5 (gfx11) or RDNA4 (gfx12) GPU",
+    reason="needs an RDNA3/3.5 (gfx11, such as gfx1100) or RDNA4 (gfx12) GPU",
 )
 _LOG2E = 1.4426950408889634
 

@@ -395,6 +395,15 @@ def test_manifest_timing_passes_the_cluster_without_torch():
         assert call.kwargs == {"cluster": (2, 1, 1)}
 
 
+def test_untimed_manifest_launch_passes_the_cluster_through():
+    rt = mock.Mock()
+    run_manifest._launch_untimed(rt, "fn", (4, 1, 1), (64, 1, 1), b"", (2, 1, 1))
+    rt.launch_blocking.assert_called_once_with(
+        "fn", (4, 1, 1), (64, 1, 1), b"", cluster=(2, 1, 1)
+    )
+    rt.launch.assert_not_called()
+
+
 def test_prepared_cluster_launch_sets_up_once(hip):
     # Validation, the device query and the ctypes launch config are built when
     # the launch is prepared; each call only enqueues the same config.

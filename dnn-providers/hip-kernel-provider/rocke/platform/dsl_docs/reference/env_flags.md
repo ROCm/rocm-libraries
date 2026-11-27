@@ -65,6 +65,22 @@ For setup and the most common flags in context, see
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
 
+## Asset locators
+
+`rocke.assets` finds the trees outside the `rocke` package through these
+overrides. The installed test payload sets them
+(`rocke.tests.staged_payload.point_locators_at_staged_payload`) because it has
+no source checkout; a developer working in a checkout rarely needs them.
+
+| Variable | Overrides (default) |
+|---|---|
+| `ROCKE_PLATFORM_ROOT` | `platform_root()`: the `rocke/platform` source root (the checkout's `platform/`). |
+| `ROCKE_LIBRARY_ROOT` | `library_root()`: the `rocke/library` source root (`platform/../library`). |
+| `ROCKE_DSL_DOCS` | `dsl_docs_dir()`: the `dsl_docs` tree (`platform/dsl_docs`). |
+| `ROCKE_PLATFORM_TOOLS_DIR` | `platform_tools_dir()`: the platform `tools` tree (`platform/tools`). |
+| `ROCKE_PLATFORM_INSTANCES_DIR` | `platform_instances_dir()`: the platform instance-test tree, home of the IR parity harness (`platform/tests/instances`). |
+| `ROCKE_PLATFORM_PARITY_DIR` | `platform_parity_dir()`: the parity-emitter tree, home of `_emit_common.py` (the `parity` directory of `platform_instances_dir()`). |
+
 ## External compiler runtime
 
 These settings are consumed by COMGR or supporting runtime components, rather

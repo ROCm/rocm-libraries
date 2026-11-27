@@ -71,8 +71,8 @@ Run the on-GPU numeric check on a matching device:
 python -m pytest tests/test_dsa_indexer_gfx942_numeric.py
 ```
 
-The emitted IR is pinned by `tests/test_dsa_indexer_gfx942_golden.py` and by the
-platform representative golden (`lightning_indexer/gfx942/*`).
+The emitted IR is pinned by the platform representative golden
+(`lightning_indexer/gfx942/*` and `lightning_indexer/gfx950/*`).
 
 ## Implementation
 

@@ -21,7 +21,7 @@ no type is refused with a ``TypeError``, as the if/else rule refuses one,
 before its type is read, in the Python engine only, as serialized IR cannot
 carry one to the C++ engine. Each other refusal runs the
 Python verifier and the Python lowerings everywhere, and the C++ lowerings
-where the ``rocke_engine`` binding is built.
+where the shared ``librocke`` loads (``rocke.tests.engines``).
 ``tests/core/test_yield_rules.cpp`` covers the same rules in the C++ engine,
 its verifier included.
 """

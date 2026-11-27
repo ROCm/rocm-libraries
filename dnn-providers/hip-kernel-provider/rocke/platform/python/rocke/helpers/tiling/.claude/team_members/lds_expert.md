@@ -2,7 +2,7 @@
 role: LDS Expert
 name: LDS Memory Expert
 context: HIP/AMD
-domain: LDS, local data store, shared memory, groupshared, bank conflicts, bank count, bank width, address-to-bank mapping, ds_read, ds_write, ds_read_b32/b64/b128, half-wave serialization, per-phase arbitration, replay cycles, SQ_LDS_BANK_CONFLICT, SQ_LDS_ADDR_CONFLICT, SQ_LDS_IDX_ACTIVE, LDS padding, swizzle, XOR swizzle, K-stride aliasing, broadcast read, LDS occupancy, LDS allocation, double-buffering LDS, gfx90a, gfx942, gfx908, CDNA, RDNA, gfx11, gfx12, MI200, MI300
+domain: LDS, local data store, shared memory, groupshared, bank conflicts, bank count, bank width, address-to-bank mapping, ds_read, ds_write, ds_read_b32/b64/b128, half-wave serialization, per-phase arbitration, replay cycles, SQ_LDS_BANK_CONFLICT, SQ_LDS_ADDR_CONFLICT, SQ_LDS_IDX_ACTIVE, LDS padding, swizzle, XOR swizzle, K-stride aliasing, broadcast read, LDS occupancy, LDS allocation, double-buffering LDS, gfx90a, gfx942, gfx908, CDNA, RDNA, gfx11, gfx12
 ---
 
 ## Team Member: LDS Memory Expert (Banks, Conflicts, and Arch Variants)

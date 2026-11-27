@@ -8,10 +8,8 @@ fixture) passes when every subtest skips: pytest reports each skipped subtest,
 and the test itself as passed, though it checked nothing. The plugin
 :func:`register_sweep_guard` installs fails such a test: a test that ran
 subtests, all of which skipped, fails with their count. Each pytest root
-registers it from its ``pytest_configure``::
-
-    def pytest_configure(config):
-        register_sweep_guard(config)
+registers it from its ``pytest_configure``, through
+``rocke.tests.pytest_roots.configure_pytest_root``.
 
 A sweep that wants to skip as a whole (no GPU of the arch it needs) skips
 before its first subtest, which leaves the test skipped, not failed. A test

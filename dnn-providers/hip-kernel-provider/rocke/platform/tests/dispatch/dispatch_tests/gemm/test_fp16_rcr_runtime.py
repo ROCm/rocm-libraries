@@ -1,6 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""GPU smoke tests for the CK DSL FP16 GEMM dispatcher."""
+"""GPU smoke tests for the CK DSL FP16 GEMM dispatcher.
+
+Each run launches the kernel once through ``rocke.run_manifest --untimed``: these
+are correctness checks and time nothing.
+"""
 
 from __future__ import annotations
 
@@ -9,15 +13,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.run_manifest import UNTIMED_LAUNCH_LINE
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 # The runtime body below builds+launches a code object for the device arch, so gate on
 # the exact arch (via the rocke HIP runtime, no torch): on any other device the launch
@@ -41,8 +49,6 @@ class TestDispatchGemmRuntime(unittest.TestCase):
             block_k=cls.spec.tile.tile_k,
             threads_per_block=cls.spec.block_size,
             default_shape=(128, 128, 64),
-            warmup_iters=2,
-            timed_iters=5,
             args_signature=list(cls.dispatch_result.signature),
             atoms=["dispatcher-fp16-gemm-runtime-test"],
             extra={"dispatcher_kernel_id": cls.dispatch_result.kernel_id.as_dict()},
@@ -62,6 +68,7 @@ class TestDispatchGemmRuntime(unittest.TestCase):
             str(self.manifest),
             "--shape",
             ",".join(str(x) for x in shape),
+            "--untimed",
         )
         if verify:
             cmd.append("--verify")
@@ -74,6 +81,8 @@ class TestDispatchGemmRuntime(unittest.TestCase):
         )
         output = (proc.stdout or "") + (proc.stderr or "")
         self.assertEqual(proc.returncode, 0, output[-2500:])
+        self.assertIn(UNTIMED_LAUNCH_LINE, output)
+        self.assertNotIn("Perf:", output)
         return output
 
     def test_small_shapes_verify_against_cpu_reference(self):
@@ -81,7 +90,6 @@ class TestDispatchGemmRuntime(unittest.TestCase):
             with self.subTest(shape=shape):
                 out = self._run_manifest(shape, verify=True, timeout=120)
                 self.assertIn("bad=0/", out)
-                self.assertIn("Perf:", out)
 
     def test_large_example_shapes_launch_without_hang(self):
         # Shapes come from the gfx1151 GEMM README and gfx950 square GEMM study.
@@ -98,8 +106,7 @@ class TestDispatchGemmRuntime(unittest.TestCase):
         )
         for shape in shapes:
             with self.subTest(shape=shape):
-                out = self._run_manifest(shape, verify=False, timeout=180)
-                self.assertIn("Perf:", out)
+                self._run_manifest(shape, verify=False, timeout=180)
 
 
 if __name__ == "__main__":

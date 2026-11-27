@@ -110,7 +110,7 @@ class StreamKGemmSpec:
     tile_n: int = 16
     tile_k: int = 16
     dtype: DType = "f16"
-    num_cus: int = 304  # MI300X / MI355X default
+    num_cus: int = 304  # the 304-CU gfx942 part
     blocks_per_cu: int = 1
     reduction: StreamKReductionStrategy = StreamKReductionStrategy.Atomic
     # ``persistent`` selects between the two macro-tile dispatch modes:

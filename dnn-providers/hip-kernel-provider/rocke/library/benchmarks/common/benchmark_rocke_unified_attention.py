@@ -203,7 +203,7 @@ def main() -> int:
         "--num-cus",
         type=int,
         default=120,
-        help="num_cus hint passed to UnifiedAttentionProblem (default 120 for MI300/MI350)",
+        help="num_cus hint passed to UnifiedAttentionProblem (default 120 for gfx942 / gfx950)",
     )
     parser.add_argument("--output", "-o", type=Path, default=None)
     parser.add_argument(

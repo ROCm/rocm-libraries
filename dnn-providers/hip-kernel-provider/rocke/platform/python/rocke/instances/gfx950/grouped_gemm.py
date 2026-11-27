@@ -1,4 +1,4 @@
-"""Dense grouped GEMM kernel builder for gfx950 (MI355X).
+"""Dense grouped GEMM kernel builder for gfx950.
 
 Dense blocked grouped bf16 GEMM with expert-sorted layout. No gather/scatter —
 each block processes rows [expert*M + m_base : ... + m_base+TM]. Parent kernel

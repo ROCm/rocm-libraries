@@ -232,9 +232,9 @@ base values. The checks run in this order:
   and the kernel's `supports_tiled_*` run. On gfx950 2D, `UnifiedSpace.validate`
   then checks what that validator does not model: the LDS footprint
   (`_gfx950_2d_lds_bytes`, the pool the LLVM lowering packs) against the
-  arch's LDS capacity. Over-budget specs fail codegen on MI355X. A padded K
+  arch's LDS capacity. Over-budget specs fail codegen on gfx950. A padded K
   slot that holds Q is not this check's: the kernel spec's `__post_init__`
-  refuses it (such specs mismatched the reference on MI355X).
+  refuses it (such specs mismatched the reference on gfx950).
 - **Dense:** `DenseSpace` (through `KnobSpace.canonicalize`) applies the
   knobs to the base spec, so the dataclass validators run. It drops any
   setting that would compile to the same IR as another under a new symbol:
