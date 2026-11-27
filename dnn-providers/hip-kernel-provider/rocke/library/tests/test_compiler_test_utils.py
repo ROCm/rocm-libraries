@@ -17,6 +17,7 @@ applies it where no ``llvm-objdump`` can read the code object.
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 import pytest
@@ -263,3 +264,66 @@ def test_a_batch_reports_each_kernels_failure_on_that_kernel(monkeypatch):
         outcomes[1].scratch_bytes()
     with pytest.raises(comgr.ComgrError, match="refused"):
         outcomes[2].scratch_bytes()
+
+
+def test_a_batch_compiles_in_spawned_workers_and_keeps_its_order(monkeypatch):
+    # Two worker processes, started with spawn, compile the batch with the real
+    # COMGR: each result lands on its own input, and an input COMGR refuses
+    # comes back as its error, sent across the process boundary.
+    monkeypatch.setenv("ROCKE_BACKEND", "python")
+    first = KernelDef("pool_first", [], Region("entry"))
+    second = KernelDef("pool_second", [], Region("entry"))
+    compile_kernel_or_skip(first, arch="gfx950")
+    inputs = [
+        compile_module.lower_kernel_for_comgr(kernel, arch="gfx950")
+        for kernel in (first, second)
+    ]
+    refused = dataclasses.replace(inputs[0], llvm_text="this is not LLVM IR")
+    monkeypatch.setattr(_parallel_compile, "available_cpus", lambda: 2)
+    results = _parallel_compile.compile_in_workers([inputs[0], refused, inputs[1]])
+    (first_hsaco, first_error), (no_hsaco, error), (second_hsaco, second_error) = (
+        results
+    )
+    assert first_error is None and first_hsaco[:4] == b"\x7fELF"
+    assert second_error is None and second_hsaco[:4] == b"\x7fELF"
+    # Each code object is its own kernel's: its symbol is in it.
+    assert b"pool_first" in first_hsaco and b"pool_second" not in first_hsaco
+    assert b"pool_second" in second_hsaco and b"pool_first" not in second_hsaco
+    assert no_hsaco is None and isinstance(error, comgr.ComgrError), error
+
+
+class _ErrorThatDoesNotPickle(Exception):
+    """An error holding a lambda, which pickle cannot send to the parent."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.callback = lambda: None
+
+
+def test_a_compile_error_that_cannot_be_sent_back_keeps_its_type_and_text(
+    monkeypatch,
+):
+    # A worker sends each error back by pickling it; one that does not pickle
+    # comes back as a RuntimeError naming its type and message, and one that
+    # does comes back as itself. One worker, so the compile stand-in applies;
+    # the conversion is the same in this process as in a worker.
+    sent = ValueError("a picklable refusal")
+
+    def compile_or_raise(comgr_input):
+        if comgr_input.kernel_name == "unpicklable":
+            raise _ErrorThatDoesNotPickle("a refusal pickle cannot carry")
+        raise sent
+
+    monkeypatch.setattr(compile_module, "compile_comgr_input", compile_or_raise)
+    monkeypatch.setattr(_parallel_compile, "available_cpus", lambda: 1)
+    inputs = [
+        compile_module.ComgrInput(name, "", "amdgcn-amd-amdhsa--gfx950", ())
+        for name in ("unpicklable", "picklable")
+    ]
+    (no_hsaco, converted), (also_none, kept) = _parallel_compile.compile_in_workers(
+        inputs
+    )
+    assert no_hsaco is None and also_none is None
+    assert type(converted) is RuntimeError
+    assert str(converted) == "_ErrorThatDoesNotPickle: a refusal pickle cannot carry"
+    assert kept is sent
