@@ -91,6 +91,9 @@ static const ln_cfg_t CONFIGS[] = {
     /* 39..40 cheap_reduce (MIOpen-style naive E[X^2]-E[X]^2): one static, one dynamic */
     {4096, 256, 4, "f16", false, false, false, true},
     {4096, 256, 4, "f16", false, true, false, true},
+    /* 41..42 fast_reduce + cheap_reduce (wave-prologue (sum, sum_sq) fold) */
+    {4096, 256, 4, "f16", false, false, true, true},
+    {4096, 256, 4, "bf16", true, true, true, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))

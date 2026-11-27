@@ -91,6 +91,13 @@ from .common.layernorm2d import (  # noqa: F401
     layernorm2d_grid,
     layernorm2d_signature,
 )
+from .common.layernorm2d_bwd import (  # noqa: F401
+    LayerNorm2DBwdSpec,
+    build_layernorm2d_bwd,
+    is_valid_spec as is_valid_layernorm2d_bwd_spec,
+    layernorm2d_bwd_grid,
+    layernorm2d_bwd_signature,
+)
 from .common.rmsnorm2d import (  # noqa: F401
     RMSNorm2DSpec,
     build_rmsnorm2d,

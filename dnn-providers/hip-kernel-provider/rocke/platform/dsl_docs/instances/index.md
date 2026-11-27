@@ -177,6 +177,7 @@ the natural grid starves, and costs redundant tile reads once it does not.
 | `elementwise.py` | `ElementwiseSpec` | `instances/small_ops.md` |
 | `reduce.py` | `Reduce2DSpec`, `ReduceOp` | `instances/small_ops.md` |
 | `layernorm2d.py` | `LayerNorm2DSpec` | `instances/small_ops.md` |
+| `layernorm2d_bwd.py` | `LayerNorm2DBwdSpec` (three-kernel backward) | `instances/small_ops.md` |
 | `rmsnorm2d.py` | `RMSNorm2DSpec` | `instances/small_ops.md` |
 | `batchnorm2d.py` | `BatchNorm2DSpec` | `instances/small_ops.md` |
 | `transpose.py` | `Transpose2DSpec` | `instances/small_ops.md` |
@@ -204,6 +205,9 @@ Elementwise unary: (A, C, N)
 Elementwise binary: (A, B, C, N)
 Reduce2D: (X, Y, M, N)
 LayerNorm2D: (X, Gamma, Beta, Y[, mean, invstd], M, N, eps)
+LayerNorm2D bwd dx: (DY, X, Gamma, Mean, Rstd, DX, M, N)
+LayerNorm2D bwd dwdb: (DY, X, Mean, Rstd, DW, DB, WS, M, N, P)
+LayerNorm2D bwd dwdb_reduce: (WS, DW, DB, N, P)
 RMSNorm2D: (X, Gamma, Y[, inv_rms], M, N, eps)
 BatchNorm2D: (X, Gamma, Beta, Y, RunningMean, RunningVar[, mean, invstd], N, C, H, W, eps, momentum)
 Transpose2D: (X, Y, M, N)
@@ -243,6 +247,7 @@ From `helpers/README.md`:
 |-------------------------|--------------|------------------------|-------|-----|-----------|------|--------------|--------------------|
 | elementwise | yes | - | - | yes | - | yes | - | - |
 | layernorm2d | yes | - | yes | yes | yes | yes | - | - |
+| layernorm2d_bwd | yes | - | yes | yes | yes | yes | - | - |
 | rmsnorm2d | yes | - | yes | yes | yes | yes | - | - |
 | batchnorm2d | yes | - | yes | yes | yes | yes | - | - |
 | reduce | yes | - | yes | yes | yes | yes | - | - |

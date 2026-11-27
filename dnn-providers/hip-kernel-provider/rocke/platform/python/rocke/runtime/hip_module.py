@@ -1239,7 +1239,7 @@ class Runtime:
         shared_bytes: int = 0,
         stream: int = 0,
         cluster: Optional[Tuple[int, int, int]] = None,
-        events: Optional[Tuple["Event", "Event"]] = None,
+        events: Optional[Tuple[Optional["Event"], Optional["Event"]]] = None,
     ) -> "Callable[[], None]":
         """Build every ctypes argument of one launch once; return a
         zero-argument callable that only enqueues it.
@@ -1250,7 +1250,10 @@ class Runtime:
         ``events`` is a ``(start, stop)`` pair recorded on the launch's own
         dispatch packet (``hipExtModuleLaunchKernel``), so their span is the
         kernel alone; see :func:`rocke.runtime.time_launches_ext`. It cannot
-        be combined with ``cluster``.
+        be combined with ``cluster``. Either side may be ``None`` (not
+        recorded): a multi-kernel sequence puts ``(start, None)`` on its
+        first launch and ``(None, stop)`` on its last, as MIOpen times a
+        multi-kernel solver.
 
         For loops that launch the same kernel with the same arguments
         over and over -- the timed loop of a benchmark. :meth:`launch`
@@ -1301,8 +1304,8 @@ class Runtime:
                 ctypes.c_void_p(stream_id),
                 None,
                 extra,
-                start.handle,
-                stop.handle,
+                start.handle if start is not None else _HipEventHandle(None),
+                stop.handle if stop is not None else _HipEventHandle(None),
                 ctypes.c_uint(0),
             )
 

@@ -143,15 +143,63 @@ def time_candidate(
     per-call protocols add -- the like-for-like protocol against MIOpen's
     reported kernel time.
     """
-    launcher = KernelLauncher.from_artifact(artifact)
-    config = LaunchConfig(grid=grid, block=block)
+    return time_sequence(
+        [(artifact, grid, block, args)], warmup=warmup, iters=iters, timing=timing
+    )
+
+
+# One launch of a multi-kernel sequence: artifact, grid, block, kernarg dict.
+Step = Tuple[Any, Tuple[int, int, int], Tuple[int, int, int], Any]
+
+
+def time_sequence(
+    steps: Sequence[Step],
+    *,
+    warmup: int = 5,
+    iters: int = 25,
+    timing: str = "staged",
+) -> float:
+    """Time ``steps`` launched back to back as one sample, in ms.
+
+    The multi-kernel form of :func:`time_candidate` (which is this with one
+    step), for an operator that is several kernels -- the layernorm2d
+    backward's ``dx`` / ``dwdb`` / ``dwdb_reduce``. Every protocol treats
+    the whole sequence as one call; ``timing="ext"`` records the start
+    event on the first kernel's dispatch packet and the stop event on the
+    last's, which is how MIOpen times its own multi-kernel solvers (one
+    event pair spanning every kernel of the invoker).
+    """
+    bound = [
+        (KernelLauncher.from_artifact(artifact), LaunchConfig(grid=grid, block=block), args)
+        for artifact, grid, block, args in steps
+    ]
+    last = len(bound) - 1
+
+    def chain(calls):
+        if len(calls) == 1:
+            return calls[0]
+
+        def run() -> None:
+            for call in calls:
+                call()
+
+        return run
+
     if timing == "ext":
-        samples = time_launches_ext(
-            lambda start, stop: launcher.bind(args, config=config, events=(start, stop)),
-            warmup=warmup, iters=iters,
-        )
+        def bind(start, stop):
+            return chain([
+                launcher.bind(
+                    args, config=config,
+                    events=(start if i == 0 else None, stop if i == last else None),
+                )
+                for i, (launcher, config, args) in enumerate(bound)
+            ])
+
+        samples = time_launches_ext(bind, warmup=warmup, iters=iters)
         return statistics.median(samples)
-    call_once = launcher.bind(args, config=config)
+    call_once = chain(
+        [launcher.bind(args, config=config) for launcher, config, args in bound]
+    )
 
     if timing == "block":
         return time_launches(call_once, warmup=warmup, iters=iters)

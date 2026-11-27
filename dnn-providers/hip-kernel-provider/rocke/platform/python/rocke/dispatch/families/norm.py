@@ -49,6 +49,7 @@ from typing import Sequence, Tuple
 
 from ...core.arch import ArchTarget, arches_with_own_facts
 from ...instances.common import layernorm2d as _ln
+from ...instances.common import layernorm2d_bwd as _lnb
 from ...instances.common import rmsnorm2d as _rms
 from ..core import (
     Capability,
@@ -498,6 +499,130 @@ def dynamic_norm_candidates_for(req: NormRequest) -> Tuple[KernelCandidate, ...]
     if _request_errors(req):
         return ()
     return tuple(c for c in _DYNAMIC_NORM_CANDIDATES if c.admits(req)[0])
+
+
+# ===================================================================== #
+# LayerNorm2D backward (AOT-generic) candidates
+# ===================================================================== #
+#
+# instances/common/layernorm2d_bwd.py is three shape-free kernels (``dx``,
+# ``dwdb``, ``dwdb_reduce``) that together make one MIOpen-style backward
+# (``MIOpenDriver layernorm* -F 0``). Each part is tuned independently --
+# the parts run back to back and share no on-chip state -- so each gets its
+# own candidate list over its own knobs, keyed by ``LayerNorm2DBwdSpec.part``.
+# Like the forward's dynamic candidates these are opt-in (never selected by
+# dispatch_norm) and live outside NORM_REGISTRY; the AOT sweep queries them
+# directly through dynamic_norm_bwd_candidates().
+#
+# ``dwdb`` / ``dwdb_reduce`` vector-access ``vec`` columns, so they admit a
+# request only when ``cols % vec == 0``; ``dx`` has a masked tail and admits
+# any ``cols``. ``grid`` reports the ``P == 1`` (no workspace) launch; the
+# host picks the runtime row-split ``P`` (see
+# layernorm2d_bwd.default_row_splits) and launches ``dwdb`` on
+# ``(grid_x, P, 1)`` plus ``dwdb_reduce`` when ``P > 1``.
+
+_BWD_UNROLLS = _lnb.UNROLLS
+
+
+def _make_bwd_candidate(
+    *, part: str, block_size: int, vec: int, priority: int,
+    fast_reduce: bool = False, unroll: int = 4,
+) -> KernelCandidate:
+    u_suffix = f"_u{unroll}" if part != "dx" else ""
+    fr_suffix = "_fr" if fast_reduce else ""
+    spec_id = f"layernorm_bwd_{part}_b{block_size}_v{vec}{u_suffix}{fr_suffix}"
+    name = f"norm2d_{spec_id}"
+
+    def _spec(req: NormRequest) -> _lnb.LayerNorm2DBwdSpec:
+        return _lnb.LayerNorm2DBwdSpec(
+            part=part,
+            block_size=block_size,
+            vec=vec,
+            dtype=_norm_dtype(req.dtype),
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+            fast_reduce=fast_reduce,
+            unroll=unroll,
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, NormRequest)
+        if req.kind.lower() != "layernorm":
+            return False, f"candidate kind 'layernorm' != request kind {req.kind!r}"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        if part != "dx" and int(req.cols) % vec != 0:
+            return False, f"{part} needs cols % vec == 0 (cols={req.cols}, vec={vec})"
+        return _lnb.is_valid_spec(_spec(req), arch=req.arch)
+
+    def select(req: OperatorRequest) -> _lnb.LayerNorm2DBwdSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, NormRequest)
+        return _spec(req)
+
+    def grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
+        assert isinstance(req, NormRequest)
+        return _lnb.layernorm2d_bwd_grid(spec, rows=int(req.rows), cols=int(req.cols))
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="layernorm_bwd",
+        spec_id=spec_id,
+        abi_version=NORM_ABI_VERSION,
+        priority=priority,
+        capability=Capability(arches=_NORM_ARCHES, dtypes=("f16", "bf16")),
+        _supports=support,
+        select_spec=select,
+        signature=lambda spec: _lnb.layernorm2d_bwd_signature(spec),
+        grid=grid,
+        block=lambda spec: (int(spec.block_size), 1, 1),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=lambda spec, _arch: _lnb.build_layernorm2d_bwd(spec),
+        opt_in=True,
+    )
+    return candidate
+
+
+def _build_bwd_candidates() -> Tuple[KernelCandidate, ...]:
+    cands = []
+    for bs in _BLOCK_SIZES:
+        for v in _VECS:
+            prio = _candidate_priority(block_size=bs, vec=v)
+            for fr_rank, fr in enumerate(_FAST_REDUCE):
+                cands.append(
+                    _make_bwd_candidate(
+                        part="dx", block_size=bs, vec=v,
+                        priority=prio + fr_rank * 10000, fast_reduce=fr,
+                    )
+                )
+            for part in ("dwdb", "dwdb_reduce"):
+                for u_rank, u in enumerate(_BWD_UNROLLS):
+                    cands.append(
+                        _make_bwd_candidate(
+                            part=part, block_size=bs, vec=v,
+                            priority=prio + u_rank * 10000, unroll=u,
+                        )
+                    )
+    return tuple(cands)
+
+
+_DYNAMIC_NORM_BWD_CANDIDATES = _build_bwd_candidates()
+
+
+def dynamic_norm_bwd_candidates(part: str | None = None) -> Tuple[KernelCandidate, ...]:
+    """Every LayerNorm2D backward candidate (optionally only one ``part``),
+    unfiltered by any request."""
+    if part is None:
+        return _DYNAMIC_NORM_BWD_CANDIDATES
+    return tuple(
+        c for c in _DYNAMIC_NORM_BWD_CANDIDATES if c.spec_id.startswith(f"layernorm_bwd_{part}_b")
+    )
 
 
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:

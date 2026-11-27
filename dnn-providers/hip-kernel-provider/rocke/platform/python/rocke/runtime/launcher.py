@@ -658,12 +658,14 @@ class KernelLauncher:
         values: Mapping[str, Any],
         *,
         config: LaunchConfig,
-        events: Optional[Tuple[Event, Event]] = None,
+        events: Optional[Tuple[Optional[Event], Optional[Event]]] = None,
     ) -> Callable[[], None]:
         """Pack ``values`` once; return a zero-argument asynchronous launch.
 
         ``events`` records a ``(start, stop)`` pair on the launch's own
         dispatch packet; see :func:`rocke.runtime.time_launches_ext`.
+        Either side may be ``None`` to time a multi-kernel sequence (start
+        on the first launch, stop on the last).
 
         The callable enqueues the kernel with exactly these arguments on
         ``config``'s stream and returns -- no packing, no stream lookup,
