@@ -13,7 +13,9 @@
 
 #include <array>
 #include <cstddef>
+#include <exception>
 #include <limits>
+#include <optional>
 #include <utility>
 
 namespace {
@@ -141,6 +143,46 @@ TEST_P(GPU_HipocLaunchLimit_FP32, RejectsOversizedCooperativeGrid)
         miopen::Exception);
     // Drain the stream even if a regression let the oversized launch through.
     EXPECT_NO_THROW(handle.Finish());
+}
+
+TEST_P(GPU_HipocLaunchLimit_FP32, LaunchesAtLimitOnLegacyStream)
+{
+#ifndef hipStreamLegacy
+    GTEST_SKIP() << "HIP headers do not define hipStreamLegacy";
+#else
+    std::optional<miopen::Handle> legacy_handle;
+    try
+    {
+        legacy_handle.emplace(hipStreamLegacy);
+    }
+    catch(const std::exception& e)
+    {
+        GTEST_SKIP() << "Could not create a MIOpen handle on hipStreamLegacy: " << e.what();
+    }
+    const auto& handle = *legacy_handle;
+    ASSERT_EQ(handle.GetStream(), hipStreamLegacy);
+
+    const auto dimension = GetParam();
+    const auto arch      = handle.GetDeviceName();
+    const auto limit     = miopen::GetMaxWorkgroupsYZ(arch);
+    SCOPED_TRACE(testing::Message() << arch << ", grid dimension " << dimension);
+
+    // On unlimited devices, exceed 65535 workgroups to force the stream device lookup.
+    std::array<std::size_t, 3> grid{1, 1, 1};
+    grid[dimension] = limit == std::numeric_limits<std::size_t>::max() ? 65536 : limit;
+    auto invoke     = handle.AddKernel(
+        "", "", kProgramName, kKernelName, {1, 1, 1}, {1, 1, 1}, "", 0, kKernelSource);
+    invoke.SetGlobalDims(grid[0], grid[1], grid[2]);
+
+    std::array host_output{0.0f};
+    const auto output = handle.Write(host_output);
+    const auto last_y = static_cast<unsigned>(grid[1] - 1);
+    const auto last_z = static_cast<unsigned>(grid[2] - 1);
+    ASSERT_NO_THROW(invoke(output.get(), last_y, last_z));
+    ASSERT_NO_THROW(handle.Finish());
+    handle.ReadToVec(output, host_output);
+    EXPECT_EQ(host_output.front(), 1.0f);
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipocLaunchLimit_FP32, testing::Values(1, 2));

@@ -112,6 +112,16 @@ void CheckWorkgroupCount(const std::array<size_t, 3>& gdims,
 
 namespace {
 
+hipStream_t NormalizeStreamForDeviceQuery(hipStream_t stream)
+{
+#ifdef hipStreamLegacy
+    // Unlike module launch, hipStreamGetDevice can dereference the legacy stream sentinel.
+    return stream == hipStreamLegacy ? nullptr : stream;
+#else
+    return stream;
+#endif
+}
+
 /// Maximum Y/Z workgroup count of the device that runs \p stream. Looked up once per device.
 /// The stream, not the creating handle's target, decides: an invoker may be run on a stream of
 /// another device than the one its kernel was built for.
@@ -120,8 +130,10 @@ size_t GetStreamMaxWorkgroupsYZ(hipStream_t stream)
     static std::mutex mutex;
     static std::unordered_map<int, size_t> cache;
 
-    int device = 0;
-    if(hipStreamGetDevice(stream, &device) != hipSuccess && hipGetDevice(&device) != hipSuccess)
+    const auto query_stream = NormalizeStreamForDeviceQuery(stream);
+    int device              = 0;
+    if(hipStreamGetDevice(query_stream, &device) != hipSuccess &&
+       hipGetDevice(&device) != hipSuccess)
         return std::numeric_limits<size_t>::max();
 
     const std::lock_guard<std::mutex> lock(mutex);

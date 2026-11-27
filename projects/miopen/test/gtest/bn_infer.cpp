@@ -52,9 +52,8 @@ struct GPU_BNOCLInferLarge3D_FP16
 {
 };
 
-// The forward inference spatial kernels map H*W to the Y workgroup ID for NHWC with a
-// single-thread workgroup in Y. That ID is only 16 bits wide on gfx12, so H*W > 65536 would wrap
-// it.
+// Forward inference maps spatial positions to Y workgroups. On gfx12, the 16-bit Y workgroup
+// ID limits the grid, so larger shapes require the grid-stride variant.
 struct GPU_BNOCLInferYWorkgroupLimit2D_FP16
     : BNInferTest<half_float::half, half_float::half, float, float, float, double, BN2DTestCase>
 {
@@ -159,14 +158,13 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN3DTestCase>());
 
-// An odd C (vector size 1) with C >= 256 gives a one-thread-high NHWC workgroup, so the number of Y
-// workgroups equals H*W. Only when that exceeds the architecture's Y workgroup limit (65536 for
-// the gfx120X family, 65535 for gfx125X; no limit elsewhere) the solver selects the grid-stride
-// kernel variant (MIO_BN_Y_STRIDE=1) and caps the Y workgroup count at 65535. 255x255 (65025)
-// always runs the original path (control); 256x256 (65536) and 300x300 exercise the stride loop on
-// gfx1250 (256x256 only there) and gfx1201 (300x300), and the original path on archs without a
-// limit. C = 2 gives vector size 2, xlocalsize = 1 and ylocalsize = 256, so the cap is 65535 * 256
-// = 16776960 positions; 4100x4100 = 16810000 is just above it with a multi-thread Y workgroup.
+// When the uncapped Y workgroup count exceeds the device limit (65536 for gfx120X, 65535 for
+// gfx125X; no limit elsewhere), the solver enables MIO_BN_Y_STRIDE and caps the count at 65535.
+// NHWC with C = 257 has vector size 1, xlocalsize = 256 and ylocalsize = 1, so the uncapped
+// count is H*W: 255x255 (65025) is a control, 256x256 (65536) strides only on gfx125X, and
+// 300x300 (90000) strides on both families. The N = 2 case checks the batch loop at the same
+// Y workgroup count. NHWC with C = 2 has vector size 2 and ylocalsize = 256, so 4100x4100
+// requires ceil(16810000/256) = 65665 Y workgroups and also strides on both families.
 INSTANTIATE_TEST_SUITE_P(
     Standard,
     GPU_BNOCLInferYWorkgroupLimit2D_FP16,
@@ -174,6 +172,7 @@ INSTANTIATE_TEST_SUITE_P(
                          {1, 257, 255, 255, miopen::batchnorm::Direction::ForwardInference, 1, 0},
                          {1, 257, 256, 256, miopen::batchnorm::Direction::ForwardInference, 1, 0},
                          {1, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                         {2, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0},
                          {1, 2, 4100, 4100, miopen::batchnorm::Direction::ForwardInference, 1, 0}}),
                      testing::ValuesIn({miopenTensorNHWC}),
                      testing::ValuesIn({miopenBNSpatial}),
@@ -181,18 +180,32 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN2DTestCase>());
 
-// Per-activation mode shares the Y stride variant but indexes the parameters per position, so the
-// stride loop has to reload them. Its parameter tensors have C*H*W elements, hence the smaller
-// shapes: 300x300 and 384x384 are 1.4x and 2.2x above the 65535 workgroup cap (they select the
-// stride variant on gfx12).
+// Per-activation mode reloads its C*H*W parameters at each position in the stride loop. With
+// C = 257, 300x300 (90000) and 384x384 (147456) both exceed the gfx12 limits. The N = 2
+// case uses 300x300 to cover the batch loop with 23130000 elements per parameter tensor.
 INSTANTIATE_TEST_SUITE_P(
     StandardPerActivation,
     GPU_BNOCLInferYWorkgroupLimit2D_FP16,
     testing::Combine(testing::ValuesIn(std::vector<BN2DTestCase>{
                          {1, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+                         {2, 257, 300, 300, miopen::batchnorm::Direction::ForwardInference, 1, 0},
                          {1, 257, 384, 384, miopen::batchnorm::Direction::ForwardInference, 1, 0}}),
                      testing::ValuesIn({miopenTensorNHWC}),
                      testing::ValuesIn({miopenBNPerActivation}),
+                     testing::ValuesIn({testBNAPIV2, testBNAPIInvVar}),
+                     testing::ValuesIn({miopenActivationPASTHRU})),
+    TestNameGenerator<BN2DTestCase>());
+
+// NCHW with 4097x4097 has odd H*W (16785409), so the vector size is 1. With ylocalsize = 256,
+// ceil(16785409/256) = 65569 Y workgroups exceeds both gfx12 limits. C = 1 keeps the
+// per-activation parameter tensors to 16785409 elements each.
+INSTANTIATE_TEST_SUITE_P(
+    StandardNchw,
+    GPU_BNOCLInferYWorkgroupLimit2D_FP16,
+    testing::Combine(testing::Values(BN2DTestCase{
+                         1, 1, 4097, 4097, miopen::batchnorm::Direction::ForwardInference, 1, 0}),
+                     testing::ValuesIn({miopenTensorNCHW}),
+                     testing::ValuesIn({miopenBNSpatial, miopenBNPerActivation}),
                      testing::ValuesIn({testBNAPIV2, testBNAPIInvVar}),
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN2DTestCase>());
