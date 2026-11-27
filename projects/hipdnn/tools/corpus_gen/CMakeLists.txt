@@ -92,8 +92,10 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # label is a value of the manifest's own `form` column and a reported quota. The
                 # small --per-combination is as for regime_quota.
                 "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
-                # The backward declares seven of them: no sink token.
-                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|7|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias"
+                # The backward declares seven of them: no sink token. One graph of each form
+                # needs no full first pass; --per-combination 2 delivers all seven at the default
+                # seed and at seeds 2 to 6.
+                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--per-combination,2,--form-floor,1|0|7|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias"
                 # Both floors at once, narrowed to one form so that the seven other forms are
                 # short: one graph fills a regime's floor and the form's, so `requested` is the
                 # graphs plus the larger of the two shortfalls (CorpusGenRun.cmake), 24 + 7, not
@@ -141,8 +143,9 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "archetype_held_by_model_shapes|--without-engine,--operations,${_operations_dir},--operation,matmul,--keep,q.dtype=fp16,--keep,q.a_layout=row,--keep,q.b_layout=row,--model-shapes,${_bert_shapes},--count,100|0|100|||reports.anchored_share.matmul.archetypes.bert_base_projection.admitted=0,reports.anchored_share.matmul.archetypes.bert_base_projection.held>=1,reports.search.matmul.searched=1,reports.search.matmul.seed_checks>=82,reports.search.matmul.seeds_accepted>=82,reports.search.matmul.walk_checks>=1,reports.search.matmul.oracle_queries>=1"
                 # A quota and a small --count: the archetypes kept through
                 # the cut fit in the room the quota leaves, so the corpus is
-                # --count and the quota is delivered.
-                "quota_within_a_small_count|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=4,--count,5|0|5|||reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=4"
+                # --count and the quota is delivered. Five graphs need no full
+                # first pass: --per-combination 2, as for combinations_past_the_bound.
+                "quota_within_a_small_count|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--regime-quota,decode_short_mha=4,--count,5|0|5|||reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=4"
                 # The cut keeps a graph of every admitted archetype: at
                 # --count 8 it would otherwise drop decode_gemv and
                 # llama3_70b_projection.

@@ -305,8 +305,11 @@ TEST(TestCorpusRealism, EveryDeclaredArchetypeSetIsActuallyDrawnFrom)
             continue;
         }
 
+        // Each assertion is about whether a source contributes at all, not how much: 20 points a
+        // combination still draws from the archetypes (38 and up) and their neighbourhood (108 and
+        // up) of every shipped declaration at this seed, at a third of the 60-point cost.
         ExplorationRequest request;
-        request.pointsPerCombination = 60;
+        request.pointsPerCombination = 20;
         request.seed = 21;
 
         const auto composition
@@ -412,16 +415,17 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
     // (seqlen_q > seqlen_k).
     const auto metadata = test::shippedOperation(GetParam());
 
-    // The default first pass: 50 points for each live combination of the unweighted parameters
-    // (is_causal, alignment, form, and dtype in the backward and generate_stats in the forward),
-    // about 4200 rows in the backward. The forward weights dtype, which splits the budget where
-    // an unweighted one multiplied it by three, so it takes 150 to reach about 9500 rows, enough
-    // that the shares below are not noise.
+    // The first pass draws a number of points for each live combination of the unweighted
+    // parameters (is_causal, alignment, form, and dtype in the backward and generate_stats in the
+    // forward). The forward weights dtype, which splits the budget where an unweighted one
+    // multiplies it, so the default 50 points give it about 3100 rows; the backward's 20 give
+    // about 1600. Both hold the shares below over seeds 0 to 20 (measured floors in the comment
+    // there) at a fraction of the cost of a larger first pass.
     ExplorationRequest request;
     request.seed = 9;
-    request.pointsPerCombination = GetParam() == "sdpa_fwd" ? 150 : 50;
+    request.pointsPerCombination = GetParam() == "sdpa_fwd" ? 50 : 20;
     const auto problems = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).problems();
-    ASSERT_GT(problems.size(), GetParam() == "sdpa_fwd" ? 5000U : 1500U);
+    ASSERT_GT(problems.size(), GetParam() == "sdpa_fwd" ? 2500U : 1200U);
 
     size_t wide = 0;
     size_t square = 0;
@@ -453,12 +457,12 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
         return static_cast<double>(count) / static_cast<double>(problems.size());
     };
 
-    // Measured over seeds 0 to 20 no lower than 0.82 and 0.16 (sdpa_fwd) and 0.78 and 0.27
-    // (sdpa_bwd), so one pair of floors holds for both. The wide floor is set well above the 0.57
-    // a log-uniform head_dim from 1 would leave at most and below the measured shares. The first
-    // pass spreads over about 180 combinations of a few points each, whose anchored quota (the
-    // mixture's share of a combination's own count, the archetypes' D of 64 and 128 among it) is
-    // small, so the share is lower than the declared mixture alone would give.
+    // Measured over seeds 0 to 20 no lower than 0.84 and 0.28 (sdpa_fwd, 50 points) and 0.77 and
+    // 0.27 (sdpa_bwd, 20 points), so one pair of floors holds for both. The wide floor is set well
+    // above the 0.57 a log-uniform head_dim from 1 would leave at most and below the measured
+    // shares. The first pass spreads over about 180 combinations of a few points each, whose
+    // anchored quota (the mixture's share of a combination's own count, the archetypes' D of 64
+    // and 128 among it) is small, so the share is lower than the declared mixture alone would give.
     constexpr double SDPA_WIDE_SHARE = 0.7;
     constexpr double SDPA_SQUARE_SHARE = 0.1;
     EXPECT_GE(narrowest, 8) << "the declared head_dim range";

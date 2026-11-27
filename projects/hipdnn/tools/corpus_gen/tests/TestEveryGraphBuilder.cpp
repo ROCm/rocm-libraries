@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_corpus_gen/GraphBuilderRegistry.hpp>
+#include <hipdnn_corpus_gen/ProblemSpace.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
 
 #include <nlohmann/json.hpp>
@@ -875,6 +876,104 @@ TEST(TestSdpaForms, BackwardRaggedPacksTheQuerySideThroughOneOffsetAndTheKeySide
         EXPECT_EQ(key.at(name)->ragged_offset_multiplier(), HEADS_KV * HEAD_DIM) << name;
     }
     EXPECT_EQ(graph->tensors()->size(), 13U);
+}
+
+TEST(TestSdpaForms, ARaggedOffsetMultiplierIsTheTensorsTokenStrideInEveryTokenMajorLayout)
+{
+    // The offsets count tokens, so each tensor's multiplier is its own token stride: under
+    // qkv_packed, Q, K and V (and dQ, dK, dV) step over the fused projection row, while O (and
+    // dO) stay token-major at heads * V's width; an MLA value head narrows V, O and their
+    // gradients by 64. Built at a square GQA shape, which qkv_packed requires, and at MLA's
+    // 192/128, the pair both directions declare.
+    constexpr int64_t SEQLEN = 32;
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        for(const std::string layout : {"bshd", "qkv_packed"})
+        {
+            for(const std::string valueHead : {"same", "mla"})
+            {
+                const int64_t headDim = valueHead == "mla" ? 192 : HEAD_DIM;
+                const int64_t valueDim = valueHead == "mla" ? headDim - 64 : headDim;
+                const auto point
+                    = test::withDefaultCategoricals(metadata,
+                                                    ProblemPoint{{"batch", BATCH},
+                                                                 {"heads", HEADS},
+                                                                 {"heads_kv", HEADS_KV},
+                                                                 {"seqlen_q", SEQLEN},
+                                                                 {"seqlen_k", SEQLEN},
+                                                                 {"head_dim", headDim},
+                                                                 {"is_causal", true},
+                                                                 {"generate_stats", true},
+                                                                 {"dtype", std::string("fp16")},
+                                                                 {"form", std::string("ragged")},
+                                                                 {"layout", layout},
+                                                                 {"value_head_dim", valueHead}});
+                std::string where = operation;
+                where += ' ';
+                where += layout;
+                where += ' ';
+                where += valueHead;
+                ASSERT_TRUE(detail::satisfiesConstraints(metadata, point))
+                    << where << " is not a point the declaration admits";
+                const auto built = buildGraphFor(metadata, point);
+                ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+                const auto* graph = asGraph(built.bytes);
+
+                const int64_t fusedRow = (HEADS + HEADS_KV) * headDim + HEADS_KV * valueDim;
+                const bool packed = layout == "qkv_packed";
+                std::map<std::string, std::pair<std::optional<int64_t>, int64_t>> expected;
+                const auto expect
+                    = [&](const std::string& role, std::optional<int64_t> uid, int64_t perToken) {
+                          expected[role] = {uid, perToken};
+                      };
+                if(operation == "sdpa_fwd")
+                {
+                    const auto* attributes = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
+                    ASSERT_NE(attributes, nullptr) << where;
+                    expect("q", attributes->q_tensor_uid(), packed ? fusedRow : HEADS * headDim);
+                    expect("k", attributes->k_tensor_uid(), packed ? fusedRow : HEADS_KV * headDim);
+                    expect(
+                        "v", attributes->v_tensor_uid(), packed ? fusedRow : HEADS_KV * valueDim);
+                    expect("o", attributes->o_tensor_uid(), HEADS * valueDim);
+                    expect("stats", attributes->stats_tensor_uid(), HEADS);
+                }
+                else
+                {
+                    const auto* attributes
+                        = graph->nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+                    ASSERT_NE(attributes, nullptr) << where;
+                    for(const auto& [role, uid] : std::vector<std::pair<std::string, int64_t>>{
+                            {"q", attributes->q_tensor_uid()}, {"dq", attributes->dq_tensor_uid()}})
+                    {
+                        expect(role, uid, packed ? fusedRow : HEADS * headDim);
+                    }
+                    for(const auto& [role, uid] : std::vector<std::pair<std::string, int64_t>>{
+                            {"k", attributes->k_tensor_uid()}, {"dk", attributes->dk_tensor_uid()}})
+                    {
+                        expect(role, uid, packed ? fusedRow : HEADS_KV * headDim);
+                    }
+                    for(const auto& [role, uid] : std::vector<std::pair<std::string, int64_t>>{
+                            {"v", attributes->v_tensor_uid()}, {"dv", attributes->dv_tensor_uid()}})
+                    {
+                        expect(role, uid, packed ? fusedRow : HEADS_KV * valueDim);
+                    }
+                    expect("o", attributes->o_tensor_uid(), HEADS * valueDim);
+                    expect("dO", attributes->do_tensor_uid(), HEADS * valueDim);
+                    expect("stats", attributes->stats_tensor_uid(), HEADS);
+                }
+                for(const auto& [role, entry] : expected)
+                {
+                    const auto* tensor = tensorWithUid(*graph, entry.first);
+                    ASSERT_NE(tensor, nullptr) << where << " " << role;
+                    ASSERT_TRUE(tensor->ragged_offset_tensor_uid().has_value())
+                        << where << " " << role;
+                    EXPECT_EQ(tensor->ragged_offset_multiplier(), entry.second)
+                        << where << " " << role;
+                }
+            }
+        }
+    }
 }
 
 TEST(TestSdpaForms, AFormTheDirectionDoesNotBuildIsRefusedByName)
