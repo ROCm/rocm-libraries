@@ -47,9 +47,9 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
-| `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` (incl. split-K forward: `split_k`, `split_k_cluster`; the register-prefetch K loop `prefetch_global_regs`) | `library/kernels/conv/docs/convolution.md` |
+| `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` (incl. split-K forward: `split_k`, `split_k_cluster`; the register-prefetch K loop `prefetch_global_regs`; the patch-embedding GEMM `patch` / `dtl`) | `library/kernels/conv/docs/convolution.md` |
 | `conv_fwd_split_k_reduce.py` | `FwdSplitKReduceSpec` (split-K forward Stage 2) | `library/kernels/conv/docs/convolution.md` |
-| `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `library/kernels/conv/docs/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
+| `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`, `patch` / `dtl`, `prefetch_global_regs`) | `library/kernels/conv/docs/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
 | `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode), `DirectConvWgradSpec` (incl. the gfx1250 image-per-block and small-C wgrad), `DirectDepthwiseWgradSpec` (VALU depthwise wgrad, cached for the wave32 targets) | `library/kernels/conv/docs/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `library/kernels/conv/docs/convolution.md` |
 | `conv_dgrad_patch_wmma.py` | `DgradPatchWmmaSpec` (gfx1250 patch-embedding dgrad) | `library/kernels/conv/docs/convolution.md` |

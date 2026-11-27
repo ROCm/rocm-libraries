@@ -309,6 +309,37 @@ the field defaults `False`, and the sweep driver and the AOT job generator take
 the value from `DgradConvSpec.default_uniform_k_decode(*, arch, wave_size,
 pipeline)` (on for gfx950 wave64 outside the wavelet pipeline).
 
+### Single-tap tail peel and register prefetch of the uniform loop
+
+When `kpg % tile_k != 0` but the problem has one filter tap
+(`y_dot_slice == x_dot_slice == 1`, e.g. 1x1), every full K tile still lies
+inside the tap, so the uniform loop runs on the `floor((k_hi - k_lo) / tile_k)`
+full tiles and the plain loop peels the tail. Multi-tap problems with a ragged
+`kpg` keep the plain loop alone.
+
+`prefetch_global_regs=True` (tag `pgr`) is the register-prefetch form of the
+uniform loop: tile k+1's global reads are issued into VGPRs right after tile k
+is published to LDS and stay in flight under tile k's MFMAs, behind LDS-only
+barriers (the forward knob of the same name). It needs `uniform_k_decode` and is
+rejected with `async_dma`, `unroll_k`, `tap_outer_k`, `dy_halo` and the wavelet
+pipeline. Default False.
+
+### Patch-embedding dgrad (`patch`, `dtl`, split-K)
+
+`patch=True` serves patch embeddings (stride >= filter, no padding or dilation,
+ungrouped, tilde path, one record). `split_k > 1` is admitted with the cshuffle
+epilogue, whose atomic store takes the tilde address function; the record's
+padded K is `roundup(dg_K, tile_k * split_k)` and each slice is whole K tiles
+(a slice wholly past K reads only the tail). `chiplet_swizzle` on a patch record
+remaps its `(m, n)` tiles in XCD groups. `dtl=True` (tag `dtl`, gfx950) is the
+two-stage DRAM-to-LDS DMA K loop on the K-outer patch GEMM (16-bit operands,
+wave64, 16-byte-chunk MFMA fragments, no split-K / `async_dma` / `unroll_k` /
+`pgr` / `uniform_k_decode` / `tap_outer_k` / `dy_halo`); it double-buffers both
+tiles. The AOT grid builds these on the `CACHE_DGRAD_VARIANT_GEOMETRIES`,
+`CACHE_DGRAD_PATCH_*` and `CACHE_DGRAD_A_PADS` (A row pad 16) covers on gfx950
+fp16 / bf16, cache-served only. Tests: `test_conv_dgrad_patch.py`,
+`test_conv_implicit_gemm_gfx950_variants.py`.
+
 ## Stride-1 record from kernargs
 
 At stride 1 the tilde decomposition is the identity in both spatial axes

@@ -145,6 +145,29 @@ rejected with `async_dma`, `unroll_k`, the `wavelet` pipeline and on WMMA, and
 when a tile needs more than 32 global loads per thread per operand. Name tag
 `pgr`.
 
+### Patch-embedding GEMM (`patch`, `dtl`) and the 16-element K pad
+
+- `patch=True` (tag `patch`) serves a width-folded patch embedding: 2-D, ungrouped,
+  no padding or dilation, `X == 1`, `sH >= Y` (`is_fwd_patch_problem`). Every tap
+  of an output pixel is inside the image, so the load path has no bounds test and
+  a filter row is `C` contiguous elements. Rejected with split-K, `group_merge`
+  and the `wavelet` pipeline. Default False: other configs keep their names and
+  binaries.
+- `dtl=True` (tag `dtl`, gfx950, on top of `patch`) runs the patch GEMM's K loop
+  as two LDS stages filled by 16-byte DRAM-to-LDS DMAs (inline asm, explicit
+  waits), one barrier per K tile, with the bank swizzle applied to the global
+  address on the load side. 16-bit operands, wave64, `mem` pipeline, no split-K,
+  `async_dma`, `unroll_k` or `prefetch_global_regs`; `tile_k / 8` a power of two.
+- `lds_k_pad=16` (tag `kp16`) replaces the default 8 where a `tile_k = 64` row
+  stride bank-conflicts on the MFMA fragment reads; it composes with
+  `prefetch_global_regs`.
+- On gfx950 (fp16 / bf16) the AOT grid builds these on the
+  `CACHE_FWD_PATCH_GEOMETRIES`, `CACHE_FWD_PATCH_DTL_GEOMETRIES` and
+  `CACHE_FWD_WIDE_LDS_K_PAD_*` covers (`kernels/conv/aot_jobs.py`). The C++ engine
+  mirrors all three (`conv_implicit_gemm_conv_*.cpp`); tests:
+  `test_conv_implicit_gemm_gfx950_variants.py`, `test_conv_fwd_prefetch_global_regs.py`
+  (gfx950-runner lane).
+
 ### Initial implementation
 
 - Introduced `ImplicitGemmConvSpec` and `build_implicit_gemm_conv`.
