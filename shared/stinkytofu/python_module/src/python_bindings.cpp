@@ -765,12 +765,14 @@ NB_MODULE(_stinkytofu, m) {
             "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store, nv, lds, caps)")
         .def(
             "set_smem",
-            [](LogicalInstruction& inst, bool glc, bool nv, int offset, bool hasSCOPEModifier) {
-                inst.smem = SMEMModifiers(glc, nv, offset, hasSCOPEModifier);
+            [](LogicalInstruction& inst, bool glc, bool nv, int offset, bool hasSCOPEModifier,
+               int scope) {
+                inst.smem = SMEMModifiers(glc, nv, offset, hasSCOPEModifier,
+                                          static_cast<MUBUFScope>(scope));
             },
             nb::arg("glc") = false, nb::arg("nv") = false, nb::arg("offset") = 0,
-            nb::arg("has_scope_modifier") = false,
-            "Set SMEM modifiers (glc, nv, offset, has_scope_modifier)")
+            nb::arg("has_scope_modifier") = false, nb::arg("scope") = 0,
+            "Set SMEM modifiers (glc, nv, offset, has_scope_modifier, scope)")
         .def(
             "set_tensor",
             [](LogicalInstruction& inst, int scope, int th, bool nv, bool isStore) {

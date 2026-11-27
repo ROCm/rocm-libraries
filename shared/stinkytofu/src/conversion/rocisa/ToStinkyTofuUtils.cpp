@@ -239,7 +239,8 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                                const std::map<std::string, int>& asmCaps) {
     bool hasSCOPEModifier = asmCaps.count("HasSCOPEModifier") && asmCaps.at("HasSCOPEModifier");
     return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv != rocisa::NonVolatile::NV_NONE,
-                                     rocMod.offset, hasSCOPEModifier);
+                                     rocMod.offset, hasSCOPEModifier,
+                                     convertMUBUFScope(rocMod.scope));
 }
 
 stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod,
@@ -737,6 +738,19 @@ void attachTrue16ModifiersFromOperands(StinkyInstruction* stinkyInst,
         stinkytofu::True16Modifiers(dst0, dstHi, srcSels));
 }
 
+/// The GLOBALStoreInstruction subclasses whose rocisa GLOBALModifiers are translated:
+/// the SADDR returning atomic and global_store_b32/b64/b128, not the
+/// global_store_async_from_lds_* family.
+const rocisa::GLOBALStoreInstruction* globalStoreWithModifiers(const rocisa::Instruction* inst) {
+    if (dynamic_cast<const rocisa::GlobalAtomicIncU32Saddr*>(inst) ||
+        dynamic_cast<const rocisa::GlobalStoreB32*>(inst) ||
+        dynamic_cast<const rocisa::GlobalStoreB64*>(inst) ||
+        dynamic_cast<const rocisa::GlobalStoreB128*>(inst)) {
+        return static_cast<const rocisa::GLOBALStoreInstruction*>(inst);
+    }
+    return nullptr;
+}
+
 /// Add modifiers to StinkyInstruction (DS, FLAT, MUBUF, SMEM, WaitCnt, DelayAlu)
 void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Instruction* inst,
                                const std::map<std::string, int>& asmCaps) {
@@ -771,16 +785,10 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
         }
-        else if (auto typed = dynamic_cast<const rocisa::GlobalAtomicIncU32Saddr*>(inst)) {
-            // GlobalAtomicIncU32Saddr carries cache scope / temporal hint / offset as rocisa
-            // GLOBALModifiers; translate so the emitter prints them (the returning-atomic
-            // th:TH_ATOMIC_RETURN is added separately by the emitter). Scoped to the atomic
-            // specifically -- the GLOBALStoreInstruction base also covers global_store_*,
-            // whose modifier handling must not change here.
+        else if (auto typed = globalStoreWithModifiers(inst)) {
             if (typed->modifier.has_value()) {
-                const auto& gm = typed->modifier.value();
                 stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
-                    convertGLOBALModifiers(gm, asmCaps));
+                    convertGLOBALModifiers(typed->modifier.value(), asmCaps));
             }
         }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
@@ -1275,7 +1283,7 @@ void applyLogicalPayload(LogicalInstruction* logical, const rocisa::Instruction*
         logical->mubuf = buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps);
     } else if (const auto* typed = dynamic_cast<const rocisa::MUBUFStoreInstruction*>(inst)) {
         logical->mubuf = buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps);
-    } else if (const auto* typed = dynamic_cast<const rocisa::GlobalAtomicIncU32Saddr*>(inst)) {
+    } else if (const auto* typed = globalStoreWithModifiers(inst)) {
         if (typed->modifier) logical->global = convertGLOBALModifiers(*typed->modifier, asmCaps);
     } else if (const auto* typed = dynamic_cast<const rocisa::SMemLoadInstruction*>(inst)) {
         if (typed->smem) logical->smem = convertSMEMModifiers(*typed->smem, asmCaps);

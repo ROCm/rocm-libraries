@@ -449,6 +449,25 @@ DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, 
 // (unlike flat, which also bumps dscnt).
 DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_ATOMIC_SADDR,
     .logical = "GlobalAtomicIncU32Saddr")
+DEF_BATCH(.format = VGLOBAL_ATOMIC_SADDR,
+    GlobalAtomicCmpswapB64SaddrInst, "global_atomic_cmpswap_b64", .logical = "GlobalAtomicCmpswapB64Saddr",
+        .operand_fields = { {D0, .size=64}, {S1, .size=128} },
+    GlobalAtomicMaxU64SaddrInst, "global_atomic_max_u64", .logical = "GlobalAtomicMaxU64Saddr",
+        .operand_fields = { {D0, .size=64}, {S1, .size=64} },
+)
+
+DEF_BATCH(.format = VGLOBAL_LOAD,
+    GlobalLoadB32Inst, "global_load_b32", .logical = "GlobalLoadB32",
+    GlobalLoadB64Inst, "global_load_b64", .logical = "GlobalLoadB64",
+        .operand_fields = { {D0, .size=64} },
+)
+DEF_BATCH(.format = VGLOBAL_STORE,
+    GlobalStoreB32Inst, "global_store_b32", .logical = "GlobalStoreB32",
+    GlobalStoreB64Inst, "global_store_b64", .logical = "GlobalStoreB64",
+        .operand_fields = { {S1, .size=64} },
+    GlobalStoreB128Inst, "global_store_b128", .logical = "GlobalStoreB128",
+        .operand_fields = { {S1, .size=128} },
+)
 
 // Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
