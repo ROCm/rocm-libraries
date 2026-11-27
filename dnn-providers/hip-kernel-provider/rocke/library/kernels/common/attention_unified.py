@@ -68,6 +68,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_dropout import dropout_launch_args, dropout_signature
 from ._lse_store import validate_unified_lse
 from ._spec_checks import require_bool
 
@@ -160,9 +161,14 @@ class UnifiedAttentionProblem:
     # kernels (not the gfx942 4-warp GQA builder); every other path declines it
     # (see _reject_lse).
     emit_lse: bool = False
+    # Dropout on P. max_seqlen_q / max_seqlen_k become the mask's declared
+    # extents max_sq / max_sk: they place every row's counters, so the backward
+    # must be given the same values.
+    dropout: bool = False
 
     def __post_init__(self):
         require_bool("emit_lse", self.emit_lse)
+        require_bool("dropout", self.dropout)
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
@@ -593,6 +599,26 @@ def _reject_lse(
     return None
 
 
+_DROPOUT_ARCHES = ("gfx950",)
+
+
+def _reject_dropout(
+    problem: UnifiedAttentionProblem, arch: str, path: str
+) -> Optional[Tuple[bool, str]]:
+    """Dropout exists in the tiled 2D kernel only: split-KV (decode, chunked
+    prefill) and the scalar kernel are refused rather than run without it."""
+    if not problem.dropout:
+        return None
+    if path != "tiled 2D":
+        return False, f"dropout is not implemented on the {path} attention path"
+    if arch not in _DROPOUT_ARCHES:
+        return False, f"dropout is not implemented on {arch} tiled 2D attention"
+    # SdpaSemanticsRegister SEM-024 declines dropout with fp8 scaling.
+    if problem.use_fp8:
+        return False, "dropout is not implemented with FP8 K/V"
+    return None
+
+
 _GFX942_4WARP_LSE_REFUSAL = (
     "LSE output is not implemented on the gfx942 4-warp GQA builder (finite "
     "-1e30 max sentinel, no l == 0 guard, fixed 17-argument ABI)"
@@ -623,9 +649,11 @@ def supports_native_unified_attention(
     - softcap: yes
     """
     arch = _canonical_arch_for_selection(arch)
-    # The scalar kernel writes no LSE; refusing here keeps the auto tail from
-    # ever launching it for an LSE request.
-    rejected = _reject_lse(problem, arch, "scalar 2D")
+    # The scalar kernel has neither LSE nor dropout; refusing here keeps the auto
+    # tail from ever launching it for either request.
+    rejected = _reject_lse(problem, arch, "scalar 2D") or _reject_dropout(
+        problem, arch, "scalar 2D"
+    )
     if rejected is not None:
         return rejected
     if problem.head_size not in UNIFIED_HEAD_SIZES:
@@ -666,6 +694,7 @@ def supports_native_unified_attention_tiled(
     arch = _canonical_arch_for_selection(arch)
     rejected = (
         _reject_lse(problem, arch, "tiled 2D")
+        or _reject_dropout(problem, arch, "tiled 2D")
         or _reject_mask_semantics(problem)
         or _reject_mask_on_arch(problem, arch)
     )
@@ -773,6 +802,7 @@ def supports_native_unified_attention_3d_tiled(
     arch = _canonical_arch_for_selection(arch)
     rejected = (
         _reject_lse(problem, arch, "3d")
+        or _reject_dropout(problem, arch, "split-KV")
         or _reject_mask_semantics(problem)
         or _reject_mask_on_arch(problem, arch)
     )
@@ -1928,6 +1958,8 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # Suffix only when on, so every LSE-off key is unchanged (same as the
         # 3D key). The 4-warp exclusion is already keyed by _gfx942_4warp_fast.
         key = key + ("lse",)
+    if problem.dropout:
+        key = key + ("do",)
     return key
 
 
@@ -3469,6 +3501,8 @@ def _tiled_spec_from_problem(
     if problem.emit_lse:
         # Output contract, not a tuning choice; LSE-off specs stay as before.
         _spec = replace(_spec, emit_lse=True)
+    if problem.dropout:
+        _spec = replace(_spec, dropout=True)
     return _resolve_lds_budget(_spec, arch)
 
 
@@ -4385,6 +4419,7 @@ def _tiled_2d_signature(
     kv_dtype: Optional[str] = None,
     include_additive_bias: bool = False,
     emit_lse: bool = False,
+    dropout: bool = False,
 ):
     """Launch signature of the tiled 2D kernels built for ``arch``."""
     spec_cls, _, _ = _tiled_2d_impl(arch)
@@ -4396,6 +4431,7 @@ def _tiled_2d_signature(
         kv_dtype=kv_dtype,
         runtime_fields=_runtime_kernarg_fields(spec_cls),
         emit_lse=emit_lse,
+        dropout=dropout,
     )
 
 
@@ -4501,6 +4537,7 @@ def _attn_signature(
     kv_dtype: Optional[str] = None,
     runtime_fields: Sequence[str] = (),
     emit_lse: bool = False,
+    dropout: bool = False,
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -4541,6 +4578,9 @@ def _attn_signature(
         append_additive_bias_signature(sb)
     if emit_lse:
         sb.ptr("lse_ptr", "f32")
+    if dropout:
+        dropout_signature(sb)
+        sb.scalar("dropout_max_seqlen_q", "i32").scalar("dropout_max_seqlen_k", "i32")
     return sb.build()
 
 
@@ -5320,10 +5360,10 @@ def _explicit_path_supported(
     # allow_unsupported escape hatch must not skip it (a keyless row would
     # silently drop an attention sink, or an arch without the store would
     # write no LSE at all).
-    rejected = _reject_lse(
-        problem,
-        _canonical_arch_for_selection(arch),
-        "3d" if kind == "3d" else "tiled 2D",
+    canonical = _canonical_arch_for_selection(arch)
+    path = "3d" if kind == "3d" else "tiled 2D"
+    rejected = _reject_lse(problem, canonical, path) or _reject_dropout(
+        problem, canonical, "split-KV" if kind == "3d" else path
     )
     if rejected is not None:
         return rejected
@@ -5987,6 +6027,7 @@ def _get_2d_launcher(
             ),
             # The runner has already checked that an explicit spec agrees.
             emit_lse=problem.emit_lse,
+            dropout=problem.dropout,
         ),
         cache_key=("2d",) + cache_key,
     )
@@ -6305,6 +6346,9 @@ def run_unified_attention_torch(
     execution: Attention3DExecution | None = None,
     use_graph: bool = True,
     lse=None,
+    dropout_seed=None,
+    dropout_offset=None,
+    dropout_p: Optional[float] = None,
 ):
     """Launch a CK DSL attention kernel on caller-owned device arrays.
 
@@ -6357,9 +6401,31 @@ def run_unified_attention_torch(
     4-warp GQA builder); the scalar path, sinks and other arches raise
     ``NotImplementedError`` rather than returning without it. Rows with no
     visible key get ``-inf`` (and O = 0).
+
+    ``problem.dropout`` takes ``dropout_seed`` and ``dropout_offset`` (an int,
+    or a device int64 array of one element, each) and ``dropout_p`` in (0, 1);
+    see ``kernels.common._attention_dropout.dropout_launch_args``. Paths without
+    dropout refuse it rather than run without the mask.
     """
     from rocke.runtime.device_array import array_info
 
+    # Before any compile: the dropout inputs must agree with problem.dropout.
+    drop_vals = dropout_launch_args(
+        problem.dropout,
+        dropout_seed=dropout_seed,
+        dropout_offset=dropout_offset,
+        dropout_p=dropout_p,
+        q=q,
+        mask_shape=(
+            problem.num_seqs,
+            problem.num_query_heads,
+            problem.max_seqlen_q,
+            problem.max_seqlen_k,
+        ),
+    )
+    if problem.dropout:
+        drop_vals["dropout_max_seqlen_q"] = int(problem.max_seqlen_q)
+        drop_vals["dropout_max_seqlen_k"] = int(problem.max_seqlen_k)
     if kv_layout == "strided" and problem.emit_lse:
         raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
@@ -6591,6 +6657,11 @@ def run_unified_attention_torch(
         )
         if bool(getattr(lse_owner, "emit_lse", False)) != problem.emit_lse:
             raise ValueError("tuning_spec LSE output disagrees with problem.emit_lse")
+        # Dropout changes the ABI; a 3D spec is refused by the path gate.
+        if tuning_spec.path != "3d" and (
+            bool(getattr(tuning_spec.kernel_spec, "dropout", False)) != problem.dropout
+        ):
+            raise ValueError("tuning_spec dropout disagrees with problem.dropout")
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
@@ -6680,12 +6751,13 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
-        # Never for LSE: _run_2d_graphed replays a cache hit before any gate,
-        # and _cheap_2d_sig / the graph key / its refs carry no LSE, so an
-        # LSE-off graph on the same buffers would serve the request unwritten.
+        # Never for LSE or dropout: _run_2d_graphed replays a cache hit before
+        # any gate, and _cheap_2d_sig / the graph key / its refs carry neither,
+        # so an off graph on the same buffers would serve the request.
         if (
             tuning_spec is None
             and not problem.emit_lse
+            and not problem.dropout
             and is_torch_tensor(q)
             and _enable_2d_graph_replay(problem, _launch_arch)
             and not _torch_stream_capturing()
@@ -6768,6 +6840,7 @@ def run_unified_attention_torch(
                 kv_addr_limit=meta.kv_addr_limit,
                 lse=lse,
             )
+            vals.update(drop_vals)
             return launcher(
                 vals,
                 config=LaunchConfig(
@@ -6779,6 +6852,12 @@ def run_unified_attention_torch(
         if backend == "tiled":
             raise NotImplementedError(reason_t)
 
+    if problem.dropout and backend == "auto":
+        # The scalar fallback below has no dropout (its gate refuses it).
+        raise NotImplementedError(
+            f"dropout needs the tiled 2D attention path, which declined this "
+            f"problem ({reason_t})"
+        )
     if problem.emit_lse and backend == "auto":
         # Only split-KV and tiled 2D write LSE; the scalar fallback below does
         # not (its gate refuses LSE), so name why each LSE path declined.

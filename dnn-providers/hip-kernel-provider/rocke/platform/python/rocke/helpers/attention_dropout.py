@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The SDPA dropout mask of hipDNN SEM-015, drawn in IR.
+"""The SDPA dropout mask of SdpaSemanticsRegister SEM-015, drawn in IR.
 
 A forward and a backward kernel regenerate the same mask from the seed, the
 offset and the element's position, so they need not pass it between them. The
@@ -27,14 +27,16 @@ def dropout_row_counter(
 ) -> Tuple[Value, Value]:
     """Counter words of key 0 of a row: ``offset + row * ceil(max_sk / 4)`` mod ``2**64``.
 
-    ``row`` is the i32 ``(z * Hq + h) * max_sq + q`` and ``max_sk`` the declared
-    key extent; their product is taken in i64, as it outgrows i32 on long
-    sequences. ``offset`` is the u64 sum of hipDNN's offsets as two i32 words.
-    Hoist it per row: a key ``kv`` adds ``kv // 4``
-    (:func:`rocke.helpers.rng.philox_counter_add`).
+    ``row`` is the i64 ``(z * Hq + h) * max_sq + q`` and ``max_sk`` the i32
+    declared key extent. The i64 product is signed, so the launch keeps
+    ``rows * ceil(max_sk / 4)`` below ``2**63``. ``offset`` is the u64 sum of
+    hipDNN's offsets as two i32 words. Hoist it per row: a key ``kv`` adds
+    ``kv // 4`` (:func:`rocke.helpers.rng.philox_counter_add`).
     """
+    if row.type != I64:
+        raise TypeError(f"dropout_row_counter: row must be i64, got {row.type}")
     per_row = b.lshr(b.add(max_sk, b.const_i32(3)), b.const_i32(2))
-    row_base = b.mul(b.zext(row, I64), b.zext(per_row, I64))
+    row_base = b.mul(row, b.zext(per_row, I64))
     rb_lo = b.trunc(row_base, I32)
     rb_hi = b.trunc(b.lshr(row_base, b.const_i64(32)), I32)
     lo = add_u32_wrap(b, offset_lo, rb_lo)

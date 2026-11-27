@@ -1187,6 +1187,18 @@ _CONFIGS[75] = dict(
 # the same shared reader.
 _CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
 
+# --- idx77-84: dropout on P, each an existing config plus dropout.
+#   idx77: transposed32, one 32-key sub-tile (idx68).
+#   idx78: transposed32 + LSE, two sub-tiles (idx64).
+#   idx79: transposed32 invariant hoist, D128 (idx44).
+#   idx80: 16x16 register-PV bf16 (idx29).
+#   idx81: 16x16 P_lds fp16, four PV K steps (idx23).
+#   idx82: 16x16 PV_K_STEP=16 (idx3); idx83: idx82 + LSE (idx66).
+#   idx84: 16x16 with two M atoms per warp (idx5 + block_m_per_warp=32).
+for _idx, _base in zip(range(77, 84), (68, 64, 44, 29, 23, 3, 66)):
+    _CONFIGS[_idx] = {**_CONFIGS[_base], "dropout": True}
+_CONFIGS[84] = {**_CONFIGS[5], "block_m_per_warp": 32, "dropout": True}
+
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:

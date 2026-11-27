@@ -17,7 +17,7 @@ import unittest
 
 import numpy as np
 
-from rocke.core.ir import I32, IRBuilder
+from rocke.core.ir import I32, I64, IRBuilder
 from rocke.helpers import attention_dropout
 from rocke.helpers import rng
 from rocke.numeric import philox_dropout as oracle
@@ -200,7 +200,7 @@ class IRHelperTest(unittest.TestCase):
             b.param(n, I32) for n in names
         )
         r_lo, r_hi = attention_dropout.dropout_row_counter(
-            b, offset_lo=off_lo, offset_hi=off_hi, row=row, max_sk=max_sk
+            b, offset_lo=off_lo, offset_hi=off_hi, row=b.zext(row, I64), max_sk=max_sk
         )
         c_lo, c_hi = rng.philox_counter_add(b, r_lo, r_hi, k)
         words = attention_dropout.dropout_words(

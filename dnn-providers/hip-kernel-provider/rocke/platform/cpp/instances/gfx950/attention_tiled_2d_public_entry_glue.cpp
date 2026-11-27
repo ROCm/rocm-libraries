@@ -383,6 +383,20 @@ bool rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(
 bool rocke_gfx950_attention_tiled_2d_validate_post_init_rules(
     const rocke_attention_tiled_2d_spec_t* spec, char* reason, size_t reason_cap)
 {
+    if(spec->dropout)
+    {
+        /* The mask follows the PV A operand of the 16x16 body and the
+         * transposed 32x32 body's S^T; these paths hold P otherwise. */
+        if(spec->use_mfma_32x32 && !spec->use_transposed_qk_32x32)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "dropout is not supported with the non-transposed 32x32 body");
+        if(spec->use_grouped_kv2_softmax)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "dropout is not supported with use_grouped_kv2_softmax");
+        /* SdpaSemanticsRegister SEM-024 declines dropout with fp8 scaling. */
+        if(spec->kv_storage_dtype != NULL)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "dropout is not supported with fp8 KV storage");
+    }
     if(spec->use_mfma_32x32)
     {
         if(spec->block_m_per_warp != 32)
@@ -824,6 +838,15 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
             o.align_set = true;
             ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
         }
+        /* Trailing dropout params and declared extents (Python: after lse_ptr).
+         * Off -> no param, ABI unchanged. gfx950 has v_bitop3_b32 and a
+         * full-rate v_mad_u64_u32, so xor3 and mad64. */
+        if(spec->dropout)
+        {
+            rocke_declare_dropout_params(b, /*xor3=*/true, /*mad64=*/true, &ctx->drop);
+            ctx->drop_max_sq = rocke_b_param(b, "dropout_max_seqlen_q", rocke_i32(), NULL);
+            ctx->drop_max_sk = rocke_b_param(b, "dropout_max_seqlen_k", rocke_i32(), NULL);
+        }
     }
 
     /* ---- grid ids + wave decomposition (Py891-904) ---- */
@@ -1218,6 +1241,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_register_pv ? "regpv" : "",
             s->use_qblock_reverse ? "qrev" : "",
             s->emit_lse ? (s->lse_head_major ? "lsehm" : "lse") : "",
+            s->dropout ? "do" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

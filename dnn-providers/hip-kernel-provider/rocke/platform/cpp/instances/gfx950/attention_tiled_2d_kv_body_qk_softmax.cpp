@@ -449,6 +449,14 @@ rocke_value_t* rocke_gfx950_attn2d_pack_p_a32(rocke_gfx950_attn2d_build_ctx_t* c
 static rocke_value_t*
     p_regs_f32_buf[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE * ROCKE_GFX950_ATTN2D_MAX_N_TILES];
 
+/* Dropout slot_key of the transposed 32x32 body: the key slot `slot` of S^T
+ * holds within its 32-key sub-tile is its MFMA C row. */
+static rocke_value_t* transposed_c_row_key(void* user, int slot)
+{
+    rocke_gfx950_attn2d_build_ctx_t* ctx = (rocke_gfx950_attn2d_build_ctx_t*)user;
+    return rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(ctx->b, ctx->lane, slot);
+}
+
 /* Re-entrancy reset: clear the REGISTER_PV scratch before a new build. */
 void rocke_gfx950_attn2d_reset_softmax_scratch(void)
 {
@@ -866,6 +874,22 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     st_l_local = rocke_b_fadd(b, st_l_local, p_t);
                 }
             }
+        }
+        if(ctx->spec->dropout)
+        {
+            /* After the row sum: l stays pre-dropout. S^T slot reg of sub-tile n
+             * holds key n * 32 + C row of reg. */
+            rocke_dropout_slot_key_t slot_key = {transposed_c_row_key, ctx};
+            for(int group_idx = 0; group_idx < n_groups; ++group_idx)
+                rocke_apply_dropout_tile(b,
+                                         &ctx->drop,
+                                         ctx->drop_rows[0],
+                                         (group_idx == 0) ? pt32_g0 : pt32_g1,
+                                         QK_N_TILES,
+                                         16,
+                                         (group_idx == 0) ? tile_off : tile_off_g1,
+                                         slot_key,
+                                         32);
         }
         rocke_value_t* st_l_remote = rocke_b_warp_shuffle_xor(b, st_l_local, 32);
         rocke_value_t* st_l_sum = rocke_b_fadd(b, st_l_local, st_l_remote);
@@ -1308,6 +1332,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         pv_in.nxt_buf = ctx->nxt_buf_v;
         pv_in.safe_tile1 = safe_tile1;
         pv_in.safe_next_tile = safe_next_tile; /* deferred K prefetch */
+        pv_in.tile_off = tile_off;
         rocke_gfx950_attn2d_emit_pv_bucket(ctx, &pv_in);
     }
 

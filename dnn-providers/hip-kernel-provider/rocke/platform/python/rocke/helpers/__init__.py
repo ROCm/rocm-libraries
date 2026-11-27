@@ -734,7 +734,7 @@ __all__ = [
     "mulhilo_u32_wide",
     "philox4x32_10",
     "philox_counter_add",
-    # SDPA dropout mask (hipDNN SEM-015)
+    # SDPA dropout mask helpers
     "dropout_keep",
     "dropout_row_counter",
     "dropout_words",

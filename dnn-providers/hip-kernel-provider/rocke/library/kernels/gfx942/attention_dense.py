@@ -520,8 +520,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   count for short query lengths over long KV (chunked prefill), where one CTA
     #   per (query block, head) leaves most CUs idle. 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
-    # Philox dropout on P (hipDNN SEM-015 mask; kernels.common._attention_dropout).
-    # Lives here, not on the shared spec, which the C++ engine mirrors.
+    # Dropout on P (kernels.common._attention_dropout).
     dropout: bool = field(default=False, kw_only=True)
 
     @classmethod
@@ -3057,6 +3056,8 @@ def run_attention_dense_torch(
         dropout_seed=dropout_seed,
         dropout_offset=dropout_offset,
         dropout_p=dropout_p,
+        q=q,
+        mask_shape=(spec.batch, spec.num_query_heads, spec.seqlen_q, spec.seqlen_kv),
     )
     key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)

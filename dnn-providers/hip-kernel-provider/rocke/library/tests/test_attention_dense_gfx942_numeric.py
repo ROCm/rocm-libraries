@@ -2279,7 +2279,7 @@ def test_cfvst_kdb_vpf_pipeline_reuses_runtime_shape_binary():
 
 
 class TestDenseDropoutNumericGfx942:
-    """Philox dropout (SdpaSemanticsRegister SEM-015) on both grids against the oracle mask."""
+    """Dropout on both grids against the oracle mask."""
 
     @requires_gfx942_gpu
     @pytest.mark.gpu

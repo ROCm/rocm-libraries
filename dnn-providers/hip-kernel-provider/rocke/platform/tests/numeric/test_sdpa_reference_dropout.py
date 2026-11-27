@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Explicit-mask dropout of ``rocke.numeric.sdpa_reference`` (SdpaSemanticsRegister SEM-015)."""
+"""Explicit-mask dropout of ``rocke.numeric.sdpa_reference``."""
 
 from __future__ import annotations
 

@@ -1493,6 +1493,17 @@ GFX950_ATTENTION_TILED_2D += [
         "tile_size": 64,
     },
 ]
+# idx77-84: dropout on P, each an existing config plus dropout:
+# transposed32 (68; 64 with LSE; 44 with the invariant hoist), 16x16
+# register-PV (29), P_lds fp16 (23), PV_K_STEP=16 (3; 66 with LSE), and two M
+# atoms per warp (5 + block_m_per_warp=32).
+GFX950_ATTENTION_TILED_2D += [
+    {**GFX950_ATTENTION_TILED_2D[i], "dropout": True}
+    for i in (68, 64, 44, 29, 23, 3, 66)
+]
+GFX950_ATTENTION_TILED_2D += [
+    {**GFX950_ATTENTION_TILED_2D[5], "block_m_per_warp": 32, "dropout": True}
+]
 
 GFX942_ATTENTION_TILED_3D = [
     {

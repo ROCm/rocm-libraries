@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""GPU checks of Philox dropout (SdpaSemanticsRegister SEM-015) the per-arch dense numeric tests share.
+"""GPU checks of dropout the per-arch dense numeric tests share.
 
 * The mask bit for bit: with V = identity (Skv == D) the output element
   ``O[b, i, h, j]`` is non-zero iff key ``j`` of row ``(b, h, i)`` is visible and

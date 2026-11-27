@@ -350,6 +350,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/oracle_free/test_permutation_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
     "tests/library/tests/test_attention_dense_dropout.py"
+    "tests/library/tests/test_attention_unified_dropout.py"
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"
     "tests/library/tests/dispatch/attention/test_review_followups.py"
@@ -735,6 +736,7 @@ set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_extended_parity_attention.py"
     "tests/library/tests/test_attention_unified_mask_gfx950_numeric.py"
     "tests/library/tests/test_attention_unified_swa_sink_gfx950_numeric.py"
+    "tests/library/tests/test_attention_unified_dropout_gfx950_numeric.py"
     # Each score modifier and each transposed 32x32 route once; the mixes run
     # in rocke_library_attention_biased_mixes_gpu_pytest below.
     "tests/library/tests/test_attention_tiled_2d_gfx950_biased_numeric.py::test_each_modifier_on_each_route")

@@ -853,6 +853,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     s.lse_head_major = t2d_lse_head_major(d);
+    s.dropout = a_bool(d, "dropout", s.dropout);
     /* Every other field the C struct shares with the Python spec. A field left
      * out here silently keeps its C default, so the native builder would build
      * a different kernel (e.g. gfx942 x8 transposed specs fail validation
@@ -1062,6 +1063,7 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     s.lse_head_major = t2d_lse_head_major(d);
+    s.dropout = a_bool(d, "dropout", s.dropout);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1422,14 +1424,14 @@ void reg3(py::module_& m,
 
 /* Refuse a problem that sets a UnifiedAttentionProblem field the C struct has no
  * member for, where the field changes the Python gfx950 tiled-2D spec: additive
- * bias (selector gates and spec field), the LSE output, a pinned waves_per_eu, and
- * the top-left / right-bounded mask. Dropping one would run the C++ selector on a
+ * bias (selector gates and spec field), the LSE output, dropout, a pinned
+ * waves_per_eu, and the top-left / right-bounded mask. Dropping one would run the C++ selector on a
  * different problem than the Python one and return a different spec without
  * saying so. A field left at its default carries no information and is accepted. */
 static void require_c_representable_problem(const py::dict& d)
 {
     std::vector<std::string> unsupported;
-    for(const char* flag : {"use_additive_bias", "emit_lse", "causal_top_left"})
+    for(const char* flag : {"use_additive_bias", "emit_lse", "causal_top_left", "dropout"})
     {
         if(a_bool(d, flag, false))
             unsupported.push_back(std::string(flag) + "=True");
@@ -1522,6 +1524,7 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["emit_lse"] = s.emit_lse;
     if(s.lse_head_major)
         d["lse_layout"] = "head_major";
+    d["dropout"] = s.dropout;
     return d;
 }
 

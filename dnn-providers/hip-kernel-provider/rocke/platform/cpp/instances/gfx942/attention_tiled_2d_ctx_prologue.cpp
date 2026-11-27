@@ -140,6 +140,13 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         snprintf(b->err, ROCKE_ERR_MSG_CAP, "lse_layout='head_major' is gfx950-only");
         return false;
     }
+    /* The gfx942 spec has no dropout: refuse rather than build without it. */
+    if(spec->dropout)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err, ROCKE_ERR_MSG_CAP, "dropout is gfx950-only");
+        return false;
+    }
 
     /* ---- narrow 16x16x16 atom select (lines 1147-1159) ---- */
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);

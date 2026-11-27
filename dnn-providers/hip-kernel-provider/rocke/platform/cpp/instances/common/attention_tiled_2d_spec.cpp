@@ -77,6 +77,7 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.use_qblock_reverse = false;
     s.emit_lse = false;
     s.lse_head_major = false;
+    s.dropout = false;
     return s;
 }
 

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host oracle of the SDPA Philox dropout mask (hipDNN SEM-015).
+"""Host oracle of the SDPA dropout mask (SdpaSemanticsRegister SEM-015).
 
 SEM-015 fixes the mask a forward and a backward kernel must both regenerate, so
 that a rocKE forward can pair with any other engine's backward (and the

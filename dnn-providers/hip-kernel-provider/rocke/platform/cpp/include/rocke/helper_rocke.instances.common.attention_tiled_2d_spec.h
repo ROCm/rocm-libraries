@@ -149,6 +149,10 @@ typedef struct rocke_attention_tiled_2d_spec
      * each sequence's LSE is a [num_query_heads, q_len] block; the kernel name's
      * "lse" token becomes "lsehm". Needs emit_lse. */
     bool lse_head_major; /* False */
+    /* gfx950 dropout on P: the dropout params and
+     * the declared extents dropout_max_seqlen_q / _k become the last kernargs,
+     * and the kernel name gains "do". The gfx942 twin refuses it. */
+    bool dropout; /* False (Python kw_only) */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

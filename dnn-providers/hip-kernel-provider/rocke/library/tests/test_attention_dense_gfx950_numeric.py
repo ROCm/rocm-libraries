@@ -2561,7 +2561,7 @@ class TestDenseRowIndependence:
 
 
 class TestDenseDropoutNumericGfx950:
-    """Philox dropout (SdpaSemanticsRegister SEM-015) on the grid, persistent and
+    """Dropout on the grid, persistent and
     wide-DMA bodies, varlen and paged, against the oracle mask."""
 
     @requires_gfx950_gpu

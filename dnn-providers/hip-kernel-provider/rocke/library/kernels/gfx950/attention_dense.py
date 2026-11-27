@@ -242,8 +242,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # Lives here, not on the shared spec: only this arch's loader decodes fp8,
     # and the shared spec is the one the C++ engine mirrors.
     kv_storage_dtype: str | None = field(default=None, kw_only=True)
-    # Philox dropout on P (hipDNN SEM-015 mask; kernels.common._attention_dropout).
-    # Lives here, not on the shared spec, which the C++ engine mirrors.
+    # Dropout on P (kernels.common._attention_dropout).
     dropout: bool = field(default=False, kw_only=True)
 
     @property
@@ -363,7 +362,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         require_bool("dropout", self.dropout)
         if self.dropout:
             # Both are inference forms: the KV split serves chunked prefill, and
-            # hipDNN declines dropout with fp8 scaling (SEM-024).
+            # SdpaSemanticsRegister SEM-024 declines dropout with fp8 scaling.
             if self.kv_segments != 1:
                 raise ValueError("dropout is not supported with kv_segments > 1")
             if self.kv_storage_dtype is not None:
@@ -3463,6 +3462,8 @@ def run_attention_dense_torch(
         dropout_seed=dropout_seed,
         dropout_offset=dropout_offset,
         dropout_p=dropout_p,
+        q=q,
+        mask_shape=(spec.batch, spec.num_query_heads, spec.seqlen_q, spec.seqlen_kv),
     )
     key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)

@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Philox dropout of the gfx942 and gfx950 dense kernels, on the host.
+"""Dropout of the gfx942 and gfx950 dense kernels, on the host.
 
 The lane-to-counter map of ``kernels.common._attention_dropout`` runs
-through the integer IR evaluator against the SEM-015 oracle
+through the integer IR evaluator against the mask oracle
 (``rocke.numeric.philox_dropout``); the spec flag's refusals, name, ABI, IR and
 launch arguments are checked without a device.
 """
@@ -39,6 +39,8 @@ from rocke.tests.int_eval import evaluate_int_ops
 M32 = 0xFFFFFFFF
 ROUND_FORMS = ((False, False), (False, True), (True, True))  # (xor3, mad64)
 PARAM_NAMES = [name for name, _ in DROPOUT_PARAMS]
+# q (device 0) and the mask's (B, Hq, max_sq, max_sk) of a launch.
+_LAUNCH = {"q": HostArray((1,), "bf16"), "mask_shape": (2, 8, 64, 64)}
 # The C-layout row map each dense body passes as ``slot_key``.
 _C_ROW = {"gfx942": c_row942, "gfx950": c_row950}
 
@@ -204,12 +206,50 @@ class DropoutSpecTest(unittest.TestCase):
             self.assertRegex(ir_on, rf"ptrtoint ptr addrspace\(1\) %{name} to i64")
 
 
+class DropoutRowIndexTest(unittest.TestCase):
+    def test_row_index_past_i32(self):
+        # Varlen: num_seqs * Hq * max_sq passes 2**31 while the tokens fit; the
+        # row must still be the mask's exact index, not a wrapped or poison one.
+        B, Hq, Sq, Skv = 4096, 32, 65536, (1 << 20) + 3
+        offset = (1 << 64) - 3
+        b = IRBuilder("drop_row")
+        names = ("off_lo", "off_hi", "z", "h", "q")
+        off_lo, off_hi, z, h, q = (b.param(n, I32) for n in names)
+        st = DropoutState(off_lo, off_hi, off_lo, off_hi, off_lo, scale=None)
+        lo, hi = dropout_query_counter(
+            b,
+            st,
+            batch=z,
+            head=h,
+            query=q,
+            num_heads=b.const_i32(Hq),
+            seqlen_q=b.const_i32(Sq),
+            seqlen_kv=b.const_i32(Skv),
+        )
+        for zz, hh, qq in ((B - 1, Hq - 1, Sq - 1), (1024, 0, 0), (3, 5, 7)):
+            row = (zz * Hq + hh) * Sq + qq
+            want = (offset + row * -(-Skv // 4)) % (1 << 64)
+            inputs = {
+                "off_lo": offset & M32,
+                "off_hi": offset >> 32,
+                "z": zz,
+                "h": hh,
+                "q": qq,
+            }
+            got_lo, got_hi = evaluate_int_ops(b, inputs, [lo, hi])
+            self.assertEqual(got_lo | got_hi << 32, want, (zz, hh, qq))
+
+
 class DropoutLaunchArgsTest(unittest.TestCase):
     def test_by_value_and_by_pointer(self):
         p = 0.2
         seed_arr = HostArray((1,), "i64")
         got = dropout_launch_args(
-            True, dropout_seed=seed_arr, dropout_offset=(1 << 64) - 5, dropout_p=p
+            True,
+            dropout_seed=seed_arr,
+            dropout_offset=(1 << 64) - 5,
+            dropout_p=p,
+            **_LAUNCH,
         )
         self.assertEqual(sorted(got), sorted(PARAM_NAMES))
         self.assertIs(got["dropout_seed_ptr"], seed_arr)
@@ -222,21 +262,27 @@ class DropoutLaunchArgsTest(unittest.TestCase):
             dropout_seed=np.uint64(1 << 63),
             dropout_offset=np.int64(3),
             dropout_p=p,
+            **_LAUNCH,
         )
         self.assertEqual(
             (as_numpy["dropout_seed"], as_numpy["dropout_offset"]), (-(1 << 63), 3)
         )
         self.assertEqual(
             dropout_launch_args(
-                False, dropout_seed=None, dropout_offset=None, dropout_p=None
+                False, dropout_seed=None, dropout_offset=None, dropout_p=None, **_LAUNCH
             ),
             {},
         )
 
     def test_refusals(self):
-        def call(enabled=True, seed=1, offset=2, p=0.1):
+        def call(enabled=True, seed=1, offset=2, p=0.1, mask_shape=(2, 8, 64, 64)):
             return dropout_launch_args(
-                enabled, dropout_seed=seed, dropout_offset=offset, dropout_p=p
+                enabled,
+                dropout_seed=seed,
+                dropout_offset=offset,
+                dropout_p=p,
+                q=_LAUNCH["q"],
+                mask_shape=mask_shape,
             )
 
         cases = [
@@ -269,6 +315,19 @@ class DropoutLaunchArgsTest(unittest.TestCase):
             (
                 dict(offset=HostArray((1,), "i64", device=None)),
                 r"^dropout_offset must be in device memory$",
+            ),
+            (
+                dict(seed=HostArray((1,), "i64", device=1)),
+                r"^dropout_seed must be on the same device as q, got device 1 and 0$",
+            ),
+            (
+                dict(mask_shape=(1 << 16, 1 << 15, 64, 64)),
+                re.escape("has B * Hq past 2**31"),
+            ),
+            (
+                # 2**64 counters: past the kernel's signed i64 row base.
+                dict(mask_shape=(1 << 10, 1 << 10, 1 << 20, 1 << 26)),
+                re.escape("needs counters past 2**63"),
             ),
         ]
         for kw, msg in cases:

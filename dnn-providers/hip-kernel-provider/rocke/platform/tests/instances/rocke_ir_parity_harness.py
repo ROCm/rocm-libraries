@@ -1955,8 +1955,7 @@ def cases():
                 "use_sinks": True,
             },
         ),
-        # --- Philox dropout: the serial mask (grid), the mask spread over the
-        # PV MFMAs (persistent) and packed sequences.
+        # --- Dropout: the grid, persistent and packed-sequence bodies.
         ("dropout_sq512", {"dropout": True}),
         (
             "dropout_persist_lse_sq512",
@@ -2065,7 +2064,7 @@ def cases():
                 "waves_per_eu": 4,
             },
         ),
-        # Philox dropout: the k-major PV of both grids.
+        # Dropout: the k-major PV of both grids.
         ("dropout_causal_sq512", {"dropout": True}),
         ("dropout_persist_sq512", {**_persist942, "dropout": True}),
     ):

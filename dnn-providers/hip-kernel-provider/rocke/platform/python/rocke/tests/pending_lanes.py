@@ -1259,6 +1259,7 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_tiled_3d_wave_page_id_load.py",
         "library/tests/test_attention_tiled_runtime_shape_numeric.py",
         "library/tests/test_attention_unified_2d_masked_tile_numeric.py",
+        "library/tests/test_attention_unified_dropout_gfx950_numeric.py",
         "library/tests/test_attention_unified_lse_numeric.py",
         "library/tests/test_attention_unified_mask_gfx950_numeric.py",
         "library/tests/test_attention_unified_swa_sink_gfx950_numeric.py",

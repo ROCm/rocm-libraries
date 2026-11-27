@@ -1239,6 +1239,32 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(75, s);
         s->use_transposed_qk_32x32 = true;
         break;
+
+    /* --- idx77-84: dropout on P (lockstep with the Python
+     *     _CONFIGS[77..84]), each an existing config plus dropout.
+     *     77: transposed32, one 32-key sub-tile (68); 78: transposed32 + LSE,
+     *     two sub-tiles (64); 79: transposed32 invariant hoist, D128 (44);
+     *     80: 16x16 register-PV bf16 (29); 81: 16x16 P_lds fp16, four PV K
+     *     steps (23); 82: 16x16 PV_K_STEP=16 (3); 83: 82 + LSE (66);
+     *     84: 16x16 with two M atoms per warp (5 + block_m_per_warp=32). */
+    case 77:
+    case 78:
+    case 79:
+    case 80:
+    case 81:
+    case 82:
+    case 83:
+    {
+        static const int base[] = {68, 64, 44, 29, 23, 3, 66};
+        make_spec(base[idx - 77], s);
+        s->dropout = true;
+        break;
+    }
+    case 84:
+        make_spec(5, s);
+        s->block_m_per_warp = 32;
+        s->dropout = true;
+        break;
     default:
         return -1;
     }

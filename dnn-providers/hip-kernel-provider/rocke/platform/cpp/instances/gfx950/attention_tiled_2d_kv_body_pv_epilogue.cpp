@@ -80,6 +80,39 @@ static rocke_value_t* rocke__attn2d_mfma_16x16x32(rocke_ir_builder_t* b,
 
 #define MFMA_N_CONST 16 /* Python module constant MFMA_N = 16 */
 
+/* Python _pv_a_operand_key: the key, within its PV K step, of slot `slot` of
+ * this lane's PV A operand (the dropout slot_key of the 16x16 body). */
+static rocke_value_t* pv_a_key(void* user, int slot)
+{
+    rocke_gfx950_attn2d_build_ctx_t* ctx = (rocke_gfx950_attn2d_build_ctx_t*)user;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* step4 = rocke_b_const_i32(b, ctx->PV_K_STEP / 4);
+    rocke_value_t* key0 = rocke_b_mul(b, ctx->lane_rg_v, step4);
+    if(slot == 0)
+        return key0;
+    rocke_value_t* off = rocke_b_const_i32(b, slot);
+    return rocke_b_add(b, key0, off);
+}
+
+/* Python _drop_a: zero the dropped elements of one PV A operand. */
+static rocke_value_t* drop_a(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                             rocke_value_t* a_vec,
+                             rocke_value_t* const* keep,
+                             int n,
+                             const rocke_type_t* dtype)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* zero_f32 = rocke_b_const_f32(b, 0.0);
+    rocke_value_t* zero = rocke_b_cast_f32_to(b, zero_f32, dtype);
+    rocke_value_t* comps[8];
+    for(int e = 0; e < n; ++e)
+    {
+        rocke_value_t* elem = rocke_b_vec_extract(b, a_vec, e);
+        comps[e] = rocke_b_select(b, keep[e], elem, zero);
+    }
+    return rocke_b_vec_pack(b, comps, n, dtype);
+}
+
 /* ============================================================ *
  *  rocke_pv32_v_load_paired   (helpers/attention.py:794-857)
  *
@@ -264,6 +297,8 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
     rocke_value_t* yields[ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS];
     rocke_value_t* pv_fp8_scale = NULL;
     int n, r, atom, k, i, yc;
+    rocke_value_t* drop_keep[ROCKE_GFX950_ATTN2D_MAX_K_ITERS]
+                            [ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE / 4][8];
 
     for(i = 0; i < ROCKE_GFX950_ATTN2D_MAX_ACCS; ++i)
         new_acc[i] = NULL;
@@ -433,6 +468,34 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
         }
     }
 
+    /* Dropout keep flags of each (k, atom) A operand, drawn once per KV tile
+     * and shared by the N tiles: drop_keep[k][atom][g * 4 + w]. */
+    bool has_drop_keep = ctx->spec->dropout && !ctx->USE_MFMA_32X32;
+    if(has_drop_keep)
+    {
+        if(ctx->PV_K_ITERS > ROCKE_GFX950_ATTN2D_MAX_K_ITERS || ctx->PV_K_STEP / 16 > 2)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "dropout: PV K geometry out of range");
+            return;
+        }
+        rocke_dropout_slot_key_t slot_key = {pv_a_key, ctx};
+        for(atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
+        {
+            rocke_value_t* tile_ctr[2];
+            rocke_dropout_tile_counter(b, ctx->drop_rows[atom], in->tile_off, slot_key, tile_ctr);
+            for(k = 0; k < ctx->PV_K_ITERS; ++k)
+                for(int g = 0; g < ctx->PV_K_STEP / 16; ++g)
+                    rocke_dropout_keep_run(b,
+                                           &ctx->drop,
+                                           tile_ctr,
+                                           k,
+                                           g,
+                                           slot_key,
+                                           ctx->PV_K_STEP,
+                                           &drop_keep[k][atom][g * 4]);
+        }
+    }
+
     /* ---- narrow 16x16 per-atom PV (Python 3413-3562) ---- */
     {
         int n_lim = ctx->USE_MFMA_32X32 ? 0 : ctx->PV_N_TILES;
@@ -581,6 +644,8 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                 pidx[1] = p_off;
                                 A_p = rocke_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 8);
                             }
+                            if(has_drop_keep)
+                                A_p = drop_a(ctx, A_p, drop_keep[k][atom], 8, dtype);
                             acc_per_atom[atom] = rocke__attn2d_mfma_16x16x32(
                                 b, dtype, A_p, B_v, acc_per_atom[atom]);
                         }
@@ -637,6 +702,8 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
                             pidx[1] = p_off;
                             A_p = rocke_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 4);
                         }
+                        if(has_drop_keep)
+                            A_p = drop_a(ctx, A_p, drop_keep[k][atom], 4, dtype);
                         acc_per_atom[atom]
                             = rocke__attn2d_mfma_16x16x16(b, dtype, A_p, B_v, acc_per_atom[atom]);
                     }
@@ -782,6 +849,12 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
      * ALL rcps first (list comp), THEN all fcmps -- two loops. */
     for(r = 0; r < ctx->SOFTMAX_STATE_SLOTS; ++r)
         ctx->rcp_l[r] = rocke_b_rcp(b, ctx->l_final[r]);
+    if(ctx->spec->dropout)
+    {
+        /* 1 / (1 - p) folded into 1 / l; LSE keeps the pre-dropout l. */
+        for(r = 0; r < ctx->SOFTMAX_STATE_SLOTS; ++r)
+            ctx->rcp_l[r] = rocke_b_fmul(b, ctx->rcp_l[r], ctx->drop.scale);
+    }
     for(r = 0; r < ctx->SOFTMAX_STATE_SLOTS; ++r)
         ctx->l_zero[r] = rocke_b_fcmp(b, "oeq", ctx->l_final[r], ctx->zero_f);
 
@@ -831,6 +904,8 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 return NULL;
 
             inv_l_t = rocke_b_rcp(b, ctx->l_final[0]);
+            if(ctx->spec->dropout)
+                inv_l_t = rocke_b_fmul(b, inv_l_t, ctx->drop.scale);
             l_zero_t = rocke_b_fcmp(b, "oeq", ctx->l_final[0], ctx->zero_f);
             if(ctx->spec->emit_lse)
             {

@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Philox dropout on P for the attention forward kernels (hipDNN SEM-015).
+"""Dropout on P for the attention forward kernels.
 
-The mask is SEM-015's (``rocke.numeric.philox_dropout`` is its oracle), so a
-backward of another engine regenerates it from the same seed and offset.
+The mask is SdpaSemanticsRegister SEM-015's (``rocke.numeric.philox_dropout``
+is its oracle), so a backward of another engine regenerates it from the same
+seed and offset.
 Dropout multiplies the post-softmax P by ``keep / (1 - p)`` before PV: the row
 sum and the LSE stay pre-dropout, the dropped probabilities are zeroed before
 the PV MFMA, and ``1 / (1 - p)`` is folded into the epilogue's ``1 / l``.
@@ -120,10 +121,13 @@ def dropout_query_counter(
 
     ``seqlen_q`` / ``seqlen_kv`` are the declared extents (``max_sq`` /
     ``max_sk`` of SEM-015), also for varlen and paged; ``batch`` is the
-    sequence and ``query`` the position in it. The row index fits i32 as the
-    LSE index does.
+    sequence and ``query`` the position in it. The row index widens to i64 at
+    ``* seqlen_q``: on varlen batches ``num_seqs * Hq * max_sq`` outgrows i32
+    while the tokens do not (the launch bounds ``num_seqs * Hq`` by i32).
     """
-    row = b.add(b.mul(b.add(b.mul(batch, num_heads), head), seqlen_q), query)
+    row = b.add(b.mul(batch, num_heads), head)
+    row = b.mul(b.zext(row, I64), b.zext(seqlen_q, I64))
+    row = b.add(row, b.zext(query, I64))
     return dropout_row_counter(
         b, offset_lo=st.offset_lo, offset_hi=st.offset_hi, row=row, max_sk=seqlen_kv
     )
@@ -202,11 +206,11 @@ def dropout_signature(sig):
     return sig
 
 
-def _seed_or_offset(name: str, value) -> tuple[object, int]:
+def _seed_or_offset(name: str, value, q) -> tuple[object, int]:
     """``(pointer, value)`` kernargs of one of seed / offset.
 
     An integer (as u64 or i64) goes by value; an array (``DeviceArray`` or
-    torch tensor) of one int64 element on the device is read by the kernel.
+    torch tensor) of one int64 element on ``q``'s device is read by the kernel.
     """
     from rocke.runtime.device_array import array_info
 
@@ -225,18 +229,25 @@ def _seed_or_offset(name: str, value) -> tuple[object, int]:
         )
     if info.device is None:
         raise ValueError(f"{name} must be in device memory")
+    q_device = array_info(q).device
+    if info.device != q_device:
+        raise ValueError(
+            f"{name} must be on the same device as q, got device {info.device} "
+            f"and {q_device}"
+        )
     return value, 0
 
 
 def dropout_launch_args(
-    enabled: bool, *, dropout_seed, dropout_offset, dropout_p
+    enabled: bool, *, dropout_seed, dropout_offset, dropout_p, q, mask_shape
 ) -> dict:
     """Kernargs of the dropout params, or ``{}`` when the spec has dropout off.
 
     ``dropout_seed`` / ``dropout_offset``: an ``int`` each, or a device int64
-    array of one element (see :func:`_seed_or_offset`); ``dropout_p`` in
-    ``(0, 1)``. Inputs that disagree with the spec raise rather than launch a
-    kernel whose ABI has (or lacks) the dropout params.
+    array of one element on ``q``'s device (see :func:`_seed_or_offset`);
+    ``dropout_p`` in ``(0, 1)``. ``mask_shape`` is the mask's
+    ``(B, Hq, max_sq, max_sk)``. Inputs that disagree with the spec raise
+    rather than launch a kernel whose ABI has (or lacks) the dropout params.
     """
     named = (
         ("dropout_seed", dropout_seed),
@@ -254,8 +265,21 @@ def dropout_launch_args(
     # p = 0 is no dropout: the dispatch picks a kernel without it.
     if not 0.0 < p < 1.0:
         raise ValueError(f"dropout_p must be in (0, 1), got {p}")
-    seed_ptr, seed = _seed_or_offset("dropout_seed", dropout_seed)
-    offset_ptr, offset = _seed_or_offset("dropout_offset", dropout_offset)
+    batch, heads, max_sq, max_sk = (int(n) for n in mask_shape)
+    # The kernel forms batch * Hq + head in signed i32 and each row's counter
+    # base in signed i64.
+    if batch * heads >= 1 << 31:
+        raise ValueError(
+            f"dropout mask {tuple(mask_shape)} has B * Hq past 2**31, beyond the "
+            "kernel's i32 row arithmetic"
+        )
+    if batch * heads * max_sq * -(-max_sk // 4) >= 1 << 63:
+        raise ValueError(
+            f"dropout mask {tuple(mask_shape)} needs counters past 2**63, beyond "
+            "the kernel's i64 row arithmetic"
+        )
+    seed_ptr, seed = _seed_or_offset("dropout_seed", dropout_seed, q)
+    offset_ptr, offset = _seed_or_offset("dropout_offset", dropout_offset, q)
     return {
         "dropout_seed_ptr": seed_ptr,
         "dropout_offset_ptr": offset_ptr,

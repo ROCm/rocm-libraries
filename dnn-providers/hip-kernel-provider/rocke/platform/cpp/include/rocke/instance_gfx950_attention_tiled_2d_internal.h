@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* static tile distribution (32x32 C dist)        */
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_transpose_lds_reader_t (PV reader)         */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_dropout_internal.h" /* rocke_dropout_state_t */
 #include "rocke/instance_gfx950_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -183,6 +184,11 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_kv_p;
     rocke_value_t* sliding_window_p;
     rocke_value_t* lse; /* lse_ptr (spec->emit_lse only, else NULL) */
+    /* spec->dropout only: the resolved dropout state and the declared extents
+     * (dropout_max_seqlen_q / _k kernargs). */
+    rocke_dropout_state_t drop;
+    rocke_value_t* drop_max_sq;
+    rocke_value_t* drop_max_sk;
 
     /* ---- grid ids + wave decomposition ---- */
     rocke_value_t* q_block_global_idx;
@@ -252,6 +258,11 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* lane_rg_is0_v;
     rocke_value_t* lane_rg_is1_v;
     rocke_value_t* lane_rg_is2_v;
+    /* spec->dropout only: mask row counters (lo, hi) of the rows this lane
+     * masks, one per PV A atom (16x16 body) or one for the transposed 32x32
+     * body's S^T column (Python drop_rows). */
+    rocke_value_t* drop_rows[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE / 4][2];
+    int drop_rows_count;
 
     /* ---- SSA constants ---- */
     rocke_value_t* zero_f;
@@ -589,6 +600,8 @@ typedef struct rocke_gfx950_attn2d_pv_inputs
     rocke_value_t* cur_buf;
     /* clamped next tile index for the deferred K single-buffer prefetch. */
     rocke_value_t* safe_next_tile;
+    /* kv_tile_iv * T: the first key of the tile (dropout counters). */
+    rocke_value_t* tile_off;
 } rocke_gfx950_attn2d_pv_inputs_t;
 
 /* PV MFMA + carry yield bucket (the back half of _emit_kv_body). */
