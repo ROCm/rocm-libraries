@@ -26,7 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
-from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning
+from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning, storeCachelineAlignEnabled
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -307,7 +307,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("SpaceFillingAlgo")
 
     # Non-default debug modes replace or remove generated control flow.
-    for key in ("DebugStreamK", "StreamKAtomic", "MbskPrefetchMethod", "DebugPersistentKernelLoopForever"):
+    for key in ("DebugStreamK", "StreamKAtomic", "MbskPrefetchMethod", "DebugPersistentKernelLoopForever",
+                "DebugDisableInstrMask"):
       if state.get(key, 0) != 0:
         requiredParametersTemp.add(key)
 
@@ -318,9 +319,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
-    # StoreCachelineAlign only changes codegen on the gfx950 MXF4 subtile path. Name it only
-    # there and only when it is on, so every other kernel keeps its existing name.
-    if state.get("StoreCachelineAlign", False) \
+    # StoreCachelineAlign only changes codegen on the gfx950 MXF4 subtile path, and there
+    # only on kernels whose waves hold both halves of a line. Name it only where it acts,
+    # so every other kernel keeps its existing name.
+    if storeCachelineAlignEnabled(state) \
         and tuple(state.get("ISA", ())[:2]) == (9, 5) and isMxf4SubtilePath(state):
       requiredParametersTemp.add("StoreCachelineAlign")
     else:

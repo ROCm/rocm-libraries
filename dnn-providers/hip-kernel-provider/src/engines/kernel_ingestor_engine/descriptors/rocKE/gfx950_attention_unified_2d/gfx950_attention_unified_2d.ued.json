@@ -20,5 +20,6 @@
     "block_m_per_warp",
     "use_mfma_32x32",
     "use_transposed_qk_32x32"
-  ]
+  ],
+  "numerical_notes": []
 }

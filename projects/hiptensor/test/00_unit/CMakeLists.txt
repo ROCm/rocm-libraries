@@ -38,6 +38,10 @@
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options_test.cpp
      )
+ add_hiptensor_unit_test(api_attribute_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/api_attribute_test.cpp
+     )
  add_hiptensor_unit_test(plan_lifetime_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/plan_lifetime_test.cpp
@@ -61,6 +65,10 @@ add_hiptensor_unit_test(elementwise_mode_test
 add_hiptensor_unit_test(elementwise_broadcast_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_broadcast_test.cpp
+    )
+add_hiptensor_unit_test(elementwise_instance_selection_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_instance_selection_test.cpp
     )
 add_hiptensor_unit_test(reduction_mode_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
