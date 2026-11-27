@@ -206,7 +206,7 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load or store is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
 
 When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
 
@@ -411,11 +411,11 @@ Anchor helpers:
 
 | Site | Condition | Effect |
 |------|-----------|--------|
-| Tensor anchor | Anchor lacks `MemTokenData` and any tensor load in flight | `required[CK_Tensor] = 0` |
+| Tensor anchor | Anchor lacks `MemTokenData` and any tensor load or store in flight | `required[CK_Tensor] = 0` |
 | LDS writer | Writer lacks `MemTokenData`, any DS op in flight, writer is not `ds_write` | `required[CK_DS] = 0` |
 | Barrier | Any in-flight DS op and (barrier untagged OR any pending DS op untagged) | `required[CK_DS] = 0` |
 
-These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads.
+These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads and stores.
 
 ---
 

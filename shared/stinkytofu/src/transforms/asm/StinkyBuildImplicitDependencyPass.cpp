@@ -58,7 +58,8 @@
 //    instruction type determines src vs dest placement:
 //
 //      tensor_load / ds_write                      →  LDS token to dest (LDS producer)
-//      ds_read / global_store_async_from_lds_*      →  LDS token to src  (LDS consumer)
+//      ds_read / global_store_async_from_lds_*     →  LDS token to src  (LDS consumer)
+//      tensor_store_from_lds                       →  LDS token to src  (LDS consumer)
 //      barrier / signal / wait                      →  LDS token to both (synchronization point)
 //
 //    The def-use chain builder then sees:
@@ -494,11 +495,13 @@ static void processLdsWriter(StinkyInstruction& inst, const MemTokenData& mt,
     for (int tokenId : mt.tokens) addUniqueLdsDest(inst, tokenId);
 }
 
-// LDS readers (ds_read, global_store_async_from_lds_*): LDS tokens to src.
+// LDS readers (ds_read, global_store_async_from_lds_*, tensor_store_from_lds): LDS tokens to src.
 static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
                              [[maybe_unused]] const std::string& bbLabel) {
     PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS reader ("
-                         << (isDSRead(inst) ? "ds_read" : "global_store_async_from_lds")
+                         << (isDSRead(inst)        ? "ds_read"
+                             : isTensorStore(inst) ? "tensor_store_from_lds"
+                                                   : "global_store_async_from_lds")
                          << ") tokens=[";
                for (int t
                     : mt.tokens) std::cerr
