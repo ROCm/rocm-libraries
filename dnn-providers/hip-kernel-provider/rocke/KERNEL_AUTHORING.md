@@ -12,7 +12,7 @@ optimize a kernel — that lives in the field manual
 and the optimization runbook
 ([optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md)),
 which this doc routes to. The hard *invariants* it depends on (byte-identity,
-one-way dependency, relative-paths, no-`ruff --fix`, torch-optional, default arch)
+one-way dependency, relative-paths, no-`ruff --fix`, no torch, default arch)
 are owned by [platform/AGENTS.md](platform/AGENTS.md) — that file wins on any
 conflict. This doc adds the *process* around them (the DoD, the check command,
 change-type checklists, and the attention appendix); it is a workflow map, not
@@ -113,11 +113,20 @@ a matching remote GPU before marking kernel work done.
       **new** family/case adds an entry, an intended emission change **re-blesses**
       it, an inert change touches no golden. [`run_checks.py`](#run-the-checks)
       picks all of this up automatically.
-- [ ] **Placed in CI.** Each new or moved test runs in a CTest entry at the tier
-      that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
-      gives (standard by default, quick only for smoke). The pull request states
+- [ ] **Assigned to a CI entry.** Each new or moved test is in a CTest entry at
+      the tier that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
+      gives (standard by default). CI does not run it yet
+      ([What CI checks today](TESTING.md#what-ci-checks-today)); the local checks
+      below are the evidence. The pull request states
       the tier and a short reason for it; it need not report measurements
-      against the [budgets](TESTING.md#budgets).
+      against the [budgets](TESTING.md#budgets), though the author measures the
+      affected entries as [§5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
+      says before choosing the tier.
+- [ ] **Nothing new in quick.** Quick holds unit tests and the most basic
+      enablement checks only, within its budget; a new test goes to standard
+      unless the pull request states why it is one of those
+      ([tier table](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)).
+      The `rocke-pending-lanes` hook passes.
 - [ ] **[`run_checks.py`](#run-the-checks) green** on the platforms in the
       [testing matrix](#local-testing-matrix-platforms).
 - [ ] **Correctness before speed.** The numeric harness passes within tolerance
@@ -531,7 +540,7 @@ The gate is the emission definition-of-done. Run it from the **platform** tree
 
 ```bash
 cd rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform
-export ROCKE=$(pwd) PYTHONPATH=$ROCKE/Python
+export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
 
 ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20, build engine + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22 flavor

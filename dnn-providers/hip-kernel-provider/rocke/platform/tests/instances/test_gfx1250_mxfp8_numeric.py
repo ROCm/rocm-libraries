@@ -4,6 +4,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 
 @pytest.mark.parametrize(
     "dtype,matrix_path,route,m,n,k,case,count",

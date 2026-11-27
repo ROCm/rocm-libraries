@@ -60,6 +60,7 @@
 #include "launch_params.h"
 #include "hipconv/conv_params.hpp"
 #include "detail.h"
+#include "grid_limits.h"
 
 #include <algorithm>
 
@@ -1997,9 +1998,10 @@ public:
         // divisibility requirement. Reject configs whose dynamic LDS would exceed
         // what one workgroup may allocate; only the tf32 waves_per_wg=8 entries
         // come anywhere near it, since 4-byte elements double the ring.
-        if(get_launch_params(dev, par).dynamic_shared_bytes > kMaxDynamicLds)
+        const LaunchParams launch = get_launch_params(dev, par);
+        if(launch.dynamic_shared_bytes > kMaxDynamicLds)
             return false;
-        return true;
+        return grid_fits(launch);
     }
 
     // Stride-1 fprop compiles every legal (h_split, waves_per_simd). The

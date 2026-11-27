@@ -297,7 +297,7 @@ the bulk of the performance gain (AITER reports 17× over non-absorbed naive MLA
 > $\texttt{BLOCK\_H} \cdot (r_{KV} + d_{\text{rope}} + r_{KV}) \cdot 2 / 1152
 > = \texttt{BLOCK\_H} \cdot 1.89$ flop/byte:
 >
-> | `BLOCK_H` | flop/byte | vs MI300X HBM balance (~247) | vs MI300X MALL balance (~77) |
+> | `BLOCK_H` | flop/byte | vs gfx942 HBM balance (~247) | vs gfx942 MALL balance (~77) |
 > |---|---|---|---|
 > | 1 | 1.9 | 0.8% | 2.5% — deeply bandwidth-bound |
 > | 16 | 30 | 12% | 39% |
@@ -307,7 +307,7 @@ the bulk of the performance gain (AITER reports 17× over non-absorbed naive MLA
 > Compare ~16 flop/byte for GQA-8 decode: MLA's geometry *permits* an intensity ceiling
 > ~15× GQA's. Both balances are ≈1307 TFLOPS bf16 divided by the relevant bandwidth:
 > 5.3 TB/s HBM gives 247 flop/byte, 17 TB/s Infinity Cache gives 77. Both bandwidths are
-> AMD's published **theoretical peaks** for MI300X (192 GB HBM3 at 5.3 TB/s; 256 MB MALL
+> AMD's published **theoretical peaks** for the 304-CU gfx942 part (192 GB HBM3 at 5.3 TB/s; 256 MB MALL
 > at 17 TB/s). Measured Infinity Cache throughput is below peak — the subsystem is high
 > latency (~218 ns) as well as high bandwidth — so 77 is an upper bound on the MALL
 > balance and the real knee, if MALL is the tier that binds, arrives at a lower
@@ -972,7 +972,7 @@ weight *traffic* is. The per-workgroup epilogue re-reads the whole 128 KB `W_UV[
 slice once per (head, segment): at `B = 1`, `H_q = 128` and, say, `NUM_SEGMENTS = 8` that is
 `128 × 8 × 128 KB = 128 MiB` of requests per decode step, against `9.4 MB` of KV at
 `kv_len = 8192`. The after-reduce variant divides that by `NUM_SEGMENTS` (16 MiB). The
-16 MiB `W_UV` working set fits MI300X's 256 MB MALL, so most of the difference should
+16 MiB `W_UV` working set fits gfx942's 256 MB MALL, so most of the difference should
 be absorbed below HBM — but it is L2/MALL request traffic contending with the KV
 stream, not something "tiny next to the KV reads", and it grows linearly with the
 split-KV factor.

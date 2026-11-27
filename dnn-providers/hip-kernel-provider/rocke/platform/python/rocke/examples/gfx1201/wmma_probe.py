@@ -16,7 +16,7 @@ input cannot distinguish row from col — random input can). Run a non-square
 shape too: a square grid hides a block-to-tile mismatch (M and N tile counts
 are equal, so a swapped launch grid covers the same tiles).
 
-Must run on a gfx1201 device (Navi 48):
+Must run on a gfx1201 device:
 
   PYTHONPATH=python python3 -m rocke.examples.gfx1201.wmma_probe --m 16 --n 16 --k 16
   PYTHONPATH=python python3 -m rocke.examples.gfx1201.wmma_probe --m 64 --n 64 --k 64

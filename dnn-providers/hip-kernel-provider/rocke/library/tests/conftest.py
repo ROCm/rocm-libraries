@@ -100,38 +100,28 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    """Pin the production comgr (the torch wheel's bundled library) by path
-    for this session and its child processes, without importing torch
-    (``kernels/common/attention_bwd_comgr.py``), and give comgr's code-object
-    cache a directory of this session's own (removed at exit). An explicit ``ROCKE_COMGR_LIB`` /
-    ``AMD_COMGR_CACHE_DIR`` wins; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
+    """Give comgr's code-object cache a directory of this session's own, removed
+    at exit (``kernels/common/attention_bwd_comgr.py``; an explicit
+    ``AMD_COMGR_CACHE_DIR`` wins, ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out). The
+    compiler is the one rocKE's discovery loads; the session does not choose it.
 
     An import failure of the ``kernels`` package is reported, not raised: the
     tests that need the package fail on it themselves, the others still run
     (the same rule as ``_restore_attention_arch_state`` below). It also
-    declares the shard-cost and run-alone marks for runs that do not load the
-    ``rocke.tests.ctest_shard`` and ``rocke.tests.ctest_workers`` plugins,
-    applies the test session's garbage
-    collector setting (``rocke.tests.session_gc``) and fails a sweep whose
-    subtests all skipped (``rocke.tests.sweep_guard``)."""
-    from rocke.tests.ctest_shard import register_shard_cost_marker
-    from rocke.tests.ctest_workers import register_run_alone_marker
-    from rocke.tests.session_gc import use_test_session_gc
-    from rocke.tests.sweep_guard import register_sweep_guard
+    installs what every rocKE pytest root installs
+    (``rocke.tests.pytest_roots``)."""
+    from rocke.tests.pytest_roots import configure_pytest_root
 
-    use_test_session_gc()
-    register_shard_cost_marker(config)
-    register_run_alone_marker(config)
-    register_sweep_guard(config)
+    configure_pytest_root(config, _TESTROOT, "library/tests")
     try:
-        from kernels.common.attention_bwd_comgr import ensure_production_comgr
+        from kernels.common.attention_bwd_comgr import pin_comgr_cache
     except Exception as exc:  # noqa: BLE001 - see the docstring
         config.issue_config_time_warning(
-            pytest.PytestConfigWarning(f"production comgr not pinned: {exc!r}"),
+            pytest.PytestConfigWarning(f"comgr cache not placed: {exc!r}"),
             stacklevel=2,
         )
         return
-    ensure_production_comgr()
+    pin_comgr_cache()
 
 
 def pytest_collection_finish(session):
@@ -305,19 +295,17 @@ def pytest_sessionstart(session):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
-    """Skip the quarantined tests (``rocke.tests.quarantine``); then
-    ``--rocke-reference-arch``: keep that arch's reference cases; then
+    """``--rocke-reference-arch``: keep that arch's reference cases; then
     ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
     ``rocke.tests.ctest_shard``; unset: every item); then group the tests
     of one kernel (:func:`_group_by_parameter_set`). When the run loads the
     ``rocke.tests.ctest_shard`` plugin, the plugin selects the shard after
-    this hook."""
+    this hook; the quarantine (``rocke.tests.quarantine``) skips its tests
+    after this hook and before the shard plugin."""
     from reference_common.pytest_support import select_reference_items
     from rocke.tests import ctest_shard
-    from rocke.tests.quarantine import skip_quarantined_items
     from tests._affordable_lane import mark_exhaustive_items
 
-    skip_quarantined_items(items, _TESTROOT, "library/tests")
     mark_exhaustive_items(items)
     select_reference_items(config, items)
     shard = os.environ.get(ctest_shard.SHARD_ENV, "").strip()

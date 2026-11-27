@@ -57,10 +57,10 @@ production request fails instead of falling back silently.
 | Check | Result |
 |---|---|
 | Convolution, gradient, and shared-reference host contracts | 302 passed |
-| Source gfx942, Slurm job 68130754 | 61 passed: 32 forward, 3 controls, 26 gradients; 32 other-target cases deselected |
-| Source gfx950, Slurm job 68130755 | 61 passed: 32 forward, 3 controls, 26 gradients; 32 other-target cases deselected |
-| Installed gfx942, Slurm job 68130838 | Four selected CTests passed; other-target CTest skipped; 26 focused gradients passed |
-| Installed gfx950, Slurm job 68130839 | Four selected CTests passed; other-target CTest skipped; 26 focused gradients passed |
+| Source gfx942 | 61 passed: 32 forward, 3 controls, 26 gradients; 32 other-target cases deselected |
+| Source gfx950 | 61 passed: 32 forward, 3 controls, 26 gradients; 32 other-target cases deselected |
+| Installed gfx942 | Four selected CTests passed; other-target CTest skipped; 26 focused gradients passed |
+| Installed gfx950 | Four selected CTests passed; other-target CTest skipped; 26 focused gradients passed |
 
 All selected numerical cases executed with no skips, using Python 3.12 and
 NumPy 2.5.4 with Torch absent. Each gradient case executed three times. Source

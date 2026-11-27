@@ -11,8 +11,8 @@
 # removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
 # Without an entry here they carry no quick/standard/comprehensive/full
 # label: the install-tree copy has at most a hardcoded tier label baked
-# in by rocke/platform/CMakeLists.txt (nothing gives it
-# standard/comprehensive/full), and the build-tree copies registered by
+# in by rocke/platform/CMakeLists.txt (never quick: the quick list below
+# decides quick), and the build-tree copies registered by
 # rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way
 # they silently drop out of `ctest -L <tier>` selection, which is how
 # TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
@@ -29,18 +29,18 @@
 # runner and counted-sync entries start at comprehensive so they add no work to
 # quick/standard pre-merge and post-merge runs.
 #
-# The quick tier is the smoke tier. CI runs it as one shard, so every entry in
-# it runs whole there, and the tier's rocKE share has a 300-second budget. It
-# holds the entries that cost seconds and show at a glance that an install
-# works: the native C++ tests, the Python import smoke, the golden checks, the
-# oracle-free GPU checks and the pinned GPU reference lanes with their
-# reference contracts. The Python unit, IR and GPU numeric suites start at the
-# standard tier instead (the python-standard and gpu-standard categories),
-# where CI splits their tests across its shards. Before an entry joins the
-# quick category, check that the tier stays inside its budget on the slowest
-# CI runner. The tier rule gives a category whose name is not a tier only its
-# own name as a label, so python-standard and gpu-standard list the standard,
-# comprehensive and full labels themselves.
+# What each tier is for, what belongs in it and its budget are defined once,
+# in rocke/TESTING.md section 5.0.3; rocke/tools/check_entry_times.py and the
+# registration checks fail a quick entry that is over its budgets or
+# registered as GPU work. The quick category below is the one list of quick
+# entries and the only thing that puts an entry in quick: no registration
+# carries the quick label itself (rocke/platform/tests/tools/test_quick_tier.py
+# checks it). The golden, parity, GPU numeric and pinned GPU reference entries
+# start at standard (the python-standard, gpu-standard and
+# pinned-reference-standard categories), where CI splits their tests across its
+# shards. The tier rule gives a
+# category whose name is not a tier only its own name as a label, so those
+# categories list the standard, comprehensive and full labels themselves.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -73,11 +73,10 @@
 # runs them is in rocke/TESTING.md section 5.0.2.
 test_categories:
   quick:
-    description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
+    description: "rocKE unit tests and basic enablement checks (C++ + Python)"
     test_patterns:
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
-      - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
@@ -135,6 +134,8 @@ test_categories:
       - "rocke_buffer_rsrc_hip"
       - "rocke_attention_dense_spec"
       - "rocke_yield_rules"
+      - "rocke_attention_dense_gfx950_spec"
+      - "rocke_sha256"
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_tiled_attention_2d_gfx950_fp8_k_read"
       - "rocke_tiled_attention_entry_guards"
@@ -153,28 +154,10 @@ test_categories:
       - "rocke_f64_lowering"
       - "rocke_flavor_datalayout_ssot"
       - "rocke_moe_fused_mega_spec_guards"
-      # Registered only in the build tree: they read engine sources the
-      # installed test artifact does not carry (see
-      # rocke/platform/tests/cmake/CoreTests.cmake).
-      - "rocke_arch_table_engine_parity"
-      - "rocke_gemm_spec_dict_binding_parity"
-      # Registered only in the build tree: they run from this source tree, which
-      # the installed test artifact does not carry (see
-      # rocke/platform/tests/cmake/CoreTests.cmake).
-      # Not registered on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
-      - "rocke_pending_lanes_check"
-      - "rocke_coalesced_loader_async_refusals"
       - "rocke_python_import_smoke"
-      - "rocke_golden_static"
-      - "rocke_differential_golden_ll"
-      - "rocke_differential_golden_canonical"
-      - "rocke_oracle_free_pytest"
-      - "rocke_library_dsa_pytest"
+      # Skips, with the build's reason, where the build made no engine modules.
+      - "rocke_engine_modules_check"
       - "rocke_contracts_pytest"
-      - "rocke_entry_time_check"
-      - "rocke_reference_common_pytest"
-      - "rocke_[a-z0-9_]+_reference_unit_pytest"
-      - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
     labels:
       - "quick"
       - "pre-commit"
@@ -243,6 +226,8 @@ test_categories:
       - "rocke_buffer_rsrc_hip"
       - "rocke_attention_dense_spec"
       - "rocke_yield_rules"
+      - "rocke_attention_dense_gfx950_spec"
+      - "rocke_sha256"
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_tiled_attention_2d_gfx950_fp8_k_read"
       - "rocke_tiled_attention_entry_guards"
@@ -289,6 +274,7 @@ test_categories:
       - "rocke_tiling_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_tiling_gpu_pytest"
+      - "rocke_platform_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -323,6 +309,7 @@ test_categories:
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       - "rocke_library_mla_pytest"
+      - "rocke_library_dsa_pytest"
       - "rocke_library_sdpa_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
@@ -331,13 +318,35 @@ test_categories:
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_engine_parity_pytest"
-      # Skips, with the build's reason, where the build made no engine modules.
-      - "rocke_engine_modules_check"
       # Compiles kernels to check the backend's access widths: a performance check.
       - "rocke_tiling_backend_width_pytest"
       # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_hip_lowering_parity"
+      # Registered only in the build tree: they list the source checkout through
+      # git (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_compliance_pytest"
+      - "rocke_no_torch_check"
+      - "rocke_toolchain_pins_check"
+      # Registered only in the build tree: they read engine sources the
+      # installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_arch_table_engine_parity"
+      - "rocke_gemm_spec_dict_binding_parity"
+      # Registered only in the build tree: they run from this source tree, which
+      # the installed test artifact does not carry (see
+      # rocke/platform/tests/cmake/CoreTests.cmake).
+      # Not registered on Windows (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_pending_lanes_check"
+      - "rocke_coalesced_loader_async_refusals"
+      # Lists every split entry to project each shard: seconds, not quick.
+      - "rocke_entry_time_check"
+      # Golden byte stability and the HIP emitter pair: each splits across the
+      # standard shards.
+      - "rocke_golden_static"
+      - "rocke_differential_golden_ll"
+      - "rocke_differential_golden_canonical"
+      - "rocke_optimization_barrier_hip_pair"
     labels:
       - "standard"
       - "comprehensive"
@@ -351,14 +360,30 @@ test_categories:
     description: "rocKE GPU numeric checks that start at the standard tier, not quick"
     test_patterns:
       - "rocke_tiling_gpu_pytest"
+      - "rocke_platform_gpu_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
+      - "rocke_oracle_free_pytest"
     labels:
       - "standard"
       - "comprehensive"
       - "full"
       - "gpu"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  pinned-reference-standard:
+    description: "rocKE pinned GPU reference lanes and their reference contracts"
+    test_patterns:
+      - "rocke_reference_common_pytest"
+      - "rocke_[a-z0-9_]+_reference_unit_pytest"
+      - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
       - "python"
       - "ckc"
       - "hip-kernel-provider"
@@ -422,9 +447,13 @@ test_categories:
     description: "rocKE checks run by scheduled CI only"
     test_patterns:
       - "rocke_tiling_visualization_pytest"
+      # Needs the packages of rocke/heuristics/tests/requirements.txt; skips without them.
+      - "rocke_heuristics_pytest"
       - "rocke_library_conv_exhaustive_pytest"
       - "rocke_library_attention_cache_key_sweep_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake).
       - "rocke_library_engine_parity_exhaustive_pytest"
       # gfx950 GPU; the score-modifier mixes (each modifier once runs in standard).
       - "rocke_library_attention_biased_mixes_gpu_pytest"
+      # GPU; the fp32/tf32 direct-conv sweep sampler (its fixed cases run in standard).
+      - "rocke_library_conv_sweep_gpu_pytest"

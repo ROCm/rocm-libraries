@@ -139,8 +139,8 @@ def compute_streamk_grid_size(
     the global counter exhausts; the launch grid stays small and
     constant so launch overhead is one-shot.
 
-    Default ``num_cus = 304`` matches MI300X (the canonical CK Tile
-    deployment target). Override for MI355X (304) or other parts.
+    Default ``num_cus = 304`` matches the 304-CU gfx942 part (the canonical CK
+    Tile deployment target). Override for gfx950 (256) or other parts.
     """
     if spec.num_macro_tiles <= 0:
         raise ValueError("spec has zero macro tiles")

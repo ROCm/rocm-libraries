@@ -34,7 +34,7 @@
 extern "C" {
 #endif
 
-/* Default chiplet / CU count for compute_streamk_grid_size (MI300X). */
+/* Default chiplet / CU count for compute_streamk_grid_size (gfx942). */
 #define ROCKE_STREAMK_DEFAULT_NUM_CUS 304
 #define ROCKE_STREAMK_DEFAULT_BLOCKS_PER_CU 1
 

@@ -539,6 +539,7 @@ def _gfx950_device() -> bool:
         return False
 
 
+@pytest.mark.gpu
 class TestGfx950Numerics(unittest.TestCase):
     """A = B = 1.0 in the format under test and K = 128, so an unscaled result is 128.
 

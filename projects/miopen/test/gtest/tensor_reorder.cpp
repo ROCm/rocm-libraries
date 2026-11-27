@@ -391,7 +391,7 @@ TEST_P(GPU_TensorReorder_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_TensorReorder_FP32, TestFloat32) { this->Run(); }
 TEST_P(GPU_TensorReorder_FP64, TestFloat64) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorReorder_I8, GetCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorReorder_FP16, GetCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorReorder_FP32, GetCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorReorder_FP64, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorReorder_I8, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorReorder_FP16, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorReorder_FP32, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorReorder_FP64, GetCases(), TestNameGenerator{});

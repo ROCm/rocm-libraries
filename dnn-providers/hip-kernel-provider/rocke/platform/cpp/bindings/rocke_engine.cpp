@@ -2978,15 +2978,14 @@ static std::string rocke_engine_flavor_list()
 
 /* Refuse an empty target in the binding: the engine's own refusal names no
  * Python argument. Shared by both serialized-IR bindings. The text after the
- * prefix is rocke.core.native_engine.NO_TARGET_MESSAGE, the Python entries'
- * refusal; tests/core/test_native_engine.py holds the two equal. */
+ * prefix is ROCKE_BINDING_NO_TARGET_MESSAGE (family_glue.hpp), the Python
+ * entries' refusal. */
 static void require_serialized_ir_arch(const std::string& arch, const char* entry)
 {
     if(arch.empty())
     {
-        throw std::runtime_error(std::string("rocke_engine.") + entry
-                                 + ": lowering requires an explicit gfx target; pass arch=... "
-                                   "(there is no default)");
+        throw std::runtime_error(std::string("rocke_engine.") + entry + ": "
+                                 + ROCKE_BINDING_NO_TARGET_MESSAGE);
     }
 }
 
@@ -3099,9 +3098,9 @@ PYBIND11_MODULE(rocke_engine, m)
 
     m.def(
         "f64_mma_probe_serialize_ir",
-        [](int m, int k) {
+        [](int m, int k, const std::string& arch) {
             rocke_ir_builder_t b;
-            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k, require_arch(arch));
             char* text = nullptr;
             rocke_status_t status
                 = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
@@ -3113,8 +3112,9 @@ PYBIND11_MODULE(rocke_engine, m)
                 throw std::runtime_error(error);
             return result;
         },
-        py::arg("m") = 16,
-        py::arg("k") = 4);
+        py::arg("m"),
+        py::arg("k"),
+        py::arg("arch"));
 
     m.def(
         "tf32_mma_probe_serialize_ir",

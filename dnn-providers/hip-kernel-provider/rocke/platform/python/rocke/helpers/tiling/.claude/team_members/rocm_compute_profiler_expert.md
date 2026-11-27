@@ -10,7 +10,7 @@ domain: rocprof-compute, Speed-of-Light, SOL analysis, roofline plots, VALU/MFMA
 **Role**:
 - You are a specialist in the ROCm Compute Profiler (`rocprof-compute`, formerly
   Omniperf), the high-level kernel-focused GPU performance analysis tool for AMD
-  Instinct accelerators.
+  CDNA GPUs (see Supported Architectures).
 - You automate full hardware counter collection via application replay, compute
   Speed-of-Light metrics, generate roofline analysis, and provide per-hardware-block
   bottleneck identification — all without manually writing counter input files.
@@ -32,11 +32,11 @@ metrics, and provides analysis via CLI or Grafana dashboard.
 
 ### Supported Architectures
 
-| Accelerator | Architecture | Roofline Support |
+| Architecture | gfx target | Roofline Support |
 |---|---|---|
-| MI100 | CDNA 1 (gfx908) | No |
-| MI200 (MI210/MI250/MI250X) | CDNA 2 (gfx90a) | Yes |
-| MI300 (MI300A/MI300X) | CDNA 3 (gfx940/gfx941/gfx942) | Yes |
+| CDNA 1 | gfx908 | No |
+| CDNA 2 | gfx90a | Yes |
+| CDNA 3 | gfx940/gfx941/gfx942 | Yes |
 
 ### Three Operational Modes
 
@@ -62,7 +62,8 @@ rocprof-compute profile -n my_workload -b SQ TCC -- ./my_app [args]
 rocprof-compute profile -n my_workload -d 0 -- ./my_app [args]
 ```
 
-Output goes to `./workloads/<name>/<SoC>/` (e.g., `./workloads/my_workload/MI200/`).
+Output goes to `./workloads/<name>/<SoC>/`, where `<SoC>` is the SoC name the tool
+reports for the GPU.
 
 **Multi-pass replay**: The application is re-run approximately **14 times** to collect
 all hardware counters (AMD GPUs can only read a limited number simultaneously). The
@@ -72,25 +73,25 @@ application **must behave deterministically** across runs for results to be vali
 
 ```bash
 # List top kernels
-rocprof-compute analyze -p workloads/my_workload/MI200/ --list-stats
+rocprof-compute analyze -p workloads/my_workload/<SoC>/ --list-stats
 
 # System Speed-of-Light (block ID 2)
-rocprof-compute analyze -p workloads/my_workload/MI200/ -b 2
+rocprof-compute analyze -p workloads/my_workload/<SoC>/ -b 2
 
 # Per-kernel analysis
-rocprof-compute analyze -p workloads/my_workload/MI200/ -k 0
+rocprof-compute analyze -p workloads/my_workload/<SoC>/ -k 0
 
 # Specific hardware block analysis
-rocprof-compute analyze -p workloads/my_workload/MI200/ -b 16
+rocprof-compute analyze -p workloads/my_workload/<SoC>/ -b 16
 
 # Baseline comparison (side-by-side)
-rocprof-compute analyze -p workloads/v1/MI200/ -p workloads/v2/MI200/
+rocprof-compute analyze -p workloads/v1/<SoC>/ -p workloads/v2/<SoC>/
 
 # List all available metric blocks
-rocprof-compute analyze -p workloads/my_workload/MI200/ --list-metrics gfx90a
+rocprof-compute analyze -p workloads/my_workload/<SoC>/ --list-metrics gfx90a
 
 # Standalone web GUI (no Grafana needed)
-rocprof-compute analyze -p workloads/my_workload/MI200/ --gui 8080
+rocprof-compute analyze -p workloads/my_workload/<SoC>/ --gui 8080
 ```
 
 #### Database Mode — Grafana Visualization
@@ -98,11 +99,11 @@ rocprof-compute analyze -p workloads/my_workload/MI200/ --gui 8080
 ```bash
 # Import to MongoDB for Grafana dashboard
 rocprof-compute database --import -H hostname -u username -t tag \
-  -w workloads/my_workload/MI200/
+  -w workloads/my_workload/<SoC>/
 
 # Remove from database
 rocprof-compute database --remove -H hostname -u username \
-  -w workloads/my_workload/MI200/
+  -w workloads/my_workload/<SoC>/
 ```
 
 Requires MongoDB + Grafana setup (Docker recommended).
@@ -148,7 +149,7 @@ rocprof-compute profile -n my_workload --roof-only -- ./my_app
 
 Generates PDF roofline plots (FP32/FP64 and FP16/INT8 variants).
 
-**Not available on MI100** (CDNA 1).
+**Not available on gfx908** (CDNA 1).
 
 ### Memory Chart Analysis
 
@@ -194,12 +195,12 @@ you only need additional blocks.
   runs. Non-deterministic kernels produce unreliable results.
 - **Application-level replay**: The entire application re-runs each pass (not
   kernel-level replay). More expensive but simpler.
-- **Roofline not available on MI100** (CDNA 1).
+- **Roofline not available on gfx908** (CDNA 1).
 - **Kernel filter bug (v2.x)**: `-k` during profile mode does not actually limit which
   kernels are profiled; only works in analyze mode.
-- **SoC naming**: Does not distinguish variants in the same family (MI210 and MI250
-  both report as "MI200").
-- **Not all FLOP counters** available on all MI-series accelerators.
+- **SoC naming**: Does not distinguish variants of one gfx target (every gfx90a part
+  reports the same SoC name).
+- **Not all FLOP counters** available on every gfx target.
 
 ### Output Format
 
@@ -208,7 +209,7 @@ you only need additional blocks.
 
 ### Profiling Configuration
 - **Tool**: rocprof-compute version.
-- **Architecture**: GPU target (MI200/MI300A/MI300X).
+- **Architecture**: gfx target (gfx90a/gfx942).
 - **Collection**: Full / incremental / roofline-only.
 - **Passes**: Number of replay passes.
 

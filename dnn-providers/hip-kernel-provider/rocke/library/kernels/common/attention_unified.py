@@ -872,7 +872,7 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem, arch: str) -> bool
     """d128 occupancy lever: select T = block_size (small tile) + nw=2 for
     the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
 
-    Diagnosis (gfx950 MI355X, llvm22+comgr7.2, measured same-session; re-verified
+    Diagnosis (gfx950, llvm22+comgr7.2, measured same-session; re-verified
     on the merged tree): the d128 combo at num_warps=2 is purely LDS-bound --
     K_lds[2,T,HD] + V_lds[1,T,HD] = 48 KB at T=2*block_size -> only 1 workgroup
     fits the 64 KB/CU budget; the register file already admits 2 waves/SIMD
@@ -932,7 +932,7 @@ def _enable_k_single_buffer(
     halve K_lds via K single-buffer so LDS stays at 32 KB -> 2 WG/CU. The
     next-K prefetch is re-issued after the PV-wait barrier (no WAR race). This
     crosses flash at the S4096 holdout (0.976x -> 1.020x bf16+fp16) and beats
-    the small-tile T=32 pick at every measured shape (gfx950 MI355X, same-session
+    the small-tile T=32 pick at every measured shape (gfx950, same-session
     vs torch SDPA FLASH, GPU-idle; see the long-context analysis). Occupancy proof
     (llvm-readelf):
     T=64 + K-single -> VGPR=215 AGPR=0 LDS=32 KB -> 2 WG/CU.
@@ -1002,7 +1002,7 @@ def _d256_gfx950_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
     applied by the spec override in ``_tiled_spec_from_problem``. Narrow +
     arch/feature-guarded: every other shape is byte-identical.
 
-    Perf (MI355X, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
+    Perf (gfx950, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
     mode2 g4 gives +9.1% @ Sq4096 and +10.1% @ Sq8192 over the 32x32 base.
     """
     return arch == "gfx950" and _d256_gfx950_cohort(problem)
@@ -1058,7 +1058,7 @@ def _enable_softmax_mfma_interleave(
     lets the backend spread the causal-mask + softmax VALU across the MFMA gap)
     combined with num_warps=4 lifts MFMA-busy to ~18% and occupancy to ~24%.
 
-    Measured (gfx950 MI355X, comgr llvm22, same-session vs the shipped auto path;
+    Measured (gfx950, comgr llvm22, same-session vs the shipped auto path;
     ``sweep_shapes_gfx950.py`` across the gap-doc cohort, correctness max_abs=0.0
     vs the shipped kernel on every shape):
       * D128 S8192: 122 -> 443 TF (3.6x); S4096 118 -> 412 (3.5x);
@@ -1079,7 +1079,7 @@ def _enable_softmax_mfma_interleave(
     **Why this cohort only (measured, not assumed).** The interleave lever pays
     off wherever the loop is schedule-bound with a softmax-VALU/MFMA-idle window
     to fill -- i.e. a 32x32-transposed (combo) geometry at nw>=2. The full
-    eligible space was swept (MI355X); adding ONLY the hint to each cohort's
+    eligible space was swept (gfx950); adding ONLY the hint to each cohort's
     SHIPPED spec:
 
         cohort (shipped geometry)        S1024  S2048  S4096
@@ -1185,7 +1185,7 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
 
     Perf (gfx942, same-run vs AITER ``unified_attention``, D256 bf16 causal
     prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
-    Sq8192 (OURS ~6% faster). Measured on MI300A 2026-07-11 (MI300X prototype
+    Sq8192 (OURS ~6% faster). Measured on a 228-CU gfx942 2026-07-11 (304-CU gfx942 prototype
     run: 0.97x / 0.94x); OURS matches the fp32 reference + AITER within bf16 tol.
 
     D192 bf16 causal prefill rides the same lean body: the 2-wave wide-flash
@@ -1214,7 +1214,7 @@ def _d128_gfx942_swa_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool
     4-warp kernel applies the windowed mask + windowed KV-skip in-kernel.
 
     Perf (4-warp vs the non-ring wide flash it replaces; both routes, same
-    inputs/node/HIP-event timer; MI300X gfx942, GQA 32/8, window 4096; every
+    inputs/node/HIP-event timer; gfx942, GQA 32/8, window 4096; every
     cohort bit-identical vs an fp32 windowed reference): ~4x at ``block_size``
     16 (fp16 4.2x / bf16 4.0x), ~3.1x / 1.4x at 32 (fp16 / bf16), ~1.2-1.3x at
     64 (64-key tiles drop the double-buffer pipeline). The bs16 uplift rises
@@ -1291,7 +1291,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
 
     **Universal ``T = 2 * BS``** post the Q-in-registers + single-buffer-V
     refactor: the LDS savings (8 KiB Q + 8 KiB V) make the multi-block
-    path fit comfortably for every workload class on MI355X. For decode,
+    path fit comfortably for every workload class on gfx950. For decode,
     the higher per-iter amortization beats the smaller-tile choice by
     ~24% (measured by an out-of-tree ``probe_prefill_sweep.py``: decode_b1
     drops 34 µs → 26 µs).
@@ -1335,7 +1335,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # and the spec validator would reject the build (reachable via the public
     # backend="auto" dispatcher for a head_size=64 fp16 long-prefill problem with
     # a 16/32-token paged KV cache). The narrow path keeps the single-KV-block
-    # oracle (the generic ``2*block_size`` over-allocates LDS on MI300X with mw=32).
+    # oracle (the generic ``2*block_size`` over-allocates LDS on gfx942 with mw=32).
     if arch == "gfx942" and problem.head_size == 64:
         if _enable_gfx942_fp16_flash(problem, arch):
             return 64
@@ -1382,7 +1382,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         if problem.head_size == 64:
             # fast_paged_kv_desc (needs T=64) is a ~1.3-1.4x win for the bf16
             # h64kv8 no-SW family -> beats the T=128 early-V path (measured on
-            # MI355X). Force T=64 there so the combo's fast_paged enablement is
+            # gfx950). Force T=64 there so the combo's fast_paged enablement is
             # valid; other d64 single-batch shapes keep the wider T=128 tile.
             if (
                 problem.dtype == "bf16"
@@ -1419,7 +1419,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
     # async DMA loader only 32*64 = 2048 bytes per iter, which under-feeds
-    # the long-prefill kv loop. Measured on MI355X with the bench at
+    # the long-prefill kv loop. Measured on gfx950 with the bench at
     # ``/tmp/bench_prefill_sweep2.py``:
     #   - q=128:   T=64 best (29µs vs 37µs)
     #   - q=256:   T=64 best
@@ -1459,13 +1459,13 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
     per-tile KV slab, otherwise the async DMA underfills.
 
     Tuning thresholds (calibrated against the trace shapes documented in
-    an out-of-tree ``trace_bench_report.md`` on MI355X / gfx950; the
+    an out-of-tree ``trace_bench_report.md`` on gfx950; the
     ``warps``-sweep harness is an out-of-tree ``probe_prefill_sweep.py``
     and the prefill-time harness is an out-of-tree
     ``probe_prefill_time.py``):
 
     **Post Q-in-registers + single-buffer-V refactor** (measured with
-    ``probe_prefill_sweep.py`` on MI355X):
+    ``probe_prefill_sweep.py`` on gfx950):
 
       ``q <= 64``    (decode + tiny prefill) -> 1   (small grid; tiny
                                                      per-CTA work)
@@ -1485,7 +1485,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
       - the architectural ceiling above (``T * HD >= num_warps * 512``);
       - the per-wave-tokens constraint (``WAVE*8/HD <= BS``);
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
-        MI355X comfortably).
+        gfx950 comfortably).
     """
     if _d256_gfx950_fast(problem, arch):
         return 2
@@ -1525,7 +1525,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
     if _enable_gfx942_sink_prefill_tuned(problem, arch):
         return 2
     # gfx942 D64 oracle.
-    #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the MI300X
+    #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the gfx942
     #     64 KB LDS budget and match the direct gfx942 harness.
     #   * decode (max_seqlen_q == 1, bf16): num_warps=1. Decode is memory-bound;
     #     nw=1 (BLOCK_M=32, T=2*block_size) measured markedly faster than nw=4
@@ -1606,7 +1606,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
     # is much higher than necessary because (a) q<=128 had NW=2 which
     # over-allocated LDS/VGPR for a tiny grid, and (b) q>256 num_seqs<=1
     # kept NW=2 which left perf on the table on long single-seq prefill.
-    # Measured (``/tmp/bench_prefill_sweep2.py``, MI355X bf16 hd64):
+    # Measured (``/tmp/bench_prefill_sweep2.py``, gfx950 bf16 hd64):
     #   q=128:   NW=1 best  (28.7µs vs 37µs default)
     #   q=256:   NW=2 best  (32µs vs 43µs default)
     #   q>=512:  NW=2 (mw=16) or NW=4 (mw=32) best
@@ -1942,7 +1942,7 @@ def _select_2d_waves_per_eu(
     We match that: it gives the LLVM backend more VGPR headroom per wave
     (less risk of spill to scratch / LDS) while still meeting the
     occupancy targets (the double-buffered K/V kernel runs at 2-3 WGs/CU
-    on MI355X depending on shape; pushing for wpe=3 was a marginal
+    on gfx950 depending on shape; pushing for wpe=3 was a marginal
     +5% on isolated workloads but no consistent gain over the full
     workload spectrum once we A/B'd it against Triton's choice).
 
@@ -2177,7 +2177,7 @@ def _enable_sched_barrier(problem: UnifiedAttentionProblem, arch: str) -> bool:
     QK MFMAs packed instead of interleaving the next-tile ``buffer_load_lds``
     into the MFMA window. Bit-identical numerics (pure scheduler hint).
 
-    Same-session A/B on MI355X (gfx950, LLVM backend):
+    Same-session A/B on gfx950 (LLVM backend):
       * SINGLE-BATCH d128 S<=1024 (num_warps==1 + V-double-buffer): +35.6-36.0%
         on bf16 AND fp16 (0.152 -> 0.112 ms) -> DSL/flash ~0.67x -> ~0.92x. The
         lone resident wave cannot hide the prefetch-in-MFMA-window cost, so
@@ -2204,7 +2204,7 @@ def _enable_early_v_schedule(problem: UnifiedAttentionProblem, arch: str) -> boo
     issues the V load earlier in the iteration so the long KV loop overlaps the
     V DMA with the QK MFMA + softmax window. Bit-identical to the no-flag path.
 
-    Scoped to d64-LONG by same-session ablation (MI355X gfx950 LLVM):
+    Scoped to d64-LONG by same-session ablation (gfx950 LLVM):
       * d64 GQA-8 S2048: T128 + early-V 104.3us is the best (vs T128 none
         108.1, T64 none 112.2) -> ON for d64 long.
       * d128 S2048/S4096: early-V REGRESSES (e.g. fp16 S2048 187us vs none
@@ -2225,7 +2225,7 @@ def _enable_mfma_32x32(problem: UnifiedAttentionProblem, arch: str) -> bool:
     ``use_transposed_qk_32x32=True``) has been parity-validated against the
     default 16x16x32 path across 17 representative shapes (bf16 long /
     short prefill, multi-batch, sliding-window, GQA, hd64/128/256,
-    decode). Measured speedup vs default (MI355X, bf16):
+    decode). Measured speedup vs default (gfx950, bf16):
 
       * multi-batch prefill (num_seqs >= 2, max_seqlen_q >= 256):
         1.21-1.48x on hd64, 1.28-1.39x on hd128
@@ -2410,7 +2410,7 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
 
     The baseline L4 geometry is transposed-x8 + K single-buffer (WG=64). The
     production provider defaults D128 to wide4 (WG=256). D64 uses the same
-    gfx942-legal 32x32x8 atom plus cfvst stack; measured on MI300X it improves
+    gfx942-legal 32x32x8 atom plus cfvst stack; measured on gfx942 it improves
     S2048 D64 from ~142 TFLOPS to ~199 TFLOPS with identical correctness.
     """
     return (
@@ -2496,7 +2496,7 @@ def _gfx942_bf16_wide_use_cfvst(problem: UnifiedAttentionProblem) -> bool:
     transpose works on raw i32 words, and the K=8 32x32x8 atom is gfx942-legal
     for bf16), so it ports unchanged to bf16.
 
-    MEASURED (MI300X, graph, same-session steady-state, 3% median over 6 runs):
+    MEASURED (gfx942, graph, same-session steady-state, 3% median over 6 runs):
     cfvst is a small consistent WIN on D64 (S1024 ~0.106->0.104ms, S2048
     ~0.309->0.301ms, S4096 ~1.027->0.997ms = ~3% each). On D128 cfvst-only
     cannot fit the nw=4/BLOCK_M=128 geometry within the 64 KB LDS cap (it needs
@@ -2537,7 +2537,7 @@ def _gfx942_bf16_wide_geometry(
         # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
         # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
         # so restore the K double-buffer (single_k=False) instead of the T=64
-        # K-single-buffer. Same-session MEASURED on MI300X (gfx942): xflash vs
+        # K-single-buffer. Same-session MEASURED on gfx942: xflash vs
         # torch FLASH 0.24->0.57-0.65 (~2.3-2.4x the shipped T=64 single-K
         # baseline) on bf16 D128 S1024/S2048/S4096, occupancy unchanged at
         # 2 WG/CU (the win is K-double-buffer prefetch overlap, not occupancy --
@@ -3530,7 +3530,7 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
     # latent trap: it doubled BLOCK_M without the atom benefit and ran
     # ~1.4x slower than mw=16 on the sinks trace family. ``select_path``
     # has already routed decode-class shapes to 3D before we get here.
-    # gfx942 (CDNA3 / MI300X) head_size=64: the oracle is always mw=32 with a
+    # gfx942 (CDNA3) head_size=64: the oracle is always mw=32 with a
     # 1x tile (tile_size == block_size) on the plain 16x16 atom path. gfx942 is
     # LDS-bound at one CTA/CU on the 64 KB part, so the mw=32 + 2x-tile combo is
     # rejected while the 1x-tile mw=32 combo fits, yielding 1.7-2.0x over mw=16.
@@ -5873,7 +5873,7 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
         return "llvm"
     # gfx942 kernels are validated through LLVM-direct. The HIP debug backend has
     # emitted code objects that hipModuleLoadData rejects for both cfvst D128 and
-    # narrow D64 MI300X kernels, so keep gfx942 on the proven direct path unless
+    # narrow D64 gfx942 kernels, so keep gfx942 on the proven direct path unless
     # the caller explicitly overrides ``compile_backend``.
     if arch == "gfx942":
         return "llvm"

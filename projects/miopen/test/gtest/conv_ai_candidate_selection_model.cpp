@@ -848,7 +848,7 @@ TEST_P(GPU_CandidateSelection_FP32, ShippedVocabCoversCKInstances_Test)
         << first_missing;
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_CandidateSelection_FP32,
                          ::testing::ValuesIn(GenerateCandidateSelectionParams()),
                          [](const ::testing::TestParamInfo<CandidateSelectionParams>& testInfo) {
@@ -857,14 +857,16 @@ INSTANTIATE_TEST_SUITE_P(Full,
                              return os.str();
                          });
 
+using CPU_ConfigEmbeddingTableLoader_NONE = ::testing::TestWithParam<int>;
+
 // ============================================================================
 // config-embedding table loader
 // ============================================================================
 // Every shipped table loads into a non-empty vocabulary: well-formed MICE, a v3 vocab block, and an
 // md5 that matches the installed input encoder (a mismatch rejects the table -> empty vocab).
-TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
+TEST_P(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
 {
-    const std::array<const char*, 2> arches  = {"gfx942", "gfx950"};
+    const std::array<const char*, 3> arches  = {"gfx942", "gfx950", "gfx1250"};
     const std::array<const char*, 6> solvers = {"ConvHipImplicitGemmGroupFwdXdlops",
                                                 "ConvHipImplicitGemmGroupBwdXdlops",
                                                 "ConvHipImplicitGemmGroupWrwXdlops",
@@ -886,8 +888,8 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
                 << ": table present but vocab empty (rejected / md5 mismatch / no v3 block)";
         }
     // This suite is compiled only with MIOPEN_ENABLE_AI_KERNEL_TUNING (see the guard at the top of
-    // the file). All 12 (gfx942 + gfx950) x 6-solver tables ship with this PR, so require every one
-    // -- EXPECT_GT(present, 0) would stay green if 11 of 12 .bin files were dropped from packaging.
+    // the file). All 18 (gfx942 + gfx950 + gfx1250) x 6-solver tables ship, so require every one
+    // -- EXPECT_GT(present, 0) would stay green if 17 of 18 .bin files were dropped from packaging.
     EXPECT_EQ(present, static_cast<int>(arches.size() * solvers.size()))
         << "expected all " << arches.size() * solvers.size()
         << " shipped config-embedding tables installed at " << db << ", found " << present;
@@ -898,7 +900,7 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
 // table vs refreshed model), and a truncated kernel-id block. Crafted in a temp directory and read
 // through LoadConfigEmbeddingVocabFromFile, so nothing is written into the installed system db
 // (which is normally read-only, and would make the test GTEST_SKIP / silently never run).
-TEST(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
+TEST_P(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
 {
     namespace fs = miopen::fs;
     std::random_device rd;
@@ -1007,6 +1009,8 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
     fs::remove_all(dir);
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConfigEmbeddingTableLoader_NONE, ::testing::Values(0));
+
 namespace {
 // Canonical derived-feature names, matching ConvInputPreprocessor.derived_feature_names() in the
 // MIOpenFF training repo. The base block is emitted for every model; the divfeat block is appended
@@ -1046,9 +1050,11 @@ const std::vector<std::string> kDivfeatNames     = {"waste_m16",
                                                     "k_small"};
 } // namespace
 
+using CPU_ConvAiEngineeredConvFeaturesByName_NONE = ::testing::TestWithParam<int>;
+
 // The named engineered-feature builder must reproduce the positional EngineeredConvFeatures block
 // when asked for exactly the base names, so a model that lists only the base names is unchanged.
-TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, BaseMatchesPositional)
+TEST_P(CPU_ConvAiEngineeredConvFeaturesByName_NONE, BaseMatchesPositional)
 {
     using namespace miopen::ai::common;
     const auto positional = EngineeredConvFeatures(
@@ -1084,7 +1090,7 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, BaseMatchesPositional)
 // block byte for byte. EngineeredConvFeatures and EngineeredConvFeaturesByName are parallel
 // implementations, so this pins that routing base-only models through the named path does not
 // change their features for 3D or backward (BaseMatchesPositional only covers 2D forward).
-TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DefaultNamesMatchPositional)
+TEST_P(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DefaultNamesMatchPositional)
 {
     using namespace miopen::ai::common;
     EXPECT_EQ(DefaultDerivedFeatureNames(2), kBaseDerivedNames);
@@ -1139,7 +1145,7 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DefaultNamesMatchPositional)
 // Golden divfeat values for a forward INT8 grouped shape (C=256, K=1024, 1x1, group=16, N=16),
 // pinned from the MIOpenFF training ConvInputPreprocessor.compute_derived_features(). Catches any
 // C++/Python drift in the tile-divisibility math (tile-waste, dtype-aware K-pack, cpg_in flags).
-TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGolden)
+TEST_P(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGolden)
 {
     using namespace miopen::ai::common;
     std::vector<std::string> names = kBaseDerivedNames;
@@ -1188,7 +1194,7 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGolden)
 // Exercises the depthwise branch of the divfeat flags: when groups == C_in, cpg_in = C_in/groups =
 // 1, so is_depthwise = (cpg_in <= 1) = 1 and log_cpg_in = log1p(1). The other divfeat goldens all
 // use cpg_in = 16, so the is_depthwise == 1 path is otherwise untested.
-TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatDepthwiseFlag)
+TEST_P(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatDepthwiseFlag)
 {
     using namespace miopen::ai::common;
     std::vector<std::string> names = kBaseDerivedNames;
@@ -1228,7 +1234,7 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatDepthwiseFlag)
 // by direction; cpg_in uses the physical in-channel count (256/16 = 16 -> log1p = 2.8332), NOT the
 // role-swapped forward-output channel. C_in != C_out so the buggy source (cpg_in from out-channels)
 // would fail.
-TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGoldenBackward)
+TEST_P(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGoldenBackward)
 {
     using namespace miopen::ai::common;
     std::vector<std::string> names = kBaseDerivedNames;
@@ -1297,7 +1303,7 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGoldenBackward)
 }
 
 // Features are emitted in the order of the names list, and an unknown feature name is rejected.
-TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, OrderAndUnknownName)
+TEST_P(CPU_ConvAiEngineeredConvFeaturesByName_NONE, OrderAndUnknownName)
 {
     using namespace miopen::ai::common;
     std::vector<std::string> reversed(kBaseDerivedNames.rbegin(), kBaseDerivedNames.rend());
@@ -1371,10 +1377,14 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, OrderAndUnknownName)
                  miopen::Exception);
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvAiEngineeredConvFeaturesByName_NONE, ::testing::Values(0));
+
 #else
 // Add a dummy test when AI kernel tuning is disabled
-TEST(CPU_CandidateSelectionDisabled_NONE, FeatureDisabled)
+using CPU_CandidateSelectionDisabled_NONE = ::testing::TestWithParam<int>;
+TEST_P(CPU_CandidateSelectionDisabled_NONE, FeatureDisabled)
 {
     GTEST_SKIP() << "AI candidate selection features are disabled in this build";
 }
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_CandidateSelectionDisabled_NONE, ::testing::Values(0));
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING

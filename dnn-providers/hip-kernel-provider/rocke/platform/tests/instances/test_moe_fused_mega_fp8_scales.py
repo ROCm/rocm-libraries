@@ -441,6 +441,7 @@ def _run_on_gpu(arch: str, spec: FusedMegaKernelSpecFp8, case: _MoeCase) -> np.n
     return host["Y"]
 
 
+@pytest.mark.gpu
 def test_row_scales_on_gpu(gpu_arch):
     """With an A scale per row that differs within every MFMA tile, the
     kernel's ``Y`` matches the reference. A kernel that scales a lane's four

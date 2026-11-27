@@ -23,6 +23,8 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+from rocke.runtime import comgr
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.llc import find_llvm_tool
 
 # (arch, warp tile, tile_k): every TF32 atom the catalog carries.
@@ -329,20 +331,6 @@ class TestTf32Naming(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _comgr(isa: str):
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    if isa not in isas:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"the loaded comgr cannot target {isa}")
-    return comgr.build_hsaco_from_llvm_ir
-
-
 def _mnemonics(hsaco: bytes) -> list[str]:
     from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 
@@ -364,10 +352,11 @@ class TestTf32Isa(unittest.TestCase):
     def test_one_config_per_atom(self):
         for arch, wt, tk in _ATOMS:
             with self.subTest(arch=arch, wt=wt):
-                isa = f"amdgcn-amd-amdhsa--{arch}"
-                build = _comgr(isa)
+                require_comgr_target(arch)
                 kernel = _build(_spec(wt, tk, epilogue="cshuffle", split_k=2), arch)
-                hsaco, _ = build(_lower(kernel, arch), isa=isa)
+                hsaco, _ = comgr.build_hsaco_from_llvm_ir(
+                    _lower(kernel, arch), isa=f"amdgcn-amd-amdhsa--{arch}"
+                )
                 self.assertTrue(hsaco, "comgr produced an empty code object")
                 seen = _mnemonics(hsaco)
                 n = _logical_mmas(kernel)

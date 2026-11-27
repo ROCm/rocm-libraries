@@ -26,9 +26,9 @@ from unittest import mock
 import kernels.common.attention_unified as _au
 import pytest
 from kernels import UnifiedAttentionProblem
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
-rocke_engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+rocke_engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
 
 ARCH = "gfx950"
 

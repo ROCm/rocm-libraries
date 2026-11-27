@@ -47,6 +47,7 @@ from ..ir import (
     dtype_to_ir_type,
     type_bits,
 )
+from ..llvm_profile import supports_llvm23_target_ops
 from ..lower_llvm import LLVM_FLAVOR_LLVM22
 from .matrix_operand_forms import (
     AsIs,
@@ -162,6 +163,9 @@ class MatrixCall:
     ``decl_key`` names the declaration-table entry; it defaults to the
     intrinsic. A ``decl_key`` that names a hand-written entry adds nothing to
     the table, and the hand-written text must equal :meth:`declaration`.
+    ``requires_llvm23`` marks a call whose intrinsic only the LLVM 23 target-op
+    profile declares this way; the lowering refuses it below that profile
+    (:meth:`lowers_at`, :func:`~rocke.core.isa.matrix_call_lowering.refuse_llvm23_matrix_op`).
     """
 
     intrinsic: str
@@ -171,6 +175,7 @@ class MatrixCall:
     c: MatrixOperandForm
     result: MatrixResultForm
     decl_key: str | None = None
+    requires_llvm23: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "args", tuple(self.args))
@@ -185,6 +190,11 @@ class MatrixCall:
                 f"MatrixCall {self.intrinsic!r} result form must be AsIs or "
                 f"EvenHalves, got {type(self.result).__name__}"
             )
+
+    def lowers_at(self, flavor: str) -> bool:
+        """Whether the lowering emits this call at LLVM ``flavor``: always,
+        unless it ``requires_llvm23`` and ``flavor`` lacks that profile."""
+        return not self.requires_llvm23 or supports_llvm23_target_ops(flavor)
 
     @property
     def key(self) -> str:
@@ -246,6 +256,7 @@ def _wmma(
         MatrixOperand.C,
     ),
     decl_key: str | None = None,
+    requires_llvm23: bool = False,
 ) -> MatrixCall:
     """A WMMA whose A and B share one register type and whose accumulator and
     result share another, the arguments in ``args`` order."""
@@ -257,6 +268,7 @@ def _wmma(
         c=AsIs(accumulator),
         result=AsIs(accumulator),
         decl_key=decl_key,
+        requires_llvm23=requires_llvm23,
     )
 
 
@@ -626,7 +638,8 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
         },
         # gfx1250 i8 -> i32: 32 i8 per lane in eight words. This is the LLVM 23
         # call; LLVM 22 declares the instruction without the clamp argument
-        # (its arch-domain column records this declaration as unknown).
+        # (its arch-domain column records this declaration as unknown), so the
+        # lowering refuses it below LLVM 23.
         **_integer_wmma(
             "wmma_gfx1250_i32_16x16x64_iu8",
             8,
@@ -635,6 +648,7 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
                 _I32_X8,
                 _I32_X8,
                 _GFX1250_INTEGER_WMMA_ARGS,
+                requires_llvm23=True,
             ),
         ),
         # gfx1250 f8f6f4 -> f32, every format pair with a 6-bit or 4-bit

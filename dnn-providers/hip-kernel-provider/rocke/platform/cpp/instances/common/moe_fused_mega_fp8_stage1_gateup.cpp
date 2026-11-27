@@ -266,6 +266,9 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
     rocke_value_t* c_group_k = rocke_b_const_i32(b, ROCKE_MOE_FP8_GROUP_K);
     rocke_value_t* c_atom_k = rocke_b_const_i32(b, atom->k);
     int atoms_per_group = ROCKE_MOE_FP8_GROUP_K / atom->k; /* 4 (K=32) or 1 (K=128) */
+    /* The DTLA path stages the weight operands through LDS; otherwise this loop
+     * reads no LDS at all. */
+    const bool stages_b_through_lds = dtla != NULL && dtla->present && atoms_per_group == 1;
 
     /* One A scale row per output the lane holds (shared by every ni cell). */
     const std::vector<rocke_value_t*> a_scale_row_offsets
@@ -342,7 +345,8 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
         rocke_value_t* g_acc[ROCKE_MOE_FP8_MAX_NNI];
         rocke_value_t* u_acc[ROCKE_MOE_FP8_MAX_NNI];
 
-        rocke_moe_fp8_emit_loop_cadence_hint(ctx, cadence);
+        if(stages_b_through_lds)
+            rocke_moe_fp8_emit_loop_cadence_hint(ctx, cadence);
 
         for(ni = 0; ni < nni; ++ni)
         {
@@ -376,7 +380,7 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
             u_acc[ni] = zero;
         }
 
-        if(dtla != NULL && dtla->present && atoms_per_group == 1)
+        if(stages_b_through_lds)
         {
             /* ---- DTLA path (GOAL 1): direct-to-LDS gate+up B operands ----- */
             rocke_value_t* kbase0 = k_group_base;

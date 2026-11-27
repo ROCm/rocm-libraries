@@ -28,7 +28,7 @@ from rocke.instances.gfx950.block_scaled_gemm import (
 )
 from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import native_engine_or_skip
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -130,7 +130,7 @@ def test_complete_kernel_golden_and_native_identity(idx, flavor, monkeypatch):
             Path(__file__).with_name("gfx950_scaled_mfma_llvm23.json").read_text()
         )
         assert hashlib.sha256(llvm.encode()).hexdigest() == golden[str(idx)]
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     assert engine.gfx950_block_scaled_gemm_serialize_ir(
         asdict(spec), "gfx950"
     ) == serialize(kernel)
@@ -163,7 +163,7 @@ def test_wrong_target_rejection(arch):
     reason="scaled MFMA exists on gfx950 only; gfx942 refuses it and test_wrong_target_rejection checks the refusal",
 )
 def test_native_lowering_preserves_diagnostic(tmp_path):
-    import_or_skip_until("rocke_engine", BINDING_LANE)
+    import_or_skip_until("rocke_engine", BUILD_VARIANT)
     compiler = shutil.which("cc")
     if sys.platform != "linux" or not compiler:
         pytest.skip("ELF loader fixture requires Linux and a C compiler")
@@ -205,7 +205,7 @@ def test_native_lowering_preserves_diagnostic(tmp_path):
 )
 @pytest.mark.parametrize("name_bytes", [255, 256, 512])
 def test_long_native_kernel_names(name_bytes):
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     empty = BlockScaledGemmSpec("", 32, 32, 64)
     spec = BlockScaledGemmSpec(
         "x" * (name_bytes - len(empty.kernel_name())), 32, 32, 64
@@ -296,7 +296,7 @@ def test_serialized_native_contract_rejection(mutation):
 )
 @pytest.mark.parametrize("dtype", ["unknown", "fp32", "FP6 ", " BF8", "fp4"])
 def test_native_spec_format_validation(dtype):
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     spec = BlockScaledGemmSpec("formats", 32, 32, 64, dtype_a=dtype)
     if dtype.strip().lower() in ("unknown", "fp32"):
         with pytest.raises(RuntimeError, match="invalid gfx950"):

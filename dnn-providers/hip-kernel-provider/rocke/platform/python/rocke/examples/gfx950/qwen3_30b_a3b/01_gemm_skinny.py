@@ -36,7 +36,7 @@ The winning configuration for A3B decode shapes was found by the
            0.3µs by balancing XCD load.
   Step 22  Final confirmation vs rocBLAS with apples-to-apples timer.
 
-Results (MI355X / gfx950, batch=2, bf16)
+Results (gfx950, batch=2, bf16)
 -----------------------------------------
   Shape               hipBLASLt   DSL      speedup
   QKV M=2 N=2560 K=2048  11.1µs   6.8µs   1.63×

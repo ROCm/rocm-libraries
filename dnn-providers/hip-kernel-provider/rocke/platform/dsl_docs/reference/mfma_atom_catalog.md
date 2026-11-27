@@ -2,18 +2,18 @@
 
 The shipped MFMA atoms live in `helpers.atoms`, grouped into `MFMA_F16_ATOMS`, `MFMA_BF16_ATOMS`, and `MFMA_FP8_ATOMS` (fp8 / bf8), with the unified `MFMA_ATOMS` catalog covering all of them. Lookup helper: `mfma_atom("f16", m, n, k)` (also accepts `bf16`, `fp8` / `fp8e4m3`, `bf8` / `bf8e5m2`). The bf16 and fp8/bf8 atoms below are first-class catalog entries — not just bare `IRBuilder` methods. The RDNA wave32 / WMMA targets use the separate `WmmaAtom` catalog (`WMMA_ATOMS`, looked up via `wmma_atom(...)`); the layouts in this doc are the wave64 MFMA layouts.
 
-These MFMA atoms are the wave64 CDNA path (gfx942 / gfx950). The Python and C++ engines emit byte-identical IR for them.
+These MFMA atoms are the wave64 CDNA path. The Target column is the first target whose MMA catalog (`ArchTarget.from_gfx(arch).mma`) lists the atom; the atom is available where the catalog lists it. The Python and C++ engines emit byte-identical IR for them.
 
 ## Atom Table
 
 | Atom             | (m, n, k) | A per lane  | B per lane  | C per lane   | Output tile | Target  | Notes                              |
 |------------------|-----------|------------:|------------:|-------------:|------------:|---------|------------------------------------|
-| `f16_4x4x4`      | 4 x 4 x 4  | `<4xhalf>`  | `<4xhalf>`  | `<4xfloat>`  | 4x4 x 16 batches | gfx940+ | 16 independent 4x4 matmuls per wave (small-channel direct conv) |
-| `f16_16x16x16`   | 16x16x16 | `<4xhalf>`  | `<4xhalf>`  | `<4xfloat>`  | 16x16        | gfx940+ | Legacy CDNA atom                   |
+| `f16_4x4x4`      | 4 x 4 x 4  | `<4xhalf>`  | `<4xhalf>`  | `<4xfloat>`  | 4x4 x 16 batches | gfx908+ | 16 independent 4x4 matmuls per wave (small-channel direct conv) |
+| `f16_16x16x16`   | 16x16x16 | `<4xhalf>`  | `<4xhalf>`  | `<4xfloat>`  | 16x16        | gfx908+ | Legacy CDNA atom                   |
 | `f16_16x16x32`   | 16x16x32 | `<8xhalf>`  | `<8xhalf>`  | `<4xfloat>`  | 16x16        | gfx950+ | K-packed: halves K-loop trip count |
-| `f16_32x32x8`    | 32x32x8  | `<4xhalf>`  | `<4xhalf>`  | `<16xfloat>` | 32x32        | gfx940+ | Canonical hero atom                |
+| `f16_32x32x8`    | 32x32x8  | `<4xhalf>`  | `<4xhalf>`  | `<16xfloat>` | 32x32        | gfx908+ | Canonical hero atom                |
 | `f16_32x32x16`   | 32x32x16 | `<8xhalf>`  | `<8xhalf>`  | `<16xfloat>` | 32x32        | gfx950+ | K-packed                           |
-| `bf16_16x16x16`  | 16x16x16 | `<4xbfloat>` | `<4xbfloat>` | `<4xfloat>` | 16x16       | gfx942+ | Lowers via the `_1k` variant (`<4 x i16>` operands) |
+| `bf16_16x16x16`  | 16x16x16 | `<4xbfloat>` | `<4xbfloat>` | `<4xfloat>` | 16x16       | gfx90a+ | Lowers via the `_1k` variant (`<4 x i16>` operands) |
 | `bf16_16x16x32`  | 16x16x32 | `<8xbfloat>` | `<8xbfloat>` | `<4xfloat>` | 16x16       | gfx950+ | K-packed bf16                      |
 | `bf16_32x32x16`  | 32x32x16 | `<8xbfloat>` | `<8xbfloat>` | `<16xfloat>` | 32x32      | gfx950+ | K-packed bf16 hero                 |
 | `fp8_16x16x32` / `bf8_16x16x32` | 16x16x32 | `<8xfp8e4m3>` / `<8xbf8e5m2>` | same | `<4xfloat>`  | 16x16 | gfx942+ | 8 f8 bytes/lane = `<2 x i32>` at the intrinsic boundary |
@@ -215,8 +215,8 @@ sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
 `mfma_f32_32x32x16_bf16`; see the
 [emulation description](../architecture/xf32_bf16x3_emulation.md).
 
-gfx942 declares two f64 atoms in the arch catalog; gfx90a and gfx950 declare
-`mfma_f64_16x16x4_f64` only. Both hold one f64 value per lane for A and B.
+gfx90a, gfx942 and gfx950 declare two f64 atoms in the arch catalog, with the
+same lane maps on all three. Both hold one f64 value per lane for A and B.
 
 `mfma_f64_16x16x4_f64` uses the fp32 16x16x4 A/B lane maps
 (`row`/`col = lane % 16`, `k = lane / 16`). C/D hold four f64 values per lane

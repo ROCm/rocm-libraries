@@ -21,6 +21,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
@@ -55,6 +57,25 @@ class RunSummary:
     max_abs_diff: float = 0.0
     bad_count: int = 0
     total: int = 0
+
+
+# The line ``--untimed`` prints after its launch completes: a correctness run's
+# proof that the kernel ran, where a timed run prints ``Perf:``.
+UNTIMED_LAUNCH_LINE = "launch: ok (untimed)"
+
+
+@dataclass(frozen=True)
+class CheckSummary:
+    """What one untimed launch of a manifest's kernel showed.
+
+    ``bad_count`` of the ``total`` compared output elements fall outside the
+    reference tolerance; without ``verify`` nothing is compared, so
+    ``bad_count`` is 0.
+    """
+
+    max_abs_diff: float
+    bad_count: int
+    total: int
 
 
 # A problem builder turns (manifest, shape, verify) into the launch recipe
@@ -241,6 +262,81 @@ def _launch_timed(
         return total_ms / iters
 
 
+def _launch_untimed(
+    rt: Runtime,
+    fn: object,
+    grid: tuple[int, int, int],
+    block: tuple[int, int, int],
+    args: bytes,
+    cluster: tuple[int, int, int] | None = None,
+) -> None:
+    """Launch once on the default stream and wait for the kernel; time nothing.
+
+    `cluster` is the kernel's compiled cluster shape, as for `_launch_timed`.
+    """
+    rt.launch_blocking(fn, grid, block, args, cluster=cluster)
+
+
+@dataclass(frozen=True)
+class _PreparedLaunch:
+    """A loaded kernel with its arguments in device memory, ready to launch.
+
+    ``flop`` and ``bytes_xfer`` are the problem's work, which only the timed
+    path turns into rates.
+    """
+
+    rt: Runtime
+    fn: object  # the handle Runtime's module.get_function returns
+    grid: tuple[int, int, int]
+    block: tuple[int, int, int]
+    args: bytes
+    ptrs: tuple[int, ...]
+    cluster: tuple[int, int, int] | None
+    flop: float
+    bytes_xfer: float
+    check: Callable[[Runtime, tuple[int, ...]], tuple[float, int, int]]
+
+
+@contextmanager
+def _prepared_launch(
+    manifest: dict[str, object],
+    blob: bytes,
+    shape: tuple[int, int, int] | None,
+    verify: bool,
+) -> Iterator[_PreparedLaunch]:
+    """Load the manifest's kernel and place its arguments; free what was made.
+
+    The problem builder runs before the device is touched: an unrunnable kind
+    or a refused shape is a property of the manifest, and saying so should not
+    need a GPU. Each device resource is released on exit, also when a later
+    step of the setup raises.
+    """
+    builder = resolve_manifest_runner(manifest)
+    make_args, grid, block, flop, bytes_xfer, check = builder(manifest, shape, verify)
+
+    rt = Runtime()
+    with ExitStack() as release:
+        module = rt.load_module(blob)
+        release.callback(module.unload)
+        fn = module.get_function(str(manifest["kernel_name"]))
+        args, ptrs = make_args(rt)
+        for ptr in ptrs:
+            release.callback(rt.free, ptr)
+        cluster = manifest.get("cluster_dims")
+        yield _PreparedLaunch(
+            rt=rt,
+            fn=fn,
+            grid=grid,
+            block=block,
+            args=args,
+            ptrs=tuple(ptrs),
+            cluster=None if cluster is None else tuple(cluster),
+            flop=flop,
+            bytes_xfer=bytes_xfer,
+            check=check,
+        )
+
+
 def run_manifest(
     manifest_path: Path,
     hsaco_path: Optional[Path] = None,
@@ -249,41 +345,81 @@ def run_manifest(
     verify: bool = False,
 ) -> RunSummary:
     manifest, blob, _resolved = _load(manifest_path, hsaco_path)
-    # Resolve the adapter before touching the device: an unrunnable kind is a
-    # property of the manifest, and saying so should not require a GPU.
-    builder = resolve_manifest_runner(manifest)
-
-    rt = Runtime()
-    module = rt.load_module(blob)
-    fn = module.get_function(str(manifest["kernel_name"]))
-    make_args, grid, block, flop, bytes_xfer, check = builder(manifest, shape, verify)
-
-    args, ptrs = make_args(rt)
     warmup = int(manifest.get("warmup_iters", 5))
     iters = int(manifest.get("timed_iters", 100))
-    cluster = manifest.get("cluster_dims")
-    ms = _launch_timed(
-        rt,
-        fn,
-        grid,
-        block,
-        args,
-        warmup,
-        iters,
-        None if cluster is None else tuple(cluster),
-    )
-    max_abs_diff, bad_count, total = check(rt, ptrs)
-    for ptr in ptrs:
-        rt.free(ptr)
-    module.unload()
+    with _prepared_launch(manifest, blob, shape, verify) as launch:
+        ms = _launch_timed(
+            launch.rt,
+            launch.fn,
+            launch.grid,
+            launch.block,
+            launch.args,
+            warmup,
+            iters,
+            launch.cluster,
+        )
+        max_abs_diff, bad_count, total = launch.check(launch.rt, launch.ptrs)
     return RunSummary(
         ms=ms,
-        tflops=flop / 1e9 / ms,
-        gbps=bytes_xfer / 1e6 / ms,
+        tflops=launch.flop / 1e9 / ms,
+        gbps=launch.bytes_xfer / 1e6 / ms,
         max_abs_diff=max_abs_diff,
         bad_count=bad_count,
         total=total,
     )
+
+
+def check_manifest(
+    manifest_path: Path,
+    hsaco_path: Path | None = None,
+    *,
+    shape: tuple[int, int, int] | None = None,
+    verify: bool = False,
+) -> CheckSummary:
+    """Launch the manifest's kernel once, wait for it, and time nothing.
+
+    The correctness counterpart of :func:`run_manifest`: one blocking launch,
+    then, with ``verify``, the comparison with the reference. A fault or a
+    failed GPU check raises from the launch.
+    """
+    manifest, blob, _resolved = _load(manifest_path, hsaco_path)
+    with _prepared_launch(manifest, blob, shape, verify) as launch:
+        _launch_untimed(
+            launch.rt,
+            launch.fn,
+            launch.grid,
+            launch.block,
+            launch.args,
+            launch.cluster,
+        )
+        max_abs_diff, bad_count, total = launch.check(launch.rt, launch.ptrs)
+    return CheckSummary(max_abs_diff=max_abs_diff, bad_count=bad_count, total=total)
+
+
+def _print_verify(summary: CheckSummary | RunSummary) -> None:
+    print(
+        f"verify max_abs_diff={summary.max_abs_diff:.8g} "
+        f"bad={summary.bad_count}/{summary.total}"
+    )
+
+
+def _exit_code(summary: CheckSummary | RunSummary, verify: bool) -> int:
+    """1 when a verified run found an element outside the tolerance, else 0."""
+    return 1 if verify and summary.bad_count else 0
+
+
+def _check_main(ns: argparse.Namespace) -> int:
+    """``--untimed``: one launch, the verify line with ``--verify``, no ``Perf:``."""
+    summary = check_manifest(
+        Path(ns.manifest),
+        Path(ns.hsaco),
+        shape=_parse_shape(ns.shape),
+        verify=ns.verify,
+    )
+    if ns.verify:
+        _print_verify(summary)
+    print(UNTIMED_LAUNCH_LINE)
+    return _exit_code(summary, ns.verify)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -299,7 +435,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("manifest")
     ap.add_argument("--shape", default=None)
     ap.add_argument("--verify", action="store_true")
+    ap.add_argument(
+        "--untimed",
+        action="store_true",
+        help="launch the kernel once and time nothing (correctness runs)",
+    )
     ns = ap.parse_args(argv)
+    if ns.untimed:
+        return _check_main(ns)
     summary = run_manifest(
         Path(ns.manifest),
         Path(ns.hsaco),
@@ -307,10 +450,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         verify=ns.verify,
     )
     if ns.verify:
-        print(
-            f"verify max_abs_diff={summary.max_abs_diff:.8g} "
-            f"bad={summary.bad_count}/{summary.total}"
-        )
+        _print_verify(summary)
     print(
         f"Perf: {summary.ms:.6g} ms, {summary.tflops:.6g} TFlops, {summary.gbps:.6g} GB/s"
     )
@@ -325,9 +465,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         bad_count=summary.bad_count,
         total=summary.total,
     )
-    if ns.verify and summary.bad_count:
-        return 1
-    return 0
+    return _exit_code(summary, ns.verify)
 
 
 if __name__ == "__main__":

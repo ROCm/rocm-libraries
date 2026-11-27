@@ -155,6 +155,7 @@ def _lowering_target(device_arch):
     return generic if generic in _WORD_BY_ARCH else None
 
 
+@pytest.mark.gpu
 def test_hip_route_copy_is_bounds_checked_on_the_gpu():
     """A copy through the HIP route on the current GPU: lanes inside both
     bounds copy S, lanes past the load bound read 0, and lanes past the store

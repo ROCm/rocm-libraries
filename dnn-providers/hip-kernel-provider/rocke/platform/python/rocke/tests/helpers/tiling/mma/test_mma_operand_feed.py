@@ -32,6 +32,7 @@ from rocke.core.ir import (
     PtrType,
     VectorType,
 )
+from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
 from rocke.helpers.tiling import (
     Fragment,
     fill_fragment,
@@ -247,7 +248,10 @@ def test_unsigned_tile_of_several_instructions_issues_each_one(
     assert len(mma_ops) == calls
     assert all(op.operands[0].type == VectorType(U8, 32) for op in mma_ops)
     assert all(op.operands[1].type == VectorType(I8, 32) for op in mma_ops)
-    ir = lower_with_engine(kernel, "gfx1250", engine=engine)
+    # The gfx1250 i8 call is the LLVM 23 form, which both engines refuse below LLVM 23.
+    ir = lower_with_engine(
+        kernel, "gfx1250", engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM23
+    )
     assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == calls
 
 

@@ -14,6 +14,7 @@ import sys
 import pytest
 from rocke.tests.arch_marks import arch_specific
 from rocke.tests.provider_categories import provider_category_labels
+from rocke.tests.reference_artifacts import published_reference_variants
 
 _PLATFORM = Path(__file__).resolve().parents[1]
 _LIBRARY = _PLATFORM.parent / "library"
@@ -244,23 +245,6 @@ def _artifact_operations(library):
     return result.stdout.split()
 
 
-def _artifact_published(library):
-    """Return the published variants that the artifact CLI under `library` lists."""
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-I",
-            str(library / "tests/reference_common/artifact.py"),
-            "published",
-            "--json",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return json.loads(result.stdout)
-
-
 def configure(project, *, enabled=True, python=True):
     return subprocess.run(
         [
@@ -458,7 +442,7 @@ def test_artifact_cli_lists_the_variants_that_configuration_installs(project):
     result = configure(project)
     assert result.returncode == 0, result.stdout + result.stderr
     listed = {}
-    for entry in _artifact_published(project / "library"):
+    for entry in published_reference_variants(project / "library"):
         pair = f"{entry['operation']}/{entry['architecture']}"
         listed.setdefault(pair, []).append(entry["variant"])
         for name in ("lock", "pointer", "archive"):
@@ -816,7 +800,7 @@ def test_artifact_cli_lists_the_published_architectures(tmp_path):
     """
     listed = {
         (entry["operation"], entry["architecture"])
-        for entry in _artifact_published(_LIBRARY)
+        for entry in published_reference_variants(_LIBRARY)
     }
     assert listed == {
         (operation, architecture)
@@ -849,7 +833,7 @@ def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
     Every rocke_<operation>_reference_unit_pytest and published
     rocke_<operation>_gpu_<arch>_pytest needs each category label that the
     shared rocke_reference_common_pytest gets. A name that no longer matches
-    the patterns keeps only the quick label baked into the installed tests.
+    the patterns keeps only the standard label baked into the installed tests.
     """
     published = _published(tmp_path)
     names = _reference_ctests(published)

@@ -9,8 +9,8 @@ row chunk. Each piece spends its time in numpy's elementwise passes, which run
 on one core and release the GIL, so pieces run in parallel on threads. Each
 worker holds one piece's float64 score temporaries (up to a few hundred MiB on
 the largest references), so the pool is small: four workers give most of the
-speedup (measured 2.1x on the largest dense reference; 16 workers gave 3.1x for
-three times the memory), and never more than the CPUs this process may use.
+gain, more workers cost memory in proportion for little more, and the pool
+never exceeds the CPUs this process may use.
 """
 
 from __future__ import annotations

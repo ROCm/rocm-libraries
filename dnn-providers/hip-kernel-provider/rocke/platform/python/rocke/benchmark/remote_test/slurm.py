@@ -100,7 +100,7 @@ def _build_srun_argv(
     # Preflight: HSA must be able to enumerate a GPU agent. If only the
     # CPU agent shows up, no container-side fix will help — the host's
     # amdgpu DRM driver hasn't bound to the GPU (common when the DKMS
-    # driver predates a new silicon's PCI ID, e.g. gfx1151 / Strix Halo
+    # driver predates a new silicon's PCI ID, e.g. gfx1151
     # PCI 0x1586 requires ROCm 6.4+). Fail with an actionable message
     # instead of letting `hipInit` return the opaque hipError(100).
     preflight = (

@@ -250,6 +250,8 @@ def _type_to_hip(t) -> str:
             return f"f32x{t.count}"
         if elem == "f64":
             return f"f64x{t.count}"
+        if elem == "i64":
+            return f"i64x{t.count}"
         if elem in ("i32", "tf32"):
             return f"i32x{t.count}"
         if elem == "i16":
@@ -362,6 +364,7 @@ _VEC_PREFIX = {
     "bf16": "bf16x",
     "f32": "f32x",
     "f64": "f64x",
+    "i64": "i64x",
     "i32": "i32x",
     "tf32": "i32x",
     "i16": "i16x",
@@ -1070,7 +1073,7 @@ class _Lowerer:
     #
     # The RDNA half of the neutral-MMA contract. A WMMA ``op_id`` reaches this
     # handler only through ``_op_tile_mma`` (it rebuilds ``tile.<op_id>``). The
-    # hardware-verified wave32 builtin on gfx1151 (Strix Halo) is
+    # hardware-verified wave32 builtin on gfx1151 is
     # ``__builtin_amdgcn_wmma_f32_16x16x16_f16_w32(<16 x half> a,
     # <16 x half> b, <8 x float> c) -> <8 x float>`` -- the same fragment
     # layout the LLVM WMMA path emits (A/B per-lane ``f16x16``, accumulator

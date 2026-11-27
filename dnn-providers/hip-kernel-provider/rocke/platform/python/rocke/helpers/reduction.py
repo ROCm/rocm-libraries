@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Callable, List, Literal, Tuple
 
-from ..core.ir import F32, F64, I32, IRBuilder, Value
+from ..core.ir import F32, F64, I32, I64, IRBuilder, Value, VectorType
 
 
 __all__ = [
@@ -41,6 +41,7 @@ __all__ = [
     "block_lds_reduce_pair",
     "block_lds_reduce_with_index",
     "block_lds_reduce_with_wave_prologue",
+    "butterfly_allreduce",
     "tree_reduce",
     "welford_block_reduce",
     "welford_block_reduce_stable",
@@ -221,6 +222,65 @@ def block_lds_reduce_pair(
     return out_a, out_c
 
 
+# Lanes an ascending XOR butterfly can reach: masks 1 .. 32 of a 64-lane wave.
+_BUTTERFLY_MAX_STAGES = 6
+
+
+def butterfly_allreduce(
+    b: IRBuilder,
+    value: Value,
+    combine: Callable[[Value, Value], Value],
+    *,
+    stages: int,
+) -> Value:
+    """Reduce ``value`` across ``2**stages`` lanes with an ascending XOR
+    butterfly; every one of those lanes ends up holding the result.
+
+    Stage ``k`` (``k = 0, 1, ...``) exchanges ``value`` with lane ``l ^ 2**k``
+    and folds with ``combine(own, remote)``. ``combine`` must be commutative,
+    so that the two partners of a stage hold the same value afterwards (a sum,
+    a max, the larger of two keys).
+
+    For an f32 or i32 value the stages inside one 16-lane DPP row ride
+    :meth:`IRBuilder.warp_shuffle_xor_dpp` (VALU DPP: no LDS crossbar, no
+    ``lgkmcnt(0)`` wait). Masks 1 and 2 go as themselves (``quad_perm`` on
+    gfx9); masks 4 and 8 go as DPP masks 7 and 15 (``row_half_mirror`` /
+    ``row_mirror``), which pair lane ``i`` with ``i ^ 7`` (``i ^ 15``). After
+    the lower stages every lane of a quad (half-row) holds one value, so that
+    partner delivers what lane ``i ^ 4`` (``i ^ 8``) holds. Masks 16 and up,
+    and other types, take :meth:`IRBuilder.warp_shuffle_xor` (``ds_swizzle``
+    / ``ds_bpermute``). An i64 value crosses lanes as its two i32 halves,
+    each exchanged as above.
+
+    Raises ``ValueError`` unless ``stages`` is in ``0 .. 6`` (the masks of a
+    64-lane wave).
+    """
+    if not 0 <= stages <= _BUTTERFLY_MAX_STAGES:
+        raise ValueError(
+            f"butterfly_allreduce failed - stages={stages}, expected 0 .. "
+            f"{_BUTTERFLY_MAX_STAGES}"
+        )
+    for stage in range(stages):
+        value = combine(value, _butterfly_exchange(b, value, 1 << stage))
+    return value
+
+
+def _butterfly_exchange(b: IRBuilder, value: Value, lane_xor: int) -> Value:
+    """One exchange of :func:`butterfly_allreduce`: what lane ``l ^ lane_xor``
+    holds, once the stages below ``lane_xor`` ran."""
+    if value.type.name == "i64":
+        halves = b.bitcast(value, VectorType(I32, 2))
+        remote_halves = [
+            _butterfly_exchange(b, b.vec_extract(halves, half), lane_xor)
+            for half in range(2)
+        ]
+        return b.bitcast(b.vec_pack(remote_halves, I32), I64)
+    if lane_xor <= 8 and value.type.name in ("f32", "i32"):
+        dpp_mask = lane_xor if lane_xor <= 2 else 2 * lane_xor - 1
+        return b.warp_shuffle_xor_dpp(value, dpp_mask)
+    return b.warp_shuffle_xor(value, lane_xor)
+
+
 def _warp_xor_reduce(
     b: IRBuilder,
     val: Value,
@@ -231,18 +291,12 @@ def _warp_xor_reduce(
     """Wave-internal XOR butterfly reduce — no LDS round-trip.
 
     For ``wave_size = 2^n``, performs ``n`` cross-lane XOR-mask
-    shuffles. For f32/i32 values the stages inside one 16-lane DPP row
-    ride ``warp_shuffle_xor_dpp`` (VALU DPP, no LDS crossbar / no
-    ``lgkmcnt(0)`` wait): masks 1 and 2 as themselves (``quad_perm`` on
-    gfx9 CDNA), masks 4 and 8 as dpp masks 7 and 15 (``row_half_mirror``
-    / ``row_mirror``). Those pair lane ``i`` with ``i ^ 7`` (``i ^ 15``)
-    rather than ``i ^ 4`` (``i ^ 8``), which is equivalent because the
-    stages run in ascending order: when one runs, every lane of the quad
-    (half-row) already holds that group's value. That makes the result
-    bitwise identical for ``sum`` and ``prod``. For ``max`` / ``min``
+    shuffles: a :func:`butterfly_allreduce`, so f32/i32 stages inside one
+    16-lane DPP row ride DPP. Its partner for masks 4 and 8 is ``i ^ 7``
+    (``i ^ 15``), which makes the result bitwise identical to the plain XOR
+    butterfly for ``sum`` and ``prod``. For ``max`` / ``min``
     (``maxnum`` / ``minnum``) only the sign of a zero result can differ,
-    since those may return either zero for ``(+0, -0)``. Masks 16 and 32 leave
-    the row and use ``ds_swizzle_xor`` / ``ds_bpermute``. After the last
+    since those may return either zero for ``(+0, -0)``. After the last
     stage every lane in the wave holds the wave-local reduction.
 
     Promoted from the working prototype in ``instances/reduce.py::
@@ -250,16 +304,12 @@ def _warp_xor_reduce(
     """
     if wave_size & (wave_size - 1):
         raise ValueError(f"wave_size {wave_size} is not a power of two")
-    stages = wave_size.bit_length() - 1
-    cur = val
-    for k in range(stages):
-        mask = 1 << k
-        if mask <= 8 and cur.type.name in ("f32", "i32"):
-            remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
-        else:
-            remote = b.warp_shuffle_xor(cur, mask)
-        cur = _emit_combine(b, combine, cur, remote)
-    return cur
+    return butterfly_allreduce(
+        b,
+        val,
+        lambda own, remote: _emit_combine(b, combine, own, remote),
+        stages=wave_size.bit_length() - 1,
+    )
 
 
 def tree_reduce(

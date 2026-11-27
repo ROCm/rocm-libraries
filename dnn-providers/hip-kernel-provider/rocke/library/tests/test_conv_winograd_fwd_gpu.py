@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import arch_skip_reason
+from rocke.tests.lanes import TICKET, arch_skip_reason, skip_until
 
 GPU_ARCH = get_device_arch(0)
 
@@ -322,7 +322,7 @@ def _run(pk, m, io, op, ps, vec, scale, *, chunks=1, merge=(), mode="serial", **
     if mode == "graph":
         # rocKE has no HIP-graph capture of its own; the torch CUDA-graph
         # capture this mode used cannot run in a torch-free process.
-        pytest.skip("HIP graph capture needs a rocKE graph primitive")
+        skip_until(TICKET, reason="HIP graph capture needs a rocKE graph primitive")
 
     mh, mw = m if isinstance(m, tuple) else (m, 0)
     p = ConvProblem(Y=3, X=3, **pk)

@@ -56,7 +56,7 @@ For setup and the most common flags in context, see
 | `ROCKE_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
 | `ROCKE_EXPLICIT_GATE_RUN` / `ROCKE_EXPLICIT_GATE_PARTIAL` | Internal explicit-gate launcher contract. The source runner and installed CTest entries set these to attest that a non-discovered gate was selected intentionally and whether it is a focused diagnostic rather than a complete verdict. Do not set them to make an ordinary pytest invocation report complete coverage. |
 | `ROCKE_EXPLICIT_GATE_PREFLIGHT` / `ROCKE_EXPLICIT_GATE_SENTINEL` | Internal explicit-gate process contract. Preflight uses the first only in its isolated probe; the launcher supplies the second as a temporary pytest-session attestation path. They are not user-facing gate selectors. |
-| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` lets a developer run report `INCOMPLETE` when the qualified reference toolchain is unavailable; installed required coverage sets `0`. |
+| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` turns a preflight failure (a toolchain query that fails, a comgr without a gate arch, no `llvm-objdump`) into a skip (exit 77) that a developer run reports as `INCOMPLETE`; installed required coverage sets `0`. A compiler other than the gate's reference toolchain skips either way, until AICK-3320. |
 | `ROCKE_ISA_INSPECT_PROBE` | Explicit path to the staged ISA inspection helper used by installed counted-compiler tests. CTest supplies it so relocated tests do not reach back into the source tree. |
 | `ROCKE_ROOT` | Override the detected repository root. |
 | `ROCKE_REMOTE_HOST` / `ROCKE_REMOTE_USER` / `ROCKE_REMOTE_KEY` / `ROCKE_REMOTE_STAGE` | Multi-arch remote-test orchestrator: SSH host/user/key and the staging dir. |
@@ -64,6 +64,22 @@ For setup and the most common flags in context, see
 | `ROCKE_DOCKER_IMAGE` / `ROCKE_DOCKER_EXTRA_FLAGS` | Container image and extra flags for containerized runs. |
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
+
+## Asset locators
+
+`rocke.assets` finds the trees outside the `rocke` package through these
+overrides. The installed test payload sets them
+(`rocke.tests.staged_payload.point_locators_at_staged_payload`) because it has
+no source checkout; a developer working in a checkout rarely needs them.
+
+| Variable | Overrides (default) |
+|---|---|
+| `ROCKE_PLATFORM_ROOT` | `platform_root()`: the `rocke/platform` source root (the checkout's `platform/`). |
+| `ROCKE_LIBRARY_ROOT` | `library_root()`: the `rocke/library` source root (`platform/../library`). |
+| `ROCKE_DSL_DOCS` | `dsl_docs_dir()`: the `dsl_docs` tree (`platform/dsl_docs`). |
+| `ROCKE_PLATFORM_TOOLS_DIR` | `platform_tools_dir()`: the platform `tools` tree (`platform/tools`). |
+| `ROCKE_PLATFORM_INSTANCES_DIR` | `platform_instances_dir()`: the platform instance-test tree, home of the IR parity harness (`platform/tests/instances`). |
+| `ROCKE_PLATFORM_PARITY_DIR` | `platform_parity_dir()`: the parity-emitter tree, home of `_emit_common.py` (the `parity` directory of `platform_instances_dir()`). |
 
 ## External compiler runtime
 
@@ -188,3 +204,20 @@ and a kernel that needs an option the loaded compiler lacks raises
 contract and the table are in `rocke.runtime.compiler_options`;
 `tools/gen_compiler_options.py` measures it, and the CTest
 `rocke_compiler_options_reproducibility` re-measures the loaded compiler's column.
+
+**Tests.** A test uses the compiler this discovery loads on the host it runs
+on (`ROCKE_COMGR_LIB` when set, else the search in
+[`BUILD.md`](../../BUILD.md#runtime-finding-rocm-libamd_comgr--libamdhip64);
+the setup guide names the ROCm release,
+[Recommended stack](../development/setup_guide.md#1-recommended-stack)), and
+asks that compiler what it can do (`loaded_compiler_info()`,
+`rocke.tests.comgr.require_comgr_target`). It pins no LLVM flavor and no ROCm
+release and decides nothing on the comgr's ROCm release. It does not import
+torch: once torch is imported, discovery follows torch's bundled libraries, so
+a test that still imports torch (one on the no-torch allowlist, until its use
+goes) may load torch's comgr. A test that cannot hold on some compilers has a
+record in `rocke.tests.pending_lanes` (a measured budget or a quarantine names
+the compilers), with a ticket and an expiry, and nowhere else.
+`rocke_toolchain_pins_check` and `rocke_no_torch_check` hold the tree to this
+(see the "No toolchain pins" and "No torch" properties in
+[`TESTING.md`](../../../TESTING.md)).

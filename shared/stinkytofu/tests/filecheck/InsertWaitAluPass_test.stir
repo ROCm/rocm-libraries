@@ -31,7 +31,7 @@ st.func @lifecycle_entry_and_return() {
 # CHECK: v_mov_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @valu_to_vmem_raw() {
 ^entry:
@@ -47,7 +47,7 @@ st.func @valu_to_vmem_raw() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vmem_to_valu_war() {
 ^entry:
@@ -77,7 +77,7 @@ st.func @valu_to_valu_no_wait() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: s_and_saveexec_b32
+# CHECK-NEXT: s_and_saveexec_b32
 
 st.func @exec_modifier_drains_va_vdst() {
 ^entry:
@@ -92,7 +92,7 @@ st.func @exec_modifier_drains_va_vdst() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: v_cmpx_eq_u32
+# CHECK-NEXT: v_cmpx_eq_u32
 
 st.func @vcmpx_drains_va_vdst() {
 ^entry:
@@ -116,7 +116,7 @@ st.func @exec_no_drain_when_empty() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @valu_to_vmem_tight() {
 ^entry:
@@ -144,7 +144,7 @@ st.func @no_wait_no_dep() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @va_vdst_producer_last_of_pipe_zero() {
 ^entry:
@@ -161,7 +161,7 @@ st.func @va_vdst_producer_last_of_pipe_zero() {
 # CHECK: v_rcp_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 1
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @va_vdst_ooo_follower_nonzero() {
 ^entry:
@@ -179,7 +179,7 @@ st.func @va_vdst_ooo_follower_nonzero() {
 # CHECK: v_rcp_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @va_vdst_ooo_producer_last_zero() {
 ^entry:
@@ -197,7 +197,7 @@ st.func @va_vdst_ooo_producer_last_zero() {
 # CHECK: v_rcp_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @va_vdst_ooo_two_pipe_consumer_min() {
 ^entry:
@@ -247,7 +247,7 @@ st.func @merge_hold_cnt_with_va_vdst() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: buffer_load_b32
+# CHECK-NEXT: buffer_load_b32
 
 st.func @valu_src_war_before_vmem_write() {
 ^entry:
@@ -278,7 +278,7 @@ st.func @valu_src_no_war_diff_reg() {
 # CHECK: ds_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 1
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_ds_ds_follower() {
 ^entry:
@@ -295,7 +295,7 @@ st.func @vm_ds_ds_follower() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 1
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_ds_buffer_follower() {
 ^entry:
@@ -313,7 +313,7 @@ st.func @vm_ds_buffer_follower() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_ds_buffer_last_of_group() {
 ^entry:
@@ -331,7 +331,7 @@ st.func @vm_ds_buffer_last_of_group() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 1
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_flat_both_groups() {
 ^entry:
@@ -348,7 +348,7 @@ st.func @vm_flat_both_groups() {
 # CHECK: flat_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 1
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_flat_ds_groupA() {
 ^entry:
@@ -364,7 +364,7 @@ st.func @vm_flat_ds_groupA() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 1
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_flat_buffer_groupB() {
 ^entry:
@@ -378,7 +378,7 @@ st.func @vm_flat_buffer_groupB() {
 # CHECK: ds_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_ds_last_single() {
 ^entry:
@@ -391,7 +391,7 @@ st.func @vm_ds_last_single() {
 # CHECK: ds_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 3
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @vm_many_ds() {
 ^entry:
@@ -415,7 +415,7 @@ st.func @vm_many_ds() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 2
-# CHECK: "st.global_prefetch_b8"
+# CHECK-NEXT: "st.global_prefetch_b8"
 
 st.func @valu_to_global_prefetch_suppressed() {
 ^entry:
@@ -431,7 +431,7 @@ st.func @valu_to_global_prefetch_suppressed() {
 # CHECK: "st.global_store_async_from_lds_b64"
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @async_store_to_valu_war() {
 ^entry:
@@ -452,7 +452,7 @@ st.func @async_store_to_valu_war() {
 # CHECK: v_mov_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst
-# CHECK: "st.global_atomic_inc_u32"
+# CHECK-NEXT: "st.global_atomic_inc_u32"
 
 st.func @valu_to_global_atomic_data_raw_not_suppressed() {
 ^entry:
@@ -468,7 +468,7 @@ st.func @valu_to_global_atomic_data_raw_not_suppressed() {
 # CHECK: "st.global_store_async_from_lds_b64"
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @async_store_lds_addr_to_valu_war() {
 ^entry:
@@ -482,7 +482,7 @@ st.func @async_store_lds_addr_to_valu_war() {
 # CHECK: "st.global_prefetch_b8"
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @global_prefetch_to_valu_war() {
 ^entry:
@@ -496,7 +496,7 @@ st.func @global_prefetch_to_valu_war() {
 # CHECK: "st.global_load_tr_b64"
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @global_load_tr_to_valu_war() {
 ^entry:

@@ -27,7 +27,7 @@
  *       to rocke_b_buffer_load_f16 / rocke_b_buffer_load_vN_f16 and the matching
  *       rocke_b_buffer_store_f16 / rocke_b_buffer_store_vN_f16 store.
  *   No stubbed region remains; the differential harness reports img2col GREEN
- *   (6 configs, bad=0) in both ir --canonical and ll modes against the Python
+ *   (8 configs, bad=0) in both ir --canonical and ll modes against the Python
  *   reference rocke/instances/common/img2col.py.
  */
 #include "rocke/instance_img2col.h"
@@ -92,6 +92,28 @@ bool rocke_img2col_is_valid_spec(const rocke_img2col_spec_t* spec,
                  "unsupported dtype '%s' (only f16 in v1)",
                  spec->dtype != NULL ? spec->dtype : "");
         rocke_img2col_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
+    /* if spec.problem.groups != 1: ... */
+    if(spec->problem.groups != 1)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "groups %d unsupported (img2col covers single-group convolution only)",
+                 spec->problem.groups);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
+    /* if spec.problem.is_3d: ... (the flag is true on this path, so Python's
+     * rendering of it is the fixed text "True") */
+    if(rocke_conv_problem_is_3d(&spec->problem))
+    {
+        rocke_img2col_set_reason(reason,
+                                 reason_cap,
+                                 "img2col failed - is_3d=True, expected a 2-D problem "
+                                 "(img2col covers 2-D convolution only)");
         return false;
     }
 

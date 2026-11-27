@@ -131,7 +131,6 @@ def test_from_mma_default_renders_canonical_not_the_configured_style():
     )  # NOT the configured style
 
 
-@pytest.mark.usefixtures("requires_matplotlib")
 def test_a_memory_shade_without_its_space_is_refused():
     mma = _mma()
     with pytest.raises(ValueError, match="AND memory_space"):

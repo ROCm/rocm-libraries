@@ -9,7 +9,7 @@ Runbook anchors:
 - §12.1.I `persistent` (CK Tile uses persistent CTAs in 03_gemm,
   18_flatmm, 40_streamk_gemm)
 - §12.1.L Multi-XCD / chiplet grid swizzle (CK Tile's
-  `chiplet_aware_super_tile` from the multi-XCD MI300X/MI355X path)
+  `chiplet_aware_super_tile` from the multi-XCD gfx942 / gfx950 path)
 - §17.4 "compiler hints rarely close large gaps"
 - §17.4 "a structural change often needs multiple co-evolved levers"
 
@@ -19,7 +19,7 @@ chiplet) and `example/ck_tile/18_flatmm/flatmm_basic.hpp`
 (FlatmmConfig32 reference defaults).
 
 The hypothesis going in: with only 64 N-tiles at tile_n=64, a single
-XCD (38 CUs on MI355X) is comfortably enough — chiplet swizzle should
+XCD (32 CUs on gfx950) is comfortably enough — chiplet swizzle should
 be neutral. `waves_per_eu=2` may help shake more waves out of the 56-VGPR
 kernel (probe step showed `MAX_WAVES_PER_CU` is already the limiter at
 32, so this probably doesn't move). `persistent=True` keeps the same
@@ -110,7 +110,7 @@ EXPERIMENTS = [
         False,
         True,
         None,
-        "XCD-aware grid swizzle (MI355X 8 XCDs)",
+        "XCD-aware grid swizzle (8 XCDs on gfx950)",
     ),
     (
         "persistent_chiplet",

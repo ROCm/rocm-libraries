@@ -11,7 +11,9 @@ fails while lowering, naming the operand and the instruction, with the same text
 in the LLVM and HIP lowerings.
 
 Every case lowers with both engines and requires the same IR or HIP source, or
-the same error; a HIP refusal carries the LLVM lowering's error text.
+the same error; a HIP refusal carries the LLVM lowering's error text. The
+refusal cases run once per engine, so the Python engine's are checked in every
+lane.
 """
 
 import re
@@ -35,9 +37,11 @@ from rocke.core.ir import (
 )
 from rocke.core.mma_operand import mma_operand_needs_reinterpret
 from rocke.tests.engines import (
-    assert_both_engines_reject,
-    assert_both_engines_reject_hip,
+    ENGINES,
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
     lower_hip_with_both_engines,
+    lower_hip_with_engine,
     lower_with_both_engines,
 )
 from rocke.tests.ir_validity import assert_target_accepts
@@ -206,6 +210,21 @@ def test_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format():
     assert_target_accepts(text, "gfx1250")
 
 
+def _assert_each_lowering_rejects(
+    kernel: KernelDef, arch: str, engine: str, message: str
+) -> None:
+    """``engine``'s HIP and LLVM lowerings both refuse ``kernel`` with exactly
+    ``message``: Python raises ``ValueError``, C++ reports its status. HIP is
+    checked first: without the shared C++ engine the C++ HIP lowering can still
+    run through ``rocke_ir_lower_cli``, while the C++ LLVM check skips."""
+    assert_engine_rejects_hip(
+        kernel, arch, engine=engine, error_type=ValueError, message=message
+    )
+    assert_engine_rejects(
+        kernel, arch, engine=engine, error_type=ValueError, message=message
+    )
+
+
 @pytest.mark.parametrize(
     ("arch", "op_id", "a_operand", "b_operand", "accumulator", "message"),
     [
@@ -267,18 +286,19 @@ def test_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format():
     ],
     ids=["i32-into-f32", "f16-into-f32", "f16-into-iu8", "i8-into-iu4", "fp8-into-bf8"],
 )
+@pytest.mark.parametrize("engine", ENGINES)
 def test_an_operand_of_another_number_format_fails(
-    arch, op_id, a_operand, b_operand, accumulator, message
+    arch, op_id, a_operand, b_operand, accumulator, message, engine
 ):
     kernel = _mma_kernel(arch, op_id, a_operand, b_operand, accumulator, F32)
     if op_id in ("mfma_f32_16x16x4_f32", "mfma_f32_32x32x2_f32"):
         message = "MFMA requires src0 and src1 to be f32"
-    assert_both_engines_reject(kernel, arch, ValueError, message)
-    assert_both_engines_reject_hip(kernel, arch, ValueError, message)
+    _assert_each_lowering_rejects(kernel, arch, engine, message)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("role", ["a", "b"])
-def test_an_operand_of_another_width_fails_naming_its_role(role):
+def test_an_operand_of_another_width_fails_naming_its_role(role, engine):
     narrow, words = _zeros(I8, 8), _zeros(I32, 4)
     message = (
         f"MMA operand {role} of 'wmma_i32_16x16x16_iu8' is vec<i8x8> (64 bits); the "
@@ -292,11 +312,11 @@ def test_an_operand_of_another_width_fails_naming_its_role(role):
         _zeros(I32, 8),
         I32,
     )
-    assert_both_engines_reject(kernel, "gfx1151", ValueError, message)
-    assert_both_engines_reject_hip(kernel, "gfx1151", ValueError, message)
+    _assert_each_lowering_rejects(kernel, "gfx1151", engine, message)
 
 
-def test_an_f32_operand_of_another_width_fails_in_every_lowering():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_f32_operand_of_another_width_fails_in_every_lowering(engine):
     message = (
         "MMA operand a of 'mfma_f32_16x16x4_f32' is vec<f32x2> (64 bits); the "
         "instruction takes f32 (32 bits) -- pass a 32-bit value"
@@ -310,8 +330,7 @@ def test_an_f32_operand_of_another_width_fails_in_every_lowering():
         F32,
     )
     message = "MFMA requires src0 and src1 to be f32"
-    assert_both_engines_reject(kernel, "gfx942", ValueError, message)
-    assert_both_engines_reject_hip(kernel, "gfx942", ValueError, message)
+    _assert_each_lowering_rejects(kernel, "gfx942", engine, message)
 
 
 # ------------------------------------------------------------------- HIP source
@@ -449,7 +468,8 @@ def test_hip_16_bit_mfma_lowers_in_both_engines(
     _assert_hipcc_accepts(source, arch, tmp_path)
 
 
-def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(engine, tmp_path):
     kernel = _mma_kernel(
         "gfx1151",
         "wmma_i32_16x16x16_iu8",
@@ -458,7 +478,7 @@ def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
         _zeros(I32, 8),
         I32,
     )
-    source = lower_hip_with_both_engines(kernel, "gfx1151")
+    source = lower_hip_with_engine(kernel, "gfx1151", engine=engine)
     assert re.search(
         r"\(true, __builtin_bit_cast\(i32x4, \w+\), true, \w+, \w+, false\);",
         _mma_builtin_call(source),
@@ -466,7 +486,8 @@ def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
     _assert_hipcc_accepts(source, "gfx1151", tmp_path)
 
 
-def test_hip_integer_wmma_takes_packed_words_unchanged():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_integer_wmma_takes_packed_words_unchanged(engine):
     kernel = _mma_kernel(
         "gfx1151",
         "wmma_i32_16x16x16_iu4",
@@ -475,11 +496,14 @@ def test_hip_integer_wmma_takes_packed_words_unchanged():
         _zeros(I32, 8),
         I32,
     )
-    call = _mma_builtin_call(lower_hip_with_both_engines(kernel, "gfx1151"))
+    call = _mma_builtin_call(lower_hip_with_engine(kernel, "gfx1151", engine=engine))
     assert "__builtin_bit_cast" not in call
 
 
-def test_hip_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format():
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format(
+    engine,
+):
     kernel = _mma_kernel(
         "gfx1250",
         "wmma_gfx1250_f32_16x16x64_fp8_bf8",
@@ -488,5 +512,5 @@ def test_hip_gfx1250_fp8_wmma_reinterprets_each_operand_as_its_catalog_format():
         _zeros(F32, 8),
         F32,
     )
-    call = _mma_builtin_call(lower_hip_with_both_engines(kernel, "gfx1250"))
+    call = _mma_builtin_call(lower_hip_with_engine(kernel, "gfx1250", engine=engine))
     assert len(re.findall(r"__builtin_bit_cast\(i32x8, \w+\)", call)) == 2

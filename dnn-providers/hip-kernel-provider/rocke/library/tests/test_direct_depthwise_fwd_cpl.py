@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import arch_skip_reason
 
@@ -221,6 +222,7 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDepthwiseFwdCplGpu(unittest.TestCase):
     def _check(self, pkw, kind, knobs):

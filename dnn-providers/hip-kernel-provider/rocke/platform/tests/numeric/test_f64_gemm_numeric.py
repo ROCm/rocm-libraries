@@ -110,6 +110,7 @@ def _assert_both_engines_refuse(spec, arch, reason):
         assert native.gemm_is_valid(spec_dict, arch=arch) == (admitted, verdict)
 
 
+@pytest.mark.gpu
 @arch_specific(
     _F64_GEMM_HARDWARE_VERIFIED_ARCHS,
     reason="fp64 GEMM numerics have passed on hardware for these targets only",
@@ -189,6 +190,7 @@ def test_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
         assert np.max(error) < k * np.finfo(np.float64).eps
 
 
+@pytest.mark.gpu
 @arch_specific(
     _F64_GEMM_HARDWARE_VERIFIED_ARCHS,
     reason="fp64 GEMM numerics have passed on hardware for these targets only",
@@ -228,16 +230,12 @@ def test_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
                     np.testing.assert_array_equal(c[z, rows], expected[z, rows])
 
 
-# Refusals that follow the target: the warp-tile message and the LDS cap differ.
+# The refusal that follows the target: per arch, the K padding that overflows
+# its LDS, and the refusal it gets. The MMA catalog lists the f64 4x4x4 atom on
+# both arches, so a (4, 4, 4) warp tile gets the fp64 GEMM's own refusal on each.
 _F64_GEMM_REFUSALS = {
-    "gfx942": {
-        "warp_tile": "fp64 GEMM supports only warp_tile (16, 16, 4)",
-        "lds_k_pad": (64, "LDS budget 81920 > 65536 cap"),
-    },
-    "gfx950": {
-        "warp_tile": "unsupported fp64 warp_tile (4, 4, 4) on gfx950",
-        "lds_k_pad": (160, "LDS budget 180224 > 163840 cap"),
-    },
+    "gfx942": {"lds_k_pad": (64, "LDS budget 81920 > 65536 cap")},
+    "gfx950": {"lds_k_pad": (160, "LDS budget 180224 > 163840 cap")},
 }
 
 
@@ -251,7 +249,7 @@ def test_f64_gemm_rejects_unsupported(arch, case):
     spec, reason = {
         "warp_tile": (
             _spec((64, 64, 16, 2, 2), "mem", "default", warp_tile=(4, 4, 4)),
-            expected["warp_tile"],
+            "fp64 GEMM supports only warp_tile (16, 16, 4)",
         ),
         "acc": (
             _spec((64, 64, 16, 2, 2), "mem", "default", acc="fp32"),

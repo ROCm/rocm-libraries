@@ -4,7 +4,8 @@
  * without its optional `message` buffer.
  *
  * For each input -- a kernel that lowers, a kernel the HIP lowering refuses,
- * text that is not a kernel, empty text, no text, and no output buffer -- the
+ * text that is not a kernel, empty text, no text, no output buffer, and an
+ * empty or no arch (this entry has no default target) -- the
  * call returns the same status whether or not the caller passes a `message`
  * buffer. With one, a refusal appends a non-empty reason (for the documented
  * refusals, exactly the documented one) and a lowered kernel appends none;
@@ -83,10 +84,11 @@ void check_refusal(const char* input,
                    const char* ir_text,
                    bool with_out,
                    rocke_status_t status,
-                   const char* reason)
+                   const char* reason,
+                   const char* arch = "gfx942")
 {
-    const lowering reported = lower(ir_text, "gfx942", true, with_out);
-    const lowering unreported = lower(ir_text, "gfx942", false, with_out);
+    const lowering reported = lower(ir_text, arch, true, with_out);
+    const lowering unreported = lower(ir_text, arch, false, with_out);
     check(reported.status == status, input, "the reported status is not the documented one");
     check(unreported.status == status, input, "the unreported status is not the documented one");
     check(reported.message == reason, input, "the reason is not the documented one");
@@ -126,6 +128,16 @@ int main()
     check_refusal("empty text", "", true, ROCKE_ERR_VALUE, "empty IR input");
     check_refusal("no text", nullptr, true, ROCKE_ERR_VALUE, "empty IR input");
     check_refusal("no output buffer", waitcnt.c_str(), false, ROCKE_ERR_VALUE, "no output buffer");
+    const char* const missing_arches[] = {"", nullptr};
+    for(const char* arch : missing_arches)
+    {
+        check_refusal(arch ? "empty arch" : "no arch",
+                      waitcnt.c_str(),
+                      true,
+                      ROCKE_ERR_VALUE,
+                      "lowering requires an explicit gfx target (there is no default)",
+                      arch);
+    }
     if(g_failures)
     {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

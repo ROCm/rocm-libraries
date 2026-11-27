@@ -107,7 +107,7 @@ def independent_reference(case: Case, inputs: dict[str, np.ndarray]) -> np.ndarr
     No rocKE geometry, indexing, or GPU implementation is used by this oracle.
     As in the existing forward test, the result is rounded to output storage
     before comparison. This defines a new independently qualified input corpus;
-    it does not claim bitwise identity with Torch's float32 accumulation.
+    it does not claim bitwise identity with any float32-accumulating reference.
     """
     if set(inputs) != set(case.input_shapes):
         raise ValueError("incorrect convolution operands")

@@ -20,11 +20,11 @@ Requires a ROCm GPU (gfx942 or gfx950).  Run:
 from __future__ import annotations
 
 import unittest
-from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple
 
 import numpy as np
+import pytest
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
@@ -39,7 +39,6 @@ from ._direct_conv_numeric import (
     poisoned,
     stored_uniform,
 )
-from ._parallel_compile import compile_in_workers
 
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")
@@ -752,16 +751,15 @@ def _run_forward_device(
     x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 1.0)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 1.0)
     ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
-    # Zero D rather than leaving it uninitialised: the tail guards are supposed
-    # to leave the out-of-range lanes alone, and a garbage-filled D is the only
-    # way a guard that writes where it must not shows up as a mismatch.
-    y = np.zeros((p.N, p.Ho, p.Wo, p.total_k), storage.host_dtype(dtype))
+    # NaN-fill D, so an output element the kernel leaves unwritten fails the
+    # comparison instead of matching a zero reference.
+    y = poisoned((p.N, p.Ho, p.Wo, p.total_k), dtype, 0xFF)
     try:
         y = launch_direct_conv(
             artifact, p, (x, w), y, grid=grid, block=block, dtype=dtype
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(y, dtype), ref, floor=1.0)
     if not rel_err < tol:
@@ -1202,18 +1200,13 @@ _DW_DGRAD_STREAM_SHAPES: List[_Shape] = [
 ]
 
 
-def _run_dgrad_batch(
-    arch: str, shapes: Sequence[_Shape], dtype: str = "fp16"
-) -> dict[str, tuple[bool, str]]:
-    """Build, compile, launch, and verify the direct dgrad kernel of each shape.
+def _run_dgrad_one(arch: str, shape: _Shape, dtype: str) -> tuple[bool, str]:
+    """Build, compile, launch, and verify the direct dgrad kernel of ``shape``.
 
-    Returns ``(passed, reason)`` by shape id. Each kernel takes seconds of
-    COMGR, which compiles one module at a time in a process, so the kernels are
-    lowered here and compiled together in worker processes
-    (``compile_in_workers``, the binary ``compile_kernel`` gives); each is then
-    launched and verified on its own.
+    Returns ``(passed, reason)``. ``reason`` starts with ``"skip "`` when the
+    spec is invalid on ``arch``.
     """
-    from rocke.helpers.compile import KernelArtifact, lower_kernel_for_comgr
+    from rocke import compile_kernel
 
     from kernels.common.conv_direct_grouped import (
         DirectConvDgradSpec,
@@ -1223,69 +1216,47 @@ def _run_dgrad_batch(
         is_valid_dgrad_spec,
     )
 
-    results: dict[str, tuple[bool, str]] = {}
-    lowered = []  # (shape, problem, spec, kernel, comgr input)
-    for shape in shapes:
-        kpg = shape.kpg if shape.kpg > 0 else shape.cpg
-        p = DirectConvProblem(
-            N=shape.N,
-            H=shape.H,
-            W=shape.W,
-            groups=shape.groups,
-            cpg=shape.cpg,
-            kpg=kpg,
-            KH=shape.KH,
-            KW=shape.KW,
-            PAD=shape.PAD,
-            stride=shape.stride,
-            dtype=dtype,
-        )
-        spec_kwargs = {"problem": p, "name": f"test_dgrad_{shape.id}"}
-        if shape.block_groups > 0:
-            spec_kwargs["block_groups"] = shape.block_groups
-        spec = DirectConvDgradSpec(**spec_kwargs)
+    kpg = shape.kpg if shape.kpg > 0 else shape.cpg
+    p = DirectConvProblem(
+        N=shape.N,
+        H=shape.H,
+        W=shape.W,
+        groups=shape.groups,
+        cpg=shape.cpg,
+        kpg=kpg,
+        KH=shape.KH,
+        KW=shape.KW,
+        PAD=shape.PAD,
+        stride=shape.stride,
+        dtype=dtype,
+    )
+    spec_kwargs = {"problem": p, "name": f"test_dgrad_{shape.id}"}
+    if shape.block_groups > 0:
+        spec_kwargs["block_groups"] = shape.block_groups
+    spec = DirectConvDgradSpec(**spec_kwargs)
 
-        ok, reason = is_valid_dgrad_spec(spec, arch=arch)
-        if not ok:
-            results[shape.id] = (False, f"skip invalid spec: {reason}")
-            continue
-        try:
-            kernel = build_direct_conv_dgrad(spec, arch=arch)
-        except ValueError as e:
-            results[shape.id] = (False, f"build failed: {e}")
-            continue
-        try:
-            comgr_input = lower_kernel_for_comgr(kernel, arch=arch)
-        except Exception as e:
-            results[shape.id] = (False, f"compile failed: {e}")
-            continue
-        lowered.append((shape, p, spec, kernel, comgr_input))
+    ok, reason = is_valid_dgrad_spec(spec, arch=arch)
+    if not ok:
+        return False, f"skip invalid spec: {reason}"
+    try:
+        kernel = build_direct_conv_dgrad(spec, arch=arch)
+    except ValueError as e:
+        return False, f"build failed: {e}"
+    try:
+        artifact = compile_kernel(kernel, arch=arch)
+    except Exception as e:
+        return False, f"compile failed: {e}"
 
-    code_objects = compile_in_workers([case[-1] for case in lowered])
-    for (shape, p, spec, kernel, comgr_input), (hsaco, error) in zip(
-        lowered, code_objects
-    ):
-        if error is not None:
-            results[shape.id] = (False, f"compile failed: {error}")
-            continue
-        artifact = KernelArtifact(
-            kernel=kernel,
-            ir_text="",
-            llvm_text=comgr_input.llvm_text,
-            hsaco=hsaco,
-            isa=comgr_input.isa,
-        )
-        grid, block = direct_launch_geometry(spec)
-        results[shape.id] = _run_dgrad_device(
-            artifact,
-            p,
-            dtype=dtype,
-            grid=grid,
-            block=block,
-            label=f"{shape.id}  {dtype}",
-            arch=arch,
-        )
-    return results
+    grid, block = direct_launch_geometry(spec)
+    return _run_dgrad_device(
+        artifact,
+        p,
+        dtype=dtype,
+        grid=grid,
+        block=block,
+        label=f"{shape.id}  {dtype}",
+        arch=arch,
+    )
 
 
 def _run_dw_dgrad_one(
@@ -1373,8 +1344,9 @@ def _run_dgrad_device(
 ) -> tuple[bool, str]:
     """Launch and verify one direct dgrad kernel on ``p``: ``dY`` and KRSC
     ``W`` are U(-0.5, 0.5) draws from seed 42 stored as ``dtype``, ``dX``
-    starts zeroed, and the result is checked against the float64 data
-    gradient of the stored values (exact input H, W at any stride).
+    starts NaN-filled (so an element left unwritten fails), and the result is
+    checked against the float64 data gradient of the stored values (exact input
+    H, W at any stride).
 
     Returns ``(passed, reason)``.
     """
@@ -1384,13 +1356,13 @@ def _run_dgrad_device(
     dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
     ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
-    dx = np.zeros((p.N, p.H, p.W, p.total_c), storage.host_dtype(dtype))
+    dx = poisoned((p.N, p.H, p.W, p.total_c), dtype, 0xFF)
     try:
         dx = launch_direct_conv(
             artifact, p, (dy, w), dx, grid=grid, block=block, direction="dgrad"
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(dx, dtype), ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
@@ -1402,16 +1374,8 @@ def _run_dgrad_device(
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
 class TestDirectConvDgradWgradCorrectness(unittest.TestCase):
-    """Correctness tests for direct conv backward pass (dgrad only)."""
-
-    def test_dgrad(self):
-        results = _run_dgrad_batch(GPU_ARCH, _DGRAD_SHAPES)
-        for s in _DGRAD_SHAPES:
-            with self.subTest(shape=s.id):
-                passed, reason = results[s.id]
-                if reason.startswith("skip"):
-                    self.skipTest(reason)
-                self.assertTrue(passed, f"FAIL dgrad {s.id} on {GPU_ARCH}: {reason}")
+    """Correctness tests for the direct depthwise dgrad kernels (the grouped
+    dgrad kernel is tested by :class:`TestDirectConvDgradCorrectness`)."""
 
     def _run_dw_dgrad(self, shape: _Shape) -> None:
         passed, reason = _run_dw_dgrad_one(GPU_ARCH, shape)
@@ -1457,7 +1421,8 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
 
     Uses the same harness as ``TestDirectConvCorrectness`` but with
     ``dtype="bf16"`` and a looser tolerance (``_TOL_BF16``).  cpg=4 is
-    excluded because there is no ``mfma_f32_4x4x4_bf16`` atom on CDNA.
+    excluded because there is no ``mfma_f32_4x4x4_bf16`` atom on CDNA. The
+    bf16 grouped dgrad cases are in :class:`TestDirectConvDgradCorrectness`.
     """
 
     def _run_fwd(self, shape: _Shape) -> None:
@@ -1486,17 +1451,6 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
             if s.cpg == 32:
                 with self.subTest(shape=s.id):
                     self._run_fwd(s)
-
-    def test_bf16_dgrad(self):
-        results = _run_dgrad_batch(GPU_ARCH, _BF16_DGRAD_SHAPES, dtype="bf16")
-        for s in _BF16_DGRAD_SHAPES:
-            with self.subTest(shape=s.id):
-                passed, reason = results[s.id]
-                if reason.startswith("skip"):
-                    self.skipTest(reason)
-                self.assertTrue(
-                    passed, f"FAIL bf16 dgrad {s.id} on {GPU_ARCH}: {reason}"
-                )
 
     def test_bf16_depthwise(self):
         for s in _SHAPES:
@@ -1539,6 +1493,49 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
                 self.assertTrue(
                     passed, f"FAIL bf16 dw_dgrad_stream {s.id} on {GPU_ARCH}: {reason}"
                 )
+
+
+# Rough gfx942 seconds of the two dgrad cases (kpg=32) whose kernel takes far
+# longer to compile than the others', so the CI shards and their workers share
+# them (rocke.tests.ctest_shard); the other cases take a few seconds each.
+_DGRAD_SHARD_COSTS = {"dg_32c_N2H8W8_g8": 24, "dg_asym_cpg16_kpg32_g4": 34}
+
+
+def _dgrad_case(dtype: str, shape: _Shape):
+    """One dgrad case as a pytest param. The id leads with the dtype: the shard
+    key of a case is its module and its id, so the fp16 and bf16 runs of a
+    shape stay two keys."""
+    cost = _DGRAD_SHARD_COSTS.get(shape.id)
+    return pytest.param(
+        dtype,
+        shape,
+        id=f"{dtype}-{shape.id}",
+        marks=[pytest.mark.rocke_shard_cost(cost)] if cost else [],
+    )
+
+
+def test_dgrad_shard_costs_name_dgrad_shapes():
+    """A renamed shape id cannot silently drop its shard cost."""
+    shape_ids = {s.id for s in (*_DGRAD_SHAPES, *_BF16_DGRAD_SHAPES)}
+    assert set(_DGRAD_SHARD_COSTS) <= shape_ids
+
+
+@pytest.mark.skipif(bool(_SKIP_REASON), reason=_SKIP_REASON or "no GPU")
+class TestDirectConvDgradCorrectness:
+    """The grouped direct dgrad kernel, one test per shape and dtype: each
+    kernel compiles for seconds, some for tens of seconds, so a sweep in one
+    test would be one shard key too heavy for a CI shard."""
+
+    @pytest.mark.parametrize(
+        ("dtype", "shape"),
+        [_dgrad_case("fp16", shape) for shape in _DGRAD_SHAPES]
+        + [_dgrad_case("bf16", shape) for shape in _BF16_DGRAD_SHAPES],
+    )
+    def test_dgrad(self, dtype: str, shape: _Shape):
+        passed, reason = _run_dgrad_one(GPU_ARCH, shape, dtype)
+        if reason.startswith("skip"):
+            pytest.skip(reason)
+        assert passed, f"FAIL {dtype} dgrad {shape.id} on {GPU_ARCH}: {reason}"
 
 
 # ---------------------------------------------------------------------------
@@ -1805,7 +1802,7 @@ def _run_nongrouped_spec(
                 block=(red_spec.threads, 1, 1),
             )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(y_dev.read(), p.dtype), ref, floor=1.0)
     tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
@@ -2521,7 +2518,7 @@ def _run_wgrad_one(
             direction="wgrad",
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
     dw = dw_dev.read().sum(axis=1).reshape(ref.shape)
 
     rel_err = peak_relative_error(dw, ref, floor=1.0)
