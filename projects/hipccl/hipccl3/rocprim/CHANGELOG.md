@@ -49,6 +49,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
+* Fixed an issue that was preventing the use of trivially copyable data types with no default constructor in device merge sort and device merge.
 
 ### Fixed
 

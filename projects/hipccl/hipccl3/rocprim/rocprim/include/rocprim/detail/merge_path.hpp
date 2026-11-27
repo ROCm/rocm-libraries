@@ -22,6 +22,7 @@
 #define ROCPRIM_DETAIL_MERGE_PATH_HPP_
 
 #include "../config.hpp"
+#include "../types/uninitialized_array.hpp"
 
 #include <cassert>
 #include <iterator>
@@ -117,8 +118,12 @@ void serial_merge(KeyType*                keys_shared,
 
     // Pre-loaded keys so we don't have to re-fetch multiple times from memory.
     // These will be updated every iteration.
-    KeyType key_a;
-    KeyType key_b;
+    // Use storage that doesn't require KeyType to be default constructible.
+    ::rocprim::detail::thread_items_array<KeyType, 1> key_a_storage;
+    ::rocprim::detail::thread_items_array<KeyType, 1> key_b_storage;
+
+    KeyType& key_a = key_a_storage.get_unsafe_array()[0];
+    KeyType& key_b = key_b_storage.get_unsafe_array()[0];
 
     // Only load valid keys, otherwise might be out of bounds!
     // If we allow unsafe, this check is not done.

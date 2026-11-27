@@ -48,6 +48,7 @@
 #include <numeric>
 #include <stdint.h>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -590,4 +591,223 @@ TEST(RocprimDeviceMergeTests, MergeMismatchedIteratorTypes)
 TEST(RocprimDeviceMergeTests, MergeMismatchedIteratorTypesWithGraphs)
 {
     testMergeMismatchedIteratorTypes<true, DefaultConfig>();
+}
+
+// Trivially copyable type that is ordered, but not default constructible.
+struct non_default_constructible_item
+{
+    int value;
+
+    ROCPRIM_HOST_DEVICE
+    explicit non_default_constructible_item(int v)
+        : value(v)
+    {}
+
+    ROCPRIM_HOST_DEVICE
+    bool operator<(const non_default_constructible_item& other) const
+    {
+        return value < other.value;
+    }
+};
+static_assert(!std::is_default_constructible<non_default_constructible_item>::value,
+              "non_default_constructible_item must not be default constructible");
+static_assert(std::is_trivially_copyable<non_default_constructible_item>::value,
+              "non_default_constructible_item must be trivially copyable");
+
+TEST(RocprimDeviceMergeTests, MergeNonDefaultConstructible)
+{
+    using item_type = non_default_constructible_item;
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    const hipStream_t stream            = 0;
+    const bool        debug_synchronous = false;
+
+    const auto make_items = [](const std::vector<int>& raw)
+    {
+        std::vector<item_type> items;
+        items.reserve(raw.size());
+        for(const int v : raw)
+        {
+            items.emplace_back(v);
+        }
+        return items;
+    };
+
+    // device_ptr::load() requires a default constructible type, so copy the results into a
+    // vector that already holds size (valid) elements instead.
+    const auto copy_to_host = [](const common::device_ptr<item_type>& d_data,
+                                 const std::vector<item_type>&        like)
+    {
+        std::vector<item_type> output = like;
+        HIP_CHECK(hipMemcpy(output.data(),
+                            d_data.get(),
+                            output.size() * sizeof(item_type),
+                            hipMemcpyDeviceToHost));
+        std::vector<int> result(output.size());
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            result[i] = output[i].value;
+        }
+        return result;
+    };
+
+    for(const auto& sizes : get_sizes())
+    {
+        const size_t size1 = std::get<0>(sizes);
+        const size_t size2 = std::get<1>(sizes);
+        SCOPED_TRACE(testing::Message() << "with sizes = " << size1 << ", " << size2);
+        if(size1 + size2 == 0)
+        {
+            continue;
+        }
+
+        // Sorted inputs drawn from a small range so that there are many equal keys. The values
+        // are unique, so they also verify that elements from the first input come first on ties.
+        std::vector<int> raw_keys1(size1);
+        std::vector<int> raw_keys2(size2);
+        std::vector<int> raw_values1(size1);
+        std::vector<int> raw_values2(size2);
+        for(size_t i = 0; i < size1; i++)
+        {
+            raw_keys1[i]   = static_cast<int>((i * 7) % 211) - 100;
+            raw_values1[i] = static_cast<int>(i);
+        }
+        for(size_t i = 0; i < size2; i++)
+        {
+            raw_keys2[i]   = static_cast<int>((i * 13) % 197) - 100;
+            raw_values2[i] = static_cast<int>(size1 + i);
+        }
+        const auto sort_with_values = [](std::vector<int>& keys, std::vector<int>& values)
+        {
+            std::vector<size_t> order(keys.size());
+            std::iota(order.begin(), order.end(), size_t{0});
+            std::stable_sort(order.begin(),
+                             order.end(),
+                             [&](size_t a, size_t b) { return keys[a] < keys[b]; });
+            std::vector<int> sorted_keys(keys.size());
+            std::vector<int> sorted_values(keys.size());
+            for(size_t i = 0; i < order.size(); i++)
+            {
+                sorted_keys[i]   = keys[order[i]];
+                sorted_values[i] = values[order[i]];
+            }
+            keys   = sorted_keys;
+            values = sorted_values;
+        };
+        sort_with_values(raw_keys1, raw_values1);
+        sort_with_values(raw_keys2, raw_values2);
+
+        // Expected results (std::merge is stable: ties are taken from the first range).
+        std::vector<std::pair<int, int>> in1;
+        std::vector<std::pair<int, int>> in2;
+        for(size_t i = 0; i < size1; i++)
+        {
+            in1.emplace_back(raw_keys1[i], raw_values1[i]);
+        }
+        for(size_t i = 0; i < size2; i++)
+        {
+            in2.emplace_back(raw_keys2[i], raw_values2[i]);
+        }
+        std::vector<std::pair<int, int>> expected(size1 + size2, {0, 0});
+        std::merge(in1.begin(),
+                   in1.end(),
+                   in2.begin(),
+                   in2.end(),
+                   expected.begin(),
+                   [](const auto& a, const auto& b) { return a.first < b.first; });
+        std::vector<int> expected_keys;
+        std::vector<int> expected_values;
+        for(const auto& [k, v] : expected)
+        {
+            expected_keys.push_back(k);
+            expected_values.push_back(v);
+        }
+
+        const auto keys1   = make_items(raw_keys1);
+        const auto keys2   = make_items(raw_keys2);
+        const auto values1 = make_items(raw_values1);
+        const auto values2 = make_items(raw_values2);
+        const auto out_like = make_items(std::vector<int>(size1 + size2, 0));
+
+        common::device_ptr<item_type> d_keys1;
+        common::device_ptr<item_type> d_keys2;
+        common::device_ptr<item_type> d_values1;
+        common::device_ptr<item_type> d_values2;
+        common::device_ptr<item_type> d_keys_out;
+        common::device_ptr<item_type> d_values_out;
+        ASSERT_TRUE(d_keys1.resize_with_memory_check(size1 > 0 ? size1 : 1));
+        ASSERT_TRUE(d_keys2.resize_with_memory_check(size2 > 0 ? size2 : 1));
+        ASSERT_TRUE(d_values1.resize_with_memory_check(size1 > 0 ? size1 : 1));
+        ASSERT_TRUE(d_values2.resize_with_memory_check(size2 > 0 ? size2 : 1));
+        ASSERT_TRUE(d_keys_out.resize_with_memory_check(size1 + size2));
+        ASSERT_TRUE(d_values_out.resize_with_memory_check(size1 + size2));
+        if(size1 > 0)
+        {
+            d_keys1.store(keys1);
+            d_values1.store(values1);
+        }
+        if(size2 > 0)
+        {
+            d_keys2.store(keys2);
+            d_values2.store(values2);
+        }
+
+        rocprim::less<item_type> compare_op;
+
+        for(const bool with_values : {false, true})
+        {
+            SCOPED_TRACE(testing::Message() << "with values = " << with_values);
+
+            const auto run = [&](void* d_temp, size_t& temp_size)
+            {
+                if(with_values)
+                {
+                    return rocprim::merge(d_temp,
+                                          temp_size,
+                                          d_keys1.get(),
+                                          d_keys2.get(),
+                                          d_keys_out.get(),
+                                          d_values1.get(),
+                                          d_values2.get(),
+                                          d_values_out.get(),
+                                          size1,
+                                          size2,
+                                          compare_op,
+                                          stream,
+                                          debug_synchronous);
+                }
+                return rocprim::merge(d_temp,
+                                      temp_size,
+                                      d_keys1.get(),
+                                      d_keys2.get(),
+                                      d_keys_out.get(),
+                                      size1,
+                                      size2,
+                                      compare_op,
+                                      stream,
+                                      debug_synchronous);
+            };
+
+            size_t temp_storage_size_bytes = 0;
+            HIP_CHECK(run(nullptr, temp_storage_size_bytes));
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            common::device_ptr<void> d_temp_storage;
+            ASSERT_TRUE(d_temp_storage.resize_with_memory_check(temp_storage_size_bytes));
+            HIP_CHECK(run(d_temp_storage.get(), temp_storage_size_bytes));
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_eq(copy_to_host(d_keys_out, out_like), expected_keys));
+            if(with_values)
+            {
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(copy_to_host(d_values_out, out_like), expected_values));
+            }
+        }
+    }
 }

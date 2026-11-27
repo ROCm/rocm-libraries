@@ -36,6 +36,7 @@
 
 #include "../../block/block_store.hpp"
 #include "../../detail/merge_path.hpp"
+#include "../../types/uninitialized_array.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -180,7 +181,8 @@ typename std::enable_if<WithValues>::type merge_values(unsigned int         flat
 
     unsigned int count = input1_size + input2_size;
 
-    value_type values[ItemsPerThread];
+    ::rocprim::detail::thread_items_array<value_type, ItemsPerThread> values_storage;
+    auto& values = values_storage.get_unsafe_array();
 
     if(count >= ItemsPerThread * BlockSize)
     {
@@ -299,7 +301,9 @@ struct merge_kernel_impl_
         static_assert(std::is_convertible_v<key_type2, key_type1>,
                       "Keys_input2 must be convertible to keys_input1");
 
-        Key          input[items_per_thread];
+        ::rocprim::detail::thread_items_array<Key, items_per_thread> input_storage;
+        auto&                                                        input
+            = input_storage.get_unsafe_array();
         unsigned int index[items_per_thread];
 
         const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
