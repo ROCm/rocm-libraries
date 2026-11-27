@@ -23,7 +23,7 @@ Key differences vs gfx950 (MFMA) profiles:
     LDSSegmentBRotate (B-side LDS segment conflict elimination).
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from geko.config_generator.constants import HARDWARE_MAP, dataSize, mx_format
 from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
@@ -457,9 +457,10 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     1. **Pinned by the gfx1250 recommended configuration.** TDM on both tensors
        with its companions (PLR 1, PGR 2, 1LDSBuffer 0), SIA 4 (StinkyTofu),
        LDS transpose on, kernel-arg preload on, cluster launch and GL2 prefetch
-       off on A0, and the LdsPad* / LdsBlockSizePerPad* family left at -1 so
-       codegen derives padding and block size. These are requirements of the
-       codegen path, not tuning knobs.
+       off on A0, the LdsPad* / LdsBlockSizePerPad* family left at -1 so
+       codegen derives padding and block size, and ForceDisableShadowInit on
+       persistent MX kernels. These are requirements of the codegen path, not
+       tuning knobs.
     2. **Searched axes**: everything gfx950 generic sweeps that gfx1250 supports,
        plus the gfx1250-exclusive knobs.
 
@@ -553,20 +554,34 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def tdm_fuse(self, ctx: SizeContext) -> ForkParameter:
-        """Pinned [1] -- {A, MXSA} + {MXSB, B}, so A and B never share a TDM load.
+        """[0, 1], plus 3 for MX problems; flat, independent of the MI group.
+
+        TDMFuse picks which tensors share a TDM descriptor set (Components/TDMFuse.py):
+        0 {A, B} + {MXSA, MXSB} (develop's default), 1 {A, MXSA} + {MXSB, B},
+        2 {A, MXSA, MXSB} + {B}, 3 {B, MXSA, MXSB} + {A}.
 
         A ``tensor_load_to_lds`` carries one set of th/scope/nv bits for every
-        tensor it moves. Under TDMFuse=0 (develop's default, {A, B} + {MXSA, MXSB})
-        A and B share that instruction, so a TemporalHint is applied only when
-        TemporalHintA and TemporalHintB agree: of the four (A, B) pairs swept
-        below, (0, 1) and (1, 0) both build the (0, 0) kernel and only (1, 1)
-        differs. TDMFuse=1 gives A and B a descriptor set each, so every pair
-        builds its own kernel.
+        tensor it moves. Under TDMFuse=0 on more than one wave A and B share that
+        instruction, and a TemporalHint is applied only when TemporalHintA and
+        TemporalHintB agree: a disagreeing pair builds the (0, 0) code under
+        another kernel name, so the Ductile backend's validity check drops it.
+        TDMFuse 1 and 3 give A and B a descriptor set each, so every pair builds
+        its own kernel.
 
-        TDMFuse 1-3 need more than one wave; ``_GFX1250TDMFuseOneWave`` in
-        post_processor.py keeps one-wave MIs at TDMFuse=0.
+        0 is the only grouping with the paired LDS layout of
+        LDSSegmentInterleave=1 (TensileLite rejects a non-persistent
+        LDSSegmentInterleave=1 kernel it cannot pair) and the only value a
+        one-wave MI builds. 3 is offered for MX problems only: without MX scales
+        TDMFuse 1-3 all reduce to {A} + {B} and issue the same loads, so 3 would
+        rebuild the TDMFuse=1 kernel under another name. 2 is not offered.
+
+        TDMFuse 1-3 need more than one wave, and with MX scales on both tensors
+        TDMFuse 3 builds only on 2 or 4 waves; TensileLite rejects the others
+        and the GA redraws them. TDMFuse stays flat so the GA can change it
+        without redrawing the MI; ``_GFX1250TDMFuseNarrowing`` in
+        post_processor.py only drops a value no MI of the size can use.
         """
-        return self._make_param("TDMFuse", [1])
+        return self._make_param("TDMFuse", [0, 1, 3] if self._mx_block() else [0, 1])
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
@@ -653,6 +668,36 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     def lds_block_size_per_pad_mxsb(self, ctx: SizeContext) -> Optional[ForkParameter]:
         return self._make_param("LdsBlockSizePerPadMXSB", [-1]) if self._mx_block() else None
 
+    def _shadow_init_values(self, persistent: bool) -> List[bool]:
+        """ForceDisableShadowInit values for an MX kernel: [True] when persistent.
+
+        The parameter only turns off KernelWriter's optional shadow init, which
+        sets up the store and initializes C in the shadow of the global-read
+        prefetch and keeps the registers it uses live across the main loop.
+        Persistent MX kernels need it True: with shadow init on, some of them
+        fail to compile in KernelWriter (for example StreamK kernels of
+        [32, 16, 128, 1, 1, 8, 4, 2, 2] with SourceSwap and TDMIterateMode 1),
+        and TensileLite keeps persistent MX kernels on the unpaired
+        LDSSegmentInterleave layout unless it is True
+        (``persistent_keeps_unpaired``). Non-persistent MX kernels search both
+        values: some only compile with True, while shadow init stays available
+        for the ones where it pays off.
+        """
+        return [True] if persistent else [False, True]
+
+    @param
+    def force_disable_shadow_init(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        """MX only; not emitted otherwise, so non-MX problems keep Tensile's default False.
+
+        Without ``StreamK: true`` every kernel is non-persistent and the flat
+        parameter offers [False, True]. With it, :meth:`execution_policy` carries
+        the value per persistent strategy instead (see
+        :meth:`_shadow_init_values`), so no flat parameter is emitted.
+        """
+        if not self._mx_block() or self._sk3():
+            return None
+        return self._make_param("ForceDisableShadowInit", self._shadow_init_values(persistent=False))
+
     # =================================================================
     # 2. Persistent strategy and GlobalSplitU
     # =================================================================
@@ -715,6 +760,11 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         Each persistent strategy pairs with PrefetchAcrossPersistent [0, 1].
         OOB keeps only XCC remap 0 ("Cannot use auto WGMXCC with SKXCC");
         Equality searches all divisors of the ARCH's XCC count.
+
+        On MX problems every entry also carries ForceDisableShadowInit: True on
+        the persistent entries, and the non-persistent ``None`` entry is
+        repeated once per value of :meth:`_shadow_init_values`, so every group
+        value stays single-valued.
         """
         if not self._sk3():
             return None
@@ -731,7 +781,15 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
                         "PrefetchAcrossPersistent": self._make_param("PrefetchAcrossPersistent", [prefetch]),
                         "PersistentXCCMapping": self._make_param("PersistentXCCMapping", [remap]),
                     })
-        return entries
+        if not self._mx_block():
+            return entries
+        with_fdsi = []
+        for entry in entries:
+            persistent = entry["TileProcessingStrategy"].values != ["None"]
+            for value in self._shadow_init_values(persistent):
+                fdsi = self._make_param("ForceDisableShadowInit", [value])
+                with_fdsi.append({**entry, "ForceDisableShadowInit": fdsi})
+        return with_fdsi
 
     @param
     def global_split_u_algorithm(self, ctx: SizeContext) -> ForkParameter:
@@ -783,11 +841,15 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
-        """Both values; _GFX1250SourceSwapCoupling pins non-square MIs to False.
+        """Both values, for every MI.
 
         SourceSwap=True on a non-square MI (32x16) swaps the effective M and N, so
-        the kernel builds a different macro tile than the ClusterDim coupling ranks
-        shapes for. Square MIs build the same tile either way and keep both values.
+        the kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2]
+        is 512x128 unswapped and 256x256 swapped, the tile of the shipped
+        MXFP4/NVFP4 MAF kernel. When ClusterDim is coupled and some MI is
+        non-square, _GFX1250SourceSwapSplit gives each MI one group entry per
+        value, so the ClusterDim coupling ranks each on its own tile; otherwise
+        the parameter stays flat. Square MIs build the same tile either way.
         """
         return self._make_param("SourceSwap", [False, True])
 
@@ -962,11 +1024,22 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
-        # MI455X latest reco: pin to 1 (paired with BRotate=1).
-        # ---
-        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
-        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
-        return self._make_param("LDSSegmentInterleave", [0])
+        """[0, 1]; independent of LDSSegmentBRotate, which stays pinned to 0.
+
+        AIHPBLAS-5252 is about LDSSegmentBRotate=1 only, which Tensile rejects
+        on StreamK. LDSSegmentInterleave=1 with LDSSegmentBRotate=0 builds on
+        StreamK as well, and TensileLite builds the paired LDS layouts for
+        StreamK / persistent kernels too.
+
+        The paired layout needs TDMFuse=0, which ``tdm_fuse`` offers next to
+        1 and 3. Both parameters stay flat: TensileLite rejects a
+        non-persistent LDSSegmentInterleave=1 kernel it cannot pair, and an
+        MI whose MIWaveGroup or LocalSplitU cannot interleave, and the GA
+        redraws those. A persistent kernel it cannot pair, TDMFuse 1 and 3
+        included, keeps the unpaired interleave, a kernel of its own. Rule C
+        of the geometry narrowing drops 1 when no MI can interleave.
+        """
+        return self._make_param("LDSSegmentInterleave", [0, 1])
 
     @param
     def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
@@ -992,10 +1065,18 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     # load tensor ("TemporalHint=7 is reserved for loads").
     @param
     def temporal_hint_a(self, ctx: SizeContext) -> ForkParameter:
+        """[0, 1]; flat, like TemporalHintB.
+
+        Under TDMFuse=0 on more than one wave A and B share one TDM load, so
+        only agreeing pairs build distinct kernels, and the Ductile backend's
+        validity check drops the others (see ``tdm_fuse``). Under TDMFuse > 0 every pair builds its own
+        kernel.
+        """
         return self._make_param("TemporalHintA", [0, 1])
 
     @param
     def temporal_hint_b(self, ctx: SizeContext) -> ForkParameter:
+        """[0, 1]; see ``temporal_hint_a``."""
         return self._make_param("TemporalHintB", [0, 1])
 
     @param

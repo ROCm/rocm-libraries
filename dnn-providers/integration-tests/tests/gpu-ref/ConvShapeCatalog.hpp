@@ -14,7 +14,7 @@
 //
 // Function family         → Tier            → Purpose
 // ──────────────────────────────────────────────────────────────────────
-// getSmall*ConvCases()    → Smoke           → Minimal shapes, fast
+// getSmall*ConvCases()    → Quick (first case), Standard → Minimal shapes, fast
 // getMedium*ConvCases()   → Standard        → Moderate shapes, PR-level
 // getLargeEdge*ConvCases()→ Comprehensive   → Corner cases (odd channels,
 //                                              asymmetric filters, prime K)
@@ -145,7 +145,7 @@ inline std::vector<ConvShapeCase> getSmall3dConvCases()
 // ============================================================================
 // Medium shapes — Standard tier (PR gate)
 // Trimmed per P3 (identical compiled code): group/depthwise/pointwise/padding classes only change
-// runtime loop bounds and are already covered by the Smoke shapes.
+// runtime loop bounds and are already covered by the small shapes.
 // ============================================================================
 
 // Medium 1D shapes [fwd, wgrad] — dgrad uses getMedium1dDgradCases() instead

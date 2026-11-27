@@ -69,7 +69,8 @@ typedef enum
 {
     //! The operation is successful.
     HIPTENSOR_STATUS_SUCCESS = 0,
-    //! The handle was not initialized.
+    //! The handle was not initialized, or a pointer argument the function requires, such as a
+    //! descriptor, a plan, or the output pointer of a create function, is NULL.
     HIPTENSOR_STATUS_NOT_INITIALIZED = 1,
     //! Resource allocation failed inside the hipTensor library.
     HIPTENSOR_STATUS_ALLOC_FAILED = 3,
