@@ -36,6 +36,8 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     build_implicit_gemm_conv_wgrad,
     is_valid_wgrad_spec,
 )
+from rocke.runtime import comgr
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.llc import find_llvm_tool
 
 _TF32 = ConvDataSpec(dtype_a="fp32", dtype_b="fp32", dtype_d="fp32", mma_dtype="tf32")
@@ -322,16 +324,8 @@ class TestTf32Isa(unittest.TestCase):
     }
 
     def _mnemonics(self, arch: str, ll: str) -> list:
-        try:
-            from rocke.runtime import comgr
-
-            isas = comgr.supported_isas()
-        except Exception as exc:  # noqa: BLE001 -- environment-dependent
-            self.skipTest(f"comgr unavailable: {exc}")
-        isa = f"amdgcn-amd-amdhsa--{arch}"
-        if isa not in isas:
-            self.skipTest(f"the loaded comgr cannot target {arch}")
-        hsaco, _ = comgr.build_hsaco_from_llvm_ir(ll, isa=isa)
+        require_comgr_target(arch)
+        hsaco, _ = comgr.build_hsaco_from_llvm_ir(ll, isa=f"amdgcn-amd-amdhsa--{arch}")
         self.assertTrue(hsaco)
         tool = find_llvm_tool("llvm-objdump")
         if tool is None:

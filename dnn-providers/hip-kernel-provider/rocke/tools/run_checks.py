@@ -280,6 +280,8 @@ def main() -> int:
                     "--no-ir-validity",
                     "--no-arch-domain",
                     "--no-pytest",
+                    "--no-both",
+                    "--no-backend-width",
                     "--build-root",
                     guard_root,
                 ],

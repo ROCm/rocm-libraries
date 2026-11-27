@@ -38,9 +38,12 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
+from rocke.runtime import comgr
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.lanes import BUILD_VARIANT, skip_until, skip_until_reason
 from rocke.tests.llc import find_llvm_tool
 
@@ -560,16 +563,8 @@ class TestDirectTf32Names(unittest.TestCase):
 
 def _disassemble(kernel, arch: str):
     """``(instructions, notes)`` with ``instructions = [(addr, mnemonic, text)]``."""
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
+    require_comgr_target(arch)
     isa = f"amdgcn-amd-amdhsa--{arch}"
-    try:
-        if isa not in comgr.supported_isas():  # pragma: no cover
-            raise unittest.SkipTest(f"the loaded comgr cannot target {arch}")
-    except comgr.ComgrError as exc:  # pragma: no cover
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
     objdump = find_llvm_tool("llvm-objdump")
     readelf = find_llvm_tool("llvm-readelf")
     if objdump is None or readelf is None:
@@ -854,6 +849,7 @@ _DGRAD_CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP or "gpu")
 class TestDirectTf32Gpu(unittest.TestCase):
     """Every variant, fp32 and tf32, on gfx942 / gfx950 against a float64 reference."""

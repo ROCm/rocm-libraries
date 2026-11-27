@@ -9,12 +9,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from rocke.tests.source_allowlist import (
+    AllowlistEntry,
+    file_kinds,
+    format_allowlist_entry,
+)
 from rocke.tests.torch_uses import (
     TorchUse,
     TorchUseKind,
     allowlist_breaches,
-    file_kinds,
-    format_allowlist_entry,
     is_config_file,
     read_allowlist,
     torch_named_identifiers,
@@ -48,6 +51,8 @@ CONFIG = TorchUseKind.CONFIG
             {IMPORT, TORCH_API},
         ),
         ("import importlib.util\nimportlib.util.find_spec('torch')\n", {IMPORT}),
+        ("import sys\nloaded = sys.modules.get('torch')\n", {IMPORT}),
+        ("import sys\nloaded = sys.modules['torch']\n", {IMPORT}),
         ("import pytest\ntorch = pytest.importorskip('torch')\n", {IMPORTORSKIP}),
         (
             (
@@ -86,6 +91,9 @@ def test_each_kind_of_use_is_found(source, kinds):
         "from .torch import helper\n",
         "out = run_unified_attention_torch(q, k, v)\n",
         "import pytest\nyaml = pytest.importorskip('yaml')\n",
+        "import sys\nassert 'torch' not in sys.modules\n",
+        "import sys\nsys.modules['torch'] = None\n",
+        "import sys\nloaded = sys.modules.get('numpy')\n",
     ],
 )
 def test_text_that_only_mentions_torch_is_not_a_use(source):
@@ -171,8 +179,8 @@ def test_the_allowlist_skips_comments_and_blank_lines(tmp_path):
         tmp_path, "# header\n\na/b.py: import torch_object\nc.cmake: config\n"
     )
     assert read_allowlist(path) == {
-        "a/b.py": frozenset({IMPORT, TORCH_OBJECT}),
-        "c.cmake": frozenset({CONFIG}),
+        "a/b.py": AllowlistEntry(frozenset({IMPORT, TORCH_OBJECT})),
+        "c.cmake": AllowlistEntry(frozenset({CONFIG})),
     }
 
 
@@ -202,7 +210,12 @@ def _uses(*kinds: TorchUseKind) -> list[TorchUse]:
 
 def test_a_tree_that_matches_its_allowlist_has_no_breach():
     found = {"a.py": _uses(IMPORT, TORCH_OBJECT)}
-    assert allowlist_breaches(found, {"a.py": frozenset({IMPORT, TORCH_OBJECT})}) == []
+    assert (
+        allowlist_breaches(
+            found, {"a.py": AllowlistEntry(frozenset({IMPORT, TORCH_OBJECT}))}
+        )
+        == []
+    )
 
 
 def test_a_file_not_on_the_list_is_a_new_use():
@@ -212,19 +225,21 @@ def test_a_file_not_on_the_list_is_a_new_use():
 
 def test_a_listed_file_gaining_a_kind_is_a_new_kind_of_use():
     breaches = allowlist_breaches(
-        {"a.py": _uses(IMPORT, TORCH_API)}, {"a.py": frozenset({IMPORT})}
+        {"a.py": _uses(IMPORT, TORCH_API)},
+        {"a.py": AllowlistEntry(frozenset({IMPORT}))},
     )
     assert breaches == ["a.py: new kind of torch use: line 2 torch_api: code"]
 
 
 def test_a_listed_file_without_torch_is_a_stale_entry():
-    breaches = allowlist_breaches({}, {"gone.py": frozenset({IMPORT})})
+    breaches = allowlist_breaches({}, {"gone.py": AllowlistEntry(frozenset({IMPORT}))})
     assert breaches == ["gone.py: stale entry, no torch use left: delete its line"]
 
 
 def test_a_listed_kind_no_longer_used_is_stale():
     breaches = allowlist_breaches(
-        {"a.py": _uses(IMPORT)}, {"a.py": frozenset({IMPORT, TORCH_API})}
+        {"a.py": _uses(IMPORT)},
+        {"a.py": AllowlistEntry(frozenset({IMPORT, TORCH_API}))},
     )
     assert breaches == [
         "a.py: stale kinds, no longer used: torch_api; make the line 'a.py: import'"

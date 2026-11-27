@@ -25,9 +25,9 @@ lane reason by hand. An expired entry fails a change that touches it (its lines
 in the registry, or its test file), and every run under ``--strict-expiry``;
 otherwise it is reported as a warning. The registry's measured budgets are held
 to the same rules: each names a present test file, is listed once, and is
-reported or failed when expired the same way. A quarantined test is held to
-stricter rules: it names a test that exists, is listed once, fails the check as
-soon as it expires, and the registry holds at most ``QUARANTINE_CAP`` of them.
+reported or failed when expired the same way. A quarantined test names a test
+that exists, is listed once, is reported or failed when expired the same way,
+and the registry holds at most ``QUARANTINE_CAP`` of them.
 
 The check configures the platform (nothing is built) and reads the provider
 categories, so it runs in a source checkout of the monorepo only.
@@ -38,6 +38,7 @@ from __future__ import annotations
 import ast
 import datetime
 import functools
+import itertools
 import os
 import posixpath
 import re
@@ -45,13 +46,13 @@ import shutil
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
-from rocke.tests import in_tree_suites
+from rocke.tests import in_tree_suites, pending_lanes
 from rocke.tests.comgr import CompilerBuild
 from rocke.tests.ctest_listing import (
     configure_installed_ctest,
@@ -75,6 +76,7 @@ from rocke.tests.entry_selection import normalized_path as _normalized
 from rocke.tests.lane_mentions import LaneMention, LaneMentionKind, lane_mentions
 from rocke.tests.lanes import (
     BUILD_VARIANT,
+    PR_RUNNER_ARCHES,
     RUNNER_HARDWARE,
     SOURCE_TREE,
     TICKET,
@@ -82,6 +84,7 @@ from rocke.tests.lanes import (
     skip_until_reason,
 )
 from rocke.tests.pending_lanes import (
+    LANE_TICKETS,
     MEASURED_BUDGETS,
     PENDING,
     PENDING_MAX_DAYS,
@@ -91,6 +94,7 @@ from rocke.tests.pending_lanes import (
     QUARANTINED,
     TEAMS,
     Compilers,
+    LaneTicket,
     MeasuredBudget,
     PendingTest,
     QuarantinedTest,
@@ -101,7 +105,15 @@ from rocke.tests.pending_lanes import (
     waiting_entry,
 )
 from rocke.tests.provider_categories import provider_category_labels
-from rocke.tests.quarantine import register_quarantine, skip_quarantined_items
+from rocke.tests.quarantine import (
+    quarantine_plugin_name,
+    register_quarantine,
+    skip_quarantined_items,
+)
+from rocke.tests.reference_artifacts import (
+    ARTIFACT_CLI,
+    published_reference_variants,
+)
 
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
@@ -115,12 +127,30 @@ PORTABLE_IR_RUNNER = "platform/tests/portable_ir/test_portable_ir.py"
 PORTABLE_IR_UNIT_TESTS = "platform/python/rocke/portable_ir/tests"
 # platform/CMakeLists.txt (the ROCKE_INSTALL_TEST_GPU_REFERENCES block, through
 # cmake/InstallGpuReferences.cmake) registers rocke_<operation>_gpu_<arch>_pytest
-# over this file of each reference operation only when the reference bundles
+# over library/tests/test_<operation>_pinned_reference.py for each architecture
+# that publishes a variant of the operation, only when the reference bundles
 # are installed, which the provider build does and this check's configure
-# (without the bundles) cannot.
+# (without the bundles) cannot. The library's artifact CLI lists those pairs
+# from the committed locks (rocke.tests.reference_artifacts).
 # The registry module, relative to the rocke directory.
 PENDING_LANES_MODULE = "platform/python/rocke/tests/pending_lanes.py"
-PINNED_REFERENCE_TEST = re.compile(r"library/tests/test_(\w+)_pinned_reference\.py")
+# A record of the registry: each kind names its test file and its expiry.
+Record = PendingTest | MeasuredBudget | QuarantinedTest
+
+
+def pinned_reference_entries(library: Path) -> dict[str, set[str]]:
+    """Each pinned-reference test file, relative to the rocke directory -> the
+    GPU CTest entries the provider build registers over it on a pull-request
+    runner arch: one per architecture in ``PR_RUNNER_ARCHES`` that publishes a
+    variant of the file's operation, as the artifact CLI under ``library``
+    lists them. A file's name credits it with nothing."""
+    entries: dict[str, set[str]] = {}
+    for variant in published_reference_variants(library):
+        operation, arch = variant["operation"], variant["architecture"]
+        if arch in PR_RUNNER_ARCHES:
+            path = f"library/tests/test_{operation}_pinned_reference.py"
+            entries.setdefault(path, set()).add(f"rocke_{operation}_gpu_{arch}_pytest")
+    return entries
 
 
 def run_by_another_test() -> dict[str, str]:
@@ -159,13 +189,10 @@ def ci_selected_files(scratch: Path) -> set[str]:
             install,
         ),
     ]
-    references = {
-        path: f"rocke_{match.group(1)}_gpu_gfx942_pytest"
-        for path in tree_test_files(ROCKE)
-        if (match := PINNED_REFERENCE_TEST.fullmatch(path))
-    }
+    references = pinned_reference_entries(ROCKE / "library")
+    reference_names = set().union(*references.values())
     entry_names = [entry["name"] for entries, _, _ in trees for entry in entries]
-    labels = provider_category_labels([*entry_names, *references.values()], scratch)
+    labels = provider_category_labels([*entry_names, *reference_names], scratch)
 
     def ci_run(name: str) -> bool:
         return bool(labels.get(name, set()) & CI_TIERS)
@@ -186,7 +213,7 @@ def ci_selected_files(scratch: Path) -> set[str]:
         file.relative_to(rocke).as_posix() for file in selected if rocke in file.parents
     }
     in_ci |= {file for file, runner in run_by_another_test().items() if runner in in_ci}
-    in_ci |= {path for path, name in references.items() if ci_run(name)}
+    in_ci |= {path for path, names in references.items() if any(map(ci_run, names))}
     return in_ci
 
 
@@ -230,15 +257,17 @@ def _days_from_today(days: int) -> str:
 
 
 def _pending(path: str, lane: Lane, **overrides: object) -> PendingTest:
-    """A pending entry with a valid team, issue and expiry, overridden by
-    ``overrides``."""
+    """A pending entry with a valid team, reason and lane ticket (its issue and
+    expiry), overridden by ``overrides``."""
     fields = {
         "reason": "why",
         "team": TEAMS[0],
         "issue": "AICK-1234",
         "expires": _days_from_today(30),
     }
-    return PendingTest(path, lane, **{**fields, **overrides})
+    fields.update(overrides)
+    ticket = LaneTicket(fields.pop("issue"), lane, fields.pop("expires"))
+    return ticket.waiting(path, **fields)
 
 
 def test_audit_finds_files_in_limbo_and_stale_entries():
@@ -259,6 +288,23 @@ def test_audit_finds_files_in_limbo_and_stale_entries():
         ["a/test_limbo.py"],
         ["a/test_skips.py", "a/test_whole_file.py"],
     )
+
+
+def test_the_tree_test_files_are_the_source_files_git_lists(tmp_path):
+    """A build tree inside the checkout stages copies of the tests; they are
+    no source test files, so they are in no CI entry's limbo."""
+    git = shutil.which("git") or "git"
+    subprocess.run([git, "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("build/\n", encoding="utf-8")
+    for path in (
+        "platform/tests/test_source.py",
+        "platform/tests/helper.py",
+        "platform/build/tests/test_staged_copy.py",
+        "elsewhere/test_outside_the_roots.py",
+    ):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("", encoding="utf-8")
+    assert tree_test_files(tmp_path) == {"platform/tests/test_source.py"}
 
 
 def test_a_file_may_wait_for_several_lanes_but_a_whole_file_entry_is_alone():
@@ -415,24 +461,109 @@ def test_a_pending_test_needs_its_recorded_reason_team_and_issue():
     )
 
 
-def test_a_record_expires_within_its_maximum_window():
+def lane_ticket_breaches(
+    pending: Iterable[PendingTest], tickets: Iterable[LaneTicket]
+) -> list[str]:
+    """The lane tickets listed twice, or two of them for one issue, and the
+    entries whose ticket is not listed: an entry's lane, issue and expiry are
+    its ticket's, so a listed ticket gives each lane of an issue one date."""
+    tickets = list(tickets)
+    issues = [ticket.issue for ticket in tickets]
+    breaches = [
+        f"lane ticket listed twice: {issue}"
+        for issue in sorted({issue for issue in issues if issues.count(issue) > 1})
+    ]
+    breaches += sorted(
+        {
+            f"{entry.path}{'::' + entry.node if entry.node else ''} waits on "
+            f"{entry.issue} ({entry.lane.name}, {entry.expires}), a "
+            "ticket LANE_TICKETS does not list: add it there"
+            for entry in pending
+            if entry.ticket not in tickets
+        }
+    )
+    return breaches
+
+
+def test_a_lane_ticket_gives_its_records_its_lane_issue_and_expiry():
+    """A lane ticket's entries take its lane, issue and expiry; a ticket needs
+    a tracked issue, a listed lane and an expiry within the pending window, and
+    an entry needs a ticket."""
+    ticket = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(30))
+    entry = ticket.waiting("library/tests/test_x.py", "why", TEAMS[0], node="test_y")
+    assert (entry.ticket, entry.lane, entry.issue, entry.expires, entry.node) == (
+        ticket,
+        RUNNER_HARDWARE,
+        "AICK-1",
+        ticket.expires,
+        "test_y",
+    )
+    assert ticket.waiting(
+        "library/tests/test_x.py", "why", TEAMS[0], whole_file=True
+    ).whole_file
+    with pytest.raises(ValueError, match="expected the issue that tracks it"):
+        LaneTicket("none filed yet", RUNNER_HARDWARE, _days_from_today(30))
+    with pytest.raises(ValueError, match="expected one of rocke.tests.lanes.LANES"):
+        LaneTicket("AICK-1", Lane("unlisted", "why"), _days_from_today(30))
+    with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
+        LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(PENDING_MAX_DAYS + 1))
+    with pytest.raises(TypeError, match="expected a LaneTicket"):
+        PendingTest("library/tests/test_x.py", RUNNER_HARDWARE, "why", TEAMS[0])
+
+
+def test_an_entry_whose_ticket_is_not_listed_is_a_breach():
+    """An entry's ticket must be listed in LANE_TICKETS, once per issue, so
+    each lane of an issue keeps one date."""
+    listed = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(30))
+    path = "library/tests/test_x.py"
+    assert lane_ticket_breaches([listed.waiting(path, "why", TEAMS[0])], [listed]) == []
+    unlisted = LaneTicket("AICK-1", RUNNER_HARDWARE, _days_from_today(20))
+    assert lane_ticket_breaches(
+        [unlisted.waiting(path, "why", TEAMS[0])], [listed]
+    ) == [
+        (
+            f"{path} waits on AICK-1 (runner-hardware, {unlisted.expires}), a "
+            "ticket LANE_TICKETS does not list: add it there"
+        )
+    ]
+    assert lane_ticket_breaches([], [listed, unlisted]) == [
+        "lane ticket listed twice: AICK-1"
+    ]
+
+
+def test_every_entry_waits_on_a_listed_lane_ticket():
+    """Every pending entry's ticket is listed in LANE_TICKETS, once per
+    issue."""
+    breaches = lane_ticket_breaches(PENDING, LANE_TICKETS)
+    assert not breaches, breaches
+
+
+def test_a_record_expires_within_its_maximum_window(monkeypatch):
     """A pending entry or measured budget expires at most PENDING_MAX_DAYS
     days away, a quarantine at most QUARANTINE_MAX_DAYS: a record is re-decided
     in that window, not set once and forgotten. A past date is a valid
-    record, which the expiry check then reports."""
+    record, which the expiry check then reports. Today is read once and held
+    for the records' checks too, so a run across midnight (UTC) does not move
+    the window between the dates and the checks."""
+    today = utc_today()
+    monkeypatch.setattr(pending_lanes, "utc_today", lambda: today)
+
+    def days_away(days: int) -> str:
+        return (today + datetime.timedelta(days=days)).isoformat()
+
     path = "library/tests/test_x.py"
-    assert _pending(path, TICKET, expires=_days_from_today(PENDING_MAX_DAYS))
+    assert _pending(path, TICKET, expires=days_away(PENDING_MAX_DAYS))
     assert _pending(path, TICKET, expires="2026-01-01")
     with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
-        _pending(path, TICKET, expires=_days_from_today(PENDING_MAX_DAYS + 1))
+        _pending(path, TICKET, expires=days_away(PENDING_MAX_DAYS + 1))
     test_id = f"{path}::test_y"
-    assert _quarantined(test_id, expires=_days_from_today(QUARANTINE_MAX_DAYS))
+    assert _quarantined(test_id, expires=days_away(QUARANTINE_MAX_DAYS))
     with pytest.raises(
         ValueError, match=f"expected at most {QUARANTINE_MAX_DAYS} days"
     ):
-        _quarantined(test_id, expires=_days_from_today(QUARANTINE_MAX_DAYS + 1))
+        _quarantined(test_id, expires=days_away(QUARANTINE_MAX_DAYS + 1))
     with pytest.raises(ValueError, match=f"expected at most {PENDING_MAX_DAYS} days"):
-        _measured_budget(expires=_days_from_today(PENDING_MAX_DAYS + 1))
+        _measured_budget(expires=days_away(PENDING_MAX_DAYS + 1))
 
 
 def test_install_rules_map_installed_paths_back_to_the_source(tmp_path):
@@ -486,14 +617,18 @@ def change_base() -> str | None:
     """The commit this change is checked against: where it forks from
     ``ROCKE_CHANGE_BASE``, else from the ``--from-ref`` of the pre-commit run
     (``PRE_COMMIT_FROM_REF``; in CI, the tip of the pull request's base
-    branch), else from origin/develop; None when none resolves. The fork
+    branch); None when neither is set or the base does not resolve. The fork
     point, so that the base's own newer edits are not counted as this
-    change's; a base with no fork point with HEAD (a tree) is taken as is."""
-    base = (
-        os.environ.get("ROCKE_CHANGE_BASE")
-        or os.environ.get("PRE_COMMIT_FROM_REF")
-        or "origin/develop"
-    )
+    change's; a base with no fork point with HEAD (a tree) is taken as is.
+
+    No base is guessed: a run that names none (the CTest entry, develop's own
+    CI, a plain local run) has no change, so an expired record only warns
+    there. A guessed one, such as a stale local origin/develop, would count
+    other changes' edits as this change's and fail a run that touched
+    nothing."""
+    base = os.environ.get("ROCKE_CHANGE_BASE") or os.environ.get("PRE_COMMIT_FROM_REF")
+    if not base:
+        return None
     return _git("merge-base", base, "HEAD") or (
         base if _git("rev-parse", "--verify", "--quiet", base) else None
     )
@@ -718,14 +853,30 @@ def test_the_change_base_is_the_fork_point_of_the_first_base_given(monkeypatch):
     assert change_base() is None
 
 
-def _fail_or_report_expired(
-    request, registry_name: str, records: Iterable, label
+def test_a_run_that_names_no_base_has_no_change(monkeypatch):
+    """With neither ROCKE_CHANGE_BASE nor PRE_COMMIT_FROM_REF set, no base is
+    guessed (not origin/develop), so an expired record only warns."""
+    monkeypatch.delenv("ROCKE_CHANGE_BASE", raising=False)
+    monkeypatch.delenv("PRE_COMMIT_FROM_REF", raising=False)
+    assert change_base() is None
+    assert current_change() is None
+
+
+def fail_or_report_expired(
+    registry_name: str,
+    records: Iterable[Record],
+    label: Callable[[Record], str],
+    *,
+    source: str,
+    change: Change | None,
+    strict: bool,
+    max_days: int,
+    today: datetime.date,
 ) -> None:
-    """Fail on the expired records of the registry tuple ``registry_name``
-    that :func:`expiry_failures` says fail this run; report the rest as a
-    warning. ``label`` names a record in the message."""
-    today = utc_today()
-    source = (ROCKE / PENDING_LANES_MODULE).read_text(encoding="utf-8")
+    """Fail on the expired records of the registry tuple ``registry_name``,
+    written in the registry module's ``source``, that :func:`expiry_failures`
+    says fail this run; report the rest as a warning. ``label`` names a record
+    in the message, and ``max_days`` is its kind's longest expiry window."""
     spans = record_lines(source, registry_name)
     records = list(records)
     assert len(spans) == len(records), (
@@ -740,12 +891,11 @@ def _fail_or_report_expired(
     ]
     if not expired:
         return
-    strict = request.config.getoption("--strict-expiry")
-    failing = expiry_failures(expired, current_change(), strict=strict)
+    failing = expiry_failures(expired, change, strict=strict)
     assert not failing, (
         f"expired {registry_name} entries this change touches, or any under "
         "--strict-expiry; re-decide them "
-        f"(a new expiry at most {PENDING_MAX_DAYS} days away, or clear them): "
+        f"(a new expiry at most {max_days} days away, or clear them): "
         f"{failing}"
     )
     message = (
@@ -753,6 +903,27 @@ def _fail_or_report_expired(
     )
     print(message)
     warnings.warn(message, stacklevel=2)
+
+
+def _check_expiry(
+    request: pytest.FixtureRequest,
+    registry_name: str,
+    records: Iterable[Record],
+    label: Callable[[Record], str],
+    max_days: int,
+) -> None:
+    """:func:`fail_or_report_expired` on this tree's registry module, this
+    change, today, and this run's ``--strict-expiry``."""
+    fail_or_report_expired(
+        registry_name,
+        records,
+        label,
+        source=(ROCKE / PENDING_LANES_MODULE).read_text(encoding="utf-8"),
+        change=current_change(),
+        strict=request.config.getoption("--strict-expiry"),
+        max_days=max_days,
+        today=utc_today(),
+    )
 
 
 def test_every_pending_entry_is_current(request):
@@ -768,11 +939,12 @@ def test_every_pending_entry_is_current(request):
         if pending.node and not _defines_test(ROCKE / pending.path, pending.node)
     )
     assert not gone, f"tests listed but gone: {gone}"
-    _fail_or_report_expired(
+    _check_expiry(
         request,
         "PENDING",
         PENDING,
         lambda p: f"{p.path}{'::' + p.node if p.node else ''} ({p.lane.name})",
+        PENDING_MAX_DAYS,
     )
 
 
@@ -784,11 +956,12 @@ def test_every_measured_budget_is_current(request):
         {b.path for b in MEASURED_BUDGETS if not (ROCKE / b.path).is_file()}
     )
     assert not missing, f"measured budgets for test files that are gone: {missing}"
-    _fail_or_report_expired(
+    _check_expiry(
         request,
         "MEASURED_BUDGETS",
         MEASURED_BUDGETS,
         lambda b: f"{b.path}::{b.kernel_name}",
+        PENDING_MAX_DAYS,
     )
 
 
@@ -893,6 +1066,13 @@ def _quarantined(test_id: str, **overrides: object) -> QuarantinedTest:
 def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
     with pytest.raises(ValueError, match="expected <test file>::<pytest node name>"):
         _quarantined("library/tests/test_x.py")
+    with pytest.raises(ValueError, match="expected a test function or one of its"):
+        _quarantined("library/tests/test_x.py::TestX")
+    with pytest.raises(ValueError, match="expected a test function or one of its"):
+        _quarantined("library/tests/test_x.py::testing_helper")
+    assert _quarantined("library/tests/test_x.py::TestX::test_y").node_name == (
+        "TestX::test_y"
+    )
     with pytest.raises(ValueError, match="expected a test under one of"):
         _quarantined("platform/python/rocke/tests/test_x.py::test_y")
     with pytest.raises(ValueError, match="expected the issue that tracks it"):
@@ -991,6 +1171,10 @@ def test_only_a_quarantine_tree_skips_quarantined_tests(request):
         register_quarantine(
             request.config, ROCKE / "platform/python", "platform/python"
         )
+    with pytest.raises(
+        ValueError, match="quarantine_plugin_name failed .* expected one of"
+    ):
+        quarantine_plugin_name("platform/python")
 
 
 def test_a_tiling_test_can_be_quarantined():
@@ -998,23 +1182,45 @@ def test_a_tiling_test_can_be_quarantined():
     assert _quarantined(f"{tiling}/test_x.py::test_y").path == f"{tiling}/test_x.py"
 
 
-def _quarantine_hook_impls(config: pytest.Config) -> list:
+def _quarantine_hook_impls(config: pytest.Config, tree_path: str) -> list:
     """The collection hook implementations ``rocke.tests.quarantine`` installed
-    in this session."""
+    in this session for the tree ``tree_path``. A session that also collects
+    another root's tests (``library/tests``) holds that tree's as well."""
+    name = quarantine_plugin_name(tree_path)
     return [
         impl
         for impl in config.pluginmanager.hook.pytest_collection_modifyitems.get_hookimpls()
-        if type(impl.plugin).__module__ == "rocke.tests.quarantine"
+        if impl.plugin_name == name
     ]
 
 
 def test_a_tree_registers_its_quarantine_once(request):
     """This session's root (``platform/tests``) registered its quarantine; a
     second registration of the same tree adds no second hook."""
-    registered = _quarantine_hook_impls(request.config)
+    registered = _quarantine_hook_impls(request.config, "platform/tests")
     assert len(registered) == 1, registered
     register_quarantine(request.config, ROCKE / "platform/tests", "platform/tests")
-    assert _quarantine_hook_impls(request.config) == registered
+    assert _quarantine_hook_impls(request.config, "platform/tests") == registered
+
+
+def test_each_tree_keeps_its_own_quarantine_in_one_session(request):
+    """A session that collects two roots' tests holds one quarantine per tree,
+    each found by its tree's name: the library tree's beside this root's
+    leaves this root's single hook as it was."""
+    pluginmanager = request.config.pluginmanager
+    library_plugin = quarantine_plugin_name("library/tests")
+    registered_here = not pluginmanager.has_plugin(library_plugin)
+    platform_hooks = _quarantine_hook_impls(request.config, "platform/tests")
+    assert len(platform_hooks) == 1, platform_hooks
+    try:
+        register_quarantine(request.config, ROCKE / "library/tests", "library/tests")
+        assert len(_quarantine_hook_impls(request.config, "library/tests")) == 1
+        assert (
+            _quarantine_hook_impls(request.config, "platform/tests") == platform_hooks
+        )
+    finally:
+        if registered_here:
+            pluginmanager.unregister(name=library_plugin)
 
 
 def test_a_root_marks_its_items_before_the_quarantine_skips_them(request):
@@ -1024,7 +1230,7 @@ def test_a_root_marks_its_items_before_the_quarantine_skips_them(request):
     ``-m gpu``) before it is skipped."""
     from rocke.tests.helpers.tiling import conftest as tiling_conftest
 
-    (quarantine_impl,) = _quarantine_hook_impls(request.config)
+    (quarantine_impl,) = _quarantine_hook_impls(request.config, "platform/tests")
     assert not quarantine_impl.tryfirst
     assert tiling_conftest.pytest_collection_modifyitems.pytest_impl["tryfirst"]
 
@@ -1108,55 +1314,179 @@ def _defines_test(test_file: Path, node_name: str) -> bool:
     )
 
 
-def quarantine_breaches(
-    entries: Iterable[QuarantinedTest], today: datetime.date
-) -> list[str]:
-    """What fails the quarantine record, whatever the change: an item listed
-    twice, more items than ``QUARANTINE_CAP``, or an expired entry."""
+def quarantine_breaches(entries: Iterable[QuarantinedTest]) -> list[str]:
+    """What fails the quarantine record, whatever the change: two entries
+    that may hold out the same item, or more items than ``QUARANTINE_CAP``. An
+    expired entry fails as any expired record does
+    (:func:`fail_or_report_expired`)."""
     entries = list(entries)
-    ids = [entry.test_id for entry in entries]
     breaches = [
-        f"quarantined more than once: {test_id}"
-        for test_id in sorted({test_id for test_id in ids if ids.count(test_id) > 1})
+        f"quarantined twice: {first.test_id} and {second.test_id} may hold out "
+        "the same tests; keep one entry per test"
+        for first, second in itertools.combinations(entries, 2)
+        if first.overlaps(second)
     ]
     if len(entries) > QUARANTINE_CAP:
         breaches.append(
             f"{len(entries)} quarantined tests, over the cap of {QUARANTINE_CAP}; "
             "fix one before quarantining another"
         )
-    breaches += [
-        f"quarantine expired: {entry.test_id}; fix the test, retire it, or extend "
-        "the expiry with the reason recorded in its issue"
-        for entry in entries
-        if entry.expiry_date < today
-    ]
     return breaches
 
 
-def test_a_quarantine_fails_when_expired_listed_twice_or_over_the_cap():
-    today = utc_today()
+def test_a_quarantine_fails_when_listed_twice_or_over_the_cap():
     current = _quarantined("library/tests/test_x.py::test_y")
-    assert quarantine_breaches([current], today) == []
+    assert quarantine_breaches([current]) == []
+    # Expiry is not a breach whatever the change; an expired quarantine fails
+    # as test_an_expired_quarantine_fails_a_change_that_touches_it says.
     expired = _quarantined("library/tests/test_x.py::test_z", expires="2026-01-01")
-    assert quarantine_breaches([current, expired], today) == [
+    assert quarantine_breaches([current, expired]) == []
+    assert quarantine_breaches([current, current]) == [
         (
-            "quarantine expired: library/tests/test_x.py::test_z; fix the test, "
-            "retire it, or extend the expiry with the reason recorded in its issue"
+            "quarantined twice: library/tests/test_x.py::test_y and "
+            "library/tests/test_x.py::test_y may hold out the same tests; keep one "
+            "entry per test"
         )
     ]
-    assert quarantine_breaches([current, current], today) == [
-        "quarantined more than once: library/tests/test_x.py::test_y"
-    ]
+    # A function and one of its cases, two narrowings of one function, or one
+    # function on two arches: an item both cover would be held out only where
+    # the first one says, so one entry names both arches.
+    method = "library/tests/test_x.py::TestX::test_y"
+    for first, second in (
+        (_quarantined(method), _quarantined(f"{method}[a]", arches=("gfx950",))),
+        (
+            _quarantined(method, params=("bf16",)),
+            _quarantined(method, params=("mha",)),
+        ),
+        (
+            _quarantined(method, arches=("gfx942",)),
+            _quarantined(method, arches=("gfx950",)),
+        ),
+    ):
+        assert quarantine_breaches([first, second]) == [
+            (
+                f"quarantined twice: {first.test_id} and {second.test_id} may hold "
+                "out the same tests; keep one entry per test"
+            )
+        ]
+    assert (
+        quarantine_breaches(
+            [_quarantined(f"{method}[a]"), _quarantined(f"{method}[b]")]
+        )
+        == []
+    )
     over_the_cap = [
         _quarantined(f"library/tests/test_x.py::test_{index}")
         for index in range(QUARANTINE_CAP + 1)
     ]
-    assert quarantine_breaches(over_the_cap, today) == [
+    assert quarantine_breaches(over_the_cap) == [
         (
             f"{QUARANTINE_CAP + 1} quarantined tests, over the cap of "
             f"{QUARANTINE_CAP}; fix one before quarantining another"
         )
     ]
+
+
+# A quarantine registry as pending_lanes.py writes one: a group of two records
+# (lines 2-6, 9 and 10 shared; 7 and 8 their own) and one record alone (lines
+# 12-18).
+_QUARANTINE_SOURCE = """\
+QUARANTINED: tuple = (
+    *_quarantined(
+        "AICK-1",
+        "reason",
+        TEAM,
+        "2026-01-01",
+        "library/tests/test_x.py::test_a",
+        "library/tests/test_x.py::test_b",
+        arches=("gfx950",),
+        compilers=COMPILERS,
+    ),
+    QuarantinedTest(
+        "library/tests/test_y.py::test_c",
+        "AICK-2",
+        "reason",
+        TEAM,
+        "2026-01-01",
+    ),
+)
+
+
+def _quarantined(issue, reason, team, expires, *test_ids, arches=(), compilers=None):
+    pass
+"""
+
+
+def _expired_quarantines() -> list[QuarantinedTest]:
+    """The records ``_QUARANTINE_SOURCE`` spells, expired."""
+    return [
+        _quarantined(test_id, expires="2026-01-01")
+        for test_id in (
+            "library/tests/test_x.py::test_a",
+            "library/tests/test_x.py::test_b",
+            "library/tests/test_y.py::test_c",
+        )
+    ]
+
+
+def _check_quarantine_expiry(change: Change | None, *, strict: bool) -> None:
+    fail_or_report_expired(
+        "QUARANTINED",
+        _expired_quarantines(),
+        lambda entry: entry.test_id,
+        source=_QUARANTINE_SOURCE,
+        change=change,
+        strict=strict,
+        max_days=QUARANTINE_MAX_DAYS,
+        today=datetime.date(2026, 1, 2),
+    )
+
+
+def _change(files=(), lines=()) -> Change:
+    return Change(frozenset(files), frozenset(lines), frozenset())
+
+
+def test_an_expired_quarantine_fails_a_change_that_touches_it():
+    """Its own line in the registry, its group's shared lines, or its test
+    file: the change that touches an expired quarantine re-decides it."""
+    with pytest.raises(AssertionError, match=r"\['library/tests/test_y.py::test_c'\]"):
+        _check_quarantine_expiry(_change(lines={15}), strict=False)
+    with pytest.raises(AssertionError, match=r"\['library/tests/test_x.py::test_a'\]"):
+        _check_quarantine_expiry(_change(lines={7}), strict=False)
+    with pytest.raises(
+        AssertionError,
+        match=(
+            r"\['library/tests/test_x.py::test_a', "
+            r"'library/tests/test_x.py::test_b'\]"
+        ),
+    ):
+        _check_quarantine_expiry(_change(lines={6}), strict=False)
+    with pytest.raises(AssertionError, match=r"\['library/tests/test_y.py::test_c'\]"):
+        _check_quarantine_expiry(
+            _change(files={"library/tests/test_y.py"}), strict=False
+        )
+    with pytest.raises(
+        AssertionError, match=f"at most {QUARANTINE_MAX_DAYS} days away"
+    ):
+        _check_quarantine_expiry(_change(lines={15}), strict=False)
+
+
+def test_an_expired_quarantine_is_a_warning_for_a_change_that_does_not_touch_it():
+    """An expired quarantine does not turn an unrelated change red, nor a run
+    with no change to compare (develop's own CI): it is reported. The entry
+    still covers its test, whose skip does not read the date."""
+    for change in (_change(files={"library/tests/test_z.py"}, lines={30}), None):
+        with pytest.warns(UserWarning, match="QUARANTINED entries past their expiry"):
+            _check_quarantine_expiry(change, strict=False)
+    expired = _quarantined("library/tests/test_x.py::test_a", expires="2026-01-01")
+    assert expired.covers("library/tests/test_x.py", "test_a")
+
+
+def test_every_expired_quarantine_fails_under_strict_expiry():
+    """The scheduled run (--strict-expiry) fails on every expired quarantine,
+    whatever the change."""
+    with pytest.raises(AssertionError, match="test_a.*test_b.*test_c"):
+        _check_quarantine_expiry(None, strict=True)
 
 
 # The files that may name the runner lane or write a lane declaration by hand:
@@ -1248,7 +1578,7 @@ def test_a_case_that_needs_runner_hardware_has_a_record():
     ]
     assert not unrecorded, (
         "cases that need a GPU no pull-request runner has, with no record: add a "
-        "PendingTest(<file>, RUNNER_HARDWARE, ...) to rocke.tests.pending_lanes: "
+        "record waiting on a RUNNER_HARDWARE lane ticket to rocke.tests.pending_lanes: "
         f"{unrecorded}"
     )
 
@@ -1315,8 +1645,8 @@ def test_every_record_names_a_team_that_owns_its_test():
     ), f"records whose team is not a CODEOWNERS team of their test: {unowned}"
 
 
-def test_every_quarantined_test_is_current():
-    breaches = quarantine_breaches(QUARANTINED, utc_today())
+def test_every_quarantined_test_is_current(request):
+    breaches = quarantine_breaches(QUARANTINED)
     assert not breaches, breaches
     gone = [
         entry.test_id
@@ -1326,6 +1656,13 @@ def test_every_quarantined_test_is_current():
         or not all((ROCKE / child).is_file() for child in entry.runs_files)
     ]
     assert not gone, f"quarantined but gone: {gone}"
+    _check_expiry(
+        request,
+        "QUARANTINED",
+        QUARANTINED,
+        lambda entry: entry.test_id,
+        QUARANTINE_MAX_DAYS,
+    )
 
 
 @pytest.mark.skipif(
@@ -1350,3 +1687,52 @@ def test_every_test_file_is_assigned_to_a_ci_entry_or_has_a_recorded_reason(tmp_
         "assigned to a CI entry, or a case record's file is assigned to none): "
         f"{stale}"
     )
+
+
+# The template platform/CMakeLists.txt registers each published operation and
+# architecture's GPU reference entry with, and the test file the entry runs.
+_REFERENCE_ENTRY_TEMPLATE = re.compile(
+    r"add_test\((rocke_\$\{_operation\}_gpu_\$\{_arch\}_pytest) \S+ "
+    r'\\"\$\{ROCKE_TEST_CTEST_REL\}tests/'
+    r'(library/tests/test_\$\{_operation\}_pinned_reference\.py)\\"'
+)
+
+
+def _render(template: str, operation: str, arch: str) -> str:
+    return template.replace("${_operation}", operation).replace("${_arch}", arch)
+
+
+def test_pinned_reference_entries_are_the_published_operations_registrations(
+    tmp_path,
+):
+    """The audit credits each pinned-reference file with the entries the CMake
+    template registers for the operations and pull-request runner arches the
+    committed locks publish; a pinned-reference file planted beside them
+    without a reference operation is credited with none."""
+    name_template, file_template = _REFERENCE_ENTRY_TEMPLATE.search(
+        (ROCKE / "platform/CMakeLists.txt").read_text(encoding="utf-8")
+    ).groups()
+    published = {
+        (variant["operation"], variant["architecture"])
+        for variant in published_reference_variants(ROCKE / "library")
+    }
+    expected: dict[str, set[str]] = {}
+    for operation, arch in published:
+        if arch in PR_RUNNER_ARCHES:
+            expected.setdefault(_render(file_template, operation, arch), set()).add(
+                _render(name_template, operation, arch)
+            )
+    assert expected, "no published pinned reference on a pull-request runner arch"
+    assert pinned_reference_entries(ROCKE / "library") == expected
+
+    # The same locks in a copy of the library tree, with a planted file.
+    library = tmp_path / "library"
+    shutil.copytree(
+        ROCKE / "library/tests/reference_common", library / ARTIFACT_CLI.parent
+    )
+    for operation in {operation for operation, _ in published}:
+        package = f"tests/{operation}_reference/architectures"
+        shutil.copytree(ROCKE / "library" / package, library / package)
+    planted = library / "tests/test_bogus_pinned_reference.py"
+    planted.write_text("def test_x():\n    pass\n", encoding="utf-8")
+    assert pinned_reference_entries(library) == expected

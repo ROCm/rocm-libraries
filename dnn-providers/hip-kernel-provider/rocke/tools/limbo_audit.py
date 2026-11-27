@@ -32,8 +32,10 @@ any other name for a lane without a GPU::
         --universe <records of a --collect-only run> --report limbo.md
 
 Records name test files by their path in the tree that ran them (an installed
-tree or a source checkout); the audit maps each to the source test file whose
-path is the longest unique suffix of it.
+tree or a source checkout), on any operating system; the audit maps each to the
+source test file whose path is the longest unique suffix of it. A lane none of
+whose records maps to a source test file is no evidence, and fails the audit
+as a test in limbo does.
 """
 
 from __future__ import annotations
@@ -52,7 +54,11 @@ if _SOURCE_PACKAGE_ROOT.is_dir() and str(_SOURCE_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PACKAGE_ROOT))
 
 from rocke.core.arch.target import known_arches
-from rocke.tests.pending_lanes import TEST_FILE_ROOTS, waiting_entry
+from rocke.tests.pending_lanes import (
+    TEST_FILE_ROOTS,
+    python_files_under_test_roots,
+    waiting_entry,
+)
 from rocke.tests.run_records import OTHER_SHARD, RunRecord, read_run_records
 
 __all__ = [
@@ -62,7 +68,6 @@ __all__ = [
     "audit",
     "lane_run",
     "main",
-    "python_files",
     "universe_of",
 ]
 
@@ -92,7 +97,9 @@ class SourcePaths:
 
     def source_of(self, path: str) -> str | None:
         if path not in self._mapped:
-            parts = Path(path).as_posix().split("/")
+            # Records name files with "/" (run_records); a record a Windows
+            # run wrote with "\\" maps the same on any reader's OS.
+            parts = path.replace("\\", "/").split("/")
             self._mapped[path] = next(
                 (
                     hits[0]
@@ -103,18 +110,6 @@ class SourcePaths:
                 None,
             )
         return self._mapped[path]
-
-
-def python_files(rocke_dir: Path) -> list[str]:
-    """Every Python file under the test file roots of ``rocke_dir``, relative to
-    it: the files a run may collect tests from (an entry may name a test module
-    that is not ``test_*.py``)."""
-    return [
-        file.relative_to(rocke_dir).as_posix()
-        for root in TEST_FILE_ROOTS
-        for file in (rocke_dir / root).rglob("*.py")
-        if "__pycache__" not in file.parts
-    ]
 
 
 TestId = tuple[str, str]  # (source test file, pytest node name)
@@ -146,6 +141,12 @@ class LaneRun:
             self.reasons[test] = []
         if reason and reason not in self.reasons[test]:
             self.reasons[test].append(reason)
+
+    @property
+    def observed_nothing(self) -> bool:
+        """Whether none of the lane's records named a source test file: its
+        records are missing or from another tree, so it is no evidence."""
+        return not (self.progress or self.skipped_files or self.failed_files)
 
     def ran(self, test: TestId) -> bool:
         return self.progress.get(test) == "ran" or test[0] in self.failed_files
@@ -308,6 +309,10 @@ def report(limbo: list[LimboTest], lanes: list[LaneRun]) -> str:
             f"and rocke.tests.pending_lanes does not account for: {len(limbo)}."
         ),
     ]
+    empty = [lane.name for lane in lanes if lane.observed_nothing]
+    if empty:
+        evidence = "Lanes with no record naming a source test file, so no evidence"
+        lines += ["", f"{evidence}: {', '.join(empty)}"]
     unmapped = sorted(set().union(*(lane.unmapped for lane in lanes)))
     if unmapped:
         lines += ["", f"Records naming no source test file: {len(unmapped)}"]
@@ -363,7 +368,16 @@ def main(argv: list[str] | None = None) -> int:
         help="the rocke source directory the records ran (default: this checkout)",
     )
     args = parser.parse_args(argv)
-    source_paths = SourcePaths(python_files(args.tree))
+    try:
+        tree_files = python_files_under_test_roots(args.tree)
+    except RuntimeError as error:
+        parser.error(str(error))
+    if not tree_files:
+        parser.error(
+            f"limbo_audit failed - tree={str(args.tree)!r}, expected a rocke "
+            f"source checkout with Python files under {', '.join(TEST_FILE_ROOTS)}"
+        )
+    source_paths = SourcePaths(tree_files)
     lanes = [
         lane_run(name, read_run_records(directory), source_paths)
         for name, directory in args.lane
@@ -382,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(text) < 20000
         else text[:20000] + "\n[report truncated; see --report]"
     )
-    return 1 if limbo else 0
+    return 1 if limbo or any(lane.observed_nothing for lane in lanes) else 0
 
 
 if __name__ == "__main__":

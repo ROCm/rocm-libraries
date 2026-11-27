@@ -39,7 +39,9 @@ from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.runtime import comgr
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.comgr import require_comgr_target
 
 _ARCH = "gfx950"
 _ISA = f"amdgcn-amd-amdhsa--{_ARCH}"
@@ -116,16 +118,7 @@ def _compiler():
     gfx950, skips. Anything comgr raises after this is the IR failing to build,
     so callers let it propagate as a failure.
     """
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    if _ISA not in isas:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"the loaded comgr cannot target {_ARCH}")
+    require_comgr_target(_ARCH)
     return comgr.build_hsaco_from_llvm_ir
 
 

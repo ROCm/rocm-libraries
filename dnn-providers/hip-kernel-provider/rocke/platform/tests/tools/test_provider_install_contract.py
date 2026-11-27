@@ -171,3 +171,4 @@ def test_source_checkout_scans_are_not_installed(rocke: Path, tmp_path: Path) ->
 
     assert _excludes_file(install, "test_compliance_patterns.py")
     assert _excludes_file(install, "test_no_torch.py")
+    assert _excludes_file(install, "test_toolchain_pins.py")

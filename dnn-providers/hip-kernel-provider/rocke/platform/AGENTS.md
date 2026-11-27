@@ -212,11 +212,11 @@ python -m pip install -r requirements.txt
 
 On-GPU lanes also need a HIP-visible device + ROCm `comgr`. Torch is not needed
 (see "No torch" below); its legacy cases skip without it. To run them anyway,
-install the ROCm torch wheel that `requirements.txt` documents into the same
-virtualenv, never the default PyPI CPU torch:
+install a ROCm torch wheel matching the system ROCm into the same virtualenv
+(from the PyTorch wheel index named after that ROCm release), never the default
+PyPI CPU torch, and check it:
 
 ```bash
-python -m pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
 python -c 'import torch; print(torch.__version__, torch.version.hip)'
 ```
 

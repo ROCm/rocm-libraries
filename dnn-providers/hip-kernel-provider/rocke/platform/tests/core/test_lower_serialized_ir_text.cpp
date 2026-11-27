@@ -293,6 +293,8 @@ void test_hip_twin()
         = serialized_kernel("waitcnt", emit_waitcnt, "gfx942", ROCKE_LLVM_FLAVOR_AUTO, nullptr);
     check_hip_twin("lowers", waitcnt.c_str(), "gfx942");
     check_hip_twin("lowering refused", waitcnt.c_str(), "gfx1250");
+    check_hip_twin("empty arch", waitcnt.c_str(), "");
+    check_hip_twin("no arch", waitcnt.c_str(), nullptr);
     check_hip_twin("not a kernel", "not serialized IR", "gfx942");
     check_hip_twin("empty text", "", "gfx942");
     check_hip_twin("no text", nullptr, "gfx942");

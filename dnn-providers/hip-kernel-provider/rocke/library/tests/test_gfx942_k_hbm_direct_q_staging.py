@@ -173,9 +173,8 @@ def test_k_from_hbm_refuses_i64_kv_addressing():
 
 @pytest.mark.parametrize("knob", ["use_k_hbm_direct", "use_v_hbm_direct"])
 def test_hbm_knobs_refuse_a_non_bool(knob):
-    # "false" is truthy: read as a flag it would turn the knob on.
-    with pytest.raises(TypeError) as refusal:
+    # "false" is truthy: read as a flag it would turn the knob on. A
+    # ValueError, the type dispatch reads as "this spec cannot run".
+    with pytest.raises(ValueError) as refusal:
         dataclasses.replace(_FP16_D64_K_FROM_HBM_SINKS, **{knob: "false"})
-    assert str(refusal.value) == (
-        f"gfx942 tiled 2D spec failed - {knob}='false', expected a bool"
-    )
+    assert str(refusal.value) == f"{knob} must be a bool, got str"

@@ -1092,17 +1092,6 @@ def test_hip_add_nuw_compiles_without_nsw(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _gpu_kernel():
     """Lane i writes ult(cx[i], cy[i]) and add_nuw(sx[i], sy[i])."""
     b = IRBuilder("unsigned_int_ops_gpu")
@@ -1119,9 +1108,9 @@ def _gpu_kernel():
 
 @pytest.mark.gpu
 def test_gpu_values_match_numpy():
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
     from rocke.runtime.hip_module import Runtime
 

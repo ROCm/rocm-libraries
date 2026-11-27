@@ -162,6 +162,48 @@ def test_public_text_has_no_hits(text: str) -> None:
             },
             "expected unique ids",
         ),
+        (
+            {
+                "rules": [
+                    {
+                        "id": "x",
+                        "pattern": "a",
+                        "ignore_case": "false",
+                        "message": "m",
+                        "allowed": [],
+                    }
+                ]
+            },
+            "rule='x' ignore_case='false', expected a bool",
+        ),
+        (
+            {
+                "rules": [
+                    {
+                        "id": "x",
+                        "pattern": "a",
+                        "ignore_case": False,
+                        "message": "m",
+                        "allowed": "host",
+                    }
+                ]
+            },
+            "rule='x' allowed='host', expected a list",
+        ),
+        (
+            {
+                "rules": [
+                    {
+                        "id": "x",
+                        "pattern": "a",
+                        "ignore_case": False,
+                        "message": "m",
+                        "allowed": [1],
+                    }
+                ]
+            },
+            r"rule='x' allowed=\[1\], expected a list of strings",
+        ),
     ],
 )
 def test_a_broken_pattern_file_is_refused(

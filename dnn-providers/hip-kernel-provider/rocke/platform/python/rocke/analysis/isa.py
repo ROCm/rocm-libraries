@@ -370,17 +370,14 @@ def _metadata_scalar(value: str) -> str:
     return value.strip("'\"")
 
 
-def parse_kernel_arguments(readelf_notes: str) -> dict[str, tuple[KernelArgument, ...]]:
-    """Each kernel's arguments, by kernel name, from ``llvm-readelf --notes``
-    output of an AMDHSA code object (its ``amdhsa.kernels`` metadata).
-
-    Every kernel entry of the list is one dict of ``.key: value`` lines; the
-    entries of its ``.args`` list sit deeper. Only the first ``amdhsa.kernels``
-    list is read (a code object carries one metadata note). Raises
-    ``ValueError`` when the list does not start with an entry, a kernel has no
-    ``.name``, or an argument lacks ``.value_kind``, ``.offset`` or ``.size``.
-    """
-    kernels: list[dict] = []
+def _kernel_entries(readelf_notes: str) -> list[dict[str, object]]:
+    """The entries of the first ``amdhsa.kernels`` list of ``llvm-readelf
+    --notes`` output, one dict per kernel: its kernel-level ``.key: value``
+    lines (without the dot; a key whose value is a nested list maps to
+    ``None``) and ``"args"``, one dict per entry of its ``.args`` list. Raises
+    ``ValueError`` when the list does not start with an entry or a kernel has
+    no ``.name``."""
+    kernels: list[dict[str, object]] = []
     kernel_column: int | None = None  # the column of a kernel-level key
     last_kernel_key = ""  # nested entries belong to .args only after it
     in_kernels = False
@@ -406,16 +403,49 @@ def parse_kernel_arguments(readelf_notes: str) -> dict[str, tuple[KernelArgument
                 kernels.append({"args": []})
             last_kernel_key = key
             if key != "args":
-                kernels[-1][key] = value
+                # A key with nothing after its colon opens a nested list.
+                kernels[-1][key] = None if match["value"] == "" else value
         elif column > kernel_column and last_kernel_key == "args":
             if match["item"]:
                 kernels[-1]["args"].append({})
             kernels[-1]["args"][-1][key] = value
+    if any("name" not in kernel for kernel in kernels):
+        raise ValueError("a kernel in the code-object metadata has no .name")
+    return kernels
 
+
+def parse_kernel_fields(readelf_notes: str) -> dict[str, dict[str, str]]:
+    """Each kernel's other scalar metadata values, by kernel name, from
+    ``llvm-readelf --notes`` output of an AMDHSA code object: its kernel-level
+    ``.key: value`` lines but ``.name``, keyed without the dot
+    (``"group_segment_fixed_size"``), each value the raw text (a string, as
+    the metadata prints it, without a YAML tag or quotes). Keys whose value is
+    a nested list (``.args``, ``.reqd_workgroup_size``) are left out; the
+    arguments are :func:`parse_kernel_arguments`'. Raises ``ValueError`` as
+    that function does for a list that does not start with an entry or a
+    kernel without a name."""
+    return {
+        kernel["name"]: {
+            key: value
+            for key, value in kernel.items()
+            if key not in ("args", "name") and value is not None
+        }
+        for kernel in _kernel_entries(readelf_notes)
+    }
+
+
+def parse_kernel_arguments(readelf_notes: str) -> dict[str, tuple[KernelArgument, ...]]:
+    """Each kernel's arguments, by kernel name, from ``llvm-readelf --notes``
+    output of an AMDHSA code object (its ``amdhsa.kernels`` metadata).
+
+    Every kernel entry of the list is one dict of ``.key: value`` lines; the
+    entries of its ``.args`` list sit deeper. Only the first ``amdhsa.kernels``
+    list is read (a code object carries one metadata note). Raises
+    ``ValueError`` when the list does not start with an entry, a kernel has no
+    ``.name``, or an argument lacks ``.value_kind``, ``.offset`` or ``.size``.
+    """
     result: dict[str, tuple[KernelArgument, ...]] = {}
-    for kernel in kernels:
-        if "name" not in kernel:
-            raise ValueError("a kernel in the code-object metadata has no .name")
+    for kernel in _kernel_entries(readelf_notes):
         arguments = []
         for arg in kernel["args"]:
             missing = sorted({"value_kind", "offset", "size"} - set(arg))

@@ -19,7 +19,12 @@ from pathlib import Path
 from ..assets import platform_root
 from .host_cpus import available_cpus
 
-__all__ = ["build_platform_targets", "configure_platform", "generator_arguments"]
+__all__ = [
+    "build_platform_targets",
+    "cmake_cache_entries",
+    "configure_platform",
+    "generator_arguments",
+]
 
 
 def generator_arguments(build_root: Path) -> list[str]:
@@ -30,6 +35,20 @@ def generator_arguments(build_root: Path) -> list[str]:
     if (build_root / "CMakeCache.txt").exists() or shutil.which("ninja") is None:
         return []
     return ["-GNinja"]
+
+
+def cmake_cache_entries(build_root: Path) -> dict[str, str]:
+    """The ``NAME:TYPE=value`` entries of the configured tree ``build_root``'s
+    CMakeCache.txt, each value by its name: what the configure recorded, such
+    as ``CMAKE_COMMAND``, the CMake program that configured the tree. Raises
+    ``FileNotFoundError`` when ``build_root`` has no cache."""
+    entries = {}
+    cache = build_root / "CMakeCache.txt"
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line and not line.startswith(("#", "//")) and "=" in line:
+            key, value = line.split("=", 1)
+            entries[key.split(":", 1)[0]] = value
+    return entries
 
 
 def configure_platform(

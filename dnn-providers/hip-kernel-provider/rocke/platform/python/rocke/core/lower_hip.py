@@ -250,6 +250,8 @@ def _type_to_hip(t) -> str:
             return f"f32x{t.count}"
         if elem == "f64":
             return f"f64x{t.count}"
+        if elem == "i64":
+            return f"i64x{t.count}"
         if elem in ("i32", "tf32"):
             return f"i32x{t.count}"
         if elem == "i16":
@@ -362,6 +364,7 @@ _VEC_PREFIX = {
     "bf16": "bf16x",
     "f32": "f32x",
     "f64": "f64x",
+    "i64": "i64x",
     "i32": "i32x",
     "tf32": "i32x",
     "i16": "i16x",

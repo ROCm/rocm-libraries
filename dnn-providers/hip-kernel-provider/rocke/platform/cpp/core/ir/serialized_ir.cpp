@@ -56,6 +56,11 @@ rocke_status_t serialized_ir_parse(const char* ir_text,
     return ROCKE_OK;
 }
 
+bool serialized_ir_names_target(const char* arch)
+{
+    return arch != nullptr && *arch != '\0';
+}
+
 void serialized_ir_take_message(rocke_strbuf_t* message, char** out_message)
 {
     if(out_message)

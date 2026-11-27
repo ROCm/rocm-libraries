@@ -76,6 +76,12 @@ _SKIP_REASON = (
 #: Most worker processes the sample compiles in: each worker holds its own
 #: imports and COMGR in memory.
 _MAX_SAMPLE_COMPILE_WORKERS = 32
+#: The share of the pinned sample that must be sweep candidates for a problem.
+#: Over this class's problems, gfx942, gfx950 and gfx90a keep at least 45 % of
+#: the sample, gfx1151 and gfx1201 at least 17 %, and gfx1250 at least 12 %
+#: (counted with ``build_dgrad_sweep_kernel``, no compile). A floor below all of
+#: them still fails a change that silently drops most of the sample.
+_MIN_CANDIDATE_SHARE = 0.1
 
 
 # Each test below declares its rough gfx942 CI seconds, so the CI shards and
@@ -90,8 +96,8 @@ class TestConvDgradCorrectness(unittest.TestCase):
     launched here, and must pass the sweep's ``--verify``
     (:func:`verify_verdict`). A kernel that stores its output is launched on
     poisoned output, an atomic (split-K) one on zeroed output. A build or
-    compile that raises fails the test, and so does a problem with no
-    candidate.
+    compile that raises fails the test, and so does a problem for which fewer
+    than ``_MIN_CANDIDATE_SHARE`` of the sample are candidates.
     """
 
     @classmethod
@@ -126,7 +132,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
         ]
         grad_output, weights = _dgrad_inputs(problem, dtype)
         ref = _dgrad_reference(problem, dtype)
-        checked, failures = 0, []
+        checked, not_candidates, failures = 0, 0, []
         try:
             for combo, future in zip(combos, futures):
                 try:
@@ -142,6 +148,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
                     failures.append(f"{combo}: build/compile raised {error!r}")
                     continue
                 if compiled is None:
+                    not_candidates += 1
                     continue
                 spec, artifact = compiled
                 got = _dgrad_launch(
@@ -167,12 +174,20 @@ class TestConvDgradCorrectness(unittest.TestCase):
             for future in futures:
                 future.cancel()
         case = f"{dtype} {problem.short()} split_k={split_k} on {ARCH}"
+        counts = (
+            f"of {len(combos)} sampled, {checked} checked, {not_candidates} not "
+            f"sweep candidates, {len(failures)} failed"
+        )
         if failures:
             self.fail(
-                f"{len(failures)} sampled dgrad candidates failed for {case}:\n"
-                + "\n".join(failures)
+                f"{len(failures)} sampled dgrad candidates failed for {case} "
+                f"({counts}):\n" + "\n".join(failures)
             )
-        self.assertGreater(checked, 0, f"no sampled dgrad candidate for {case}")
+        self.assertGreaterEqual(
+            checked,
+            _MIN_CANDIDATE_SHARE * len(combos),
+            f"too few sampled dgrad candidates for {case}: {counts}",
+        )
 
     # ---- stride=1 (direct store, no atomics) ---------------------------------
 

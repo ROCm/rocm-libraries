@@ -530,7 +530,7 @@ def _lower_llvm_via_backend(
     accepted for backward compatibility but is no longer consulted (the
     serialized-IR hand-off makes it unnecessary).
     """
-    from ..core.backend import lower_kernel_via_backend, resolve_backend
+    from ..core.backend import BACKEND_ENV, lower_kernel_via_backend, resolve_backend
 
     chosen = resolve_backend(backend)
     if backend is not None and chosen != resolve_backend():
@@ -539,8 +539,8 @@ def _lower_llvm_via_backend(
         # directly rather than the chokepoint's env-resolved default.
         import os
 
-        prev = os.environ.get("ROCKE_BACKEND")
-        os.environ["ROCKE_BACKEND"] = chosen
+        prev = os.environ.get(BACKEND_ENV)
+        os.environ[BACKEND_ENV] = chosen
         try:
             return lower_kernel_via_backend(
                 kernel,
@@ -549,9 +549,9 @@ def _lower_llvm_via_backend(
             )
         finally:
             if prev is None:
-                os.environ.pop("ROCKE_BACKEND", None)
+                os.environ.pop(BACKEND_ENV, None)
             else:
-                os.environ["ROCKE_BACKEND"] = prev
+                os.environ[BACKEND_ENV] = prev
 
     return lower_kernel_via_backend(
         kernel,

@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""One wave computes ``D = A @ B + C`` with a gfx942 f64 MFMA atom.
+"""One wave computes ``D = A @ B + C`` with an f64 MFMA atom.
 
-Each K step of 4 issues one MFMA, and operands are placed with the catalog lane
-maps. Reusing C's indices for D and feeding D back as C requires matching widths
-and a shared src2/dst mapping implementation; instruction types remain validated
-by the lowerers.
+The atom comes from the MMA catalog of the target the probe is built for. Each
+K step of 4 issues one MFMA, and operands are placed with the catalog lane maps. Reusing C's indices
+for D and feeding D back as C requires matching widths and a shared src2/dst
+mapping implementation; instruction types remain validated by the lowerers.
 
 * ``m=16`` (``mfma_f64_16x16x4_f64``): ``A`` is row-major ``16 x k``, ``B`` is
   row-major ``k x 16``, and ``C``/``D`` are row-major ``16 x 16``.
@@ -16,9 +16,11 @@ by the lowerers.
   ``4b..4b+3``), and ``C``/``D`` are row-major ``16 x 4``.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
-from ...core.arch import ArchTarget
+from ...core.arch import ArchTarget, known_arches
 from ...core.ir import F64, IRBuilder, KernelDef, PtrType
 
 # m -> (B slab rows, B/C/D columns) per K step of 4.
@@ -41,10 +43,19 @@ class F64MmaProbeSpec:
         return f"f64_mma_probe_m{self.m}_k{self.k}"
 
 
-def build_f64_mma_probe(spec: F64MmaProbeSpec) -> KernelDef:
-    """Build a probe for the fixed gfx942 F64 instruction and lane-map contract."""
-    target = ArchTarget.from_gfx("gfx942")
-    atom = target.mma.op_for_shape(
+def build_f64_mma_probe(spec: F64MmaProbeSpec, arch: str) -> KernelDef:
+    """Build the f64 MFMA probe from the MMA catalog of ``arch``.
+
+    Raises ``ValueError`` when ``arch`` is not a known target, or when its
+    catalog lists no f64 atom of the spec's shape that meets the probe's
+    instruction and lane-map contract. An unknown target is a ``ValueError``,
+    not a registry ``KeyError``, so that both engines refuse it alike.
+    """
+    if arch not in known_arches():
+        raise ValueError(
+            f"build_f64_mma_probe failed - arch={arch!r}, expected a known gfx target"
+        )
+    atom = ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="mma",
         a_dtype="fp64",
         b_dtype="fp64",
@@ -85,7 +96,9 @@ def build_f64_mma_probe(spec: F64MmaProbeSpec) -> KernelDef:
         or atom.dst.layout.fn is not atom.srcs[2].layout.fn
     ):
         raise ValueError(
-            "F64 probe requires the fixed gfx942 instruction and layout contract"
+            f"build_f64_mma_probe failed - arch={arch!r}, expected a target whose "
+            f"MMA catalog lists the f64 {spec.m}x{spec.m}x4 atom with the probe's "
+            "lane-map contract"
         )
     b = IRBuilder(spec.name)
     a = b.param("A", PtrType(F64, "global"), align=8)
