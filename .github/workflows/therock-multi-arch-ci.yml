@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 4a6dabfc096bdf59c3aac8719154d2385066ef69.
+# TheRock ref: pinned to ROCm/TheRock commit 6c35fc2080509f20adedc9262942fc3ebaa2e53d.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -127,8 +127,9 @@ jobs:
       test_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       test_type: ${{ steps.configure.outputs.test_type }}
-      # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
-      # lands the formal mechanism for per-family presubmit test selection.
+      # TEMPORARY: hipBLASLt and hipSPARSELt gfx950 presubmit trial. Remove once
+      # TheRock#8985 lands the formal mechanism for per-family presubmit test
+      # selection.
       family_overrides: ${{ steps.family-override.outputs.family_overrides }}
     steps:
       - name: Checkout repository config
@@ -142,7 +143,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+          ref: 6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -159,11 +160,13 @@ jobs:
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
-      # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
-      # lands the formal mechanism for per-family presubmit test selection.
+      # TEMPORARY: hipBLASLt and hipSPARSELt gfx950 presubmit trial. Remove once
+      # TheRock#8985 lands the formal mechanism for per-family presubmit test
+      # selection.
       # Keyed on the changed paths rather than changed_projects: the latter is
       # a derived classification that can widen to every configured project or
-      # collapse to empty, neither of which means "this PR touched hipBLASLt".
+      # collapse to empty, neither of which means "this PR touched hipBLASLt"
+      # (or hipSPARSELt).
       - name: Resolve gfx950 family override
         id: family-override
         env:
@@ -174,9 +177,18 @@ jobs:
         run: |
           overrides='{}'
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            if gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
-                 --jq '.[].filename' | grep -q '^projects/hipblaslt/'; then
-              overrides='{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"]}}}'
+            files=$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+                      --jq '.[].filename')
+            labels=()
+            if grep -q '^projects/hipblaslt/' <<< "${files}"; then
+              labels+=('"test:hipblaslt"')
+            fi
+            if grep -q '^projects/hipsparselt/' <<< "${files}"; then
+              labels+=('"test:hipsparselt"')
+            fi
+            if (( ${#labels[@]} > 0 )); then
+              label_list=$(IFS=,; echo "${labels[*]}")
+              overrides="{\"gfx950\":{\"linux\":{\"tests_on_trigger\":[\"presubmit\"],\"test_labels_for_family\":[${label_list}]}}}"
             fi
           fi
           echo "Resolved family_overrides: ${overrides}"
@@ -184,7 +196,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -232,7 +244,7 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+      ref: 6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
       # Pass external repo info for stage-impact analysis.
       external_repo: >-
         {
@@ -254,7 +266,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -268,7 +280,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+      ref: 6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
     permissions:
       contents: read
       id-token: write
@@ -281,7 +293,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -294,7 +306,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+      ref: 6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
     permissions:
       contents: read
       id-token: write
@@ -366,7 +378,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 4a6dabfc096bdf59c3aac8719154d2385066ef69 # 2026-11-21
+          ref: 6c35fc2080509f20adedc9262942fc3ebaa2e53d # 2026-11-26
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

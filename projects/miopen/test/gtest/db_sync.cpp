@@ -559,8 +559,8 @@ void SetupPaths(fs::path& fdb_file_path,
     const std::string ext = ".fdb.txt";
     const auto root_path  = miopen::GetSystemDbPath();
     // The base name has to be the test name for each GPU arch we have
-    const std::string base_name = handle.GetDbBasename(); // "gfx90a68";
-    const std::string suffix    = "HIP";                  // miopen::GetSystemFindDbSuffix();
+    const std::string base_name = handle.GetSystemDbBasename(); // "gfx90a68";
+    const std::string suffix    = "HIP";                        // miopen::GetSystemFindDbSuffix();
     fdb_file_path               = root_path / (base_name + "." + suffix + ext);
 #if MIOPEN_ENABLE_SQLITE && MIOPEN_USE_SQLITE_PERFDB
     pdb_file_path = root_path / (base_name + ".db");
@@ -1152,7 +1152,9 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
 {
     fs::path fdb_file_path, pdb_file_path, kdb_file_path;
     auto& handle = get_test_handle(num_cu);
-    if(handle.GetDeviceName() != arch)
+    // A target variant (gfx1250 reports "gfx1250-strict") loads its base arch's system db.
+    const auto& device = handle.GetDeviceName();
+    if(device.substr(0, device.find('-')) != arch)
         GTEST_SKIP();
     // Skip params whose CU count is not the one this device would actually select its system DB
     // for. The param's num_cu only picks the DB *basename* (via TestHandle::GetMaxComputeUnits);
@@ -1302,5 +1304,7 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                                          // (gfx120140). 32 makes StaticFDBSync skip other CU
                                          // counts, such as the 56-CU part (28 WGP), instead of
                                          // failing on a missing file.
-                                         std::make_pair("gfx1201", 32)),
+                                         std::make_pair("gfx1201", 32),
+                                         // gfx1250 reports CUs, not WGPs: 256 selects gfx1250100.
+                                         std::make_pair("gfx1250", 256)),
                          StaticFDBSyncParamName);

@@ -7,6 +7,7 @@
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -24,8 +25,8 @@ const char* PLUGIN_NAME = "TestGoodHeuristicPlugin";
 const char* POLICY_NAME = "TestGoodHeuristicPolicy";
 const char* PLUGIN_VERSION = "1.0.0";
 
-hipdnnCallback_t g_loggingCallback = nullptr;
-hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO;
+std::atomic<hipdnnCallback_t> g_loggingCallback{nullptr};
+std::atomic<hipdnnSeverity_t> g_logLevel{HIPDNN_SEV_INFO};
 // NOLINTEND(readability-identifier-naming)
 
 // Simple handle implementation
@@ -146,13 +147,13 @@ hipdnnPluginStatus_t hipdnnHeuristicPluginGetPolicyName(int64_t policy_id, const
 
 hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
 {
-    g_loggingCallback = callback;
+    g_loggingCallback.store(callback, std::memory_order_relaxed);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
 hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)
 {
-    g_logLevel = level;
+    g_logLevel.store(level, std::memory_order_relaxed);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -336,10 +337,11 @@ hipdnnPluginStatus_t hipdnnHeuristicPolicyFinalize(hipdnnHeuristicPolicyDescript
     impl->finalized = true;
     *applied = 1; // Policy applied
 
-    const hipdnnSeverity_t level = g_logLevel;
-    if(g_loggingCallback != nullptr)
+    const hipdnnSeverity_t level = g_logLevel.load(std::memory_order_relaxed);
+    const hipdnnCallback_t callback = g_loggingCallback.load(std::memory_order_relaxed);
+    if(callback != nullptr)
     {
-        g_loggingCallback(level, "TestGoodHeuristicPlugin: policy finalized");
+        callback(level, "TestGoodHeuristicPlugin: policy finalized");
     }
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }

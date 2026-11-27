@@ -92,6 +92,13 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate(hipdnnHandle_t* handle);
  *
  * @param [in] handle        An instance of hipdnnHandle_t
  *
+ * On Linux, a handle destroyed after process exit has begun (for example by the destructor of an
+ * object with static storage duration) is not released and the call returns
+ * HIPDNN_STATUS_SUCCESS, so that it never calls into plugins whose static objects are already
+ * destroyed. On Windows the backend's exit handler runs when the backend DLL detaches, after the
+ * caller's static destructors, so such a call releases the handle normally while the plugins are
+ * still loaded.
+ *
  * @retval HIPDNN_STATUS_BAD_PARAM          The descriptor is not a valid (NULL) descriptor.
  * @retval HIPDNN_STATUS_SUCCESS            The destruction was successful
  *
@@ -153,6 +160,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
  *
  * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t previously created by
  *                           hipdnnBackendCreateDescriptor()
+ *
+ * On Linux, a descriptor destroyed after process exit has begun is not released and the call
+ * returns HIPDNN_STATUS_SUCCESS. On Windows the backend's exit handler runs when the backend DLL
+ * detaches, after the caller's static destructors, so such a call releases the descriptor
+ * normally while the plugins are still loaded.
  *
  * @retval  HIPDNN_STATUS_SUCCESS       The memory was destroyed successfully
  * @retval  HIPDNN_STATUS_ALLOC_FAILED   The destruction of memory failed.
@@ -231,7 +243,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  *                                         retrieve
  * @param  [in]   attributeName            The name of the attribute being get from the descriptor
  * @param  [in]   attributeType            The type of attribute
- * @param  [in]   requestedElementCount    Number of elements to output to arrayOfElements
+ * @param  [in]   requestedElementCount    Number of elements to output to arrayOfElements. Must not
+ *                                         be negative
  * @param  [out]  elementCount             Output pointer for the number of elements the descriptor
  *                                         attribute has. Note that hipdnnBackendGetAttribute() will
  *                                         only write the least of this and requestedElementCount
@@ -244,6 +257,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include:
  *                                              attributeName is not a valid attribute for the descriptor.
  *                                              attributeType is not one of the valid types for the attribute.
+ *                                              requestedElementCount is negative.
  * @retval  HIPDNN_STATUS_PLUGIN_ERROR      An engine plugin failed to provide valid metadata.
  * @retval  HIPDNN_STATUS_NOT_INITIALIZED   The descriptor has not been successfully finalized using hipdnnBackendFinalize().
  *
@@ -277,7 +291,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * @retval  HIPDNN_STATUS_BAD_PARAM         The function is called with arguments that correspond to invalid values. Some examples include:
  *                                              attributeName is not a settable attribute of descriptor.
  *                                              attributeType is incorrect for this attributeName.
- *                                              elementCount value is unexpected.
+ *                                              elementCount value is unexpected, for example negative.
  *                                              arrayOfElements contains values invalid for the attributeType.
  * @retval  HIPDNN_STATUS_NOT_SUPPORTED     The values to which the attributes are being set are not supported by the current version of hipDNN.
  *
@@ -610,7 +624,12 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  * @brief Sets the search paths for hipDNN engine plugins.
  *
  * This function configures the search paths for engine plugins and must be called before
- * creating a hipDNN handle, as plugins are loaded during handle creation.
+ * creating a hipDNN handle, as plugins are loaded during handle creation. With an active
+ * handle, a call succeeds only when `pluginPaths` equals the full configured path set
+ * (compared as written, ignoring order and duplicates) and `loadingMode` equals the current
+ * loading mode; it then changes nothing. This holds in `HIPDNN_PLUGIN_LOADING_ADDITIVE` mode
+ * too: adding a path that is already configured fails unless the call lists every
+ * configured path.
  *
  * Paths can be either directories or specific plugin files. Relative paths are resolved
  * from the location of the libhipdnn_backend.so file. The backend can resolve
@@ -623,7 +642,10 @@ HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, 
  *
  * @retval HIPDNN_STATUS_SUCCESS           The operation was successful.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER         `pluginPaths` is nullptr when `numPaths` is greater than 0.
- * @retval HIPDNN_STATUS_NOT_SUPPORTED         Called with active handle.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED         Called with an active handle when `pluginPaths`
+ *                                             differs from the full configured path set or
+ *                                             `loadingMode` differs from the current loading
+ *                                             mode.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -634,7 +656,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * Mirrors @ref hipdnnSetEnginePluginPaths_ext for the heuristic plugin search domain.
  * Must be called before creating a hipDNN handle, as heuristic plugins are loaded
- * during handle creation.
+ * during handle creation. With an active handle, a call succeeds only when `pluginPaths`
+ * equals the full configured heuristic path set (compared as written, ignoring order and
+ * duplicates) and `loadingMode` equals the current loading mode; it then changes nothing.
+ * This holds in `HIPDNN_PLUGIN_LOADING_ADDITIVE` mode too: adding a path that is already
+ * configured fails unless the call lists every configured path.
  *
  * Paths can be either directories or specific plugin files. Relative paths are resolved
  * from the location of the libhipdnn_backend.so file.
@@ -645,7 +671,11 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
  *
  * @retval HIPDNN_STATUS_SUCCESS                  The operation was successful.
  * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   `pluginPaths` is nullptr when `numPaths` is greater than 0.
- * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with active handle.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            Called with an active handle when
+ *                                                `pluginPaths` differs from the full
+ *                                                configured heuristic path set or
+ *                                                `loadingMode` differs from the current
+ *                                                loading mode.
  * @retval HIPDNN_STATUS_INTERNAL_ERROR           An internal error occurred.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetHeuristicPluginPaths_ext(
