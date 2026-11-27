@@ -14,6 +14,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -7616,7 +7617,7 @@ MegakernelDecodeAttributes gemmaDecodeAttributes()
 
 TEST_F(TestGraph, MegakernelDecodeMatchesManifestEntry)
 {
-    Graph graph;
+    GraphTestUtils graph;
     graph.set_compute_data_type(DataType::FLOAT);
     auto tab = std::make_shared<TensorAttributes>();
     tab->set_uid(1).set_dim({16}).set_stride({1}).set_data_type(DataType::INT64);
@@ -7627,16 +7628,13 @@ TEST_F(TestGraph, MegakernelDecodeMatchesManifestEntry)
     ASSERT_TRUE(added.is_good()) << added.get_message();
     const auto validated = graph.validate();
     ASSERT_TRUE(validated.is_good()) << validated.get_message();
-    const auto [document, serialized] = graph.to_json();
-    ASSERT_TRUE(serialized.is_good()) << serialized.get_message();
-
-    const auto nodes = nlohmann::json::parse(document).at("nodes");
+    const auto& nodes = graph.getPrivateGraphSubnodes();
     ASSERT_EQ(nodes.size(), 1u);
-    const auto& node = nodes.at(0);
-    EXPECT_EQ(node.at("type"), "CustomOpAttributes");
-    EXPECT_EQ(node.at("custom_op_id"), "megakernel.gemma4-26b-a4b-fp8-gfx942");
-    EXPECT_EQ(node.at("input_tensor_uids"), nlohmann::json({1, 2}));
-    EXPECT_EQ(node.at("output_tensor_uids"), nlohmann::json::array());
+    const auto node = std::dynamic_pointer_cast<CustomOpNode>(nodes.front());
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->attributes.get_custom_op_id(), "megakernel.gemma4-26b-a4b-fp8-gfx942");
+    EXPECT_THAT(node->attributes.get_inputs(), ElementsAre(tab, glob));
+    EXPECT_TRUE(node->attributes.get_outputs().empty());
 
     // Binary fields from descriptors/megakernel/manifest.json at bf3255d71eb,
     // first entry. The matcher adds the schema version and runtime layer count.
@@ -7654,8 +7652,7 @@ TEST_F(TestGraph, MegakernelDecodeMatchesManifestEntry)
         "lm_head": false,
         "nlayers": 1
     })");
-    const auto bytes = node.at("data").get<std::vector<uint8_t>>();
-    EXPECT_EQ(nlohmann::json::parse(bytes), expectedPayload);
+    EXPECT_EQ(nlohmann::json::parse(node->attributes.get_data()), expectedPayload);
 }
 
 TEST_F(TestGraph, MegakernelDecodeRejectsInvalidInputsAndAttributes)
