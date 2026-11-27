@@ -28,7 +28,10 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+class AnalysisManager;
+class Function;
 class Pass;
+class PassContext;
 
 struct WaitCntInsertionOptions {
     /// Disabled by default: CK_Tensor dataflow freezes after the first solver
@@ -39,6 +42,18 @@ struct WaitCntInsertionOptions {
     /// first WMMA, instead of one per WMMA, so a scheduled WMMA batch stays
     /// back-to-back (see WmmaRunWaitMerge). Set when WMMA batching is on.
     bool mergeWaitsInWmmaRuns = false;
+
+    /// Skip the s_wait_tensorcnt arm only; every other counter is still inserted.
+    /// For a producer that owns its tensorcnt waits already and wants the rest.
+    bool disableTensorcntInsertion = false;
+
+    /// After the generic waits, add the frame-contract dscnt/tensorcnt waits
+    /// (`insertGirFrameWaits`). Their ranks credit the generic waits already in the stream.
+    bool girFrameWaits = false;
+
+    /// Afterwards, drop dscnt waits the scheduled ds proximity already covers
+    /// (RemoveDscntPass). Not combined with `girFrameWaits`: a frame wait is a hazard fence.
+    bool pruneDscnt = false;
 };
 
 /**
@@ -52,5 +67,11 @@ struct WaitCntInsertionOptions {
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(
     WaitCntInsertionOptions options = {});
+
+/// Inserts dscnt/tensorcnt waits for frame hazards reconstructed on the scheduled ST CFG
+/// (`WaitCntInsertionOptions::girFrameWaits`). Must run after the generic waits so its ranks
+/// credit them. Returns true if it emitted any.
+STINKYTOFU_EXPORT bool insertGirFrameWaits(Function& function, PassContext& passCtx,
+                                           AnalysisManager& AM);
 
 }  // namespace stinkytofu
