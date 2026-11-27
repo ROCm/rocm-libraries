@@ -66,8 +66,7 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
                                                get_fp16_valid_blocks, get_fp32_valid_blocks, \
-                                               MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES, \
-                                               MAX_LOCAL_READ_BYTES
+                                               MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams, \
                                             globalParameters
@@ -930,6 +929,19 @@ def _usesFp8LdsConfig(dtype, state):
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
+
+  @staticmethod
+  def localReadInstructionPad(lrvw: int, ldsBpe: float) -> int:
+    """One local-read *instruction* width, in LDS elements, capped at lrvw.
+
+    Lanes of an LDS pass hit distinct banks only if the row stride is an odd
+    multiple of the per-lane instruction width, so a pad of two instructions
+    (gfx10/11 16-bit WMMA: lrvw 16 = 2x ds_read_b128) cannot remove a
+    conflict. Returns lrvw where a row is one instruction, and where an
+    instruction is not a whole number of elements (6-bit types).
+    """
+    perInstruction = Solution.MAX_NUM_DS_LOAD_BYTES / ldsBpe
+    return min(lrvw, int(perInstruction)) if perInstruction.is_integer() else lrvw
 
   # Written only by the LDS-capacity rejection, cleared before every DepthU
   # attempt, and popped before the state is handed back, so no other rejection
@@ -4850,12 +4862,17 @@ class Solution(collections.abc.Mapping):
         ldsPadA = state["LdsPadA"]
         ldsPadB = state["LdsPadB"]
         ldsPadM = state["LdsPadMetadata"]
-        # Pad by one local-read *instruction* width: the row stride must be an
-        # odd multiple of it, so a pad of two instructions (gfx10/11 16-bit
-        # WMMA: lrvw 16 = 2x ds_read_b128) cannot remove a conflict. No-op
-        # where a row is one instruction. Clamp before the MI16x16 doubling.
-        optPadA = min(lrvwA, int(MAX_LOCAL_READ_BYTES // numBytesA))
-        optPadB = min(lrvwB, int(MAX_LOCAL_READ_BYTES // numBytesB))
+        # Clamp before the MI16x16 doubling below, which decides in MacDataType
+        # units, so only where LDS holds MacDataType (not under a ConvertAfterDS
+        # size change). A no-op on MFMA: the b192 reject leaves rows <= 16 B.
+        def instructionOptPad(tc: str, lrvw: int) -> int:
+          macBpe = state["ProblemType"][f"MacDataType{tc}"].numBytes()
+          if getLdsBpe(tc) != macBpe:
+            return lrvw
+          return Solution.localReadInstructionPad(lrvw, macBpe)
+
+        optPadA = instructionOptPad("A", lrvwA)
+        optPadB = instructionOptPad("B", lrvwB)
         readRegsA = int(lrvwA * state["ProblemType"]["MacDataTypeA"].numBytes() // 4)
         readRegsB = int(lrvwB * state["ProblemType"]["MacDataTypeB"].numBytes() // 4)
         if state["ProblemType"]["Sparse"]:
