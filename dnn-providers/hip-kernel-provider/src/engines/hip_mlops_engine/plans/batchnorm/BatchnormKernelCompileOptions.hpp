@@ -23,22 +23,6 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensorAttrs,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanTensorAttrs,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensorAttrs,
-        const hipDeviceProp_t& deviceProps,
-        const core::utils::ActivationMode optActivationMode = core::utils::ActivationMode::PASTHRU)
-        : BatchnormKernelCompileOptions(inputTensorAttrs,
-                                        outputTensorAttrs,
-                                        meanTensorAttrs,
-                                        scaleTensorAttrs,
-                                        std::string(deviceProps.gcnArchName),
-                                        optActivationMode)
-    {
-    }
-
-    BatchnormKernelCompileOptions(
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensorAttrs,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanTensorAttrs,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensorAttrs,
         const std::string& gcnArchName,
         const core::utils::ActivationMode optActivationMode = core::utils::ActivationMode::PASTHRU)
         : KernelCompileOptions(inputTensorAttrs, gcnArchName)
