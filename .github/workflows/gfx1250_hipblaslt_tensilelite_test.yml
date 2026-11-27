@@ -75,7 +75,7 @@ jobs:
     steps:
       # Only the gate's script, its tests and its path rules. The gate job runs no build and no GPU code.
       - name: Checkout the gate's script and path rules
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             .github/scripts/configure_gfx1250_hw_ci.py
@@ -172,7 +172,7 @@ jobs:
     steps:
       - name: Checkout hipBLASLt + shared deps (sparse)
         id: checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           submodules: recursive
@@ -197,7 +197,7 @@ jobs:
       # Only to read which compiler per-PR CI builds with: TheRock pins it as the
       # compiler/amd-llvm submodule, so no submodules are fetched.
       - name: Checkout TheRock at per-PR CI's ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/TheRock
           ref: ${{ steps.ci_env.outputs.therock-ref }}
