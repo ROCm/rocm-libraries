@@ -52,6 +52,23 @@ def test_a_source_mentions_a_runner_lane_by_name_and_a_lane_by_declaration():
     assert lane_mentions_in_source(SOURCES["clean.py"], "clean.py") == []
 
 
+def test_a_runner_lane_named_as_an_attribute_or_through_an_alias_is_found():
+    """The runner lane read off its module, or imported under another name
+    whose uses no longer spell it, is named all the same."""
+    attribute = "from rocke.tests import lanes\nlane = lanes.RUNNER_HARDWARE\n"
+    assert lane_mentions_in_source(attribute, "attribute.py") == [
+        LaneMention(
+            "attribute.py", 2, LaneMentionKind.RUNNER_LANE_NAME, "RUNNER_HARDWARE"
+        )
+    ]
+    alias = (
+        "from rocke.tests.lanes import RUNNER_HARDWARE as hardware\nlane = hardware\n"
+    )
+    assert lane_mentions_in_source(alias, "alias.py") == [
+        LaneMention("alias.py", 1, LaneMentionKind.RUNNER_LANE_NAME, "RUNNER_HARDWARE")
+    ]
+
+
 def _lines_of_kind(source: str, kind: LaneMentionKind) -> list[int]:
     return [
         mention.line

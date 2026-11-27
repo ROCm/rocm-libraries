@@ -183,6 +183,22 @@ def _runner_hardware_need(
     return arches if arches and lanes.runner_lanes_for(arches) else None
 
 
+def _runner_lane_name(node: ast.AST) -> str | None:
+    """The runner lane ``node`` names: a bare name (``RUNNER_HARDWARE``), an
+    attribute (``lanes.RUNNER_HARDWARE``), or an import that binds it to
+    another name (``import RUNNER_HARDWARE as hardware``, whose uses read
+    ``hardware``); None for any other node."""
+    if isinstance(node, ast.Name):
+        name = node.id
+    elif isinstance(node, ast.Attribute):
+        name = node.attr
+    elif isinstance(node, ast.alias) and node.asname is not None:
+        name = node.name.rpartition(".")[2]
+    else:
+        return None
+    return name if name in _RUNNER_LANE_NAMES else None
+
+
 def lane_mentions_in_source(source: str, path: str) -> list[LaneMention]:
     """Each lane mention of Python ``source``, labelled ``path``, in
     :func:`ast.walk` order. Raises ``SyntaxError`` naming ``path`` when
@@ -191,10 +207,14 @@ def lane_mentions_in_source(source: str, path: str) -> list[LaneMention]:
     module_arches = _module_arches(tree)
     mentions = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in _RUNNER_LANE_NAMES:
+        runner_lane_name = _runner_lane_name(node)
+        if runner_lane_name is not None:
             mentions.append(
                 LaneMention(
-                    path, node.lineno, LaneMentionKind.RUNNER_LANE_NAME, node.id
+                    path,
+                    node.lineno,
+                    LaneMentionKind.RUNNER_LANE_NAME,
+                    runner_lane_name,
                 )
             )
         elif (
