@@ -245,20 +245,26 @@ size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& 
                 const uint32_t oldIdx = reg.reg.idx;
                 const std::optional<int64_t> named = resolveNamedIndex(symbol, live, reg.reg.num);
                 if (!named.has_value() || *named < 0) {
-                    // Fail closed in migration mode. The operand is known to be the -1
-                    // sentinel an eager logical leaf left behind (idx == kUnresolvedSentinelIdx,
-                    // checked above), so it MUST resolve to a real index. Leaving it be would
-                    // emit a garbage (all-ones) register and silently diverge the asm -- the
-                    // exact failure mode the rocisa "+-N" negative-offset name once caused.
-                    // Fail loud so any still-uncovered symbolic-name serialization is
-                    // caught at build/validation time instead of slipping into codegen.
-                    // This core library is built with -fno-exceptions, so abort() rather
-                    // than throw; the check only runs in migration mode
-                    // (resolveUnresolvedSentinel, set during the logical-IR A/B trial),
-                    // so it never fires on the native path. Native mode keeps the old
-                    // contract: a name that says nothing about an already-valid index is
-                    // harmless, so leave it be.
-                    if (resolveUnresolvedSentinel) {
+                    // Fail closed only for VGPR sentinels. A VGPR -1 placeholder is one
+                    // DeferLeafVgprSymbolicGuard deferred on purpose (it sets -1 for regType
+                    // V only), so it MUST resolve to a stream-correct index; leaving it be
+                    // would emit a garbage (all-ones) register and silently diverge the asm
+                    // -- the exact failure mode the rocisa "+-N" negative-offset name once
+                    // caused. Fail loud (abort(); the core lib is -fno-exceptions) so any
+                    // still-uncovered VGPR name serialization is caught at build/validation
+                    // time. Only runs in migration mode (resolveUnresolvedSentinel, set
+                    // during the logical-IR A/B trial), so it never fires on the native path.
+                    //
+                    // A non-VGPR sentinel is a name-only SGPR. Resolvable ones (sgprtdmAGroup,
+                    // sgprSrdD, ... whose `.set` is in this function's scope) are rewritten
+                    // above -- the index the dedup/scheduler passes key on. An UNresolvable
+                    // one is a symbol whose `.set` is out of this function's scope, e.g. a
+                    // kernarg coefficient like sgpractivationBeta that a *callable* activation
+                    // module references but whose `.set` lives in the main kernel. The native
+                    // path leaves exactly these symbolic and lets the assembler bind them, so
+                    // leave the name in place (the emitter prints "s[sgpractivationBeta]") and
+                    // do NOT abort -- matching native, byte-for-byte.
+                    if (resolveUnresolvedSentinel && reg.reg.type == RegType::V) {
                         std::cerr << "logical-IR migration: could not resolve symbolic register "
                                      "operand '"
                                   << symbol

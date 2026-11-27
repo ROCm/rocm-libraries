@@ -109,6 +109,7 @@ from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_
 from .Common.DebugInstrMask import applyDebugDisableInstrMask
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .ir import logical_region, maybe_logical_leaf, sched_rocisa_view
+from .ir import Instruction as _LogicalFlipInstruction
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
@@ -24081,6 +24082,50 @@ class KernelWriterAssembly(KernelWriter):
         result = True
     return result
 
+  def _logicalizeActivationMath(self, module):
+    """[G] epilogue activation Phase-3 flip (approach i): convert the fully-built
+    activation math to LogicalLeaf.
+
+    Activation.py builds the activation stream as rocisa and runs its build-time
+    *mutating* passes on it -- CombineInstructions/FuseInstruction (peephole
+    const-folding), ConvertCoeffToHex (float immediate -> hex) and
+    assignGpr/HolderToGpr (symbolic Holder -> physical GPR). Those passes
+    reconstruct/mutate instructions by concrete rocisa type and read .dst/.srcs,
+    so the stream must stay rocisa *through* them. We therefore flip only here, at
+    the return of getActivation{DestDataType,ActivationComputeType} -- i.e. after
+    getModule()+assignGpr() have fully resolved the module. The leaf's rocisaInst
+    clone is then byte-identical to what the lazy converter would lower at
+    toStinkyTofuModule time (eager == lazy); ValuC-relative symbolic VGPRs stay
+    symbolic and resolve at StinkyTofu lowering, same on both A/B passes.
+
+    The build-time passes move into logical lowering in Phase 4 -- the C++
+    LogicalPeepholePass (ported from Activation.py, shared/stinkytofu/src/
+    transforms/logical) is the landing for CombineInstructions/FuseInstruction.
+
+    No _MIGRATED entry and no C++ seam are needed: maybe_logical_leaf lowers via
+    the exact createLogicalFromRocisa path the lazy converter already runs on
+    these opcodes, and every activation opcode (pure VALU/SALU) is Other / None /
+    weight-1 in both rocisa and the logical schedCategory tables, so the
+    makeLogicalLeaf oracle matches by default. Subtile-guarded: subtile activation
+    stays pure rocisa (its own emitter + LogicalScheduler introspect concrete
+    types). maybe_logical_leaf is itself gated on gfx1250 + active region + trial +
+    not _kernel_logical_disabled, so this is a no-op everywhere else."""
+    if self.states.kernel["UseSubtileImpl"]:
+      return module
+    with logical_region("activation"):
+      self._flipInstructionsToLeaves(module)
+    return module
+
+  def _flipInstructionsToLeaves(self, module):
+    """Recursively replace each leaf instruction item in *module* with its
+    LogicalLeaf (via maybe_logical_leaf). Recurses into nested Modules; Labels /
+    TextBlocks (non-Instruction items) are left untouched."""
+    for idx, item in enumerate(module.items()):
+      if isinstance(item, Module):
+        self._flipInstructionsToLeaves(item)
+      elif isinstance(item, _LogicalFlipInstruction):
+        module.setItem(idx, maybe_logical_leaf(item))
+
   def getActivationDestDataType(self, kernel, activation, activationTypeStr: str, gwvw, \
   elementSumIdxIn, elementSumIdxOut, tmpVgpr, tmpSgpr):
     module = Module("ActivationAfterPack")
@@ -24121,7 +24166,7 @@ class KernelWriterAssembly(KernelWriter):
       actModule = activation.getModule(self.states.kernel["ProblemType"]["DestDataType"], activationTypeStr, vgprIn, vgprOut)
       module.add(activation.assignGpr(actModule, tmpVgpr, tmpSgpr))
       activation.setUsePK(True)
-    return module
+    return self._logicalizeActivationMath(module)
 
   def getActivationActivationComputeType(self, kernel, activation, activationTypeStr: str, gwvw, \
     elementSumIdxIn, elementSumIdxOut, tmpVgpr, tmpSgpr, satInt8=False, enableValuCPrefix=False):
@@ -24138,7 +24183,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(activation.assignGpr(actModule, tmpVgpr, tmpSgpr))
     activation.setSaturationForInt8(False)
     activation.setVgprPrefixFormat("")
-    return module
+    return self._logicalizeActivationMath(module)
 
   ##############################################################################
   # Prefetch across persistent: prefetch next tile's data during the NLL.
