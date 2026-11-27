@@ -70,9 +70,7 @@ struct FmhaFwdSplitKVKernel
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    // Markers are described in fmha_fwd_kernel_path_markers.hpp. Unlike
-    // fmha_fwd_kernel.hpp there is no name-based fallback: a pipeline that
-    // wants these paths must declare them.
+    // Opt-in markers, described in fmha_fwd_kernel_path_markers.hpp.
     static constexpr bool kUsesUntransposedVKernelPath =
         detail::uses_untransposed_v_kernel_path_v<FmhaPipeline>;
     static constexpr bool kUsesTdmAffineDramPath =

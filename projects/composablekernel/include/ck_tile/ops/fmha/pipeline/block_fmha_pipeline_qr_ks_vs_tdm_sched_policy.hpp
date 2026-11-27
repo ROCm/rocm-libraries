@@ -8,7 +8,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_load.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
-#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_common_policy.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_config.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_schedule.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
@@ -22,69 +22,69 @@ namespace ck_tile {
 template <typename Geometry_,
           typename Tuning_,
           typename TileSchedule_ = FmhaTdmSchedDefaultScheduleFor<Geometry_>>
-struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
+struct BlockFmhaPipelineQRKSVSTdmSchedPolicy
+    : BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy<
+          BlockFmhaPipelineQRKSVSTdmSchedPolicy<Geometry_, Tuning_, TileSchedule_>,
+          Geometry_,
+          Tuning_,
+          TileSchedule_,
+          FmhaTdmSchedLayout<Geometry_>>
 {
-    using BasePolicy = BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
-    using Geometry   = Geometry_;
-    using Tuning     = Tuning_;
-    using Schedule   = TileSchedule_;
-    using Layout     = FmhaTdmSchedLayout<Geometry>;
-    using KLoad      = FmhaTdmSchedLoad<Geometry::kKSuLoadCount>;
-    using VLoad      = FmhaTdmSchedTransposeLoad<Geometry::kVStageLoadCount>;
+    using Base = BlockFmhaPipelineQRKSVSTdmSchedCommonPolicy<BlockFmhaPipelineQRKSVSTdmSchedPolicy,
+                                                             Geometry_,
+                                                             Tuning_,
+                                                             TileSchedule_,
+                                                             FmhaTdmSchedLayout<Geometry_>>;
+    using BasePolicy      = typename Base::BasePolicy;
+    using Geometry        = Geometry_;
+    using Tuning          = Tuning_;
+    using Schedule        = TileSchedule_;
+    using Layout          = typename Base::Layout;
+    using OutputFragments = typename Base::OutputFragments;
+    using ScoreSoftmax    = typename Base::ScoreSoftmax;
+    using ScoreMapping    = typename Base::ScoreMapping;
+    using Base::kKFootprintBytes;
+    using Base::kKPhysicalStride;
+    using Base::kLdsRows;
+    using Base::kVFootprintBytes;
+    using Base::kVPhysicalStride;
+    using Base::kVPrefetchTensorCount;
+    using KLoad = FmhaTdmSchedLoad<Geometry::kKSuLoadCount>;
+    using VLoad = FmhaTdmSchedTransposeLoad<Geometry::kVStageLoadCount>;
     static_assert(Schedule::kNumQkStages == Geometry::kQkStages &&
                   Schedule::kNumPvStages == Geometry::kPvStages &&
                   Schedule::kQkWmmasPerStage == Geometry::kQkWmmasPerStage &&
                   Schedule::kPvWmmasPerStage == Geometry::kPvWmmasPerStage);
-    static constexpr index_t kBlockPerCu = Tuning::kBlockPerCu;
 
-    static constexpr index_t kLdsRows            = Geometry::kN;
-    static constexpr index_t kKValidWidth        = Geometry::kHeadDimQK;
-    static constexpr index_t kKPhysicalStride    = Layout::kKPhysicalStride;
-    static constexpr index_t kVLogicalWidth      = Geometry::kDv;
-    static constexpr index_t kVPhysicalStride    = Layout::kVPhysicalStride;
-    static constexpr index_t kVPadAmount         = Layout::kVPadAmount;
-    static constexpr index_t kVPadInterval       = Layout::kVPadInterval;
-    static constexpr index_t kKFootprintElements = kLdsRows * kKPhysicalStride;
-    static constexpr index_t kVFootprintElements = kLdsRows * kVPhysicalStride;
-    static constexpr index_t kKFootprintBytes =
-        kKFootprintElements * sizeof(typename Geometry::KDataType);
-    static constexpr index_t kVFootprintBytes =
-        kVFootprintElements * sizeof(typename Geometry::VDataType);
+    static constexpr index_t kVPadAmount   = Layout::kVPadAmount;
+    static constexpr index_t kVPadInterval = Layout::kVPadInterval;
+    // K rows are written whole by TDM (no TDM padding), so the K box and LDS rows span the stride.
+    static constexpr index_t kKDramBoxWidth = kKPhysicalStride;
+    static constexpr index_t kKLdsWidth     = kKPhysicalStride;
+    // V rows get kVPadAmount-encoded padding at each row boundary.
+    static constexpr index_t kVRowBytes = Geometry::kDv * sizeof(typename Geometry::VDataType);
+    using KPadding                      = detail::LdsPaddingConfig<false, 0, 0>;
+    using VPadding = detail::LdsPaddingConfig<true, kVRowBytes, (kVPadAmount + 1) * 4>;
+    static_assert(detail::EncodedTdmPadding<VPadding>::kPadInterval == kVPadInterval &&
+                  detail::EncodedTdmPadding<VPadding>::kPadAmount == kVPadAmount);
     // Named geometry knobs. Values frozen to the current D128/D192 formulas.
     static constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
     static constexpr bool kLeadFirstLoad      = Geometry::kHeadDimQK == 128;
     static constexpr bool kUseUnsignedCausalMask =
         Geometry::kHeadDimQK == 128 || Geometry::kHeadDimQK == 192;
-    static constexpr index_t kKPrefetchTensorCount = Tuning::kKWait;
-    static constexpr index_t kVPrefetchTensorCount = Tuning::kVWait;
-    static constexpr bool kPrefetchTailDrain       = Tuning::kTailDrain;
-    static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
-    static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
-
-    template <index_t Stage>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()
-    {
-        return Tuning::template GetQkTailDsCount<Stage>();
-    }
-
-    template <index_t Stage>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetPvTailDsCount()
-    {
-        return Tuning::template GetPvTailDsCount<Stage>();
-    }
 
     template <index_t Stage>
     CK_TILE_DEVICE static void WaitQkStageTail()
     {
         static_assert(Stage >= 0 && Stage < Geometry::kQkStages);
-        s_wait_dscnt<GetQkTailDsCount<Stage>()>();
+        s_wait_dscnt<Base::template GetQkTailDsCount<Stage>()>();
     }
 
     template <index_t Stage>
     CK_TILE_DEVICE static void WaitPvStageTail()
     {
         static_assert(Stage >= 0 && Stage < Geometry::kPvStages);
-        s_wait_dscnt<GetPvTailDsCount<Stage>()>();
+        s_wait_dscnt<Base::template GetPvTailDsCount<Stage>()>();
     }
 
     static constexpr index_t kLdsOffsetK0  = 0;
@@ -93,26 +93,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kLdsOffsetV1  = kLdsOffsetV0 + kVFootprintBytes;
     static constexpr index_t kLdsArenaSize = kLdsOffsetV1 + kVFootprintBytes;
 
-    using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
-
-    // The split-softmax score mapping and the PV output fragments are hand-written for one
-    // decomposition; tie them to the derived geometry.
     static_assert(FmhaTdmSchedSupportedGeometry<Geometry>::value);
-    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages>;
-    using ScoreMapping = typename ScoreSoftmax::Mapping;
-    static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
-                      ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
-                      ScoreMapping::kNumSu == Geometry::kQkStages &&
-                      ScoreMapping::kNIterPerSu == Geometry::kQkSuNIter &&
-                      ScoreMapping::kNumMsb == Geometry::kQkMIter * Geometry::kQkSuNIter &&
-                      ScoreMapping::kElementsPerWmma ==
-                          Geometry::QkWmma::kCM0PerLane * Geometry::QkWmma::kCM1PerLane,
-                  "split-softmax score mapping does not match the QK geometry");
-    static_assert(OutputFragments::kNumFragments == Geometry::kPvMIter * Geometry::kPvNIter &&
-                      OutputFragments::kNumDmsb % Geometry::kPvMIter == 0 &&
-                      OutputFragments::kElementsPerFragment ==
-                          Geometry::PvWmma::kCM0PerLane * Geometry::PvWmma::kCM1PerLane,
-                  "output fragments do not match the PV geometry");
 
     // Q is used only during the prologue. Its descriptor may span both K buffers
     // when the KV tile is 64 rows; the LDS barrier precedes the K loads that overwrite it.
@@ -120,106 +101,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                   2 * kKFootprintBytes);
     static_assert(kLdsOffsetK0 % 16 == 0 && kLdsOffsetK1 % 16 == 0 && kLdsOffsetV0 % 16 == 0 &&
                   kLdsOffsetV1 % 16 == 0);
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemmSu()
-    {
-        using GemmProblem =
-            BlockGemmProblem<typename Problem::QDataType,
-                             typename Problem::KDataType,
-                             typename Problem::SaccDataType,
-                             Problem::kBlockSize,
-                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
-                                                    Geometry::kQkSuColumns,
-                                                    Problem::BlockFmhaShape::kQKHeaddim>,
-                                           typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                                           typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
-
-        using WarpGemm = WarpGemmDispatcher<typename Problem::QDataType,
-                                            typename Problem::KDataType,
-                                            typename Problem::SaccDataType,
-                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
-                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
-                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
-                                            true>;
-
-        using BlockGemmPolicy =
-            BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::QDataType,
-                                                typename Problem::KDataType,
-                                                typename Problem::SaccDataType,
-                                                typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                                                WarpGemm,
-                                                GemmLoopOrder::MNK>;
-
-        return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
-    }
-
-    template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeKSuRegTileDistribution()
-    {
-        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemmSu<Problem>())>;
-        static_assert(BlockGemm::NIterPerWarp == Geometry::kQkSuNIter &&
-                      BlockGemm::KIterPerWarp == Geometry::kQkKIter);
-        return make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
-    }
-
-    template <index_t WmmaOrdinal,
-              typename BlockGemm,
-              typename CBlockTensor,
-              typename ABlockTensor,
-              typename BBlockTensor>
-    CK_TILE_DEVICE static void RunQkSuWmma(CBlockTensor& c_block_tensor,
-                                           const ABlockTensor& a_block_tensor,
-                                           const BBlockTensor& b_block_tensor)
-    {
-        using WarpGemm    = typename BlockGemm::WarpGemm;
-        using AWarpDstr   = typename WarpGemm::AWarpDstr;
-        using BWarpDstr   = typename WarpGemm::BWarpDstr;
-        using CWarpDstr   = typename WarpGemm::CWarpDstr;
-        using AWarpTensor = typename WarpGemm::AWarpTensor;
-        using BWarpTensor = typename WarpGemm::BWarpTensor;
-        using CWarpTensor = typename WarpGemm::CWarpTensor;
-
-        constexpr auto a_warp_y_lengths =
-            to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
-        constexpr auto b_warp_y_lengths =
-            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
-        constexpr auto c_warp_y_lengths =
-            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
-        constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
-        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
-        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
-
-        static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp *
-                                                            BlockGemm::KIterPerWarp *
-                                                            BlockGemm::MIterPerWarp);
-        constexpr index_t n_iter =
-            WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
-        constexpr index_t k_iter =
-            (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
-        constexpr index_t m_iter = WmmaOrdinal % BlockGemm::MIterPerWarp;
-
-        AWarpTensor a_warp_tensor;
-        a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
-            merge_sequences(sequence<m_iter, k_iter>{}, a_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-
-        BWarpTensor b_warp_tensor;
-        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-
-        CWarpTensor c_warp_tensor;
-        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-            merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
-
-        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-        c_block_tensor.set_y_sliced_thread_data(
-            merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-            c_warp_tensor.get_thread_buffer());
-    }
 
     template <index_t Stage,
               typename Mode,
@@ -306,15 +187,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                         next_b_block_tensor, b_lds_window, affine_v0);
             }
         };
-        auto emit_point = [](auto, auto, auto point) {
-            if constexpr(decltype(point)::value == FmhaTdmSchedSchedulePoint::AfterTokens)
-                __builtin_amdgcn_sched_barrier(0);
-            else
-                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
-        };
+        typename Base::SchedulePointEmitter emit_point;
 
         auto emit_wmma = [&](auto, auto wmma) {
-            RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
+            Base::template RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
                 c_block_tensor, a_block_tensor, b_block_tensor);
         };
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
@@ -395,12 +271,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                                                                     b_lds_window);
             }
         };
-        auto emit_point = [](auto, auto, auto point) {
-            if constexpr(decltype(point)::value == FmhaTdmSchedSchedulePoint::AfterTokens)
-                __builtin_amdgcn_sched_barrier(0);
-            else
-                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
-        };
+        typename Base::SchedulePointEmitter emit_point;
 
         auto emit_prepared_token = [&](auto kind, auto access) {
             if constexpr(kLeadFirstLoadThisStage && decltype(access)::value == 0)
@@ -604,158 +475,22 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     CK_TILE_HOST_DEVICE static constexpr bool IsSupportedProblem()
     {
         using Shape = remove_cvref_t<typename Problem::BlockFmhaShape>;
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-        constexpr bool is_wave32 = get_warp_size() == Geometry::kWaveSize;
-#else
-        constexpr bool is_wave32 = true;
-#endif
-        // The problem must describe exactly this policy's geometry (dtypes, block tile, wave
-        // layout, WMMA tiles). Both GEMMs share one wave layout: P stays in the lanes that
-        // produced S.
         return Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-               std::is_same_v<FmhaTdmSchedGeometryFor<Problem, Geometry::kQkSuColumns>, Geometry> &&
-               Shape::Gemm1BlockWarps::at(number<0>{}) == Shape::Gemm0BlockWarps::at(number<0>{}) &&
-               Shape::Gemm1BlockWarps::at(number<1>{}) == Shape::Gemm0BlockWarps::at(number<1>{}) &&
-               Shape::Gemm1BlockWarps::at(number<2>{}) == Shape::Gemm0BlockWarps::at(number<2>{}) &&
-               std::is_same_v<remove_cvref_t<typename Problem::SaccDataType>, float> &&
-               std::is_same_v<remove_cvref_t<typename Problem::OaccDataType>, float> &&
-               Shape::kK0 == Geometry::kQkWmmaK && Shape::kSubQKHeaddim == Geometry::kHeadDimQK &&
-               Shape::IsVLayoutRowMajor && Shape::NumWarps == Geometry::kWaves && is_wave32;
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetK0() { return kLdsOffsetK0; }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetK1() { return kLdsOffsetK1; }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetV0() { return kLdsOffsetV0; }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetV1() { return kLdsOffsetV1; }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsArenaSize() { return kLdsArenaSize; }
-
-    template <typename Problem, bool LoadOnce = true>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        static_assert(LoadOnce, "qr_tdm_sched requires a full-head K TDM load");
-        constexpr index_t warp_num = Problem::kBlockSize / get_warp_size();
-        static_assert(kLdsRows % warp_num == 0);
-
-        return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<warp_num, kLdsRows / warp_num>, sequence<kKPhysicalStride>>,
-                tuple<sequence<1>>,
-                tuple<sequence<0>>,
-                sequence<1, 2>,
-                sequence<1, 0>>{},
-            bool_constant<true>{});
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        constexpr index_t kKPack = BasePolicy::template GetSmemKPackK<Problem>();
-        return make_naive_tensor_descriptor(
-            make_tuple(number<kLdsRows>{}, number<kKPhysicalStride>{}),
-            make_tuple(number<kKPhysicalStride>{}, number<1>{}),
-            number<kKPack>{},
-            number<1>{});
-    }
-
-    template <typename Problem, bool LoadOnce = true>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
-    {
-        static_assert(LoadOnce, "qr_tdm_sched requires a full-head K LDS descriptor");
-        return MakeKLdsWriteBlockDescriptor<Problem>();
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsWriteBlockDescriptor()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        constexpr index_t kKPack = BasePolicy::template GetSmemKPackV<Problem>();
-        return make_naive_tensor_descriptor(
-            make_tuple(number<kLdsRows>{}, number<kVLogicalWidth>{}),
-            make_tuple(number<kVPhysicalStride>{}, number<1>{}),
-            number<kKPack>{},
-            number<1>{});
+               Base::template IsSupportedSchedProblem<Problem>() &&
+               Shape::kK0 == Geometry::kQkWmmaK;
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadBlockDescriptor()
     {
-        return MakeVLdsWriteBlockDescriptor<Problem>();
-    }
-
-    template <typename Problem, bool Xor = false>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsBlockDescriptor()
-    {
-        static_assert(!Xor, "D192/V128 TDM writer requires an affine V LDS descriptor");
-        return MakeVLdsWriteBlockDescriptor<Problem>();
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        using BlockGemm = remove_cvref_t<decltype(BasePolicy::template GetPVBlockGemm<Problem>())>;
-        using WarpGemm  = typename BlockGemm::WarpGemm;
-
-        constexpr index_t kMWarp        = Geometry::kWaves;
-        constexpr index_t kNWarp        = 1;
-        constexpr index_t kNIterPerWarp = Geometry::kPvNIter;
-        constexpr index_t kKIterPerWarp = Geometry::kPvStageKIter;
-        static_assert(kNIterPerWarp == kVLogicalWidth / (kNWarp * WarpGemm::kN) &&
-                      kKIterPerWarp == Geometry::kPvStageK / WarpGemm::kK);
-
-        constexpr auto outer_encoding = tile_distribution_encoding<
-            sequence<kMWarp>,
-            tuple<sequence<kNIterPerWarp, kNWarp>, sequence<kKIterPerWarp>>,
-            tuple<sequence<0, 1>>,
-            tuple<sequence<0, 1>>,
-            sequence<2, 1>,
-            sequence<0, 0>>{};
-        constexpr auto block_encoding = detail::make_embed_tile_distribution_encoding(
-            outer_encoding, typename WarpGemm::BWarpDstrEncoding{});
-        using ReadEncoding =
-            typename InputTileDistributionTraits<decltype(block_encoding),
-                                                 typename Problem::VDataType>::TransposedDstrEncode;
-
-        return make_static_tile_distribution(ReadEncoding{});
-    }
-
-    template <typename Problem, bool LoadOnce = true>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeK()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        static_assert(LoadOnce, "qr_tdm_sched requires a full-head K LDS allocation");
-        return kKFootprintBytes;
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeV()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        return kVFootprintBytes;
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        return GetLdsArenaSize();
+        return Base::template MakeVLdsWriteBlockDescriptor<Problem>();
     }
 
     template <typename Problem>
     static constexpr bool kUsePaddedQ = Geometry::kHeadDimQK <= 128 && Geometry::kM == 128;
 
     template <typename Problem>
-    using LdsPaddingConfigQ = std::conditional_t<
+    using QPadding = std::conditional_t<
         kUsePaddedQ<Problem>,
         detail::
             LdsPaddingConfig<true, Geometry::kHeadDimQK * sizeof(typename Geometry::QDataType), 16>,
@@ -767,7 +502,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(IsSupportedProblem<Problem>(), "V128 policy received an invalid problem");
         if constexpr(kUsePaddedQ<Problem>)
         {
-            using Padding = LdsPaddingConfigQ<Problem>;
+            using Padding = QPadding<Problem>;
             constexpr auto desc =
                 detail::make_qr_tdm_row_major_lds_descriptor<typename Problem::QDataType,
                                                              Geometry::kM,
@@ -794,49 +529,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         return MakeQLdsBlockDescriptor<Problem>().get_element_space_size() *
                sizeof(typename Problem::QDataType);
     }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
-    {
-        static_assert(IsSupportedProblem<Problem>(), "V128 policy received an invalid problem");
-        using Padding = detail::EncodedTdmPadding<LdsPaddingConfigQ<Problem>>;
-        return make_tuple(number<Padding::kEnabled>{},
-                          number<Padding::kPadAmount>{},
-                          number<Padding::kPadInterval>{});
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        return make_tuple(number<false>{}, number<0>{}, number<0>{});
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
-    {
-        static_assert(IsSupportedProblem<Problem>(),
-                      "qr_tdm_sched policy geometry does not match the problem");
-        return make_tuple(number<true>{}, number<kVPadAmount>{}, number<kVPadInterval>{});
-    }
 };
 
-template <typename Geometry>
-struct FmhaTdmSchedTuningSelector
-{
-    static constexpr index_t kBlockPerCu =
-        Geometry::kHeadDimQK == 64 ? 3
-                                   : (Geometry::kHeadDimQK == 192 && Geometry::kN == 64 ? 2 : 1);
-    using type = FmhaTdmSchedDerivedTuning<Geometry, kBlockPerCu>;
-};
-
-template <typename Geometry>
-using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry>::type;
-
+// Workgroups per CU come from the generated traits (the codegen holds the occupancy rules).
 template <typename Problem>
 using FmhaTdmSchedPolicyFor = BlockFmhaPipelineQRKSVSTdmSchedPolicy<
     FmhaTdmSchedGeometryFor<Problem>,
-    FmhaTdmSchedDefaultTuning<FmhaTdmSchedGeometryFor<Problem>>>;
+    FmhaTdmSchedDerivedTuning<FmhaTdmSchedGeometryFor<Problem>, Problem::kBlockPerCu>>;
 
 } // namespace ck_tile

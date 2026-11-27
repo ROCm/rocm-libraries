@@ -61,13 +61,15 @@ FP8 and the split-KV/paged-KV APIs retain their separate inventories.
 ### Scheduled TDM forward pipeline
 
 `qr_tdm_sched` shares the gfx125 TDM architecture requirements with `qr_tdm`.
-Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
+Its FP16/BF16 configurations use D64/V64, D128/V128,
 or D192/V128, and row-major V. They use no bias, dropout, logits
 soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
 the existing pipeline candidates.
 Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
 logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
+FP8 Q/K/V (`fp8`, `fp8bf16`, `mxfp8`, `mxfp8bf16`) instances of `qr_tdm_sched` run a
+separate FP8 main loop with its own head dimensions, quantization, bias, and sink support.
 
 The generated API tries matching scheduled traits first. D64/V64 uses a
 128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and

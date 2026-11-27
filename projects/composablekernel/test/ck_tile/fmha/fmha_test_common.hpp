@@ -21,6 +21,8 @@ template <int HeadDim,
           int ValueDim  = 128>
 struct Model
 {
+    // The codegen's qr_tdm_sched occupancy of this geometry.
+    static constexpr int kBlockPerCu = HeadDim == 64 ? 3 : N == 64 ? 2 : 1;
     using Shape  = ck_tile::TileFmhaShape<ck_tile::sequence<128, N, 32, ValueDim, 32, HeadDim>,
                                           ck_tile::sequence<4, 1, 1>,
                                           ck_tile::sequence<16, 16, 32>,
@@ -37,7 +39,7 @@ struct Model
                                            Lse,
                                            false,
                                            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
-                                           1,
+                                           kBlockPerCu,
                                            false,
                                            false>;
     using Problem =

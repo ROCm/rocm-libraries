@@ -22,7 +22,7 @@ enum class mode_enum
     group
 };
 
-std::ostream& operator<<(std::ostream& stream, mode_enum mode)
+inline std::ostream& operator<<(std::ostream& stream, mode_enum mode)
 {
     return stream << (mode == mode_enum::batch ? "batch" : "group");
 }
@@ -44,7 +44,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& v)
     return os << "]";
 }
 
-std::vector<int32_t> to_seqstarts(ck_tile::span<const int32_t> seqlens)
+inline std::vector<int32_t> to_seqstarts(ck_tile::span<const int32_t> seqlens)
 {
     std::vector<int32_t> seqstarts = {0};
     for(int32_t seqlen : seqlens)

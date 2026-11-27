@@ -18,22 +18,22 @@ struct FmhaTdmSchedFp8SupportedGeometry
     static_assert(std::is_same_v<Q, fp8_t> && std::is_same_v<typename Geometry::KDataType, Q> &&
                       std::is_same_v<typename Geometry::VDataType, Q> &&
                       std::is_same_v<typename Geometry::PDataType, Q>,
-                  "qr_tdm_fp8_sched requires homogeneous FP8 Q/K/V/P");
+                  "FP8 qr_tdm_sched requires homogeneous FP8 Q/K/V/P");
     static_assert(
         Geometry::kM == 128 && Geometry::kN == 128 &&
             (((Geometry::kHeadDimQK == 64 || Geometry::kHeadDimQK == 128 ||
                Geometry::kHeadDimQK == 256) &&
               Geometry::kDv == Geometry::kHeadDimQK) ||
              (Geometry::kHeadDimQK == 192 && Geometry::kDv == 128)),
-        "qr_tdm_fp8_sched supports D64/V64, D128/V128, D192/V128 and D256/V256 with N128");
+        "FP8 qr_tdm_sched supports D64/V64, D128/V128, D192/V128 and D256/V256 with N128");
     static_assert(Geometry::kWaves == 4 && Geometry::kWaveSize == 32,
-                  "qr_tdm_fp8_sched requires four wave32 waves");
+                  "FP8 qr_tdm_sched requires four wave32 waves");
     static_assert(Geometry::kQkWmmaK == (Geometry::kHeadDimQK % 128 != 0 ? 64 : 128) &&
                       Geometry::kPvWmmaK == 128,
-                  "qr_tdm_fp8_sched needs a K64 QK WMMA at D64/D192, else K128, and K128 PV WMMA");
+                  "FP8 qr_tdm_sched needs a K64 QK WMMA at D64/D192, else K128, and K128 PV WMMA");
     static_assert(Geometry::kQkStages == Geometry::kN / 32 &&
                       Geometry::kPvStages == Geometry::kN / 128,
-                  "qr_tdm_fp8_sched requires 32-row QK stages and 128-row PV stages");
+                  "FP8 qr_tdm_sched requires 32-row QK stages and 128-row PV stages");
     static_assert(Geometry::PRepackLayout::kInThread,
                   "gemm_0 C^T and gemm_1 A lane layouts differ; P cannot be re-packed in-thread");
     static constexpr bool value = true;
@@ -47,18 +47,18 @@ struct FmhaTdmSchedFp8OneWaveGeometry
     static_assert(std::is_same_v<Q, fp8_t> && std::is_same_v<typename Geometry::KDataType, Q> &&
                       std::is_same_v<typename Geometry::VDataType, Q> &&
                       std::is_same_v<typename Geometry::PDataType, Q>,
-                  "qr_tdm_fp8_sched requires homogeneous FP8 Q/K/V/P");
+                  "FP8 qr_tdm_sched requires homogeneous FP8 Q/K/V/P");
     static_assert(Geometry::kM == 32 && Geometry::kWaves == 1 && Geometry::kWaveSize == 32 &&
                       Geometry::kN == 128 &&
                       (((Geometry::kHeadDimQK == 64 || Geometry::kHeadDimQK == 128 ||
                          Geometry::kHeadDimQK == 256) &&
                         Geometry::kDv == Geometry::kHeadDimQK) ||
                        (Geometry::kHeadDimQK == 192 && Geometry::kDv == 128)),
-                  "one-wavefront qr_tdm_fp8_sched supports M32 D64/D128/D192/D256 with N128");
+                  "one-wavefront FP8 qr_tdm_sched supports M32 D64/D128/D192/D256 with N128");
     static_assert(Geometry::kQkWmmaK == (Geometry::kHeadDimQK % 128 != 0 ? 64 : 128) &&
                       Geometry::kPvWmmaK == 128 && Geometry::kQkStages == Geometry::kN / 32 &&
                       Geometry::kPvStages == Geometry::kN / 128,
-                  "one-wavefront qr_tdm_fp8_sched keeps the four-wavefront WMMA stages");
+                  "one-wavefront FP8 qr_tdm_sched keeps the four-wavefront WMMA stages");
     static_assert(Geometry::PRepackLayout::kInThread,
                   "gemm_0 C^T and gemm_1 A lane layouts differ; P cannot be re-packed in-thread");
     static constexpr bool value = true;

@@ -7,9 +7,12 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_fp8.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_pipeline_common.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
@@ -21,7 +24,7 @@ namespace ck_tile {
 template <typename Problem_,
           typename Policy_        = FmhaTdmSchedPolicyFor<Problem_>,
           bool EnableVirtualSink_ = true>
-struct BlockFmhaPipelineQRKSVSTdmSched
+struct BlockFmhaPipelineQRKSVSTdmSched16
 {
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
@@ -108,11 +111,26 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     static_assert(Geometry::kM == kM0 && Geometry::kN == kN0 && Geometry::kDv == kN1);
 
     static constexpr const char* name = "qr_tdm_sched";
+    using Common                      = FmhaTdmSchedPipelineCommon;
 
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
-    static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
+    // D128 has the kernel store O asynchronously from the K0 LDS slot.
+    static constexpr bool kUsesAsyncLdsOutputStore = kQKHeaddim == 128;
+    static constexpr auto kCausalTileOrder =
+        kQKHeaddim == 128  ? detail::FmhaFwdCausalTileOrder::kBatchLocalXcd
+        : kQKHeaddim == 64 ? detail::FmhaFwdCausalTileOrder::kBatchLocal
+                           : detail::FmhaFwdCausalTileOrder::kDefault;
+    static constexpr index_t kBlockPerCu = Policy::kBlockPerCu;
+
+    // The no-virtual-sink specialization omits the finite sink normalization.
+    template <typename Kargs>
+    CK_TILE_HOST static bool IsSupportedKargs(const Kargs& kargs)
+    {
+        return kEnableVirtualSink || kargs.sink_ptr == nullptr;
+    }
+
     // Q is staged in the K1 slot so Q, K0 and V0 load together.
     static constexpr bool kOverlapQKVPrologue =
         Geometry::kHeadDimQK == 128 && Geometry::kN == 128 &&
@@ -134,6 +152,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                       PvMmaShape::kN == Geometry::PvWmma::kN &&
                       PvMmaShape::kK == Geometry::PvWmma::kK,
                   "gemm_1 dispatched a different physical WMMA shape");
+    static_assert(kBlockPerCu * Policy::GetLdsArenaSize() <= static_cast<index_t>(get_lds_size()),
+                  "kBlockPerCu workgroups must fit the CU's LDS");
 #endif
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -183,7 +203,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
         LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
         FmhaMask mask,
-        PositionEncoding position_encoding,
+        [[maybe_unused]] PositionEncoding position_encoding,
         float scale_s,
         void* __restrict__ smem_ptrk0,
         void* __restrict__ smem_ptrk1,
@@ -247,28 +267,13 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
-        // The shared kernel can supply a sink logit independently of kHasSink,
-        // which controls sink tokens in the mask. Preserve this runtime input.
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
 
-        if constexpr(BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
-        {
-            // A virtual sink has V=0. Merge it only at normalization so its
-            // logit cannot change the BF16 rounding of the real-token P operand.
-            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-            clear_tile(l);
-        }
-        else if(__builtin_isinf_sign(sink_v) >= 0)
-        {
-            set_tile(m, sink_v * C_LOG2E);
-            set_tile(l, SMPLComputeDataType{1.0f});
-        }
-        else
-        {
-            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-            clear_tile(l);
-        }
+        // A virtual sink has V=0. Merge it only at normalization so its
+        // logit cannot change the BF16 rounding of the real-token P operand.
+        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+        clear_tile(l);
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
@@ -330,22 +335,9 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
-        {
-            constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
-            tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
-            tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
-            tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
-
-            constexpr auto LdsPaddingConfigK     = Policy::template GetLdsPaddingConfigK<Problem>();
-            tdm_config_k.pad_enable              = LdsPaddingConfigK[I0];
-            tdm_config_k.pad_config.pad_amount   = LdsPaddingConfigK[I1];
-            tdm_config_k.pad_config.pad_interval = LdsPaddingConfigK[number<2>{}];
-
-            constexpr auto LdsPaddingConfigV     = Policy::template GetLdsPaddingConfigV<Problem>();
-            tdm_config_v.pad_enable              = LdsPaddingConfigV[I0];
-            tdm_config_v.pad_config.pad_amount   = LdsPaddingConfigV[I1];
-            tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
-        }
+        Common::SetTdmPadding(tdm_config_q, Policy::template GetLdsPaddingConfigQ<Problem>());
+        Common::SetTdmPadding(tdm_config_k, Policy::template GetLdsPaddingConfigK<Problem>());
+        Common::SetTdmPadding(tdm_config_v, Policy::template GetLdsPaddingConfigV<Problem>());
 
         // K tile in LDS (sink-aware start)
         const auto kv_load_start =
@@ -686,46 +678,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             };
 
             auto process_score = [&]() {
-                // QK scores are ready for bias, masking, and softmax.
-                // STAGE 2: scale_s, add bias (prefill path, mirrors baseline)
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-                {
-                    tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                    // No per-element OOB branch: padded scores are masked to -inf, padded rows are
-                    // not stored, and the buffer range check returns 0 past the end.
-                    const auto bias_tile =
-                        load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
-                    tile_elementwise_inout(
-                        [](auto& x, const auto& y) {
-                            x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
-                        },
-                        s_acc,
-                        bias_tile);
-                }
-                else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                {
-                    const auto current_k_origin = [&]() {
-                        const bool in_sink = (num_sink_loop > i_total_loops);
-                        if(in_sink)
-                            return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                        else
-                            return make_tuple(
-                                kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-                    }();
-                    constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
-                    sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
-                        sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
-                            const auto tile_idx = get_x_indices_from_distributed_indices(
-                                s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
-                            const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
-                            const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
-                            constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                            s_acc(i_j_idx) *= scale_s;
-                            position_encoding.update(s_acc(i_j_idx), row, col);
-                        });
-                    });
-                }
-
+                // QK scores are ready for masking and softmax.
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
                 if constexpr(!kDeferTensorReady)
                     s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
@@ -910,16 +863,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         const index_t num_pipeline_loop = num_total_loop;
         do
         {
-            bool is_even_loop    = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
-            auto k_lds_write_ptr = is_even_loop ? static_cast<KDataType* __restrict__>(smem_ptrk0)
-                                                : static_cast<KDataType* __restrict__>(smem_ptrk1);
-            auto k_lds_read_ptr  = is_even_loop ? static_cast<KDataType* __restrict__>(smem_ptrk1)
-                                                : static_cast<KDataType* __restrict__>(smem_ptrk0);
-            auto v_lds_write_ptr = is_even_loop ? static_cast<VDataType* __restrict__>(smem_ptrv1)
-                                                : static_cast<VDataType* __restrict__>(smem_ptrv0);
-            auto v_lds_read_ptr  = is_even_loop ? static_cast<VDataType* __restrict__>(smem_ptrv0)
-                                                : static_cast<VDataType* __restrict__>(smem_ptrv1);
-            mainloop(k_lds_write_ptr, k_lds_read_ptr, v_lds_write_ptr, v_lds_read_ptr);
+            bool is_even_loop  = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
+            const auto buffers = Common::SelectKvBuffers<KDataType, VDataType>(
+                is_even_loop, smem_ptrk0, smem_ptrk1, smem_ptrv0, smem_ptrv1);
+            mainloop(buffers.k_cur, buffers.k_next, buffers.v_next, buffers.v_cur);
             if constexpr(kUseCountdownLoop)
             {
                 even_buffer = !even_buffer;
@@ -945,15 +892,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
                 sweep_tile_span(lse_acc_spans[I0], [&, m_ = m, l_ = l](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                    {
-                        lse_acc(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]);
-                    }
-                    else
-                    {
-                        lse_acc(i_idx) = m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]);
-                    }
+                    lse_acc(i_idx)       = Common::RowLse(m_[i_idx], scale_s, l_[i_idx]);
                 });
 
                 store_tile(lse_acc_dram_window_tmp, lse_acc);
@@ -961,15 +900,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                const auto tmp       = [&]() {
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 FmhaMask::IsMasking)
-                    {
-                        return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
-                    }
-                    else
-                        return 1 / l[i_idx];
-                }();
+                const auto tmp       = Common::RowInvSum<FmhaMask::IsMasking>(l[i_idx]);
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     output(i_j_idx) *= tmp;
@@ -977,7 +908,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             });
         };
 
-        if constexpr(kEnableVirtualSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
+        if constexpr(kEnableVirtualSink)
         {
             if(__builtin_isinf_sign(sink_v) != -1)
             {
@@ -1078,6 +1009,34 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                    smem_ptrv1,
                    sink_v);
     }
+};
+
+// The qr_tdm_sched pipeline: the FP8 main loop for 8-bit Q/K/V, the 16-bit one otherwise.
+template <typename Problem_>
+inline constexpr bool kFmhaTdmSchedIsFp8 =
+    sizeof(typename remove_cvref_t<Problem_>::QDataType) == 1;
+
+template <typename Problem_, bool kIsFp8 = kFmhaTdmSchedIsFp8<Problem_>>
+struct FmhaTdmSchedAnyPolicy
+{
+    using type = FmhaTdmSchedPolicyFor<Problem_>;
+};
+template <typename Problem_>
+struct FmhaTdmSchedAnyPolicy<Problem_, true>
+{
+    using type = FmhaTdmSchedFp8PolicyFor<Problem_>;
+};
+template <typename Problem_>
+using FmhaTdmSchedAnyPolicyFor = typename FmhaTdmSchedAnyPolicy<Problem_>::type;
+
+template <typename Problem_,
+          typename Policy_        = FmhaTdmSchedAnyPolicyFor<Problem_>,
+          bool EnableVirtualSink_ = true>
+struct BlockFmhaPipelineQRKSVSTdmSched
+    : std::conditional_t<kFmhaTdmSchedIsFp8<Problem_>,
+                         BlockFmhaPipelineQRKSVSTdmSchedFp8<Problem_, Policy_, EnableVirtualSink_>,
+                         BlockFmhaPipelineQRKSVSTdmSched16<Problem_, Policy_, EnableVirtualSink_>>
+{
 };
 
 } // namespace ck_tile

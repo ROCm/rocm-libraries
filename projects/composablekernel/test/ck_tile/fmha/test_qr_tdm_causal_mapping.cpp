@@ -18,7 +18,8 @@ template <ck_tile::index_t M,
           typename DataType                        = ck_tile::bf16_t,
           ck_tile::BlockAttentionBiasEnum BiasEnum = ck_tile::BlockAttentionBiasEnum::NO_BIAS,
           bool HasSink                             = false,
-          ck_tile::index_t N                       = 64>
+          ck_tile::index_t N                       = 64,
+          ck_tile::index_t BlockPerCu              = -1>
 using MappingProblem = ck_tile::BlockFmhaPipelineProblem<
     DataType,
     DataType,
@@ -51,7 +52,7 @@ using MappingProblem = ck_tile::BlockFmhaPipelineProblem<
                             StoreLSE,
                             false,
                             ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
-                            -1,
+                            BlockPerCu,
                             false,
                             HasSink>,
     true,
@@ -105,7 +106,8 @@ using ScheduledMappingKernel = ck_tile::FmhaFwdKernel<
                        ck_tile::bf16_t,
                        ck_tile::BlockAttentionBiasEnum::NO_BIAS,
                        false,
-                       128>>,
+                       128,
+                       1>>,
     ck_tile::Default2DEpilogue<
         ck_tile::Default2DEpilogueProblem<float, ck_tile::bf16_t, false, false>>>;
 

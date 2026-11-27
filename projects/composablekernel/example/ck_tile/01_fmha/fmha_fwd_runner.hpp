@@ -50,7 +50,7 @@ auto get_elimit(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp32>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdFp32>(std::string /*init_method*/)
 {
     double rtol = 1e-5;
     double atol = 1e-5;
@@ -58,7 +58,7 @@ auto get_elimit<FmhaFwdFp32>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1e-2;
@@ -66,7 +66,7 @@ auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -74,7 +74,7 @@ auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -82,7 +82,7 @@ auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -90,23 +90,23 @@ auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdMxFp8Bf16>(std::string init_method)
+inline auto get_elimit<FmhaFwdMxFp8Bf16>(std::string init_method)
 {
     return get_elimit<FmhaFwdMxFp8>(init_method);
 }
 
 template <>
-auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
+inline auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
 {
     double rtol = 1e-1;
     double atol = 2.6e-1;
     return ck_tile::make_tuple(rtol, atol);
 }
 
-int num_splits_heuristic(int batch_nhead_mblocks,
-                         int num_SMs,
-                         int max_splits,
-                         float fill_threshold = 0.8f)
+inline int num_splits_heuristic(int batch_nhead_mblocks,
+                                int num_SMs,
+                                int max_splits,
+                                float fill_threshold = 0.8f)
 {
     // If we have enough to almost fill the SMs, then just use 1 split
     if(batch_nhead_mblocks >= fill_threshold * num_SMs)
@@ -139,14 +139,14 @@ int num_splits_heuristic(int batch_nhead_mblocks,
     return 1;
 }
 
-int override_num_splits_if_necessary(int batch,
-                                     int nhead,
-                                     int max_seqlen_q,
-                                     int max_seqlen_k,
-                                     int hdim_q,
-                                     int hdim_v,
-                                     float p_drop,
-                                     int num_splits)
+inline int override_num_splits_if_necessary(int batch,
+                                            int nhead,
+                                            int max_seqlen_q,
+                                            int max_seqlen_k,
+                                            int hdim_q,
+                                            int hdim_v,
+                                            float p_drop,
+                                            int num_splits)
 {
     int device;
     auto status = hipGetDevice(&device);
@@ -288,7 +288,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        double alpha_k                    = 2)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -570,7 +571,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         std::cerr << "The value of qscale_str cannot be 'mx' for non-MX data types" << std::endl;
         return fwd_result::invalid_args;
     }
-    // Row-major MXFP8 V is served by gfx1250 qr_tdm_fp8_sched; packed MXFP4 V stays col-major.
+    // Row-major MXFP8 V is served by gfx1250 qr_tdm_sched; packed MXFP4 V stays col-major.
     if(is_mx && is_v_rowmajor && std::is_same_v<DataTypeConfig, FmhaFwdMxFp4>)
     {
         std::cerr << "The value of is_v_rowmajor must be 'false' for MXFP4" << std::endl;
@@ -2905,9 +2906,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     const double alpha_rows = static_cast<double>(
                         mask.type == mask_enum::no_mask ? real_seqlen_q
                                                         : std::min(real_seqlen_q, real_seqlen_k));
-                    // The one policy constant: the worst correct head measured needed 1.07.
-                    constexpr double alpha_k = 2;
-                    // 1/12 is the variance of a half-ULP round-to-nearest.
+                    // alpha_k is the policy knob; 1/12 is the half-ULP round-to-nearest variance.
                     const double alpha_tol =
                         alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows) +
                                             u_o * u_o / (12 * alpha_rows * hdim_v));

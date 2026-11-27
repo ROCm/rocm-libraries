@@ -103,7 +103,7 @@ TYPED_TEST(QrTdmSchedConfig, GeometryAndDerivedTails)
     EXPECT_EQ(T::kKWait, 1);
     EXPECT_EQ(T::kVWait, 1);
     EXPECT_TRUE(T::kTailDrain);
-    EXPECT_EQ(T::kBlockPerCu, G::kN == 128 ? 1 : G::kHeadDimQK == 64 ? 3 : 2);
+    EXPECT_EQ(T::kBlockPerCu, TypeParam::Problem::kBlockPerCu);
     static_for<0, G::kQkStages, 1>{}([&](auto stage) {
         constexpr int s = decltype(stage)::value;
         EXPECT_EQ(T::template GetQkTailDsCount<s>(),

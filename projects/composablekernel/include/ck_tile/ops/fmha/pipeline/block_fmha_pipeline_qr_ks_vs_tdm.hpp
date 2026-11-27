@@ -28,6 +28,12 @@ template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmDefaul
 struct BlockFmhaPipelineQRKSVSTdm
 {
     static constexpr bool kUsesLdsArena = true;
+    // FmhaFwdKernel capability markers (fmha_fwd_kernel_path_markers.hpp).
+    static constexpr bool kUsesUntransposedVKernelPath    = true;
+    static constexpr bool kUsesTdmAffineDramPath          = true;
+    static constexpr bool kTakesQuantDescales             = true;
+    static constexpr bool kTakesLogitsAndDropoutCallbacks = true;
+    static constexpr bool kSplitsOutputStoreByAlignment   = true;
 
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};

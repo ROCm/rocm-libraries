@@ -229,4 +229,74 @@ struct FmhaTdmSchedFp8TransposeLoad
     }
 };
 
+// FP32 bias tile in LDS: each wavefront TDMs and reads back only its own score row bands.
+template <typename Geometry>
+struct FmhaTdmSchedFp8BiasLoad
+{
+    static constexpr index_t kM        = Geometry::kM;
+    static constexpr index_t kN        = Geometry::kN;
+    static constexpr index_t kBandRows = Geometry::kQkWmmaM;
+    static constexpr index_t kBands    = Geometry::kQkMIter;
+    // 16 B row pad: the 16 rows of one ds_load_b128 then start on distinct bank quads.
+    static constexpr index_t kRowPitch = kN + 4;
+    static constexpr index_t kLdsBytes = kM * kRowPitch * static_cast<index_t>(sizeof(float));
+    // TDM transfers each wavefront issues per tile.
+    static constexpr index_t kTdmOps = kBands;
+    static_assert(kM == kBands * Geometry::kWaves * kBandRows && kN == 128,
+                  "each wavefront owns kQkMIter bands of WMMA rows of a 128-column tile");
+
+    // Tile at (row0, col0) of a rows x cols tensor; rows and columns past the end load zeros.
+    CK_TILE_DEVICE static void Issue(const float* base,
+                                     index_t stride,
+                                     index_t rows,
+                                     index_t cols,
+                                     index_t row0,
+                                     index_t col0,
+                                     float* lds)
+    {
+        TDMConfig config;
+        config.pad_enable = true;
+        // Encoded as dwords - 1: 4 pad dwords after every 2^(6 + 1) = 128 row dwords.
+        config.pad_config.pad_amount   = 4 - 1;
+        config.pad_config.pad_interval = 6;
+        const index_t wave             = get_warp_id();
+        static_for<0, kBands, 1>{}([&](auto band) {
+            const index_t r = (static_cast<index_t>(band) * Geometry::kWaves + wave) * kBandRows;
+            const uint32_t dims[2]    = {static_cast<uint32_t>(max(cols - col0, index_t{0})),
+                                         static_cast<uint32_t>(max(rows - row0 - r, index_t{0}))};
+            const uint64_t strides[2] = {static_cast<uint64_t>(stride), 0};
+            constexpr uint16_t box[2] = {kN, kBandRows};
+            const auto desc           = createTDMDescriptor<float, 2>(
+                base + static_cast<long_index_t>(row0 + r) * stride + col0,
+                lds + r * kRowPitch,
+                dims,
+                strides,
+                box,
+                config);
+            amd_tdm_load(desc);
+        });
+    }
+};
+
+// Compiler-only fence and VGPR pins shared by the FP8 sched pipeline pieces.
+struct FmhaTdmSchedFp8Pins
+{
+    // Compiler-only memory fence: keeps LDS reads below a barrier that publishes async writes.
+    CK_TILE_DEVICE static void CompilerMemoryFence() { asm volatile("" ::: "memory"); }
+
+    // From an SGPR the hardware reads only byte 0 of the scale operand and broadcasts it.
+    CK_TILE_DEVICE static int32_t PinToVgpr(int32_t v)
+    {
+        asm volatile("" : "+v"(v));
+        return v;
+    }
+
+    // Pin after all loads are issued; a pin per load serializes the round trips.
+    template <index_t N>
+    CK_TILE_DEVICE static void PinEachToVgpr(array<int32_t, N>& v)
+    {
+        static_for<0, N, 1>{}([&](auto i) { v(i) = PinToVgpr(v[i]); });
+    }
+};
+
 } // namespace ck_tile

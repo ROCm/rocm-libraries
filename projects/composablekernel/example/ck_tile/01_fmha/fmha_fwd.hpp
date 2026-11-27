@@ -181,7 +181,7 @@ struct FmhaFwdTypeConfig<FmhaFwdMxFp8>
     static constexpr ck_tile::index_t kVScaleGranularity  = 32;
 };
 
-// MXFP8 inputs with a BF16 output (gfx125x qr_tdm_fp8_sched only).
+// MXFP8 inputs with a BF16 output (gfx125x qr_tdm_sched only).
 template <>
 struct FmhaFwdTypeConfig<FmhaFwdMxFp8Bf16> : FmhaFwdTypeConfig<FmhaFwdMxFp8>
 {
