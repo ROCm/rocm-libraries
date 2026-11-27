@@ -455,30 +455,31 @@ TEST(multi_gpu_validate, catch_validation_errors)
     }
 }
 
-// Multi-rank tokens run in MPI runs only, and single-rank tokens in single-process runs only:
-// add a multi-rank token only if (part of) the root cause of the issue it covers is exclusive
-// to multi-process logic, and cover any other part with single-rank tokens.
+// Tokens are converted to the number of ranks of the run (see
+// token_for_mp_ranks): add a multi-rank token only if (part of) the root
+// cause of the issue it covers is exclusive to multi-process logic, and
+// cover any other part with single-rank tokens.
 static const auto multi_gpu_tokens = {
     // clang-format off
 
     // input bricks are not contiguous
-    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6480_81_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6480_81_1_rank_1_dev_1",
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_0_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6480_81_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6480_81_1_rank_1_dev_0",
     // output bricks are not contiguous
-    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25600_160_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25600_160_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25600_160_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25600_160_1_rank_1_dev_0_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_0",
     // neither input nor output bricks are contiguous
-    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_0_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_0",
     // slab-decomposed c2c with padded input strides
     "complex_forward_len_128_256_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_64_256_stride_262144_4096_1_dev_0_brick_lower_0_64_0_upper_1_128_256_stride_262144_4096_1_dev_1_ofield_brick_lower_0_0_0_upper_1_128_128_stride_16384_128_1_dev_0_brick_lower_0_0_128_upper_1_128_256_stride_16384_128_1_dev_1",
     // pencil-decomposed c2c with padded input distances
     "complex_forward_len_8_8_8_single_op_batch_64_ifield_brick_lower_0_0_0_0_upper_64_4_4_8_stride_4096_32_8_1_dev_0_brick_lower_0_0_4_0_upper_64_4_8_8_stride_4096_32_8_1_dev_1_brick_lower_0_4_0_0_upper_64_8_4_8_stride_4096_32_8_1_dev_2_brick_lower_0_4_4_0_upper_64_8_8_8_stride_4096_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_64_4_8_4_stride_128_32_4_1_dev_0_brick_lower_0_0_0_4_upper_64_4_8_8_stride_128_32_4_1_dev_1_brick_lower_0_4_0_0_upper_64_8_8_4_stride_128_32_4_1_dev_2_brick_lower_0_4_0_4_upper_64_8_8_8_stride_128_32_4_1_dev_3",
     // 1D multi-process batched in-place transform using 1 device per rank
-    "complex_forward_len_256_double_ip_batch_4_ifield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_1_ofield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_1",
+    "complex_forward_len_256_double_ip_batch_4_ifield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_0_ofield_brick_lower_0_0_upper_4_128_stride_128_1_dev_0_brick_lower_0_128_upper_4_256_stride_128_1_rank_1_dev_0",
     // 2D multi-process out-of-place transform using 2 MPI ranks each with 2 GPUs
-    "complex_forward_len_128_256_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_128_64_stride_8192_64_1_dev_0_brick_lower_0_0_64_upper_1_128_128_stride_8192_64_1_rank_1_dev_1_brick_lower_0_0_128_upper_1_128_192_stride_8192_64_1_rank_0_dev_2_brick_lower_0_0_192_upper_1_128_256_stride_8192_64_1_rank_1_dev_3_ofield_brick_lower_0_0_0_upper_1_128_64_stride_8192_64_1_dev_0_brick_lower_0_0_64_upper_1_128_128_stride_8192_64_1_rank_1_dev_1_brick_lower_0_0_128_upper_1_128_192_stride_8192_64_1_rank_0_dev_2_brick_lower_0_0_192_upper_1_128_256_stride_8192_64_1_rank_1_dev_3",    
+    "complex_forward_len_128_256_single_op_batch_1_ifield_brick_lower_0_0_0_upper_1_128_64_stride_8192_64_1_dev_0_brick_lower_0_0_64_upper_1_128_128_stride_8192_64_1_rank_1_dev_0_brick_lower_0_0_128_upper_1_128_192_stride_8192_64_1_rank_0_dev_1_brick_lower_0_0_192_upper_1_128_256_stride_8192_64_1_rank_1_dev_1_ofield_brick_lower_0_0_0_upper_1_128_64_stride_8192_64_1_dev_0_brick_lower_0_0_64_upper_1_128_128_stride_8192_64_1_rank_1_dev_0_brick_lower_0_0_128_upper_1_128_192_stride_8192_64_1_rank_0_dev_1_brick_lower_0_0_192_upper_1_128_256_stride_8192_64_1_rank_1_dev_1",
     // 3D multi-process out-of-place transform using 2 MPI ranks each with 2 GPUs
-    "complex_forward_len_256_256_256_double_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_64_256_256_stride_4194304_65536_256_1_dev_0_brick_lower_0_64_0_0_upper_1_128_256_256_stride_4194304_65536_256_1_rank_0_dev_1_brick_lower_0_128_0_0_upper_1_192_256_256_stride_4194304_65536_256_1_rank_1_dev_2_brick_lower_0_192_0_0_upper_1_256_256_256_stride_4194304_65536_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_256_256_64_stride_4194304_16384_64_1_dev_0_brick_lower_0_0_0_64_upper_1_256_256_128_stride_4194304_16384_64_1_rank_0_dev_1_brick_lower_0_0_0_128_upper_1_256_256_192_stride_4194304_16384_64_1_rank_1_dev_2_brick_lower_0_0_0_192_upper_1_256_256_256_stride_4194304_16384_64_1_rank_1_dev_3",
+    "complex_forward_len_256_256_256_double_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_64_256_256_stride_4194304_65536_256_1_dev_0_brick_lower_0_64_0_0_upper_1_128_256_256_stride_4194304_65536_256_1_rank_0_dev_1_brick_lower_0_128_0_0_upper_1_192_256_256_stride_4194304_65536_256_1_rank_1_dev_0_brick_lower_0_192_0_0_upper_1_256_256_256_stride_4194304_65536_256_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_256_256_64_stride_4194304_16384_64_1_dev_0_brick_lower_0_0_0_64_upper_1_256_256_128_stride_4194304_16384_64_1_rank_0_dev_1_brick_lower_0_0_0_128_upper_1_256_256_192_stride_4194304_16384_64_1_rank_1_dev_0_brick_lower_0_0_0_192_upper_1_256_256_256_stride_4194304_16384_64_1_rank_1_dev_1",
     // 3D multi-process batched in-place transform using 2 MPI ranks each with 2 GPUs
-    "complex_forward_len_128_300_256_single_op_batch_4_ifield_brick_lower_0_0_0_0_upper_4_32_300_256_stride_2457600_76800_256_1_dev_0_brick_lower_0_32_0_0_upper_4_64_300_256_stride_2457600_76800_256_1_rank_1_dev_1_brick_lower_0_64_0_0_upper_4_96_300_256_stride_2457600_76800_256_1_rank_0_dev_2_brick_lower_0_96_0_0_upper_4_128_300_256_stride_2457600_76800_256_1_rank_1_dev_3_ofield_brick_lower_0_0_0_0_upper_4_128_300_64_stride_2457600_19200_64_1_dev_0_brick_lower_0_0_0_64_upper_4_128_300_128_stride_2457600_19200_64_1_rank_1_dev_1_brick_lower_0_0_0_128_upper_4_128_300_192_stride_2457600_19200_64_1_rank_0_dev_2_brick_lower_0_0_0_192_upper_4_128_300_256_stride_2457600_19200_64_1_rank_1_dev_3",
+    "complex_forward_len_128_300_256_single_op_batch_4_ifield_brick_lower_0_0_0_0_upper_4_32_300_256_stride_2457600_76800_256_1_dev_0_brick_lower_0_32_0_0_upper_4_64_300_256_stride_2457600_76800_256_1_rank_1_dev_0_brick_lower_0_64_0_0_upper_4_96_300_256_stride_2457600_76800_256_1_rank_0_dev_1_brick_lower_0_96_0_0_upper_4_128_300_256_stride_2457600_76800_256_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_4_128_300_64_stride_2457600_19200_64_1_dev_0_brick_lower_0_0_0_64_upper_4_128_300_128_stride_2457600_19200_64_1_rank_1_dev_0_brick_lower_0_0_0_128_upper_4_128_300_192_stride_2457600_19200_64_1_rank_0_dev_1_brick_lower_0_0_0_192_upper_4_128_300_256_stride_2457600_19200_64_1_rank_1_dev_1",
 
     // 2D, 2-device out-of-place transform where both devices require work memory
     "complex_forward_len_8_65536_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_8_32768_8_stride_2097152_262144_8_1_dev_0_brick_lower_0_0_32768_0_upper_1_8_65536_8_stride_2097152_262144_8_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_8_65536_4_stride_2097152_262144_4_1_dev_0_brick_lower_0_0_0_4_upper_1_8_65536_8_stride_2097152_262144_4_1_dev_1",
@@ -566,9 +567,61 @@ static std::vector<std::string> multi_gpu_bluestein_tokens()
     return tokens;
 }
 
+// Relocate a token's bricks if the run has one rank (mp_ranks) and the
+// token several, or the reverse, with D devices per rank: device j of a
+// single-rank token moves to device j % D of rank j / D, with D set to
+// gpus_per_rank; the reverse conversion uses the smallest D that fits the
+// token, i.e., its largest device ID plus one.
+static std::string token_for_mp_ranks(const std::string& token)
+{
+    fft_params params;
+    params.from_token(token);
+
+    int max_rank      = 0;
+    int max_device_id = 0;
+    for(const auto* fields : {&params.ifields, &params.ofields})
+        for(const auto& f : *fields)
+            for(const auto& b : f.bricks)
+            {
+                max_rank      = std::max(max_rank, b.rank);
+                max_device_id = std::max(max_device_id, b.device);
+            }
+
+    const bool to_multi_rank = mp_ranks > 1;
+    if(to_multi_rank != (max_rank > 0))
+    {
+        const int devices_per_rank
+            = to_multi_rank ? static_cast<int>(gpus_per_rank) : max_device_id + 1;
+        for(auto* fields : {&params.ifields, &params.ofields})
+            for(auto& f : *fields)
+                for(auto& b : f.bricks)
+                {
+                    if(to_multi_rank)
+                    {
+                        b.rank   = b.device / devices_per_rank;
+                        b.device = b.device % devices_per_rank;
+                    }
+                    else
+                    {
+                        b.device += b.rank * devices_per_rank;
+                        b.rank = 0;
+                    }
+                }
+    }
+    return params.token();
+}
+
 std::vector<fft_params> param_generator_multi_gpu_adhoc()
 {
-    auto all_params = param_generator_token(test_prob, multi_gpu_tokens);
+    std::vector<std::string> tokens;
+    for(const auto& token : multi_gpu_tokens)
+    {
+        auto converted = token_for_mp_ranks(token);
+        if(std::find(tokens.begin(), tokens.end(), converted) == tokens.end())
+            tokens.push_back(std::move(converted));
+    }
+
+    auto all_params = param_generator_token(test_prob, tokens);
     for(auto& p : param_generator_token(test_prob, multi_gpu_bluestein_tokens()))
         all_params.push_back(std::move(p));
 
@@ -596,8 +649,7 @@ std::vector<fft_params> param_generator_multi_gpu_adhoc()
                                     [=](const fft_params& params) {
                                         return unavailable_bricks(params.ifields)
                                                || unavailable_bricks(params.ofields)
-                                               || (mp_lib == fft_params::fft_mp_lib_mpi
-                                                   && single_rank(params));
+                                               || (mp_ranks > 1 && single_rank(params));
                                     }),
                      all_params.end());
 
