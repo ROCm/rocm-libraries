@@ -52,3 +52,39 @@ foreach(arch IN LISTS archs)
         COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltTransform_${arch}.hsaco"
     )
 endforeach()
+
+# The MXFP6 packers are fixed-shape gfx950 kernels kept as assembly. They are linked into their
+# own code object, which the transform loads from the directory of hipblasltTransform_gfx950.hsaco.
+if("gfx950" IN_LIST archs)
+    set(pack_sources
+        "${CMAKE_CURRENT_SOURCE_DIR}/gfx950/rocke_mxfp6_pack_op_4096x65536_r256_w128t4_xcd_c0c1p_nosc.s"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gfx950/rocke_mxfp6_pack_scales_4096_0x65536_16x16x128_xcd_nts.s"
+    )
+    set(pack_objects)
+    foreach(pack_source IN LISTS pack_sources)
+        get_filename_component(pack_name "${pack_source}" NAME_WE)
+        set(pack_object "${CMAKE_CURRENT_BINARY_DIR}/${pack_name}.o")
+        add_custom_command(
+            OUTPUT "${pack_object}"
+            COMMAND ${CMAKE_CXX_COMPILER} -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=gfx950 -mwavefrontsize64 -c "${pack_source}" -o "${pack_object}"
+            DEPENDS "${pack_source}"
+            COMMENT "Assembling ${pack_name}.s"
+            VERBATIM
+        )
+        list(APPEND pack_objects "${pack_object}")
+    endforeach()
+    set(pack_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransformPack_gfx950.co")
+    add_custom_command(
+        OUTPUT "${pack_library}"
+        COMMAND ${CMAKE_CXX_COMPILER} -target amdgcn-amd-amdhsa ${pack_objects} -o "${pack_library}"
+        DEPENDS ${pack_objects}
+        COMMENT "Building hipblasltTransformPack_gfx950.co"
+        VERBATIM
+    )
+    add_custom_target(matrix-transform-pack-cp-gfx950 ALL
+        DEPENDS "${pack_library}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx950"
+        COMMAND ${CMAKE_COMMAND} -E copy "${pack_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx950/hipblasltTransformPack_gfx950.co"
+    )
+
+endif()
