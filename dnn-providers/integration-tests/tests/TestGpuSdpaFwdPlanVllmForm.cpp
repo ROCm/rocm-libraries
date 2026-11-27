@@ -166,7 +166,7 @@ void expectMatchesOracle(const VllmProblem& p, const VllmBuffers& buffers, const
 
 // Ragged Q over paged K/V with seq_len_q = diff(query_start_loc) and seq_len_kv equals the
 // oracle.
-TEST(TestGpuSdpaFwdPlanVllmForm, PagedKvUnderARaggedQuery)
+TEST(TestGpuSdpaFwdPlanVllmFormDevice, PagedKvUnderARaggedQuery)
 {
     SKIP_IF_NO_DEVICES();
     for(const bool causal : {false, true})
@@ -180,7 +180,7 @@ TEST(TestGpuSdpaFwdPlanVllmForm, PagedKvUnderARaggedQuery)
 }
 
 // FA / vLLM windows mapped to hipDNN's bounds (SEM-027) equal FA's definition.
-TEST(TestGpuSdpaFwdPlanVllmForm, FaWindowsMapToHipdnnBounds)
+TEST(TestGpuSdpaFwdPlanVllmFormDevice, FaWindowsMapToHipdnnBounds)
 {
     SKIP_IF_NO_DEVICES();
     const std::vector<std::pair<const char*, FaWindow>> windows = {{"decoder W=1", {0, 0}},
@@ -209,7 +209,7 @@ TEST(TestGpuSdpaFwdPlanVllmForm, FaWindowsMapToHipdnnBounds)
 
 // NaN or infinity in every K/V element no row sees gives the same bits as zeros there;
 // so do a block table with rows wider apart than its width and an interleaved cache.
-TEST(TestGpuSdpaFwdPlanVllmForm, KeysNoRowSeesDoNotLeak)
+TEST(TestGpuSdpaFwdPlanVllmFormDevice, KeysNoRowSeesDoNotLeak)
 {
     SKIP_IF_NO_DEVICES();
     const std::array<float, 2> poisons
@@ -261,7 +261,7 @@ TEST(TestGpuSdpaFwdPlanVllmForm, KeysNoRowSeesDoNotLeak)
 // Q, K and V all packed (vLLM's encoder call, AITER's extend): FLOAT through the dense rewrite,
 // BFLOAT16 through the native ragged kernel; each window equals the oracle and NaN outside every
 // row's window gives the same bits as zeros.
-TEST(TestGpuSdpaFwdPlanVllmForm, CompactThdWindowsAndKeysNoRowSees)
+TEST(TestGpuSdpaFwdPlanVllmFormDevice, CompactThdWindowsAndKeysNoRowSees)
 {
     SKIP_IF_NO_DEVICES();
     for(const auto dataType :

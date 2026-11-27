@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "GpuLayernormBwdRefTestFixture.hpp"
+#include "QuickCases.hpp"
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <stdexcept>
 
@@ -900,14 +901,10 @@ TEST_P(TestGpuLayernormBwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
-
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuLayernormBwdRef4DFp32,
-                         ::testing::ValuesIn(getLayernormSmall4DTestCases()));
+// --- Standard: fp32 small + medium shapes, reduced precision on small shapes ---
 
 // P1 (dtype orthogonality): reduced-precision runs use the minimal dtype catalog in the standard
-// tier (small shapes); Quick is fp32-only smoke.
+// tier (small shapes); fp32 runs the small catalog followed by the medium catalog.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef4DFp16,
                          ::testing::ValuesIn(getLayernormSmall4DDtypeTestCases()));
@@ -917,7 +914,8 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef4DFp32,
-                         ::testing::ValuesIn(getLayernormMedium4DTestCases()));
+                         ::testing::ValuesIn(concatCases(getLayernormSmall4DTestCases(),
+                                                         getLayernormMedium4DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuLayernormBwdRef4DFp32,
@@ -932,7 +930,7 @@ INSTANTIATE_TEST_SUITE_P(StandardSmall,
                          ::testing::ValuesIn(getLayernormSmall5DTestCases()));
 
 // P1 (dtype orthogonality): reduced-precision runs use the minimal dtype catalog in the standard
-// tier (small shapes); Quick is fp32-only smoke.
+// tier (small shapes); fp32 runs the small (StandardSmall) and medium (Standard) catalogs.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuLayernormBwdRef5DFp16,
                          ::testing::ValuesIn(getLayernormSmall5DDtypeTestCases()));

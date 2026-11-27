@@ -138,7 +138,7 @@ TEST(TestReferenceBenchmark, FailedSynchronizeIsAReferenceBenchmarkError)
 // running when the work callable returns: the stream is idle afterwards only if the
 // timer waited for it. HarnessDependencies must default to it, as the production
 // harness takes the default.
-TEST(TestReferenceBenchmark, ProductionTimerWaitsForQueuedDeviceWork)
+TEST(TestReferenceBenchmarkDevice, ProductionTimerWaitsForQueuedDeviceWork)
 {
     SKIP_IF_NO_DEVICES();
     constexpr size_t BYTES = size_t{256} << 20;
@@ -1172,7 +1172,7 @@ const std::array<DeviceSiteCase, 3> DEVICE_SITE_CASES{{
      8},
 }};
 
-class TestReferenceBenchmarkDeviceSite : public ::testing::TestWithParam<DeviceSiteCase>
+class TestReferenceBenchmarkSiteDevice : public ::testing::TestWithParam<DeviceSiteCase>
 {
 };
 
@@ -1183,7 +1183,7 @@ class TestReferenceBenchmarkDeviceSite : public ::testing::TestWithParam<DeviceS
 // tells the two apart: a copy made inside the phase holds the reference's values,
 // and one left for the comparison picks up the overwrite and mismatches. Runs the
 // real device synchronize, so it needs a device.
-TEST_P(TestReferenceBenchmarkDeviceSite, ExpectedOutputsReachTheValidatorInsideMaterialize)
+TEST_P(TestReferenceBenchmarkSiteDevice, ExpectedOutputsReachTheValidatorInsideMaterialize)
 {
     SKIP_IF_NO_DEVICES();
     using ::testing::_;
@@ -1286,7 +1286,7 @@ TEST_P(TestReferenceBenchmarkDeviceSite, ExpectedOutputsReachTheValidatorInsideM
 }
 
 INSTANTIATE_TEST_SUITE_P(Sites,
-                         TestReferenceBenchmarkDeviceSite,
+                         TestReferenceBenchmarkSiteDevice,
                          ::testing::ValuesIn(DEVICE_SITE_CASES),
                          [](const ::testing::TestParamInfo<DeviceSiteCase>& info) {
                              return std::string(info.param.name);

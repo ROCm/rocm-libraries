@@ -134,7 +134,7 @@ TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
 // GPU ref pipeline is wired up correctly; it skips for ops that lack a GPU
 // plan (confirming those ops correctly fall to the CPU reference path).
 // ---------------------------------------------------------------------------
-TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
+TEST(TestGpuGoldenVerificationRefDevice, SkipsWhenNoPlanAvailable)
 {
     SKIP_IF_NO_DEVICES();
 

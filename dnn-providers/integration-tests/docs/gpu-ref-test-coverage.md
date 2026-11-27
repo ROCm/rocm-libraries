@@ -106,20 +106,35 @@ binary.
 
 | Tier | Contents |
 |---|---|
-| quick | fp32 smoke: every op and kernel variant (mode, rank, direction) on small shapes in fp32, plus validation, channel-last, optional-argument and broadcast tests. Layernorm 5D fp32 small shapes are in standard (prefix `StandardSmall`) |
-| standard | fp32 medium shapes, plus every reduced-precision and mixed-type case on small shapes: instantiation prefix `Standard*`, plus the name patterns in `test_categories_gpu_ref.yaml` (the single list of them). Quick still holds the typed validator suites (`TestGpuFpValidation`, `TestGpuIntValidation`, `TestGpuFpReferenceRmsValidation`, which are cheap) and the two bf16 `TestGpuSdpaFwdProviderContract` tests |
+| quick | One fp32 case per GPU reference kernel family (every kernel entry point is compiled and launched once and compared with the CPU reference): the `Quick/*` instantiations (the first case of a small catalog, `QuickCases.hpp`) plus the 13 plain tests named in `test_categories_gpu_ref.yaml`. About 30 tests and 40 kernel variants |
+| standard | Everything else except `Comprehensive*` and `Full*`: the fp32 small and medium catalogs (prefix `Standard*`, `StandardSmall*`), every reduced-precision and mixed-type case, and the host-only validation tests |
 | comprehensive | `Comprehensive*` instantiations: large edge-case shapes, fp32 only (plus batchnorm bwd `ComprehensiveDouble`). Nightly runs `ctest -L comprehensive` |
 | full | `Full*` instantiations: large stress shapes, fp32 only. Prerelease runs `ctest -L full` |
 
-A new reduced-precision or mixed-type case belongs in standard. Give a
-parameterized suite a `Standard` prefix. A plain `TEST` is placed by its suite
-name, so name it with the datatype token (`...Fp16`, `...MixedType`).
+Quick is an opt-in list and standard is the catch-all: a test that is not named in the quick list, and
+has no `Quick` prefix, runs in standard. The quick tier is sized by the number of HipRTC compiles it
+triggers (about 0.4 s per kernel variant), not by its case count. To add a family to quick, add a
+`Quick` instantiation with one case (`quickCase(catalog)`, `QuickCases.hpp`), or name a plain `TEST` in
+both lists of `test_categories_gpu_ref.yaml` (quick `test_patterns` and standard `exclude`). The
+`hipdnn_gpu_ref_tests_tier_partition` CTest check fails when a test runs in no tier or in two, or when a
+quick pattern selects no test.
 
-The pointwise modes added with the CPU-parity work (the math, ELU and softplus unary modes, MAX, MIN,
-CMP_GT and BINARY_SELECT) run their small fp32 cases in standard, under the `StandardSmall` prefix. Their
-plain `TEST`s, and the plan and executor execution tests in `hipdnn_integration_tests_unit_tests`, are
-placed by name patterns in `test_categories_gpu_ref.yaml` and `test_categories.yaml`. Quick keeps the
-pre-existing modes' small fp32 cases and the host-only validation tests.
+GTest allows one instantiation per prefix and fixture, so an fp32 fixture has one `Standard`
+instantiation that runs the small catalog followed by the medium catalog
+(`concatCases(small, medium)`), and one `Quick` instantiation with the first small case. The first
+small case therefore runs in both tiers; it costs milliseconds, because its kernel is already compiled.
+
+A new reduced-precision or mixed-type case belongs in standard. Give a parameterized suite a
+`Standard` prefix. A plain `TEST` needs no prefix.
+
+The unit tests in `hipdnn_integration_tests_unit_tests` that need a device (GPU reference plan and graph
+executor execution, device fills, device comparison sites) also compile HipRTC kernels. Their suite name
+carries the marker `Device` (`TestGpuMatmulPlanPureDeviceFp32`, `TestBundleVerificationHarnessDevice`;
+before a trailing datatype, because the test-name rule requires the datatype last). They run in standard
+by the `*Device*` patterns in `test_categories.yaml`, and quick runs the unit tests that need no device.
+A device test in a suite without the marker lands in quick; `hipdnn_integration_tests_unit_tests_tier_partition`
+runs the quick tier with no visible device (`HIP_VISIBLE_DEVICES=-1`) and fails if a test skips with
+"No devices available".
 
 ## What was kept, and why
 
