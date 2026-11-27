@@ -6,23 +6,40 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
-from rocke.instances.gfx942 import f64_mma_probe as probe
 from rocke.core.arch import ArchTarget, MmaCatalog, known_arches
 from rocke.core.ir import F32, F64, IRBuilder, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
-from rocke.instances.gfx942.f64_mma_probe import (
+from rocke.instances.common import f64_mma_probe as probe
+from rocke.instances.common.f64_mma_probe import (
     F64MmaProbeSpec,
     build_f64_mma_probe,
 )
+from rocke.tests.engines import (
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
+    available_engines,
+    lower_hip_with_engine,
+    lower_with_engine,
+)
 from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
-# m -> (op_id, c_frag_len, A/B/C shapes) for the gfx942 f64 atoms.
+# m -> (op_id, c_frag_len, A/B/C shapes) for the f64 atoms.
 _ATOMS = {
     16: ("mfma_f64_16x16x4_f64", 4, ((16, 4), (4, 16), (16, 16))),
     4: ("mfma_f64_4x4x4_f64", 1, ((16, 4), (16, 4), (16, 4))),
 }
+
+# m -> the LLVM call each f64 atom lowers to.
+_LLVM_CALL = {
+    16: "call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64(",
+    4: "call double @llvm.amdgcn.mfma.f64.4x4x4f64(",
+}
+
+# The targets whose MMA catalog lists both f64 atoms; no other target lists
+# either.
+_LISTED_ON = ("gfx90a", "gfx942", "gfx950")
 
 
 class _Integers:
@@ -33,35 +50,83 @@ class _Integers:
     add = staticmethod(lambda x, y: x + y)
 
 
-def _f64_atom(m):
-    return ArchTarget.from_gfx("gfx942").mma.op_for_shape(
+def _f64_atom(m, arch="gfx942"):
+    return ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="mma", a_dtype="fp64", b_dtype="fp64", c_dtype="fp64", m=m, n=m, k=4
     )
 
 
+def _refusal(arch, m):
+    """The probe's refusal of ``arch``: unknown, or its catalog lacks the atom's
+    contract."""
+    if arch not in known_arches():
+        return (
+            f"build_f64_mma_probe failed - arch={arch!r}, expected a known gfx target"
+        )
+    return (
+        f"build_f64_mma_probe failed - arch={arch!r}, expected a target whose MMA "
+        f"catalog lists the f64 {m}x{m}x4 atom with the probe's lane-map contract"
+    )
+
+
+# Targets the probe refuses: two whose catalog lists no f64 atom, and an unknown one.
+_REFUSED_ARCHES = ["gfx908", "gfx1201", "gfx000"]
+
+
+@pytest.mark.parametrize("arch", _LISTED_ON)
 @pytest.mark.parametrize("m", [16, 4])
-def test_catalog_isolation(m):
+def test_catalog_isolation(m, arch):
     op_id, c_frag_len, _ = _ATOMS[m]
-    atom = _f64_atom(m)
+    atom = _f64_atom(m, arch)
     assert atom.op_id == op_id
     assert atom.c_dtype == "fp64"
     assert (atom.a_frag_len, atom.b_frag_len, atom.c_frag_len) == (1, 1, c_frag_len)
     assert atom.srcs[2].frag_len == atom.dst.frag_len == c_frag_len
-    fp32 = ArchTarget.from_gfx("gfx942").mma.op_for_shape(
+    fp32 = ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
     )
     assert fp32.op_id == "mfma_f32_16x16x4_f32"
-    # gfx90a and gfx950 list the 16x16x4 atom too; the four-block atom is
-    # gfx942's alone, and no other target lists either.
-    listed_on = {"gfx942"} if m == 4 else {"gfx90a", "gfx942", "gfx950"}
     for gfx in known_arches():
         lists = any(op.op_id == op_id for op in ArchTarget.from_gfx(gfx).mma.ops)
-        assert lists == (gfx in listed_on), gfx
+        assert lists == (gfx in _LISTED_ON), gfx
 
 
 @pytest.mark.parametrize("m", [16, 4])
-def test_layouts_are_bijective(m):
-    atom = _f64_atom(m)
+def test_lowered_exactly_where_the_catalog_lists_the_atom(m):
+    # Each engine lowers the atom, to LLVM IR and to HIP, on the targets whose
+    # catalog lists it, and refuses it with the catalog gate's text elsewhere.
+    op_id = _ATOMS[m][0]
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m), "gfx942")
+    builtin = f"__builtin_amdgcn_mfma_f64_{m}x{m}x4f64("
+    for arch in known_arches():
+        refusal = (
+            f"tile.{op_id} is not available on {arch}: its MMA catalog does not list it"
+        )
+        for engine in available_engines():
+            if arch in _LISTED_ON:
+                assert _LLVM_CALL[m] in lower_with_engine(kernel, arch, engine=engine)
+                assert builtin in lower_hip_with_engine(kernel, arch, engine=engine)
+                continue
+            assert_engine_rejects(
+                kernel,
+                arch,
+                engine=engine,
+                error_type=NotImplementedError,
+                message=refusal,
+            )
+            assert_engine_rejects_hip(
+                kernel,
+                arch,
+                engine=engine,
+                error_type=NotImplementedError,
+                message=refusal,
+            )
+
+
+@pytest.mark.parametrize("arch", _LISTED_ON)
+@pytest.mark.parametrize("m", [16, 4])
+def test_layouts_are_bijective(m, arch):
+    atom = _f64_atom(m, arch)
     _, c_frag_len, shapes = _ATOMS[m]
     calc = _Integers()
     for layout, shape, count in zip(
@@ -75,8 +140,9 @@ def test_layouts_are_bijective(m):
         assert len(set(coords)) == shape[0] * shape[1] == len(coords)
 
 
-def test_layout_16x16x4():
-    atom = _f64_atom(16)
+@pytest.mark.parametrize("arch", _LISTED_ON)
+def test_layout_16x16x4(arch):
+    atom = _f64_atom(16, arch)
     calc = _Integers()
     for lane in range(64):
         assert atom.a_layout().coord(calc, lane, 0) == (lane % 16, lane // 16)
@@ -88,10 +154,11 @@ def test_layout_16x16x4():
             )
 
 
-def test_layout_4x4x4():
+@pytest.mark.parametrize("arch", _LISTED_ON)
+def test_layout_4x4x4(arch):
     # Lane l = 16*k + 4*blk + (m or n) for A/B, 16*m + 4*blk + n for C/D, with
     # the four blocks stacked along rows.
-    atom = _f64_atom(4)
+    atom = _f64_atom(4, arch)
     calc = _Integers()
     for lane in range(64):
         hi, blk, lo = lane // 16, (lane // 4) % 4, lane % 4
@@ -123,35 +190,50 @@ def test_probe_rejects_bad_spec(m, k):
         F64MmaProbeSpec(m, k)
 
 
+@pytest.mark.parametrize("arch", _REFUSED_ARCHES)
+@pytest.mark.parametrize("m", [16, 4])
+def test_probe_refuses_a_target_without_the_atom(m, arch):
+    with pytest.raises(ValueError) as error:
+        build_f64_mma_probe(F64MmaProbeSpec(m), arch)
+    assert str(error.value) == _refusal(arch, m)
+
+
+@pytest.mark.parametrize("arch", _REFUSED_ARCHES)
+@pytest.mark.parametrize("m", [16, 4])
+def test_native_probe_refuses_a_target_without_the_atom(m, arch):
+    # The binding raises a failed build as RuntimeError, as its other builders do.
+    native = import_or_skip_until("rocke_engine", BUILD_VARIANT)
+    with pytest.raises(RuntimeError) as error:
+        native.f64_mma_probe_serialize_ir(m, 4, arch)
+    assert str(error.value) == _refusal(arch, m)
+
+
+@pytest.mark.parametrize("arch", _LISTED_ON)
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
-def test_python_builder_and_lowerers(m, k):
-    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
+def test_python_builder_and_lowerers(m, k, arch):
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k), arch)
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
-    hip = lower_kernel_to_hip(kernel, arch="gfx942")
+    hip = lower_kernel_to_hip(kernel, arch=arch)
     assert f"__builtin_amdgcn_mfma_f64_{m}x{m}x4f64(" in hip
-    call = (
-        "call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
-        if m == 16
-        else "call double @llvm.amdgcn.mfma.f64.4x4x4f64("
-    )
     for flavor in LLVM_FLAVORS:
-        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
-        assert ll.count(call) == k // 4
+        ll = _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
+        assert ll.count(_LLVM_CALL[m]) == k // 4
         assert ll.count("store double ") == _ATOMS[m][1]
 
 
+@pytest.mark.parametrize("arch", _LISTED_ON)
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
-def test_native_builder_and_lowerers_match_python(m, k):
+def test_native_builder_and_lowerers_match_python(m, k, arch):
     native = import_or_skip_until("rocke_engine", BUILD_VARIANT)
-    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k), arch)
     ir = serialize(kernel)
-    assert native.f64_mma_probe_serialize_ir(m, k) == ir
+    assert native.f64_mma_probe_serialize_ir(m, k, arch) == ir
     for flavor in LLVM_FLAVORS:
-        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
-        assert native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor) == ll
+        ll = _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
+        assert native.lower_serialized_ir(ir, arch=arch, flavor=flavor) == ll
 
 
 _CONTRACT_CASES = [
@@ -253,10 +335,8 @@ def test_probe_rejects_incompatible_contract_before_emission(m, role, field):
         patch.object(probe, "IRBuilder", wraps=IRBuilder) as builder,
     ):
         with pytest.raises(ValueError) as error:
-            build_f64_mma_probe(F64MmaProbeSpec(m))
-        assert str(error.value) == (
-            "F64 probe requires the fixed gfx942 instruction and layout contract"
-        )
+            build_f64_mma_probe(F64MmaProbeSpec(m), "gfx942")
+        assert str(error.value) == _refusal("gfx942", m)
         builder.assert_not_called()
 
 
@@ -283,7 +363,7 @@ def test_probe_accepts_copied_contract(m, forwarded):
             dst=replace(copied.dst, layout=replace(copied.dst.layout, fn=forward)),
         )
     spec = F64MmaProbeSpec(m)
-    expected = serialize(build_f64_mma_probe(spec))
+    expected = serialize(build_f64_mma_probe(spec, "gfx942"))
     target = ArchTarget.from_gfx("gfx942")
     catalog = MmaCatalog(
         [copied if op.op_id == atom.op_id else op for op in target.mma.ops]
@@ -291,4 +371,4 @@ def test_probe_accepts_copied_contract(m, forwarded):
     with patch.object(
         ArchTarget, "from_gfx", return_value=replace(target, mma=catalog)
     ):
-        assert serialize(build_f64_mma_probe(spec)) == expected
+        assert serialize(build_f64_mma_probe(spec, "gfx942")) == expected

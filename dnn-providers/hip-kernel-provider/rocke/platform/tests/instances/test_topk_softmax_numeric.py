@@ -12,7 +12,10 @@ The reference is numpy on the values the kernel reads: a stable sort by
 descending value gives the picks, and the softmax runs in float64. Indices must
 match exactly; weights within the rounding of the output dtype. One test runs
 rows of distinct values (exact in every input dtype, so rounding makes no
-ties); another runs rows made of ties. The configurations cover a row length
+ties); another runs rows made of ties; a third runs the values whose order is
+easiest to get wrong: signed zeros (equal, so a tie), the input dtype's
+smallest subnormals, NaN (never picked), the largest finite values, and ties
+at the last indices of a long row. The configurations cover a row length
 that is not a multiple of the block (masked tail lanes), one- and multi-wave
 blocks, and each input and output dtype.
 """
@@ -80,6 +83,46 @@ def _tie_rows(spec: TopkSoftmaxSpec) -> np.ndarray:
     return rows
 
 
+# Per input dtype: the smallest positive subnormal, the largest finite value,
+# and the finite value just below it.
+_SMALLEST_SUBNORMAL = {"f32": 2.0**-149, "f16": 2.0**-24, "bf16": 2.0**-133}
+_LARGEST_FINITE = {
+    "f32": float(np.finfo(np.float32).max),
+    "f16": 65504.0,
+    "bf16": (2.0 - 2.0**-7) * 2.0**127,
+}
+_BELOW_LARGEST_FINITE = {
+    "f32": float(np.nextafter(np.float32(_LARGEST_FINITE["f32"]), np.float32(0))),
+    "f16": 65472.0,
+    "bf16": (2.0 - 2.0**-6) * 2.0**127,
+}
+
+
+def _edge_rows(spec: TopkSoftmaxSpec) -> np.ndarray:
+    """Rows of the values whose order is easiest to get wrong.
+
+    Row 0: signed zeros, which tie, at indices on both sides of a block
+    boundary and at the last index; the dtype's smallest subnormals on either
+    side of zero; NaN, which is never picked. Row 1: the largest finite value
+    twice (a tie) and the value just below it twice. Row 2: a tie of the
+    largest value at the last indices of the row. The other entries are equal
+    and smaller, so a ``k`` past the special entries picks them in index
+    order."""
+    n = spec.n_per_row
+    assert n >= 9, "the edge rows need nine distinct positions"
+    tiny = _SMALLEST_SUBNORMAL[spec.dtype]
+    rows = np.full((3, n), -2.0)
+    rows[0, [0, 5]] = np.nan
+    rows[0, 1] = -tiny
+    rows[0, [3, n - 1]] = -0.0
+    rows[0, [7, n // 2]] = 0.0
+    rows[0, n - 2] = tiny
+    rows[1, [2, n // 3]] = _LARGEST_FINITE[spec.dtype]
+    rows[1, [0, n - 1]] = _BELOW_LARGEST_FINITE[spec.dtype]
+    rows[2, [n - 5, n - 3, n - 2, n - 1]] = 3.0
+    return rows
+
+
 _SPECS = [
     TopkSoftmaxSpec(n_per_row=64, k=4, dtype="f32", out_dtype="f32"),
     # A row longer than the block, not a multiple of it: masked tail lanes.
@@ -92,10 +135,15 @@ _SPECS = [
         dtype="f32",
         out_dtype="bf16",
         block_size=128,
-        cross_wave_argmax=True,
     ),
     TopkSoftmaxSpec(n_per_row=128, k=1, dtype="f16", out_dtype="f32", block_size=256),
 ]
+
+
+# A 4096-entry row (16 block widths): indices up to 4095 in a 256-lane block.
+_LONG_ROW_SPEC = TopkSoftmaxSpec(
+    n_per_row=4096, k=8, dtype="f32", out_dtype="f32", block_size=256
+)
 
 
 def _spec_id(spec: TopkSoftmaxSpec) -> str:
@@ -119,7 +167,9 @@ def _run_and_check(spec: TopkSoftmaxSpec, x: np.ndarray) -> None:
         "Y": _encode(np.full((rows, spec.k), np.nan), spec.out_dtype),
         "Idx": np.full((rows, spec.k), -1, dtype=np.int32),
     }
-    assert np.array_equal(_decode(buffers["X"], spec.dtype), x), "inputs not exact"
+    stored = _decode(buffers["X"], spec.dtype)
+    assert np.array_equal(stored, x, equal_nan=True), "inputs not exact"
+    assert np.array_equal(np.signbit(stored), np.signbit(x)), "signs not kept"
     launch_with_buffers(
         compile_kernel(build_topk_softmax(spec, arch), arch=arch),
         topk_softmax_signature(spec),
@@ -149,3 +199,8 @@ def test_topk_softmax_picks_the_largest_distinct_values_on_gpu(spec):
 @pytest.mark.parametrize("spec", _SPECS, ids=_spec_id)
 def test_topk_softmax_breaks_ties_toward_the_smaller_index_on_gpu(spec):
     _run_and_check(spec, _tie_rows(spec))
+
+
+@pytest.mark.parametrize("spec", [*_SPECS, _LONG_ROW_SPEC], ids=_spec_id)
+def test_topk_softmax_ranks_signed_zeros_subnormals_nan_and_extremes_on_gpu(spec):
+    _run_and_check(spec, _edge_rows(spec))

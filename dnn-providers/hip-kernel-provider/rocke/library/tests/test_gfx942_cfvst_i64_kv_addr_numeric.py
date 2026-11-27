@@ -25,8 +25,7 @@ import numpy as np
 import pytest
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
-from rocke.runtime.hip_module import get_device_total_memory
-from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.gpu import current_device_arch_in, skip_without_device_memory
 
 from ._attention_paged_reference import round_to_half
 from ._attention_tiled_launch import launch_unified
@@ -37,8 +36,6 @@ _NUM_SEQS = 2
 _NUM_QH = 32
 _NUM_KV = 8
 _CACHE_BYTES = 2 * 2**30 + 2**27  # 2.125 GiB per K and V
-# K and V caches, the output and headroom.
-_GPU_BYTES_NEEDED = 6 << 30
 
 # The shipped cfvst prefill shapes: (dtype, head_size, block_size).
 _SHIPPED = (("bf16", 64, 32), ("fp16", 64, 32), ("fp16", 128, 32))
@@ -70,9 +67,7 @@ def _problem(dtype: str, head_size: int, block_size: int, num_kv_blocks: int = 0
 @pytest.fixture
 def gfx942_with_room():
     current_device_arch_in(("gfx942",), "the gfx942 cfvst past-2 GiB check")
-    total = get_device_total_memory()
-    if total is None or total < _GPU_BYTES_NEEDED:
-        pytest.skip(f"needs a device with {_GPU_BYTES_NEEDED >> 30} GiB of memory")
+    skip_without_device_memory(2 * _CACHE_BYTES, "the gfx942 cfvst past-2 GiB check")
 
 
 def _clean_launch_caches():

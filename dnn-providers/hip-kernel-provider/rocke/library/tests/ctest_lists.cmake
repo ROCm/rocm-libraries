@@ -25,7 +25,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" -v -rs ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT})\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;gpu;quick\"\n"
+       "  LABELS \"ckc;python;gpu;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
@@ -216,7 +216,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Both entries collect the same files and split them with one -k
 # expression and its negation, so every test runs in exactly one of them; a
 # test the expression does not name runs in the first. The GPU classes (all
-# named *Gpu*) are deselected from both and run in the GPU list.
+# named *Gpu*, and marked gpu where they launch through the runtime directly)
+# are deselected from both and run in the GPU list.
 # test_conv_direct_grouped_backend_parity.py runs in
 # rocke_library_conv_pytest, not here. Their own entries rather than part
 # of rocke_library_conv_pytest: the build-and-lower matrices take tens of
@@ -245,7 +246,7 @@ foreach(_rocke_conv_tf32_test ${_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_tf32_test}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
+       "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -m \"not gpu\" -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;conv;host;standard\"\n"
@@ -255,7 +256,7 @@ if(WIN32)
   message(STATUS "rocKE: rocke_library_conv_tf32_lowering_pytest not registered on Windows (CI shard time; see comment above)")
 else()
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-         "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
+         "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -m \"not gpu\" -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
          "  LABELS \"ckc;python;conv;host;standard\"\n"
@@ -488,6 +489,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
+       "  SKIP_RETURN_CODE 77\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE})\n")
 
 # DSA lightning-indexer CPU tests (no GPU: validator and dispatch wiring; the
@@ -549,7 +551,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_contracts_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/contracts/test_builder_surface.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_contracts_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;host;quick\"\n"
+       "  LABELS \"ckc;python;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -557,7 +559,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
-       "  LABELS \"ckc;python;host;quick\"\n"
+       "  LABELS \"ckc;python;host;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -688,8 +690,8 @@ endif()
 # The C++/Python engine parity checks of library kernels: the gfx950 tiled-2D
 # selector, and the LLVM IR of the attention, MLA prefill and GDN/KDA decode
 # kernels. They run the C++ engine through its Python modules (rocke_engine),
-# which a provider build installs beside the rocke package when the build's
-# Python has pybind11; without them every case skips, and
+# which a provider build installs beside the rocke package when its configure
+# sets ROCKE_BUILD_PYBIND=ON; without them every case skips, and
 # rocke_engine_modules_check says why. The selector's full grid (its exhaustive
 # items) runs in the comprehensive entry below. The GDN/KDA decode case takes
 # about 20 s on one host core (it lowers 341 kernels at four LLVM flavors with

@@ -274,7 +274,8 @@ typedef struct rocke_moe_fp8_build_ctx
 
 /* ---- scheduling-cadence + MFMA dispatch -------- */
 
-/* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1".
+/* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1",
+ * and then mark the kernel to compile in a fresh, memory-capped process.
  * `cadence` NULL => ctx->cadence (which itself NULL => levers env default). */
 void rocke_moe_fp8_emit_loop_cadence_hint(rocke_moe_fp8_build_ctx_t* ctx, const char* cadence);
 

@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# CPU contract for the DPP split in the warp XOR reduce helpers.
+# CPU contract for the DPP split in butterfly_allreduce and the warp XOR
+# reduce helpers built on it.
 #
 # For f32/i32 values, the stages inside one 16-lane DPP row lower through
 # warp_shuffle_xor_dpp (``tile.dpp_xor``): masks 1 and 2 as themselves
@@ -11,10 +12,10 @@
 # than raising.
 import unittest
 
-from rocke.core.ir import IRBuilder
+from rocke.core.ir import I64, IRBuilder
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers.attention import warp_xor_reduce_sum
-from rocke.helpers.reduction import _warp_xor_reduce
+from rocke.helpers.reduction import _warp_xor_reduce, butterfly_allreduce
 
 
 def _ops(kernel):
@@ -72,6 +73,30 @@ class WarpXorReduceDppSplit(unittest.TestCase):
         warp_xor_reduce_sum(b, b.const_f64(1.0), stages=4)
         self.assertEqual(_dpp_masks(b.kernel), [])
         self.assertGreater(_count(b.kernel, "tile.ds_swizzle_xor"), 0)
+
+    def test_allreduce_exchanges_an_i64_as_two_i32_halves(self):
+        # stages=5 walks masks 1, 2, 4, 8, 16: each half takes DPP inside the
+        # row and ds_swizzle for mask 16.
+        b = IRBuilder("allreduce_i64")
+        key = b.sext(b.const_i32(1), I64)
+        result = butterfly_allreduce(
+            b,
+            key,
+            lambda own, remote: b.select(b.cmp_gt(remote, own), remote, own),
+            stages=5,
+        )
+        self.assertEqual(result.type, I64)
+        self.assertEqual(_dpp_masks(b.kernel), [1, 1, 2, 2, 7, 7, 15, 15])
+        self.assertEqual(_count(b.kernel, "tile.ds_swizzle_xor"), 2)
+
+    def test_allreduce_refuses_more_stages_than_a_wave_has_lanes(self):
+        for stages in (-1, 7):
+            b = IRBuilder("allreduce_refusal")
+            with self.assertRaisesRegex(
+                ValueError,
+                rf"^butterfly_allreduce failed - stages={stages}, expected 0 \.\. 6$",
+            ):
+                butterfly_allreduce(b, b.const_f32(1.0), b.fadd, stages=stages)
 
 
 if __name__ == "__main__":

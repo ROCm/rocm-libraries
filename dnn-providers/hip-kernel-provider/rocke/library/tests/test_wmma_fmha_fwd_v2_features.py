@@ -30,7 +30,8 @@ import numpy as np
 import pytest
 
 from rocke.core.arch import generic_arch_from_target_id
-from rocke.runtime.hip_module import get_device_arch, get_device_total_memory
+from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.gpu import skip_without_device_memory
 from rocke.tests.lanes import skip_needing_arch
 
 _ARCH = generic_arch_from_target_id(get_device_arch() or "")
@@ -826,9 +827,7 @@ def test_paged_cache_past_4gib(case):
     page_bytes = page_elems * np.dtype(kv_np).itemsize
     n_pages = -(-_FAR_BYTES // page_bytes)
     # Two caches past 4 GiB each, plus room for the rest of the case.
-    total = get_device_total_memory()
-    if total is None or total < 2 * n_pages * page_bytes + (1 << 30):
-        pytest.skip("needs a device with about 10 GiB of memory")
+    skip_without_device_memory(2 * n_pages * page_bytes, "the KV caches past 4 GiB")
     pages = [-(-n // ps) for n in lens_k]
     # Physical pages: a few low ones, then pages past 2 GiB and past 4 GiB,
     # shuffled across the sequences.

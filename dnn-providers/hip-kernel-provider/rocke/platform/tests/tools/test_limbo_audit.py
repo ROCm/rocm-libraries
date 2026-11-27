@@ -17,6 +17,8 @@ is quarantined.
 from __future__ import annotations
 
 import importlib.util
+import json
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -30,7 +32,7 @@ from rocke.tests.lanes import (
     SOURCE_TREE,
     skip_until_reason,
 )
-from rocke.tests.pending_lanes import PENDING
+from rocke.tests.pending_lanes import PENDING, python_files_under_test_roots
 from rocke.tests.run_records import RECORDS_DIR_ENV, UNFINISHED, read_run_records
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
@@ -86,8 +88,11 @@ def test_the_registry_entries_this_audit_relies_on_hold():
 
 
 def _tree_with(tmp_path: Path, files: dict[str, str]) -> Path:
-    """A scratch rocke directory holding ``files`` (path -> source)."""
+    """A scratch rocke checkout (a git work tree, as the audit reads its files
+    through git) holding ``files`` (path -> source)."""
     tree = tmp_path / "rocke"
+    tree.mkdir(parents=True)
+    subprocess.run([shutil.which("git") or "git", "init", "-q"], cwd=tree, check=True)
     for path, source in files.items():
         (tree / path).parent.mkdir(parents=True, exist_ok=True)
         (tree / path).write_text(textwrap.dedent(source), encoding="utf-8")
@@ -127,7 +132,7 @@ def _run_lane(
 
 
 def _audit(tree: Path, lanes: dict[str, Path], universe: Path | None = None):
-    source_paths = limbo_audit.SourcePaths(limbo_audit.python_files(tree))
+    source_paths = limbo_audit.SourcePaths(python_files_under_test_roots(tree))
     runs = [
         limbo_audit.lane_run(name, read_run_records(records), source_paths)
         for name, records in lanes.items()
@@ -288,6 +293,31 @@ def test_left_out():
     )
     assert _audit(tree, {"gfx942": selected_only}, universe) == {
         (UNREGISTERED_FILE, "test_left_out"): {}
+    }
+
+
+def test_a_case_no_lane_collected_is_in_limbo_beside_a_case_that_ran(tmp_path):
+    """A lane that runs one case of a parametrized test by its node id never
+    collects the others; the universe still holds them, and a real case is
+    never taken for the placeholder of an empty parameter set."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            UNREGISTERED_FILE: """
+import pytest
+
+@pytest.mark.parametrize("shape", ["small", "large"])
+def test_shape(shape):
+    pass
+""",
+        },
+    )
+    universe = _run_lane(tree, tmp_path / "universe", "none", "--collect-only")
+    small_only = _run_lane(
+        tree, tmp_path / "gfx942", "gfx942", f"{UNREGISTERED_FILE}::test_shape[small]"
+    )
+    assert _audit(tree, {"gfx942": small_only}, universe) == {
+        (UNREGISTERED_FILE, "test_shape[large]"): {}
     }
 
 
@@ -488,15 +518,97 @@ def test_an_installed_path_maps_to_its_source_file():
     )
     # Two source files of that name and no longer suffix in common: none.
     assert source_paths.source_of("/elsewhere/test_dtypes.py") is None
+    # A path a Windows run wrote maps the same on any reader's OS.
+    assert (
+        source_paths.source_of(r"C:\x\hip_kernel_provider\tests\core\test_dtypes.py")
+        == "platform/tests/core/test_dtypes.py"
+    )
+
+
+def _as_windows_records(records: Path, destination: Path) -> Path:
+    """A copy of the run records in ``records`` with each file path written as
+    a run on Windows writes it without run_records' "/" separators: a drive
+    and backslashes."""
+    destination.mkdir()
+    for path in records.glob("*.jsonl"):
+        lines = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            fields = json.loads(line)
+            if fields["file"]:
+                fields["file"] = "C:" + fields["file"].replace("/", "\\")
+            lines.append(json.dumps(fields))
+        (destination / path.name).write_text("\n".join(lines) + "\n", "utf-8")
+    return destination
+
+
+# A test that skips with a reason no registry entry records.
+_SKIPS_WHY = "def test_skips():\n    import pytest; pytest.skip('why')\n"
+
+
+def test_records_a_windows_run_wrote_are_audited_on_any_os(tmp_path):
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SKIPS_WHY})
+    records = _run_lane(tree, tmp_path / "gfx1100", "gfx1100")
+    windows = _as_windows_records(records, tmp_path / "windows")
+    assert _audit(tree, {"gfx1100": windows}) == {
+        (UNREGISTERED_FILE, "test_skips"): {"gfx1100": "why"}
+    }
+
+
+def test_a_lane_whose_records_name_no_source_test_file_fails_the_audit(tmp_path):
+    """Records of another tree (or none at all) are no evidence that the lane
+    ran anything: the audit fails rather than reporting no test in limbo."""
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: "def test_passes():\n    pass\n"})
+    other = _tree_with(
+        tmp_path / "other", {"platform/tests/test_elsewhere.py": "x = 1\n"}
+    )
+    records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
+    report = tmp_path / "limbo.md"
+    arguments = ["--lane", f"gfx942={records}", "--report", str(report)]
+    assert limbo_audit.main([*arguments, "--tree", str(tree)]) == 0
+    assert limbo_audit.main([*arguments, "--tree", str(other)]) == 1
+    assert (
+        "Lanes with no record naming a source test file, so no evidence: gfx942"
+        in report.read_text()
+    )
+
+
+def test_a_tree_with_no_test_files_is_refused(tmp_path, capsys):
+    """An audit over a tree with nothing to map records to would report every
+    lane as no evidence; the command refuses the tree instead, naming it."""
+    tree = _tree_with(tmp_path, {"tests/test_elsewhere.py": "x = 1\n"})
+    with pytest.raises(SystemExit) as stopped:
+        limbo_audit.main(
+            ["--lane", f"gfx942={tmp_path / 'records'}", "--tree", str(tree)]
+        )
+    assert stopped.value.code == 2
+    assert "expected a rocke source checkout with Python files under" in (
+        capsys.readouterr().err
+    )
+
+
+def test_a_tree_outside_a_git_work_tree_is_refused(tmp_path, capsys):
+    """The audit reads a checkout's files through git, so a directory that is
+    no work tree has no test files it can list; the command names it."""
+    outside = tmp_path / "outside"
+    (outside / "platform").mkdir(parents=True)
+    inside_a_work_tree = subprocess.run(
+        [shutil.which("git") or "git", "rev-parse", "--is-inside-work-tree"],
+        cwd=outside,
+        capture_output=True,
+        check=False,
+    )
+    if inside_a_work_tree.returncode == 0:
+        pytest.fail(f"expected {outside} outside any git work tree")
+    with pytest.raises(SystemExit) as stopped:
+        limbo_audit.main(
+            ["--lane", f"gfx942={tmp_path / 'records'}", "--tree", str(outside)]
+        )
+    assert stopped.value.code == 2
+    assert "source_files failed - root=" in capsys.readouterr().err
 
 
 def test_the_command_fails_on_a_test_in_limbo_and_writes_its_report(tmp_path):
-    tree = _tree_with(
-        tmp_path,
-        {
-            UNREGISTERED_FILE: "def test_skips():\n    import pytest; pytest.skip('why')\n"
-        },
-    )
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SKIPS_WHY})
     records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
     report = tmp_path / "limbo.md"
     arguments = [

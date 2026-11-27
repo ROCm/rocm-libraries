@@ -15,6 +15,7 @@ alone.
 from __future__ import annotations
 
 import ctypes
+import os
 import shutil
 import subprocess
 import sys
@@ -210,10 +211,24 @@ def test_an_unknown_flavor_names_the_engines_flavors():
     )
 
 
+def _isolated_environment(environment: dict[str, str], tree: Path) -> dict[str, str]:
+    """This process's environment without its ``ROCKE_*`` settings, which
+    would choose the engine or the package for the child, with ``environment``
+    over it and ``PYTHONPATH`` naming only ``tree``. The rest is kept: a
+    Python needs some of it to start (``SYSTEMROOT`` on Windows)."""
+    inherited = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("ROCKE_") and name != "PYTHONPATH"
+    }
+    return {**inherited, **environment, "PYTHONPATH": str(tree)}
+
+
 def _run_isolated_copy(tmp_path: Path, environment: dict[str, str], code: str) -> str:
     """Run ``code`` in a child Python whose only ``rocke`` package is a copy of
     this module and the standard-library modules it imports, in a tree of its
-    own under ``tmp_path``; return its stdout."""
+    own under ``tmp_path``, with :func:`_isolated_environment`; return its
+    stdout."""
     package = tmp_path / "tree" / "rocke"
     (package / "core").mkdir(parents=True)
     (package / "__init__.py").write_text("")
@@ -224,7 +239,7 @@ def _run_isolated_copy(tmp_path: Path, environment: dict[str, str], code: str) -
     run = subprocess.run(
         [sys.executable, "-S", "-c", code],
         cwd=package.parent,
-        env={**environment, "PYTHONPATH": str(package.parent)},
+        env=_isolated_environment(environment, package.parent),
         capture_output=True,
         text=True,
         check=False,
@@ -242,6 +257,22 @@ try:
 except native_engine.SharedEngineNotFound as missing:
     print(missing)
 """
+
+
+def test_the_isolated_child_keeps_the_environment_but_rocke_settings(
+    tmp_path, monkeypatch
+):
+    """The child keeps what a Python needs to start (``SYSTEMROOT`` on Windows
+    stands for it here) and drops the parent's ``ROCKE_*`` settings."""
+    monkeypatch.setenv("ROCKE_TEST_ISOLATION_SENTINEL", "parent")
+    monkeypatch.setenv("NON_ROCKE_ISOLATION_SENTINEL", "kept")
+    code = """
+import os
+print(os.environ.get("NON_ROCKE_ISOLATION_SENTINEL"))
+print(os.environ.get("ROCKE_TEST_ISOLATION_SENTINEL"))
+"""
+    out = _run_isolated_copy(tmp_path, {}, code)
+    assert out.splitlines() == ["kept", "None"]
 
 
 def test_no_library_is_reported_with_where_it_was_looked_for(tmp_path):

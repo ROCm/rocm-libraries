@@ -40,7 +40,7 @@ from rocke.core import ir as ir_mod
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _escape_md_string, lower_kernel_to_llvm
-from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.engines import lower_with_both_engines, native_engine_or_skip
 from rocke.tests.lanes import BUILD_VARIANT, SOURCE_TREE, skip_until
 
 THIS_FILE = os.path.abspath(__file__)
@@ -512,38 +512,20 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
     were emitting different bytes.
     """
 
-    def lower_with(self, backend, kernel):
-        prev = os.environ.get("ROCKE_BACKEND")
-        os.environ["ROCKE_BACKEND"] = backend
-        try:
-            return lower_kernel_to_llvm(kernel, arch="gfx950")
-        finally:
-            if prev is None:
-                os.environ.pop("ROCKE_BACKEND", None)
-            else:
-                os.environ["ROCKE_BACKEND"] = prev
-
     def test_engines_agree_byte_for_byte(self):
-        native_engine_or_skip()
         for build in (build_flat, build_loop):
-            kernel = build(capture_loc=True)
-            cpp = self.lower_with("cpp", kernel)
-            python = self.lower_with("python", kernel)
+            cpp = lower_with_both_engines(build(capture_loc=True), "gfx950")
             self.assertIn("!dbg", cpp, f"{build.__name__}: cpp emitted no debug info")
-            self.assertEqual(cpp, python, build.__name__)
 
     def test_both_mode_accepts_a_debug_build(self):
         """`both` is the gate that would catch any drift, so run it directly."""
         native_engine_or_skip()
-        ll = self.lower_with("both", build_loop(capture_loc=True))
+        with mock.patch.dict(os.environ, {"ROCKE_BACKEND": "both"}):
+            ll = lower_kernel_to_llvm(build_loop(capture_loc=True), arch="gfx950")
         self.assertIn("DICompileUnit", ll)
 
     def test_engines_agree_with_capture_off(self):
-        native_engine_or_skip()
-        kernel = build_loop(capture_loc=False)
-        self.assertEqual(
-            self.lower_with("cpp", kernel), self.lower_with("python", kernel)
-        )
+        lower_with_both_engines(build_loop(capture_loc=False), "gfx950")
 
     def test_engines_agree_on_a_windows_style_location(self):
         """A drive-letter path has to split the same way in both engines.
@@ -555,11 +537,9 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         and one that never split on it would disagree on Windows -- where it did,
         emitting the entire path as the filename with no directory at all.
         """
-        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         kernel.body.ops[-1].loc = r"C:\proj\rocke\emit.py:42"
-        cpp = self.lower_with("cpp", kernel)
-        self.assertEqual(cpp, self.lower_with("python", kernel))
+        cpp = lower_with_both_engines(kernel, "gfx950")
         # Backslashes survive as LLVM ``\5C`` hex escapes in the metadata string.
         directory, filename = os.path.split(r"C:\proj\rocke\emit.py")
         self.assertIn(
@@ -570,13 +550,10 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         )
 
     def test_engines_agree_on_a_path_with_a_semicolon(self):
-        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         path = native_abs("a;b", "kernel.py")
         kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
-        cpp = self.lower_with("cpp", kernel)
-        self.assertEqual(cpp, self.lower_with("python", kernel))
-        assert_difile(self, cpp, path)
+        assert_difile(self, lower_with_both_engines(kernel, "gfx950"), path)
 
     def test_engines_agree_on_a_windows_path_with_a_semicolon(self):
         """Same as the native-separator case, but with a drive-letter spelling.
@@ -585,22 +562,16 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         split. Either way both engines have to agree, and ``;`` must not cut
         the loc into two frames.
         """
-        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         path = r"C:\proj\a;b\kernel.py"
         kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
-        cpp = self.lower_with("cpp", kernel)
-        self.assertEqual(cpp, self.lower_with("python", kernel))
-        assert_difile(self, cpp, path)
+        assert_difile(self, lower_with_both_engines(kernel, "gfx950"), path)
 
     def test_engines_agree_on_a_quote_in_the_filename(self):
-        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         path = native_abs('weird"file.py')
         kernel.body.ops[-1].loc = f"{path}:7"
-        cpp = self.lower_with("cpp", kernel)
-        self.assertEqual(cpp, self.lower_with("python", kernel))
-        assert_difile(self, cpp, path)
+        assert_difile(self, lower_with_both_engines(kernel, "gfx950"), path)
 
 
 # Enough to pin the separator handling: absolute and relative paths on both

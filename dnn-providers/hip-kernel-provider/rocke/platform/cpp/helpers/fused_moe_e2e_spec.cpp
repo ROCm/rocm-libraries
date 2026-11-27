@@ -263,8 +263,8 @@ rocke_topk_softmax_spec_t
     /* TopkSoftmaxSpec(n_per_row=experts, k=topk, dtype="f32", out_dtype="f32",
      *                 block_size=router_block_size).
      *
-     * Start from the C default so the fields the Python omits (name,
-     * cross_wave_argmax) carry the TopkSoftmaxSpec dataclass defaults. */
+     * Start from the C default so the field the Python omits (name) carries
+     * the TopkSoftmaxSpec dataclass default. */
     rocke_topk_softmax_spec_t t = rocke_topk_softmax_spec_default();
     if(spec != NULL)
     {

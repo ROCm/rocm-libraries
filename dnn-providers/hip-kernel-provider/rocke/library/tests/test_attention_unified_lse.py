@@ -506,8 +506,15 @@ def test_runner_without_lse_launches_the_unchanged_reduce(runner):
 
 @pytest.mark.parametrize("backend", ["auto", "tiled"])
 def test_runner_launches_lse_on_a_2d_routed_shape_without_the_graph(runner, backend):
+    # A torch Q, so the graph fast path is otherwise eligible: only the LSE
+    # request keeps the launch off it.
     lse = object()
-    _run(_prefill_problem("gfx942", emit_lse=True), lse=lse, backend=backend)
+    _run(
+        _prefill_problem("gfx942", emit_lse=True),
+        lse=lse,
+        backend=backend,
+        q=_TorchTensor(),
+    )
     assert runner.vals2d["lse_ptr"] is lse
     assert runner.sig2d[-1] == "lse_ptr"
     assert runner.key2d[-1] == "lse"

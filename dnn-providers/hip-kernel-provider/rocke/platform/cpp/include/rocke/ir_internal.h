@@ -443,6 +443,14 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
     "parameters carry facts, which a launch from a code object or from a launch " \
     "plan does not check"
 
+/* Why the engine's C entries refuse a NULL or empty arch: there is no default
+ * target. The LLVM lowering gives it for any caller; the serialized-IR HIP
+ * entry gives it too, although rocke_lower_kernel_to_hip keeps its gfx950
+ * default. The Python-facing entries add a "pass arch=..." hint instead
+ * (ROCKE_BINDING_NO_TARGET_MESSAGE in bindings/family_glue.hpp, and
+ * rocke.core.native_engine.NO_TARGET_MESSAGE). */
+#define ROCKE_NO_TARGET_REASON "lowering requires an explicit gfx target (there is no default)"
+
 /* What a refused launch plan tells its caller to do instead (Python
  * core/ir.py::LAUNCH_THROUGH_FROM_ARTIFACT, same words). */
 #define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"

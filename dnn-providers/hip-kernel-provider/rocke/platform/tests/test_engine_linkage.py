@@ -17,9 +17,10 @@ from unittest.mock import Mock
 import pytest
 from rocke.core import native_engine
 from rocke.portable_ir.src import online
-from rocke.tests import item_time_limit
+from rocke.tests import item_time_limit, require_gpu
 from rocke.tests.ci_shard import ACTIVATION_FLAG
 from rocke.tests.ctest_listing import (
+    GPU_LABEL,
     GPU_RESOURCE_LOCK,
     PROVIDER_CTEST_SUBDIR,
     configure_installed_ctest,
@@ -29,7 +30,9 @@ from rocke.tests.ctest_listing import (
 )
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
 from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.platform_build import cmake_cache_entries
 from rocke.tests.provider_categories import provider_category_labels
+from rocke.tests.source_modules import load_entry_time_check
 
 PLATFORM = Path(__file__).resolve().parents[1]
 
@@ -146,16 +149,6 @@ EXPLICIT_GATES = {
     "rocke_library_counted_structural_gate",
     "rocke_library_counted_compiler_gate",
 }
-
-
-def _cmake_cache(build: Path) -> dict[str, str]:
-    """The ``NAME:TYPE=value`` entries of ``build``'s CMakeCache.txt, by name."""
-    entries = {}
-    for line in (build / "CMakeCache.txt").read_text().splitlines():
-        if line and not line.startswith(("#", "//")) and "=" in line:
-            key, value = line.split("=", 1)
-            entries[key.split(":", 1)[0]] = value
-    return entries
 
 
 def runs_pytest(test):
@@ -373,6 +366,24 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
         assert not off_limit, (tree.name, off_limit)
 
 
+@requires_cmake
+def test_no_installed_entry_argument_quotes_a_value_inside_it(tmp_path):
+    """CMake keeps a quote that follows ``=`` inside a generated argument, so
+    ``--ignore=\"<path>\"`` reaches pytest as a path that starts with a quote
+    and ignores nothing. Every installed entry passes such a value as its own
+    token (``--ignore \"<path>\"``)."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+    )
+    quoted = [
+        (test["name"], argument)
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
+        for argument in test.get("command", [])
+        if '="' in argument
+    ]
+    assert not quoted, quoted
+
+
 def gpu_test_limit() -> float:
     """The per-test limit of the GPU pytest entries that
     tests/cmake/TestTimeouts.cmake sets (ROCKE_TEST_ITEM_TIMEOUT_GPU), in
@@ -386,15 +397,19 @@ def gpu_test_limit() -> float:
 
 def test_the_gpu_per_test_limit_is_at_most_half_the_smallest_shard_budget():
     """A stalled GPU test runs to its per-test limit before it fails. The limit
-    is at most half the smallest rocKE share of a CI shard
-    (tools/check_entry_times.py, CI_TIERS), so one stall leaves the shard time
-    for the rest of its tests; a slower test raises only its own limit, with
-    the rocke_measured_seconds mark."""
-    script = PLATFORM.parent / "tools" / "check_entry_times.py"
-    if not script.is_file():
-        skip_until(SOURCE_TREE, reason="tools/ is absent from the installed tree")
-    entry_times = load_driver("rocke_check_entry_times", script)
-    smallest_budget = min(tier.budget_seconds for tier in entry_times.CI_TIERS)
+    is at most half the smallest rocKE share of a CI shard of a tier that runs
+    GPU entries (tools/check_entry_times.py, CI_TIERS), so one stall leaves the
+    shard time for the rest of its tests; a slower test raises only its own
+    limit, with the rocke_measured_seconds mark. A tier that runs no GPU entry
+    (quick) bounds it only once its GPU allowlist names an entry."""
+    entry_times = load_entry_time_check(PLATFORM / "tests" / "tools")
+    if entry_times is None:
+        skip_until(SOURCE_TREE, reason="tools/check_entry_times.py is absent here")
+    smallest_budget = min(
+        tier.budget_seconds
+        for tier in entry_times.CI_TIERS
+        if tier.runs_gpu_entries or entry_times.GPU_ENTRY_ALLOWLIST
+    )
     assert gpu_test_limit() <= smallest_budget / 2
 
 
@@ -433,8 +448,10 @@ def test_every_gpu_pytest_entry_limits_each_test(
     itself at most half the entry's CTest TIMEOUT, pytest-timeout's thread
     method, the one that interrupts a stall inside a HIP or COMGR call, and the
     rocke.tests.item_time_limit plugin, so only a measured time raises one
-    test's limit. Each takes the rocke_gpu resource lock, so a parallel ctest
-    never runs two of them on the one GPU at once."""
+    test's limit. Each loads rocke.tests.require_gpu, so an entry that finds
+    no GPU fails rather than skipping every test. Each takes the
+    rocke_gpu resource lock, so a parallel ctest never runs two of them on the
+    one GPU at once."""
     _, ctest_dir = configure_installed_ctest(
         tmp_path,
         f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
@@ -444,7 +461,7 @@ def test_every_gpu_pytest_entry_limits_each_test(
     gpu_entries = {
         test["name"]: test
         for test in list_installed_ctest_entries(ctest_dir, tmp_path)
-        if runs_pytest(test) and "gpu" in (entry_property(test, "LABELS") or [])
+        if runs_pytest(test) and GPU_LABEL in (entry_property(test, "LABELS") or [])
     }
     assert "rocke_tiling_gpu_pytest" in gpu_entries, sorted(gpu_entries)
     if (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file():
@@ -464,6 +481,7 @@ def test_every_gpu_pytest_entry_limits_each_test(
             if argument == "-p"
         ]
         assert item_time_limit.PLUGIN_NAME in plugins, (name, plugins)
+        assert require_gpu.PLUGIN_NAME in plugins, (name, plugins)
         assert limit <= float(entry_property(test, "TIMEOUT")) / 2, name
         assert entry_property(test, "RESOURCE_LOCK") == [GPU_RESOURCE_LOCK], name
 
@@ -552,15 +570,21 @@ def test_pytest_entries_require_the_cpp_engine_where_it_is_installed(
     """Where the build installs the shared engine beside the package, every
     installed pytest entry but the explicit gates loads
     rocke.tests.require_cpp_engine right after the shard plugin, so a missing
-    engine fails it; where the build installs none there, no entry does."""
+    engine fails it, and every GPU entry loads
+    rocke.tests.differential_engines, so it runs the Python engine's kernels
+    and compares the C++ engine's with them; where the build installs none
+    there, no entry loads either."""
     _, ctest_dir = configure_installed_ctest(tmp_path, *cmake_arguments)
     pytest_entries = {
-        test["name"]: test["command"]
+        test["name"]: test
         for test in list_installed_ctest_entries(ctest_dir, tmp_path)
         if runs_pytest(test)
     }
     assert pytest_entries
-    for name, command in pytest_entries.items():
+    for name, test in pytest_entries.items():
+        command = test["command"]
+        gpu = "gpu" in (entry_property(test, "LABELS") or [])
+        assert ("rocke.tests.differential_engines" in command) == (strict and gpu), name
         if name in EXPLICIT_GATES:
             assert "rocke.tests.require_cpp_engine" not in command, name
             continue
@@ -626,11 +650,19 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             target = f"{provider_subdir}_{target}_test"
         return f"../{target}{executable_suffix}"
 
+    # tests/run_all.py runs the both-engine HIP checks with the rocke_ir_lower_cli
+    # the configure recorded (rocke_record_program_path), under the name this
+    # mode gives it, inside the build tree.
+    recorded_cli = Path((build / "rocke_ir_lower_cli.path").read_text().strip())
+    expected_name = native_artifact("rocke_ir_lower_cli").removeprefix("../")
+    assert recorded_cli.name == expected_name
+    assert build.resolve() in recorded_cli.resolve().parents
+
     # The replay CLI and the provenance manifest install in
     # <tests>/portable_ir and are named beside the installed rocke package
     # (rocke.assets.beside_package): the package's directory is the
     # CTestTestfile's in provider mode, site-packages in a standalone install.
-    cache = _cmake_cache(build)
+    cache = cmake_cache_entries(build)
     test_dir = PurePosixPath(cache["CMAKE_INSTALL_BINDIR"])
     if provider_subdir:
         test_dir /= provider_subdir
@@ -850,6 +882,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             }
             assert counted_properties["PROCESSORS"] == 4
             assert counted_properties["RESOURCE_LOCK"] == ["rocke_counted_sync_gate"]
+            # Off its reference toolchain the gate ends with 77, a skip.
+            assert counted_properties["SKIP_RETURN_CODE"] == 77
         # COMGR-only gates get the package and nothing compiler-specific.
         comgr_only_environment = environment_for(
             tests, "rocke_arch_domain_reproducibility"
@@ -860,9 +894,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             == comgr_only_environment
         )
 
-        # The C++ HIP lowering entries are not registered on Windows. On every
-        # platform the platform pytest part that holds each of their files
-        # leaves it out. Elsewhere each entry names the installed
+        # The C++ HIP lowering entries are not registered on Windows. Where an
+        # entry is registered, the platform pytest part that holds each of its
+        # files leaves it out; on Windows the part keeps it, so its
+        # Python-engine checks still run. Elsewhere each entry names the installed
         # rocke_ir_lower_cli, and the parity entry also gets the compiler tools
         # for its hipcc checks.
         files_by_entry = {
@@ -885,11 +920,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 path = f"{test_ctest_rel}{test_file}"
                 if entry is not None:
                     assert path in entry["command"]
-                platform_part = next(
+                part_command = next(
                     test for test in tests if test["name"] == f"rocke_pytest_{part}"
-                )
-                ignored = platform_part["command"].index(path)
-                assert platform_part["command"][ignored - 1] == "--ignore"
+                )["command"]
+                assert (path in part_command) == (entry is not None), test_file
+                if entry is not None:
+                    assert part_command[part_command.index(path) - 1] == "--ignore"
         if os.name != "nt":
             ir_lower_cli = native_artifact("rocke_ir_lower_cli")
             identity_environment = environment_for(tests, "rocke_hip_source_identity")
@@ -1073,8 +1109,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     tier the parts by their name prefix, so every part, and a part a new CMake
     group would add, gets the same labels, among them the standard and
     ffm-quick tiers that the single entry ran in. They are not in the quick
-    tier: CI runs quick as one shard, where a pytest suite runs whole, so quick
-    keeps only entries that cost seconds. The tiling package's entries run
+    tier, which holds only unit tests and basic enablement checks (TESTING.md
+    section 5.0.3). The tiling package's entries run
     tests outside tests/, so they are not parts and do not take their prefix;
     the categories tier each by its own name: rocke_tiling_pytest like the
     parts, rocke_tiling_gpu_pytest like the library's GPU entry, and

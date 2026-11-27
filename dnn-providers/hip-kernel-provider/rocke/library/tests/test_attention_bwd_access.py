@@ -542,10 +542,8 @@ def test_resource_gate_of_the_new_values(arch, variant):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()

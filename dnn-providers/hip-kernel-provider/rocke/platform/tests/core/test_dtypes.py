@@ -44,7 +44,7 @@ from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.engines import (
     ENGINES,
     engine_modules_available,
-    instance_llvm_from_all_engines,
+    instance_llvm_from_engine,
     lower_with_engine,
 )
 from rocke.tests.fp8_gemm_checks import Fp8HostCodec, fp8_host_codec
@@ -537,14 +537,18 @@ def _quant_spec(case, *, vec: int):
 )
 @pytest.mark.parametrize("vec", [2, 4])
 @pytest.mark.parametrize("case", _quant_instances(), ids=lambda case: case[0])
-def test_quant_instances_scale_to_the_target_fp8_bound(case, vec, arch, other_arch):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_quant_instances_scale_to_the_target_fp8_bound(
+    case, vec, arch, other_arch, engine
+):
     """The row scale ``amax * (1 / bound)`` uses the bound of ``arch``'s e4m3
-    encoding, on the scalar (vec 2) and the packed (vec 4) path, and the C++
-    builder emits the same IR as the Python one."""
+    encoding, on the scalar (vec 2) and the packed (vec 4) path, in the Python
+    builder's kernel and in the C++ builder's, which emits the same IR."""
     family, build, _, _, _ = case
-    text = instance_llvm_from_all_engines(
+    text = instance_llvm_from_engine(
         _quant_spec(case, vec=vec),
         arch,
+        engine=engine,
         build_kernel=build,
         binding=f"{family}_lower_llvm",
     )

@@ -100,11 +100,10 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    """Pin the production comgr (the torch wheel's bundled library) by path
-    for this session and its child processes, without importing torch
-    (``kernels/common/attention_bwd_comgr.py``), and give comgr's code-object
-    cache a directory of this session's own (removed at exit). An explicit ``ROCKE_COMGR_LIB`` /
-    ``AMD_COMGR_CACHE_DIR`` wins; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
+    """Give comgr's code-object cache a directory of this session's own, removed
+    at exit (``kernels/common/attention_bwd_comgr.py``; an explicit
+    ``AMD_COMGR_CACHE_DIR`` wins, ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out). The
+    compiler is the one rocKE's discovery loads; the session does not choose it.
 
     An import failure of the ``kernels`` package is reported, not raised: the
     tests that need the package fail on it themselves, the others still run
@@ -115,14 +114,14 @@ def pytest_configure(config):
 
     configure_pytest_root(config, _TESTROOT, "library/tests")
     try:
-        from kernels.common.attention_bwd_comgr import ensure_production_comgr
+        from kernels.common.attention_bwd_comgr import pin_comgr_cache
     except Exception as exc:  # noqa: BLE001 - see the docstring
         config.issue_config_time_warning(
-            pytest.PytestConfigWarning(f"production comgr not pinned: {exc!r}"),
+            pytest.PytestConfigWarning(f"comgr cache not placed: {exc!r}"),
             stacklevel=2,
         )
         return
-    ensure_production_comgr()
+    pin_comgr_cache()
 
 
 def pytest_collection_finish(session):

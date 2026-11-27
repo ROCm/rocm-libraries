@@ -22,11 +22,11 @@ import unittest
 import pytest
 from rocke.core.ir import KernelDef, Op, Region
 from rocke.helpers import compile as compile_module
-from rocke.helpers.compile import compile_kernel
 from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
-from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
+from rocke.tests.comgr import compile_kernel_or_skip
+from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV
 from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 from . import _attention_bwd_resources, _parallel_compile
@@ -224,12 +224,9 @@ def test_gdn_compiled_resources_applies_the_policy(
     # The GDN/KDA resource checks compile through COMGR, then read the code
     # object with the llvm-objdump on PATH. An empty PATH is a host without it.
     kernel = KernelDef("probe", [], Region("entry"))
-    try:
-        compile_kernel(kernel, arch="gfx950", capture_ir_text=False)
-    except ImportError as exc:
-        # Before the parametrized requirement is set: the run's own policy
-        # decides whether a host without COMGR skips or fails.
-        require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+    # Before the parametrized requirement is set: the run's own policy decides
+    # whether a host without COMGR skips or fails.
+    compile_kernel_or_skip(kernel, arch="gfx950")
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
     with pytest.raises(outcome, match=reason):
@@ -245,10 +242,7 @@ def test_a_batch_reports_each_kernels_failure_on_that_kernel(monkeypatch):
     good = KernelDef("batch_good", [], Region("entry"))
     unlowerable = KernelDef("batch_unlowerable", [], Region("entry", [Op("no.op")]))
     uncompilable = KernelDef("batch_uncompilable", [], Region("entry"))
-    try:
-        compile_kernel(good, arch="gfx950", capture_ir_text=False)
-    except ImportError as exc:
-        require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+    compile_kernel_or_skip(good, arch="gfx950")
     compile_one = compile_module.compile_comgr_input
 
     def compile_or_refuse(comgr_input):

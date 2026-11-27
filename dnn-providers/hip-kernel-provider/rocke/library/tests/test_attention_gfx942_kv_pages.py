@@ -26,10 +26,11 @@ from kernels.gfx942.attention_tiled_2d import (
 )
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.runtime.device_array import DeviceArray
-from rocke.runtime.hip_module import get_device_total_memory
-from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.gpu import current_device_arch_in, skip_without_device_memory
 
 from ._attention_paged_reference import (
+    PAGED_OUTPUT_ATOL,
+    PAGED_OUTPUT_RTOL,
     decode_half,
     encode_half,
     paged_attention_reference,
@@ -163,11 +164,9 @@ def _assert_matches_reference(out, q, k, v, block_table, lengths):
             compact_table[b],
             _SCALE,
         )
-        # On long sequences the output's spread is about 0.05 (max |o| about
-        # 0.2), so a looser absolute bound could hide one misaddressed page.
-        # rtol covers the bf16 rounding of the output, which grows with |o| on
-        # short sequences (half an ulp is at most |o| / 256).
-        np.testing.assert_allclose(out[b], ref[0], atol=2e-3, rtol=2**-8)
+        np.testing.assert_allclose(
+            out[b], ref[0], atol=PAGED_OUTPUT_ATOL, rtol=PAGED_OUTPUT_RTOL
+        )
 
 
 @pytest.mark.parametrize("num_query_heads,num_kv_heads", [(32, 8), (64, 4)])
@@ -223,9 +222,9 @@ def test_i64_decode_reads_past_2gib(gfx942):
     first_past = 2**31 // block_bytes
     num_blocks = first_past + 128
     pages = seqlen // _BLOCK_SIZE
-    total = get_device_total_memory()
-    if total is None or total < 2 * num_blocks * block_bytes + (1 << 30):
-        pytest.skip("needs a device with about 5 GiB of memory")
+    skip_without_device_memory(
+        2 * num_blocks * block_bytes, "the i64 decode past 2 GiB"
+    )
     rng = np.random.default_rng(2)
     shape = (num_blocks, _BLOCK_SIZE, num_kv_heads, _HEAD_SIZE)
     k, v = np.zeros(shape, np.uint16), np.zeros(shape, np.uint16)

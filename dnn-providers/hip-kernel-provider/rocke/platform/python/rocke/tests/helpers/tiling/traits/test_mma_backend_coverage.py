@@ -77,6 +77,7 @@ from rocke.helpers.tiling.traits import (
     load_mma_traits,
 )
 from rocke.helpers.tiling.traits.mma_traits import UNSIGNED_TWIN
+from rocke.tests.host_cpus import available_cpus
 from rocke.tests.ir_validity import (
     Verdict,
     arbiter_llvm_flavor,
@@ -529,7 +530,7 @@ def _compile_target(
             ) from None
         return arbiter_verdict(module, name)
 
-    with cf.ThreadPoolExecutor(os.cpu_count() or 1) as pool:
+    with cf.ThreadPoolExecutor(max(1, min(available_cpus(), len(jobs)))) as pool:
         judged = dict(zip([job.key for job in jobs], pool.map(judge, jobs)))
     refused = {key for key, verdict in judged.items() if verdict is None}
     verdicts = {key: verdict for key, verdict in judged.items() if verdict is not None}
@@ -1051,9 +1052,15 @@ def _write_record(llvm_flavor: str) -> None:
             for index, entry in enumerate(by_target.get(target, []))
             if entry["class"] == "issuable"
         ]
-        verdicts = _compile_target(clang_flavor, target, jobs)
-        if isinstance(verdicts, str):
-            raise SystemExit(f"{verdicts}; use a clang that can judge every target")
+        judged = _compile_target(clang_flavor, target, jobs)
+        if isinstance(judged, str):
+            raise SystemExit(f"{judged}; use a clang that can judge every target")
+        verdicts, refused = judged
+        if refused:
+            raise SystemExit(
+                f"the {clang_flavor} lowering refuses {sorted(refused)} on {target} for its "
+                "emission profile; use a clang that can judge every pair"
+            )
         for (op_id, index), (verdict, _) in verdicts.items():
             if verdict != "accepted":
                 document["pairs"][op_id][target][index]["class"] = "invalid_ir"
