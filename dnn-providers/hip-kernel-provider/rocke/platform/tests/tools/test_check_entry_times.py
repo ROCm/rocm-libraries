@@ -58,7 +58,7 @@ def _listing(*tests: dict) -> dict:
 
 
 def _column(ceilings: dict | None = None, test_seconds: dict | None = None, **seconds):
-    column = {"source": "test data", "seconds": seconds}
+    column = {"sources": {"test data": sorted(seconds)}, "seconds": seconds}
     if test_seconds is not None:
         column["test_seconds"] = test_seconds
     if ceilings is not None:
@@ -1180,7 +1180,7 @@ def test_record_fills_a_new_column_from_logs(tmp_path) -> None:
     recorded = json.loads(times.read_text(encoding="utf-8"))
     assert recorded["linux"]["seconds"] == {"rocke_golden_static": 250.0}
     assert recorded["windows"] == {
-        "source": "test logs",
+        "sources": {"test logs": ["rocke_golden_static", "rocke_pytest_core"]},
         "seconds": {"rocke_golden_static": 34.0, "rocke_pytest_core": 122.0},
     }
 
@@ -1215,6 +1215,16 @@ def test_record_updates_logged_entries_and_keeps_the_rest(tmp_path) -> None:
         },
         "rocke_not_in_logs": {"t.py::test": 9.0},
     }
+    # Each time keeps the source that recorded it.
+    assert recorded["sources"] == {
+        "test data": ["rocke_not_in_logs"],
+        "test logs": [
+            "rocke_golden_static",
+            "rocke_library_gpu_pytest",
+            "rocke_pytest_core",
+        ],
+    }
+    assert check.source_breaches("linux", recorded) == []
 
 
 def test_pruned_column_keeps_only_registered_entries() -> None:
@@ -1222,7 +1232,10 @@ def test_pruned_column_keeps_only_registered_entries() -> None:
         [_test("rocke_golden_static", ["quick"], WHOLE_COMMAND)]
     )
     column = {
-        "source": "test data",
+        "sources": {
+            "old run": ["rocke_golden_static", "rocke_gone"],
+            "removed run": ["rocke_gone_by_source_only"],
+        },
         "seconds": {"rocke_golden_static": 30.0, "rocke_gone": 5.0},
         "test_seconds": {
             "rocke_gone": {"t.py::test": 4.0},
@@ -1232,9 +1245,14 @@ def test_pruned_column_keeps_only_registered_entries() -> None:
         "ceilings": {"standard": 540.0},
     }
     kept, dropped = check.pruned_column(column, entries)
-    assert dropped == ["rocke_gone", "rocke_measured_only", "rocke_timed_by_test_only"]
+    assert dropped == [
+        "rocke_gone",
+        "rocke_gone_by_source_only",
+        "rocke_measured_only",
+        "rocke_timed_by_test_only",
+    ]
     assert kept == {
-        "source": "test data",
+        "sources": {"old run": ["rocke_golden_static"]},
         "seconds": {"rocke_golden_static": 30.0},
         "test_seconds": {},
         "tests_measured": ["rocke_golden_static"],
@@ -1372,8 +1390,11 @@ def test_check_judges_only_the_column_of_the_listed_registration(
     other's column; that column is judged on its own registration."""
     listing, times = _write_inputs(tmp_path, 20.0)
     both = {
-        "linux": {"source": "test data", "seconds": {"rocke_golden_static": 20.0}},
-        "windows": {"source": "test data", "seconds": {}},
+        "linux": {
+            "sources": {"test data": ["rocke_golden_static"]},
+            "seconds": {"rocke_golden_static": 20.0},
+        },
+        "windows": {"sources": {}, "seconds": {}},
     }
     times.write_text(json.dumps(both), encoding="utf-8")
     check_column = [*_data_options(times), "check", "--listing", str(listing)]
@@ -1499,6 +1520,41 @@ def test_large_drops_ignores_a_new_entry() -> None:
     assert check.large_drops({}, {"rocke_new": 0.1}) == []
 
 
+def test_recorded_sources_move_the_recorded_entries_to_their_source() -> None:
+    sources = {"old": ["rocke_a", "rocke_b"], "older": ["rocke_c"]}
+    assert check.recorded_sources(sources, "new", ["rocke_c", "rocke_d"]) == {
+        "old": ["rocke_a", "rocke_b"],
+        "new": ["rocke_c", "rocke_d"],
+    }
+    assert check.recorded_sources(sources, "old", ["rocke_c"]) == {
+        "old": ["rocke_a", "rocke_b", "rocke_c"]
+    }
+
+
+@pytest.mark.parametrize(
+    "sources, message",
+    [
+        ({"run": ["rocke_a"]}, "rocke_b has a time but no source; record it again"),
+        (
+            {"run": ["rocke_a", "rocke_b"], "other": ["rocke_b"]},
+            "rocke_b is under two sources, expected one",
+        ),
+        (
+            {"run": ["rocke_a", "rocke_b", "rocke_gone"]},
+            "rocke_gone has a source but no time; prune it",
+        ),
+        (
+            {"run": ["rocke_a", "rocke_b"], " ": []},
+            "' ' lists 0 entries, expected a description and at least one entry",
+        ),
+    ],
+    ids=["untraced", "twice", "untimed", "empty"],
+)
+def test_source_breaches_names_each_misdescribed_time(sources, message) -> None:
+    column = {"sources": sources, "seconds": {"rocke_a": 1.0, "rocke_b": 2.0}}
+    assert check.source_breaches("linux", column) == [f"linux sources: {message}"]
+
+
 def test_record_refuses_logs_without_rocke_entries(tmp_path) -> None:
     _, times = _write_inputs(tmp_path, 250.0)
     log = tmp_path / "other.log"
@@ -1512,8 +1568,8 @@ def test_committed_entry_times_have_a_source_and_seconds_per_column() -> None:
     entry_times = check.load_entry_times()
     assert set(entry_times) == {"linux", "windows"}
     tier_labels = {tier.label for tier in check.CI_TIERS}
-    for column in entry_times.values():
-        assert column["source"]
+    for name, column in entry_times.items():
+        assert check.source_breaches(name, column) == []
         assert column["seconds"]
         assert all(seconds >= 0 for seconds in column["seconds"].values())
         assert set(column.get("ceilings", {})) <= tier_labels

@@ -85,7 +85,9 @@ Refresh one operating system's times from ``ctest -V`` logs of CI test jobs
 (any tier, any shard; entries the logs do not show passing keep their previous
 time). A time that falls below ``RECORD_DROP_FRACTION`` of the entry's previous
 one is refused unless ``--accept-drops`` is given: a run that skipped most of
-an entry's tests still passes.
+an entry's tests still passes. Each recorded entry moves under its ``--source``
+text in the column's ``sources``, so every time keeps the description of the
+run that measured it.
 A split entry's whole time is the sum over its shards of each shard's median;
 when the logs lack a shard, it is the shard count times the median shard. Test
 seconds come from the logs that carry pytest's ``--durations`` report, for the
@@ -177,9 +179,11 @@ __all__ = [
     "lowered_ceiling",
     "measured_entries_from_ctest_logs",
     "pruned_column",
+    "recorded_sources",
     "recorded_test_seconds",
     "registered_entries",
     "slow_test_seconds_from_ctest_logs",
+    "source_breaches",
     "split_entry_shard_seconds",
     "tier_breaches",
     "untimed_entries",
@@ -464,13 +468,61 @@ def registered_entries(tests: Iterable[Mapping]) -> list[RegisteredEntry]:
 
 
 def load_entry_times(path: Path = ENTRY_TIMES_PATH) -> dict[str, dict]:
-    """``{column: {"source": str, "seconds": {entry: whole seconds},
-    "test_seconds": {entry: {test node id: seconds}},
+    """``{column: {"sources": {source: [entry]}, "seconds": {entry: whole
+    seconds}, "test_seconds": {entry: {test node id: seconds}},
     "tests_measured": [entry], "ceilings": {tier label: seconds}}}``;
+    ``sources`` says, per ``record --source`` text, the entries whose time it
+    recorded (:func:`source_breaches` holds it to one source per timed entry);
     ``tests_measured`` names the entries whose every test of at least
-    ``TEST_SECONDS_FLOOR`` is in ``test_seconds``. All but ``source`` and
+    ``TEST_SECONDS_FLOOR`` is in ``test_seconds``. All but ``sources`` and
     ``seconds`` are optional."""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def recorded_sources(
+    sources: Mapping[str, Sequence[str]], source: str, recorded: Iterable[str]
+) -> dict[str, list[str]]:
+    """``sources`` after a ``record`` from ``source`` of the ``recorded``
+    entries: they move to ``source`` from wherever they were, a source left
+    with no entry is dropped, and each source's entries are sorted."""
+    moved = set(recorded)
+    updated = {
+        text: sorted(set(entries) - moved)
+        for text, entries in sources.items()
+        if text != source
+    }
+    updated[source] = sorted(moved | set(sources.get(source, ())))
+    return {text: entries for text, entries in updated.items() if entries}
+
+
+def source_breaches(column_name: str, column: Mapping[str, Any]) -> list[str]:
+    """One failure per way ``column``'s ``sources`` misdescribe its times: a
+    source with no text or no entry, an entry under two sources, an entry with
+    a time but no source, and a source naming an entry without a time."""
+    found = []
+    where = f"{column_name} sources"
+    sources = column.get("sources", {})
+    timed = set(column.get("seconds", {}))
+    seen: dict[str, str] = {}
+    for text, entries in sources.items():
+        if not text.strip() or not entries:
+            found.append(
+                f"{where}: {text!r} lists {len(entries)} entries, expected a "
+                "description and at least one entry"
+            )
+        for name in entries:
+            if name in seen:
+                found.append(f"{where}: {name} is under two sources, expected one")
+            seen[name] = text
+    found += [
+        f"{where}: {name} has a time but no source; record it again"
+        for name in sorted(timed - set(seen))
+    ]
+    found += [
+        f"{where}: {name} has a source but no time; prune it"
+        for name in sorted(set(seen) - timed)
+    ]
+    return found
 
 
 def _cost_scale(measured: Mapping[str, float], declared: Mapping[str, float]) -> float:
@@ -769,15 +821,16 @@ def pruned_column(
     column: Mapping[str, Any], entries: Iterable[RegisteredEntry]
 ) -> tuple[dict[str, Any], list[str]]:
     """``column`` (one operating system's data) without the entry times,
-    slow-test times and measured marks of entries that ``entries`` does not
-    register, and the names it dropped from any of them, sorted. Its other
-    keys (source, ceilings) are kept as they are.
+    slow-test times, measured marks and sources of entries that ``entries``
+    does not register, and the names it dropped from any of them, sorted. A
+    source left with no entry is dropped; the ceilings are kept as they are.
     """
     registered = {entry.name for entry in entries}
     timed = (
         set(column.get("seconds", {}))
         | set(column.get("test_seconds", {}))
         | set(column.get("tests_measured", ()))
+        | {name for names in column.get("sources", {}).values() for name in names}
     )
     dropped = sorted(timed - registered)
     kept = dict(column)
@@ -796,6 +849,12 @@ def pruned_column(
         kept["tests_measured"] = [
             name for name in column["tests_measured"] if name in registered
         ]
+    if "sources" in column:
+        kept_sources = {
+            text: [name for name in names if name in registered]
+            for text, names in column["sources"].items()
+        }
+        kept["sources"] = {text: names for text, names in kept_sources.items() if names}
     return kept, dropped
 
 
@@ -1224,7 +1283,9 @@ def _record(arguments: argparse.Namespace) -> int:
             "(a run on their own target), or pass --accept-drops if they "
             "really got cheaper"
         )
-    column["source"] = arguments.source
+    column["sources"] = recorded_sources(
+        column.get("sources", {}), arguments.source, seconds
+    )
     column["seconds"] = dict(sorted({**column.get("seconds", {}), **seconds}.items()))
     test_seconds = slow_test_seconds_from_ctest_logs(arguments.logs)
     measured = measured_entries_from_ctest_logs(arguments.logs)
