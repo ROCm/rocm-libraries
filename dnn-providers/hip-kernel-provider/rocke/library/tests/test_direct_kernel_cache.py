@@ -1994,6 +1994,80 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
     assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
 
 
+def test_measure_plans_clamps_sizes_for_one_launch_plans_only(monkeypatch, capsys):
+    """Past the i32 byte range, an rr plan (one launch, per-image rebased)
+    launches with clamped sizes; any other plan keeps its true sizes, so the
+    kernarg packer refuses it and the sweep skips it."""
+    import struct
+    from types import SimpleNamespace
+
+    from benchmarks.common import benchmark_direct_conv as bdc
+
+    seen = {}
+    current = []
+
+    def launch_values(st, ptrs, sizes):
+        seen[st.kernel_name] = dict(sizes)
+        return sizes
+
+    monkeypatch.setattr(dks, "launch_values", launch_values)
+
+    class Launcher:
+        def bind(self, values, config):
+            if any(v > 2**31 - 1 for v in values.values()):
+                raise struct.error("'i' format requires -2147483648 <= number")
+            return lambda: None
+
+    class Modules:
+        def launcher(self, *, hsaco_path, kernel_name, signature):
+            return Launcher()
+
+    class Stop:
+        def measure(self, run, **kw):
+            current.append(run)
+            return None
+
+        def report(self, label):
+            pass
+
+    def plan(label, algorithm):
+        step = SimpleNamespace(
+            hsaco_path=None, kernel_name=label, signature=None, grid=(1, 1, 1)
+        )
+        step.block = (64, 1, 1)
+        return SimpleNamespace(
+            label=label,
+            steps=(step,),
+            zeroed=(),
+            identity=SimpleNamespace(algorithm=algorithm),
+        )
+
+    plans = [plan("other", "direct_nongrouped"), plan("rr", "direct_fwd_rr_mfma")]
+    bdc._measure_plans(
+        args=SimpleNamespace(fast_rank=False, warmup=1, iters=1),
+        plans=plans,
+        modules=Modules(),
+        rt=None,
+        ptrs={},
+        sizes={"x": 2**31 + 4096},
+        inputs={},
+        out_name="y",
+        out_like=None,
+        out_dtype="fp32",
+        ref_out=None,
+        flop=1.0,
+        bytes_xfer=1.0,
+        stop=Stop(),
+        chunks=[1],
+        per_chunk={pl.label: [pl] for pl in plans},
+        tol=dks.direct_verify_tol("fp16", "gfx942"),
+    )
+    assert seen["other"] == {"x": 2**31 + 4096}
+    assert seen["rr"] == {"x": 2**31 - 1}
+    assert len(current) == 1
+    assert "[skip] other: kernarg does not fit" in capsys.readouterr().out
+
+
 def test_run_from_cache_plans_each_chunk_size():
     """Each distinct chunk size is planned on its own batch; only kernels that
     serve every chunk are offered, each launch with its chunk's plan."""
