@@ -377,3 +377,70 @@ def test_durations_cover_rocjitsu_slow_configs():
     # And every recorded config over 45 min is marked.
     marked = {f"test_config[tensilelite/Tests/common/{p.relative_to(common).as_posix()}]" for p in slow}
     assert {key for key, seconds in durations.items() if seconds > launcher.DEFAULT_TEST_TIMEOUT} <= marked
+
+
+FAKE_GTEST = """
+import os, sys
+from pathlib import Path
+out = Path(os.environ["GTEST_OUTPUT"].removeprefix("xml:"))
+out.mkdir(parents=True, exist_ok=True)
+print("fake gtest shard", os.environ["GTEST_SHARD_INDEX"] + "/" + os.environ["GTEST_TOTAL_SHARDS"])
+fail = '<failure message="bad"/>' if "fail" in sys.argv else ""
+(out / "fake.xml").write_text(
+    '<testsuites><testsuite name="s">'
+    '<testcase classname="s" name="ok" status="run" result="completed" time="2.5"/>'
+    f'<testcase classname="s" name="bad" status="run" result="completed" time="0.1">{fail}</testcase>'
+    '</testsuite></testsuites>')
+sys.exit(1 if fail else 0)
+"""
+
+
+@linux_only
+@pytest.mark.parametrize("args, code", [((), 0), (("fail",), 1)])
+def test_gtest_mode_shards_and_keeps_the_exit_code(tmp_path, rocm, args, code):
+    (tmp_path / "fake_gtest.py").write_text(FAKE_GTEST)
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith(("GTEST_", "THEROCK_"))},
+        "ROCM_PATH": str(rocm),
+        "AMDGPU_TARGETS": "gfx1250",
+        "ROCJITSU_GTEST": "1",
+        "ROCJITSU_REPORT_DIR": str(tmp_path / "reports"),
+        "SHARD_INDEX": "2",
+        "TOTAL_SHARDS": "3",
+    }
+    command = [sys.executable, str(EMULATION / "run_rocjitsu.py"), "--",
+               sys.executable, str(tmp_path / "fake_gtest.py"), *args]
+    result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == code, result.stdout + result.stderr
+    # TheRock's 1-based SHARD_INDEX 2 of 3 is gtest's 0-based shard 1.
+    assert "fake gtest shard 1/3" in result.stdout
+
+
+def write_gtest_xml(report_dir, cases):
+    (report_dir / "gtest").mkdir(parents=True)
+    (report_dir / "gtest" / "t.xml").write_text(f"<testsuites><testsuite>{cases}</testsuite></testsuites>")
+
+
+def test_gtest_mode_fails_without_passing_tests(tmp_path):
+    result = dict(exit_code=0, timed_out=False)
+    assert launcher.check_gtest(tmp_path, result) == 1
+    assert "no passing tests" in result["error"]
+
+
+def test_gtest_mode_does_not_count_disabled_tests_as_passed(tmp_path):
+    write_gtest_xml(tmp_path, '<testcase name="DISABLED_x" status="notrun" result="suppressed"/>')
+    result = dict(exit_code=0, timed_out=False)
+    assert launcher.check_gtest(tmp_path, result) == 1
+
+
+def test_gtest_mode_passes_with_a_passing_test(tmp_path):
+    write_gtest_xml(tmp_path, '<testcase name="a" status="run" result="completed"/>')
+    assert launcher.check_gtest(tmp_path, dict(exit_code=0, timed_out=False)) == 0
+
+
+def test_gtest_mode_reports_a_half_written_xml(tmp_path):
+    (tmp_path / "gtest").mkdir()
+    (tmp_path / "gtest" / "cut.xml").write_text("<testsuites><testsuite")
+    result = dict(exit_code=0, timed_out=False)
+    assert launcher.check_gtest(tmp_path, result) == 1
+    assert result["error"].startswith("unreadable gtest XML")

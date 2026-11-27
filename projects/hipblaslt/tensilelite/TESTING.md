@@ -580,9 +580,11 @@ splits the CPU cores and memory the job may use (its cgroup limits) between pyte
 each worker's emulator threads, and kills every client process left over when the job's time runs out.
 Configs that take more than 45 minutes each under the emulator (7 today) carry the `rocjitsu_slow`
 marker and are left out, the same 45-minute limit the FFM emulator lane uses; the remaining 279 configs
-take about 8.5 hours of test time (measured on a 96-core host), split across shards. The job runs only
-once the TheRock commit this repository pins includes it, and starts as advisory (an expected failure),
-so it does not gate a merge yet.
+take about 8.5 hours of test time (measured on a 96-core host), split across shards. With
+`ROCJITSU_GTEST=1` the same launcher runs a gtest binary instead, which is how the hipBLASLt and
+hipSPARSELt test binaries run under the emulator. The job runs only once the TheRock commit this
+repository pins includes it, and starts as advisory (an expected failure), so it does not gate a merge
+yet.
 
 Other Math CI jobs post checks without gating. The one worth knowing is
 `tensilelite-unit-codecov`, which runs the TensileLite Python and C++ coverage environments on gfx950
