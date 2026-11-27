@@ -141,6 +141,17 @@ APPL_PREFIXES = (
     "projects/miopen/src/fusion/",
     "projects/miopen/src/include/miopen/fusion/",
     "projects/miopen/src/hip/convolutionocl.cpp",
+    # The find and immediate flow, and the shared predicates solvers call.
+    "projects/miopen/src/include/miopen/find_solution.hpp",
+    "projects/miopen/src/find_controls.cpp",
+    "projects/miopen/src/include/miopen/find_controls.hpp",
+    "projects/miopen/src/convolution.cpp",
+    "projects/miopen/src/fusion.cpp",
+    "projects/miopen/src/include/miopen/fusion.hpp",
+    "projects/miopen/src/include/miopen/execution_context.hpp",
+    "projects/miopen/src/gemm_v2.cpp",
+    "projects/miopen/src/include/miopen/gemm_v2.hpp",
+    "projects/miopen/src/include/miopen/target_properties.hpp",
 )
 
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")

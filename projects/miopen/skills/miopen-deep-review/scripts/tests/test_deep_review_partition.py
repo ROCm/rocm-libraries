@@ -540,6 +540,13 @@ def test_appl_scope_is_where_applicability_is_decided(part):
         "projects/miopen/src/fusion/fusion_plan.cpp",
         "projects/miopen/src/include/miopen/fusion/solvers.hpp",
         "projects/miopen/src/hip/convolutionocl.cpp",
+        "projects/miopen/src/include/miopen/find_solution.hpp",
+        "projects/miopen/src/convolution.cpp",
+        "projects/miopen/src/fusion.cpp",
+        "projects/miopen/src/find_controls.cpp",
+        "projects/miopen/src/include/miopen/execution_context.hpp",
+        "projects/miopen/src/gemm_v2.cpp",
+        "projects/miopen/src/include/miopen/target_properties.hpp",
     )
     outside = (
         "projects/miopen/test/gtest/unit_conv_solver_tests.cpp",
@@ -603,3 +610,13 @@ def test_runbook_partition_table_lists_exactly_the_concern_lanes(part):
     assert section, "## Partition section not found in RUNBOOK.md"
     rows = re.findall(r"^\| `([A-Z]+)(?:<k>)?` \|", section.group(1), re.M)
     assert sorted(rows) == sorted({"CORR", *part.CONCERN_LANES})
+
+
+def test_every_source_path_the_appl_brief_cites_triggers_the_lane(part):
+    # catches: the brief names a file as part of the applicability flow but a change to
+    # that file never reaches the lane, so the decision point goes unreviewed
+    brief = (SCRIPT.parent.parent / "lanes" / "applicability.md").read_text()
+    cited = sorted(set(re.findall(r"`(projects/miopen/src/[A-Za-z0-9_./-]+)`", brief)))
+    assert cited, "no source paths found in lanes/applicability.md"
+    missing = [p for p in cited if not part.concern_scope("APPL", [(p, 1, "")])]
+    assert not missing, f"cited by the APPL brief but not in APPL_PREFIXES: {missing}"
