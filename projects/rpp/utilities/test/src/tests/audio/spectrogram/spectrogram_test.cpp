@@ -107,11 +107,14 @@ void run_spectrogram(const AudioConfig& cfg, const SpectrogramParams& p) {
     dst.write(actual.data(), dstBytes);
 
     RppHandle handle(cfg.backend, n);
-    ASSERT_EQ(rppt_spectrogram(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, srcLengths.data(),
-                               p.centerWindows, p.reflectPadding,
-                               p.customWindow ? window.data() : nullptr, p.nfft, p.power,
-                               p.windowLength, p.windowStep, handle.get(), cfg.backend),
-              RPP_SUCCESS);
+    const RppStatus status = rppt_spectrogram(
+        src.ptr(), &srcDesc, dst.ptr(), &dstDesc, srcLengths.data(), p.centerWindows,
+        p.reflectPadding, p.customWindow ? window.data() : nullptr, p.nfft, p.power, p.windowLength,
+        p.windowStep, handle.get(), cfg.backend);
+    // HIP loads rocFFT at runtime and returns NOT_IMPLEMENTED when it is not installed.
+    if (cfg.backend == RPP_HIP_BACKEND && status == RPP_ERROR_NOT_IMPLEMENTED)
+        GTEST_SKIP() << "rocFFT runtime (librocfft.so.0) not available";
+    ASSERT_EQ(status, RPP_SUCCESS);
 
     handle.sync();
     dst.read(actual.data(), dstBytes);
