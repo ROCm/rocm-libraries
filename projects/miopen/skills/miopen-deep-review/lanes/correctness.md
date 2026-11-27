@@ -5,6 +5,10 @@ Read every changed line of your owned files, and the outside code each change de
 ## Correctness
 
 - Trace each change from producer to consumer and from guard to caller to test. State the smallest input that breaks it.
+- When inserting a runtime call ahead of an existing operation, compare the values both accept at the pinned runtime
+  version. Trace caller-supplied handles through any normalization, including null and special values (for HIP streams,
+  `nullptr`, `hipStreamLegacy`, and `hipStreamPerThread`). Check the runtime implementation when the API docs do not
+  settle the case. If a previously valid value fails only when a new guard is reached, name a test that reaches that guard.
 - Implicit invariants of the old code: for each formula, size or limit the diff changes, write down what the old form guaranteed
   that no code states (divisibility by an element size, alignment, an upper bound, a minimum, monotonicity, "never zero") and
   check that the new form still guarantees it where a consumer depends on it. Then try the inputs on the other side of the
