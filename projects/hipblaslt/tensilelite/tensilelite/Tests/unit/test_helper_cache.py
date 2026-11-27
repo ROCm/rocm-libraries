@@ -158,13 +158,16 @@ class TestComputeCacheKey:
         monkeypatch.setattr(component, "_getVersion", lambda *args: version)
         monkeypatch.setattr(component.Component, "_rocm_version", version)
         monkeypatch.setattr(component, "os_name", platform)
-        monkeypatch.setenv("ROCM_PATH", "C:/ROCm")
         kernel_path = _write_test_files(tmp_path)
         monkeypatch.delenv("Tensile_CXX_COMPILER_LAUNCHER", raising=False)
-        direct = component.Compiler(Path("amdclang++"), "sha1", asan_build=True, save_temps=True)
+        launched_path = Path("/other/rocm/bin/amdclang++")
+        # On Windows the compiler's own ROCm root becomes --rocm-path, which
+        # is a real compile option, so only the launcher varies there.
+        direct_path = launched_path if platform == "nt" else Path("amdclang++")
+        direct = component.Compiler(direct_path, "sha1", asan_build=True, save_temps=True)
         monkeypatch.setenv("Tensile_CXX_COMPILER_LAUNCHER", "ccache --verbose")
         launched = component.Compiler(
-            Path("/other/rocm/bin/amdclang++"), "sha1", asan_build=True, save_temps=True
+            launched_path, "sha1", asan_build=True, save_temps=True
         )
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], direct)
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], launched)
