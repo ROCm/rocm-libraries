@@ -38,7 +38,7 @@
  *
  * Each case is a function template over an `Arch`, which supplies
  *   - `static std::vector<KernelArgument> pythonAbi()`: the ABI the pack's rocKE builder
- *     declares;
+ *     declares, generated from rocKE at build time (RockeKernelSignatures.hpp);
  *   - `static std::string prepareFailureFor(const std::vector<KernelArgument>&)`: the message
  *     of what the pack's prepare() throws over its default graph and a descriptor recording
  *     the argument list (empty if it returned a prepared dispatch).

@@ -1134,7 +1134,9 @@ AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
 /// error and no status code. hkp_pack lowers the recorded names out of the rocKE builder's
 /// own parameter list, so keep these spellings identical to the Python
 /// (kernels/gfx9xx/attention_dense.py, the attention_dense_signature parameter list); a
-/// divergence here fails every dispatch rather than silently weakening the check.
+/// divergence here fails every dispatch rather than silently weakening the check. The dense
+/// signature tests check every form against the one rocKE declares, generated from rocKE at
+/// build time (tests/.../packs/RockeKernelSignatures.hpp).
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
 /// mismatch diagnostic prints the real layout beside the recorded one instead of ten

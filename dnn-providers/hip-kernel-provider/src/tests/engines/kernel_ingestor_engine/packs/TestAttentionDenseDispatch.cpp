@@ -210,7 +210,7 @@ KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
                             int64_t blockN = 64,
                             bool writesLse = false)
 {
-    return kpackKernel(arch, writesLse ? pythonLseAbi() : pythonAbi(), blockM, blockN);
+    return kpackKernel(arch, writesLse ? pythonLseAbi(arch) : pythonAbi(arch), blockM, blockN);
 }
 
 std::string prepareFailure(const Graph& graph, const BoundTokens& bound)

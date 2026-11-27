@@ -77,7 +77,8 @@ set(_rocke_tables)
 foreach(_table
         gen_gfx942_attention_unified_3d_admission:Gfx942AttentionUnified3dAdmissionTable
         gen_gfx942_attention_unified_3d_split_rule:Gfx942AttentionUnified3dSplitRuleTable
-        gen_gfx942_attention_unified_3d_arguments:Gfx942AttentionUnified3dArgumentsTable)
+        gen_gfx942_attention_unified_3d_arguments:Gfx942AttentionUnified3dArgumentsTable
+        gen_rocke_kernel_signatures:RockeKernelSignaturesTable)
     string(REPLACE ":" ";" _table "${_table}")
     list(GET _table 0 _script)
     list(GET _table 1 _name)
@@ -99,8 +100,10 @@ endforeach()
 # above reach it through this target rather than as its sources.
 add_custom_target(hkp_rocke_test_tables DEPENDS ${_rocke_tables}
                   COMMENT "Host test tables generated from rocKE")
-add_dependencies(hip_kernel_provider_tests hkp_rocke_test_tables)
-target_include_directories(hip_kernel_provider_tests PRIVATE "${_rocke_table_generated}")
+foreach(_tests hip_kernel_provider_tests hip_kernel_provider_census_tests)
+    add_dependencies(${_tests} hkp_rocke_test_tables)
+    target_include_directories(${_tests} PRIVATE "${_rocke_table_generated}")
+endforeach()
 
 # The schema hash test compares the pinned constant with the hash of the schema file. Line
 # ends are normalised to LF, so a CRLF checkout gives the same hash.

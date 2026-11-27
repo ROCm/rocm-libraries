@@ -22,8 +22,8 @@ the segment kernel's full ordered argument list rocKE would pass for it:
 
 TestGfx942AttentionUnified3dArguments.cpp asserts gfx942StridedKvArguments() and
 gfx942Unified3dSegmentArguments() reproduce every row value-by-value, in order.
-Before printing, the script also asserts rocKE's reduce signature is the 6
-arguments the engine's reduceSignature() lists (no LSE, num_query_heads i32).
+The reduce launch's argument list is checked by
+TestGfx942AttentionUnified3dSignature.cpp against RockeKernelSignaturesTable.inc.
 
 The build generates the table into the build tree through
 gen_rocke_table.py (kernel_ingestor_engine/CMakeLists.txt);
@@ -193,27 +193,6 @@ def _signatures():
     return _tiled_3d_signatures("gfx942", "fp16", strided_kv=True)
 
 
-# hipDNN's reduce launch: no LSE, num_query_heads read at runtime.
-REDUCE_ARGUMENTS = (
-    ("output_ptr", "ptr"),
-    ("segm_output_ptr", "ptr"),
-    ("segm_max_ptr", "ptr"),
-    ("segm_expsum_ptr", "ptr"),
-    ("seq_lens_ptr", "ptr"),
-    ("num_query_heads", "i32"),
-)
-
-
-def check_reduce():
-    """The reduce launch Gfx942AttentionUnified3dNative.cpp passes is rocKE's."""
-    _, reduce = _signatures()
-    got = tuple(
-        (p["name"], "ptr" if p["type"].startswith("ptr<") else p["type"])
-        for p in reduce
-    )
-    assert got == REDUCE_ARGUMENTS, f"rocKE reduce signature changed: {got}"
-
-
 def arguments(batch, hq, hkv, scale, k_layout, v_layout):
     assert k_layout[0][1] == hkv and v_layout[0][1] == hkv and hq % hkv == 0
     kv = StridedKvCacheLayout(
@@ -246,7 +225,6 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
 
 
 def main():
-    check_reduce()
     for label, batch, hq, hkv, scale, k_layout, v_layout in CASES:
         args = ",\n  ".join(arguments(batch, hq, hkv, scale, k_layout, v_layout))
         print(

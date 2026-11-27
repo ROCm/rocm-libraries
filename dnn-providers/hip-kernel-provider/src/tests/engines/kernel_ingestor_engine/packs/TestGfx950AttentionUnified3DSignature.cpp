@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RockeKernelSignatures.hpp"
 
 /**
  * @file TestGfx950AttentionUnified3DSignature.cpp
@@ -21,7 +22,8 @@
  * A wrong argument count, order, kind or width is not a launch error: the kernel reads the
  * kernarg segment as the types it was compiled for, so the failure is misread memory with a
  * success status. Two kernels share three scratch pointers here, in different positions, so
- * a slot carried over from one list to the other is easy to write.
+ * a slot carried over from one list to the other is easy to write. The lists the builders
+ * declare come from rocKE at build time (RockeKernelSignatures.hpp).
  *
  * Names are the only thing that tells two pointers apart (every pointer is an 8-byte
  * `global_buffer`), so the exchanges below are refused by name alone. No device, no compile
@@ -98,30 +100,7 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesASegmentListOfTheWrongLength)
 /// launched as a segment kernel.
 TEST(TestGfx950AttentionUnified3DSignature, RefusesTheUnified2DListAsASegmentKernel)
 {
-    const auto buffer
-        = [](const char* name) { return KernelArgument{"global_buffer", 8, 0, name}; };
-    const auto scalar = [](const char* name) { return KernelArgument{"by_value", 4, 0, name}; };
-    const std::vector<KernelArgument> unified2d{buffer("output_ptr"),
-                                                buffer("query_ptr"),
-                                                buffer("key_cache_ptr"),
-                                                buffer("value_cache_ptr"),
-                                                buffer("sink_ptr"),
-                                                buffer("block_tables_ptr"),
-                                                buffer("seq_lens_ptr"),
-                                                buffer("alibi_slopes_ptr"),
-                                                buffer("qq_bias_ptr"),
-                                                buffer("query_start_len_ptr"),
-                                                scalar("scale"),
-                                                scalar("k_scale"),
-                                                scalar("v_scale"),
-                                                scalar("out_scale"),
-                                                scalar("softcap"),
-                                                scalar("num_seqs"),
-                                                scalar("block_table_stride"),
-                                                scalar("qq_bias_stride0"),
-                                                scalar("num_query_heads"),
-                                                scalar("num_kv_heads"),
-                                                scalar("sliding_window")};
+    const auto unified2d = rockeKernelSignature("gfx950.unified_2d");
     expectRefused(unified2d, pythonReduceAbi(), "the 2D kernel is not a segment kernel");
 }
 

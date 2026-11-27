@@ -35,6 +35,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RockeKernelSignatures.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
 
 /**
@@ -641,27 +642,17 @@ inline constexpr uint32_t POINTER_BYTES = 8;
 
 inline constexpr uint32_t SCALAR_BYTES = 4;
 
-/// The argument list attention_dense_signature declares, under the names it gives them.
-inline std::vector<KernelArgument> pythonAbi()
+/// The argument list @p arch's attention_dense_signature declares for the runtime-shape grid
+/// form, under the names it gives them (generated from rocKE: RockeKernelSignatures.hpp).
+inline std::vector<KernelArgument> pythonAbi(const AttentionDenseTestArch& arch)
 {
-    return {KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "q_ptr"},
-            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "k_ptr"},
-            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "v_ptr"},
-            KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "o_ptr"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "scale"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "batch"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_query_heads"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
+    return rockeKernelSignature(std::string(arch.gcnArchName) + ".dense");
 }
 
-/// The emit_lse form: the same ten arguments, then lse_ptr, the FP32 stats output.
-inline std::vector<KernelArgument> pythonLseAbi()
+/// The emit_lse form: the same arguments, then lse_ptr, the FP32 stats output.
+inline std::vector<KernelArgument> pythonLseAbi(const AttentionDenseTestArch& arch)
 {
-    auto signature = pythonAbi();
-    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
-    return signature;
+    return rockeKernelSignature(std::string(arch.gcnArchName) + ".dense.lse");
 }
 
 /// A KPACK descriptor for @p arch's engine recording @p signature, carrying the completed

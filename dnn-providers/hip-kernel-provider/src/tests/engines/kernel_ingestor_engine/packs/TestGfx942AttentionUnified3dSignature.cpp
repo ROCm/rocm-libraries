@@ -16,6 +16,7 @@
 
 #include "Gfx942AttentionUnified3dTestGraphs.hpp"
 #include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RockeKernelSignatures.hpp"
 
 /**
  * @file TestGfx942AttentionUnified3dSignature.cpp
@@ -25,9 +26,9 @@
  * segment = `_tiled_3d_signatures("gfx942", dtype, strided_kv=True)` (the segment half)
  * and reduce = its reduce half (`rocke/library/kernels/common/attention_unified.py`): 19
  * base arguments, 3 i32 runtime fields (num_query_heads, num_kv_heads, sliding_window),
- * then 8 strided-K/V arguments; and 5 pointers then the i32 num_query_heads. The lists
- * below are written out independently of the pack; hkp_pack records the builder's own
- * parameter names
+ * then 8 strided-K/V arguments; and 5 pointers then the i32 num_query_heads. Both lists
+ * come from rocKE at build time (RockeKernelSignatures.hpp), not from the pack; hkp_pack
+ * records the builder's own parameter names
  * (descriptor-packaging/tests/rocke/test_hkp_pack_gfx942_unified_3d_rocke.py), and
  * prepare() compares both launches' recorded lists before loading either.
  *
@@ -49,59 +50,17 @@ using hipdnn_plugin_sdk::ingestor::KernelSource;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 
 constexpr const char* BUFFER = "global_buffer";
-constexpr const char* BY_VALUE = "by_value";
 
 /// `_tiled_3d_signatures("gfx942", dtype, strided_kv=True)[0]`, by name and width.
 std::vector<KernelArgument> pythonSegmentAbi()
 {
-    std::vector<KernelArgument> abi;
-    for(const char* name : {"segm_output_ptr",
-                            "segm_max_ptr",
-                            "segm_expsum_ptr",
-                            "query_ptr",
-                            "key_cache_ptr",
-                            "value_cache_ptr",
-                            "sink_ptr",
-                            "block_tables_ptr",
-                            "seq_lens_ptr",
-                            "alibi_slopes_ptr",
-                            "qq_bias_ptr",
-                            "query_start_len_ptr"})
-    {
-        abi.push_back(KernelArgument{BUFFER, 8, 0, name});
-    }
-    for(const char* name : {"scale",
-                            "k_scale",
-                            "v_scale",
-                            "softcap",
-                            "num_seqs",
-                            "block_table_stride",
-                            "qq_bias_stride0",
-                            "num_query_heads",
-                            "num_kv_heads",
-                            "sliding_window"})
-    {
-        abi.push_back(KernelArgument{BY_VALUE, 4, 0, name});
-    }
-    for(const std::string prefix : {"k", "v"})
-    {
-        abi.push_back(KernelArgument{BY_VALUE, 8, 0, prefix + "_stride_batch_bytes"});
-        abi.push_back(KernelArgument{BY_VALUE, 8, 0, prefix + "_stride_head_bytes"});
-        abi.push_back(KernelArgument{BY_VALUE, 4, 0, prefix + "_stride_token_bytes"});
-        abi.push_back(KernelArgument{BY_VALUE, 4, 0, prefix + "_span_bytes"});
-    }
-    return abi;
+    return rockeKernelSignature("gfx942.unified_3d.segment");
 }
 
 /// `_tiled_3d_signatures("gfx942", dtype)[1]`: no LSE, num_query_heads read at runtime.
 std::vector<KernelArgument> pythonReduceAbi()
 {
-    return {KernelArgument{BUFFER, 8, 0, "output_ptr"},
-            KernelArgument{BUFFER, 8, 0, "segm_output_ptr"},
-            KernelArgument{BUFFER, 8, 0, "segm_max_ptr"},
-            KernelArgument{BUFFER, 8, 0, "segm_expsum_ptr"},
-            KernelArgument{BUFFER, 8, 0, "seq_lens_ptr"},
-            KernelArgument{BY_VALUE, 4, 0, "num_query_heads"}};
+    return rockeKernelSignature("gfx942.unified_3d.reduce");
 }
 
 constexpr const char* SEGMENT_SYMBOL = "attention_unified_3d_segment_test";

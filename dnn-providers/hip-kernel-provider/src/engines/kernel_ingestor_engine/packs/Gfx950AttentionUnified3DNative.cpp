@@ -490,7 +490,9 @@ double scoreKernel(const MatchContext& /*context*/,
 /// only when BOTH sides carry one; kind and size alone cannot tell the twelve pointers
 /// apart, so without names an operand permutation passes and the kernel reads the wrong
 /// buffers. Keep these spellings identical to build_unified_attention_3d_tiled's `b.param`
-/// calls. Offsets are printed in a mismatch diagnostic and never compared.
+/// calls; TestGfx950AttentionUnified3DSignature checks this list against the one rocKE
+/// declares, generated from rocKE at build time (tests/.../packs/RockeKernelSignatures.hpp).
+/// Offsets are printed in a mismatch diagnostic and never compared.
 std::vector<KernelArgument> unified3DSegmentSignature()
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
