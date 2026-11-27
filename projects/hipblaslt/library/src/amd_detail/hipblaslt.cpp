@@ -41,12 +41,6 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 #include "Debug.hpp"
 
 #define TO_STR2(x) #x
@@ -74,6 +68,8 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
         return HIPBLAS_STATUS_INVALID_VALUE;
     case rocblaslt_status_arch_mismatch:
         return HIPBLAS_STATUS_ARCH_MISMATCH;
+    case rocblaslt_status_not_supported:
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
     default:
         throw HIPBLAS_STATUS_INVALID_ENUM;
     }
@@ -92,8 +88,8 @@ hipblasStatus_t refuse_unsupported_order(const char*      caller,
         if(orders[i] == HIPBLASLT_ORDER_ROW)
         {
             log_error(caller,
-                      "HIPBLASLT_ORDER_ROW is not supported for a matmul; only "
-                      "hipblasLtMatrixTransform accepts it",
+                      "HIPBLASLT_ORDER_ROW is not supported by this API; hipblasLtMatmul "
+                      "accepts it for A and B, and hipblasLtMatrixTransform accepts it",
                       "matrix",
                       names[i]);
             return HIPBLAS_STATUS_NOT_SUPPORTED;
@@ -225,19 +221,6 @@ namespace
                                    B);
     }
 
-    // rocblaslt_matmul and rocblaslt_matmul_algo_get_heuristic send a call with any grouped
-    // layout to the grouped path, which refuses every order but COL itself.
-    bool any_grouped(hipblasLtMatrixLayout_t matA,
-                     hipblasLtMatrixLayout_t matB,
-                     hipblasLtMatrixLayout_t matC,
-                     hipblasLtMatrixLayout_t matD)
-    {
-        for(auto mat : {matA, matB, matC, matD})
-            if(mat && ((rocblaslt_matrix_layout)mat)->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
-                return true;
-        return false;
-    }
-
     // The arguments rocblaslt_matmul_algo_get_heuristic checks before anything else.
     bool heuristic_arguments_present(hipblasLtHandle_t           handle,
                                      hipblasLtMatmulDesc_t       matmulDesc,
@@ -246,6 +229,116 @@ namespace
                                      int*                        returnAlgoCount)
     {
         return handle && matmulDesc && pref && returnAlgoCount && requestedAlgoCount >= 1;
+    }
+
+    /********************************************************************************
+     * Row-major A and B for hipblasLtMatmul and hipblasLtMatmulAlgoGetHeuristic.
+     *
+     * The kernels read every matrix as column-major. A row-major r x c matrix with
+     * leading dimension ld has the same bytes as a column-major c x r matrix with the
+     * same ld, so a row-major A or B becomes its column-major transpose with its op
+     * flipped. D is not rewritten, so C and D must be column-major. The heuristic and
+     * matmul rewrite the same way, so an algo from one is valid for the other.
+     *******************************************************************************/
+    struct ColumnMajorProblem
+    {
+        _rocblaslt_matmul_desc   desc;
+        _rocblaslt_matrix_layout a, b;
+    };
+
+    // Only called for HIPBLAS_OP_N and HIPBLAS_OP_T; rewrite_row_major refuses the rest.
+    hipblasOperation_t flip(hipblasOperation_t op)
+    {
+        return op == HIPBLAS_OP_N ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+    }
+
+    bool is_n_or_t(hipblasOperation_t op)
+    {
+        return op == HIPBLAS_OP_N || op == HIPBLAS_OP_T;
+    }
+
+    void to_column_major(_rocblaslt_matrix_layout& layout)
+    {
+        std::swap(layout.m, layout.n);
+        layout.order = HIPBLASLT_ORDER_COL;
+    }
+
+    bool is_scalar_scale(RocblasltContractionProblem::ScalingFormat format)
+    {
+        return format == RocblasltContractionProblem::ScalingFormat::None
+               || format == RocblasltContractionProblem::ScalingFormat::Scalar;
+    }
+
+    hipblasStatus_t refuse_rewrite(const char* caller, const char* reason)
+    {
+        log_error(caller, "HIPBLASLT_ORDER_ROW is not supported here", "reason", reason);
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
+    }
+
+    // Sets `rewritten` and fills `out` when A or B is row-major. Leaves `rewritten`
+    // false for an all-column-major call, a grouped call (the grouped path refuses
+    // row-major itself), a null argument, or HIPBLASLT_OPERATION_INVALID (the normal
+    // validation reports both).
+    hipblasStatus_t rewrite_row_major(const char*             caller,
+                                      rocblaslt_matmul_desc   desc,
+                                      rocblaslt_matrix_layout matA,
+                                      rocblaslt_matrix_layout matB,
+                                      rocblaslt_matrix_layout matC,
+                                      rocblaslt_matrix_layout matD,
+                                      ColumnMajorProblem&     out,
+                                      bool&                   rewritten)
+    {
+        rewritten = false;
+        if(!desc || !matA || !matB || !matC || !matD)
+            return HIPBLAS_STATUS_SUCCESS;
+        for(auto mat : {matA, matB, matC, matD})
+            if(mat->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+                return HIPBLAS_STATUS_SUCCESS;
+
+        const bool rowA = matA->order == HIPBLASLT_ORDER_ROW;
+        const bool rowB = matB->order == HIPBLASLT_ORDER_ROW;
+        const bool colC = matC->order == HIPBLASLT_ORDER_COL;
+        const bool colD = matD->order == HIPBLASLT_ORDER_COL;
+        if(!rowA && !rowB && colC && colD)
+            return HIPBLAS_STATUS_SUCCESS;
+
+        if(desc->op_A == HIPBLASLT_OPERATION_INVALID || desc->op_B == HIPBLASLT_OPERATION_INVALID)
+            return HIPBLAS_STATUS_SUCCESS;
+        // The kernels write D, and read C, column-major only. Swizzled orders exist for A and B.
+        if(!colC || !colD)
+        {
+            log_error(caller,
+                      "C and D must be HIPBLASLT_ORDER_COL",
+                      "order_c",
+                      int(matC->order),
+                      "order_d",
+                      int(matD->order));
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+        if(!is_n_or_t(desc->op_A) || !is_n_or_t(desc->op_B))
+            return refuse_rewrite(caller,
+                                  "only HIPBLAS_OP_N and HIPBLAS_OP_T have a row-major equivalent");
+        if(!is_scalar_scale(desc->scaleAType) || !is_scalar_scale(desc->scaleBType))
+            return refuse_rewrite(caller, "block and vector scale tensors have a fixed layout");
+        if(matA->type == HIP_R_4I || matB->type == HIP_R_4I)
+            return refuse_rewrite(caller, "int4 weights have a fixed layout");
+
+        out.desc.copy(*desc);
+        out.desc.m_data = desc->m_data;
+        out.a           = *matA;
+        out.b           = *matB;
+        if(rowA)
+        {
+            to_column_major(out.a);
+            out.desc.op_A = flip(out.desc.op_A);
+        }
+        if(rowB)
+        {
+            to_column_major(out.b);
+            out.desc.op_B = flip(out.desc.op_B);
+        }
+        rewritten = true;
+        return HIPBLAS_STATUS_SUCCESS;
     }
 } // namespace
 
@@ -258,7 +351,7 @@ namespace
  *******************************************************************************/
 struct hipblasLtFusionDescriptor
 {
-    std::vector<hipblasLtFuseableEpilogue_t> stages;
+    std::vector<hipblasLtFuseableEpilogue_t> epilogue_stages;
     std::vector<hipblasLtFuseablePrologue_t> prologue_stages;
 
     // HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX parameters. The per-rank arrays are
@@ -280,7 +373,7 @@ namespace
 {
     bool fused_epilogue_has_stage(const hipblasLtFusionDescriptor* d, hipblasLtFuseableEpilogue_t e)
     {
-        for(auto s : d->stages)
+        for(auto s : d->epilogue_stages)
             if(s == e)
                 return true;
         return false;
@@ -322,7 +415,7 @@ namespace
     bool fused_epilogue_stage_composes(const hipblasLtFusionDescriptor* desc,
                                        hipblasLtFuseableEpilogue_t      stage)
     {
-        if(desc->stages.empty())
+        if(desc->epilogue_stages.empty())
             return true;
         if(stage == HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX)
             return false;
@@ -532,17 +625,17 @@ namespace
 
     // Runs the checks a matmul carrying a fused epilogue or prologue owes before
     // it is dispatched. A descriptor with no communicating stage passes through.
-    hipblasStatus_t validate_fused_epilogue_dispatch(hipblasLtHandle_t       handle,
-                                                     hipblasLtMatmulDesc_t   matmulDesc,
-                                                     hipblasLtMatrixLayout_t Bdesc,
-                                                     hipblasLtMatrixLayout_t Ddesc)
+    hipblasStatus_t validate_fusion_dispatch(hipblasLtHandle_t       handle,
+                                             hipblasLtMatmulDesc_t   matmulDesc,
+                                             hipblasLtMatrixLayout_t Bdesc,
+                                             hipblasLtMatrixLayout_t Ddesc)
     {
         if(matmulDesc == nullptr)
             return HIPBLAS_STATUS_SUCCESS;
 
         const rocblaslt_matmul_desc desc = (rocblaslt_matmul_desc)matmulDesc;
-        RocblasltFusedEpilogueInfo  info;
-        if(!rocblaslt_resolve_fused_epilogue(desc->fused_epilogue, desc->fused_prologue, info))
+        RocblasltFusionInfo         info;
+        if(!rocblaslt_resolve_fusion(desc->fused_epilogue, desc->fused_prologue, info))
             return HIPBLAS_STATUS_SUCCESS;
 
         if(info.misattached)
@@ -555,7 +648,7 @@ namespace
 
         switch(info.mode)
         {
-        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+        case RocblasltFusionInfo::Mode::GemmA2A:
         {
             const hipblasStatus_t contents = validate_fused_epilogue_contents(desc->fused_epilogue);
             if(contents != HIPBLAS_STATUS_SUCCESS)
@@ -563,72 +656,23 @@ namespace
             return validate_fused_a2a_launch(
                 (rocblaslt_handle)handle, desc->fused_epilogue, (rocblaslt_matrix_layout)Ddesc);
         }
-        case RocblasltFusedEpilogueInfo::Mode::A2AGemm:
+        case RocblasltFusionInfo::Mode::A2AGemm:
             return validate_fused_prologue_launch((rocblaslt_handle)handle,
                                                   desc->fused_prologue,
                                                   (rocblaslt_matrix_layout)Bdesc,
                                                   (rocblaslt_matrix_layout)Ddesc);
-        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+        case RocblasltFusionInfo::Mode::Disabled:
             break;
         }
         return HIPBLAS_STATUS_SUCCESS;
-    }
-
-    /****************************************************************************
-     * Device communicator.
-     ***************************************************************************/
-
-    // What each rank contributes to the registration allgather. Opaque to the
-    // caller, which must neither interpret nor reorder it. A peer in this process
-    // is reached through its raw device pointer, once peer access to its device
-    // is enabled, which is what the ordinal is for; one in another process is
-    // reached through the IPC handle. All of it travels because which case a peer
-    // falls into is only known once the payloads are in hand.
-    struct DeviceCommExchange
-    {
-        uint32_t          magic;
-        uint32_t          rank;
-        uint32_t          world;
-        uint32_t          nChannels;
-        int32_t           device;
-        uint64_t          pid;
-        void*             flags;
-        uint32_t          ipcValid;
-        hipIpcMemHandle_t ipc;
-    };
-
-    constexpr uint32_t kDeviceCommMagic = 0x41324131u; // "1A2A"
-
-    // Undoes whatever hipblasLtSetDeviceComm managed to put on the handle, from
-    // any point in it, and leaves the handle unregistered. Each of the three
-    // kinds of entry is released the way it was acquired, and a peer in this
-    // process is another handle's allocation, so it is left alone.
-    void release_device_comm(rocblaslt_handle handle)
-    {
-        for(uint32_t j = 0; j < HIPBLASLT_DEVICE_COMM_MAX_WORLD; ++j)
-        {
-            void* region = handle->device_comm_peer_flags[j];
-            if(region != nullptr)
-            {
-                if(j == handle->device_comm_rank)
-                    static_cast<void>(hipFree(region));
-                else if(handle->device_comm_peer_flags_mapped[j])
-                    static_cast<void>(hipIpcCloseMemHandle(region));
-            }
-            handle->device_comm_peer_flags[j]        = nullptr;
-            handle->device_comm_peer_flags_mapped[j] = false;
-        }
-        handle->device_comm_rank     = 0;
-        handle->device_comm_channels = 0;
-        handle->device_comm_world    = 0;
     }
 }
 
 // The pointers alias the descriptor's own storage; they stay valid only as long as
 // the descriptor does.
-bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
-                                      const hipblasLtFusionDescriptor* prologue,
-                                      RocblasltFusedEpilogueInfo&      out)
+bool rocblaslt_resolve_fusion(const hipblasLtFusionDescriptor* epilogue,
+                              const hipblasLtFusionDescriptor* prologue,
+                              RocblasltFusionInfo&             out)
 {
     if(epilogue == nullptr && prologue == nullptr)
         return false;
@@ -639,10 +683,10 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
         = prologue && fused_prologue_has_stage(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
 
     out.misattached = (epilogue && !epilogue->prologue_stages.empty())
-                      || (prologue && !prologue->stages.empty()) || (gemmA2A && a2aGemm);
-    out.mode = a2aGemm   ? RocblasltFusedEpilogueInfo::Mode::A2AGemm
-               : gemmA2A ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
-                         : RocblasltFusedEpilogueInfo::Mode::Disabled;
+                      || (prologue && !prologue->epilogue_stages.empty()) || (gemmA2A && a2aGemm);
+    out.mode = a2aGemm   ? RocblasltFusionInfo::Mode::A2AGemm
+               : gemmA2A ? RocblasltFusionInfo::Mode::GemmA2A
+                         : RocblasltFusionInfo::Mode::Disabled;
 
     const hipblasLtFusionDescriptor* desc = a2aGemm || epilogue == nullptr ? prologue : epilogue;
     out.a2aSdmaQueues     = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
@@ -656,15 +700,15 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
     return true;
 }
 
-rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
-                                                            rocblaslt_matmul_desc   matmulDesc,
-                                                            rocblaslt_matrix_layout matB,
-                                                            rocblaslt_matrix_layout matD)
+rocblaslt_status rocblaslt_validate_fusion_dispatch(rocblaslt_handle        handle,
+                                                    rocblaslt_matmul_desc   matmulDesc,
+                                                    rocblaslt_matrix_layout matB,
+                                                    rocblaslt_matrix_layout matD)
 {
-    return validate_fused_epilogue_dispatch((hipblasLtHandle_t)handle,
-                                            (hipblasLtMatmulDesc_t)matmulDesc,
-                                            (hipblasLtMatrixLayout_t)matB,
-                                            (hipblasLtMatrixLayout_t)matD)
+    return validate_fusion_dispatch((hipblasLtHandle_t)handle,
+                                    (hipblasLtMatmulDesc_t)matmulDesc,
+                                    (hipblasLtMatrixLayout_t)matB,
+                                    (hipblasLtMatrixLayout_t)matD)
                    == HIPBLAS_STATUS_SUCCESS
                ? rocblaslt_status_success
                : rocblaslt_status_invalid_value;
@@ -771,12 +815,6 @@ try
     {
         CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).StreamKFlags));
     }
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    if(handle != nullptr)
-    {
-        release_device_comm((rocblaslt_handle)handle);
-    }
-#endif
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_destroy((const rocblaslt_handle)handle));
     rocblaslt::Debug::Instance().markerStop();
@@ -1107,7 +1145,7 @@ try
     }
     else
     {
-        desc->stages.push_back(epilogue);
+        desc->epilogue_stages.push_back(epilogue);
     }
 
     rocblaslt::Debug::Instance().markerStop();
@@ -1129,7 +1167,7 @@ try
     {
         status = HIPBLAS_STATUS_INVALID_VALUE;
     }
-    else if(!desc->prologue_stages.empty() || !desc->stages.empty())
+    else if(!desc->prologue_stages.empty() || !desc->epilogue_stages.empty())
     {
         log_error(__func__, "prologue stage does not compose with the stages already added");
         status = HIPBLAS_STATUS_INVALID_VALUE;
@@ -1305,14 +1343,27 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-// TODO(#11940): Move communicator and peer-transport setup to RCCL or a shared
-// transport layer; keep the fused GEMM handoff in hipBLASLt.
-hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
-                                       uint32_t                       rank,
-                                       uint32_t                       world,
-                                       uint32_t                       nChannels,
-                                       hipblasLtDeviceCommAllgatherFn allgather,
-                                       void*                          userData)
+hipblasStatus_t hipblasLtDeviceCommFlagBytes(uint32_t nChannels, size_t* bytes)
+try
+{
+    if(nChannels == 0 || bytes == nullptr)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    // The kernel owns the flag region's layout, so its size is asked for rather
+    // than recomputed here; that keeps one definition of it.
+    *bytes = (size_t)nChannels * rocblaslt_device_comm_flag_block_bytes();
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t handle,
+                                       uint32_t          rank,
+                                       uint32_t          world,
+                                       uint32_t          nChannels,
+                                       void* const*      peerFlags)
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtSetDeviceComm");
@@ -1326,7 +1377,7 @@ try
     rocblaslt_handle h = (rocblaslt_handle)handle;
 
     if(world < 1 || world > HIPBLASLT_DEVICE_COMM_MAX_WORLD || rank >= world || nChannels == 0
-       || allgather == nullptr)
+       || peerFlags == nullptr)
     {
         log_error(__func__, "invalid communicator arguments; world", (int)world);
         rocblaslt::Debug::Instance().markerStop();
@@ -1342,110 +1393,32 @@ try
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
 
-    // Travels in the payload: a peer in this process is reached from here only
-    // once peer access to its device is enabled, and that call names the ordinal.
-    int myDevice = 0;
-    if(hipGetDevice(&myDevice) != hipSuccess)
-    {
-        log_error(__func__, "could not resolve this rank's device ordinal");
-        rocblaslt::Debug::Instance().markerStop();
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
-    }
-
-    // The kernel owns the flag region's layout, so its size is asked for rather
-    // than recomputed here; that keeps one definition of it.
-    void*        flags = nullptr;
-    const size_t bytes = (size_t)nChannels * rocblaslt_device_comm_flag_block_bytes();
-    // Fine-grained, because a peer's copy engine updates these lines.
-    if(hipExtMallocWithFlags(&flags, bytes, hipDeviceMallocFinegrained) != hipSuccess
-       || flags == nullptr)
-    {
-        log_error(__func__, "could not allocate the communicator's flag regions");
-        rocblaslt::Debug::Instance().markerStop();
-        return HIPBLAS_STATUS_ALLOC_FAILED;
-    }
-    if(hipMemset(flags, 0, bytes) != hipSuccess)
-    {
-        static_cast<void>(hipFree(flags));
-        rocblaslt::Debug::Instance().markerStop();
-        return HIPBLAS_STATUS_ALLOC_FAILED;
-    }
-
-    DeviceCommExchange mine{};
-    mine.magic     = kDeviceCommMagic;
-    mine.rank      = rank;
-    mine.world     = world;
-    mine.nChannels = nChannels;
-    mine.device    = myDevice;
-    mine.pid       = (uint64_t)getpid();
-    mine.flags     = flags;
-    // Only needed by a peer in another process; a failure here is reported when
-    // such a peer is actually found, not before.
-    mine.ipcValid = (hipIpcGetMemHandle(&mine.ipc, flags) == hipSuccess) ? 1u : 0u;
-
-    std::vector<DeviceCommExchange> all(world);
-    hipblasStatus_t                 status
-        = allgather(userData, &mine, all.data(), sizeof(DeviceCommExchange));
-    if(status != HIPBLAS_STATUS_SUCCESS)
-    {
-        static_cast<void>(hipFree(flags));
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
-    // The handle owns the allocation from here on: it is this rank's own entry,
-    // and rank is what release_device_comm looks at to tell it from the peers.
-    h->device_comm_rank             = rank;
-    h->device_comm_peer_flags[rank] = flags;
-
     for(uint32_t j = 0; j < world; ++j)
     {
-        const DeviceCommExchange& peer = all[j];
-        if(peer.magic != kDeviceCommMagic || peer.rank != j || peer.world != world
-           || peer.nChannels != nChannels || peer.flags == nullptr)
+        if(peerFlags[j] == nullptr
+           || reinterpret_cast<uintptr_t>(peerFlags[j]) % HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT != 0)
         {
-            log_error(__func__, "ranks disagree about the communicator; rank", (int)j);
-            release_device_comm(h);
+            log_error(__func__, "null or misaligned flag region for rank", (int)j);
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
-
-        if(j == rank || peer.pid == mine.pid)
-        {
-            // A pointer from this process is addressable as it stands only on
-            // this device; reaching another one takes peer access, or the copy
-            // engine faults on a region it was handed. Already-enabled is a
-            // success, since in one process the W handles enable each other
-            // pairwise and either direction may be established first.
-            if(j != rank && peer.device != mine.device)
-            {
-                const hipError_t peerAccess = hipDeviceEnablePeerAccess(peer.device, 0);
-                if(peerAccess != hipSuccess && peerAccess != hipErrorPeerAccessAlreadyEnabled)
-                {
-                    log_error(__func__, "cannot reach a peer's device from this one; rank", (int)j);
-                    release_device_comm(h);
-                    rocblaslt::Debug::Instance().markerStop();
-                    return HIPBLAS_STATUS_NOT_SUPPORTED;
-                }
-            }
-            h->device_comm_peer_flags[j]        = peer.flags;
-            h->device_comm_peer_flags_mapped[j] = false;
-            continue;
-        }
-
-        void* mapped = nullptr;
-        if(!peer.ipcValid
-           || hipIpcOpenMemHandle(&mapped, peer.ipc, hipIpcMemLazyEnablePeerAccess) != hipSuccess)
-        {
-            log_error(__func__, "cannot map a peer's flag region into this process; rank", (int)j);
-            release_device_comm(h);
-            rocblaslt::Debug::Instance().markerStop();
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-        h->device_comm_peer_flags[j]        = mapped;
-        h->device_comm_peer_flags_mapped[j] = true;
     }
 
+    // Peers' entries may be addresses in another process, but this rank's own entry is
+    // local, so a host pointer or one on another device is caught here rather than as a
+    // hang in the kernel.
+    hipPointerAttribute_t ownAttr{};
+    if(hipPointerGetAttributes(&ownAttr, peerFlags[rank]) != hipSuccess
+       || ownAttr.type != hipMemoryTypeDevice || ownAttr.device != h->device)
+    {
+        log_error(__func__, "own flag region is not device memory on this device; rank", (int)rank);
+        rocblaslt::Debug::Instance().markerStop();
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+
+    for(uint32_t j = 0; j < world; ++j)
+        h->device_comm_peer_flags[j] = peerFlags[j];
+    h->device_comm_rank     = rank;
     h->device_comm_channels = nChannels;
     // Last, and what makes the handle registered: every peer's region is in hand.
     h->device_comm_world = world;
@@ -1549,8 +1522,7 @@ try
     // Everything a communicating stage can be judged on before a solution exists
     // is judged here: an all-to-all's extent participates in tile selection, so a
     // request that cannot be served must not come back as a usable algo.
-    hipblasStatus_t fused_status
-        = validate_fused_epilogue_dispatch(handle, matmulDesc, Bdesc, Ddesc);
+    hipblasStatus_t fused_status = validate_fusion_dispatch(handle, matmulDesc, Bdesc, Ddesc);
     if(fused_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
@@ -1558,14 +1530,16 @@ try
     }
 #endif
 
+    auto               desc = (rocblaslt_matmul_desc)matmulDesc;
+    auto               matA = (rocblaslt_matrix_layout)Adesc;
+    auto               matB = (rocblaslt_matrix_layout)Bdesc;
+    auto               matC = (rocblaslt_matrix_layout)Cdesc;
+    auto               matD = (rocblaslt_matrix_layout)Ddesc;
+    ColumnMajorProblem columnMajor;
+    bool               rewritten = false;
     if(auto order_status
        = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
-                 && !any_grouped(Adesc, Bdesc, Cdesc, Ddesc)
-             ? refuse_unsupported_order(__func__,
-                                        (rocblaslt_matrix_layout)Adesc,
-                                        (rocblaslt_matrix_layout)Bdesc,
-                                        (rocblaslt_matrix_layout)Cdesc,
-                                        (rocblaslt_matrix_layout)Ddesc)
+             ? rewrite_row_major(__func__, desc, matA, matB, matC, matD, columnMajor, rewritten)
              : HIPBLAS_STATUS_SUCCESS;
        order_status != HIPBLAS_STATUS_SUCCESS)
     {
@@ -1573,14 +1547,20 @@ try
         rocblaslt::Debug::Instance().markerStop();
         return order_status;
     }
+    if(rewritten)
+    {
+        desc = &columnMajor.desc;
+        matA = &columnMajor.a;
+        matB = &columnMajor.b;
+    }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,
-        (rocblaslt_matmul_desc)matmulDesc,
-        (rocblaslt_matrix_layout)Adesc,
-        (rocblaslt_matrix_layout)Bdesc,
-        (rocblaslt_matrix_layout)Cdesc,
-        (rocblaslt_matrix_layout)Ddesc,
+        desc,
+        matA,
+        matB,
+        matC,
+        matD,
         (rocblaslt_matmul_preference)pref,
         requestedAlgoCount,
         (rocblaslt_matmul_heuristic_result*)heuristicResultsArray,
@@ -1615,7 +1595,7 @@ try
     hipblasStatus_t return_status = HIPBLAS_STATUS_SUCCESS;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
+    return_status = validate_fusion_dispatch(handle, matmul_descr, matB, matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
@@ -1623,6 +1603,13 @@ try
     }
 #endif
 
+    auto               desc    = (rocblaslt_matmul_desc)matmul_descr;
+    auto               layoutA = (rocblaslt_matrix_layout)matA;
+    auto               layoutB = (rocblaslt_matrix_layout)matB;
+    auto               layoutC = (rocblaslt_matrix_layout)matC;
+    auto               layoutD = (rocblaslt_matrix_layout)matD;
+    ColumnMajorProblem columnMajor;
+    bool               rewritten = false;
     if(matmul_arguments_present(handle,
                                 matmul_descr,
                                 alpha,
@@ -1636,31 +1623,33 @@ try
                                 D,
                                 matD,
                                 workspace,
-                                workspaceSizeInBytes)
-       && !any_grouped(matA, matB, matC, matD))
-        return_status = refuse_unsupported_order(__func__,
-                                                 (rocblaslt_matrix_layout)matA,
-                                                 (rocblaslt_matrix_layout)matB,
-                                                 (rocblaslt_matrix_layout)matC,
-                                                 (rocblaslt_matrix_layout)matD);
+                                workspaceSizeInBytes))
+        return_status = rewrite_row_major(
+            __func__, desc, layoutA, layoutB, layoutC, layoutD, columnMajor, rewritten);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
         return return_status;
     }
+    if(rewritten)
+    {
+        desc    = &columnMajor.desc;
+        layoutA = &columnMajor.a;
+        layoutB = &columnMajor.b;
+    }
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
-                                                                (rocblaslt_matmul_desc)matmul_descr,
+                                                                desc,
                                                                 alpha,
                                                                 A,
-                                                                (rocblaslt_matrix_layout)matA,
+                                                                layoutA,
                                                                 B,
-                                                                (rocblaslt_matrix_layout)matB,
+                                                                layoutB,
                                                                 beta,
                                                                 C,
-                                                                (rocblaslt_matrix_layout)matC,
+                                                                layoutC,
                                                                 D,
-                                                                (rocblaslt_matrix_layout)matD,
+                                                                layoutD,
                                                                 (const rocblaslt_matmul_algo*)algo,
                                                                 workspace,
                                                                 workspaceSizeInBytes,

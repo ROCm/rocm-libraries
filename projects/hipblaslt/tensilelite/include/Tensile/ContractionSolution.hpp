@@ -1015,6 +1015,13 @@ namespace TensileLite
                             PersistentLaunchSettings const&   launch,
                             size_t                   resolvedGlobalAccumulation) const;
 
+        // calculateInternalArgs() shifts the stagger group (StaggerU in bits [7:0], the stride
+        // shift in [12:8], the mapping in [15:13]) into internalArg0 bits [31:16], so StaggerU is
+        // internalArg0 bits [23:16]. The kernel decodes the same bits in
+        // tensilelite/tensilelite/KernelWriterAssembly.py.
+        static constexpr uint32_t kInternalArg0StaggerUShift = 16;
+        static constexpr uint32_t kInternalArg0StaggerUMask  = 0xFF;
+
         template <bool T_Debug>
         void calculateInternalArgs(uint32_t&                           internalArg0,
                                    uint32_t&                           internalArg1,
@@ -1302,6 +1309,12 @@ namespace TensileLite
                                                                   Hardware const* hardware,
                                                                   uint32_t        skgrid,
                                                                   int32_t         autoWGM) const;
+        // The one StaggerU a grouped launch packs. A group with any problem under
+        // uniform summation order packs StaggerU off.
+        std::tuple<size_t, size_t, size_t>
+            calculateGroupedAutoStaggerU(std::vector<Problem> const& problems,
+                                         Hardware const*             hardware,
+                                         int32_t                     autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
 
         double calculateDimensionM(Problem const&  problem) const;

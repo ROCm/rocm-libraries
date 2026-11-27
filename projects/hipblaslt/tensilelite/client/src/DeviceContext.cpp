@@ -215,7 +215,7 @@ namespace TensileLite
             const size_t   channel = launch % kCommChannels;
 
             scratch = dynamic_cast<ContractionInputs const&>(*devices[rank]->inputArr[slot]);
-            scratch.fusedA2APeers.clear();
+            scratch.fusedA2APeers = {};
 #ifdef TENSILELITE_ENABLE_SDMA
             for(size_t j = 0; j < world; j++)
             {
@@ -231,14 +231,14 @@ namespace TensileLite
                     = dynamic_cast<ContractionInputs const&>(*devices[j]->inputArr[slot]);
                 auto const&             queue = *devices[rank]->sdmaQueues[j];
                 const HsaQueueResource& q     = queue.queueResource();
-                scratch.fusedA2APeers.push_back(
-                    {(char*)devices[j]->commFlags + channel * FUSED_A2A_FLAG_BLOCK_BYTES,
-                     mode == FusedA2A::GemmA2A || j == rank ? peer.a2aBuf
-                                                            : const_cast<void*>(peer.b),
-                     queue.ringBase(),
-                     (void*)q.Queue_read_ptr_aql,
-                     (void*)q.Queue_write_ptr_aql,
-                     (void*)q.Queue_DoorBell_aql});
+                scratch.fusedA2APeers[j]
+                    = {(char*)devices[j]->commFlags + channel * FUSED_A2A_FLAG_BLOCK_BYTES,
+                       mode == FusedA2A::GemmA2A || j == rank ? peer.a2aBuf
+                                                              : const_cast<void*>(peer.b),
+                       queue.ringBase(),
+                       (void*)q.Queue_read_ptr_aql,
+                       (void*)q.Queue_write_ptr_aql,
+                       (void*)q.Queue_DoorBell_aql};
             }
 #endif
             scratch.fusedA2ACounter = scratch.Synchronizer;

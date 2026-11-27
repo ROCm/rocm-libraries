@@ -14,10 +14,17 @@
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdint>
-#include <vector>
 
 namespace rocblaslt
 {
+    // A caller's region aligned to the public constant must keep every channel's
+    // flag block, biased below by a whole number of blocks, on a line boundary.
+    static_assert(HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT % TensileLite::FUSED_A2A_LINE_BYTES == 0
+                      && TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES
+                                 % HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT
+                             == 0,
+                  "HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT no longer matches the flag block layout");
+
     // The drain bits this layer asks for. IN_KERNEL_FULL maps to both.
     constexpr uint32_t fusedA2ADrainFor(hipblasLtA2ACompletionMode_t mode)
     {
@@ -28,9 +35,9 @@ namespace rocblaslt
 
     // One group per rank in FUSED_A2A_PEER_FIELDS order. Fills the flag, recv and SDMA
     // queue slots. Any of the three sources may be null, leaving its slots null. Returns
-    // an empty list when world does not fit the segment. The flag slot is biased to the
-    // caller's channel within each peer's region.
-    inline std::vector<TensileLite::FusedA2APeerFields>
+    // an all-null table when world does not fit the segment. The flag slot is biased to
+    // the caller's channel within each peer's region.
+    inline TensileLite::FusedA2APeerTable
         buildFusedA2APeerFields(void* const*                peerFlag,
                                 void* const*                recvPtrs,
                                 uint32_t                    world,
@@ -42,7 +49,7 @@ namespace rocblaslt
 
         const size_t flagBias = size_t(channel) * TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES;
 
-        std::vector<TensileLite::FusedA2APeerFields> peers(world);
+        TensileLite::FusedA2APeerTable peers = {};
         for(uint32_t j = 0; j < world; ++j)
         {
             peers[j][TensileLite::FUSED_A2A_SLOT_FLAG_PTR]

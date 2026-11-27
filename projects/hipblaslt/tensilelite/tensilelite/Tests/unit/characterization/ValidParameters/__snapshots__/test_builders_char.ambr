@@ -1392,6 +1392,7 @@
     'CompactLoopStore',
     'ConvertAfterDS',
     'CustomKernel',
+    'DebugDisableInstrMask',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1501,6 +1502,7 @@
     'StaggerUStride',
     'StinkyTofuParameters',
     'StinkyTofuRegisterAllocation',
+    'StoreCachelineAlign',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1788,6 +1790,15 @@
     'CustomKernel': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'DebugDisableInstrMask': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 32,
+      'type': 'list',
     }),
     'DebugPersistentKernelLoopForever': dict({
       'head': list([
@@ -2728,6 +2739,14 @@
     'StinkyTofuRegisterAllocation': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'StoreCachelineAlign': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
     }),
     'StorePriorityOpt': dict({
       'head': list([

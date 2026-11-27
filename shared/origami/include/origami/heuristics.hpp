@@ -235,6 +235,98 @@ struct heuristic_defaults_t {
 };
 
 /**
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1150 and gfx1151: constants of
+ *        the latency model and of the Stream-K launch grid, fit on hipBLASLt kernel times.
+ *
+ * The two architectures run the same kernels on the same ISA, so every constant that describes
+ * the kernels is the same on both.  What differs is read from hardware_t (CUs, SIMDs per CU,
+ * MALL) and from the kernel's CUOccupancy, except the DRAM bandwidth of the decode model.
+ */
+struct w4a16_params_t {
+  // Legend: the tag at the end of each constant says how its value was obtained.
+  //   [EMPIRICAL] chosen by sweeping it against measured hipBLASLt kernel times;
+  //   [KERNEL]    a property of the kernels of the set, not fitted;
+  //   [DEFAULT]   a fallback for a config that does not carry the value, not fitted.
+  //   [MEASURED]  measured on the device (the DRAM bandwidths of the decode model, in
+  //               w4a16_decode_dram_bytes_per_us below).
+
+  // --- Tile latency model ---
+  // Dequantize VALU per element, with its dependency stalls (bf16 rounds f32 products, fp16
+  // uses packed halves).
+  static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 10.0;  // [EMPIRICAL]
+  static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 5.0;  // [EMPIRICAL]
+  // Cycles per C element of a Stream-K partial tile on the critical path: the workgroup that
+  // finishes a tile waits for, reads and adds the f32 partial of each other workgroup.
+  // This one depends on the memory system, not only on the kernels: it was fitted on gfx1151,
+  // which holds the partials in its MALL.  gfx1150 has no MALL and takes the same value because
+  // its picks do not depend on it: from 0 to twice this value none of 632 measured problems
+  // changes kernel.
+  static constexpr double SK_FIXUP_CYCLES_PER_ELEM = 2.71;  // [EMPIRICAL]
+
+  // --- Stream-K grid (grid_k_split_aware_w4a16) ---
+  // Waves of a workgroup when the config does not carry its wave layout.
+  static constexpr int DEFAULT_WAVES_PER_WORKGROUP = 4;  // [DEFAULT]
+  // Workgroups with this many waves fill a CU (rules 1 and 4).
+  static constexpr int FULL_CU_WAVES = 16;  // [KERNEL]
+  // Rule 2: K iterations up to which a tile per CU or less stays DP, and up to which it does
+  // when the tiles are more than half the CUs (each workgroup then gets over half a tile).
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS           = 8;  // [EMPIRICAL]
+  static constexpr size_t SK_SPLIT_MIN_K_ITERS_OVER_HALF = 64;  // [EMPIRICAL]
+  // Rules 4 and 6: with a MALL to hold the partials, tiles are shared below this many tiles
+  // per CU (a single row of token tiles up to it).
+  static constexpr size_t SHARED_MAX_TILES_PER_CU = 5;  // [EMPIRICAL]
+  // Above the shared range (or without a MALL): DP for K up to this many iterations.
+  static constexpr size_t MANY_TILES_DP_MAX_K_ITERS = 16;  // [EMPIRICAL]
+  // Rule 4: largest ceil(t) / t that still runs DP: full-CU workgroups, 4-wave (non-token)
+  // ones, and the rest.
+  static constexpr double DP_MAX_WAVE_ROUNDING_FULL_CU = 1.5;  // [EMPIRICAL]
+  static constexpr double DP_MAX_WAVE_ROUNDING_4_WAVES = 1.15;  // [EMPIRICAL]
+  static constexpr double DP_MAX_WAVE_ROUNDING         = 1.06;  // [EMPIRICAL]
+  // Rule 5: token tiles (MT_N at most this) get one workgroup per SIMD of the CU.
+  static constexpr size_t TOKEN_TILE_MAX_N = 48;  // [EMPIRICAL]
+
+  // --- Decode kernels (dot2 WaveSplitK: one wave per workgroup, MT_M weight rows x MT_N
+  // tokens, K split over the wave's lanes; see compute_w4a16_decode_latency) ---
+  // Cycles of a wave: fixed (start, prologue, reduction, store), and per K iteration (the
+  // load-to-use latency of its global reads and the work on them).
+  static constexpr double DECODE_WAVE_CYCLES = 5000.0;  // [EMPIRICAL]
+  static constexpr double DECODE_ITER_CYCLES = 1500.0;  // [EMPIRICAL]
+};
+
+/// Whether the W4A16 model applies to @p problem on @p hardware. The latency model and the
+/// Stream-K grid rule both use it, so they apply together.
+inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
+  if (problem.a_dtype != data_type_t::Int4) return false;
+  if (problem.mi_dtype != data_type_t::BFloat16 && problem.mi_dtype != data_type_t::Half) return false;
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
+    case hardware_t::architecture_t::gfx1151:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/// Peak DRAM read bandwidth of the device for the W4A16 decode model, in bytes/us (measured), or
+/// nullopt where the device has no decode model.
+// TODO(AIESW-51613): these values should come from hardware_t (mem3_perf_ratio is the DRAM
+// bandwidth), not from here.  The values hardware_t holds today are wrong: about 623 GB/s on
+// gfx1151 and 31 GB/s on gfx1150, against the 247 and 84.1 GB/s measured.  The tile model is
+// calibrated with them (it underestimates the memory latency and gfx1150's value compensates
+// for that), so the Origami model has to be fixed before they can change.  Until then the
+// decode model keeps the measured bandwidths here.
+inline std::optional<double> w4a16_decode_dram_bytes_per_us(const hardware_t& hardware) {
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
+      return 84.1e3;  // [MEASURED] Strix Point: 78.3 GiB/s
+    case hardware_t::architecture_t::gfx1151:
+      return 247.0e3;  // [MEASURED] Strix Halo: 230 GiB/s
+    default:
+      return std::nullopt;
+  }
+}
+
+/**
  * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
  *
  * Fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950); see

@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -15,32 +14,12 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#define HIPDNN_UNDEF_NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#define HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#ifdef HIPDNN_UNDEF_NOMINMAX
-#undef NOMINMAX
-#undef HIPDNN_UNDEF_NOMINMAX
-#endif
-#ifdef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
-#undef WIN32_LEAN_AND_MEAN
-#undef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
-#endif
-#else
-#include <unistd.h>
-#endif
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/ProcessUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "AutotuneIntegrationFixture.hpp"
@@ -238,29 +217,12 @@ protected:
             body();
             return;
         }
-        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-        ASSERT_NE(info, nullptr);
-        const std::string testId = std::string(info->test_suite_name()) + "." + info->name();
-#if defined(_WIN32)
-        std::string selfPath(MAX_PATH, '\0');
-        const DWORD length
-            = GetModuleFileNameA(nullptr, selfPath.data(), static_cast<DWORD>(selfPath.size()));
-        ASSERT_GT(length, 0U);
-        ASSERT_LT(length, selfPath.size());
-        selfPath.resize(length);
-#else
-        std::string selfPath(4096, '\0');
-        const auto length = readlink("/proc/self/exe", selfPath.data(), selfPath.size() - 1);
-        ASSERT_GT(length, 0);
-        ASSERT_LT(static_cast<size_t>(length), selfPath.size() - 1);
-        selfPath.resize(static_cast<size_t>(length));
-#endif
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter child(
             "HIPDNN_STALL_RECOVERY_CHILD", "1");
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter hostSync(
             "HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE", "1");
-        const std::string command = "\"" + selfPath + "\" --gtest_filter=" + testId;
-        ASSERT_EQ(std::system(command.c_str()), 0) << "recovery child failed: " << testId;
+        ASSERT_EQ(hipdnn_test_sdk::utilities::runCurrentTestInChild(), 0)
+            << "recovery child failed";
     }
 
     // A timeout must stop the comparison and cause one complete unstalled rerun.

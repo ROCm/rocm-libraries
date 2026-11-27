@@ -65,10 +65,13 @@ inline uint64_t fnv1aHash(const char* str) noexcept
 
 /**
  * @brief Overload for std::string
+ *
+ * Hashes every byte of the string, including embedded NUL characters, so it
+ * agrees with the std::string_view overload.
  */
 inline uint64_t fnv1aHash(const std::string& str) noexcept
 {
-    return fnv1aHash(str.c_str());
+    return fnv1aHash(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 }
 
 /**

@@ -199,7 +199,7 @@ The **EngineManager** ([`EngineManager.hpp`](../plugin_sdk/include/hipdnn_plugin
 For **Engine Implementations** ([`IEngine.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IEngine.hpp)):
 - Each engine must have a unique inter-plugin `int64_t` identifier
 - Implement `isApplicable()` to report graph support
-- Implement `getDetails()` to return engine metadata and knobs
+- Implement `getDetails()` to return engine metadata and knobs, including numerical notes (see [Reporting Numerical Notes](#reporting-numerical-notes): an explicit empty list claims determinism and must not go through `EngineDetailsT::Pack`; an absent field reads as `NONDETERMINISTIC`)
 - Delegate plan building to `IPlanBuilder` implementations
 
 For **Plan Builder Implementations** ([`IPlanBuilder.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp)):
@@ -446,7 +446,7 @@ An engine reports numerical notes through the `numerical_notes` list of its `Eng
 - **Claim determinism with an explicit empty list.** Create the details with `CreateEngineDetails` or `CreateEngineDetailsDirect` and pass an empty vector. An empty list is a claim that no numerical note applies to the engine; make it only when a test proves bitwise-reproducible results across repeated runs of the same plan and inputs. Do not build the details with `EngineDetailsT::Pack`, which drops an empty list and so turns the claim into an absent field.
 - **List the notes that apply.** An engine that is not deterministic lists `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC` and any precision note that applies.
 - **Omit the field when no test proves determinism.** Every engine defaults to `NONDETERMINISTIC`: results are not guaranteed bitwise reproducible.
-- **Make the claim per engine ID.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, not a plan or a knob setting.
+- **Make the claim for the engine ID and the finalized graph.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, never a plan, a configuration or a knob setting.
 
 ### Saving Execution Plans from Ingestor Engines
 
@@ -627,7 +627,7 @@ hipdnnSetEnginePluginPaths_ext(
 );
 ```
 
-Plugins are loaded according to the selected path schema during hipDNN handle creation. Changing paths after handle creation has no effect until another handle is created.
+Plugins are loaded according to the selected path schema during hipDNN handle creation. While a handle is live, a call succeeds only when its paths equal the full configured path set (compared as written, ignoring order and duplicates) and its loading mode equals the current one; it then changes nothing. Any other call fails with `HIPDNN_STATUS_NOT_SUPPORTED`, including an `HIPDNN_PLUGIN_LOADING_ADDITIVE` call whose paths are all configured already but are not the whole set. Destroy every handle before changing the paths.
 
 ### Querying Loaded Plugins
 
