@@ -572,6 +572,27 @@ def test_the_configure_records_the_engine_modules_it_builds(
 
 
 @requires_cmake
+@requires_library_lists
+@pytest.mark.skipif(os.name == "nt", reason="the parity entries are not on Windows")
+@pytest.mark.parametrize("pybind", [False, True], ids=["pybind-off", "pybind-on"])
+def test_the_selector_grid_parity_entry_exists_only_with_the_engine_module(
+    tmp_path, pybind
+):
+    """rocke_library_engine_parity_exhaustive_pytest runs only the selector
+    parity file, whose every case needs rocke_engine, so a build without the
+    module does not register it; the standard parity entry, whose IR checks
+    use the shared engine, is registered either way."""
+    arguments = [f"-DROCKE_BUILD_PYBIND={'ON' if pybind else 'OFF'}"]
+    if pybind:
+        pytest.importorskip("pybind11", reason="the binding's configure needs it")
+        arguments.append(f"-DPython3_EXECUTABLE={sys.executable}")
+    _, ctest_dir = configure_installed_ctest(tmp_path, *arguments)
+    names = {test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)}
+    assert "rocke_library_engine_parity_pytest" in names
+    assert ("rocke_library_engine_parity_exhaustive_pytest" in names) == pybind
+
+
+@requires_cmake
 @pytest.mark.parametrize(
     "cmake_arguments, strict",
     [

@@ -640,24 +640,35 @@ else()
     TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
 endif()
 
-# The C++/Python engine parity checks of library kernels: the gfx950 tiled-2D
-# selector, and the LLVM IR of the attention, MLA prefill and GDN/KDA decode
-# kernels. They run the C++ engine through its Python modules (rocke_engine),
-# which a provider build installs beside the rocke package when its configure
-# sets ROCKE_BUILD_PYBIND=ON; without them every case skips, and
-# rocke_engine_modules_check says why. The selector's full grid (its exhaustive
-# items) runs in the comprehensive entry below. The GDN/KDA decode case takes
-# about 20 s on one host core (it lowers 341 kernels at four LLVM flavors with
-# each engine), so the per-test limit is 120 s.
+# The C++/Python engine parity checks of library kernels, through two different
+# C++ paths:
 #
-# Not registered on Windows: provider builds there make no engine modules, so
-# every case would skip.
+#   test_attention_ir_cpp_parity.py and test_gdn_decode_ir_cpp_parity.py lower
+#   the attention, lightning-indexer, MLA prefill and GDN/KDA decode kernels
+#   with both engines and compare the LLVM IR byte for byte. Their C++ side is
+#   the shared engine (librocke, through rocke.core.native_engine), which a
+#   Linux provider build installs beside the rocke package, so they run in CI.
+#
+#   test_selector_cpp_parity.py compares the gfx950 tiled-2D selector with its
+#   C++ twin through the engine's Python module (rocke_engine), which only a
+#   configure with ROCKE_BUILD_PYBIND=ON builds; a provider build does not, so
+#   there its cases skip.
+#
+# Without its C++ engine a file's cases skip, and rocke_engine_modules_check
+# says why. The GDN/KDA decode case takes about 20 s on one host core (it lowers
+# 341 kernels at four LLVM flavors with each engine), so the per-test limit is
+# 120 s. The selector's full grid (its exhaustive items) runs in the
+# comprehensive entry below, registered only where the build makes
+# rocke_engine: anywhere else it would run nothing.
+#
+# Not registered on Windows: provider builds there make neither the shared
+# engine nor the engine modules, so every case would skip.
 set(_ROCKE_LIBRARY_ENGINE_PARITY_TESTS
     "test_selector_cpp_parity.py"
     "test_attention_ir_cpp_parity.py"
     "test_gdn_decode_ir_cpp_parity.py")
 if(WIN32)
-  message(STATUS "rocKE: rocke_library_engine_parity_pytest not registered on Windows (no engine modules; see comment above)")
+  message(STATUS "rocKE: rocke_library_engine_parity_pytest not registered on Windows (no C++ engine; see comment above)")
 else()
   rocke_library_pytest_entry(rocke_library_engine_parity_pytest
     TESTS ${_ROCKE_LIBRARY_ENGINE_PARITY_TESTS}
@@ -665,12 +676,16 @@ else()
     LABELS ckc python host standard
     PYTHONPATH "${_ROCKE_LIBRARY_PYTHONPATH}"
     TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
+endif()
+if(ROCKE_BUILD_PYBIND AND NOT WIN32)
   rocke_library_pytest_entry(rocke_library_engine_parity_exhaustive_pytest
     TESTS test_selector_cpp_parity.py
     ARGUMENTS -m exhaustive -v -rs --timeout=60
     LABELS ckc python host comprehensive full
     PYTHONPATH "${_ROCKE_LIBRARY_PYTHONPATH}"
     TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
+else()
+  message(STATUS "rocKE: rocke_library_engine_parity_exhaustive_pytest not registered (the build makes no rocke_engine; see comment above)")
 endif()
 
 # Library attention GPU numeric tests (gfx950 kernels, and the unified mask
