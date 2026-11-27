@@ -31,8 +31,58 @@
 #include <hip/hip_runtime.h>
 #endif
 
+#ifdef MIOPEN_NEURON_BF16
+#define MIOPEN_USE_BFPMIX 1
+#endif
 #include "activation_functions.hpp"
 #include "miopen_cstdint.hpp"
+
+#ifdef MIOPEN_NEURON_BF16
+#ifndef MIOPEN_USE_RNE_BFLOAT16
+#define MIOPEN_USE_RNE_BFLOAT16 1
+#endif
+#include "bfloat16_dev.hpp"
+using NeuronScalar = float;
+
+template <size_t N>
+__device__ __forceinline__ void ActivationFunction(ushort (&res)[N],
+                                                   const ushort (&data)[N],
+                                                   float gamma,
+                                                   float beta,
+                                                   float alpha)
+{
+    float input[N], output[N];
+    for(size_t i = 0; i < N; ++i)
+        input[i] = bfloat16_to_float(data[i]);
+    ActivationFunction(output, input, gamma, beta, alpha);
+    for(size_t i = 0; i < N; ++i)
+        res[i] = float_to_bfloat16(output[i]);
+}
+
+template <size_t N>
+__device__ __forceinline__ void ActivationFunction_Diff(ushort (&dx)[N],
+                                                        const ushort (&dy)[N],
+                                                        const ushort (&x)[N],
+                                                        const ushort (&y)[N],
+                                                        float diff_scale,
+                                                        float gamma,
+                                                        float beta,
+                                                        float alpha)
+{
+    float grad[N], input[N], output[N], result[N];
+    for(size_t i = 0; i < N; ++i)
+    {
+        grad[i]   = bfloat16_to_float(dy[i]);
+        input[i]  = bfloat16_to_float(x[i]);
+        output[i] = bfloat16_to_float(y[i]);
+    }
+    ActivationFunction_Diff(result, grad, input, output, diff_scale, gamma, beta, alpha);
+    for(size_t i = 0; i < N; ++i)
+        dx[i] = float_to_bfloat16(result[i]);
+}
+#else
+using NeuronScalar = FP_TYPE;
+#endif
 
 #ifdef LITE
 
@@ -53,9 +103,9 @@
 extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
                                                FP_TYPE* top,
                                                const int map_size_aligned,
-                                               FP_TYPE gamma,
-                                               FP_TYPE beta,
-                                               FP_TYPE alpha,
+                                               NeuronScalar gamma,
+                                               NeuronScalar beta,
+                                               NeuronScalar alpha,
                                                const int64_t bot_offset,
                                                const int64_t top_offset)
 {
@@ -82,9 +132,9 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
                                                  FP_TYPE* top,
                                                  const int map_size_aligned,
                                                  const int height,
-                                                 FP_TYPE gamma,
-                                                 FP_TYPE beta,
-                                                 FP_TYPE alpha,
+                                                 NeuronScalar gamma,
+                                                 NeuronScalar beta,
+                                                 NeuronScalar alpha,
                                                  const int64_t bot_offset,
                                                  const int64_t top_offset,
                                                  const uint bot_stride,
@@ -120,10 +170,10 @@ extern "C" __global__ void MIOpenActiveBwdLite(FP_TYPE* bot_diff,
                                                const FP_TYPE* bot,
                                                const FP_TYPE* top,
                                                const int map_size_aligned,
-                                               FP_TYPE diff_scale,
-                                               FP_TYPE gamma,
-                                               FP_TYPE beta,
-                                               FP_TYPE alpha,
+                                               NeuronScalar diff_scale,
+                                               NeuronScalar gamma,
+                                               NeuronScalar beta,
+                                               NeuronScalar alpha,
                                                const int64_t bot_diff_offset,
                                                const int64_t top_diff_offset,
                                                const int64_t bot_offset,
@@ -160,10 +210,10 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
                                                  const FP_TYPE* top,
                                                  const int map_size_aligned,
                                                  const int height,
-                                                 FP_TYPE diff_scale,
-                                                 FP_TYPE gamma,
-                                                 FP_TYPE beta,
-                                                 FP_TYPE alpha,
+                                                 NeuronScalar diff_scale,
+                                                 NeuronScalar gamma,
+                                                 NeuronScalar beta,
+                                                 NeuronScalar alpha,
                                                  const int64_t bot_diff_offset,
                                                  const int64_t top_diff_offset,
                                                  const int64_t bot_offset,
@@ -213,9 +263,9 @@ __launch_bounds__(
     void MIOpenNeuronFwd(const FP_TYPE* bot,
                          FP_TYPE* top,
                          const int map_size_aligned,
-                         FP_TYPE gamma,
-                         FP_TYPE beta,
-                         FP_TYPE alpha,
+                         NeuronScalar gamma,
+                         NeuronScalar beta,
+                         NeuronScalar alpha,
                          const int64_t xOffset,
                          const int64_t yOffset)
 {
@@ -336,10 +386,10 @@ __launch_bounds__(
                          const FP_TYPE* bot_data,
                          const FP_TYPE* top_data,
                          const int map_size_aligned,
-                         FP_TYPE diff_scale,
-                         FP_TYPE gamma,
-                         FP_TYPE beta,
-                         FP_TYPE alpha,
+                         NeuronScalar diff_scale,
+                         NeuronScalar gamma,
+                         NeuronScalar beta,
+                         NeuronScalar alpha,
                          const int64_t dxOffset,
                          const int64_t dyOffset,
                          const int64_t xOffset,

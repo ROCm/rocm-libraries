@@ -31,6 +31,12 @@ struct get_datatype_from_enum<DataTypeEnum_t::Half>
 };
 
 template <>
+struct get_datatype_from_enum<DataTypeEnum_t::BFloat16>
+{
+    using type = ushort; // BF16 storage; type_convert handles conversion to and from float.
+};
+
+template <>
 struct get_datatype_from_enum<DataTypeEnum_t::Float>
 {
     using type = float;
@@ -61,6 +67,12 @@ template <>
 struct get_datatype_enum_from_type<half_t>
 {
     static constexpr DataTypeEnum_t value = DataTypeEnum_t::Half;
+};
+
+template <>
+struct get_datatype_enum_from_type<ushort>
+{
+    static constexpr DataTypeEnum_t value = DataTypeEnum_t::BFloat16;
 };
 
 template <>

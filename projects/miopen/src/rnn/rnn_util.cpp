@@ -62,9 +62,14 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
 
     size_t max_active_threads = handle.GetMaxComputeUnits() * handle.GetWavefrontWidth() * 32;
     size_t total_work         = static_cast<size_t>(max_batch) * hy_h;
-    size_t read_block         = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
-                                    ? 4
-                                    : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
+    const bool is_bf16        = rnn_data_type == miopenBFloat16;
+    size_t read_block         = 1;
+    if(!is_bf16)
+    {
+        read_block = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
+                         ? 4
+                         : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
+    }
     size_t total_items        = std::max(total_work / read_block, size_t{1});
     size_t items_per_group    = total_items <= 64 ? 64 : total_items <= 128 ? 128 : 256;
     size_t global_size        = std::min(total_items, max_active_threads);
@@ -74,7 +79,8 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
     bool use_cx = cx != nullptr;
 
     std::string network_config =
-        "lstmfwdhid-" + std::string(rnn_data_type == miopenHalf ? "fp16-" : "fp32-") +
+        "lstmfwdhid-" +
+        std::string(is_bf16 ? "bf16-" : (rnn_data_type == miopenHalf ? "fp16-" : "fp32-")) +
         std::to_string(static_cast<int>(is_inference)) + "x" + std::to_string(read_block) + "x" +
         std::to_string(items_per_group) + "x" + std::to_string(workgroup_size) + "x" +
         std::to_string(static_cast<int>(use_cx)) + "x" +
@@ -105,9 +111,11 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
     {
         const auto build_params = KernelBuildParameters{
             {"READ_BLOCK", static_cast<int>(read_block)},
-            {"DATA_TYPE", miopen::GetDataType(rnn_data_type)},
+            {"DATA_TYPE", is_bf16 ? "ushort" : miopen::GetDataType(rnn_data_type)},
             {"MIOPEN_USE_FP32", static_cast<int>(rnn_data_type == miopenFloat)},
             {"MIOPEN_USE_FP16", static_cast<int>(rnn_data_type == miopenHalf)},
+            {"MIOPEN_USE_BFP16", static_cast<int>(is_bf16)},
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"INFERENCE_MODE", static_cast<int>(is_inference)},
             {"LOCAL_SIZE", items_per_group},
             {"GLOBAL_SIZE", global_size},
@@ -176,9 +184,14 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
 
     size_t max_active_threads = handle.GetMaxComputeUnits() * handle.GetWavefrontWidth() * 32;
     size_t total_work         = static_cast<size_t>(max_batch) * hy_h;
-    size_t read_block         = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
-                                    ? 4
-                                    : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
+    const bool is_bf16        = rnn_data_type == miopenBFloat16;
+    size_t read_block         = 1;
+    if(!is_bf16)
+    {
+        read_block = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
+                         ? 4
+                         : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
+    }
     size_t total_items        = std::max(total_work / read_block, size_t{1});
     size_t items_per_group    = total_items <= 64 ? 64 : total_items <= 128 ? 128 : 256;
     size_t global_size        = std::min(total_items, max_active_threads);
@@ -189,7 +202,8 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
     bool use_dcy = dcy != nullptr;
 
     std::string network_config =
-        "lstmbwdhid-" + std::string(rnn_data_type == miopenHalf ? "fp16-" : "fp32-") +
+        "lstmbwdhid-" +
+        std::string(is_bf16 ? "bf16-" : (rnn_data_type == miopenHalf ? "fp16-" : "fp32-")) +
         std::to_string(read_block) + "x" + std::to_string(items_per_group) + "x" +
         std::to_string(workgroup_size) + "x" + std::to_string(static_cast<int>(use_cx)) + "x" +
         std::to_string(static_cast<int>(use_dcy)) + "x" +
@@ -231,9 +245,11 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
     {
         const auto build_params = KernelBuildParameters{
             {"READ_BLOCK", static_cast<int>(read_block)},
-            {"DATA_TYPE", miopen::GetDataType(rnn_data_type)},
+            {"DATA_TYPE", is_bf16 ? "ushort" : miopen::GetDataType(rnn_data_type)},
             {"MIOPEN_USE_FP32", static_cast<int>(rnn_data_type == miopenFloat)},
             {"MIOPEN_USE_FP16", static_cast<int>(rnn_data_type == miopenHalf)},
+            {"MIOPEN_USE_BFP16", static_cast<int>(is_bf16)},
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"INFERENCE_MODE", 0},
             {"LOCAL_SIZE", items_per_group},
             {"GLOBAL_SIZE", global_size},

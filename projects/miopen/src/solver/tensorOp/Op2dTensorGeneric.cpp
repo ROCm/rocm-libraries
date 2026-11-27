@@ -88,7 +88,7 @@ Op2dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
 
     KernelBuildParameters build_params = KernelBuildParameters{};
 
-    GetCommonParams(build_params, problem, true);
+    GetCommonParams(build_params, problem, true, true);
 
     build_params.Define("USE_2D_TENSOR_GENERIC");
 
@@ -109,7 +109,7 @@ Op2dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
             decltype(auto) kernel_ = handle_.Run(kernels.front());
             decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
-            visit_float(data_type, [&](auto as_float) {
+            visit_float(data_type == miopenBFloat16 ? miopenFloat : data_type, [&](auto as_float) {
                 auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
                 auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
                 auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));

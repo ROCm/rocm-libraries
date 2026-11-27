@@ -31,6 +31,16 @@
 
 #include "miopen_cstdint.hpp"
 
+#ifdef MIOPEN_TENSOR_BF16
+#ifndef MIOPEN_USE_RNE_BFLOAT16
+#define MIOPEN_USE_RNE_BFLOAT16 1
+#endif
+#include "bfloat16_dev.hpp"
+using TensorScalar = float;
+#else
+using TensorScalar = MIOPEN_TYPE;
+#endif
+
 template <typename T>
 __device__ T miopenAdd(T a, T b)
 {
@@ -55,6 +65,27 @@ __device__ T miopenMin(T a, T b)
     return ((a < b) ? a : b);
 }
 
+#if defined(USE_1D_TENSOR_GENERIC) || defined(USE_2D_TENSOR_GENERIC) || \
+    defined(USE_3D_TENSOR_GENERIC)
+static __device__ MIOPEN_TYPE ApplyTensorOp(MIOPEN_TYPE a,
+                                            MIOPEN_TYPE b,
+                                            const MIOPEN_TYPE* c,
+                                            TensorScalar alpha0,
+                                            TensorScalar alpha1,
+                                            TensorScalar beta,
+                                            bool use_beta)
+{
+#ifdef MIOPEN_TENSOR_BF16
+    const auto result =
+        MIOPEN_TENSOR_OP(bfloat16_to_float(a) * alpha0, bfloat16_to_float(b) * alpha1);
+    return float_to_bfloat16(use_beta ? result + bfloat16_to_float(*c) * beta : result);
+#else
+    const auto result = MIOPEN_TENSOR_OP(a * alpha0, b * alpha1);
+    return use_beta ? result + *c * beta : result;
+#endif
+}
+#endif
+
 #ifdef USE_1D_TENSOR_GENERIC
 // N
 extern "C" __global__ void Op1dTensorGeneric(const MIOPEN_TYPE* a,
@@ -66,9 +97,9 @@ extern "C" __global__ void Op1dTensorGeneric(const MIOPEN_TYPE* a,
                                              const DIM_TYPE a_nstride,
                                              const DIM_TYPE b_nstride,
                                              const DIM_TYPE c_nstride,
-                                             const MIOPEN_TYPE alpha0,
-                                             const MIOPEN_TYPE alpha1,
-                                             const MIOPEN_TYPE beta,
+                                             const TensorScalar alpha0,
+                                             const TensorScalar alpha1,
+                                             const TensorScalar beta,
                                              const DIM_TYPE total_work,
                                              const bool use_beta)
 {
@@ -89,8 +120,7 @@ extern "C" __global__ void Op1dTensorGeneric(const MIOPEN_TYPE* a,
     const auto c_end = c_off + total_work * c_nstride;
     while(c_ptr < c_end)
     {
-        const auto res = MIOPEN_TENSOR_OP(a_ptr[0] * alpha0, b_ptr[0] * alpha1);
-        c_ptr[0]       = use_beta ? c_ptr[0] * beta + res : res;
+        c_ptr[0] = ApplyTensorOp(a_ptr[0], b_ptr[0], c_ptr, alpha0, alpha1, beta, use_beta);
 
         a_ptr += a_step;
         b_ptr += b_step;
@@ -116,9 +146,9 @@ extern "C" __global__ void Op2dTensorGeneric(const MIOPEN_TYPE* a,
                                              const DIM_TYPE b_cstride,
                                              const DIM_TYPE c_nstride,
                                              const DIM_TYPE c_cstride,
-                                             const MIOPEN_TYPE alpha0,
-                                             const MIOPEN_TYPE alpha1,
-                                             const MIOPEN_TYPE beta,
+                                             const TensorScalar alpha0,
+                                             const TensorScalar alpha1,
+                                             const TensorScalar beta,
                                              const DIM_TYPE total_work,
                                              const bool use_beta)
 {
@@ -126,32 +156,16 @@ extern "C" __global__ void Op2dTensorGeneric(const MIOPEN_TYPE* a,
     const MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off       = c + Coffset;
 
-    auto gid          = blockIdx.x * blockDim.x + threadIdx.x;
-    const auto* a_ptr = a_off + (gid / c_c) * a_nstride + (gid % c_c) * a_cstride;
-    auto* c_ptr       = c_off + (gid / c_c) * c_nstride + (gid % c_c) * c_cstride;
-
-    const auto step   = gridDim.x * blockDim.x;
-    const auto a_step = (step / c_c) * a_nstride + (step % c_c) * a_cstride;
-    const auto c_step = (step / c_c) * c_nstride + (step % c_c) * c_cstride;
-
-    const auto c_end = c_off + total_work * c_nstride;
-    while(c_ptr < c_end)
+    const DIM_TYPE step = gridDim.x * blockDim.x;
+    for(DIM_TYPE gid = blockIdx.x * blockDim.x + threadIdx.x; gid < total_work * c_c;
+        gid += step)
     {
-        const auto* b_ptr = b_off;
-        if(b_nstride != 0)
-            b_ptr += (gid / b_c) * b_nstride;
-
-        if(b_cstride != 0)
-            b_ptr += (gid % b_c) * b_cstride;
-
-        auto b_val = *b_ptr;
-        auto a_val = *a_ptr;
-        auto c_val = use_beta ? *c_ptr : static_cast<MIOPEN_TYPE>(0);
-        *c_ptr     = MIOPEN_TENSOR_OP(b_val * alpha1, a_val * alpha0) + c_val * beta;
-
-        a_ptr += a_step;
-        c_ptr += c_step;
-        gid += step;
+        const auto n = gid / c_c;
+        const auto ch = gid % c_c;
+        const auto* a_ptr = a_off + n * a_nstride + ch * a_cstride;
+        const auto* b_ptr = b_off + (gid / b_c) * b_nstride + (gid % b_c) * b_cstride;
+        auto* c_ptr = c_off + n * c_nstride + ch * c_cstride;
+        *c_ptr = ApplyTensorOp(*b_ptr, *a_ptr, c_ptr, alpha1, alpha0, beta, use_beta);
     }
 }
 
@@ -371,9 +385,9 @@ extern "C" __global__ void Op3dTensorGeneric(const MIOPEN_TYPE* a,
                                              const DIM_TYPE c_nstride,
                                              const DIM_TYPE c_cstride,
                                              const DIM_TYPE c_hstride,
-                                             const MIOPEN_TYPE alpha0,
-                                             const MIOPEN_TYPE alpha1,
-                                             const MIOPEN_TYPE beta,
+                                             const TensorScalar alpha0,
+                                             const TensorScalar alpha1,
+                                             const TensorScalar beta,
                                              const DIM_TYPE total_work,
                                              const bool use_beta)
 {
@@ -381,43 +395,19 @@ extern "C" __global__ void Op3dTensorGeneric(const MIOPEN_TYPE* a,
     const MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off       = c + Coffset;
 
-    auto gid          = blockIdx.x * blockDim.x + threadIdx.x;
-    const auto* a_ptr = a_off + (gid / (c_c * c_h)) * a_nstride +
-                        ((gid % (c_c * c_h)) / c_h) * a_cstride +
-                        ((gid % (c_c * c_h)) % c_h) * a_hstride;
-    auto* c_ptr = c_off + (gid / (c_c * c_h)) * c_nstride +
-                  ((gid % (c_c * c_h)) / c_h) * c_cstride + ((gid % (c_c * c_h)) % c_h) * c_hstride;
-
-    const auto step   = gridDim.x * blockDim.x;
-    const auto a_step = (step / (c_c * c_h)) * a_nstride +
-                        ((step % (c_c * c_h)) / c_h) * a_cstride +
-                        ((step % (c_c * c_h)) % c_h) * a_hstride;
-
-    const auto c_step = (step / (c_c * c_h)) * c_nstride +
-                        ((step % (c_c * c_h)) / c_h) * c_cstride +
-                        ((step % (c_c * c_h)) % c_h) * c_hstride;
-
-    const auto c_end = c_off + total_work * c_nstride;
-    while(c_ptr < c_end)
+    const DIM_TYPE step = gridDim.x * blockDim.x;
+    for(DIM_TYPE gid = blockIdx.x * blockDim.x + threadIdx.x;
+        gid < total_work * c_c * c_h;
+        gid += step)
     {
-        const auto* b_ptr = b_off;
-        if(b_nstride != 0)
-            b_ptr += (gid / (b_c * b_h)) * b_nstride;
-
-        if(b_cstride != 0)
-            b_ptr += ((gid % (b_c * b_h)) / b_h) * b_cstride;
-
-        if(b_hstride != 0)
-            b_ptr += ((gid % (b_c * b_h)) % b_h) * b_hstride;
-
-        auto b_val = *b_ptr;
-        auto a_val = *a_ptr;
-        auto c_val = use_beta ? *c_ptr : static_cast<MIOPEN_TYPE>(0);
-        *c_ptr     = MIOPEN_TENSOR_OP(b_val * alpha1, a_val * alpha0) + c_val * beta;
-
-        a_ptr += a_step;
-        c_ptr += c_step;
-        gid += step;
+        const auto n = gid / (c_c * c_h);
+        const auto ch = (gid / c_h) % c_c;
+        const auto h = gid % c_h;
+        const auto* a_ptr = a_off + n * a_nstride + ch * a_cstride + h * a_hstride;
+        const auto* b_ptr = b_off + (gid / (b_c * b_h)) * b_nstride +
+                            ((gid / b_h) % b_c) * b_cstride + (gid % b_h) * b_hstride;
+        auto* c_ptr = c_off + n * c_nstride + ch * c_cstride + h * c_hstride;
+        *c_ptr = ApplyTensorOp(*b_ptr, *a_ptr, c_ptr, alpha1, alpha0, beta, use_beta);
     }
 }
 

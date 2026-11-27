@@ -28,10 +28,30 @@
 
 #include <miopen/rnn.hpp>
 #include <miopen/gemm_v2.hpp>
+#include <miopen/visit_float.hpp>
 
 namespace miopen {
 
 namespace rnn_base {
+
+inline void FillTensor(const Handle& handle,
+                       const TensorDescriptor& desc,
+                       Data_t data,
+                       float value,
+                       size_t offset = 0)
+{
+    // SetTensor consumes a scalar of the tensor's storage type.
+    visit_float(desc.GetType(), [&](auto as_type) {
+        const auto scalar = as_type(value);
+        SetTensor(handle, desc, data, &scalar, offset);
+    });
+}
+
+inline void CheckGemmStatus(miopenStatus_t status)
+{
+    if(status != miopenStatusSuccess)
+        MIOPEN_THROW(status, "RNN GEMM execution failed");
+}
 
 template <typename T, size_t N, size_t M>
 std::array<T, N + M> Concat(const std::array<T, N>& a, const std::array<T, M>& b)
@@ -84,26 +104,26 @@ class RnnBaseFunctions
     RnnBaseFunctions() = default;
 
 public:
-    static miopenStatus_t BWD_GEMM_Hidden_Prop(const Handle& handle,
-                                               ConstData_t comb_gates_src_ptr,
-                                               size_t comb_gates_src_offset,
-                                               ConstData_t filter_src_ptr,
-                                               size_t filter_offset,
-                                               Data_t ht_dst_ptr,
-                                               size_t ht_dst_offset,
-                                               size_t gemm_batch_size,
-                                               size_t ht_dest_vec_size,
-                                               size_t comb_gates_size,
-                                               size_t tmp_gate_row_stride,
-                                               size_t filter_row_stride,
-                                               size_t ht_dest_row_stride,
-                                               miopenDataType_t data_type,
-                                               bool add_assign = true)
+    static void BWD_GEMM_Hidden_Prop(const Handle& handle,
+                                     ConstData_t comb_gates_src_ptr,
+                                     size_t comb_gates_src_offset,
+                                     ConstData_t filter_src_ptr,
+                                     size_t filter_offset,
+                                     Data_t ht_dst_ptr,
+                                     size_t ht_dst_offset,
+                                     size_t gemm_batch_size,
+                                     size_t ht_dest_vec_size,
+                                     size_t comb_gates_size,
+                                     size_t tmp_gate_row_stride,
+                                     size_t filter_row_stride,
+                                     size_t ht_dest_row_stride,
+                                     miopenDataType_t data_type,
+                                     bool add_assign = true)
     {
 #if MIOPEN_USE_GEMM && MIOPEN_BACKEND_HIP
         // no gemm work
         if(gemm_batch_size == 0)
-            return miopenStatusSuccess;
+            return;
 
         const miopen::GemmDescriptor gemm_desc =
             GemmDescriptor64BitWraper(false,
@@ -124,31 +144,31 @@ public:
                                       data_type,
                                       false);
 
-        return CallGemm(handle,
-                        gemm_desc,
-                        comb_gates_src_ptr,
-                        comb_gates_src_offset,
-                        filter_src_ptr,
-                        filter_offset,
-                        ht_dst_ptr,
-                        ht_dst_offset,
-                        GemmBackend_t::rocblas);
+        CheckGemmStatus(CallGemm(handle,
+                                 gemm_desc,
+                                 comb_gates_src_ptr,
+                                 comb_gates_src_offset,
+                                 filter_src_ptr,
+                                 filter_offset,
+                                 ht_dst_ptr,
+                                 ht_dst_offset,
+                                 GemmBackend_t::rocblas));
 #else
-        return miopenStatusNotImplemented;
+        MIOPEN_THROW(miopenStatusNotImplemented, "RNN GEMM is not enabled");
 #endif // MIOPEN_USE_GEMM&& MIOPEN_BACKEND_HIP
     }
 
-    static miopenStatus_t FWD_GEMM(const Handle& handle,
-                                   ConstData_t ht_ptr,
-                                   size_t ht_offset,
-                                   const miopen::TensorDescriptor& ht_dsc,
-                                   ConstData_t filter_ptr,
-                                   size_t filter_offset,
-                                   const miopen::TensorDescriptor& filter_dsc,
-                                   Data_t comb_gates_ptr,
-                                   size_t comb_gates_offset,
-                                   const miopen::TensorDescriptor& tmp_gates_dsc,
-                                   bool add_assign = true)
+    static void FWD_GEMM(const Handle& handle,
+                         ConstData_t ht_ptr,
+                         size_t ht_offset,
+                         const miopen::TensorDescriptor& ht_dsc,
+                         ConstData_t filter_ptr,
+                         size_t filter_offset,
+                         const miopen::TensorDescriptor& filter_dsc,
+                         Data_t comb_gates_ptr,
+                         size_t comb_gates_offset,
+                         const miopen::TensorDescriptor& tmp_gates_dsc,
+                         bool add_assign = true)
     {
 
         assert(filter_dsc.GetNumDims() == 2 && tmp_gates_dsc.GetNumDims() == 2 &&
@@ -168,7 +188,7 @@ public:
 
         // no gemm work
         if(batch_size == 0)
-            return miopenStatusSuccess;
+            return;
 
         [[maybe_unused]] const miopen::GemmDescriptor gemm_desc =
             GemmDescriptor64BitWraper(false,
@@ -189,34 +209,34 @@ public:
                                       ht_dsc.GetType(),
                                       false);
 #if MIOPEN_USE_GEMM && MIOPEN_BACKEND_HIP
-        return CallGemm(handle,
-                        gemm_desc,
-                        ht_ptr,
-                        ht_offset,
-                        filter_ptr,
-                        filter_offset,
-                        comb_gates_ptr,
-                        comb_gates_offset,
-                        GemmBackend_t::rocblas);
+        CheckGemmStatus(CallGemm(handle,
+                                 gemm_desc,
+                                 ht_ptr,
+                                 ht_offset,
+                                 filter_ptr,
+                                 filter_offset,
+                                 comb_gates_ptr,
+                                 comb_gates_offset,
+                                 GemmBackend_t::rocblas));
 #else
 
-        return miopenStatusNotImplemented;
+        MIOPEN_THROW(miopenStatusNotImplemented, "RNN GEMM is not enabled");
 #endif // MIOPEN_USE_GEMM&& MIOPEN_BACKEND_HIP
     }
 
-    static miopenStatus_t BWD_GEMM_Hidden_Prop(const Handle& handle,
-                                               ConstData_t comb_gates_src_ptr,
-                                               size_t comb_gates_src_offset,
-                                               const miopen::TensorDescriptor& tmp_gates_src_dsc,
+    static void BWD_GEMM_Hidden_Prop(const Handle& handle,
+                                     ConstData_t comb_gates_src_ptr,
+                                     size_t comb_gates_src_offset,
+                                     const miopen::TensorDescriptor& tmp_gates_src_dsc,
 
-                                               ConstData_t filter_src_ptr,
-                                               size_t filter_src_offset,
-                                               const miopen::TensorDescriptor& filter_src_dsc,
+                                     ConstData_t filter_src_ptr,
+                                     size_t filter_src_offset,
+                                     const miopen::TensorDescriptor& filter_src_dsc,
 
-                                               Data_t ht_dst_ptr,
-                                               size_t ht_dst_offset,
-                                               const miopen::TensorDescriptor& ht_dest_dsc,
-                                               bool add_assign = true)
+                                     Data_t ht_dst_ptr,
+                                     size_t ht_dst_offset,
+                                     const miopen::TensorDescriptor& ht_dest_dsc,
+                                     bool add_assign = true)
     {
         assert(filter_src_dsc.GetNumDims() == 2 && tmp_gates_src_dsc.GetNumDims() == 2 &&
                ht_dest_dsc.GetNumDims() == 2);
@@ -233,34 +253,34 @@ public:
         const size_t filter_ld_stride    = filter_src_dsc.GetStrides()[0]; // {comb_gates, ht_vec}
         const size_t ht_dest_ld_stride   = ht_dest_dsc.GetStrides()[0];    // {batch, ht_vec}
 
-        return BWD_GEMM_Hidden_Prop(handle,
-                                    comb_gates_src_ptr,
-                                    comb_gates_src_offset,
-                                    filter_src_ptr,
-                                    filter_src_offset,
-                                    ht_dst_ptr,
-                                    ht_dst_offset,
-                                    batch_size,
-                                    ht_vec_size,
-                                    comb_gates_size,
-                                    tmp_gates_ld_stride,
-                                    filter_ld_stride,
-                                    ht_dest_ld_stride,
-                                    ht_dest_dsc.GetType(),
-                                    add_assign);
+        BWD_GEMM_Hidden_Prop(handle,
+                            comb_gates_src_ptr,
+                            comb_gates_src_offset,
+                            filter_src_ptr,
+                            filter_src_offset,
+                            ht_dst_ptr,
+                            ht_dst_offset,
+                            batch_size,
+                            ht_vec_size,
+                            comb_gates_size,
+                            tmp_gates_ld_stride,
+                            filter_ld_stride,
+                            ht_dest_ld_stride,
+                            ht_dest_dsc.GetType(),
+                            add_assign);
     }
 
-    static miopenStatus_t BWWei_GEMM(const Handle& handle,
-                                     ConstData_t comb_gates_ptr,
-                                     size_t comb_gates_offset,
-                                     const miopen::TensorDescriptor& tmp_gates_dsc,
-                                     ConstData_t ht_ptr,
-                                     size_t ht_offset,
-                                     const miopen::TensorDescriptor& ht_dsc,
-                                     Data_t filter_ptr,
-                                     size_t filter_offset,
-                                     const miopen::TensorDescriptor& filter_dsc,
-                                     bool add_assign = true)
+    static void BWWei_GEMM(const Handle& handle,
+                           ConstData_t comb_gates_ptr,
+                           size_t comb_gates_offset,
+                           const miopen::TensorDescriptor& tmp_gates_dsc,
+                           ConstData_t ht_ptr,
+                           size_t ht_offset,
+                           const miopen::TensorDescriptor& ht_dsc,
+                           Data_t filter_ptr,
+                           size_t filter_offset,
+                           const miopen::TensorDescriptor& filter_dsc,
+                           bool add_assign = true)
     {
 
         assert(filter_dsc.GetNumDims() == 2 && tmp_gates_dsc.GetNumDims() == 2 &&
@@ -280,7 +300,7 @@ public:
 
         // no gemm work
         if(batch_size == 0)
-            return miopenStatusSuccess;
+            return;
 
         [[maybe_unused]] const miopen::GemmDescriptor gemm_desc =
             GemmDescriptor64BitWraper(false,
@@ -301,18 +321,18 @@ public:
                                       ht_dsc.GetType(),
                                       false);
 #if MIOPEN_USE_GEMM && MIOPEN_BACKEND_HIP
-        return CallGemm(handle,
-                        gemm_desc,
-                        comb_gates_ptr,
-                        comb_gates_offset,
-                        ht_ptr,
-                        ht_offset,
-                        filter_ptr,
-                        filter_offset,
-                        GemmBackend_t::rocblas);
+        CheckGemmStatus(CallGemm(handle,
+                                 gemm_desc,
+                                 comb_gates_ptr,
+                                 comb_gates_offset,
+                                 ht_ptr,
+                                 ht_offset,
+                                 filter_ptr,
+                                 filter_offset,
+                                 GemmBackend_t::rocblas));
 #else
 
-        return miopenStatusNotImplemented;
+        MIOPEN_THROW(miopenStatusNotImplemented, "RNN GEMM is not enabled");
 #endif // MIOPEN_USE_GEMM&& MIOPEN_BACKEND_HIP
     }
 };

@@ -49,7 +49,7 @@
 #endif
 #endif
 // TODO: this should also be deprecated
-#if MIOPEN_USE_FP32 == 1
+#if MIOPEN_USE_FP32 == 1 || MIOPEN_USE_BFP16 == 1
 #define FP_TYPE float
 #define FP_TYPE_PREC float
 #define EPSILON static_cast<FP_TYPE>(0.000001)

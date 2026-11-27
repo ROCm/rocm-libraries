@@ -34,10 +34,14 @@ static Driver* makeDriver(const std::string& base_arg)
         return new RNNSeqDriver<float, double>();
     if(base_arg == "rnn_seqfp16")
         return new RNNSeqDriver<float16, double>();
+    if(base_arg == "rnn_seqbfp16")
+        return new RNNSeqDriver<bfloat16, double>();
     if(base_arg == "rnn")
         return new RNNDriver<float, double>();
     if(base_arg == "rnnfp16")
         return new RNNDriver<float16, double>();
+    if(base_arg == "rnnbfp16")
+        return new RNNDriver<bfloat16, double>();
     if(base_arg == "ctc")
         return new CTCDriver<float>();
     return nullptr;

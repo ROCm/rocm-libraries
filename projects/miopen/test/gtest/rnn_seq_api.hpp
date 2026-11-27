@@ -1237,7 +1237,7 @@ struct verify_train_rnn : verify_rnn_api_base<T>
                            reserveSpace_dev.get(),
                            reserveSpaceByteSize);
 
-        size_t workSpace_TCnt    = workSpaceByteSize / sizeof(T);
+        size_t workSpace_TCnt    = (workSpaceByteSize + sizeof(T) - 1) / sizeof(T);
         size_t reserveSpace_TCnt = (reserveSpaceByteSize + sizeof(T) - 1) / sizeof(T);
 
         std::vector<T> reserveSpace_fwd_out(reserveSpace_TCnt);

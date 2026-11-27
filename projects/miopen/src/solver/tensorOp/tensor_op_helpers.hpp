@@ -39,11 +39,20 @@ namespace tensorOp {
 
 inline void GetCommonParams(KernelBuildParameters& build_params,
                             const miopen::tensorOp::ProblemDescription& problem,
-                            bool is64bSupported)
+                            bool is64bSupported,
+                            bool supportsBFloat16 = false)
 {
     miopenDataType_t data_type = problem.GetBTensorDesc().GetType();
 
-    build_params.Define("MIOPEN_TYPE", miopen::GetDataType(data_type));
+    if(supportsBFloat16 && data_type == miopenBFloat16)
+    {
+        build_params.Define("MIOPEN_TYPE", "uint16_t");
+        build_params.Define("MIOPEN_TENSOR_BF16");
+    }
+    else
+    {
+        build_params.Define("MIOPEN_TYPE", miopen::GetDataType(data_type));
+    }
 
     switch(problem.GetTensorOp())
     {
@@ -79,6 +88,8 @@ inline std::tuple<size_t, std::string> GetRDBLCKandREADTYPE(size_t len, miopenDa
 
 inline std::tuple<size_t, std::string> GetRDBLCKandREADTYPEHIP(size_t len, miopenDataType_t type)
 {
+    if(type == miopenBFloat16)
+        return {1, "ushort"};
     if(type == miopenHalf)
     {
         return (len % 2 == 0) ? std::make_tuple(2U, "half2") : std::make_tuple(1U, "half");

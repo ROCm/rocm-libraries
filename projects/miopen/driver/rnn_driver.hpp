@@ -67,7 +67,7 @@ public:
         miopenCreateRNNDescriptor(&rnnDesc);
         workspace_dev    = nullptr;
         reservespace_dev = nullptr;
-        data_type        = (sizeof(Tgpu) == 4) ? miopenFloat : miopenHalf;
+        InitDataType<Tgpu>();
 
         miopenCreateDropoutDescriptor(&DropoutDesc);
     }
@@ -557,7 +557,7 @@ int RNNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     out_sz /= sizeof(Tgpu);
     hy_sz /= sizeof(Tgpu);
     wei_sz /= sizeof(Tgpu);
-    workSpace_sz /= sizeof(Tgpu);
+    workSpace_sz = (workSpace_sz + sizeof(Tgpu) - 1) / sizeof(Tgpu);
     reserveSpace_sz = (reserveSpace_sz + sizeof(Tgpu) - 1) / sizeof(Tgpu);
 
     DEFINE_CONTEXT(ctx);

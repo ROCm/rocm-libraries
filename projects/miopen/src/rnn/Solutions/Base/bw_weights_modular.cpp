@@ -49,28 +49,6 @@ miopenStatus_t ReducAddBias(const miopen::Handle& handle,
 
         switch(algo)
         {
-        case 0: {
-            float alpha0 = 0;
-            float alpha1 = 1;
-            float beta_t = 1;
-
-            OpTensor(handle,
-                     miopenTensorOpAdd,
-                     &alpha0,
-                     dw_desc,
-                     dw,
-                     &alpha1,
-                     ws_desc,
-                     backDataSpace,
-                     &beta_t,
-                     dw_desc,
-                     dw,
-                     dw_bias_offset,
-                     back_bias_offset,
-                     dw_bias_offset,
-                     true);
-        }
-        break;
         case 1: {
             float alpha1 = 1;
             float beta1  = 1;
@@ -88,21 +66,10 @@ miopenStatus_t ReducAddBias(const miopen::Handle& handle,
             Data_t dstC_with_offset =
                 static_cast<char*>(dw) + dw_bias_offset * GetTypeSize(dw_desc.GetType());
 
-            // WA CK bug
-            Data_t red_workSpace_bugfix = red_workSpace;
-            if(dw_desc.GetType() == miopenDataType_t::miopenHalf)
-            {
-                if(std::align(4,
-                              red_workSpace_size_bytes - 4,
-                              red_workSpace_bugfix,
-                              red_workSpace_size_bytes) == nullptr)
-                    MIOPEN_THROW(miopenStatusInternalError, "failed alignment.");
-            }
-
             red_add.ReduceTensor(handle,
                                  nullptr,
                                  0,
-                                 red_workSpace_bugfix,
+                                 red_workSpace,
                                  red_workSpace_size_bytes,
                                  &alpha1,
                                  ws_desc,
@@ -113,7 +80,9 @@ miopenStatus_t ReducAddBias(const miopen::Handle& handle,
         }
         break;
 
-        default: break;
+        default:
+            MIOPEN_THROW(miopenStatusUnsupportedOp,
+                         "Modular RNN bias reduction requires MIOPEN_RNNWRW_REDUCTION=1");
         }
     }
     else
@@ -136,9 +105,7 @@ void RNNBackwardWeightsModularAlgo::PrepareWriteBuffers(const Handle& handle, Da
     const auto w_desc =
         miopen::TensorDescriptor(rnn_data_type, {1, w_tensor_size}, {w_tensor_size, 1});
 
-    const float beta = 0.;
-
-    SetTensor(handle, w_desc, w, &beta);
+    FillTensor(handle, w_desc, w, 0);
 }
 
 void RNNBackwardWeightsModularAlgo::PhisXInputWeights(const Handle& handle,
@@ -252,11 +219,6 @@ void RNNBackwardWeightsModularAlgo::BiasUpdate(const Handle& handle,
 
         const miopen::TensorDescriptor dw_desc = BuildWeiBiasDesc2D();
 
-        // size_t main_ws_size = workspaceInfo.getBufferSize() * GetTypeSize(rnnDesc.dataType);
-        //
-        // size_t reduction_ws_size = workSpaceSize - main_ws_size;
-
-        // Data_t reduction_workSpace = static_cast<char*>(workSpace) + main_ws_size;
         size_t dw_bias_offset =
             weightsLayout.getBiasXinOff(layer, static_cast<int>(SequenceDirection::Forward), 0);
 

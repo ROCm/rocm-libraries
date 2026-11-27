@@ -218,19 +218,23 @@ public:
                                      const WeightsBufferDescriptor& weiInfo,
                                      const size_t batchSize)
     {
+        if(batchSize <= 1)
+            return 0;
+
         const TensorDescriptor block_dsc =
             BuildLstmTmpBlockDesc2D(wsInfo, batchSize, rnnD.dataType);
         const miopen::TensorDescriptor dw_desc = BuildWeiBiasDesc2D(weiInfo, rnnD.dataType);
 
         miopen::ReduceTensorDescriptor red_add{
             miopenReduceTensorOp_t::MIOPEN_REDUCE_TENSOR_ADD,
-            miopenDataType_t::miopenFloat, // compute in float for fp16
+            miopenDataType_t::miopenFloat,
             miopenNanPropagation_t::MIOPEN_PROPAGATE_NAN,
             miopenReduceTensorIndices_t::MIOPEN_REDUCE_TENSOR_NO_INDICES,
             miopenIndicesType_t::MIOPEN_32BIT_INDICES};
 
-        return red_add.GetWorkspaceSize(handle, block_dsc, dw_desc) + // WA CK bug
-               (rnnD.dataType == miopenDataType_t::miopenHalf ? 4 : 0);
+        const auto bytes     = red_add.GetWorkspaceSize(handle, block_dsc, dw_desc);
+        const auto elem_size = GetTypeSize(rnnD.dataType);
+        return ((bytes + elem_size - 1) / elem_size) * elem_size;
     }
 
     std::tuple<size_t, size_t> getTempBuffersSize(const Handle& handle) const

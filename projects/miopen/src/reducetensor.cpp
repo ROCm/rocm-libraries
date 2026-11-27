@@ -528,6 +528,14 @@ void ValidateReduceTensorFitsIntoInt(const TensorDescriptor& desc, const char* n
 // This is WS requirement of the dynamic reduction.
 // We must enforce it especially when reduction is used internally.
 constexpr std::size_t workspaceAlignRequirementBytes = 64;
+constexpr std::size_t workspaceAlignmentPadding = workspaceAlignRequirementBytes - 1;
+constexpr std::size_t workspaceDescriptorBytes = 4096;
+
+static std::size_t GetPartialIndicesOffset(std::size_t partialValueBytes)
+{
+    return (partialValueBytes + workspaceAlignmentPadding) / workspaceAlignRequirementBytes *
+           workspaceAlignRequirementBytes;
+}
 
 // return the size of the workspace in bytes, so that the workspace buffer can be prepared by the
 // user
@@ -564,14 +572,14 @@ std::size_t ReduceTensorDescriptor::GetWorkspaceSize(const Handle& handle,
     const std::size_t partialSize =
         workspace_size > 0 ? detail::GetDataTypeSize(this->reduceTensorCompType_) : 0;
 
-    std::size_t wsSizeInBytes = !need_indices ? workspace_size * partialSize
-                                              : workspace_size * (partialSize + sizeof(int)) + 64 +
-                                                    sizeof(int) + workspaceAlignRequirementBytes;
+    const auto partialValueBytes = workspace_size * partialSize;
+    const auto partialBytes =
+        need_indices ? GetPartialIndicesOffset(partialValueBytes) + workspace_size * sizeof(int)
+                     : partialValueBytes;
 
-    // dynamic reduction use one additional page for storing tensor descriptors
-    wsSizeInBytes += 4096;
-
-    return (wsSizeInBytes);
+    // Dynamic reduction stores two descriptors in the first page, followed by partial results.
+    // The caller may pass a slice with any base alignment.
+    return workspaceDescriptorBytes + partialBytes + workspaceAlignmentPadding;
 };
 
 // return the size of the reduction indices in bytes, so that the indices buffer can be prepared by
@@ -614,6 +622,11 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
     const auto reduceIndicesOpt  = this->reduceTensorIndices_;
     const auto reduceIndicesType = this->reduceTensorIndicesType_;
 
+    if(compType == miopenBFloat16 ||
+       ((srcDataType == miopenBFloat16 || dstDataType == miopenBFloat16) &&
+        compType != miopenFloat))
+        MIOPEN_THROW(miopenStatusBadParm, "BF16 reduction requires FP32 compute.");
+
     const auto& inDescLengths  = aDesc.GetLengths();
     const auto& inDescStrides  = aDesc.GetStrides();
     const auto& outDescLengths = cDesc.GetLengths();
@@ -642,8 +655,12 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
     std::size_t ws_sizeInBytes      = this->GetWorkspaceSize(handle, aDesc, cDesc);
     std::size_t indices_sizeInBytes = this->GetIndicesSize(aDesc, cDesc);
 
-    if(ws_sizeInBytes > workspaceSizeInBytes)
-        MIOPEN_THROW(miopenStatusBadParm, "The workspace size allocated is not enough!");
+    if(workspace == nullptr ||
+       std::align(workspaceAlignRequirementBytes,
+                  ws_sizeInBytes - workspaceAlignmentPadding,
+                  workspace,
+                  workspaceSizeInBytes) == nullptr)
+        MIOPEN_THROW(miopenStatusBadParm, "The workspace cannot fit the aligned reduction buffers.");
 
     if(indices_sizeInBytes > indicesSizeInBytes)
         MIOPEN_THROW(miopenStatusBadParm, "The indices size allocated is not enough!");
@@ -654,15 +671,15 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
 
     int64_t ws_buf2_bytes_offset = 0;
 
-    if(need_indices && workspace != nullptr)
+    if(need_indices)
     {
         // the indices follow the partial values, which are stored in the compute type (see
         // GetWorkspaceSize())
         auto partialSize    = detail::GetDataTypeSize(compType);
         auto workspace_size = configurator.getWorkspaceSize(invariantLength, toReduceLength);
 
-        ws_buf2_bytes_offset = ((workspace_size * partialSize + 63) / 64) * 64;
-    };
+        ws_buf2_bytes_offset = GetPartialIndicesOffset(workspace_size * partialSize);
+    }
 
     const ReductionMethod_t reduceImpl =
         configurator.getReductionMethod(invariantLength, toReduceLength);
@@ -751,7 +768,9 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
         std::string param;
         std::string network_config;
 
-        param = solver::legacy_ck::get_ck_common_compiler_flag(handle);
+        // Legacy CK's AMD buffer intrinsics do not support the ushort storage type used for BF16.
+        param = solver::legacy_ck::get_ck_common_compiler_flag(
+            handle, srcDataType != miopenBFloat16 && dstDataType != miopenBFloat16);
 
         param += detailDynamic::get_definition_string_from_type_enums(
                      srcDataType, compType, dstDataType) +
@@ -806,14 +825,6 @@ void ReduceTensorDescriptor::ReduceTensor(const Handle& handle,
         std::string network_config_1 = network_config + "_1_P" + std::to_string(reduceImpl) +
                                        std::to_string(static_cast<int>(use_padding.first)) +
                                        std::to_string(static_cast<int>(use_padding.second));
-
-        if(nullptr == std::align(workspaceAlignRequirementBytes,
-                                 ws_sizeInBytes - workspaceAlignRequirementBytes,
-                                 workspace,
-                                 workspaceSizeInBytes))
-        {
-            MIOPEN_THROW(miopenStatusInternalError, "Alignment failed. There is not enough space.");
-        }
 
         if(!reduceAllDims)
         {

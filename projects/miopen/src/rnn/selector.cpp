@@ -51,6 +51,9 @@ bool RNNBwdMSIsFast(const SeqTensorDescriptor& xDesc,
                     const TensorDescriptor& hDesc,
                     const int seqLen)
 {
+    if(xDesc.GetType() == miopenBFloat16)
+        return false;
+
     if(env::enabled(MIOPEN_RNNBWDMS_EXP))
         return true;
 
@@ -77,6 +80,9 @@ bool RNNBwWeightMSIsFast(const SeqTensorDescriptor& xDesc,
                          const TensorDescriptor& hDesc,
                          const int seqLen)
 {
+    if(xDesc.GetType() == miopenBFloat16)
+        return false;
+
     if(env::enabled(MIOPEN_RNNBWMS_EXP))
         return true;
 
@@ -109,7 +115,7 @@ bool RNNDescriptor::CheckDynamicAlgoSelection(const Handle& /*handle*/,
                                               const SeqTensorDescriptor& /*xDesc*/,
                                               miopenRNNFWDMode_t fwdMode) const
 {
-    if(fwdMode == miopenRNNInference)
+    if(fwdMode == miopenRNNInference || dataType == miopenBFloat16)
         return false;
 
     bool algo_mode_match = algoMode == miopenRNNroundedDynamic ||

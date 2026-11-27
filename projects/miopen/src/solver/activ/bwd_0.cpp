@@ -123,10 +123,12 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
     const auto read_len = (packed) ? dx_elem_sz : dx_width2D;
 
     const auto element_size = (problem.GetXDesc().GetType() == miopenHalf) ? 2 : 4;
-    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8
-                              : (read_len % 4 == 0)                    ? 4
-                              : (read_len % 2 == 0)                    ? 2
-                                                                       : 1;
+    // RNN gate offsets need not be vector-aligned.
+    const auto read_unit = xDesc.GetType() == miopenBFloat16          ? 1
+                           : (read_len % 8 == 0 && element_size == 2) ? 8
+                           : (read_len % 4 == 0)                     ? 4
+                           : (read_len % 2 == 0)                     ? 2
+                                                                     : 1;
 
     const auto READ_TYPE = (read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit);
     const auto map_size_aligned = (read_len + read_unit - 1) / read_unit;
@@ -150,6 +152,10 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
     {
         compiler_options.Define("MIOPEN_USE_FP16", 1);
         compiler_options.Define("MIOPEN_USE_FP32", 0);
+    }
+    else if(xDesc.GetType() == miopenBFloat16 && yDesc.GetType() == miopenBFloat16)
+    {
+        compiler_options.Define("MIOPEN_NEURON_BF16", 1);
     }
 
     {
@@ -191,7 +197,8 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
             const auto& xOffset  = params.x_offset;
             const auto& yOffset  = params.y_offset;
 
-            visit_float(params.x_desc.GetType(), [&](auto as_float) {
+            const auto type = params.x_desc.GetType();
+            visit_float(type == miopenBFloat16 ? miopenFloat : type, [&](auto as_float) {
                 decltype(auto) f_activ_alpha = as_float(params.alpha);
                 decltype(auto) f_activ_beta  = as_float(params.beta);
                 decltype(auto) f_activ_gamma = as_float(params.gamma);

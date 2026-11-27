@@ -45,6 +45,9 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     const auto& bTensorDesc = problem.GetBTensorDesc();
     const auto& cTensorDesc = problem.GetCTensorDesc();
 
+    if(cTensorDesc.GetType() == miopenBFloat16)
+        return false; // The generic kernel converts BF16 storage before arithmetic.
+
     const auto& alens = aTensorDesc.GetLengths();
     const auto& blens = bTensorDesc.GetLengths();
     const auto& clens = cTensorDesc.GetLengths();

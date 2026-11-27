@@ -253,7 +253,9 @@ void DropoutDescriptor::Dropout(const Handle& handle,
                        out_len,
                        out_str);
 
-    size_t RD_BLCK    = /* (in_len[4] % 4 == 0) ? 4 : */ (in_len[2] % 2 == 0) ? 2 : 1;
+    const auto type = xDesc.GetType();
+    // RNN may start at odd element and mask-byte offsets.
+    const size_t RD_BLCK = type == miopenBFloat16 ? 1 : (in_len[2] % 2 == 0 ? 2 : 1);
     size_t total_work = (in_len[4] / RD_BLCK) * in_len[3] * in_len[2] * in_len[1] * in_len[0];
 
     size_t max_wk_grp = use_mask ? size_t(MAX_WORKITEM_NUM)
@@ -271,11 +273,13 @@ void DropoutDescriptor::Dropout(const Handle& handle,
     std::string program_name   = "MIOpenDropoutHIP.cpp";
     std::string kernel_name    = "DropoutKernel";
     std::string network_config = "";
+    const std::string dtype_key =
+        type == miopenBFloat16 ? "bf16-" : (type == miopenHalf ? "fp16-" : "fp32-");
     if(is_backward)
     {
         network_config =
-            "bwd-" + std::string(yDesc.GetType() == miopenHalf ? "fp16-" : "fp32-") + "-seed" +
-            std::to_string(seed) + "-rng" + std::to_string(rng_mode) + "-prng" +
+            "bwd-" + dtype_key + "-seed" + std::to_string(seed) + "-rng" +
+            std::to_string(rng_mode) + "-prng" +
             std::to_string(static_cast<int>(use_prng)) + "-evo" +
             std::to_string(static_cast<int>(state_evo)) + "-blk" + std::to_string(RD_BLCK) + "-wg" +
             std::to_string(
@@ -284,8 +288,8 @@ void DropoutDescriptor::Dropout(const Handle& handle,
     else
     {
         network_config =
-            "fwd-" + std::string(xDesc.GetType() == miopenHalf ? "fp16-" : "fp32-") + "-seed" +
-            std::to_string(seed) + "-rng" + std::to_string(rng_mode) + "-rsvsp" +
+            "fwd-" + dtype_key + "-seed" + std::to_string(seed) + "-rng" +
+            std::to_string(rng_mode) + "-rsvsp" +
             std::to_string(static_cast<int>(use_rsvsp)) + "-mask" +
             std::to_string(static_cast<int>(use_mask)) + "-evo" +
             std::to_string(static_cast<int>(state_evo)) + "-blk" + std::to_string(RD_BLCK) + "-wg" +
@@ -366,7 +370,7 @@ void DropoutDescriptor::Dropout(const Handle& handle,
     {
         std::string params;
 
-        const std::string data_type = GetDataType(xDesc.GetType());
+        const std::string data_type = type == miopenBFloat16 ? "ushort" : GetDataType(type);
         const std::string READ_DAT_TYPE =
             RD_BLCK == 1 ? data_type : data_type + std::to_string(RD_BLCK);
 
@@ -385,8 +389,10 @@ void DropoutDescriptor::Dropout(const Handle& handle,
             params += " -DDIM_TYPE=uint64_t";
         }
 
-        if(xDesc.GetType() == miopenHalf)
+        if(type == miopenHalf)
             params += " -DMIOPEN_USE_FP16=1";
+        else if(type == miopenBFloat16)
+            params += " -DMIOPEN_DROPOUT_BF16=1";
         else
             params += " -DMIOPEN_USE_FP32=1";
 
