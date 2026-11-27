@@ -15,6 +15,65 @@ version = 1
 [conv_fwd_tolerance.float]
 summation_order = 9.0
 
+# -- Convolution dynamic tolerance: MIOpen's own allowances --
+# The test SDK's allowance (lambda, in units of eps times the root mean square of the output)
+# covers kernels that sum the K products in float and round once. Some of MIOpen's solvers do
+# not: Winograd, split-K kernels that add their partial results in the output type, and kernels
+# that round the operands below the io type. An engine value replaces the SDK's value whole and
+# is priced on the root mean square of the output, the means of the inputs included. Each value
+# below keeps a headroom of at least 1.5 on the calibration data (gfx942 and gfx90a) for the
+# solvers named with it. A table named by an arch applies to the devices whose gcnArchName
+# contains it, in place of the table of its type.
+# See dnn-providers/integration-tests/docs/tolerances.md.
+
+# Forward, half: Winograd reaches 8.09 eps sigma and the split-K asm implicit-GEMM solvers 5.21
+# (ALMIOPEN-3243).
+[conv_fwd_tolerance.half]
+lambda = 12.0
+
+# Backward data, float: Winograd at short reductions (ALMIOPEN-3243).
+[conv_dgrad_tolerance.float]
+lambda = 15.0
+
+# Backward data, float, on gfx90a.
+[conv_dgrad_tolerance.float.gfx90a]
+lambda = 18.0
+
+# Backward data, half: Winograd, and the asm implicit-GEMM split-K kernels that add fp16
+# partial results (ALMIOPEN-3380).
+[conv_dgrad_tolerance.half]
+lambda = 13.0
+
+# Backward data, half, on gfx90a: the fp16 alternate implementation, whose GEMM and xdlops
+# implicit-GEMM solvers round the operands to bf16.
+[conv_dgrad_tolerance.half.gfx90a]
+lambda = 46.0
+
+# Backward data, bfloat16: the CK grouped backward-data split-K kernels (ALMIOPEN-3380).
+[conv_dgrad_tolerance.bfloat16]
+lambda = 6.0
+
+# Backward weights, float: Winograd at K = 1 to 2 (ALMIOPEN-3243).
+[conv_wrw_tolerance.float]
+lambda = 15.0
+
+# Backward weights, half: the split-K kernels add more partial results in fp16 the longer K is,
+# hence the term per K^(1/4) (ALMIOPEN-3380).
+[conv_wrw_tolerance.half]
+lambda = 13.0
+lambda_per_quartic_root_k = 2.5
+
+# Backward weights, half, on gfx90a: split-K as above, plus the bf16 operands of the fp16
+# alternate implementation.
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 35.0
+lambda_per_quartic_root_k = 2.0
+
+# Backward weights, bfloat16: the CK grouped backward-weights split-K kernels (ALMIOPEN-3380).
+[conv_wrw_tolerance.bfloat16]
+lambda = 1.0
+lambda_per_quartic_root_k = 2.0
+
 # -- Tolerance Overrides --
 # Override default tolerances for specific tests or groups of tests.
 # Each entry requires:

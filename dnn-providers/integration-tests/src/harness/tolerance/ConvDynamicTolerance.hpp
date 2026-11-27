@@ -13,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -25,22 +26,23 @@
 
 #include "harness/input-init/FillRecipe.hpp"
 
-// The dynamic tolerance for convolution-forward outputs stored as half, bfloat16 or float.
+// The dynamic tolerance for convolution outputs (forward, backward data and backward weights)
+// stored as half, bfloat16 or float.
 //
-// The fixed per-op defaults (TestTolerances.hpp conv::getToleranceFwd) are 0.1 for half and
-// bfloat16, about 10% of a typical output from a reduction length of about 1,000 on: far looser
-// than the output's own rounding at small reductions and unrelated to the error at large ones; and
-// 1e-5 for float, which is far tighter than the order of a float summation needs from a reduction
-// length of a few hundred on. This computes the tolerance from the graph and the input statistics
-// instead: tighter than the default at short reductions, and for float wider at long ones. The
+// The fixed per-op defaults (TestTolerances.hpp conv::getToleranceFwd/Bwd/Wrw, one value for both
+// atol and rtol) do not scale with the problem: for half and bfloat16 they are far looser than the
+// output's own rounding at small reductions and unrelated to the error at large ones, and for
+// float far tighter than the order of a float summation needs from a reduction length of a few
+// hundred on. This computes the tolerance from the graph and the input statistics instead. The
 // model and its calibration are in docs/tolerances.md.
 //
 // It applies to a graph whose convolution accumulates in float and whose pointwise nodes and
 // intermediates (the tensors one node writes and another reads, virtual or not) are half,
 // bfloat16, float or double: the roundings to half or bfloat16 between the convolution and the
 // output are rounding points that widen atol (ALMIOPEN-3239). A graph with a type the model does
-// not know keeps the per-op default. A float output is graded with the summation-order
-// coefficient the engine's TOML sets, or the default of the SDK (ALMIOPEN-3249).
+// not know keeps the per-op default. A convolution output is graded with the allowance of the
+// SDK for its direction and type, or with the coefficients the engine's TOML sets for them
+// ([conv_fwd_tolerance], [conv_dgrad_tolerance], [conv_wrw_tolerance]).
 
 namespace hipdnn_integration_tests::tolerance
 {
@@ -50,6 +52,7 @@ struct InputMoments
 {
     double meanSquare = 0.0;
     double maxAbs = 0.0;
+    double mean = 0.0;
     /// Every element holds one value: a FIXED fill recipe, or a value baked into the graph.
     bool constant = false;
 };
@@ -59,36 +62,38 @@ struct InputMoments
 /// value: a baked value is read from the graph, not from here.
 using InputMomentsLookup = std::function<std::optional<InputMoments>(int64_t uid)>;
 
-/// Moments of a tensor filled from a recipe, without reading it: E[x^2] of a uniform draw on
-/// [lo, hi] is (lo^2 + lo*hi + hi^2) / 3, and of a value list the mean square of the list (the
-/// list repeats over the elements). The fill rounds each draw to the element type, which
-/// changes the mean square by far less than the tolerance's margin.
+/// Moments of a tensor filled from a recipe, without reading it: a uniform draw on [lo, hi] has
+/// E[x] = (lo + hi) / 2 and E[x^2] = (lo^2 + lo*hi + hi^2) / 3, and a value list the moments of
+/// the list (the list repeats over the elements). The fill rounds each draw to the element type,
+/// which changes the moments by far less than the tolerance's margin.
 inline InputMoments recipeMoments(const FillRecipe& recipe)
 {
     const auto maxAbs = static_cast<double>(recipe.maxMagnitude());
     if(recipe.kind == FillRecipe::Kind::FIXED)
     {
         const auto v = static_cast<double>(recipe.value);
-        return {v * v, maxAbs, true};
+        return {v * v, maxAbs, v, true};
     }
     if(recipe.kind == FillRecipe::Kind::VALUES && recipe.list != nullptr)
     {
-        const auto meanSquare = std::visit(
-            [](const auto& numbers) {
+        return std::visit(
+            [maxAbs](const auto& numbers) {
                 double sum = 0.0;
+                double sumOfSquares = 0.0;
                 for(const auto number : numbers)
                 {
                     const auto v = static_cast<double>(number);
-                    sum += v * v;
+                    sum += v;
+                    sumOfSquares += v * v;
                 }
-                return sum / static_cast<double>(numbers.size());
+                const auto n = static_cast<double>(numbers.size());
+                return InputMoments{sumOfSquares / n, maxAbs, sum / n};
             },
             *recipe.list);
-        return {meanSquare, maxAbs};
     }
     const auto lo = static_cast<double>(recipe.lo);
     const auto hi = static_cast<double>(recipe.hi);
-    return {(lo * lo + lo * hi + hi * hi) / 3.0, maxAbs};
+    return {(lo * lo + lo * hi + hi * hi) / 3.0, maxAbs, (lo + hi) / 2.0};
 }
 
 /// Moments of a tensor whose value is baked into the graph (a constant scalar, the way the
@@ -115,22 +120,28 @@ inline std::optional<InputMoments>
     {
         return std::nullopt;
     }
-    return InputMoments{v * v, std::abs(v), true};
+    return InputMoments{v * v, std::abs(v), v, true};
 }
 
 namespace detail
 {
 
+struct ElementSums
+{
+    double sum = 0.0;
+    double sumOfSquares = 0.0;
+    double maxAbs = 0.0;
+    uint64_t count = 0;
+};
+
 template <typename T>
-void accumulateSquares(hipdnn_data_sdk::utilities::ITensor& tensor,
-                       double& sumOfSquares,
-                       double& maxAbs,
-                       uint64_t& count)
+void accumulateElements(hipdnn_data_sdk::utilities::ITensor& tensor, ElementSums& sums)
 {
     const auto add = [&](double v) {
-        sumOfSquares += v * v;
-        maxAbs = std::max(maxAbs, std::abs(v));
-        ++count;
+        sums.sum += v;
+        sums.sumOfSquares += v * v;
+        sums.maxAbs = std::max(sums.maxAbs, std::abs(v));
+        ++sums.count;
     };
     if(tensor.isPacked() && !tensor.raggedIterationInfo().has_value())
     {
@@ -160,33 +171,30 @@ inline std::optional<InputMoments>
                 hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    double sumOfSquares = 0.0;
-    double maxAbs = 0.0;
-    uint64_t count = 0;
+    detail::ElementSums sums;
     switch(dataType)
     {
     case DataType::FLOAT:
-        detail::accumulateSquares<float>(tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateElements<float>(tensor, sums);
         break;
     case DataType::HALF:
-        detail::accumulateSquares<hipdnn_data_sdk::types::half>(
-            tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateElements<hipdnn_data_sdk::types::half>(tensor, sums);
         break;
     case DataType::BFLOAT16:
-        detail::accumulateSquares<hipdnn_data_sdk::types::bfloat16>(
-            tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateElements<hipdnn_data_sdk::types::bfloat16>(tensor, sums);
         break;
     case DataType::DOUBLE:
-        detail::accumulateSquares<double>(tensor, sumOfSquares, maxAbs, count);
+        detail::accumulateElements<double>(tensor, sums);
         break;
     default:
         return std::nullopt;
     }
-    if(count == 0 || !std::isfinite(sumOfSquares) || !std::isfinite(maxAbs))
+    if(sums.count == 0 || !std::isfinite(sums.sumOfSquares) || !std::isfinite(sums.maxAbs))
     {
         return std::nullopt;
     }
-    return InputMoments{sumOfSquares / static_cast<double>(count), maxAbs};
+    const auto n = static_cast<double>(sums.count);
+    return InputMoments{sums.sumOfSquares / n, sums.maxAbs, sums.sum / n};
 }
 
 namespace detail
@@ -233,11 +241,15 @@ inline std::array<std::optional<int64_t>, 3>
 
 /// Whether the model takes the pointwise node to change an error in an operand by at most its
 /// slope, about 1: ADD, SUBTRACT, BINARY_SELECT (which passes one operand on), IDENTITY, the
-/// activations the conv-fwd test-plan bundles use (RELU_FWD, SIGMOID_FWD, TANH_FWD, SOFTPLUS_FWD,
-/// ELU_FWD, SWISH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD) and MUL, whose scale the walk reads. Every
-/// other mode (DIV, RECIPROCAL, SQRT, ...) has no slope this model knows, and so has a parameter
-/// that steepens one of the above: a leaky relu with a slope above 1 and an elu with an alpha
-/// above 1.
+/// activations the conv test-plan bundles use (RELU_FWD, SIGMOID_FWD, TANH_FWD, SOFTPLUS_FWD,
+/// ELU_FWD, SWISH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD), RELU_BWD, SIGMOID_BWD and TANH_BWD behind a
+/// dgrad (which multiply the gradient by the activation's derivative at the forward input: at most
+/// 1) and MUL, whose scale the walk reads. The other backward activations (SOFTPLUS_BWD, ELU_BWD,
+/// SWISH_BWD, GELU_BWD, GELU_APPROX_TANH_BWD) are not modeled: no hipDNN reference implements them
+/// yet and no output of them was calibrated, so a graph with one keeps the per-op default,
+/// whatever the convolution's direction. Every other mode (DIV, RECIPROCAL, SQRT, ...) has no
+/// slope this model knows, and so has a parameter that steepens one of the above: a leaky relu
+/// with a slope above 1 and a forward elu with an alpha above 1.
 inline bool
     hasModeledSlope(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwise)
 {
@@ -255,24 +267,185 @@ inline bool
     case PointwiseMode::SWISH_FWD:
     case PointwiseMode::GELU_FWD:
     case PointwiseMode::GELU_APPROX_TANH_FWD:
+    case PointwiseMode::SIGMOID_BWD:
+    case PointwiseMode::TANH_BWD:
         return true;
     case PointwiseMode::RELU_FWD:
+    case PointwiseMode::RELU_BWD:
         return !pointwise.relu_lower_clip_slope().has_value()
                || std::abs(*pointwise.relu_lower_clip_slope()) <= 1.0f;
     case PointwiseMode::ELU_FWD:
-        return !pointwise.elu_alpha().has_value() || *pointwise.elu_alpha() <= 1.0f;
+        return !pointwise.elu_alpha().has_value() || std::abs(*pointwise.elu_alpha()) <= 1.0f;
     default:
         return false;
     }
 }
 
+/// Whether the mode is the backward form of an activation the model prices: it multiplies a
+/// gradient (in_0) by the activation's derivative at the forward input (in_1). The model prices
+/// it only behind a ConvolutionBwd, whose result is that gradient. Only the modes with a hipDNN
+/// reference are priced; see hasModeledSlope().
+inline bool isBackwardActivation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+    switch(mode)
+    {
+    case PointwiseMode::RELU_BWD:
+    case PointwiseMode::SIGMOID_BWD:
+    case PointwiseMode::TANH_BWD:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// The convolution node of a graph, whichever its direction. `first` and `second` are the two
+/// tensors whose products it sums: x and w forward, dy and w for dgrad, x and dy for wrw.
+struct ConvNode
+{
+    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes type
+        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::NONE;
+    int64_t first = 0;
+    int64_t second = 0;
+    int64_t result = 0;
+    const flatbuffers::Vector<int64_t>* stride = nullptr;
+    const flatbuffers::Vector<int64_t>* dilation = nullptr;
+};
+
+inline std::optional<ConvNode> convNodeOf(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
+{
+    namespace data = hipdnn_flatbuffers_sdk::data_objects;
+    switch(node.attributes_type())
+    {
+    case data::NodeAttributes::ConvolutionFwdAttributes:
+    {
+        const auto* a = node.attributes_as_ConvolutionFwdAttributes();
+        return ConvNode{node.attributes_type(),
+                        a->x_tensor_uid(),
+                        a->w_tensor_uid(),
+                        a->y_tensor_uid(),
+                        a->stride(),
+                        a->dilation()};
+    }
+    case data::NodeAttributes::ConvolutionBwdAttributes:
+    {
+        const auto* a = node.attributes_as_ConvolutionBwdAttributes();
+        return ConvNode{node.attributes_type(),
+                        a->dy_tensor_uid(),
+                        a->w_tensor_uid(),
+                        a->dx_tensor_uid(),
+                        a->stride(),
+                        a->dilation()};
+    }
+    case data::NodeAttributes::ConvolutionWrwAttributes:
+    {
+        const auto* a = node.attributes_as_ConvolutionWrwAttributes();
+        return ConvNode{node.attributes_type(),
+                        a->x_tensor_uid(),
+                        a->dy_tensor_uid(),
+                        a->dw_tensor_uid(),
+                        a->stride(),
+                        a->dilation()};
+    }
+    default:
+        return std::nullopt;
+    }
+}
+
+/// The dims of a tensor of the graph with at least two of them, none negative; nullopt otherwise.
+inline std::optional<std::vector<int64_t>>
+    convDims(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper, int64_t uid)
+{
+    const auto& attrs = wrapper.getTensorMap();
+    const auto it = attrs.find(uid);
+    if(it == attrs.end() || it->second->dims() == nullptr || it->second->dims()->size() < 2)
+    {
+        return std::nullopt;
+    }
+    std::vector<int64_t> dims(it->second->dims()->begin(), it->second->dims()->end());
+    if(std::any_of(dims.begin(), dims.end(), [](int64_t extent) { return extent < 0; }))
+    {
+        return std::nullopt;
+    }
+    return dims;
+}
+
+/// K of the convolution: the products summed per output element. nullopt when the tensors or
+/// the parameters do not describe a convolution the count is defined for, or K is 0.
+inline std::optional<uint64_t> convAccumulationLength(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper, const ConvNode& conv)
+{
+    namespace data = hipdnn_flatbuffers_sdk::data_objects;
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
+    uint64_t k = 0;
+    if(conv.type == data::NodeAttributes::ConvolutionFwdAttributes)
+    {
+        const auto wDims = convDims(wrapper, conv.second);
+        if(!wDims)
+        {
+            return std::nullopt;
+        }
+        k = sdk::convFpropAccumulationLength(*wDims);
+    }
+    else if(conv.type == data::NodeAttributes::ConvolutionBwdAttributes)
+    {
+        const auto wDims = convDims(wrapper, conv.second);
+        const auto dxDims = convDims(wrapper, conv.result);
+        if(!wDims || !dxDims || conv.stride == nullptr || conv.dilation == nullptr)
+        {
+            return std::nullopt;
+        }
+        const std::vector<int64_t> stride(conv.stride->begin(), conv.stride->end());
+        const std::vector<int64_t> dilation(conv.dilation->begin(), conv.dilation->end());
+        const int64_t channelsPerGroup = (*wDims)[1];
+        const auto atLeastOne = [](int64_t v) { return v >= 1; };
+        if(channelsPerGroup < 1 || (*dxDims)[1] % channelsPerGroup != 0
+           || stride.size() + 2 != wDims->size() || dilation.size() + 2 != wDims->size()
+           || !std::all_of(stride.begin(), stride.end(), atLeastOne)
+           || !std::all_of(dilation.begin(), dilation.end(), atLeastOne))
+        {
+            return std::nullopt;
+        }
+        const int64_t groups = (*dxDims)[1] / channelsPerGroup;
+        if(groups < 1 || (*wDims)[0] % groups != 0)
+        {
+            return std::nullopt;
+        }
+        k = sdk::convDgradAccumulationLength(*wDims, groups, stride, dilation);
+    }
+    else
+    {
+        const auto dyDims = convDims(wrapper, conv.second);
+        if(!dyDims)
+        {
+            return std::nullopt;
+        }
+        k = sdk::convWrwAccumulationLength(*dyDims);
+    }
+    if(k == 0)
+    {
+        return std::nullopt;
+    }
+    return k;
+}
+
 } // namespace detail
 
-/// The error scale of one output of a graph with exactly one ConvolutionFwd node that accumulates
-/// in float, whose x and w are graph inputs (not virtual, not produced by another node), and that
-/// has nothing else but pointwise nodes. `outputUid` is the output that is graded: the
-/// convolution's result or the result of a pointwise node. Another output of the graph has its
-/// own scale, and what lies on its path only is not part of this one.
+/// The error scale of the one convolution of a graph, by direction: forward, backward data
+/// (dgrad) or backward weights (wrw).
+using ConvErrorScale = std::variant<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale,
+                                    hipdnn_test_sdk::utilities::conv::ConvDgradErrorScale,
+                                    hipdnn_test_sdk::utilities::conv::ConvWrwErrorScale>;
+
+/// The error scale of one output of a graph with exactly one convolution node (ConvolutionFwd,
+/// ConvolutionBwd or ConvolutionWrw) that accumulates in float, whose two operands (x and w
+/// forward, dy and w for dgrad, x and dy for wrw) are graph inputs (not virtual, not produced by
+/// another node), and that has nothing else but pointwise nodes. For dgrad, dx's channels must be
+/// a multiple of the weight's, the group count that gives must divide the weight's output
+/// channels, and stride and dilation need one entry of at least 1 per filter dimension.
+/// `outputUid` is the output that is graded: the convolution's result or the result of a
+/// pointwise node. Another output of the graph has its own scale, and what lies on its path only
+/// is not part of this one.
 ///
 /// outputScale is the factor by which the output carries the convolution's result. A multiply
 /// whose one operand carries it and the other is a graph input multiplies the factor by that
@@ -281,10 +454,10 @@ inline bool
 /// 1.5 y); a mode with one operand leaves the factor as it is. A multiply on the branch of
 /// another output does not enter it. The modes that leave an error alone are the ones
 /// detail::hasModeledSlope() lists, each assumed to change an error by at most its slope, about
-/// 1: the activations of the conv-fwd test-plan bundles (relu with its clips, identity, sigmoid,
-/// tanh, softplus, elu, swish, both gelus, at the bundles' parameters) have a slope of at most
-/// about 1.13. Any other mode, and a node that is neither the convolution nor pointwise, leave
-/// the graph outside the model.
+/// 1: the activations of the conv test-plan bundles (relu with its clips, identity, sigmoid,
+/// tanh, softplus, elu, swish, both gelus, at the bundles' parameters, and relu, sigmoid and tanh
+/// backward behind a dgrad) have a slope of at most about 1.13. Any other mode, and a node that is neither
+/// the convolution nor pointwise, leave the graph outside the model.
 ///
 /// The roundings below float. The graph is walked from the convolution to its outputs, and every
 /// place where a value is rounded to half or bfloat16 on the way to the graded output becomes a
@@ -318,28 +491,31 @@ inline bool
 ///
 /// A graph input's moments are those of its baked value when it bakes one, else the lookup's. A
 /// moment that is not finite makes the inputs unavailable, whichever source it came from. The
-/// moments of an input other than x and w and a multiply's scale are asked for only when a
-/// rounding point needs the magnitude of a value that depends on it.
+/// moments of an input other than the convolution's operands and a multiply's scale are asked for
+/// only when a rounding point needs the magnitude of a value that depends on it.
 ///
 /// nullopt when the graph is outside the model: no or several convolutions, a convolution that
 /// does not accumulate in float, a node that is neither the convolution nor pointwise, a pointwise
-/// mode without a modeled slope, a pointwise node computing in a type other than half, bfloat16,
+/// mode without a modeled slope, a backward activation in a graph whose convolution is not
+/// backward data, a pointwise node computing in a type other than half, bfloat16,
 /// float or double, an intermediate stored as another type than these (an unset type counts as
-/// none of them), an x or w that is not a graph input, a multiply that does not pair the
-/// convolution's result with one graph input, an output that no node writes or that does not
-/// depend on the convolution, a nonfinite magnitude, or inputs whose moments are not available.
-/// Also when x and w both hold one value (a FIXED fill recipe, or a value baked into the graph):
-/// every step of a sequential sum then rounds the same way and the error grows as K, not as
-/// sqrt(K), which the model's form does not describe; the per-op default grades that graph.
-inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
-    convFwdErrorScale(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-                      const InputMomentsLookup& momentsFor,
-                      int64_t outputUid)
+/// none of them), an operand of the convolution that is not a graph input, dims or parameters for
+/// which K is not defined or is 0, a multiply that does not pair the convolution's result with one
+/// graph input, an output that no node writes or that does not depend on the convolution, a
+/// nonfinite magnitude, or inputs whose moments are not available. Also when both operands hold
+/// one value (a FIXED fill recipe, or a value baked into the graph): every step of a sequential
+/// sum then rounds the same way and the error grows as K, not as sqrt(K), which the model's form
+/// does not describe; the per-op default grades that graph.
+inline std::optional<ConvErrorScale>
+    convErrorScale(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                   const InputMomentsLookup& momentsFor,
+                   int64_t outputUid)
 {
     namespace data = hipdnn_flatbuffers_sdk::data_objects;
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
     using hipdnn_test_sdk::utilities::conv::RoundingPoint;
 
-    const data::ConvolutionFwdAttributes* conv = nullptr;
+    std::optional<detail::ConvNode> conv;
     // The pointwise nodes, in the order the graph lists them.
     struct PointwiseNode
     {
@@ -351,19 +527,20 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     std::set<int64_t> produced;
     // Every tensor some node reads.
     std::set<int64_t> consumed;
+    bool backwardActivation = false;
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
     {
         const auto& node = wrapper.getNode(i);
-        if(node.attributes_type() == data::NodeAttributes::ConvolutionFwdAttributes)
+        if(const auto found = detail::convNodeOf(node))
         {
-            if(conv != nullptr || node.compute_data_type() != data::DataType::FLOAT)
+            if(conv.has_value() || node.compute_data_type() != data::DataType::FLOAT)
             {
                 return std::nullopt;
             }
-            conv = node.attributes_as_ConvolutionFwdAttributes();
-            produced.insert(conv->y_tensor_uid());
-            consumed.insert(conv->x_tensor_uid());
-            consumed.insert(conv->w_tensor_uid());
+            conv = found;
+            produced.insert(conv->result);
+            consumed.insert(conv->first);
+            consumed.insert(conv->second);
         }
         else if(node.attributes_type() == data::NodeAttributes::PointwiseAttributes)
         {
@@ -376,6 +553,8 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             {
                 return std::nullopt;
             }
+            backwardActivation
+                = backwardActivation || detail::isBackwardActivation(attrs->operation());
             pointwise.push_back({attrs, node.compute_data_type()});
             produced.insert(attrs->out_0_tensor_uid());
             consumed.insert(attrs->in_0_tensor_uid());
@@ -392,7 +571,8 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             return std::nullopt;
         }
     }
-    if(conv == nullptr)
+    if(!conv.has_value()
+       || (backwardActivation && conv->type != data::NodeAttributes::ConvolutionBwdAttributes))
     {
         return std::nullopt;
     }
@@ -421,19 +601,15 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             return std::nullopt;
         }
     }
-    const auto wIt = attrs.find(conv->w_tensor_uid());
-    if(wIt == attrs.end() || wIt->second->dims() == nullptr || wIt->second->dims()->size() < 2)
+    const auto accumulationLength = detail::convAccumulationLength(wrapper, *conv);
+    if(!accumulationLength)
     {
         return std::nullopt;
     }
-    const auto* wDims = wIt->second->dims();
-    hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
-    scale.accumulationLength = hipdnn_test_sdk::utilities::conv::convFpropAccumulationLength(
-        std::vector<int64_t>(wDims->begin(), wDims->end()));
-    if(scale.accumulationLength == 0)
-    {
-        return std::nullopt;
-    }
+    // Worked in the fields of the forward scale; the variant of the direction is built from it at
+    // the end.
+    sdk::ConvFpropErrorScale scale;
+    scale.accumulationLength = *accumulationLength;
 
     const auto graphInputMoments = [&](int64_t uid) -> std::optional<InputMoments> {
         const auto it = attrs.find(uid);
@@ -448,15 +624,17 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
         // A recipe's moments are taken as given, so one that is not finite (a fill of an
         // infinity) is stopped here, as hostMoments() and bakedMoments() stop theirs.
         const auto moments = momentsFor(uid);
-        if(moments && !(std::isfinite(moments->meanSquare) && std::isfinite(moments->maxAbs)))
+        if(moments
+           && !(std::isfinite(moments->meanSquare) && std::isfinite(moments->maxAbs)
+                && std::isfinite(moments->mean)))
         {
             return std::nullopt;
         }
         return moments;
     };
 
-    const auto xMoments = graphInputMoments(conv->x_tensor_uid());
-    const auto wMoments = graphInputMoments(conv->w_tensor_uid());
+    const auto xMoments = graphInputMoments(conv->first);
+    const auto wMoments = graphInputMoments(conv->second);
     if(!xMoments || !wMoments)
     {
         return std::nullopt;
@@ -467,6 +645,8 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     }
     scale.inputMeanSquare = xMoments->meanSquare;
     scale.weightMeanSquare = wMoments->meanSquare;
+    scale.inputMean = xMoments->mean;
+    scale.weightMean = wMoments->mean;
 
     // The pointwise node that writes each tensor.
     std::map<int64_t, size_t> writer;
@@ -493,7 +673,7 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     std::vector<NodeInfo> info(pointwise.size());
     // The pointwise nodes in dependency order.
     std::vector<size_t> walk;
-    std::set<int64_t> written = {conv->y_tensor_uid()};
+    std::set<int64_t> written = {conv->result};
     std::vector<bool> walked(pointwise.size(), false);
     for(bool progressed = true; progressed;)
     {
@@ -555,8 +735,8 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
 
     // The factor by which each tensor carries the convolution's result, and which tensors depend
     // on it at all (a scale of 0 gives the factor 0 and still depends). No input is looked up.
-    std::map<int64_t, double> factor = {{conv->y_tensor_uid(), 1.0}};
-    std::set<int64_t> dependent = {conv->y_tensor_uid()};
+    std::map<int64_t, double> factor = {{conv->result, 1.0}};
+    std::set<int64_t> dependent = {conv->result};
     const auto factorOf = [&](int64_t uid) {
         const auto it = factor.find(uid);
         return it == factor.end() ? 0.0 : it->second;
@@ -566,14 +746,28 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
         const auto& node = info[n];
         double result = 0.0;
         bool depends = false;
+        const auto* pw = pointwise[n].attrs;
         if(node.isScale)
         {
             result = factorOf(node.carried) * node.scaleMax;
             depends = dependent.count(node.carried) != 0;
         }
+        else if(detail::isBackwardActivation(pw->operation()))
+        {
+            // The gradient (in_0) carries the convolution's result and the forward input (in_1)
+            // does not; the other way round the result is not a slope of the convolution's.
+            const auto forwardInput = pw->in_1_tensor_uid();
+            if(dependent.count(pw->in_0_tensor_uid()) == 0
+               || (forwardInput.has_value() && dependent.count(*forwardInput) != 0))
+            {
+                return std::nullopt;
+            }
+            result = factorOf(pw->in_0_tensor_uid());
+            depends = true;
+        }
         else
         {
-            for(const auto& operand : detail::operandsOf(*pointwise[n].attrs))
+            for(const auto& operand : detail::operandsOf(*pw))
             {
                 if(operand.has_value())
                 {
@@ -599,15 +793,20 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
         return std::nullopt;
     }
 
+    // The root mean square of the convolution's result (see the test SDK's model): with means,
+    // the partial sums do not cancel and the result grows as K * mean * mean.
+    const auto products = static_cast<double>(scale.accumulationLength);
+    const double meanProduct = scale.inputMean * scale.weightMean;
+    const double sigma = std::sqrt(products * scale.inputMeanSquare * scale.weightMeanSquare
+                                   + products * (products - 1.0) * meanProduct * meanProduct);
     // The typical magnitude of a tensor, from the statistics of the inputs it depends on; none
     // when one of them has none. A value is `factor` times the convolution's result plus a
     // remainder of mean square `independent`: a multiply multiplies the remainder by the square
-    // of the scale's max |v|; every other node adds the remainders of its operands (independent
-    // inputs add in quadrature). Worked out when a point asks for it, together with the
-    // remainders it depends on, so that no input is looked up for nothing. The walk above is
-    // complete, so the graph has no cycle and this ends.
-    const double sigma = std::sqrt(static_cast<double>(scale.accumulationLength)
-                                   * scale.inputMeanSquare * scale.weightMeanSquare);
+    // of the scale's max |v|; a backward activation keeps its gradient's (it scales the gradient
+    // by a derivative of at most about 1, and the forward input adds nothing); every other node
+    // adds the remainders of its operands (independent inputs add in quadrature). Worked out when
+    // a point asks for it, together with the remainders it depends on, so that no input is looked
+    // up for nothing. The walk above is complete, so the graph has no cycle and this ends.
     std::map<int64_t, std::optional<double>> independent;
     const auto independentSquareOf = [&](int64_t target) -> std::optional<double> {
         std::vector<int64_t> pending = {target};
@@ -619,7 +818,7 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
                 pending.pop_back();
                 continue;
             }
-            if(uid == conv->y_tensor_uid())
+            if(uid == conv->result)
             {
                 independent[uid] = 0.0;
                 continue;
@@ -637,6 +836,10 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             if(node.isScale)
             {
                 reads.push_back(node.carried);
+            }
+            else if(detail::isBackwardActivation(pointwise[n].attrs->operation()))
+            {
+                reads.push_back(pointwise[n].attrs->in_0_tensor_uid());
             }
             else
             {
@@ -818,10 +1021,38 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
             return std::nullopt;
         }
     }
-    return scale;
+    switch(conv->type)
+    {
+    case data::NodeAttributes::ConvolutionFwdAttributes:
+        return scale;
+    case data::NodeAttributes::ConvolutionBwdAttributes:
+    {
+        sdk::ConvDgradErrorScale dgrad;
+        dgrad.accumulationLength = scale.accumulationLength;
+        dgrad.dyMeanSquare = scale.inputMeanSquare;
+        dgrad.weightMeanSquare = scale.weightMeanSquare;
+        dgrad.outputScale = scale.outputScale;
+        dgrad.roundingPoints = std::move(scale.roundingPoints);
+        dgrad.dyMean = scale.inputMean;
+        dgrad.weightMean = scale.weightMean;
+        return dgrad;
+    }
+    default:
+    {
+        sdk::ConvWrwErrorScale wrw;
+        wrw.accumulationLength = scale.accumulationLength;
+        wrw.inputMeanSquare = scale.inputMeanSquare;
+        wrw.dyMeanSquare = scale.weightMeanSquare;
+        wrw.outputScale = scale.outputScale;
+        wrw.roundingPoints = std::move(scale.roundingPoints);
+        wrw.inputMean = scale.inputMean;
+        wrw.dyMean = scale.weightMean;
+        return wrw;
+    }
+    }
 }
 
-/// Whether convFwdOutputTolerance() models an output stored as this type: half, bfloat16 and
+/// Whether convOutputTolerance() models an output stored as this type: half, bfloat16 and
 /// float. A caller asks before it pays for the statistics of the graph's inputs.
 inline bool hasDynamicToleranceFor(hipdnn_flatbuffers_sdk::data_objects::DataType outputType)
 {
@@ -830,26 +1061,53 @@ inline bool hasDynamicToleranceFor(hipdnn_flatbuffers_sdk::data_objects::DataTyp
            || outputType == DataType::FLOAT;
 }
 
+namespace detail
+{
+
+template <typename OutputType>
+hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(
+    const ConvErrorScale& scale,
+    const hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients& coefficients)
+{
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
+    return std::visit(
+        [&](const auto& s) -> sdk::AbsRelTolerance {
+            using Scale = std::decay_t<decltype(s)>;
+            if constexpr(std::is_same_v<Scale, sdk::ConvFpropErrorScale>)
+            {
+                return sdk::calculateConvFpropOutputTolerance<OutputType>(s, coefficients);
+            }
+            else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
+            {
+                return sdk::calculateConvDgradOutputTolerance<OutputType>(s, coefficients);
+            }
+            else
+            {
+                return sdk::calculateConvWrwOutputTolerance<OutputType>(s, coefficients);
+            }
+        },
+        scale);
+}
+
+} // namespace detail
+
 /// The dynamic tolerance for one output tensor, or nullopt when its type is not modeled
-/// (see hasDynamicToleranceFor()). `coefficients` are the ones the engine sets; an unset one keeps
-/// the default of the output type.
-inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> convFwdOutputTolerance(
-    const hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale& scale,
+/// (see hasDynamicToleranceFor()). `coefficients` are the ones an engine sets for the direction
+/// of the scale's convolution and the output type; an unset one keeps the SDK's value for them.
+inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> convOutputTolerance(
+    const ConvErrorScale& scale,
     hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
-    const hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients& coefficients = {})
+    const hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients& coefficients = {})
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    namespace conv = hipdnn_test_sdk::utilities::conv;
     switch(outputType)
     {
     case DataType::HALF:
-        return conv::calculateConvFpropOutputTolerance<hipdnn_data_sdk::types::half>(scale,
-                                                                                     coefficients);
+        return detail::convOutputToleranceAs<hipdnn_data_sdk::types::half>(scale, coefficients);
     case DataType::BFLOAT16:
-        return conv::calculateConvFpropOutputTolerance<hipdnn_data_sdk::types::bfloat16>(
-            scale, coefficients);
+        return detail::convOutputToleranceAs<hipdnn_data_sdk::types::bfloat16>(scale, coefficients);
     case DataType::FLOAT:
-        return conv::calculateConvFpropOutputTolerance<float>(scale, coefficients);
+        return detail::convOutputToleranceAs<float>(scale, coefficients);
     default:
         return std::nullopt;
     }

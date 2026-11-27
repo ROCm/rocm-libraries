@@ -13,7 +13,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -37,7 +40,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
-#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
+#include "harness/tolerance/ConvDynamicTolerance.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -70,6 +73,61 @@ const char* modeName(VerificationMode mode)
     default:
         return "unknown";
     }
+}
+
+// The dynamic tolerance of one convolution output, with the coefficients the engine's settings
+// file sets for the direction of the scale's convolution, the output type
+// and the device's architecture ([conv_<direction>_tolerance.<type>], or its table for `arch`, the
+// device's raw gcnArchName); the SDK's values when there is no settings file, or the file sets
+// none for them. Nullopt when the output type is not modeled.
+std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
+    convToleranceFor(const tolerance::ConvErrorScale& scale,
+                     hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
+                     const TestSettings* settings,
+                     const std::string& arch)
+{
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    if(settings == nullptr)
+    {
+        return tolerance::convOutputTolerance(scale, outputType);
+    }
+
+    std::string_view typeName;
+    switch(outputType)
+    {
+    case DataType::HALF:
+        typeName = "half";
+        break;
+    case DataType::BFLOAT16:
+        typeName = "bfloat16";
+        break;
+    case DataType::FLOAT:
+        typeName = "float";
+        break;
+    default:
+        return std::nullopt;
+    }
+    const auto direction = std::visit(
+        [](const auto& s) {
+            using Scale = std::decay_t<decltype(s)>;
+            if constexpr(std::is_same_v<Scale, sdk::ConvFpropErrorScale>)
+            {
+                return ConvToleranceDirection::FWD;
+            }
+            else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
+            {
+                return ConvToleranceDirection::DGRAD;
+            }
+            else
+            {
+                return ConvToleranceDirection::WRW;
+            }
+        },
+        scale);
+    return tolerance::convOutputTolerance(
+        scale, outputType, settings->convToleranceCoefficients(direction, typeName, arch));
 }
 
 } // namespace
@@ -1538,15 +1596,16 @@ VerificationOutcome
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
     //
-    // A half, bfloat16 or float output of a convolution-forward graph is graded with the dynamic
-    // tolerance computed from the graph and its input statistics instead of the fixed per-op
-    // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
-    // inputs read from golden blobs are scanned on the host, once; a scalar baked into the graph
-    // is read from the graph (convFwdErrorScale() asks this lookup only for the rest). The scale
-    // is that of one output, computed the first time the output is graded, and only when it
-    // needs it. The tolerance lookup gets the label of an output, not its uid (a uid is not
-    // stable between a C++ graph test and the bundle captured from it): the label names the
-    // output here, and an output that shares its label with another has the per-op default.
+    // A half, bfloat16 or float output of a convolution graph (forward, backward data or
+    // backward weights) is graded with the dynamic tolerance computed from the graph and its
+    // input statistics instead of the fixed per-op default. Inputs filled from a recipe take
+    // their statistics from the recipe, at no cost; inputs read from golden blobs are scanned on
+    // the host, once; a scalar baked into the graph is read from the graph (convErrorScale() asks
+    // this lookup only for the rest). The scale is that of one output, computed the first time
+    // the output is graded, and only when it needs it. The tolerance lookup gets the label of an
+    // output, not its uid (a uid is not stable between a C++ graph test and the bundle captured
+    // from it): the label names the output here, and an output that shares its label with
+    // another has the per-op default.
     std::map<int64_t, std::optional<tolerance::InputMoments>> momentsCache;
     const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
         const auto cached = momentsCache.find(uid);
@@ -1567,8 +1626,7 @@ VerificationOutcome
         momentsCache.emplace(uid, moments);
         return moments;
     };
-    std::map<int64_t, std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>>
-        convScales;
+    std::map<int64_t, std::optional<tolerance::ConvErrorScale>> convScales;
     const auto outputUidOf = [&](const std::string& label) -> std::optional<int64_t> {
         std::optional<int64_t> found;
         for(const auto uid : _bundle->outputTensorUids)
@@ -1596,23 +1654,15 @@ VerificationOutcome
             auto convScale = convScales.find(*outputUid);
             if(convScale == convScales.end())
             {
-                convScale
-                    = convScales
-                          .emplace(*outputUid,
-                                   tolerance::convFwdErrorScale(wrapper, momentsFor, *outputUid))
-                          .first;
+                convScale = convScales
+                                .emplace(*outputUid,
+                                         tolerance::convErrorScale(wrapper, momentsFor, *outputUid))
+                                .first;
             }
             if(convScale->second.has_value())
             {
-                hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
-                if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-                   && _deps.policy.testSettings != nullptr)
-                {
-                    coefficients.summationOrder
-                        = _deps.policy.testSettings->convFwdSummationOrder("float");
-                }
-                dynamic
-                    = tolerance::convFwdOutputTolerance(*convScale->second, dataType, coefficients);
+                dynamic = convToleranceFor(
+                    *convScale->second, dataType, _deps.policy.testSettings, _deps.policy.arch);
             }
         }
         if(dynamic.has_value())

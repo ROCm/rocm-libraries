@@ -12,6 +12,7 @@
 #include <set>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_data_sdk/types.hpp>
@@ -20,7 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 
-#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
+#include "harness/tolerance/ConvDynamicTolerance.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 namespace tol = hipdnn_integration_tests::tolerance;
@@ -386,14 +387,15 @@ struct Inputs
     }
 };
 
-// x is 2.0 everywhere and w 0.5; the scale cycles through -3, 1, 2 (largest magnitude 3, root
-// mean square 2.2, mean square 14/3), and the bias is small.
+// x is +-2 and w +-0.5, alternating, so their means are zero and sigma is sqrt(K * 4 * 0.25);
+// the scale cycles through -3, 1, 2 (largest magnitude 3, root mean square 2.2, mean square
+// 14/3), and the bias is small.
 Inputs defaultInputs(const GraphSpec& spec)
 {
     Inputs in;
-    in.byUid[X_UID] = filled({2, 16, 8, 8}, 2.0f);
-    in.byUid[RAW_X_UID] = filled({2, 16, 8, 8}, 2.0f);
-    in.byUid[W_UID] = filled(spec.wDims, 0.5f);
+    in.byUid[X_UID] = filledWith<half>({2, 16, 8, 8}, {2.0f, -2.0f});
+    in.byUid[RAW_X_UID] = filledWith<half>({2, 16, 8, 8}, {2.0f, -2.0f});
+    in.byUid[W_UID] = filledWith<half>(spec.wDims, {0.5f, -0.5f});
     in.byUid[SCALE_UID] = filledWith<half>({1, 3, 1, 1}, {-3.0f, 1.0f, 2.0f});
     in.byUid[BIAS_UID] = filled({1, 32, 1, 1}, 0.01f);
     return in;
@@ -417,12 +419,20 @@ int64_t gradedOutput(const GraphSpec& spec)
     }
 }
 
-// The error scale of the graph `spec` describes at `output`, given the statistics of `in`.
+// The error scale of the graph `spec` describes at `output`, given the statistics of `in`. The
+// graph's one convolution is a forward one, so a scale of another direction fails the test.
 std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     errorScale(const GraphSpec& spec, const Inputs& in, int64_t output)
 {
+    using hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale;
     flatbuffers::FlatBufferBuilder b;
-    return tol::convFwdErrorScale(buildGraph(b, spec), in.lookup(), output);
+    const auto scale = tol::convErrorScale(buildGraph(b, spec), in.lookup(), output);
+    if(!scale.has_value())
+    {
+        return std::nullopt;
+    }
+    EXPECT_TRUE(std::holds_alternative<ConvFpropErrorScale>(*scale));
+    return std::get<ConvFpropErrorScale>(*scale);
 }
 
 // The same at the output the spec grades.
@@ -1123,7 +1133,7 @@ TEST(TestConvFwdDynamicTolerance, InputsAreLookedUpOnlyWhenSomethingNeedsThem)
         };
         flatbuffers::FlatBufferBuilder b;
         EXPECT_TRUE(
-            tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value());
+            tol::convErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value());
         return asked;
     };
     const std::set<int64_t> convolutionInputs = {X_UID, W_UID};
@@ -1409,8 +1419,7 @@ TEST(TestConvFwdDynamicTolerance, ScalesThatOverflowTheOutputScaleAreNotModeled)
                                  false};
     };
     flatbuffers::FlatBufferBuilder b;
-    EXPECT_FALSE(
-        tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value());
+    EXPECT_FALSE(tol::convErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value());
 }
 
 // ── Modes, nodes and fills outside the model ────────────────────────────────
@@ -1532,7 +1541,7 @@ TEST(TestConvFwdDynamicTolerance, FixedFillOfBothConvolutionInputsIsNotModeled)
             }
             return tol::recipeMoments(uid == W_UID ? w : FillRecipe::free(-1.0f, 1.0f));
         };
-        return tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value();
+        return tol::convErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value();
     };
     const GraphSpec spec;
     const auto free = FillRecipe::free(-1.0f, 1.0f);
@@ -1576,17 +1585,17 @@ TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
     ASSERT_NE(expectedFloat.rtol, expectedBfloat16.rtol);
     ASSERT_NE(expectedFloat.atol, expectedBfloat16.atol);
 
-    const auto halfTolerance = tol::convFwdOutputTolerance(scale, DataType::HALF);
+    const auto halfTolerance = tol::convOutputTolerance(scale, DataType::HALF);
     ASSERT_TRUE(halfTolerance.has_value());
     EXPECT_DOUBLE_EQ(halfTolerance->atol, expectedHalf.atol);
     EXPECT_DOUBLE_EQ(halfTolerance->rtol, expectedHalf.rtol);
 
-    const auto bfloat16Tolerance = tol::convFwdOutputTolerance(scale, DataType::BFLOAT16);
+    const auto bfloat16Tolerance = tol::convOutputTolerance(scale, DataType::BFLOAT16);
     ASSERT_TRUE(bfloat16Tolerance.has_value());
     EXPECT_DOUBLE_EQ(bfloat16Tolerance->atol, expectedBfloat16.atol);
     EXPECT_DOUBLE_EQ(bfloat16Tolerance->rtol, expectedBfloat16.rtol);
 
-    const auto floatTolerance = tol::convFwdOutputTolerance(scale, DataType::FLOAT);
+    const auto floatTolerance = tol::convOutputTolerance(scale, DataType::FLOAT);
     ASSERT_TRUE(floatTolerance.has_value());
     EXPECT_DOUBLE_EQ(floatTolerance->atol, expectedFloat.atol);
     EXPECT_DOUBLE_EQ(floatTolerance->rtol, expectedFloat.rtol);
@@ -1599,11 +1608,11 @@ TEST(TestConvFwdDynamicTolerance, EngineCoefficientsReachTheToleranceOfTheirOutp
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
-    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients coefficients;
     coefficients.summationOrder = 11.0;
 
-    const auto withDefault = tol::convFwdOutputTolerance(scale, DataType::FLOAT);
-    const auto withEngine = tol::convFwdOutputTolerance(scale, DataType::FLOAT, coefficients);
+    const auto withDefault = tol::convOutputTolerance(scale, DataType::FLOAT);
+    const auto withEngine = tol::convOutputTolerance(scale, DataType::FLOAT, coefficients);
     const auto expected
         = hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale,
                                                                                      coefficients);
@@ -1620,11 +1629,11 @@ TEST(TestConvFwdDynamicTolerance, OnlyHalfBfloat16AndFloatOutputsGetADynamicTole
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
-    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::DOUBLE).has_value());
-    EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::INT32).has_value());
+    EXPECT_FALSE(tol::convOutputTolerance(scale, DataType::DOUBLE).has_value());
+    EXPECT_FALSE(tol::convOutputTolerance(scale, DataType::INT32).has_value());
 }
 
-// The harness asks hasDynamicToleranceFor() before it scans any input, and convFwdOutputTolerance()
+// The harness asks hasDynamicToleranceFor() before it scans any input, and convOutputTolerance()
 // answers for the same types: the two agree for every element type.
 TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFunction)
 {
@@ -1635,7 +1644,7 @@ TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFu
     for(const auto type : EnumValuesDataType())
     {
         EXPECT_EQ(tol::hasDynamicToleranceFor(type),
-                  tol::convFwdOutputTolerance(scale, type).has_value())
+                  tol::convOutputTolerance(scale, type).has_value())
             << EnumNameDataType(type);
     }
     EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::HALF));
@@ -1752,7 +1761,7 @@ TEST(TestConvFwdDynamicTolerance, GraphWithANonFiniteRecipeIsNotModeled)
                                                         : FillRecipe::free(-1.0f, 1.0f));
             };
             EXPECT_FALSE(
-                tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value())
+                tol::convErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value())
                 << "bad uid " << badUid;
         }
     }

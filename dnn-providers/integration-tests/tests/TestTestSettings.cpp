@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 
 #include "harness/TestSettings.hpp"
 
+using hipdnn_integration_tests::ConvToleranceDirection;
 using hipdnn_integration_tests::TestSettings;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
@@ -1069,20 +1071,60 @@ reason    = "windows + gfx1100 only"
 }
 
 // ---------------------------------------------------------------------------
-// [conv_fwd_tolerance]
+// [conv_fwd_tolerance], [conv_dgrad_tolerance], [conv_wrw_tolerance]
 // ---------------------------------------------------------------------------
 
-TEST(TestSettingsParser, ConvFwdSummationOrderIsUnsetWhenTheFileSaysNothing)
+namespace
+{
+
+constexpr std::array<ConvToleranceDirection, 3> CONV_DIRECTIONS
+    = {ConvToleranceDirection::FWD, ConvToleranceDirection::DGRAD, ConvToleranceDirection::WRW};
+constexpr std::array<const char*, 3> CONV_TABLES
+    = {"conv_fwd_tolerance", "conv_dgrad_tolerance", "conv_wrw_tolerance"};
+constexpr std::array<const char*, 3> CONV_TYPES = {"float", "half", "bfloat16"};
+// A device that no arch table names.
+constexpr const char* NO_ARCH = "";
+
+// The text of the error a settings file with this body is rejected with; fails the test when it
+// loads.
+std::string loadErrorOf(const std::string& body)
+{
+    const TempTomlFile file("[meta]\nversion = 1\n\n" + body);
+    try
+    {
+        const TestSettings settings(file.path());
+    }
+    catch(const std::runtime_error& e)
+    {
+        return e.what();
+    }
+    ADD_FAILURE() << "loaded without an error:\n" << body;
+    return {};
+}
+
+} // namespace
+
+TEST(TestSettingsParser, ConvToleranceCoefficientsAreUnsetWhenTheFileSaysNothing)
 {
     const TempTomlFile file(R"(
 [meta]
 version = 1
 )");
     const TestSettings settings(file.path());
-    EXPECT_FALSE(settings.convFwdSummationOrder("float").has_value());
+    for(const auto direction : CONV_DIRECTIONS)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            const auto c = settings.convToleranceCoefficients(direction, type, NO_ARCH);
+            EXPECT_FALSE(c.summationOrder.has_value()) << type;
+            EXPECT_FALSE(c.lambda.has_value()) << type;
+            EXPECT_FALSE(c.lambdaPerQuarticRootK.has_value()) << type;
+        }
+    }
 }
 
-TEST(TestSettingsParser, ParsesTheFloatSummationOrder)
+// A file of the form that was valid before the other directions had tables loads as it did.
+TEST(TestSettingsParser, ParsesTheFloatSummationOrderOfTheForwardTable)
 {
     const TempTomlFile file(R"(
 [meta]
@@ -1092,82 +1134,254 @@ version = 1
 summation_order = 9.5
 )");
     const TestSettings settings(file.path());
-    ASSERT_TRUE(settings.convFwdSummationOrder("float").has_value());
-    EXPECT_DOUBLE_EQ(*settings.convFwdSummationOrder("float"), 9.5);
-    // Only the float table exists: nothing is set for another output type.
-    EXPECT_FALSE(settings.convFwdSummationOrder("half").has_value());
-    EXPECT_FALSE(settings.convFwdSummationOrder("bfloat16").has_value());
+    const auto fwd
+        = settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float", NO_ARCH);
+    ASSERT_TRUE(fwd.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*fwd.summationOrder, 9.5);
+    EXPECT_FALSE(fwd.lambda.has_value());
+    EXPECT_FALSE(fwd.lambdaPerQuarticRootK.has_value());
+    // Nothing is set for another type or another direction.
+    for(const char* type : {"half", "bfloat16"})
+    {
+        EXPECT_FALSE(settings.convToleranceCoefficients(ConvToleranceDirection::FWD, type, NO_ARCH)
+                         .summationOrder.has_value());
+    }
+    for(const auto direction : {ConvToleranceDirection::DGRAD, ConvToleranceDirection::WRW})
+    {
+        EXPECT_FALSE(settings.convToleranceCoefficients(direction, "float", NO_ARCH)
+                         .summationOrder.has_value());
+    }
 }
 
-TEST(TestSettingsParser, AnIntegerSummationOrderIsANumber)
+// Nine tables, each with a value of its own: every direction and type reads its own and none
+// another's. Catches a table stored under the wrong direction or type.
+TEST(TestSettingsParser, EveryDirectionAndTypeKeepsItsOwnCoefficients)
+{
+    std::string body;
+    double next = 1.0;
+    for(const auto* table : CONV_TABLES)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            body += std::string("[") + table + "." + type + "]\n";
+            if(std::string(type) == "float")
+            {
+                body += "summation_order = " + std::to_string(next++) + "\n";
+            }
+            body += "lambda = " + std::to_string(next++) + "\n";
+            body += "lambda_per_quartic_root_k = " + std::to_string(next++) + "\n\n";
+        }
+    }
+    const TempTomlFile file("[meta]\nversion = 1\n\n" + body);
+    const TestSettings settings(file.path());
+
+    double expected = 1.0;
+    for(const auto direction : CONV_DIRECTIONS)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            const auto c = settings.convToleranceCoefficients(direction, type, NO_ARCH);
+            if(std::string(type) == "float")
+            {
+                ASSERT_TRUE(c.summationOrder.has_value()) << type;
+                EXPECT_DOUBLE_EQ(*c.summationOrder, expected++) << type;
+            }
+            else
+            {
+                EXPECT_FALSE(c.summationOrder.has_value()) << type;
+            }
+            ASSERT_TRUE(c.lambda.has_value()) << type;
+            EXPECT_DOUBLE_EQ(*c.lambda, expected++) << type;
+            ASSERT_TRUE(c.lambdaPerQuarticRootK.has_value()) << type;
+            EXPECT_DOUBLE_EQ(*c.lambdaPerQuarticRootK, expected++) << type;
+        }
+    }
+}
+
+TEST(TestSettingsParser, AnOutputTypeTheFileDoesNotNameKeepsTheSdkDefaults)
 {
     const TempTomlFile file(R"(
 [meta]
 version = 1
 
-[conv_fwd_tolerance.float]
-summation_order = 8
+[conv_dgrad_tolerance.half]
+lambda = 20.0
 )");
     const TestSettings settings(file.path());
-    ASSERT_TRUE(settings.convFwdSummationOrder("float").has_value());
-    EXPECT_DOUBLE_EQ(*settings.convFwdSummationOrder("float"), 8.0);
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", NO_ARCH)
+                    .lambda.has_value());
+    for(const char* other : {"bfloat16", "float", "double"})
+    {
+        EXPECT_FALSE(
+            settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, other, NO_ARCH)
+                .lambda.has_value())
+            << other;
+    }
+}
+
+TEST(TestSettingsParser, AnIntegerCoefficientIsANumber)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.float]
+summation_order = 8
+lambda = 3
+lambda_per_quartic_root_k = 2
+)");
+    const TestSettings settings(file.path());
+    const auto c
+        = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "float", NO_ARCH);
+    ASSERT_TRUE(c.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*c.summationOrder, 8.0);
+    ASSERT_TRUE(c.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*c.lambda, 3.0);
+    ASSERT_TRUE(c.lambdaPerQuarticRootK.has_value());
+    EXPECT_DOUBLE_EQ(*c.lambdaPerQuarticRootK, 2.0);
+}
+
+// An engine may need no allowance at all: zero is a value, not an unset one.
+TEST(TestSettingsParser, ALambdaOfZeroIsSet)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_dgrad_tolerance.bfloat16]
+lambda = 0.0
+lambda_per_quartic_root_k = 0.0
+)");
+    const TestSettings settings(file.path());
+    const auto c
+        = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "bfloat16", NO_ARCH);
+    ASSERT_TRUE(c.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*c.lambda, 0.0);
+    ASSERT_TRUE(c.lambdaPerQuarticRootK.has_value());
+    EXPECT_DOUBLE_EQ(*c.lambdaPerQuarticRootK, 0.0);
 }
 
 TEST(TestSettingsParser, RejectsASummationOrderThatIsNotFiniteAndPositive)
 {
-    for(const char* bad : {"0", "0.0", "-1.5", "inf", "-inf", "nan"})
+    for(const auto* table : CONV_TABLES)
     {
-        const TempTomlFile file(std::string(R"(
-[meta]
-version = 1
-
-[conv_fwd_tolerance.float]
-summation_order = )") + bad + "\n");
-        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << bad;
+        for(const char* bad : {"0", "0.0", "-1.5", "inf", "-inf", "nan"})
+        {
+            const auto message = loadErrorOf(std::string("[") + table
+                                             + ".float]\nsummation_order = " + bad + "\n");
+            EXPECT_NE(message.find(std::string(table) + ".float"), std::string::npos)
+                << table << " " << bad << ": " << message;
+        }
     }
 }
 
-TEST(TestSettingsParser, RejectsASummationOrderOfTheWrongType)
+TEST(TestSettingsParser, RejectsALambdaThatIsNotFiniteAndNotNegative)
 {
-    for(const char* bad : {R"("9")", "true", "[9.0]", "{ a = 1 }"})
+    for(const auto* table : CONV_TABLES)
     {
-        const TempTomlFile file(std::string(R"(
-[meta]
-version = 1
-
-[conv_fwd_tolerance.float]
-summation_order = )") + bad + "\n");
-        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << bad;
+        for(const char* type : CONV_TYPES)
+        {
+            for(const char* bad : {"-1.5", "-0.001", "inf", "-inf", "nan"})
+            {
+                for(const char* key : {"lambda", "lambda_per_quartic_root_k"})
+                {
+                    // The per-K key needs a lambda beside it: the rejection is of its value.
+                    const std::string body
+                        = std::string("[") + table + "." + type + "]\n"
+                          + (std::string(key) == "lambda" ? "" : "lambda = 1.0\n") + key + " = "
+                          + bad + "\n";
+                    const auto message = loadErrorOf(body);
+                    EXPECT_NE(message.find(std::string(table) + "." + type), std::string::npos)
+                        << body << ": " << message;
+                }
+            }
+        }
     }
 }
 
-TEST(TestSettingsParser, RejectsAnUnknownConvFwdToleranceTypeOrKey)
+// Each key of each table is a number; a string, a boolean, an array or a table is a load error
+// that names the key.
+TEST(TestSettingsParser, RejectsACoefficientOfTheWrongType)
 {
-    const std::vector<std::string> bad = {
-        // an output type the harness does not read
-        "[conv_fwd_tolerance.half]\nsummation_order = 2.0\n",
-        "[conv_fwd_tolerance.bfloat16]\nsummation_order = 2.0\n",
-        // a term it does not read
-        "[conv_fwd_tolerance.float]\npartial_result = 12.0\n",
-        "[conv_fwd_tolerance.float]\nsummation_order = 2.0\nextra = 1\n",
-        // not tables
-        "[conv_fwd_tolerance]\nfloat = 9.0\n",
-    };
-    for(const auto& text : bad)
+    for(const auto* table : CONV_TABLES)
     {
-        const TempTomlFile file("[meta]\nversion = 1\n\n" + text);
-        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << text;
+        for(const char* key : {"summation_order", "lambda", "lambda_per_quartic_root_k"})
+        {
+            for(const char* bad : {R"("9")", "true", "[9.0]", "{ a = 1 }"})
+            {
+                const std::string body
+                    = std::string("[") + table + ".float]\n"
+                      + (std::string(key) == "lambda_per_quartic_root_k" ? "lambda = 1.0\n" : "")
+                      + key + " = " + bad + "\n";
+                const auto message = loadErrorOf(body);
+                EXPECT_NE(message.find(std::string("'") + key + "' must be a number"),
+                          std::string::npos)
+                    << body << ": " << message;
+            }
+        }
     }
 }
 
-TEST(TestSettingsParser, RejectsAConvFwdToleranceThatIsNotATable)
+// 'summation_order' is the term of a float sum; a half or bfloat16 table has no use for it.
+TEST(TestSettingsParser, RejectsASummationOrderOutsideTheFloatTable)
 {
-    const TempTomlFile file(R"(conv_fwd_tolerance = 9.0
+    for(const auto* table : CONV_TABLES)
+    {
+        for(const char* type : {"half", "bfloat16"})
+        {
+            const auto message
+                = loadErrorOf(std::string("[") + table + "." + type + "]\nsummation_order = 2.0\n");
+            EXPECT_NE(message.find(std::string(table) + "." + type), std::string::npos) << message;
+        }
+    }
+}
 
-[meta]
-version = 1
-)");
-    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+// The per-K coefficient adds to a lambda; alone it would silently keep the SDK's lambda and add
+// to nothing.
+TEST(TestSettingsParser, RejectsAPerQuarticRootKCoefficientWithoutALambda)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            const auto message = loadErrorOf(std::string("[") + table + "." + type
+                                             + "]\nlambda_per_quartic_root_k = 1.0\n");
+            EXPECT_NE(message.find("lambda_per_quartic_root_k"), std::string::npos) << message;
+            EXPECT_NE(message.find(std::string(table) + "." + type), std::string::npos) << message;
+        }
+    }
+}
+
+TEST(TestSettingsParser, RejectsAnUnknownConvToleranceTypeOrKey)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        const std::string name(table);
+        const std::vector<std::string> bad = {
+            // an output type the harness does not read
+            "[" + name + ".double]\nlambda = 2.0\n",
+            "[" + name + ".fp16]\nlambda = 2.0\n",
+            // a term it does not read
+            "[" + name + ".float]\npartial_result = 12.0\n",
+            "[" + name + ".half]\nlambda = 2.0\nextra = 1\n",
+            // not tables
+            "[" + name + "]\nfloat = 9.0\n",
+        };
+        for(const auto& text : bad)
+        {
+            const auto message = loadErrorOf(text);
+            EXPECT_NE(message.find(name), std::string::npos) << text << ": " << message;
+        }
+    }
+}
+
+TEST(TestSettingsParser, RejectsAConvToleranceThatIsNotATable)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        const TempTomlFile file(std::string(table) + " = 9.0\n\n[meta]\nversion = 1\n");
+        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << table;
+    }
 }
 
 // A top-level key the loader does not read is an error: a misspelt section name would otherwise
@@ -1177,9 +1391,15 @@ TEST(TestSettingsParser, RejectsATopLevelKeyThatIsNoTable)
     const std::vector<std::string> bad = {
         // a misspelt section of each kind
         "[conv_fwd_tolerence.float]\nsummation_order = 9.0\n",
+        "[conv_dgrad_toleranc.half]\nlambda = 9.0\n",
+        "[conv_wrw_tolerance_half]\nlambda = 9.0\n",
         "[[tolerance_override]]\nfilters = [\"*\"]\natol = 1.0\nrtol = 1.0\n",
-        "[[validator_override]]\nfilters = [\"*\"]\ntensors = [\"*\"]\nvalidator = \"rms\"\n"
-        "rms_threshold = 1e-4\n",
+        R"([[validator_override]]
+filters = ["*"]
+tensors = ["*"]
+validator = "rms"
+rms_threshold = 1e-4
+)",
         "[[test_skip]]\nfilters = [\"*\"]\nreason = \"x\"\n",
     };
     for(const auto& text : bad)
@@ -1213,12 +1433,295 @@ reason = "known"
 
 [conv_fwd_tolerance.float]
 summation_order = 9.0
+
+[conv_dgrad_tolerance.half]
+lambda = 20.0
+
+[conv_wrw_tolerance.bfloat16]
+lambda = 30.0
+lambda_per_quartic_root_k = 1.0
 )");
     const TestSettings settings(file.path());
     EXPECT_EQ(settings.toleranceOverrideCount(), 1u);
     EXPECT_EQ(settings.validatorOverrideCount(), 1u);
     EXPECT_EQ(settings.skipEntryCount(), 1u);
-    EXPECT_TRUE(settings.convFwdSummationOrder("float").has_value());
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float", NO_ARCH)
+                    .summationOrder.has_value());
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", NO_ARCH)
+                    .lambda.has_value());
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", NO_ARCH)
+                    .lambda.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// [conv_<direction>_tolerance.<type>.<arch>]: the coefficients of one architecture
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr const char* GFX942 = "gfx942:sramecc+:xnack-";
+constexpr const char* GFX90A = "gfx90a:sramecc+:xnack-";
+
+} // namespace
+
+TEST(TestSettingsParser, AnArchTableAppliesToTheDevicesItNamesAndNoOther)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.half]
+lambda = 10.0
+
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 40.0
+lambda_per_quartic_root_k = 2.0
+)");
+    const TestSettings settings(file.path());
+    const auto onGfx90a
+        = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX90A);
+    ASSERT_TRUE(onGfx90a.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*onGfx90a.lambda, 40.0);
+    ASSERT_TRUE(onGfx90a.lambdaPerQuarticRootK.has_value());
+    EXPECT_DOUBLE_EQ(*onGfx90a.lambdaPerQuarticRootK, 2.0);
+
+    for(const char* other : {GFX942, "", "gfx1100"})
+    {
+        const auto c
+            = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", other);
+        ASSERT_TRUE(c.lambda.has_value()) << other;
+        EXPECT_DOUBLE_EQ(*c.lambda, 10.0) << other;
+        EXPECT_FALSE(c.lambdaPerQuarticRootK.has_value()) << other;
+    }
+}
+
+// The arch table is the whole of the coefficients of its device: a key it leaves unset is the
+// SDK's value there, not the output type table's.
+TEST(TestSettingsParser, AnArchTableReplacesTheTypeTableWholeAndDoesNotMergeWithIt)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_dgrad_tolerance.float]
+summation_order = 9.0
+lambda = 10.0
+lambda_per_quartic_root_k = 3.0
+
+[conv_dgrad_tolerance.float.gfx90a]
+lambda = 20.0
+
+[conv_wrw_tolerance.half]
+lambda = 10.0
+lambda_per_quartic_root_k = 3.0
+
+[conv_wrw_tolerance.half.gfx90a]
+)");
+    const TestSettings settings(file.path());
+
+    const auto dgrad
+        = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "float", GFX90A);
+    EXPECT_FALSE(dgrad.summationOrder.has_value());
+    ASSERT_TRUE(dgrad.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*dgrad.lambda, 20.0);
+    EXPECT_FALSE(dgrad.lambdaPerQuarticRootK.has_value());
+
+    // An arch table that sets nothing is the SDK's values on that device.
+    const auto wrw
+        = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX90A);
+    EXPECT_FALSE(wrw.summationOrder.has_value());
+    EXPECT_FALSE(wrw.lambda.has_value());
+    EXPECT_FALSE(wrw.lambdaPerQuarticRootK.has_value());
+
+    // The other devices keep the type table whole.
+    const auto other
+        = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "float", GFX942);
+    ASSERT_TRUE(other.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*other.summationOrder, 9.0);
+    ASSERT_TRUE(other.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*other.lambda, 10.0);
+    ASSERT_TRUE(other.lambdaPerQuarticRootK.has_value());
+    EXPECT_DOUBLE_EQ(*other.lambdaPerQuarticRootK, 3.0);
+}
+
+// A type table may hold only arch tables: the other devices then have no coefficients of it.
+TEST(TestSettingsParser, ATypeTableOfArchTablesOnlySetsNothingOnOtherDevices)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_dgrad_tolerance.half.gfx90a]
+lambda = 46.0
+)");
+    const TestSettings settings(file.path());
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", GFX90A)
+                    .lambda.has_value());
+    EXPECT_FALSE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", GFX942)
+                     .lambda.has_value());
+}
+
+// Nine type tables, each with an arch table of its own value: every direction and type reads its
+// own. Catches an arch table kept under the wrong direction or type.
+TEST(TestSettingsParser, EveryDirectionAndTypeKeepsItsOwnArchTable)
+{
+    std::string body;
+    double next = 1.0;
+    for(const auto* table : CONV_TABLES)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            body += std::string("[") + table + "." + type
+                    + ".gfx90a]\nlambda = " + std::to_string(next++) + "\n\n";
+        }
+    }
+    const TempTomlFile file("[meta]\nversion = 1\n\n" + body);
+    const TestSettings settings(file.path());
+
+    double expected = 1.0;
+    for(const auto direction : CONV_DIRECTIONS)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            const auto c = settings.convToleranceCoefficients(direction, type, GFX90A);
+            ASSERT_TRUE(c.lambda.has_value()) << type;
+            EXPECT_DOUBLE_EQ(*c.lambda, expected++) << type;
+            EXPECT_FALSE(
+                settings.convToleranceCoefficients(direction, type, GFX942).lambda.has_value())
+                << type;
+        }
+    }
+}
+
+TEST(TestSettingsParser, AFloatArchTableMayCarryASummationOrder)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_fwd_tolerance.float.gfx942]
+summation_order = 12.0
+)");
+    const TestSettings settings(file.path());
+    const auto c = settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float", GFX942);
+    ASSERT_TRUE(c.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*c.summationOrder, 12.0);
+}
+
+// The arch name is matched as a substring of the raw gcnArchName, as 'archs' of [[test_skips]]
+// is: a family prefix names every device of the family.
+TEST(TestSettingsParser, AnArchTableNameIsMatchedAsASubstringOfTheRawArchName)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.bfloat16.gfx9]
+lambda = 5.0
+)");
+    const TestSettings settings(file.path());
+    for(const char* arch : {GFX942, GFX90A})
+    {
+        EXPECT_TRUE(
+            settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", arch)
+                .lambda.has_value())
+            << arch;
+    }
+    EXPECT_FALSE(
+        settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", "gfx1100")
+            .lambda.has_value());
+}
+
+// Two arch tables of one output type that both match the device cannot be ordered: the lookup
+// that finds out names both.
+TEST(TestSettingsParser, TwoArchTablesThatBothMatchTheDeviceAreAnErrorNamingBoth)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 40.0
+
+[conv_wrw_tolerance.half.gfx90]
+lambda = 30.0
+
+[conv_wrw_tolerance.bfloat16.gfx90a]
+lambda = 4.0
+
+[conv_dgrad_tolerance.half.gfx90]
+lambda = 3.0
+)");
+    const TestSettings settings(file.path());
+    try
+    {
+        static_cast<void>(
+            settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX90A));
+        ADD_FAILURE() << "two matching arch tables did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        const std::string message = e.what();
+        EXPECT_NE(message.find("conv_wrw_tolerance.half.gfx90a]"), std::string::npos) << message;
+        EXPECT_NE(message.find("conv_wrw_tolerance.half.gfx90]"), std::string::npos) << message;
+    }
+    // Only the device both match is an error: a device one of them matches, an output type with
+    // one matching table, and another direction are not.
+    EXPECT_NO_THROW(static_cast<void>(
+        settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX942)));
+    EXPECT_NO_THROW(static_cast<void>(
+        settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", GFX90A)));
+    EXPECT_NO_THROW(static_cast<void>(
+        settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", GFX90A)));
+}
+
+TEST(TestSettingsParser, RejectsAnArchTableWithAnInvalidCoefficientNamingIt)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        const std::string name = std::string(table) + ".half.gfx90a";
+        const std::vector<std::string> bad = {
+            "[" + name + "]\nlambda = -1.0\n",
+            "[" + name + "]\nlambda = inf\n",
+            "[" + name + "]\nlambda = \"9\"\n",
+            "[" + name + "]\nlambda_per_quartic_root_k = 1.0\n",
+            "[" + name + "]\nlambda = 1.0\nlambda_per_quartic_root_k = -1.0\n",
+            "[" + name + "]\nsummation_order = 2.0\n",
+            "[" + name + "]\npartial_result = 12.0\n",
+            "[" + std::string(table) + ".float.gfx90a]\nsummation_order = 0.0\n",
+        };
+        for(const auto& text : bad)
+        {
+            const auto message = loadErrorOf(text);
+            EXPECT_NE(message.find(std::string(table)), std::string::npos)
+                << text << ": " << message;
+            EXPECT_NE(message.find("gfx90a"), std::string::npos) << text << ": " << message;
+        }
+    }
+}
+
+// No table nests under an arch table: the arch is the last level.
+TEST(TestSettingsParser, RejectsATableNestedUnderAnArchTable)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        const std::string name = std::string(table) + ".half.gfx90a";
+        std::string toml = "[";
+        toml.append(name)
+            .append("]\nlambda = 1.0\n\n[")
+            .append(name)
+            .append(".gfx90a]\nlambda = 2.0\n");
+        const auto message = loadErrorOf(toml);
+        EXPECT_NE(message.find(name), std::string::npos) << message;
+        EXPECT_NE(message.find("nested"), std::string::npos) << message;
+    }
+}
+
+TEST(TestSettingsParser, RejectsAnArchTableWithAnEmptyName)
+{
+    const auto message = loadErrorOf("[conv_wrw_tolerance.half.\"\"]\nlambda = 1.0\n");
+    EXPECT_NE(message.find("conv_wrw_tolerance.half"), std::string::npos) << message;
 }
 
 // NOLINTEND(readability-identifier-naming)
