@@ -142,6 +142,23 @@ def _wgrad_activation_bytes_exceed_i32(p: ConvProblem, dtype_a: str, dtype_b: st
     X_bytes = X_elems * _operand_bytes(dtype_b)
     return max(dY_bytes, X_bytes) > _INT32_MAX
 
+
+def _dgrad_activation_bytes_exceed_i32(p: ConvProblem, dtype: str) -> bool:
+    """Whether ``p``'s dY or dX operand needs more than an i32 byte offset.
+
+    dgrad's overflow-prone operands are dY (``N*Ho*Wo*K``) and dX
+    (``N*Hi*Wi*C``) -- both scale with the ``M = N*Hi*Wi`` axis (dY through
+    ``N*Ho*Wo``); W stays i32-bounded regardless (bounded by the filter,
+    never by ``M``), so it is not checked here. See
+    :func:`_wgrad_activation_bytes_exceed_i32` for why no split-K degree
+    narrows this.
+    """
+    dY_elems = p.N * p.Ho * (p.Do if p.is_3d else 1) * p.Wo * p.K
+    dX_elems = p.N * p.Hi * (p.Di if p.is_3d else 1) * p.Wi * p.C
+    dY_bytes = dY_elems * _operand_bytes(dtype)
+    dX_bytes = dX_elems * _operand_bytes(dtype)
+    return max(dY_bytes, dX_bytes) > _INT32_MAX
+
 # Targets the split-K forward kernel is built and validated for (the AOT cache
 # builds it for these only). Elsewhere an auto forward request resolves to 1.
 # gfx950 runs it on MFMA (wave64): the same plain K loop over one slice and the
@@ -920,7 +937,20 @@ def _resolve_dgrad(
     override: int | None,
     num_cus: int | None,
     num_xcds: int | None,
+    addr64: bool = False,
 ) -> ConvSplitK:
+    if not addr64 and _dgrad_activation_bytes_exceed_i32(p, dtype):
+        # No split-K degree narrows this: see _INT32_MAX's docstring. A
+        # non-addr64 kernel built or run here -- at any degree, including 1 --
+        # would silently wrap its dY/dX byte offsets, so fail the resolution
+        # itself rather than hand back a degree that still produces a
+        # corrupting kernel.
+        raise ValueError(
+            "dgrad split-K cannot be resolved for a non-addr64 kernel: "
+            f"this problem's dY/dX extent exceeds i32 byte addressing "
+            f"(N={p.N}, Ho={p.Ho}, Wo={p.Wo}, Hi={p.Hi}, Wi={p.Wi}); pass "
+            "addr64=True (and build an addr64 spec)"
+        )
     if split_k != -1:
         return ConvSplitK(split_k, False, split_k, f"explicit split_k={split_k}")
     wave_size = ArchTarget.from_gfx(arch).wave_size
@@ -1037,12 +1067,13 @@ def resolve_conv_split_k(
         num_cus, num_xcds: CU and XCD counts of the device the kernel runs
             on, for a part built differently from its arch's default;
             ``None`` keeps the arch default.
-        addr64: wgrad only. Whether the resolved degree serves an addr64
-            (i64-addressed) kernel. ``False`` (the default, every non-wgrad
-            direction) rejects a problem whose dY/X extent exceeds i32 byte
-            addressing: splitting K does not narrow the absolute byte range
-            a single launch's CTAs reach (see
-            :func:`_wgrad_activation_bytes_exceed_i32`), so no degree can
+        addr64: wgrad and dgrad only. Whether the resolved degree serves an
+            addr64 (i64-addressed) kernel. ``False`` (the default, fwd
+            always) rejects a problem whose activation operands (wgrad:
+            dY/X; dgrad: dY/dX) exceed i32 byte addressing: splitting K does
+            not narrow the absolute byte range a single launch's CTAs reach
+            (see :func:`_wgrad_activation_bytes_exceed_i32` /
+            :func:`_dgrad_activation_bytes_exceed_i32`), so no degree can
             rescue a plain kernel there -- the caller must build/select an
             addr64 spec instead.
         dtype_a, dtype_b: wgrad only, and only load-bearing when ``addr64``
@@ -1050,7 +1081,9 @@ def resolve_conv_split_k(
             above sizes against. ``None`` falls back to ``dtype`` (the
             output dtype), which is exact whenever dY/X/dW share one dtype --
             pass them explicitly for a mixed-precision spec, where dY/X's own
-            element size can differ from dW's.
+            element size can differ from dW's. dgrad's analogous check always
+            sizes against ``dtype`` directly (dgrad has no mixed-precision
+            dY/dX/W spec today).
 
     Forward convolution splits only on :data:`FWD_SPLIT_K_ARCHS` (the
     two-stage kernel); elsewhere, and for the problems that kernel cannot
@@ -1066,9 +1099,10 @@ def resolve_conv_split_k(
         raise ValueError(f"reduction={reduction!r} applies to wgrad only")
     if direction != "wgrad":
         epilogue = None
-        addr64 = False
         dtype_a = None
         dtype_b = None
+    if direction not in ("wgrad", "dgrad"):
+        addr64 = False
     if override is not None and override < 1:
         raise ValueError(f"override must be None or >= 1, got {override}")
     return _resolve_cached(
@@ -1150,7 +1184,7 @@ def _resolve_cached(
             num_cus=num_cus,
         )
     if direction == "dgrad":
-        return _resolve_dgrad(problem, **common)
+        return _resolve_dgrad(problem, addr64=addr64, **common)
     return _resolve_wgrad(
         problem,
         group_merge=group_merge,

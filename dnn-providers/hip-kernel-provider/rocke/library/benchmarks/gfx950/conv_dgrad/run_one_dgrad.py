@@ -287,7 +287,7 @@ def main(argv=None) -> int:
     rt.memcpy_h2d(W_dev, u8(W_t), W_t.nbytes)
     rt.memset(dX_dev, 0, dX_t.nbytes)
 
-    buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
+    buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n, addr64=spec.addr64)
     buf_bytes = struct.pack(f"{len(buf_i32)}i", *buf_i32)
     sgbuf_dev = rt.alloc(len(buf_bytes))
     rt.memcpy_h2d(

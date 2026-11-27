@@ -270,16 +270,32 @@ void wgrad_arg_names(
     }
 }
 
-void dgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d)
+/* addr64: the large-tensor dgrad-addressing ABI -- M = N*[Di*]Hi*Wi is
+ * dgrad's overflow-prone axis (both dY -- through N*Ho*Wo -- and dX --
+ * through N*Hi*Wi -- scale with it), so dY_bytes/dX_bytes and their leading
+ * strides (p_dY_stride_n[_do], p_dX_stride_n[_di]) widen to i64, and the m_
+ * magic pair (m -> (n, [di,] hi, wi)) drops since addr64 decodes it by exact
+ * i64 division instead (DgradConvSpec.addr64 is scoped to stride 1, where
+ * this decode is uniform and not record-dependent). W stays i32-bounded
+ * regardless (bounded by the filter, never by M). Callers reject addr64
+ * combined with is_3d before reaching here (see rocke_conv_arg_names_ex).
+ * Not leading(): W_bytes stays i32 under addr64, unlike fwd where all three
+ * operands scale with a possibly-huge coordinate. */
+void dgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool addr64)
 {
-    leading(out, "dY", "W", "dX");
+    push(out, "dY", ROCKE_CONV_ARG_A);
+    push(out, "W", ROCKE_CONV_ARG_B);
+    push(out, "dX", ROCKE_CONV_ARG_D);
+    push_scalar(out, "dY_bytes", addr64);
+    push_i32(out, "W_bytes");
+    push_scalar(out, "dX_bytes", addr64);
     dims(out, is_3d);
-    push_i32(out, "p_dg_M");
+    push_scalar(out, "p_dg_M", addr64);
     push_i32(out, "p_dg_N");
     push_i32(out, "p_dg_K");
-    push_i32(out, "p_dY_stride_n");
+    push_scalar(out, "p_dY_stride_n", addr64);
     if(is_3d)
-        push_i32(out, "p_dY_stride_do");
+        push_scalar(out, "p_dY_stride_do", addr64);
     push_i32(out, "p_dY_stride_ho");
     push_i32(out, "p_dY_stride_wo");
     push_i32(out, "p_W_stride_k");
@@ -287,15 +303,21 @@ void dgrad_arg_names(rocke_conv_arg_list_t* out, bool is_3d)
         push_i32(out, "p_W_stride_z");
     push_i32(out, "p_W_stride_y");
     push_i32(out, "p_W_stride_x");
-    push_i32(out, "p_dX_stride_n");
+    push_scalar(out, "p_dX_stride_n", addr64);
     if(is_3d)
-        push_i32(out, "p_dX_stride_di");
+        push_scalar(out, "p_dX_stride_di", addr64);
     push_i32(out, "p_dX_stride_hi");
     push_i32(out, "p_dX_stride_wi");
-    /* m -> (n, [di,] hi, wi): divisors Wi, Hi[, Di]. */
-    magic_2d3d(out, "m_", is_3d, "Di", "Hi", "Wi");
+    if(!addr64)
+    {
+        /* m -> (n, [di,] hi, wi): divisors Wi, Hi[, Di]. addr64 decodes m by
+         * exact i64 division instead, so it carries no magic pair. */
+        magic_2d3d(out, "m_", is_3d, "Di", "Hi", "Wi");
+    }
     grid(out);
-    /* The tilde decomposition record buffer is always present. */
+    /* The tilde decomposition record buffer is always present, even under
+     * addr64 (scoped to stride 1, which still passes through a one-record
+     * buffer). */
     push(out, "sub_gemm_buf", ROCKE_CONV_ARG_I32_PTR);
     push_i32(out, "num_sub_gemms");
 }
@@ -358,13 +380,16 @@ bool rocke_conv_arg_names_ex(const char* direction,
     }
     if(addr64)
     {
-        /* fwd or wgrad, 2D-only -- same rejections as the Python
+        /* fwd, wgrad or dgrad, 2D-only -- same rejections as the Python
          * conv_arg_names(addr64=True). fwd has no split-K builder for addr64
          * yet (_fwd_arg_names raises on addr64+split_k); wgrad freely
-         * combines addr64 with two_stage/split-K. */
+         * combines addr64 with two_stage/split-K; dgrad's addr64 (stride 1
+         * only, see DgradConvSpec.addr64) has no two_stage/streamk variant
+         * either. */
         const bool is_fwd = strcmp(direction, "fwd") == 0;
         const bool is_wgrad = strcmp(direction, "wgrad") == 0;
-        if((!is_fwd && !is_wgrad) || is_3d)
+        const bool is_dgrad = strcmp(direction, "dgrad") == 0;
+        if((!is_fwd && !is_wgrad && !is_dgrad) || is_3d)
             return false;
         if(is_fwd && two_stage)
             return false;
@@ -374,7 +399,7 @@ bool rocke_conv_arg_names_ex(const char* direction,
     else if(strcmp(direction, "wgrad") == 0)
         wgrad_arg_names(out, is_3d, two_stage, streamk, addr64);
     else if(strcmp(direction, "dgrad") == 0)
-        dgrad_arg_names(out, is_3d);
+        dgrad_arg_names(out, is_3d, addr64);
     else
         return false;
     return true;

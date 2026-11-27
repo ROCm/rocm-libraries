@@ -34,6 +34,8 @@
 #   20 -- conv_arg_names("wgrad", addr64)
 #   21 -- conv_arg_names("wgrad", addr64, two_stage)    (split-K/two-stage addr64)
 #   22 -- conv_arg_names("wgrad", addr64, is_3d)        (rejected)
+#   23 -- conv_arg_names("dgrad", addr64)
+#   24 -- conv_arg_names("dgrad", addr64, is_3d)        (rejected)
 import sys
 
 from kernels.common.conv_abi import (
@@ -79,6 +81,8 @@ _CONFIGS = {
     20: lambda: conv_arg_names(direction="wgrad", addr64=True),
     21: lambda: conv_arg_names(direction="wgrad", addr64=True, two_stage=True),
     22: lambda: conv_arg_names(direction="wgrad", addr64=True, is_3d=True),
+    23: lambda: conv_arg_names(direction="dgrad", addr64=True),
+    24: lambda: conv_arg_names(direction="dgrad", addr64=True, is_3d=True),
 }
 
 

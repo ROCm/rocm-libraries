@@ -1457,6 +1457,35 @@ def spatial_unmerge_addr64(
     )
 
 
+def dgrad_m_unmerge_addr64(
+    params, *, origin_coords: Sequence[Value], dims_i32: Sequence[Value]
+):
+    """addr64 dgrad counterpart of :func:`spatial_unmerge_addr64`: ``d`` (the
+    per-lane delta from the CTA's i64 M-tile origin) -> ``(n, htl, wtl)``, no
+    magic numbers. 2D only.
+
+    ``dims_i32`` is the current sub-GEMM tilde record's own
+    ``[h_tilde_slice, w_tilde_slice]`` (bounded regardless of ``N`` -- see
+    ``DgradConvSpec.addr64``'s docstring), the same divisors the non-addr64
+    ``dy_descriptor`` decodes ``m_sub`` against via magic division. At stride
+    1 (``DgradConvSpec.folds_sub_gemm_record``) these equal ``Hi``/``Wi``
+    exactly, so this reduces to the stride-1 decode; for a general stride the
+    caller maps ``(htl, wtl)`` on to the real ``(hi, wi)`` afterward via the
+    record's ``d_h_stride``/``d_h_offset``/``d_w_stride``/``d_w_offset``
+    (see :func:`make_dgrad_dx_descriptor_addr64`).
+
+    ``origin_coords`` is ``[n0, htl0, wtl0]`` from
+    :func:`rocke.helpers.tensor_view.tile_origin_decode_i64`, each narrowed
+    to i32 by the caller.
+    """
+    return unmerge_addr64(
+        "m",
+        into=["n", "htl", "wtl"],
+        origin_coords=origin_coords,
+        dims_i32=dims_i32,
+    )
+
+
 def channel_unmerge_dynamic(
     params, *, upper: str, prefix: str, is_3d: bool, cdim: Value, last: str = "c"
 ):
@@ -1947,6 +1976,103 @@ def addr64_x_origin_bytes(
     for wgrad's X kernargs; recomputed once per K-loop iteration.
     """
     origin_elems = b.mul(n0_i64, params["p_X_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
+
+
+def make_dgrad_dx_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    dims_i32: Sequence[Value],
+    d_h_stride: Value,
+    d_h_offset: Value,
+    d_w_stride: Value,
+    d_w_offset: Value,
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_dgrad_dx_descriptor_dynamic`
+    (dgrad's D/store operand): ``(d, c) -> N HWC``, 2D only. ``d`` is the
+    per-lane delta from the CTA's i64 M-tile origin (dgrad's overflow axis
+    ``M = N*Hi*Wi`` is CTA-level, decoded once per workgroup, like fwd's
+    ``m`` -- not per-K-loop-iteration like wgrad's).
+
+    Decodes the delta into the current sub-GEMM record's own tilde-local
+    ``(htl, wtl)`` via :func:`dgrad_m_unmerge_addr64` against ``dims_i32``
+    (``[h_tilde_slice, w_tilde_slice]``), then maps those onto the real
+    ``(hi, wi)`` via the record's own affine map -- ``hi = htl*d_h_stride +
+    d_h_offset``, ``wi = wtl*d_w_stride + d_w_offset`` -- exactly mirroring
+    the non-addr64 ``_tilde_dx_addr_fn``'s formula. At stride 1
+    (``DgradConvSpec.folds_sub_gemm_record``) the record synthesizes
+    ``d_h_stride=1, d_h_offset=0`` (and ``dims_i32=[Hi, Wi]``), so the embed
+    is the identity and this reduces to the plain stride-1 decode.
+
+    Same image-boundary precondition as :func:`make_a_descriptor_addr64`:
+    every lane's delta in one call (the whole M-tile, ``[0, tile_m)``) must
+    decode to the same ``n`` as ``origin_coords``' ``n0`` -- callers must only
+    reach this when every sub-GEMM record's own ``h_tilde_slice *
+    w_tilde_slice`` is a multiple of ``tile_m`` (see
+    ``DgradConvSpec.validate()``'s addr64 guard).
+    """
+    transforms = [
+        dgrad_m_unmerge_addr64(params, origin_coords=origin_coords, dims_i32=dims_i32),
+        embed_dynamic(
+            upper=["htl"],
+            lower="hi",
+            strides=[d_h_stride],
+            offset=d_h_offset,
+            lo=0,
+            hi=params["p_Hi"],
+        ),
+        embed_dynamic(
+            upper=["wtl"],
+            lower="wi",
+            strides=[d_w_stride],
+            offset=d_w_offset,
+            lo=0,
+            hi=params["p_Wi"],
+        ),
+    ]
+    coord_names = ["hi", "wi", "c"]
+    strides = [params["p_dX_stride_hi"], params["p_dX_stride_wi"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "dX_nhwc_addr64", coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def addr64_dgrad_dx_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The dX operand's i64 M-tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``. Only the ``n`` term, for the same reason
+    as :func:`addr64_d_origin_bytes`: :func:`make_dgrad_dx_descriptor_addr64`
+    still computes ``hi``/``wi`` *absolutely* (bounded by ``Hi``/``Wi``, never
+    by ``N``), so folding them into the origin too would double-count that
+    contribution.
+    """
+    origin_elems = b.mul(n0_i64, params["p_dX_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
+
+
+def addr64_dgrad_dy_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The dY operand's i64 M-tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``. Analogue of
+    :func:`addr64_dgrad_dx_origin_bytes` for dgrad's dY kernargs; decoded
+    once per workgroup, from the same M-tile origin as the dX store (dgrad's
+    overflow axis is CTA-level for both operands, unlike wgrad's K-tile
+    origin which differs per operand call).
+    """
+    origin_elems = b.mul(n0_i64, params["p_dY_stride_n"])
     return b.mul(origin_elems, b.const_i64(elem_bytes))
 
 

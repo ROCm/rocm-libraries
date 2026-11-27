@@ -4663,7 +4663,9 @@ def _run_dgrad_sweep(
     n_measured = 0
     for _combo, spec, resolved_split_k, artifact in pending:
         sub_gemms = spec.compute_sub_gemms()
-        buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
+        buf_i32 = pack_sub_gemm_buffer(
+            sub_gemms, spec.tile_m, spec.tile_n, addr64=spec.addr64
+        )
         buf_bytes = _struct.pack(f"{len(buf_i32)}i", *buf_i32)
         sgbuf_dev = rt.alloc(len(buf_bytes))
         rt.memcpy_h2d(
@@ -6770,7 +6772,9 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
                 f"record table supports {ident.max_sub_gemms} (max_sub_gemms)"
             )
         flat = np.array(
-            pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n),
+            pack_sub_gemm_buffer(
+                sub_gemms, ident.tile_m, ident.tile_n, addr64=ident.addr64
+            ),
             dtype=np.int32,
         )
         buf = rt.alloc(flat.nbytes)

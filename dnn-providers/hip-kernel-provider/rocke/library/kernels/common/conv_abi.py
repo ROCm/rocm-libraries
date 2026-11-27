@@ -296,7 +296,7 @@ def _wgrad_arg_names(
     return out
 
 
-def _dgrad_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
+def _dgrad_arg_names(*, is_3d: bool = False, addr64: bool = False) -> List[ArgSpec]:
     """Data-gradient conv: ``dY`` (N[D]HWK), ``W`` (K[Z]YXC), ``dX`` (N[D]HWC).
 
     GEMM mapping: ``M = N*[Di*]Hi*Wi``, ``N = cpg``, ``K = [Z*]Y*X*kpg``.
@@ -308,37 +308,55 @@ def _dgrad_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
     order invented alongside it. Until the kernel lands, asking for
     ``is_3d=True`` yields a signature nothing can be launched with, which is
     the honest answer; the spec validator is what refuses the build.
+
+    ``addr64`` is the large-tensor dgrad-addressing variant: ``M =
+    N*[Di*]Hi*Wi`` is dgrad's overflow-prone axis (both ``dY`` and ``dX`` scale
+    with it -- dY through ``N*Ho*Wo``, dX through ``N*Hi*Wi``), so their
+    byte-size pair (``dY_bytes``, ``dX_bytes``) and leading strides
+    (``p_dY_stride_n``/``_do``, ``p_dX_stride_n``/``_di``) widen to ``"i64"``.
+    ``W`` is ``kpg*[Z*]Y*X*cpg`` sized -- bounded by the filter, never by
+    ``M`` -- so ``W_bytes``/``p_W_stride_*`` stay ``"i32"``. The ``m_`` magic
+    pair (``m -> (n, [di,] hi, wi)``) is dropped since addr64 decodes it by
+    exact i64 division instead (``DgradConvSpec.addr64`` is scoped to
+    stride 1, where this decode is uniform and not record-dependent -- see
+    its docstring).
     """
+    byte_kind = "i64" if addr64 else "i32"
     out: List[ArgSpec] = [
         ("dY", "a"),
         ("W", "b"),
         ("dX", "d"),
-        ("dY_bytes", "i32"),
+        ("dY_bytes", byte_kind),
         ("W_bytes", "i32"),
-        ("dX_bytes", "i32"),
+        ("dX_bytes", byte_kind),
     ]
     out += _dims(is_3d)
-    out += [("p_dg_M", "i32"), ("p_dg_N", "i32"), ("p_dg_K", "i32")]
-    out += [("p_dY_stride_n", "i32")]
+    out += [("p_dg_M", byte_kind), ("p_dg_N", "i32"), ("p_dg_K", "i32")]
+    out += [("p_dY_stride_n", byte_kind)]
     if is_3d:
-        out += [("p_dY_stride_do", "i32")]
+        out += [("p_dY_stride_do", byte_kind)]
     out += [("p_dY_stride_ho", "i32"), ("p_dY_stride_wo", "i32")]
     out += [("p_W_stride_k", "i32")]
     if is_3d:
         out += [("p_W_stride_z", "i32")]
     out += [("p_W_stride_y", "i32"), ("p_W_stride_x", "i32")]
-    out += [("p_dX_stride_n", "i32")]
+    out += [("p_dX_stride_n", byte_kind)]
     if is_3d:
-        out += [("p_dX_stride_di", "i32")]
+        out += [("p_dX_stride_di", byte_kind)]
     out += [("p_dX_stride_hi", "i32"), ("p_dX_stride_wi", "i32")]
-    # Only the ``m`` decode needs magic pairs, for the dX store descriptor:
-    # ``m -> (n, [di,] hi, wi)`` divides by Wi, then Hi[, then Di]. The dY / W
-    # load descriptors and the strided epilogues decode ``m`` and ``k`` by
-    # fields of the tilde sub-GEMM record, which differ per record; their
-    # magic pairs ride in sub_gemm_buf (see pack_sub_gemm_buffer), not here.
-    out += _magic("m_", (["Di"] if is_3d else []) + ["Hi", "Wi"])
+    if not addr64:
+        # Only the ``m`` decode needs magic pairs, for the dX store
+        # descriptor: ``m -> (n, [di,] hi, wi)`` divides by Wi, then Hi[, then
+        # Di]. addr64 decodes m by exact i64 division instead (see
+        # docstring), so it carries no magic pair. The dY / W load descriptors
+        # and the strided epilogues decode ``m`` and ``k`` by fields of the
+        # tilde sub-GEMM record, which differ per record; their magic pairs
+        # ride in sub_gemm_buf (see pack_sub_gemm_buffer), not here.
+        out += _magic("m_", (["Di"] if is_3d else []) + ["Hi", "Wi"])
     out += _grid()
-    # The tilde decomposition record buffer is always present.
+    # The tilde decomposition record buffer is always present, even under
+    # addr64 (scoped to stride 1, which still passes through a one-record
+    # buffer -- see DgradConvSpec.folds_sub_gemm_record).
     out += [("sub_gemm_buf", "i32*"), ("num_sub_gemms", "i32")]
     return out
 
@@ -369,9 +387,11 @@ def conv_arg_names(
     kernel without stream-K. Stream-K partitions K itself, so it excludes the
     two-stage split-K variant.
 
-    ``addr64`` is the large-tensor addressing variant: ``fwd`` (2D only) or
-    ``wgrad`` (2D only, any of plain / grouped / split-K / two-stage) -- see
-    :func:`_fwd_arg_names` / :func:`_wgrad_arg_names`.
+    ``addr64`` is the large-tensor addressing variant: ``fwd`` (2D only),
+    ``wgrad`` (2D only, any of plain / grouped / split-K / two-stage), or
+    ``dgrad`` (2D only, stride 1 only -- see ``DgradConvSpec.addr64``'s
+    docstring) -- see :func:`_fwd_arg_names` / :func:`_wgrad_arg_names` /
+    :func:`_dgrad_arg_names`.
     """
     if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
@@ -389,8 +409,10 @@ def conv_arg_names(
             )
         if two_stage:
             raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
-    if addr64 and direction not in ("fwd", "wgrad"):
-        raise ValueError(f"addr64 is a fwd/wgrad-only variant (got direction={direction!r})")
+    if addr64 and direction not in ("fwd", "wgrad", "dgrad"):
+        raise ValueError(
+            f"addr64 is a fwd/wgrad/dgrad-only variant (got direction={direction!r})"
+        )
     if addr64 and is_3d:
         raise ValueError("addr64 does not yet support is_3d (2D only)")
     if direction == "fwd":
@@ -400,7 +422,7 @@ def conv_arg_names(
             is_3d=is_3d, two_stage=two_stage, streamk=streamk, addr64=addr64
         )
     if direction == "dgrad":
-        return _dgrad_arg_names(is_3d=is_3d)
+        return _dgrad_arg_names(is_3d=is_3d, addr64=addr64)
     raise ValueError(
         f"unknown direction {direction!r}; expected 'fwd', 'wgrad' or 'dgrad'"
     )

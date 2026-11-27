@@ -815,7 +815,9 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         return ConvLaunchPlan(
             (step(args),),
             sub_gemm_table=tuple(
-                pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n)
+                pack_sub_gemm_buffer(
+                    sub_gemms, ident.tile_m, ident.tile_n, addr64=ident.addr64
+                )
             ),
             num_sub_gemms=len(sub_gemms),
         )

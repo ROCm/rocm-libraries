@@ -56,6 +56,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from rocke.core.ir import (
     F16,
     I32,
+    I64,
     IRBuilder,
     KernelDef,
     PtrType,
@@ -75,7 +76,12 @@ from rocke.helpers.magic_division import (
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import ceil_div, kernel_name_join
-from rocke.helpers.tensor_view import make_buffer_resource
+from rocke.helpers.tensor_view import (
+    carry_decode_i32,
+    make_buffer_resource,
+    make_tile_buffer_resource,
+    tile_origin_decode_i64,
+)
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -92,6 +98,8 @@ from kernels.common._conv_implicit_gemm_common import (
     ConvProblem,
     _apply_accumulator_epilogue,
     _choose_load_vec_for,
+    addr64_dgrad_dx_origin_bytes,
+    addr64_dgrad_dy_origin_bytes,
     coalesced_load_reason,
     vector_width_reason,
     _emit_frag_smem_load,
@@ -106,6 +114,7 @@ from kernels.common._conv_implicit_gemm_common import (
     compute_wavelet_epi_barriers,
     emit_param_block,
     emit_wavelet_kloop_dynamic,
+    make_dgrad_dx_descriptor_addr64,
 )
 
 
@@ -278,13 +287,33 @@ class SubGemmParams:
 
     RECORD_NUM_FIELDS: int = 22
 
-    def pack_i32(self) -> List[int]:
-        """Pack this record as a list of 22 signed i32 values."""
-        return [
+    def pack_i32(self, *, addr64: bool = False) -> List[int]:
+        """Pack this record as a list of signed i32 values: 22 fields, or 23
+        under ``addr64``.
+
+        ``gemm_m = N * h_tilde_slice * w_tilde_slice`` is the one field that
+        scales with ``N`` and so can exceed i32 for a large enough problem
+        (``h_tilde_slice``/``w_tilde_slice`` themselves stay bounded
+        regardless of ``N`` -- see ``DgradConvSpec.addr64``'s docstring).
+        Under ``addr64``, field 3 holds only ``gemm_m``'s low 32 bits and a
+        new field 22 (appended past the existing 22, so every other field
+        index is unchanged) holds its high 32 bits; the kernel recombines
+        them with a zext + shift + or (see ``_build_tilde_dgrad``). Not
+        ``addr64``: byte-for-byte the original 22-field layout.
+        """
+
+        def _i32(word: int) -> int:
+            # Resign an unsigned 32-bit word to the [-2**31, 2**31) range a
+            # correct int32 bit pattern needs (the buffer is a signed i32
+            # array; other fields, e.g. a_embed_h_coeff, are already signed).
+            word &= 0xFFFFFFFF
+            return word - (1 << 32) if word >= (1 << 31) else word
+
+        out = [
             self.block_start,
             0,  # placeholder: num_m_tiles, overwritten by pack_sub_gemm_buffer
             0,  # placeholder: num_n_tiles, overwritten by pack_sub_gemm_buffer
-            self.gemm_m,
+            _i32(self.gemm_m) if addr64 else self.gemm_m,
             self.gemm_k,
             self.h_tilde_slice,
             self.w_tilde_slice,
@@ -304,6 +333,9 @@ class SubGemmParams:
             self.d_w_offset,
             self.gemm_k_padded,
         ]
+        if addr64:
+            out.append(_i32(self.gemm_m >> 32))
+        return out
 
 
 def enumerate_sub_gemms(
@@ -467,19 +499,23 @@ def sub_gemm_magic_pairs(sg: SubGemmParams) -> List[int]:
 
 
 def pack_sub_gemm_buffer(
-    sub_gemms: List[SubGemmParams], tile_m: int, tile_n: int
+    sub_gemms: List[SubGemmParams], tile_m: int, tile_n: int, *, addr64: bool = False
 ) -> List[int]:
     """Pack all sub-GEMM records into a flat i32 buffer for the kernel.
 
-    The buffer is the ``_RECORD_FIELDS``-wide records, then one
+    The buffer is the record-width-wide records (22 fields, or 23 under
+    ``addr64`` -- see :meth:`SubGemmParams.pack_i32`), then one
     ``_MAGIC_FIELDS``-wide magic-division entry per record
-    (:func:`sub_gemm_magic_pairs`). The table follows the records rather than
-    widening them so the record stride -- and every binary built against
-    it -- is unchanged; the kernel finds it at ``num_sub_gemms`` records in.
+    (:func:`sub_gemm_magic_pairs`, unaffected by ``addr64``: it only divides
+    bounded quantities, never ``gemm_m``). The table follows the records
+    rather than widening them so the record stride -- and every binary built
+    against it -- is unchanged; the kernel finds it at ``num_sub_gemms``
+    records in (``num_sub_gemms * record_fields``, record_fields itself
+    widening under addr64).
     """
     buf: List[int] = []
     for sg in sub_gemms:
-        record = sg.pack_i32()
+        record = sg.pack_i32(addr64=addr64)
         record[1] = ceil_div(sg.gemm_m, tile_m)
         record[2] = ceil_div(sg.gemm_n, tile_n)
         buf.extend(record)
@@ -686,6 +722,11 @@ def _acc_regs_per_lane(spec: DgradConvSpec) -> int:
     )
 
 
+# Element byte width for the addr64 tile-origin byte-offset math (mirrors
+# conv_implicit_gemm.py's / conv_implicit_gemm_wgrad.py's identical tables).
+_ADDR64_ELEM_BYTES = {"fp16": 2, "f16": 2, "bf16": 2, "fp32": 4}
+
+
 @dataclass(frozen=True)
 class DgradConvSpec:
     """One concrete implicit-GEMM backward-data convolution configuration.
@@ -877,6 +918,40 @@ class DgradConvSpec:
     # problem with Wo <= halo_max_wo runs on the same binary. Required (> 0)
     # with dy_halo, 0 otherwise. Tags ``hwo<n>``.
     halo_max_wo: int = 0
+
+    # Large-tensor (addr64) dgrad addressing: widens the byte offsets along
+    # M = N*Hi*Wi (the axis both dY -- through N*Ho*Wo -- and dX -- through
+    # N*Hi*Wi -- scale with) from i32 to i64, so an M large enough to overflow
+    # a 32-bit byte offset no longer silently corrupts memory. W stays i32
+    # (bounded by the filter, never by M). Any stride/dilation is supported:
+    # the general tilde decomposition decodes M through *runtime sub-GEMM
+    # record fields* (``rec_h_tilde_slice``/``rec_w_tilde_slice``, each
+    # bounded regardless of N -- only their product with N, the record's own
+    # ``gemm_m``, can overflow i32), which generalize the stride-1
+    # (``folds_sub_gemm_record``) case exactly: at stride 1 these fields
+    # equal the problem-constant Hi/Wi, so the same once-per-CTA exact-i64-
+    # division decode applies uniformly to both. The record buffer itself
+    # (``sub_gemm_buf``) carries a wider per-record layout under addr64 (its
+    # ``gemm_m`` field splits into two i32 words -- see
+    # ``SubGemmParams.pack_i32``/``_record_fields``) to keep that one
+    # overflow-prone field i64-safe too. See validate() for the exact scope
+    # this is wired for (2D, MFMA, non-patch, non-lds_k_outer, non-async_dma,
+    # plain sync K-loop, split_k == 1) and the per-sub-GEMM-record
+    # h_tilde_slice*w_tilde_slice % tile_m precondition this relies on.
+    #
+    # The CTA's M-tile origin (n0, htl0, wtl0) is decoded once per workgroup
+    # (tile_origin_decode_i64, i64 exact division) from
+    # grid.block_m_off_i64 -- mirroring fwd's addr64 M-origin decode exactly,
+    # since dgrad's overflow axis M is CTA-level like fwd's, not per-K-loop-
+    # iteration like wgrad's. See the dX store descriptor
+    # (make_dgrad_dx_descriptor_addr64) and the dY load decode in
+    # dy_descriptor for where this origin is consumed.
+    #
+    # KNOWN GAP: no C++ mirror of the kernel-body IR yet (platform/AGENTS.md's
+    # byte-identity rule is not satisfied for the IR, only the kernarg ABI
+    # shape), same as fwd's and wgrad's addr64. The wider addr64 record
+    # buffer layout is also Python-engine-only so far.
+    addr64: bool = False
 
     @property
     def block_size(self) -> int:
@@ -1125,10 +1200,72 @@ class DgradConvSpec:
                 # its shape with the bf16 one, so the cache would otherwise
                 # collide an fp32-storage TF32 kernel with a 16-bit one.
                 "tf32": self.data.is_tf32,
+                # Large-tensor addressing; see the addr64 field's docstring.
+                "a64": self.addr64,
             },
         )
 
     def validate(self) -> None:
+        if self.addr64:
+            # 2D, MFMA (checked in the builder, arch-dependent), non-patch,
+            # non-lds_k_outer, plain sync K-loop (no async_dma/unroll_k),
+            # split_k == 1 -- the scope the once-per-CTA i64 M-origin decode
+            # has actually been wired for. Any stride/dilation is accepted:
+            # the general tilde decomposition's per-record h_tilde_slice/
+            # w_tilde_slice and d_h_*/d_w_* affine map generalize the stride-1
+            # case cleanly (see the addr64 field's docstring and
+            # make_dgrad_dx_descriptor_addr64).
+            p = self.problem
+            if p.is_3d:
+                raise ValueError("dgrad addr64 does not yet support is_3d (2D only)")
+            if p.is_pointwise:
+                # dy_descriptor's pointwise fast path computes the absolute
+                # (unsafe for a huge M) m_sub directly, bypassing the
+                # origin-delta decode entirely -- see its "Pointwise
+                # (Y=X=1...)" branch, checked before any stride/addr64
+                # consideration.
+                raise ValueError("dgrad addr64 does not yet support is_pointwise")
+            if self.patch:
+                raise ValueError("dgrad addr64 does not yet support patch")
+            if self.lds_k_outer:
+                raise ValueError("dgrad addr64 does not yet support lds_k_outer")
+            if self.async_dma or self.unroll_k:
+                raise ValueError(
+                    "dgrad addr64 only supports the plain sync K-loop (no "
+                    "async_dma/unroll_k)"
+                )
+            if self.tap_outer_k:
+                raise ValueError("dgrad addr64 does not yet support tap_outer_k")
+            if self.dy_halo:
+                raise ValueError("dgrad addr64 does not yet support dy_halo")
+            if self.uniform_k_decode:
+                raise ValueError("dgrad addr64 does not yet support uniform_k_decode")
+            if self.pipeline == "wavelet":
+                raise ValueError("dgrad addr64 does not yet support pipeline='wavelet'")
+            if self.split_k != 1:
+                raise ValueError("dgrad addr64 does not yet support split_k")
+            # The addr64 dX/dY descriptors compute (hi, wi) absolutely
+            # (within a sub-GEMM record's own tilde-local coordinates)
+            # against a tile origin that only carries n0's contribution, so
+            # every lane's M-tile must decode to the same image (n) as the
+            # tile origin -- i.e. a tile_m-wide run of M can never cross an
+            # image boundary. At stride 1 there is one record spanning the
+            # whole grid, so this reduces to the old "Hi*Wi % tile_m == 0"
+            # check; in general each of the problem's tilde sub-GEMM records
+            # has its own (possibly different, near the problem's tilde
+            # boundary) h_tilde_slice/w_tilde_slice, so every record must be
+            # checked individually. See make_dgrad_dx_descriptor_addr64's
+            # docstring for the identical fwd/wgrad precondition.
+            for sg in self.compute_sub_gemms():
+                if (sg.h_tilde_slice * sg.w_tilde_slice) % self.tile_m != 0:
+                    raise ValueError(
+                        "dgrad addr64 requires every tilde sub-GEMM record's "
+                        "h_tilde_slice*w_tilde_slice to be a multiple of tile_m "
+                        f"(record i_ytilde={sg.i_ytilde}, i_xtilde={sg.i_xtilde}: "
+                        f"h_tilde_slice={sg.h_tilde_slice}, "
+                        f"w_tilde_slice={sg.w_tilde_slice}, tile_m={self.tile_m}) "
+                        "so no M-tile crosses an image boundary"
+                    )
         _dtype_why = _mma_dtype_conflict(self)
         if _dtype_why:
             raise ValueError(_dtype_why)
@@ -1953,6 +2090,7 @@ def build_implicit_gemm_conv_dgrad(
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             block_size=spec.block_size,
+            addr64=spec.addr64,
         )
         spec = _dc_replace(spec, split_k=resolved.split_k)
 
@@ -1964,8 +2102,14 @@ def build_implicit_gemm_conv_dgrad(
     return _build_tilde_dgrad(spec, arch)
 
 
-_RECORD_FIELDS = 22  # number of i32 fields per SubGemmRecord
+_RECORD_FIELDS = 22  # number of i32 fields per SubGemmRecord (non-addr64)
 _MAGIC_FIELDS = 8  # i32 fields per magic-division table entry
+
+
+def _record_fields(addr64: bool) -> int:
+    """Record width in i32 fields: 22, or 23 under addr64 (the appended
+    high-word of ``gemm_m`` -- see :meth:`SubGemmParams.pack_i32`)."""
+    return _RECORD_FIELDS + 1 if addr64 else _RECORD_FIELDS
 
 
 def _emit_binary_search(
@@ -1974,6 +2118,7 @@ def _emit_binary_search(
     sub_gemm_buf: Value,
     num_sub_gemms_val: Value,
     max_sub_gemms: int,
+    record_fields: int = _RECORD_FIELDS,
 ) -> Value:
     """Emit a binary search over the record buffer's block_starts.
 
@@ -1988,12 +2133,17 @@ def _emit_binary_search(
     stride-1 problem (one record) skips the search outright instead of
     waiting out a chain of dependent scalar loads sized for the largest
     decomposition. ``max_sub_gemms`` only bounds the trip-count computation.
+
+    ``record_fields`` is the per-record i32 stride: :data:`_RECORD_FIELDS`
+    (22) normally, or :func:`_record_fields`'s 23 under addr64 (the
+    ``block_start`` field itself is unaffected -- always field 0 -- so only
+    the stride between records changes).
     """
     import math
 
     c0 = b.const_i32(0)
     c1 = b.const_i32(1)
-    c_record_stride = b.const_i32(_RECORD_FIELDS)
+    c_record_stride = b.const_i32(record_fields)
 
     # ceil(log2(n)) = the number of powers of two 2**t (t >= 0) below n.
     n_iters = c0
@@ -2037,11 +2187,19 @@ def _magic_divmod(b: IRBuilder, n: Value, d: _MagicDiv) -> Tuple[Value, Value]:
 
 
 def _emit_load_record_field(
-    b: IRBuilder, sub_gemm_buf: Value, sg_idx: Value, field_idx: int
+    b: IRBuilder,
+    sub_gemm_buf: Value,
+    sg_idx: Value,
+    field_idx: int,
+    record_fields: int = _RECORD_FIELDS,
 ) -> Value:
-    """Load one i32 field from the sub-GEMM parameter buffer."""
+    """Load one i32 field from the sub-GEMM parameter buffer.
+
+    ``record_fields`` is the per-record i32 stride (see
+    :func:`_emit_binary_search`'s docstring).
+    """
     offset = b.add(
-        b.mul(sg_idx, b.const_i32(_RECORD_FIELDS)),
+        b.mul(sg_idx, b.const_i32(record_fields)),
         b.const_i32(field_idx),
     )
     return b.global_load_i32(sub_gemm_buf, offset)
@@ -2087,7 +2245,7 @@ def _build_tilde_dgrad(
     # library/tests/test_conv_abi.py pins the two together.
     params = emit_param_block(
         b,
-        conv_arg_names(direction="dgrad"),
+        conv_arg_names(direction="dgrad", addr64=spec.addr64),
         declare_ptr=lambda name, kind: (
             b.param(
                 name,
@@ -2154,6 +2312,11 @@ def _build_tilde_dgrad(
     # -------------------------------------------------------------------------
 
     op = _resolve_dgrad_op(spec, arch)
+    if spec.addr64 and op.family != "mma":
+        raise ValueError(
+            f"dgrad addr64 is only implemented for the MFMA path (got "
+            f"op.family={op.family!r})"
+        )
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
@@ -2190,6 +2353,7 @@ def _build_tilde_dgrad(
         )
 
     fold_record = spec.folds_sub_gemm_record
+    _record_fields_v = _record_fields(spec.addr64)
     if fold_record:
         # Stride 1 (DgradConvSpec.folds_sub_gemm_record): the only sub-GEMM's
         # record is rebuilt from the kernargs, so there is nothing to search
@@ -2234,17 +2398,39 @@ def _build_tilde_dgrad(
         # Binary search to find which sub-GEMM this CTA belongs to. The bound
         # is the runtime kernarg; only the unroll depth is fixed at build time.
         sg_idx = _emit_binary_search(
-            b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec.max_sub_gemms
+            b,
+            flat_block_id,
+            sub_gemm_buf,
+            num_sub_gemms_param,
+            spec.max_sub_gemms,
+            record_fields=_record_fields_v,
         )
 
         # Load all record fields for this sub-GEMM.
         def _ld(field_idx: int) -> Value:
-            return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx)
+            return _emit_load_record_field(
+                b, sub_gemm_buf, sg_idx, field_idx, record_fields=_record_fields_v
+            )
 
     rec_block_start = _ld(0)
     rec_num_m_tiles = _ld(1)
     rec_num_n_tiles = _ld(2)
-    rec_gemm_m = _ld(3)
+    if spec.addr64 and not fold_record:
+        # gemm_m = N * h_tilde_slice * w_tilde_slice can exceed i32 for a
+        # large enough problem (h_tilde_slice/w_tilde_slice themselves stay
+        # bounded regardless of N -- see DgradConvSpec.addr64's docstring).
+        # The record buffer stores it as two i32 words (field 3 = low, the
+        # appended field record_fields-1 = high -- see
+        # SubGemmParams.pack_i32); recombine them here.
+        _gemm_m_lo = _ld(3)
+        _gemm_m_hi = _ld(_record_fields_v - 1)
+        rec_gemm_m = b.lor(
+            b.zext(_gemm_m_lo, I64), b.shl(b.zext(_gemm_m_hi, I64), b.const_i64(32))
+        )
+    else:
+        # fold_record+addr64: field 3 already resolves to p_dg_M (i64 under
+        # addr64, see the ABI). Non-addr64: plain i32 load, unchanged.
+        rec_gemm_m = _ld(3)
     rec_gemm_k = _ld(4)
     rec_h_tilde_slice = _ld(5)
     rec_w_tilde_slice = _ld(6)
@@ -2270,11 +2456,11 @@ def _build_tilde_dgrad(
     if fold_record:
 
         def _ld_magic(j: int) -> Value:
-            return b.global_load_i32(sub_gemm_buf, b.const_i32(_RECORD_FIELDS + j))
+            return b.global_load_i32(sub_gemm_buf, b.const_i32(_record_fields_v + j))
 
     else:
         _magic_base = b.add(
-            b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS)),
+            b.mul(num_sub_gemms_param, b.const_i32(_record_fields_v)),
             b.mul(sg_idx, b.const_i32(_MAGIC_FIELDS)),
         )
 
@@ -2311,7 +2497,44 @@ def _build_tilde_dgrad(
 
     block_m_off_v = b.mul(local_m_tile, b.const_i32(block_m))
     block_n_off_v = b.mul(local_n_tile, b.const_i32(block_n))
-    grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
+    # addr64: the same block_m_off_v product (local_m_tile * tile_m), computed
+    # in i64 instead of i32 -- WarpGrid.bind(m_origin_i64=True) does not apply
+    # here since local_m_tile comes from the tilde record's flat-id split, not
+    # block_id_{x,y,z} directly, so it is built by hand (mirrors
+    # WarpGrid.bind's own block_m_off_i64 construction).
+    block_m_off_i64_v = (
+        b.mul(b.zext(local_m_tile, I64), b.const_i64(block_m)) if spec.addr64 else None
+    )
+    grid = dc_replace(
+        grid,
+        block_m_off=block_m_off_v,
+        block_n_off=block_n_off_v,
+        block_m_off_i64=block_m_off_i64_v,
+    )
+
+    # addr64: decode the CTA's M-tile origin (n0, htl0, wtl0) once per
+    # workgroup, from the i64 block_m_off (see DgradConvSpec.addr64's
+    # docstring). Decoded against this *record's own* h_tilde_slice/
+    # w_tilde_slice, not Hi/Wi directly: at stride 1 (fold_record) these are
+    # exactly Hi/Wi by construction, so this is unchanged there and
+    # simultaneously correct for the general tilde decomposition, where each
+    # record covers a strided sub-grid of its own size. validate() guarantees
+    # every record's h_tilde_slice*w_tilde_slice is a multiple of tile_m, so
+    # every lane's tile stays within one image (n) of this record.
+    if spec.addr64:
+        _htl_dim_i64 = b.zext(rec_h_tilde_slice, I64)
+        _wtl_dim_i64 = b.zext(rec_w_tilde_slice, I64)
+        _n0_i64, _htl0_i64, _wtl0_i64 = tile_origin_decode_i64(
+            b, grid.block_m_off_i64, [_htl_dim_i64, _wtl_dim_i64]
+        )
+        _addr64_origin_coords = [
+            b.trunc(_n0_i64, I32),
+            b.trunc(_htl0_i64, I32),
+            b.trunc(_wtl0_i64, I32),
+        ]
+    else:
+        _n0_i64 = None
+        _addr64_origin_coords = None
 
     c0 = b.const_i32(0)
     c_block_k = b.const_i32(block_k)
@@ -2488,13 +2711,47 @@ def _build_tilde_dgrad(
         load_vec_b = 1
         axis_b = "col"
 
-    # Buffer resources for A (dY), B (W), D (dX).
-    dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
-    w_buf_rsrc = make_buffer_resource(b, W, num_bytes=W_bytes)
-    dx_buf_rsrc = make_buffer_resource(b, dX, num_bytes=dX_bytes)
-    dy_rsrc = dy_buf_rsrc.rsrc
-    w_rsrc = w_buf_rsrc.rsrc
-    dx_rsrc = dx_buf_rsrc.rsrc
+    # Buffer resources for A (dY), B (W), D (dX). dY_bytes/dX_bytes are i64
+    # kernargs under addr64 (the ABI widens them together with M), so they
+    # cannot feed make_buffer_resource's plain i32 num_bytes -- the addr64
+    # path instead builds dy_rsrc/dx_rsrc once per workgroup from the CTA's
+    # i64 M-tile origin (see _addr64_origin_coords above), exactly mirroring
+    # fwd's once-per-CTA a_buf_rsrc/d_buf_rsrc. W stays i32-bounded
+    # regardless, so w_buf_rsrc is unaffected and built once as before.
+    #
+    # The non-addr64 branch keeps the original dY/W/dX construction order
+    # (and the original dy_buf_rsrc/w_buf_rsrc/dx_buf_rsrc -> .rsrc split)
+    # byte-for-byte: each make_buffer_resource call emits IR, so reordering
+    # them -- even to a semantically equivalent order -- would shift every
+    # existing non-addr64 dgrad kernel's emitted bytes.
+    if spec.addr64:
+        _dy_elem_bytes = _ADDR64_ELEM_BYTES.get(spec.data.dtype_a, 2)
+        _dx_elem_bytes = _ADDR64_ELEM_BYTES.get(spec.data.dtype_d, 2)
+        dy_rsrc = make_tile_buffer_resource(
+            b,
+            dY,
+            origin_i64=addr64_dgrad_dy_origin_bytes(
+                b, params, n0_i64=_n0_i64, elem_bytes=_dy_elem_bytes
+            ),
+            total_bytes_i64=dY_bytes,
+        ).rsrc
+        w_buf_rsrc = make_buffer_resource(b, W, num_bytes=W_bytes)
+        w_rsrc = w_buf_rsrc.rsrc
+        dx_rsrc = make_tile_buffer_resource(
+            b,
+            dX,
+            origin_i64=addr64_dgrad_dx_origin_bytes(
+                b, params, n0_i64=_n0_i64, elem_bytes=_dx_elem_bytes
+            ),
+            total_bytes_i64=dX_bytes,
+        ).rsrc
+    else:
+        dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
+        w_buf_rsrc = make_buffer_resource(b, W, num_bytes=W_bytes)
+        dx_buf_rsrc = make_buffer_resource(b, dX, num_bytes=dX_bytes)
+        dy_rsrc = dy_buf_rsrc.rsrc
+        w_rsrc = w_buf_rsrc.rsrc
+        dx_rsrc = dx_buf_rsrc.rsrc
 
     k_off_capture: List[Optional[Value]] = [None]
 
@@ -2504,7 +2761,12 @@ def _build_tilde_dgrad(
 
     def dy_descriptor(b_: IRBuilder, row: Value, col: Value):
         """A (dY, NHWK) offset: (m_sub_local, k_sub_local) → element offset."""
-        m_sub = b_.add(block_m_off_v, row)
+        # addr64: row is the per-lane delta from the CTA's i64 M-tile origin,
+        # not an absolute (and possibly i32-unsafe) M coordinate, so no
+        # m_sub is formed at all -- see the carry_decode_i32 call below.
+        # Non-addr64: m_sub = block_m_off_v + row, computed here (before
+        # k_sub) to keep this path's emitted IR byte-for-byte unchanged.
+        m_sub = b_.add(block_m_off_v, row) if not spec.addr64 else None
         k_sub = b_.add(k_off_capture[0], col)
 
         # Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path. The tilde
@@ -2513,7 +2775,8 @@ def _build_tilde_dgrad(
         # so (n*Ho+ho)*Wo*K + wo*K + k_out reduces exactly to m_sub*K + k_sub.
         # Forward and wgrad both already special-case this; dgrad did not, and
         # the generic form costs a runtime divide plus a tautological bounds
-        # predicate INSIDE the K-loop.
+        # predicate INSIDE the K-loop. validate() rejects addr64+is_pointwise
+        # (this fast path needs the absolute, i32-unsafe m_sub directly).
         if p.is_pointwise and not grouped:
             off = b_.add(b_.mul(m_sub, c_K), k_sub)
             ok = b_.land(
@@ -2533,9 +2796,21 @@ def _build_tilde_dgrad(
         ydot, xdot = _magic_divmod(b_, yx_rem, xdot_div)
         k_out_abs = b_.add(k_out, k_out_group_base) if grouped else k_out
 
-        # Decompose m_sub → (n, htilde_local, wtilde_local)
-        n, m_rem = _magic_divmod(b_, m_sub, hw_div)
-        htl, wtl = _magic_divmod(b_, m_rem, w_div)
+        if spec.addr64:
+            # row is the per-lane delta from the CTA's i64 M-tile origin
+            # (_addr64_origin_coords); decode (htl, wtl) by exact i32 carry
+            # propagation against this record's own h_tilde_slice/
+            # w_tilde_slice (stride 1: these equal Hi/Wi exactly), instead of
+            # magic division. The "n" term is dropped: its contribution is
+            # already folded into dy_rsrc's i64 tile origin
+            # (addr64_dgrad_dy_origin_bytes), not recomputed per lane.
+            _n_unused, htl, wtl = carry_decode_i32(
+                b_, row, _addr64_origin_coords, [rec_h_tilde_slice, rec_w_tilde_slice]
+            )
+        else:
+            # Decompose m_sub → (n, htilde_local, wtilde_local)
+            n, m_rem = _magic_divmod(b_, m_sub, hw_div)
+            htl, wtl = _magic_divmod(b_, m_rem, w_div)
 
         # ho = htl + h_tilde_slice_begin + ydot * a_embed_h_coeff
         ho = b_.add(
@@ -2551,12 +2826,18 @@ def _build_tilde_dgrad(
         k_ok = b_.cmp_lt(k_out, _kdiv)
         valid = b_.land(b_.land(ho_ok, wo_ok), k_ok)
 
-        # NHWK linear offset: (n * Ho + ho) * Wo * K + wo * K + k_out_abs
-        # (the K stride stays total-K; only the channel index carries g*kpg).
-        offset = b_.add(
-            b_.mul(b_.add(b_.mul(n, c_Ho), ho), b_.mul(c_Wo, c_K)),
-            b_.add(b_.mul(wo, c_K), k_out_abs),
-        )
+        if spec.addr64:
+            # NHWK linear offset relative to dy_rsrc's i64 origin: ho*Wo*K +
+            # wo*K + k_out_abs (the "n" term is already folded into the
+            # resource's pointer, see above).
+            offset = b_.add(b_.mul(ho, b_.mul(c_Wo, c_K)), b_.add(b_.mul(wo, c_K), k_out_abs))
+        else:
+            # NHWK linear offset: (n * Ho + ho) * Wo * K + wo * K + k_out_abs
+            # (the K stride stays total-K; only the channel index carries g*kpg).
+            offset = b_.add(
+                b_.mul(b_.add(b_.mul(n, c_Ho), ho), b_.mul(c_Wo, c_K)),
+                b_.add(b_.mul(wo, c_K), k_out_abs),
+            )
         safe_offset = b_.select(valid, offset, b_.const_i32(0))
         return safe_offset, valid
 
@@ -2869,6 +3150,9 @@ def _build_tilde_dgrad(
             c_Wi=c_Wi,
             c_C=c_C,
             c_group_base=c_group_base,
+            origin_coords=_addr64_origin_coords,
+            dims_i32=[rec_h_tilde_slice, rec_w_tilde_slice],
+            params=params,
         )
         if patch_cols is not None:
             _tilde_kwargs["patch_cols"] = patch_cols
@@ -2939,6 +3223,12 @@ def _build_tilde_dgrad(
                     dx_rsrc,
                     params,
                     c_group_base=c_group_base,
+                    origin_coords=_addr64_origin_coords,
+                    dims_i32=[rec_h_tilde_slice, rec_w_tilde_slice],
+                    d_h_stride=rec_d_h_stride,
+                    d_h_offset=rec_d_h_offset,
+                    d_w_stride=rec_d_w_stride,
+                    d_w_offset=rec_d_w_offset,
                 )
             else:
                 _emit_dgrad_direct_epilogue(
@@ -2949,6 +3239,12 @@ def _build_tilde_dgrad(
                     dx_rsrc,
                     params,
                     c_group_base=c_group_base,
+                    origin_coords=_addr64_origin_coords,
+                    dims_i32=[rec_h_tilde_slice, rec_w_tilde_slice],
+                    d_h_stride=rec_d_h_stride,
+                    d_h_offset=rec_d_h_offset,
+                    d_w_stride=rec_d_w_stride,
+                    d_w_offset=rec_d_w_offset,
                 )
         elif is_wmma:
             if use_cshuffle:
@@ -3591,15 +3887,33 @@ def _emit_dgrad_direct_epilogue(
     dx_rsrc: Value,
     params: Dict[str, Value],
     c_group_base: Optional[Value] = None,
+    origin_coords: Optional[Sequence[Value]] = None,
+    dims_i32: Optional[Sequence[Value]] = None,
+    d_h_stride: Optional[Value] = None,
+    d_h_offset: Optional[Value] = None,
+    d_w_stride: Optional[Value] = None,
+    d_w_offset: Optional[Value] = None,
 ) -> None:
     """Per-lane scalar store to dX via the input-gradient descriptor."""
-    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    dx_addr, bounds = _dgrad_stride1_dx_addr(
+        b,
+        spec,
+        params,
+        c_group_base,
+        origin_coords=origin_coords,
+        dims_i32=dims_i32,
+        d_h_stride=d_h_stride,
+        d_h_offset=d_h_offset,
+        d_w_stride=d_w_stride,
+        d_w_offset=d_w_offset,
+    )
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
         accs=accs,
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=bounds,
+        m_origin_i64=grid.block_m_off_i64 if spec.addr64 else None,
     )
 
 
@@ -3694,8 +4008,16 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
     c_Wi: Value,
     c_C: Value,
     c_group_base: Optional[Value] = None,
+    origin_coords: Optional[Sequence[Value]] = None,
+    dims_i32: Optional[Sequence[Value]] = None,
+    params: Optional[Dict[str, Value]] = None,
 ) -> None:
     """Per-lane tilde store for WMMA (gfx1151) accumulator layout into dX.
+
+    ``origin_coords``/``dims_i32``/``params`` are accepted (and ignored)
+    only so this function can be called uniformly via ``**_tilde_kwargs``
+    alongside the MFMA tilde epilogues -- WMMA is rejected for ``addr64``
+    (op.family must be ``"mma"``), so this path never actually needs them.
 
     Mirrors _emit_dgrad_direct_epilogue_wmma but uses the tilde address
     mapping instead of the stride=1 descriptor.  Safe for split_k=1 because
@@ -3776,13 +4098,43 @@ def _dgrad_stride1_dx_addr(
     spec: DgradConvSpec,
     params: Dict[str, Value],
     c_group_base: Optional[Value] = None,
+    origin_coords: Optional[Sequence[Value]] = None,
+    dims_i32: Optional[Sequence[Value]] = None,
+    d_h_stride: Optional[Value] = None,
+    d_h_offset: Optional[Value] = None,
+    d_w_stride: Optional[Value] = None,
+    d_w_offset: Optional[Value] = None,
 ) -> tuple:
-    """Return ``(addr_fn, bounds)`` for the stride-1 dX descriptor.
+    """Return ``(addr_fn, bounds)`` for the stride-1 (``fold_record``) dX
+    descriptor.
 
     Both the descriptor and the bounds come from the AOT kernarg block, so
     one compiled kernel serves any shape.
+
+    ``spec.addr64`` (``origin_coords``/``dims_i32``/``d_h_*``/``d_w_*`` then
+    required -- the caller passes the folded record's own values, which at
+    stride 1 are ``dims_i32=[Hi, Wi], d_h_stride=1, d_h_offset=0`` etc, see
+    ``DgradConvSpec.folds_sub_gemm_record``) uses
+    :func:`make_dgrad_dx_descriptor_addr64` instead: ``m_val`` is the
+    per-lane delta from the CTA's i64 M-tile origin (the caller passes
+    ``m_origin_i64=grid.block_m_off_i64`` into the epilogue's ``.store()``,
+    which is what makes ``m_val`` a delta rather than the absolute M row --
+    see ``DirectEpilogue.store``'s ``m_origin_i64`` docstring), and
+    ``bounds[0]`` (``p_dg_M``) is the i64 kernarg the addr64 ABI widens it to.
     """
-    dX_desc = make_dgrad_dx_descriptor_dynamic(b, params)
+    if spec.addr64:
+        dX_desc = make_dgrad_dx_descriptor_addr64(
+            b,
+            params,
+            origin_coords=origin_coords,
+            dims_i32=dims_i32,
+            d_h_stride=d_h_stride,
+            d_h_offset=d_h_offset,
+            d_w_stride=d_w_stride,
+            d_w_offset=d_w_offset,
+        )
+    else:
+        dX_desc = make_dgrad_dx_descriptor_dynamic(b, params)
 
     def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         # n_val is the group-local input channel (< cpg); the absolute NHWC
@@ -3826,11 +4178,28 @@ def _emit_dgrad_cshuffle_epilogue(
     dx_rsrc: Value,
     params: Dict[str, Value],
     c_group_base: Optional[Value] = None,
+    origin_coords: Optional[Sequence[Value]] = None,
+    dims_i32: Optional[Sequence[Value]] = None,
+    d_h_stride: Optional[Value] = None,
+    d_h_offset: Optional[Value] = None,
+    d_w_stride: Optional[Value] = None,
+    d_w_offset: Optional[Value] = None,
 ) -> None:
     """MFMA cshuffle epilogue for stride=1 dX."""
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1
     _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
-    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    dx_addr, bounds = _dgrad_stride1_dx_addr(
+        b,
+        spec,
+        params,
+        c_group_base,
+        origin_coords=origin_coords,
+        dims_i32=dims_i32,
+        d_h_stride=d_h_stride,
+        d_h_offset=d_h_offset,
+        d_w_stride=d_w_stride,
+        d_w_offset=d_w_offset,
+    )
     _epi = CShuffleEpilogue.from_grid(
         atom=spec.atom,
         grid=grid,
@@ -3845,6 +4214,7 @@ def _emit_dgrad_cshuffle_epilogue(
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=bounds,
+        m_origin_i64=grid.block_m_off_i64 if spec.addr64 else None,
     )
 
 
@@ -3935,30 +4305,58 @@ def _emit_dgrad_tilde_direct_epilogue(
     c_C: Value,
     c_group_base: Optional[Value] = None,
     patch_cols: Optional[Tuple[Value, Value]] = None,
+    origin_coords: Optional[Sequence[Value]] = None,
+    dims_i32: Optional[Sequence[Value]] = None,
+    params: Optional[Dict[str, Value]] = None,
 ) -> None:
     """Scalar (per-element) direct store for the tilde non-atomic path.
 
     Mirrors _emit_dgrad_direct_epilogue for the strided (tilde) case.
-    """
 
-    def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        offset, hw_ok = _tilde_dx_addr_fn(
-            b_,
-            m_val,
-            n_val,
-            hw_tilde,
-            w_tilde_slice,
-            d_h_stride,
-            d_h_offset,
-            d_w_stride,
-            d_w_offset,
-            c_Hi,
-            c_Wi,
-            c_C,
-            c_group_base,
-            patch_cols,
+    ``spec.addr64`` (``origin_coords``/``dims_i32``/``params`` then
+    required) uses the generalized :func:`make_dgrad_dx_descriptor_addr64`
+    instead of :func:`_tilde_dx_addr_fn`: ``m_val`` is the per-lane delta
+    from the CTA's i64 M-tile origin within this sub-GEMM record (the
+    caller passes ``m_origin_i64=grid.block_m_off_i64`` into ``.store()``),
+    and ``bounds_m`` is this record's own ``gemm_m``, i64-combined under
+    addr64 (see ``_build_tilde_dgrad``).
+    """
+    if spec.addr64:
+        dX_desc = make_dgrad_dx_descriptor_addr64(
+            b,
+            params,
+            origin_coords=origin_coords,
+            dims_i32=dims_i32,
+            d_h_stride=d_h_stride,
+            d_h_offset=d_h_offset,
+            d_w_stride=d_w_stride,
+            d_w_offset=d_w_offset,
         )
-        return offset, hw_ok
+
+        def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            c = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+            return dX_desc.offset(b_, m=m_val, c=c)
+
+    else:
+
+        def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            offset, hw_ok = _tilde_dx_addr_fn(
+                b_,
+                m_val,
+                n_val,
+                hw_tilde,
+                w_tilde_slice,
+                d_h_stride,
+                d_h_offset,
+                d_w_stride,
+                d_w_offset,
+                c_Hi,
+                c_Wi,
+                c_C,
+                c_group_base,
+                patch_cols,
+            )
+            return offset, hw_ok
 
     DirectEpilogue(atom=atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
@@ -3966,6 +4364,7 @@ def _emit_dgrad_tilde_direct_epilogue(
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=(bounds_m, bounds_n),
+        m_origin_i64=grid.block_m_off_i64 if spec.addr64 else None,
     )
 
 
@@ -3991,6 +4390,9 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     c_C: Value,
     c_group_base: Optional[Value] = None,
     patch_cols: Optional[Tuple[Value, Value]] = None,
+    origin_coords: Optional[Sequence[Value]] = None,
+    dims_i32: Optional[Sequence[Value]] = None,
+    params: Optional[Dict[str, Value]] = None,
 ) -> None:
     """LDS-staged wide store for the tilde non-atomic path.
 
@@ -3998,26 +4400,48 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     The N dimension (channel index) is contiguous in dX for fixed m, so
     the cshuffle epilogue can issue vector_size_c-wide buffer stores along N.
     Supports both MFMA (via atom) and WMMA (via op with from_grid_op).
-    """
 
-    def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        offset, hw_ok = _tilde_dx_addr_fn(
-            b_,
-            m_val,
-            n_val,
-            hw_tilde,
-            w_tilde_slice,
-            d_h_stride,
-            d_h_offset,
-            d_w_stride,
-            d_w_offset,
-            c_Hi,
-            c_Wi,
-            c_C,
-            c_group_base,
-            patch_cols,
+    ``spec.addr64`` (MFMA only -- WMMA is rejected, op.family must be
+    ``"mma"``) uses the generalized :func:`make_dgrad_dx_descriptor_addr64`
+    instead of :func:`_tilde_dx_addr_fn`; see
+    :func:`_emit_dgrad_tilde_direct_epilogue`'s docstring for the shape.
+    """
+    if spec.addr64:
+        dX_desc = make_dgrad_dx_descriptor_addr64(
+            b,
+            params,
+            origin_coords=origin_coords,
+            dims_i32=dims_i32,
+            d_h_stride=d_h_stride,
+            d_h_offset=d_h_offset,
+            d_w_stride=d_w_stride,
+            d_w_offset=d_w_offset,
         )
-        return offset, hw_ok
+
+        def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            c = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+            return dX_desc.offset(b_, m=m_val, c=c)
+
+    else:
+
+        def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            offset, hw_ok = _tilde_dx_addr_fn(
+                b_,
+                m_val,
+                n_val,
+                hw_tilde,
+                w_tilde_slice,
+                d_h_stride,
+                d_h_offset,
+                d_w_stride,
+                d_w_offset,
+                c_Hi,
+                c_Wi,
+                c_C,
+                c_group_base,
+                patch_cols,
+            )
+            return offset, hw_ok
 
     _war_barriers = 2 if spec.pipeline == "wavelet" else 1
     _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
@@ -4038,4 +4462,5 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=(bounds_m, bounds_n),
+        m_origin_i64=grid.block_m_off_i64 if spec.addr64 else None,
     )

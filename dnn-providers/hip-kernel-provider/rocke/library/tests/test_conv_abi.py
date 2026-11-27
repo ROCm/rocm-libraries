@@ -187,8 +187,8 @@ def test_fwd_addr64_abi_rejects_split_k_and_3d():
         conv_arg_names(direction="fwd", addr64=True, two_stage=True)
     with pytest.raises(ValueError, match="is_3d"):
         conv_arg_names(direction="fwd", addr64=True, is_3d=True)
-    with pytest.raises(ValueError, match="fwd/wgrad-only"):
-        conv_arg_names(direction="dgrad", addr64=True)
+    with pytest.raises(ValueError, match="fwd/wgrad/dgrad-only"):
+        conv_arg_names(direction="direct", addr64=True)
 
 
 def test_fwd_addr64_signature_matches_arg_names():
@@ -203,11 +203,31 @@ def test_fwd_addr64_signature_matches_arg_names():
     assert by_name["p_A_stride_hi"]["size_bytes"] == 4
 
 
-def test_wgrad_addr64_abi_rejects_3d_and_dgrad():
+def test_wgrad_addr64_abi_rejects_3d():
     with pytest.raises(ValueError, match="is_3d"):
         conv_arg_names(direction="wgrad", addr64=True, is_3d=True)
-    with pytest.raises(ValueError, match="fwd/wgrad-only"):
-        conv_arg_names(direction="dgrad", addr64=True)
+
+
+def test_dgrad_addr64_abi_shape():
+    names_plain = conv_arg_names(direction="dgrad")
+    names_addr64 = conv_arg_names(direction="dgrad", addr64=True)
+    by_name = dict(names_addr64)
+    # dY/dX widen together with M (dgrad's overflow axis N*Hi*Wi); W stays
+    # i32 (bounded by the filter, never by M).
+    assert by_name["dY_bytes"] == "i64"
+    assert by_name["dX_bytes"] == "i64"
+    assert by_name["W_bytes"] == "i32"
+    assert by_name["p_dg_M"] == "i64"
+    assert by_name["p_dY_stride_n"] == "i64"
+    assert by_name["p_dX_stride_n"] == "i64"
+    assert by_name["p_W_stride_k"] == "i32"
+    # m_ magic pair dropped under addr64 (exact i64 division instead).
+    plain_names = [n for n, _ in names_plain]
+    addr64_names = [n for n, _ in names_addr64]
+    assert any(n.startswith("p_magic_m_") for n in plain_names)
+    assert not any(n.startswith("p_magic_m_") for n in addr64_names)
+    with pytest.raises(ValueError, match="is_3d"):
+        conv_arg_names(direction="dgrad", addr64=True, is_3d=True)
 
 
 def test_wgrad_addr64_signature_matches_arg_names():
