@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ctypes
 import itertools
+import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
@@ -479,14 +480,18 @@ class DeviceArray:
         *,
         shape: Sequence[int] | None = None,
     ) -> None:
-        self._host = np.ascontiguousarray(host)
-        self.dtype = self._element_type(self._host.dtype, dtype)
-        self.shape = self._view_shape(self._host.shape, shape)
-        self._strides = tuple(s // self._host.itemsize for s in self._host.strides)
+        host = np.ascontiguousarray(host)
+        # The buffer's layout as uploaded, which read() and write() keep; the
+        # host array itself is not kept alive.
+        self._buffer_shape = tuple(host.shape)
+        self._buffer_dtype = host.dtype
+        self.dtype = self._element_type(host.dtype, dtype)
+        self.shape = self._view_shape(host.shape, shape)
+        self._strides = tuple(s // host.itemsize for s in host.strides)
         self._offset = 0
         self.device = current_device()
-        self._memory = DeviceMem(self._host.nbytes)
-        self.write(self._host)
+        self._memory = DeviceMem(host.nbytes)
+        self.write(host)
 
     def view(
         self,
@@ -508,10 +513,11 @@ class DeviceArray:
             shape,
             dense_strides(shape) if strides is None else strides,
             self._offset if offset is None else offset,
-            self._host.size,
+            self._buffer_elements(),
         )
         view = object.__new__(DeviceArray)
-        view._host, view._memory = self._host, self._memory
+        view._buffer_shape, view._buffer_dtype = self._buffer_shape, self._buffer_dtype
+        view._memory = self._memory
         view.dtype, view.device = self.dtype, self.device
         view.shape, view._strides, view._offset = shape, strides, offset
         return view
@@ -561,10 +567,14 @@ class DeviceArray:
         return self._strides if dim is None else self._strides[dim]
 
     def data_ptr(self) -> int:
-        return self._memory.ptr() + self._offset * self._host.itemsize
+        return self._memory.ptr() + self._offset * self.element_size()
 
     def element_size(self) -> int:
-        return self._host.itemsize
+        return self._buffer_dtype.itemsize
+
+    def _buffer_elements(self) -> int:
+        """Elements of the whole device buffer, whatever this array views of it."""
+        return math.prod(self._buffer_shape)
 
     def numel(self) -> int:
         return int(np.prod(self.shape, dtype=np.int64))
@@ -586,13 +596,13 @@ class DeviceArray:
             element_size=self.element_size(),
             data_ptr=self.data_ptr(),
             device=self.device,
-            backed_elements=self._host.size - self._offset,
+            backed_elements=self._buffer_elements() - self._offset,
         )
 
     def read(self) -> np.ndarray:
         """The whole device buffer as a host array like the one uploaded. The
         copy is blocking, so launches queued before it have finished."""
-        out = np.empty_like(self._host)
+        out = np.empty(self._buffer_shape, dtype=self._buffer_dtype)
         Runtime().memcpy_d2h(as_u8_buffer(out), self._memory.ptr(), out.nbytes)
         return out
 
@@ -611,10 +621,10 @@ class DeviceArray:
         """Overwrite the device buffer with ``host`` (same shape and dtype as
         the array this one was built from)."""
         host = np.ascontiguousarray(host)
-        if host.shape != self._host.shape or host.dtype != self._host.dtype:
+        if host.shape != self._buffer_shape or host.dtype != self._buffer_dtype:
             raise ValueError(
                 f"DeviceArray.write failed - host {host.shape} {host.dtype}, expected "
-                f"{self._host.shape} {self._host.dtype}"
+                f"{self._buffer_shape} {self._buffer_dtype}"
             )
         Runtime().memcpy_h2d(self._memory.ptr(), as_u8_buffer(host), host.nbytes)
 

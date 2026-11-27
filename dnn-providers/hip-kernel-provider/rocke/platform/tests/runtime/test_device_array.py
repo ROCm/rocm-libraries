@@ -376,6 +376,28 @@ def test_gpu_round_trip_and_tensor_methods():
 
 
 @pytest.mark.gpu
+def test_gpu_the_uploaded_host_array_is_not_kept_alive():
+    """The device copy keeps only the host array's shape and dtype, so a large
+    upload's host memory is freed once the caller drops it; read() and write()
+    still use the uploaded layout, and a view keeps it too."""
+    import gc
+    import weakref
+
+    current_device_arch()
+    host = np.arange(12, dtype=np.int32).reshape(3, 4)
+    expected = host.copy()
+    uploaded = weakref.ref(host)
+    array = DeviceArray(host)
+    del host
+    gc.collect()
+    assert uploaded() is None
+    np.testing.assert_array_equal(array.read(), expected)
+    np.testing.assert_array_equal(array.view((4, 3), (1, 4)).values(), expected.T)
+    with pytest.raises(ValueError, match=r"expected \(3, 4\) int32"):
+        array.write(np.zeros((4, 3), np.int32))
+
+
+@pytest.mark.gpu
 @pytest.mark.parametrize(
     "host, dtype",
     [(np.uint16, "bf16"), (np.int16, "fp16"), (np.uint32, "i32"), (np.int8, "fp8e4m3")],
