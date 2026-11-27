@@ -115,6 +115,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmv_csr_reuse_descr.cpp
     test_spmv_csr_pytorch_compat.cpp
     test_spmv_sell.cpp
+    test_spmv_set_pointers.cpp
     test_spmv_bsr.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp

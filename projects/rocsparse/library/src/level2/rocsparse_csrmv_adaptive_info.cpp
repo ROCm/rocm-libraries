@@ -56,14 +56,16 @@ void _rocsparse_adaptive_info::clear()
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
     WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
+    // Each pointer is reset once it is freed: if a later free throws, the
+    // destructor must not free it again.
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->row_blocks));
-    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
-    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_ids));
-
     this->row_blocks = nullptr;
-    this->wg_flags   = nullptr;
-    this->wg_ids     = nullptr;
-    this->size       = 0;
-    this->first_row  = 0;
-    this->last_row   = 0;
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
+    this->wg_flags = nullptr;
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_ids));
+    this->wg_ids = nullptr;
+
+    this->size      = 0;
+    this->first_row = 0;
+    this->last_row  = 0;
 }

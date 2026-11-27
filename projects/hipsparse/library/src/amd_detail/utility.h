@@ -727,7 +727,24 @@ public:
 protected:
     std::vector<Entry> m_entries;
 
+    // Entries that retire_entries moved out of m_entries. No call uses them; they
+    // are destroyed by the next SpMV routine that runs outside stream capture.
+    std::vector<Entry> m_retired_entries;
+
 public:
+    // The arrays of the sparse matrix were replaced: no entry may be reused. The
+    // entries move to the retired list, which frees no device memory, so this
+    // is legal while the stream is being captured.
+    void retire_entries();
+
+    // Destroy the retired entries. Every SpMV routine calls it before it looks
+    // up an entry. The compute buffers are freed on the handle stream;
+    // destroying the rocSPARSE SpMV descriptors synchronizes the device, and so
+    // does the analysis a fresh entry would run. Returns
+    // HIPSPARSE_STATUS_INVALID_VALUE, and keeps the entries, while the handle
+    // stream is being captured.
+    hipsparseStatus_t release_retired_entries(hipsparseHandle_t handle);
+
     // Look up an entry matching (operation, alg, scalar_datatype,
     // compute_datatype); returns nullptr if none exists.
     Entry* find_entry(rocsparse_operation operation,

@@ -67,8 +67,10 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p vecX, \p beta, 
-*          \p vecY, or \p pBufferSizeInBytes is nullptr, \p opA is invalid, or the matrix 
-*          or vector dimensions are incompatible.
+*          \p vecY, or \p pBufferSizeInBytes is nullptr, \p opA is invalid, the matrix 
+*          or vector dimensions are incompatible, or, with the rocSPARSE backend, the stream of \p handle
+*          is being captured and \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or
+*          \ref hipsparseCooSetPointers replaced the arrays since the last call made outside the capture.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
 HIPSPARSE_EXPORT
@@ -134,7 +136,10 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, or \p alg is incorrect.
+*               \p externalBuffer pointer is invalid, \p opA, \p computeType, or \p alg is incorrect, or, with the
+*               rocSPARSE backend, the stream of \p handle is being captured and \ref hipsparseCsrSetPointers,
+*               \ref hipsparseCscSetPointers, or \ref hipsparseCooSetPointers replaced the arrays since the last
+*               call made outside the capture.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
@@ -277,6 +282,14 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  Only the \ref hipsparseSpMV_bufferSize and the \ref hipsparseSpMV routines support execution in a hipGraph context.
 *  The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
 *
+*  \note
+*  With the rocSPARSE backend, \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, and \ref hipsparseCooSetPointers
+*  retire the state kept for the previous arrays. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or
+*  \p hipsparseSpMV call destroys it and analyzes the new arrays, which synchronizes the device. While the stream of \p handle
+*  is being captured, these routines then return \ref HIPSPARSE_STATUS_INVALID_VALUE, whatever the algorithm, and leave the
+*  capture valid; the next call made outside the capture proceeds. A capture of another stream is not detected and must not be
+*  in progress. A graph that captured \p hipsparseSpMV on the previous arrays must not be launched after that call.
+*
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
@@ -300,7 +313,10 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p beta, \p y, or
-*               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
+*               \p externalBuffer pointer is invalid, \p opA, \p computeType, or \p alg is incorrect, or, with the
+*               rocSPARSE backend, the stream of \p handle is being captured and \ref hipsparseCsrSetPointers,
+*               \ref hipsparseCscSetPointers, or \ref hipsparseCooSetPointers replaced the arrays since the last
+*               call made outside the capture.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */

@@ -2779,6 +2779,25 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
 /*! \ingroup aux_module
  *  \brief Set the row indices, column indices, and values array in the sparse COO matrix descriptor.
  *
+ *  \note
+ *  The analysis that \p rocsparse_spmv or \p rocsparse_v2_spmv computed for the previous arrays is no longer
+ *  used, also when the same pointers are passed after their contents changed. Call the buffer size and
+ *  preprocess stages of \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still
+ *  computes the product, with an algorithm that does not need preprocessing. The compute stage of an analyzed
+ *  \p rocsparse_spmv_descr also still computes the product. To change only the values, use
+ *  \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv, or analysis stage of \p rocsparse_v2_spmv, replaces the previous analysis. With
+ *  \ref rocsparse_spmv_alg_coo_atomic and \ref rocsparse_operation_none, that synchronizes the device, so no
+ *  stream may be captured while it runs: it returns \ref rocsparse_status_invalid_value and keeps the
+ *  previous analysis if the stream of its handle is being captured, but a capture of another stream is not
+ *  detected.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
+ *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
@@ -2817,6 +2836,33 @@ rocsparse_status
 /*! \ingroup aux_module
  *  \brief Set the row offsets, column indices, and values array in the sparse CSR matrix descriptor.
  *
+ *  \note
+ *  The analysis that \p rocsparse_spmv computed for the previous arrays is no longer used, also when the same
+ *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
+ *  \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still computes the
+ *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
+ *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
+ *  \p rocsparse_spmv_descr has to be created and analyzed. A \p rocsparse_spmv_descr holds an analysis
+ *  for a CSR or CSC matrix with \ref rocsparse_spmv_alg_csr_adaptive, \ref rocsparse_spmv_alg_csr_lrb or
+ *  \ref rocsparse_spmv_alg_csr_nnzsplit, for a CSR matrix with \ref rocsparse_spmv_alg_default and
+ *  \ref rocsparse_operation_none, for a CSC matrix with \ref rocsparse_spmv_alg_default and a transposed or
+ *  conjugate-transposed operation, and for a BSR matrix with block dimension 1 and
+ *  \ref rocsparse_storage_mode_sorted. It holds no analysis with \ref rocsparse_spmv_alg_csr_rowsplit, with
+ *  \ref rocsparse_spmv_alg_default for the other CSR and CSC operations, for any other BSR matrix, for a
+ *  COO, COO AoS or ELL matrix, or for a matrix without entries. To change only the values and keep these
+ *  analyses, use \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis, which synchronizes the device, so no stream may be
+ *  captured while it runs: it returns \ref rocsparse_status_invalid_value and frees nothing if the stream
+ *  of its handle is being captured, but a capture of another stream is not detected. A graph that captured
+ *  the compute stage of \p rocsparse_spmv on the previous arrays must not be launched after that preprocess
+ *  stage, which frees the analysis buffers that the graph uses.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
+ *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
@@ -2837,6 +2883,33 @@ rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr descr,
 
 /*! \ingroup aux_module
  *  \brief Set the column offsets, row indices, and values array in the sparse CSC matrix descriptor.
+ *
+ *  \note
+ *  The analysis that \p rocsparse_spmv computed for the previous arrays is no longer used, also when the same
+ *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
+ *  \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still computes the
+ *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
+ *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
+ *  \p rocsparse_spmv_descr has to be created and analyzed. A \p rocsparse_spmv_descr holds an analysis
+ *  for a CSR or CSC matrix with \ref rocsparse_spmv_alg_csr_adaptive, \ref rocsparse_spmv_alg_csr_lrb or
+ *  \ref rocsparse_spmv_alg_csr_nnzsplit, for a CSR matrix with \ref rocsparse_spmv_alg_default and
+ *  \ref rocsparse_operation_none, for a CSC matrix with \ref rocsparse_spmv_alg_default and a transposed or
+ *  conjugate-transposed operation, and for a BSR matrix with block dimension 1 and
+ *  \ref rocsparse_storage_mode_sorted. It holds no analysis with \ref rocsparse_spmv_alg_csr_rowsplit, with
+ *  \ref rocsparse_spmv_alg_default for the other CSR and CSC operations, for any other BSR matrix, for a
+ *  COO, COO AoS or ELL matrix, or for a matrix without entries. To change only the values and keep these
+ *  analyses, use \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis, which synchronizes the device, so no stream may be
+ *  captured while it runs: it returns \ref rocsparse_status_invalid_value and frees nothing if the stream
+ *  of its handle is being captured, but a capture of another stream is not detected. A graph that captured
+ *  the compute stage of \p rocsparse_spmv on the previous arrays must not be launched after that preprocess
+ *  stage, which frees the analysis buffers that the graph uses.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr       the pointer to the sparse matrix descriptor.
@@ -2859,6 +2932,10 @@ rocsparse_status rocsparse_csc_set_pointers(rocsparse_spmat_descr descr,
 /*! \ingroup aux_module
  *  \brief Set the column indices and values array in the sparse ELL matrix descriptor.
  *
+ *  \note
+ *  The preprocess stage of \p rocsparse_spsv does not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
+ *
  *  @param[inout]
  *  descr       the pointer to the sparse matrix descriptor.
  *  @param[in]
@@ -2875,6 +2952,33 @@ rocsparse_status
 
 /*! \ingroup aux_module
  *  \brief Set the row offsets, column indices, and values array in the sparse BSR matrix descriptor
+ *
+ *  \note
+ *  The analysis that \p rocsparse_spmv computed for the previous arrays is no longer used, also when the same
+ *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
+ *  \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still computes the
+ *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
+ *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
+ *  \p rocsparse_spmv_descr has to be created and analyzed. A \p rocsparse_spmv_descr holds an analysis
+ *  for a CSR or CSC matrix with \ref rocsparse_spmv_alg_csr_adaptive, \ref rocsparse_spmv_alg_csr_lrb or
+ *  \ref rocsparse_spmv_alg_csr_nnzsplit, for a CSR matrix with \ref rocsparse_spmv_alg_default and
+ *  \ref rocsparse_operation_none, for a CSC matrix with \ref rocsparse_spmv_alg_default and a transposed or
+ *  conjugate-transposed operation, and for a BSR matrix with block dimension 1 and
+ *  \ref rocsparse_storage_mode_sorted. It holds no analysis with \ref rocsparse_spmv_alg_csr_rowsplit, with
+ *  \ref rocsparse_spmv_alg_default for the other CSR and CSC operations, for any other BSR matrix, for a
+ *  COO, COO AoS or ELL matrix, or for a matrix without entries. To change only the values and keep these
+ *  analyses, use \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis, which synchronizes the device, so no stream may be
+ *  captured while it runs: it returns \ref rocsparse_status_invalid_value and frees nothing if the stream
+ *  of its handle is being captured, but a capture of another stream is not detected. A graph that captured
+ *  the compute stage of \p rocsparse_spmv on the previous arrays must not be launched after that preprocess
+ *  stage, which frees the analysis buffers that the graph uses.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
