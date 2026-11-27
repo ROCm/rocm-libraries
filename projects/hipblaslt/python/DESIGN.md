@@ -106,3 +106,14 @@ The bindings' Component CI lanes build them against an installed ROCm, the way a
 - **Every check is in C++.** `from_numpy`, `copy_from_host` and `copy_to_host` check, before any HIP call, that the host array's dtype is the one the type holds, that it's C-contiguous (a strided array is refused, not copied), and that the byte counts match exactly. Calling `_core` directly gets the same checks as the Python wrapper. `R_8I` also takes `uint8`, for byte buffers such as workspaces.
 - **`ml_dtypes` types cross as views.** nanobind accepts only NumPy's own scalar types, so a bfloat16 or fp8 array crosses into C++ as its same-width unsigned view, with its dtype name alongside. The C++ side checks both, so a raw `uint16` isn't accepted as bfloat16 by accident. `hipblaslt.from_numpy` and `DeviceArray.to_numpy` do the viewing.
 - **Supported types.** float32, float64, float16, bfloat16, int8, int32, and the four fp8 formats. fp4, fp6 and int4 aren't supported: hipBLASLt packs them more densely than `ml_dtypes`' one value per byte.
+
+## Heuristic and matmul
+
+- **`heuristic()`** returns hipBLASLt's recommended solutions, best first. Each `Algo` has a `heuristic_rank`, its position in that list. It isn't hipBLASLt's catalog index, a separate number that's only meaningful for one library build, and the two are kept apart by name.
+- **`matmul()` takes the `HeuristicResult`,** not a bare `Algo`, because the result carries the workspace size the solution needs.
+- **What `matmul()` checks before calling hipBLASLt.** Each check stops a call that would otherwise compute the wrong answer or write outside a buffer:
+  - **Alpha and beta** are Python numbers, passed as `float`, `double` or `int32_t` to match the descriptor's scale type. hipBLASLt reads them through a `void*`, so the wrong width is silently wrong. hipBLASLt has no attribute to read the scale type back, so `MatmulDesc` keeps the one it was created with. Only host pointer mode is supported.
+  - **The workspace** must be at least the solution's `workspace_size`, and the size passed to hipBLASLt is always the buffer's own, so a caller can't overstate it.
+  - **Each operand** must match its layout's data type and hold every element the layout reaches (rows, columns, leading dimension, batch count and stride).
+- **Stream.** `matmul()` synchronizes the stream before returning, so results are visible to the host.
+- **`gemm(a, b)`** is a convenience built only on `heuristic()` and `matmul()`, never a separate path, so it can't hide anything they would show. It handles float32, float16, bfloat16 and float64, and refuses other types rather than guess a compute type. It uses the identity `d^T = b^T @ a^T` to compute a row-major product in column-major hipBLASLt without copies.

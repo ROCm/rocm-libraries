@@ -74,6 +74,8 @@ namespace hipblaslt_py
     }
 
     MatmulDesc::MatmulDesc(hipblasComputeType_t compute_type, hipDataType scale_type)
+        : compute_type_(compute_type)
+        , scale_type_(scale_type)
     {
         HIPBLASLT_CHECK(hipblasLtMatmulDescCreate(&d_, compute_type, scale_type));
     }
@@ -497,8 +499,10 @@ void init_descriptors(nb::module_& m)
               .def(nb::init<hipblasComputeType_t, hipDataType>(),
                    nb::arg("compute_type"),
                    nb::arg("scale_type"))
-              .def_prop_ro(
-                  "ptr", [](const MatmulDesc& d) { return reinterpret_cast<uintptr_t>(d.raw()); });
+              .def_prop_ro("ptr",
+                           [](const MatmulDesc& d) { return reinterpret_cast<uintptr_t>(d.raw()); })
+              .def_prop_ro("compute_type", &MatmulDesc::compute_type)
+              .def_prop_ro("scale_type", &MatmulDesc::scale_type);
     bind_attributes(
         desc, &matmul_desc_types, hipblasLtMatmulDescSetAttribute, hipblasLtMatmulDescGetAttribute);
 
