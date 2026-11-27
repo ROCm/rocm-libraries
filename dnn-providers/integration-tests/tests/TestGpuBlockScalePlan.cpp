@@ -326,25 +326,25 @@ TEST(TestGpuBlockScalePlan, RuntimePassByValueTensorIsNotApplicable)
     }
 }
 
-TEST(TestGpuBlockScalePlan, ExecuteQuantizeNonLastAxisMatchesCpu)
+TEST(TestGpuBlockScalePlanDevice, ExecuteQuantizeNonLastAxisMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     executeQuantizeGraph(1);
 }
 
-TEST(TestGpuBlockScalePlan, ExecuteQuantizeWithoutAxisMatchesCpu)
+TEST(TestGpuBlockScalePlanDevice, ExecuteQuantizeWithoutAxisMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     executeQuantizeGraph(std::nullopt);
 }
 
-TEST(TestGpuBlockScalePlan, ExecuteDequantizeNegativeScaleMatchesCpu)
+TEST(TestGpuBlockScalePlanDevice, ExecuteDequantizeNegativeScaleMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     executeDequantizeGraph(true);
 }
 
-TEST(TestGpuBlockScalePlanFp16, ExecuteCompactMxGraphsMatchCpu)
+TEST(TestGpuBlockScalePlanDeviceFp16, ExecuteCompactMxGraphsMatchCpu)
 {
     SKIP_IF_NO_DEVICES();
     using namespace hipdnn_data_sdk::types;
@@ -352,7 +352,7 @@ TEST(TestGpuBlockScalePlanFp16, ExecuteCompactMxGraphsMatchCpu)
     executeDequantizeGraph<fp4_e2m1, fp8_e8m0, half>(false);
 }
 
-TEST(TestGpuBlockScalePlanFp16, ExecuteGraphsMatchCpu)
+TEST(TestGpuBlockScalePlanDeviceFp16, ExecuteGraphsMatchCpu)
 {
     SKIP_IF_NO_DEVICES();
     using hipdnn_data_sdk::types::half;
@@ -360,7 +360,7 @@ TEST(TestGpuBlockScalePlanFp16, ExecuteGraphsMatchCpu)
     executeDequantizeGraph<half, float, half>(false);
 }
 
-TEST(TestGpuBlockScalePlanBfp16, ExecuteGraphsMatchCpu)
+TEST(TestGpuBlockScalePlanDeviceBfp16, ExecuteGraphsMatchCpu)
 {
     SKIP_IF_NO_DEVICES();
     using hipdnn_data_sdk::types::bfloat16;

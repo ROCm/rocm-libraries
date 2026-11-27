@@ -316,6 +316,12 @@ TEST_F(TestGfx942AttentionUnified2DPacks, CarriesExactlyOneSharedKernelScopedMat
     EXPECT_EQ(kernelScoped, 1);
 }
 
+TEST_F(TestGfx942AttentionUnified2DPacks, DeclaresItsNumericalNotes)
+{
+    ASSERT_TRUE(_set->engine.numericalNotes.has_value());
+    EXPECT_TRUE(_set->engine.numericalNotes->empty());
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

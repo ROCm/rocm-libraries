@@ -259,7 +259,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableWithStatsOutput)
 // fprop() directly with a rank-3 lse) do not cover. Validates against a direct fprop() call
 // with identical inputs; the LSE buffer is pre-filled with a sentinel so an unwritten output
 // would not accidentally pass.
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteWritesLseThroughGraph)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -324,7 +324,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
 // top-left). left_bound=2 keeps 2 keys per row, the diagonal included, as cuDNN's
 // set_sliding_window_length(2) does. With Sq = Skv = 8 that window makes rows 2..7
 // lose keys, so plain causal attention would not match.
-TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -384,7 +384,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow
 
 // The graph plan computes P in fp32 (an independent oracle, SEM-012), not with the provider's
 // bf16 P rounding, which stays available only through fprop's explicit probabilityMode.
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -453,7 +453,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
 // A pass-by-value scale lives in the variant pack as a host scalar. The plan must apply it, not
 // fall back to the unscaled default: with random inputs in [-1, 1] a scale of 2.0 and a scale of
 // 1.0 give outputs that differ far beyond the comparison tolerance.
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteAppliesRuntimePassByValueScale)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -854,12 +854,12 @@ void expectMaskedPlanMatchesReferences()
 
 } // namespace
 
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithHalfMask)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteWithHalfMask)
 {
     expectMaskedPlanMatchesReferences<DataType::HALF>();
 }
 
-TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithBfloat16Mask)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecuteWithBfloat16Mask)
 {
     expectMaskedPlanMatchesReferences<DataType::BFLOAT16>();
 }
@@ -1053,7 +1053,7 @@ flatbuffers::FlatBufferBuilder makeGraphWithExtras(SdpaAttributesT attrs,
 // Philox dropout with an rng_dump output (SEM-015): the plan accepts it and applies the dumped
 // keep mask with scale 1 / (1 - p), so it matches the CPU executor run on the same graph and the
 // same dumped mask.
-TEST(TestGpuSdpaFwdPlanBuilder, ExecutePhiloxDropoutMatchesCpuOnDumpedMask)
+TEST(TestGpuSdpaFwdPlanBuilderDevice, ExecutePhiloxDropoutMatchesCpuOnDumpedMask)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1147,7 +1147,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, SinkApplicabilityFollowsCudnnShape)
 // A pass-by-value descale's variant-pack slot holds a host pointer and a baked one has no slot,
 // so the plan stages both as one value instead of handing the slot to the kernel as device
 // memory. Each must give the output of the same descale held in a device tensor.
-TEST(TestGpuSdpaFwdPlanDescale, ScalarDescalesMatchDeviceDescales)
+TEST(TestGpuSdpaFwdPlanDescaleDevice, ScalarDescalesMatchDeviceDescales)
 {
     SKIP_IF_NO_DEVICES();
     using namespace hipdnn_test_sdk::utilities::sdpa_graph_test;
