@@ -248,6 +248,20 @@ bool hasBatchCausalBf16Hd128Row(const std::string& archId)
                 .empty();
 }
 
+// The gfx942 fp8 hd128 batch-mode row a graph with kernel mask `mask` runs on (fp8 rows
+// ship with RTNA, bf16_cvt 1), or nullptr.
+const fmha_v3_fwdConfig* findGfx942Fp8Hd128BatchRow(plan_utils::MaskType mask)
+{
+    const std::string key = fwdKernelNameKey("gfx942",
+                                             "fp8bf16",
+                                             128,
+                                             128,
+                                             mask,
+                                             hip_kernel_provider_common::RoundingMode::RTNA,
+                                             hip_kernel_provider_common::BatchMode::BATCH);
+    return key.empty() ? nullptr : &cfg_fmha_fwd.at(key);
+}
+
 TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableSdpaVariations)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -2116,6 +2130,86 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableFp8MmaCoreModePolicy)
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), accepted)
             << "FP8_E4M3_FNUZ inputs, mma_core_mode = " << EnumNameDataType(mode);
+    }
+}
+
+// The gfx942 fp8 causal kernel computes every Q tile after the first wrongly (AITER issue
+// #7593, ALMIOPEN-3392), so the engine declines fp8 causal graphs with S_q past one Q tile,
+// whether the graph is bottom-right causal or top-left causal at S_q == S_kv, with or
+// without stats. One-tile causal, no-mask fp8 and bf16 causal stay served.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesFp8CausalPastOneQTile)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const fmha_v3_fwdConfig* causal
+        = findGfx942Fp8Hd128BatchRow(plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    const fmha_v3_fwdConfig* noMask = findGfx942Fp8Hd128BatchRow(plan_utils::MaskType::NO_MASK);
+    ASSERT_NE(causal, nullptr);
+    ASSERT_NE(noMask, nullptr);
+
+    // configToCompatibleGraph emits the top-left causal flags for this copy; the engine
+    // maps it back onto the bottom-right causal row at S_q == S_kv.
+    fmha_v3_fwdConfig topLeft = *causal;
+    topLeft.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+
+    const int64_t ts = causal->ts_qo;
+
+    struct Case
+    {
+        const fmha_v3_fwdConfig* row;
+        int64_t seqQ;
+        int64_t seqKv;
+        bool expected;
+        const char* label;
+    };
+    const std::vector<Case> cases = {
+        {causal, ts + 1, ts + 1, false, "bottom-right, one row past a Q tile"},
+        {causal, 2 * ts, 2 * ts, false, "bottom-right, two Q tiles"},
+        {causal, 2 * ts, ts + 44, false, "bottom-right, S_q > S_kv past a Q tile"},
+        {&topLeft, ts + 1, ts + 1, false, "top-left at S_q == S_kv, one row past a Q tile"},
+        {&topLeft, 2 * ts, 2 * ts, false, "top-left at S_q == S_kv, two Q tiles"},
+        {causal, ts, ts, true, "bottom-right, one Q tile"},
+        {causal, ts, 4 * ts, true, "bottom-right, one Q tile against a long K/V"},
+        {&topLeft, ts, ts, true, "top-left at S_q == S_kv, one Q tile"},
+        {noMask, 4 * ts, 4 * ts, true, "no mask, four Q tiles"},
+    };
+
+    for(const bool withStats : {false, true})
+    {
+        for(const auto& testCase : cases)
+        {
+            SCOPED_TRACE(std::string(testCase.label) + (withStats ? ", stats" : ""));
+            auto builder
+                = configToCompatibleGraph(*testCase.row, withStats, testCase.seqQ, testCase.seqKv);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+                builder.GetBufferPointer(), builder.GetSize());
+            EXPECT_EQ(_planBuilder.isApplicable(_handle, graphWrapper), testCase.expected);
+        }
+
+        // bf16 control: the top-left causal bf16 graph two Q tiles long stays served, so
+        // the decline is fp8-only.
+        SCOPED_TRACE(std::string("bf16 top-left causal, S_q == S_kv == 512")
+                     + (withStats ? ", stats" : ""));
+        auto bf16Builder = createSdpaFwdGraph({4, 8, 512, 128},
+                                              {4, 8, 512, 128},
+                                              DataType::BFLOAT16,
+                                              DataType::FLOAT,
+                                              false,
+                                              true,
+                                              withStats,
+                                              false,
+                                              false,
+                                              true);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper bf16Graph(
+            bf16Builder.GetBufferPointer(), bf16Builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, bf16Graph),
+                  hasBatchCausalBf16Hd128Row("gfx942"));
     }
 }
 

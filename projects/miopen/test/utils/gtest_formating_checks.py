@@ -76,8 +76,9 @@ VALID_DATATYPES = {
 TESTSUITE_REGEX = re.compile(
     r"^(CPU|GPU)_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_(" + "|".join(VALID_DATATYPES) + r")$"
 )
-# Test type for instantiations must be one of these words, optionally with extra alphanum characters.
-TEST_TYPE_REGEX = re.compile(r"^(Smoke|Standard|Full|Perf|Unit)([A-Za-z0-9]*)?$")
+# Test type for instantiations must name the test_categories.yaml tier that selects them,
+# optionally followed by a variant suffix (e.g. StandardNhwc).
+TEST_TYPE_REGEX = re.compile(r"^(Quick|Standard|Comprehensive|Full)([A-Za-z0-9]*)?$")
 
 # Updated regexes that do not allow newlines in the macro arguments
 TEST_P_REGEX = re.compile(r"\bTEST_P\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")
@@ -89,6 +90,21 @@ ALLOW_UNINSTANTIATED_REGEX = re.compile(
 )
 TEST_REGEX = re.compile(r"\bTEST\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")
 TEST_F_REGEX = re.compile(r"\bTEST_F\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")
+
+# test_categories.yaml selects tests by tier prefix, so a plain TEST/TEST_F (no prefix) runs in no
+# CI tier. Only the hipDNN shim surface is plain on purpose: the forwarding_parity entries replay it
+# by name (see test/gtest/README.md). Everything else must be TEST_P + INSTANTIATE_TEST_SUITE_P.
+PLAIN_TEST_ALLOWED_TOKEN = "HipdnnShim"
+
+
+def plain_test_error(file_path, line, macro, suite):
+    if PLAIN_TEST_ALLOWED_TOKEN in suite:
+        return None
+    return (
+        f"{file_path}:{line}: {macro}({suite}, ...) has no tier prefix and runs in no "
+        f"test_categories.yaml tier. Use TEST_P with INSTANTIATE_TEST_SUITE_P(<Quick|Standard|"
+        f"Comprehensive|Full>, {suite}, ::testing::Values(0)) (see test/gtest/README.md)."
+    )
 
 
 def analyze_tests(folder_path):
@@ -160,6 +176,9 @@ def analyze_tests(folder_path):
                     errors.append(
                         f"{file_path}:{line}: Invalid TEST suite name '{suite}' in TEST."
                     )
+                err = plain_test_error(file_path, line, "TEST", suite)
+                if err:
+                    errors.append(err)
                 key = (suite, test_name)
                 if key in test_definitions:
                     prev_line = test_definitions[key]
@@ -180,6 +199,9 @@ def analyze_tests(folder_path):
                     errors.append(
                         f"{file_path}:{line}: Invalid TEST_F fixture name '{fixture}'."
                     )
+                err = plain_test_error(file_path, line, "TEST_F", fixture)
+                if err:
+                    errors.append(err)
                 key = (fixture, test_name)
                 if key in test_f_definitions:
                     prev_line = test_f_definitions[key]

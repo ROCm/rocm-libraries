@@ -120,6 +120,8 @@ template<typename Method,
          typename Config      = rocprim::default_config>
 struct block_histogram_benchmark : public primbench::benchmark_interface
 {
+    block_histogram_benchmark(int entropy_reduction) : m_entropy_reduction(entropy_reduction) {}
+
     primbench::json meta() const override
     {
         return primbench::json{}
@@ -130,7 +132,8 @@ struct block_histogram_benchmark : public primbench::benchmark_interface
                  primbench::json{}
                      .add("bs", BlockSize)
                      .add("ipt", ItemsPerThread)
-                     .add("method", get_method_name<Method>()));
+                     .add("method", get_method_name<Method>()))
+            .add("entropy", get_entropy_percents(m_entropy_reduction));
     }
 
     void run(primbench::state& state) override
@@ -145,7 +148,7 @@ struct block_histogram_benchmark : public primbench::benchmark_interface
         const auto     bin_size = BinSize * ((N + items_per_block - 1) / items_per_block);
 
         // Allocate and fill memory
-        std::vector<T>        input(items, 0.0f);
+        std::vector<T> input = generate_histogram_input<T>(items, m_entropy_reduction, 0, bin_size);
         common::device_ptr<T> d_input(input);
         common::device_ptr<T> d_output(bin_size);
 
@@ -160,4 +163,7 @@ struct block_histogram_benchmark : public primbench::benchmark_interface
                                                                                     d_output.get());
             });
     }
+
+private:
+    int m_entropy_reduction;
 };

@@ -372,7 +372,7 @@ using CPU_ConvProblemDescriptionTestLayoutCalc_NONE = TestLayoutCalc;
 
 TEST_P(CPU_ConvProblemDescriptionTestLayoutCalc_NONE, ConvProblemDescription) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_ConvProblemDescriptionTestLayoutCalc_NONE,
                          testing::ValuesIn(TestLayoutCalc::GetTestCases()));
 
@@ -472,12 +472,14 @@ using CPU_ConvProblemDescriptionTestKeys_NONE = TestProblemKeys;
 
 TEST_P(CPU_ConvProblemDescriptionTestKeys_NONE, ConvProblemDescription) { this->RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_ConvProblemDescriptionTestKeys_NONE,
                          testing::ValuesIn(TestProblemKeys::GetTestCases()));
 
 // The optional find-db key parts come in a fixed order: cast types, "_det", then strides.
-TEST(CPU_ConvProblemDescriptionKeyOrder_NONE, CastDeterministicStrides)
+using CPU_ConvProblemDescriptionKeyOrder_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_ConvProblemDescriptionKeyOrder_NONE, CastDeterministicStrides)
 {
     if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
         GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
@@ -510,9 +512,13 @@ TEST(CPU_ConvProblemDescriptionKeyOrder_NONE, CastDeterministicStrides)
               "4x8x8x3x3x8x8x8x2xNCHWxFP16xciFP8cwFP8detx1x1x1x1x1x1x1xFxDefault");
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvProblemDescriptionKeyOrder_NONE, testing::Values(0));
+
 // The perf-db key does not depend on the deterministic attribute. Thus both modes share the
 // shipped perf-db records. Each solver checks a loaded config against the attribute.
-TEST(CPU_ConvProblemDescriptionPerfDbKey_NONE, SameForDeterministicMode)
+using CPU_ConvProblemDescriptionPerfDbKey_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_ConvProblemDescriptionPerfDbKey_NONE, SameForDeterministicMode)
 {
     if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
         GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
@@ -539,3 +545,5 @@ TEST(CPU_ConvProblemDescriptionPerfDbKey_NONE, SameForDeterministicMode)
     EXPECT_FALSE(key_default.empty());
     EXPECT_EQ(key_det, key_default);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvProblemDescriptionPerfDbKey_NONE, testing::Values(0));

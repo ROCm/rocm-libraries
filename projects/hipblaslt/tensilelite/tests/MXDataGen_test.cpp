@@ -176,6 +176,164 @@ INSTANTIATE_TEST_SUITE_P(
     )
 );
 
+class MXDataGenPaddedLeadingDimTest
+    : public ::testing::TestWithParam<std::tuple<hipDataType, bool, bool, MXScaleLayout>>
+{
+};
+
+TEST_P(MXDataGenPaddedLeadingDimTest, PreservesLogicalDataAndScaleLayout)
+{
+    auto [dataType, isTranspose, isMatrixA, scaleLayout] = GetParam();
+
+    constexpr size_t rows       = 256;
+    constexpr size_t cols       = 256;
+    constexpr size_t stride     = 320;
+    constexpr size_t mxBlock    = 32;
+    constexpr size_t scaleCount       = rows / mxBlock * cols;
+    constexpr size_t paddedScaleCount = stride / mxBlock * cols;
+    constexpr size_t guardSize        = 64;
+    constexpr uint8_t sentinel        = 0x5A;
+
+    constexpr size_t paddedElements     = stride * cols;
+    constexpr size_t paddedDataElements = stride * (cols - 1) + rows;
+
+    size_t const denseBytes = dataType == HIP_R_8F_E4M3
+                                  ? rows * cols
+                                  : (dataType == static_cast<hipDataType>(HIP_R_6F_E3M2)
+                                         ? (rows * cols * 6 + 7) / 8
+                                         : (rows * cols + 1) / 2);
+    size_t const paddedBytes = dataType == HIP_R_8F_E4M3
+                                   ? paddedDataElements
+                                   : (dataType == static_cast<hipDataType>(HIP_R_6F_E3M2)
+                                          ? (paddedDataElements * 6 + 7) / 8
+                                          : (paddedDataElements + 1) / 2);
+
+    std::vector<uint8_t> denseData(denseBytes, 0);
+    std::vector<uint8_t> paddedData(paddedBytes + guardSize, sentinel);
+    std::vector<uint8_t> denseScale(scaleCount, 0);
+    std::vector<uint8_t> paddedScale(paddedScaleCount + guardSize, sentinel);
+
+    auto denseRef = generateMXInput(dataType,
+                                    HIP_R_8F_UE8M0,
+                                    denseData.data(),
+                                    denseScale.data(),
+                                    rows,
+                                    cols,
+                                    rows,
+                                    isTranspose,
+                                    mxBlock,
+                                    1,
+                                    isMatrixA,
+                                    scaleLayout,
+                                    "Bounded",
+                                    -1.0f,
+                                    1.0f);
+    auto paddedRef = generateMXInput(dataType,
+                                     HIP_R_8F_UE8M0,
+                                     paddedData.data(),
+                                     paddedScale.data(),
+                                     rows,
+                                     cols,
+                                     stride,
+                                     isTranspose,
+                                     mxBlock,
+                                     1,
+                                     isMatrixA,
+                                     scaleLayout,
+                                     "Bounded",
+                                     -1.0f,
+                                     1.0f);
+
+    EXPECT_EQ(denseScale,
+              std::vector<uint8_t>(paddedScale.begin(), paddedScale.begin() + scaleCount));
+    EXPECT_TRUE(std::all_of(paddedScale.begin() + scaleCount,
+                            paddedScale.end(),
+                            [](uint8_t v) { return v == sentinel; }));
+    EXPECT_TRUE(std::all_of(paddedData.begin() + paddedBytes,
+                            paddedData.end(),
+                            [](uint8_t v) { return v == sentinel; }));
+
+    ASSERT_EQ(denseRef.size(), rows * cols);
+    ASSERT_EQ(paddedRef.size(), paddedElements);
+    size_t const elementBits = dataType == HIP_R_8F_E4M3
+                                   ? 8
+                                   : (dataType == static_cast<hipDataType>(HIP_R_6F_E3M2) ? 6 : 4);
+    size_t const denseColumnBytes  = rows * elementBits / 8;
+    size_t const paddedColumnBytes = stride * elementBits / 8;
+    for(size_t col = 0; col < cols; ++col)
+    {
+        EXPECT_TRUE(std::equal(denseData.begin() + col * denseColumnBytes,
+                               denseData.begin() + (col + 1) * denseColumnBytes,
+                               paddedData.begin() + col * paddedColumnBytes));
+        EXPECT_TRUE(std::equal(denseRef.begin() + col * rows,
+                               denseRef.begin() + (col + 1) * rows,
+                               paddedRef.begin() + col * stride));
+        if(col + 1 < cols)
+            EXPECT_TRUE(std::all_of(paddedData.begin() + col * paddedColumnBytes + denseColumnBytes,
+                                    paddedData.begin() + (col + 1) * paddedColumnBytes,
+                                    [](uint8_t v) { return v == 0; }));
+        EXPECT_TRUE(std::all_of(paddedRef.begin() + col * stride + rows,
+                                paddedRef.begin() + (col + 1) * stride,
+                                [](float v) { return v == 0.0f; }));
+    }
+}
+
+TEST(MXDataGenPaddedLeadingDimValidationTest, RejectsInvalidLeadingDimensions)
+{
+    constexpr size_t rows    = 256;
+    constexpr size_t cols    = 256;
+    constexpr size_t mxBlock = 32;
+
+    constexpr uint8_t sentinel = 0x5A;
+    std::vector<uint8_t> data(rows * cols, sentinel);
+    std::vector<uint8_t> scale(rows / mxBlock * cols, sentinel);
+    auto generate = [&](size_t stride) {
+        return generateMXInput(HIP_R_8F_E4M3,
+                               HIP_R_8F_UE8M0,
+                               data.data(),
+                               scale.data(),
+                               rows,
+                               cols,
+                               stride,
+                               true,
+                               mxBlock,
+                               1,
+                               true,
+                               MXScaleLayout::None,
+                               "Bounded",
+                               -1.0f,
+                               1.0f);
+    };
+
+    for(size_t stride : {size_t{0}, rows - 1})
+    {
+        EXPECT_THROW(generate(stride), std::invalid_argument);
+        EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t v) { return v == sentinel; }));
+        EXPECT_TRUE(std::all_of(scale.begin(), scale.end(), [](uint8_t v) { return v == sentinel; }));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PaddedOperands,
+    MXDataGenPaddedLeadingDimTest,
+    ::testing::Values(std::make_tuple(HIP_R_8F_E4M3, true, true, MXScaleLayout::None),
+                      std::make_tuple(HIP_R_8F_E4M3, false, false, MXScaleLayout::None),
+                      std::make_tuple(HIP_R_8F_E4M3, true, true, MXScaleLayout::GFX1250),
+                      std::make_tuple(HIP_R_8F_E4M3, false, false, MXScaleLayout::GFX1250),
+                      std::make_tuple(static_cast<hipDataType>(HIP_R_6F_E3M2),
+                                      true,
+                                      true,
+                                      MXScaleLayout::None),
+                      std::make_tuple(static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                      false,
+                                      false,
+                                      MXScaleLayout::None),
+                      std::make_tuple(HIP_R_8F_E4M3, false, true, MXScaleLayout::None),
+                      std::make_tuple(static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                      true,
+                                      false,
+                                      MXScaleLayout::None)));
+
 // ============================================================================
 // 1x128 block scaling
 //
@@ -619,6 +777,202 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
     EXPECT_EQ(dataA, dataB);
     EXPECT_EQ(scaleA, scaleB);
 }
+
+// ============================================================================
+// Reference opt-out
+//
+// The TensileLite client discards the reference floats, so it calls generateMXInput with
+// returnReference=false. That must only skip the reference: the data and scale bytes must be
+// the same as with the default, for every data type, both matrices and orientations (the
+// orientations the generator aligns itself and the ones generateMXInput re-arranges), every
+// scale layout, decoupled data/scale initialization, and an M/N tail. K stays a multiple
+// of the block: with a K tail the re-arranged orientations read past the generated bytes,
+// so their output is not deterministic even with the default.
+// ============================================================================
+
+// Params: {dataType, scaleType, initMethod, scaleInitMethod}
+class MXDataGenReferenceOptOutTest
+    : public ::testing::TestWithParam<
+          std::tuple<hipDataType, hipDataType, std::string, std::string>>
+{
+};
+
+TEST_P(MXDataGenReferenceOptOutTest, SameBytesWithoutReference)
+{
+    auto [dataType, scaleType, initMethod, scaleInitMethod] = GetParam();
+    constexpr int mxBlock                  = 32;
+
+    struct Shape
+    {
+        uint64_t      mn, k;
+        MXScaleLayout layout;
+    };
+    std::vector<Shape> const shapes = {{256, 256, MXScaleLayout::None},
+                                       {256, 256, MXScaleLayout::GFX950},
+                                       {256, 256, MXScaleLayout::GFX1250},
+                                       {256, 128, MXScaleLayout::Tile128x4},
+                                       {200, 96, MXScaleLayout::None}};
+
+    for(auto const& shape : shapes)
+        for(bool isMatrixA : {true, false})
+            for(bool isTranspose : {true, false})
+            {
+                // K runs along the stored rows for transposed A and non-transposed B.
+                bool const     kMajor = isMatrixA == isTranspose;
+                uint64_t const rows   = kMajor ? shape.k : shape.mn;
+                uint64_t const cols   = kMajor ? shape.mn : shape.k;
+                SCOPED_TRACE(::testing::Message()
+                             << "mn=" << shape.mn << " k=" << shape.k
+                             << " layout=" << static_cast<int>(shape.layout)
+                             << " isMatrixA=" << isMatrixA << " isTranspose=" << isTranspose
+                             << " scaleInitMethod=" << scaleInitMethod);
+
+                // Upper bounds for every type and layout; the same sentinel in both runs, so
+                // bytes neither run writes compare equal.
+                size_t const         bytes = rows * cols;
+                std::vector<uint8_t> dataRef(bytes, 0xcc), scaleRef(bytes, 0xcc);
+                std::vector<uint8_t> dataNoRef(bytes, 0xcc), scaleNoRef(bytes, 0xcc);
+
+                auto run = [&](std::vector<uint8_t>& data,
+                               std::vector<uint8_t>& scale,
+                               bool                  returnReference) {
+                    return generateMXInput(dataType,
+                                           scaleType,
+                                           data.data(),
+                                           scale.data(),
+                                           rows,
+                                           cols,
+                                           rows,
+                                           isTranspose,
+                                           isMatrixA ? mxBlock : 1,
+                                           isMatrixA ? 1 : mxBlock,
+                                           isMatrixA,
+                                           shape.layout,
+                                           initMethod,
+                                           -1.0f,
+                                           1.0f,
+                                           scaleInitMethod,
+                                           /*seedIndex=*/0,
+                                           returnReference);
+                };
+
+                // integer_exact refuses swizzled scales unless K runs along the stored rows,
+                // and Tile128x4 has the same orientation restriction for every init mode.
+                // Both restrictions apply with or without the returned reference.
+                if(!kMajor
+                   && (shape.layout == MXScaleLayout::Tile128x4
+                       || (initMethod == "integer_exact" && shape.layout != MXScaleLayout::None)))
+                {
+                    EXPECT_THROW(run(dataRef, scaleRef, true), std::runtime_error);
+                    EXPECT_THROW(run(dataNoRef, scaleNoRef, false), std::runtime_error);
+                    continue;
+                }
+
+                std::vector<float> const ref   = run(dataRef, scaleRef, true);
+                std::vector<float> const noRef = run(dataNoRef, scaleNoRef, false);
+
+                EXPECT_EQ(ref.size(), rows * cols);
+                EXPECT_TRUE(noRef.empty());
+                EXPECT_EQ(dataRef, dataNoRef);
+                EXPECT_EQ(scaleRef, scaleNoRef);
+                EXPECT_TRUE(std::any_of(dataRef.begin(), dataRef.end(), [](uint8_t b) {
+                    return b != 0xcc;
+                })) << "generator did not write the data";
+            }
+}
+
+TEST(MXDataGenReferenceOptOut, PreservesSeedIndexForMaf2)
+{
+    constexpr size_t rows = 64, cols = 64, mxBlock = 32;
+    std::vector<uint8_t> seedZeroData;
+    for(uint32_t seedIndex : {0u, 7u})
+    {
+        SCOPED_TRACE(seedIndex);
+        std::vector<uint8_t> dataRef(rows * cols), dataNoRef(rows * cols);
+        std::vector<uint8_t> scaleRef(rows * cols / mxBlock),
+            scaleNoRef(rows * cols / mxBlock);
+        // Existing callers pass a seed and rely on the default reference output.
+        auto const ref = generateMXInput(HIP_R_8F_E4M3,
+                                         HIP_R_8F_UE8M0,
+                                         dataRef.data(),
+                                         scaleRef.data(),
+                                         rows,
+                                         cols,
+                                         rows,
+                                         true,
+                                         mxBlock,
+                                         1,
+                                         true,
+                                         MXScaleLayout::None,
+                                         "maf2_0",
+                                         -1.0f,
+                                         1.0f,
+                                         "",
+                                         seedIndex);
+        auto const noRef = generateMXInput(HIP_R_8F_E4M3,
+                                           HIP_R_8F_UE8M0,
+                                           dataNoRef.data(),
+                                           scaleNoRef.data(),
+                                           rows,
+                                           cols,
+                                           rows,
+                                           true,
+                                           mxBlock,
+                                           1,
+                                           true,
+                                           MXScaleLayout::None,
+                                           "maf2_0",
+                                           -1.0f,
+                                           1.0f,
+                                           "",
+                                           seedIndex,
+                                           false);
+        EXPECT_EQ(ref.size(), rows * cols);
+        EXPECT_TRUE(noRef.empty());
+        EXPECT_EQ(dataRef, dataNoRef);
+        EXPECT_EQ(scaleRef, scaleNoRef);
+        if(seedIndex == 0)
+            seedZeroData = dataRef;
+        else
+            EXPECT_NE(dataRef, seedZeroData);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ReferenceOptOut,
+    MXDataGenReferenceOptOutTest,
+    ::testing::Values(
+        std::make_tuple(HIP_R_8F_E5M2, HIP_R_8F_UE8M0, std::string("Bounded"), std::string("")),
+        std::make_tuple(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, std::string("Bounded"), std::string("")),
+        std::make_tuple(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, std::string("integer_exact"), std::string("")),
+        std::make_tuple((hipDataType)HIP_R_6F_E2M3,
+                        HIP_R_8F_UE8M0,
+                        std::string("Bounded"),
+                        std::string("")),
+        std::make_tuple((hipDataType)HIP_R_6F_E3M2,
+                        HIP_R_8F_UE8M0,
+                        std::string("Bounded"),
+                        std::string("")),
+        std::make_tuple((hipDataType)HIP_R_4F_E2M1,
+                        HIP_R_8F_UE8M0,
+                        std::string("Bounded"),
+                        std::string("")),
+        std::make_tuple((hipDataType)HIP_R_4F_E2M1,
+                        HIP_R_8F_E4M3,
+                        std::string("Bounded"),
+                        std::string("")),
+        std::make_tuple((hipDataType)HIP_R_4F_E2M1,
+                        (hipDataType)HIP_R_8F_E5M3_EXT,
+                        std::string("Bounded"),
+                        std::string("")),
+        // Different data and scale modes exercise the generator's internal float path.
+        std::make_tuple(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, std::string("Bounded"), std::string("Ones")),
+        std::make_tuple((hipDataType)HIP_R_4F_E2M1,
+                        HIP_R_8F_UE8M0,
+                        std::string("Bounded"),
+                        std::string("Ones"))
+    )
+);
 
 TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
 {
