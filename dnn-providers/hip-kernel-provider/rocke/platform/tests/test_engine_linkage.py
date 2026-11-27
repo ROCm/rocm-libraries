@@ -145,6 +145,9 @@ PYTEST_WITH_SHARD_PLUGIN = [
 # What an entry that runs its share in worker processes puts right after the
 # plugin (platform/CMakeLists.txt, _ROCKE_INSTALLED_PYTEST_WORKERS).
 PYTEST_WORKERS = ["-p", "rocke.tests.ctest_workers", "--rocke-workers", "4"]
+# What the installed pytest entries of a provider build without the shared
+# engine load right after the shard plugin (platform/CMakeLists.txt).
+PYTHON_ENGINE_ONLY_PLUGIN = ["-p", "rocke.tests.python_engine_only"]
 EXPLICIT_GATES = {
     "rocke_library_counted_structural_gate",
     "rocke_library_counted_compiler_gate",
@@ -594,24 +597,26 @@ def test_the_selector_grid_parity_entry_exists_only_with_the_engine_module(
 
 @requires_cmake
 @pytest.mark.parametrize(
-    "cmake_arguments, strict",
+    "cmake_arguments, engine_plugin",
     [
-        ((_PROVIDER, _SHARED_ENGINE), True),
-        ((_PROVIDER,), False),
-        ((_SHARED_ENGINE,), False),
+        ((_PROVIDER, _SHARED_ENGINE), "rocke.tests.require_cpp_engine"),
+        ((_PROVIDER,), "rocke.tests.python_engine_only"),
+        ((_SHARED_ENGINE,), None),
     ],
     ids=["shared-provider", "no-shared-engine", "shared-standalone"],
 )
-def test_pytest_entries_require_the_cpp_engine_where_it_is_installed(
-    tmp_path, cmake_arguments, strict
+def test_pytest_entries_declare_the_engine_their_build_installs(
+    tmp_path, cmake_arguments, engine_plugin
 ):
     """Where the build installs the shared engine beside the package, every
     installed pytest entry but the explicit gates loads
     rocke.tests.require_cpp_engine right after the shard plugin, so a missing
     engine fails it, and every GPU entry loads
     rocke.tests.differential_engines, so it runs the Python engine's kernels
-    and compares the C++ engine's with them; where the build installs none
-    there, no entry loads either."""
+    and compares the C++ engine's with them. A provider build that installs
+    none there loads rocke.tests.python_engine_only instead, so its entries run
+    the Python engine as a declared lane; a standalone install loads
+    neither."""
     _, ctest_dir = configure_installed_ctest(tmp_path, *cmake_arguments)
     pytest_entries = {
         test["name"]: test
@@ -619,18 +624,24 @@ def test_pytest_entries_require_the_cpp_engine_where_it_is_installed(
         if runs_pytest(test)
     }
     assert pytest_entries
+    strict = engine_plugin == "rocke.tests.require_cpp_engine"
+    engine_plugins = {
+        "rocke.tests.require_cpp_engine",
+        "rocke.tests.python_engine_only",
+    }
     for name, test in pytest_entries.items():
         command = test["command"]
         gpu = "gpu" in (entry_property(test, "LABELS") or [])
         assert ("rocke.tests.differential_engines" in command) == (strict and gpu), name
         if name in EXPLICIT_GATES:
-            assert "rocke.tests.require_cpp_engine" not in command, name
+            assert not engine_plugins & set(command), name
             continue
         assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
-        assert (
-            command[6:8] == ["-p", "rocke.tests.require_cpp_engine"]
-        ) == strict, name
-        assert ("rocke.tests.require_cpp_engine" in command) == strict, name
+        if engine_plugin is None:
+            assert not engine_plugins & set(command), name
+        else:
+            assert command[6:8] == ["-p", engine_plugin], name
+            assert engine_plugins & set(command) == {engine_plugin}, name
 
 
 @requires_cmake
@@ -1026,6 +1037,13 @@ def test_installed_platform_pytest_parts_partition_the_suite(
         ),
     )
     tests = list_installed_ctest_entries(ctest_dir, tmp_path)
+    # A provider build without the shared engine (this configure's) runs its
+    # pytest entries on the Python engine alone.
+    pytest_prefix = [
+        *PYTEST_WITH_SHARD_PLUGIN,
+        *(PYTHON_ENGINE_ONLY_PLUGIN if provider_subdir else []),
+    ]
+    options_start = 1 + len(pytest_prefix) + len(PYTEST_WORKERS)
     parts = [test for test in tests if test["name"].startswith("rocke_pytest_")]
     plugin_tests = [
         test for test in tests if test["name"] == "rocke_ctest_shard_pytest"
@@ -1043,11 +1061,10 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     selection_by_part = {}
     for part in parts:
         name, command = part["name"], part["command"]
-        assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
-        assert command[6:10] == PYTEST_WORKERS, name
+        assert command[1:options_start] == [*pytest_prefix, *PYTEST_WORKERS], name
         assert command[-len(suite_options) :] == suite_options, name
         selection_by_part[name.removeprefix("rocke_pytest_")] = command[
-            10 : -len(suite_options)
+            options_start : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # Three labels, as the single entry had.
@@ -1099,7 +1116,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
 
     plugin_tests_file = f"{tests_root}/test_ctest_shard.py"
     assert plugin_tests["command"][1:] == [
-        *PYTEST_WITH_SHARD_PLUGIN,
+        *pytest_prefix,
         *PYTEST_WORKERS,
         plugin_tests_file,
         *suite_options,
@@ -1127,7 +1144,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
         test for test in tests if test["name"] == "rocke_platform_gpu_pytest"
     ]
     gpu_selection = [
-        *PYTEST_WITH_SHARD_PLUGIN,
+        *pytest_prefix,
         *PYTEST_WORKERS,
         tests_root,
         "--ignore",

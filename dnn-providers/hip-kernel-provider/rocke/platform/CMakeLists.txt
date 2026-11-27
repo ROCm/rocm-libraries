@@ -416,8 +416,17 @@ endif()
 # rocke.tests.require_cpp_engine, which sets ROCKE_REQUIRE_CPP_ENGINE=1 and
 # ROCKE_CPP_STRICT=1 for the run, so a missing or broken engine fails them
 # instead of skipping its cases or falling back to the Python engine.
+#
+# A provider build that installs no shared engine beside the package (the
+# Windows provider build) has no C++ engine for its tests to cover: its
+# installed pytest entries load rocke.tests.python_engine_only, which sets
+# ROCKE_BACKEND=python and ROCKE_CPP_STRICT=1, so the Python engine is a
+# declared lane there and a lowering that asks for the C++ engine fails
+# instead of falling back to the Python engine and comparing it with itself.
 if(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE)
   string(APPEND _ROCKE_INSTALLED_PYTEST " -p rocke.tests.require_cpp_engine")
+elseif(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+  string(APPEND _ROCKE_INSTALLED_PYTEST " -p rocke.tests.python_engine_only")
 endif()
 
 include(CTest)
