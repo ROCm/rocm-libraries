@@ -36,11 +36,11 @@ BenchmarkProblems:
   #
   # Store vector widths: with SourceSwap the store vector width is VectorWidthA, which -1 resolves
   # from MIWaveTile0, so MIWaveTile0 1, 2, 4 and 8 stage bf16 D in 2-, 4-, 8- and 16-byte DS stores
-  # at MT32x256, MT64x256, MT128x256 and MT256x256. The 128 KiB staged MT256x256 tile folds the DS
-  # offsets above 64 KiB into the address. The sizes have M-edge workgroups with M % 8 odd, 6, 4 and
-  # 0, N-edge-only workgroups and only NonEdge workgroups; the last size has NonEdge, M-edge, N-edge
-  # and corner workgroups and a leading dimension larger than M, so BoundsCheck also checks the gap
-  # between columns.
+  # at MacroTile0 32, 64, 128 and 256 by MacroTile1 64 and 256 (StoreVectorWidth -1 too). The 128 KiB
+  # staged MT256x256 tile folds the DS offsets above 64 KiB into the address. The sizes have M-edge
+  # workgroups with M % 8 odd, 6, 4 and 0, N-edge-only workgroups and only NonEdge workgroups; the last
+  # size has NonEdge, M-edge, N-edge and corner workgroups and a leading dimension larger than M, so
+  # BoundsCheck also checks the gap between columns.
   ########################################
   -
     - &problem_type_bf16 # ProblemType TN
@@ -58,14 +58,18 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 2, 2, 2]
           - [16, 16, 32, 1, 1, 1, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           - [16, 16, 32, 1, 1, 2, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 2, 2, 2]
           - [16, 16, 32, 1, 1, 4, 8, 2, 2]
+          - [16, 16, 32, 1, 1, 8, 2, 2, 2]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2]
         - WavefrontSize: [32]
         - DepthU: [64]
         - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - SourceSwap: [True]
         - VectorWidthA: [-1]
@@ -99,7 +103,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - DepthU: [64]
         - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - SourceSwap: [True]
         - VectorWidthA: [-1]
@@ -114,9 +118,11 @@ BenchmarkProblems:
           - Exact: [512, 509, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
   ########################################
-  # int8 D from int32 accumulators: 1-byte elements, one data_size unit each, which the TDM block
-  # stages with ds_store_b8 at store vector width 1. M is odd and ldd = 136, so the columns of D do
-  # not start 16-byte aligned.
+  # int8 D from int32 accumulators: 1-byte elements, one data_size unit each. With SourceSwap the
+  # store vector width is VectorWidthA, which -1 resolves from MIWaveTile0, so MIWaveTile0 1, 2, 4
+  # and 8 stage D with ds_store_b8, b16, b32 and b64 and read C back with ds_load_u8, u16, b32 and
+  # b64: one byte per element at width 1, several elements packed in a VGPR above it. M is odd and
+  # ldd = 136, so the columns of D do not start 16-byte aligned.
   ########################################
   -
     - # ProblemType
@@ -134,13 +140,18 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 1, 2, 2, 2]
           - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 2, 2, 2]
+          - [16, 16, 64, 1, 1, 8, 2, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - PrefetchGlobalRead: [2]
-        - StoreVectorWidth: [1]
+        - SourceSwap: [True]
+        - VectorWidthA: [-1]
+        - StoreVectorWidth: [-1]
         - TDMStoreInst: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -225,7 +236,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - DepthU: [64]
         - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
@@ -254,7 +265,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - DepthU: [128]
         - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
@@ -299,8 +310,7 @@ BenchmarkProblems:
   ########################################
   # The one epilogue group: bias, ScaleAlphaVec and activation along M, which every store batch
   # reads, so the staged D tile follows the vectors in LDS. Its solutions place them at GlobalSplitU
-  # 1, at GlobalSplitU=-1, whose single-tile K=512 size runs GSU 2 with the partials on buffer_store,
-  # and in a persistent StreamK 3 kernel.
+  # 1 and in a persistent StreamK 3 kernel, whose tile handoff keeps them in LDS.
   ########################################
   -
     - <<: *problem_type_bf16
@@ -316,14 +326,12 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 8, 8, 2, 2]
         - WavefrontSize: [32]
         - DepthU: [64]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - TDMStoreInst: [true]
         - Groups:
           - - GlobalSplitU: [1]
-              PrefetchGlobalRead: [2]
-            - GlobalSplitU: [-1]
               PrefetchGlobalRead: [2]
             - StreamK: [3]
               PrefetchGlobalRead: [1]
@@ -340,7 +348,6 @@ BenchmarkProblems:
           - Exact: [504, 512, 1, 128]
           - Exact: [512, 509, 1, 128]
           - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
-          - Exact: [255, 253, 1, 512]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: gelu]
@@ -361,7 +368,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - WorkGroupMapping: [8]
@@ -388,7 +395,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - WorkGroupMapping: [8]
@@ -418,7 +425,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [0]
         - StoreVectorWidth: [-1]
         - WorkGroupMapping: [8]
@@ -445,7 +452,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
@@ -456,10 +463,10 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [1025, 1023, 2, 128, 1040, 1040, 128, 128]
   ########################################
-  # GlobalSplitU=-1 and 2 with MultipleBufferSingleKernel and MbskPrefetchMethod 0 and 1: the
-  # GSU == 1 branch goes through the TDM block, and with MbskPrefetchMethod 0 so does the store of
-  # the reduced tile at GSU <= 2, from a TDM copy beside the buffer_store copy a larger GSU takes;
-  # with MbskPrefetchMethod 1 the reduced tile keeps buffer_store. At GlobalSplitU=-1 K=128 runs
+  # GlobalSplitU=-1 and 2 with MultipleBufferSingleKernel and MbskPrefetchMethod 0: the GSU == 1
+  # branch goes through the TDM block, and so does the store of the reduced tile at GSU <= 2, from a
+  # TDM copy beside the buffer_store copy a larger GSU takes. MbskPrefetchMethod 1 keeps buffer_store
+  # for the reduced tile and adds no TDM code. At GlobalSplitU=-1 K=128 runs
   # GSU 1 and the single-tile K=512 sizes GSU > 1.
   ########################################
   -
@@ -473,12 +480,12 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - DepthU: [64]
         - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [-1, 2]
         - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
-        - MbskPrefetchMethod: [0, 1]
+        - MbskPrefetchMethod: [0]
         - TDMStoreInst: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -488,36 +495,10 @@ BenchmarkProblems:
           - Exact: [255, 253, 1, 512]
           - Exact: [254, 253, 1, 512]
   ########################################
-  # GlobalSplitU=-1 with SingleBuffer, K=128 only, where GSU resolves to 1: the TDM block stages D at
-  # the store vector width that the atomics of the GSU > 1 branch would cap. At GSU > 1 the host
-  # refuses SingleBuffer at launch while the uniform summation order is on (the client default).
-  ########################################
-  -
-    - *problem_type_bf16
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
-        - WavefrontSize: [32]
-        - DepthU: [64]
-        - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
-        - TDMInst: [3]
-        - StoreVectorWidth: [-1]
-        - GlobalSplitU: [-1]
-        - GlobalSplitUAlgorithm: [SingleBuffer]
-        - TDMStoreInst: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
-          - Exact: [510, 509, 2, 128, 520, 520, 128, 128]
-  ########################################
   # ReuseAcrossPersistent keeps A in VGPRs from one DataParallel tile to the next, and its count of
   # resident K tiles leaves the VGPR of the staged tile's address: fp32 D from fp8 inputs at MT64x256.
-  # The N=262144 size gives each workgroup of the persistent grid several tiles.
+  # The N=65792 and N=262144 sizes let a workgroup of the persistent grid take a second tile, the
+  # back-edge with A in VGPRs; whether one does depends on the grid the host picks for the device.
   ########################################
   -
     -
