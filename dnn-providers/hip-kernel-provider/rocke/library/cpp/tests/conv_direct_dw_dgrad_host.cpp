@@ -760,6 +760,46 @@ static void check_scheduler_reason(const char* kernel, Spec spec, Valid is_valid
           reason);
 }
 
+/* The dgrad WMMA validator's ping-pong, per-axis padding and packed-kpg
+ * refusals, with the text Python's dgrad_wmma_reason gives (a substring). */
+static void test_dgrad_wmma_new_refusals(void)
+{
+    char reason[ERR_CAP];
+    rocke_direct_dgrad_wmma_spec_t s = rocke_direct_dgrad_wmma_spec_default();
+    s.problem = dense_problem(13, 21, 64, 96);
+    s.problem.KH = 1;
+    s.problem.KW = 3;
+    s.problem.PAD = 0;
+    s.problem.pad_w = 3;
+    reason[0] = '\0';
+    CHECK(!rocke_direct_dgrad_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "direct_dgrad_wmma accepted a pad_w wider than the filter");
+    CHECK(strstr(reason, "outside") != NULL, "pad_w reason: %s", reason);
+
+    s = rocke_direct_dgrad_wmma_spec_default();
+    s.problem = dense_problem(13, 21, 128, 32);
+    s.problem.groups = 16;
+    s.problem.cpg = 8;
+    s.problem.kpg = 2;
+    s.pack_groups = 2;
+    reason[0] = '\0';
+    CHECK(!rocke_direct_dgrad_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "direct_dgrad_wmma accepted a packed kpg of 4");
+    CHECK(strstr(reason, "multiples of 8") != NULL, "packed kpg reason: %s", reason);
+
+    s = rocke_direct_dgrad_wmma_spec_default();
+    s.problem = dense_problem(13, 21, 64, 96);
+    s.pingpong = true;
+    s.waves_c = 1;
+    s.waves_p = 5;
+    s.tiles_c = 1;
+    s.tiles_p = 1;
+    reason[0] = '\0';
+    CHECK(!rocke_direct_dgrad_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "direct_dgrad_wmma accepted an odd ping-pong wave count");
+    CHECK(strstr(reason, "even wave count") != NULL, "ping-pong reason: %s", reason);
+}
+
 /* The dgrad WMMA and Winograd GEMM validators write the full text too (they
  * wrote only its first clause). */
 static void test_dgrad_wmma_scheduler_reason(void)
@@ -1180,6 +1220,7 @@ int main(void)
     test_problem_output_extents();
     test_fwd_wmma_scheduler_reason();
     test_dgrad_wmma_scheduler_reason();
+    test_dgrad_wmma_new_refusals();
     test_py_str_repr();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();

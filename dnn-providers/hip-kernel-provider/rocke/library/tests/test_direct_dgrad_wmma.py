@@ -104,6 +104,8 @@ class TestDgradWmmaSpec(unittest.TestCase):
         self.assertIn("stride", dgrad_wmma_reason(DirectDgradWmmaSpec(problem=p)))
         for pkw, knobs, needle in (
             (dict(stride=2, dil_h=2, dil_w=2, PAD=2), {}, "strided dilated"),
+            (dict(KH=1, KW=3, PAD=0, pad_w=3), {}, "outside"),
+            (dict(C=128, K=32, groups=16), dict(pack_groups=2), "multiples of 8"),
             (dict(dil_h=2, dil_w=2, PAD=5), {}, "PAD"),
             (dict(C=32, K=32, groups=8), dict(pack_groups=3), "multiple"),
             (dict(C=24, K=24, groups=8), dict(pack_groups=8), "packed cpg"),
@@ -839,6 +841,11 @@ class TestDgradWmmaPingpong(unittest.TestCase):
             (dict(stride=2), dict(pp, tiles_c=2), "stride-1"),
             (dict(C=32, K=32, groups=8), dict(pp, pack_groups=4), "stride-1"),
             ({}, dict(pp, waves_c=1, waves_p=3), "even wave count"),
+            (
+                {},
+                dict(pp, waves_c=1, waves_p=5, tiles_c=1, tiles_p=1),
+                "even wave count",
+            ),
             ({}, dict(pp, tile_w=8, tile_n=4), "rank 0"),
             ({}, dict(pp, wave_epilogue=True), "block epilogue"),
             ({}, dict(pp_group=2), "pp_group"),
