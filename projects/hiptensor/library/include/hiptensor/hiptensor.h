@@ -53,14 +53,21 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle);
 //! @brief Resizes the plan cache associated with a hipTensor handle.
 //! @param[in] handle The hipTensor handle.
 //! @param[in] numEntries Number of entries the cache will support.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise. With the plan cache
+//! disabled, nothing is resized and `HIPTENSOR_STATUS_SUCCESS` is returned.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is `NULL`.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `numEntries` is 0.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorHandleResizePlanCache(hiptensorHandle_t handle,
                                                                   const uint32_t    numEntries);
 
 //! @brief Writes the plan cache of a hipTensor handle to a file.
 //! @param[in] handle The hipTensor handle whose plan cache will be written.
 //! @param[in] fileName The name of the file to write the cache to.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise. With the plan cache
+//! disabled, nothing is written and `HIPTENSOR_STATUS_SUCCESS` is returned.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is `NULL`.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `fileName` is `NULL`.
+//! @retval HIPTENSOR_STATUS_IO_ERROR if the file cannot be written.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorHandleWritePlanCacheToFile(const hiptensorHandle_t handle, const char fileName[]);
 
@@ -68,7 +75,12 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] handle The hipTensor handle to populate with the plan cache.
 //! @param[in] fileName The name of the file to read the cache from.
 //! @param[out] numCachelinesRead On exit, this variable will hold the number of successfully-read cachelines.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise. With the plan cache
+//! disabled, nothing is read, `numCachelinesRead` is set to 0 and `HIPTENSOR_STATUS_SUCCESS` is
+//! returned.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is `NULL`.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `fileName` or `numCachelinesRead` is `NULL`.
+//! @retval HIPTENSOR_STATUS_IO_ERROR if the file cannot be opened.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorHandleReadPlanCacheFromFile(
     hiptensorHandle_t handle, const char fileName[], uint32_t* numCachelinesRead);
 

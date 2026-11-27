@@ -50,6 +50,10 @@
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_lru_test.cpp
      )
+ add_hiptensor_unit_test(plan_cache_api_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_api_test.cpp
+     )
  add_hiptensor_unit_test(batched_contraction_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_test.cpp
