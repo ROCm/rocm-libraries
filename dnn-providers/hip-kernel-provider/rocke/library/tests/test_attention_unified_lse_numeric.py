@@ -22,6 +22,7 @@ from kernels.common.attention_unified import (
     run_unified_attention_torch,
 )
 from rocke.numeric import storage
+from rocke.numeric.compare import Tolerance, assert_within_tolerance
 from rocke.runtime.device_array import DeviceArray, host_values
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.gpu import current_device_arch_in
@@ -33,6 +34,7 @@ from ._attention_paged_reference import (
     PAGED_OUTPUT_RTOL,
     paged_attention_reference_with_lse,
 )
+from ._attention_tolerance import LSE_TOLERANCE, attention_tolerance
 from ._attention_unified_support import random_half
 
 
@@ -46,13 +48,6 @@ def cdna3_or_4():
     current_device_arch_in(("gfx942", "gfx950"), "the unified LSE numeric lane")
 
 
-def _tolerance(dtype):
-    return 2e-2 if dtype == "fp16" else 4e-2
-
-
-# The fp32 LSE's bound, whatever the output dtype.
-_LSE_ATOL = 1e-3
-_LSE_RTOL = 1e-3
 # The split-KV O bound. On the decode shapes max |O| is only about 0.1-0.3, so
 # the output-dtype bound above would pass one misaddressed K or V page or a
 # dropped key tile; the paged output bound (PAGED_OUTPUT_ATOL/RTOL) holds there.
@@ -261,8 +256,8 @@ def _assert_only_the_nan_row_is_nan(out, lse, o_ref, lse_ref, nan_row, assert_o)
     assert np.isfinite(lse[..., 0][rest]).all(), "NaN leaked into another LSE"
     assert np.isfinite(out[rest]).all(), "NaN leaked into another (row, head)"
     assert_o(out[rest], o_ref[rest])
-    np.testing.assert_allclose(
-        lse[..., 0][rest], lse_ref[..., 0][rest], atol=_LSE_ATOL, rtol=_LSE_RTOL
+    assert_within_tolerance(
+        lse[..., 0][rest], lse_ref[..., 0][rest], LSE_TOLERANCE, context="LSE"
     )
 
 
@@ -280,7 +275,9 @@ def _assert_split_kv_o(out, o_ref):
     """O matches the reference element-wise within the split-KV bound."""
     largest = float(np.abs(o_ref).max(initial=0.0))
     atol = max(PAGED_OUTPUT_ATOL, _SPLIT_KV_O_ATOL_PER_MAX_O * largest)
-    np.testing.assert_allclose(out, o_ref, atol=atol, rtol=PAGED_OUTPUT_RTOL)
+    assert_within_tolerance(
+        out, o_ref, Tolerance(atol=atol, rtol=PAGED_OUTPUT_RTOL), context="O"
+    )
 
 
 def _assert_split_kv_lse(lse, lse_ref):
@@ -289,9 +286,7 @@ def _assert_split_kv_lse(lse, lse_ref):
     assert not np.isnan(lse).any(), "an LSE row was left unwritten"
     np.testing.assert_array_equal(np.isneginf(lse), np.isneginf(lse_ref))
     finite = np.isfinite(lse_ref)
-    np.testing.assert_allclose(
-        lse[finite], lse_ref[finite], atol=_LSE_ATOL, rtol=_LSE_RTOL
-    )
+    assert_within_tolerance(lse[finite], lse_ref[finite], LSE_TOLERANCE, context="LSE")
 
 
 def _assert_matches_reference(out, lse, o_ref, lse_ref):
@@ -358,7 +353,7 @@ def _run2d_lse_off(problem, data, *, softcap, backend):
 
 def _assert_2d_o(out, o_ref, dtype):
     """O matches the reference within the output dtype's bound."""
-    assert np.abs(out - o_ref).max() < _tolerance(dtype)
+    assert_within_tolerance(out, o_ref, attention_tolerance(dtype), context="O")
 
 
 def _assert_2d_result(out, off, lse, o_ref, lse_ref, dtype):
@@ -375,9 +370,7 @@ def _assert_2d_result(out, off, lse, o_ref, lse_ref, dtype):
     )
     assert not np.isposinf(lse).any(), "+inf LSE"
     finite = np.isfinite(lse_ref)
-    np.testing.assert_allclose(
-        lse[finite], lse_ref[finite], atol=_LSE_ATOL, rtol=_LSE_RTOL
-    )
+    assert_within_tolerance(lse[finite], lse_ref[finite], LSE_TOLERANCE, context="LSE")
 
 
 # One explicit dispatcher geometry per tiled 2D epilogue branch (flags =
@@ -949,9 +942,7 @@ def test_gfx950_head_major_lse(branch, dtype, q_lens, kv_lens):
         bhs1 = written.reshape(len(q_lens), hq, q_lens[0], 1)
         ref = lse_ref.reshape(len(q_lens), q_lens[0], hq, 1).transpose(0, 2, 1, 3)
         finite = np.isfinite(ref)
-        np.testing.assert_allclose(
-            bhs1[finite], ref[finite], atol=_LSE_ATOL, rtol=_LSE_RTOL
-        )
+        assert_within_tolerance(bhs1[finite], ref[finite], LSE_TOLERANCE, context="LSE")
 
 
 @pytest.mark.gpu

@@ -30,10 +30,12 @@ import pytest
 from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
 from dispatch.attention.unified_rules import canonicalize_tuning_spec
 from kernels.common.attention_unified import UnifiedAttentionProblem
+from rocke.numeric.compare import assert_within_tolerance
 from rocke.runtime.hip_module import get_device_arch
 
 from ._attention_paged_reference import paged_attention_reference, round_to_half
 from ._attention_tiled_launch import launch_tiled_one_sequence
+from ._attention_tolerance import attention_tolerance
 
 _ARCH = get_device_arch()
 pytestmark = [
@@ -51,9 +53,6 @@ _GEOMETRIES = [
     ("bf16", 128, 64, "gfx942_u2d_transposed_x8_nw2_mw32_t1xb_llvm"),
     ("fp16", 64, 32, "gfx942_u2d_transposed_x8_nw4_mw32_t2xb_llvm"),
 ]
-
-# Largest |O - O_ref| allowed: fp16 / bf16 rounding of the output and of P.
-_TOLERANCE = {"fp16": 2e-2, "bf16": 4e-2}
 
 
 def _k_from_hbm_spec(problem, variant_id, v_from_hbm):
@@ -114,8 +113,4 @@ def test_k_from_hbm_matches_reference(
     )
 
     assert np.isfinite(o).all(), "non-finite output"
-    error = np.abs(o - o_ref)
-    assert error.max() < _TOLERANCE[dtype], (
-        f"max |O - O_ref| {error.max():.3g} at (row, head, dim) "
-        f"{np.unravel_index(error.argmax(), error.shape)}"
-    )
+    assert_within_tolerance(o, o_ref, attention_tolerance(dtype), context="O")

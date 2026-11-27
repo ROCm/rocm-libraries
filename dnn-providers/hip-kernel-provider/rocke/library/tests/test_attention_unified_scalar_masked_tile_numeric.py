@@ -48,6 +48,7 @@ from kernels.common.attention_unified import (
     run_unified_attention_torch,
 )
 from rocke.core.arch.target import known_arches
+from rocke.numeric.compare import assert_within_tolerance
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
 
@@ -57,6 +58,7 @@ from ._attention_paged_reference import (
     paged_attention_reference,
     rows_with_keys,
 )
+from ._attention_tolerance import attention_tolerance
 
 # The launches compile for the device's own target id, which the builders must
 # know (gfx11 devices are only known through their generic target).
@@ -289,15 +291,9 @@ def _check(out, ref, has_key, dtype):
     assert (
         finite.all()
     ), f"{int((~finite).any(axis=(1, 2)).sum())} rows with non-finite O"
-    err = np.abs(out - ref).max(axis=(1, 2))
-    # A row that sees keys has |O| ~ mean of V over its window (~0.2 for randn
-    # V), so a collapsed row (O = 0) fails; a keyless row must be exactly 0.
-    tol = 2e-2 if dtype == "fp16" else 4e-2
-    bad = err >= tol
-    assert not bad.any(), (
-        f"{int(bad.sum())} of {out.shape[0]} query rows wrong; first bad row "
-        f"{int(np.flatnonzero(bad)[0])} (sees keys: {bool(has_key[bad][0])})"
-    )
+    # A collapsed row (O = 0, or a NaN) fails the element-wise bound; a keyless
+    # row must be exactly 0.
+    assert_within_tolerance(out, ref, attention_tolerance(dtype), context="O")
     if (~has_key).any():
         assert (out[~has_key] == 0).all(), "keyless rows must give O = 0"
 
@@ -308,9 +304,9 @@ def _check_nan_slot(out, ref, row, head, dtype, message):
     others = np.ones(out.shape[:2], dtype=bool)
     others[row, head] = False
     assert np.isfinite(out[others]).all(), "NaN leaked into another (row, head)"
-    tol = 2e-2 if dtype == "fp16" else 4e-2
-    err = np.abs(out - ref).max(axis=-1)[others]
-    assert err.max() < tol, f"{int((err >= tol).sum())} (row, head) wrong"
+    assert_within_tolerance(
+        out[others], ref[others], attention_tolerance(dtype), context="O"
+    )
 
 
 # (q_len, kv_len, top_left). Rows past the first window have masked leading

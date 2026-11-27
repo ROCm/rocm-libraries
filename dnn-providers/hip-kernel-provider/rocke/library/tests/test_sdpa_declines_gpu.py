@@ -31,11 +31,11 @@ from kernels.common.attention_dense_spec import DENSE_MAX_SCALE, DENSE_MIN_SCALE
 from rocke.runtime.device_array import DeviceArray
 from rocke.tests.gpu import current_device_arch_in
 
+from ._attention_tolerance import LSE_TOLERANCE, attention_tolerance
 from ._attention_unified_support import paged_layout, random_half
 from ._dense_numeric_gpu import (
     DENSE_GRID_SPEC_ID,
     assert_close,
-    attention_tolerance,
     dense_reference,
     filled,
     operand,
@@ -114,7 +114,7 @@ def _dense_binding(arch, **bind_options):
 
 def _assert_dense_matches(out, qkv, scale):
     reference, _ = dense_reference(*qkv, scale)
-    assert_close(out, reference, atol=attention_tolerance("fp16"), rtol=0.0)
+    assert_close(out, reference, attention_tolerance("fp16"))
 
 
 @pytest.mark.gpu
@@ -151,8 +151,6 @@ def test_dense_bind_scale_refused_without_a_launch(arch, scale, error, match):
 
 _HQ, _HKV, _HEAD_SIZE, _BLOCK_SIZE = 8, 2, 64, 16
 _KV_LENS = (40, 33)  # one decode query per sequence
-# The LSE bound: a natural log of the fp32 softmax sum, so tighter than O's.
-_LSE_ATOL = 1e-2
 
 
 class _DecodeScene:
@@ -225,9 +223,9 @@ class _DecodeScene:
             q_offsets=np.arange(len(_KV_LENS) + 1),
             kv_offsets=np.concatenate([[0], np.cumsum(_KV_LENS)]),
         )
-        assert_close(self.out, out, atol=attention_tolerance("fp16"), rtol=0.0)
+        assert_close(self.out, out, attention_tolerance("fp16"))
         if self.lse is not None:
-            assert_close(self.lse, lse, atol=_LSE_ATOL, rtol=0.0)
+            assert_close(self.lse, lse, LSE_TOLERANCE)
 
 
 _REFUSED = [

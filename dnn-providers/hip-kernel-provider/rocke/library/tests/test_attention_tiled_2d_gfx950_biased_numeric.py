@@ -30,6 +30,7 @@ import pytest
 from dispatch.attention.common import AttentionTuningSpec
 from kernels.common import attention_unified as au
 from kernels.common.attention_unified import UnifiedAttentionProblem
+from rocke.numeric.compare import assert_within_tolerance, tolerance_excess
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import arch_skip_reason
 
@@ -40,6 +41,7 @@ from ._attention_paged_reference import (
     round_to_half,
 )
 from ._attention_tiled_launch import launch_tiled
+from ._attention_tolerance import attention_tolerance
 
 ARCH = "gfx950"
 _DEVICE_ARCH = get_device_arch()
@@ -52,9 +54,6 @@ pytestmark = [
         ),
     ),
 ]
-
-# max |O - reference| over every element; the 2D numeric tests' bounds.
-TOLERANCE = {"fp16": 2e-2, "bf16": 4e-2}
 
 # Every shape keeps max_seqlen_q above 256, the combo threshold, and has a
 # sequence with q_len == kv_len, whose first query rows see only a few keys:
@@ -268,10 +267,10 @@ def _check(case: Case):
         without = _reference(
             reduced_case, q, k_cache, v_cache, block_table, reduced_modifiers, scale
         )
-        effect = float(np.abs(want - without).max())
+        effect = tolerance_excess(without, want, attention_tolerance(case.dtype))
         assert (
-            effect > MODIFIER_EFFECT_IN_TOLERANCES * TOLERANCE[case.dtype]
-        ), f"dropping {name} moves O by only {effect:.3e}"
+            effect > MODIFIER_EFFECT_IN_TOLERANCES
+        ), f"dropping {name} moves O by only {effect:.3g} tolerances"
     kernel_spec = au._tiled_spec_from_problem(problem, ARCH)
     spec = AttentionTuningSpec(
         path="2d",
@@ -296,8 +295,7 @@ def _check(case: Case):
         softcap=case.softcap,
         **modifiers,
     )
-    error = float(np.abs(out - want).max())
-    assert error <= TOLERANCE[case.dtype], f"max |O - reference| = {error:.3e}"
+    assert_within_tolerance(out, want, attention_tolerance(case.dtype), context="O")
 
 
 @pytest.mark.parametrize(

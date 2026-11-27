@@ -8,7 +8,7 @@ This file adds what they leave open, against the float64 oracle
 ``rocke.numeric.sdpa_reference`` on exactly the stored values:
 
 * seeds and input distributions (uniform, large magnitude, near-constant K),
-  reporting how many rows miss the tolerance and the worst one;
+  reporting how many elements miss the tolerance and the worst one;
 * an output between two guard regions and pre-filled with NaN, so a write
   outside the output, or an element left unwritten, fails;
 * rows that see no key (O = 0, LSE = -inf) and extreme but legal magnitudes;
@@ -29,12 +29,13 @@ import numpy as np
 import pytest
 from kernels.common.attention_mask_type import AttentionMaskType
 from rocke.numeric import storage
-from rocke.numeric.compare import max_abs_error
+from rocke.numeric.compare import tolerance_excess
 from rocke.tests.gpu import current_device_arch_in
 
+from ._attention_tolerance import LSE_TOLERANCE, attention_tolerance
 from ._dense_numeric_gpu import (
     DENSE_GRID_SPEC_ID,
-    attention_tolerance,
+    assert_close,
     dense_reference,
     filled,
     guard_intact,
@@ -91,6 +92,10 @@ def _request(
     )
 
 
+#: The standard deviation of every operand of the "large" input distribution.
+_LARGE = 4.0
+
+
 def _host_operands(rng, shapes, kind):
     """Q, K, V of ``shapes`` drawn from the distribution ``kind``, as float64."""
     q_shape, k_shape, v_shape = shapes
@@ -99,7 +104,7 @@ def _host_operands(rng, shapes, kind):
     if kind == "uniform":
         return tuple(rng.uniform(-1.0, 1.0, shape) for shape in shapes)
     if kind == "large":
-        return tuple(4.0 * rng.standard_normal(shape) for shape in shapes)
+        return tuple(_LARGE * rng.standard_normal(shape) for shape in shapes)
     if kind == "near_constant_k":
         return (
             rng.standard_normal(q_shape),
@@ -146,18 +151,11 @@ def _assert_written_inside(out):
     )
 
 
-def _assert_rows_close(got, want, dtype, what):
-    """Every output row within the max-abs tolerance; a failure names how many rows
+def _assert_rows_close(got, want, dtype, what, *, value_scale=1.0):
+    """Every output element within the attention tolerance for values
+    ``value_scale`` times the unit size; a failure names how many elements
     miss it and the worst one."""
-    tolerance = attention_tolerance(dtype)
-    row_error = np.abs(values(got) - values(want)).max(axis=-1)
-    row_error = np.nan_to_num(row_error, nan=np.inf)
-    over = row_error >= tolerance
-    assert not over.any(), (
-        f"{what}: {int(over.sum())} of {over.size} rows over {tolerance:.1e}; worst "
-        f"row {tuple(np.unravel_index(int(np.argmax(row_error)), row_error.shape))} "
-        f"max_abs={row_error.max():.3e}"
-    )
+    assert_close(got, want, attention_tolerance(dtype, value_scale=value_scale), what)
 
 
 # ------------------------------------------------ seeds and distributions ----
@@ -183,7 +181,13 @@ def test_seed_and_distribution_sweep(arch, kind, seed):
     q, k, v = _operands(rng, dtype, 1, s, s, hq, hkv, d, kind=kind)
     out, _ = _launch(_request(arch, dtype, d, hq, hkv, sq=s), q, k, v)
     want, _ = dense_reference(q, k, v, 1.0 / math.sqrt(d))
-    _assert_rows_close(out, want, dtype, f"{arch} fp16 D128 GQA16/4 {kind} seed {seed}")
+    _assert_rows_close(
+        out,
+        want,
+        dtype,
+        f"{arch} fp16 D128 GQA16/4 {kind} seed {seed}",
+        value_scale=_LARGE if kind == "large" else 1.0,
+    )
 
 
 # ------------------------------------------------------- keyless rows, LSE ----
@@ -216,9 +220,9 @@ def test_keyless_rows_write_zero_output_and_neg_inf_lse(arch):
         np.isneginf(got_lse), np.isneginf(want_lse), err_msg=f"{arch} keyless LSE"
     )
     finite = np.isfinite(want_lse)
-    assert max_abs_error(got_lse[finite], want_lse[finite]) < attention_tolerance(
-        dtype
-    ), f"{arch} LSE of the rows that see a key"
+    assert_close(
+        got_lse[finite], want_lse[finite], LSE_TOLERANCE, f"{arch} LSE of keyed rows"
+    )
 
 
 @pytest.mark.gpu
@@ -242,7 +246,11 @@ def test_extreme_legal_magnitudes_stay_finite_and_correct(
     assert np.isfinite(values(out)).all(), "non-finite output for finite inputs"
     want, _ = dense_reference(q, k, v, 1.0 / math.sqrt(d))
     _assert_rows_close(
-        out, want, dtype, f"{arch} magnitudes q{q_scale} k{k_scale} v{v_scale}"
+        out,
+        want,
+        dtype,
+        f"{arch} magnitudes q{q_scale} k{k_scale} v{v_scale}",
+        value_scale=v_scale,
     )
 
 
@@ -318,12 +326,12 @@ def _mutations(q, k, v, scale, hq):
 
 
 def _assert_rejected(good, mutated, dtype, label):
-    """``mutated`` misses ``good`` by at least ``_MUTATION_MARGIN`` tolerances."""
-    tolerance = attention_tolerance(dtype)
-    error = max_abs_error(values(good), values(mutated))
-    assert error >= _MUTATION_MARGIN * tolerance, (
-        f"{label}: the bug moves the output by only {error:.3e}, under "
-        f"{_MUTATION_MARGIN:g} x tolerance {tolerance:.1e}"
+    """``mutated`` misses ``good`` by at least ``_MUTATION_MARGIN`` times the
+    attention tolerance on some element."""
+    excess = tolerance_excess(values(mutated), values(good), attention_tolerance(dtype))
+    assert excess >= _MUTATION_MARGIN, (
+        f"{label}: the bug moves the output by only {excess:.3g} x the tolerance, "
+        f"under {_MUTATION_MARGIN:g}"
     )
 
 
@@ -404,3 +412,30 @@ def test_output_check_sees_a_stray_or_missing_write(row, message):
 def test_guard_check_refuses_an_array_without_guards():
     with pytest.raises(ValueError, match="guard_intact failed"):
         guard_intact(filled((4, 8), "fp16"), _GUARD_FILL)
+
+
+# ------------------------------------------------------- the bounds themselves ----
+
+
+def test_attention_bound_scales_its_absolute_part_with_the_values():
+    """Host only. The output is a weighted mean of V rows, so V four times
+    larger gets four times the absolute room and the same relative room."""
+    unit, large = attention_tolerance("fp16"), attention_tolerance(
+        "fp16", value_scale=4.0
+    )
+    assert large.atol == 4 * unit.atol and large.rtol == unit.rtol
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"dtype": "fp32"}, r"dtype='fp32', expected one of \('fp16', 'bf16'\)"),
+        ({"dtype": "fp16", "value_scale": 0.0}, r"value_scale=0.0, expected > 0"),
+        ({"dtype": "bf16", "value_scale": -1.0}, r"value_scale=-1.0, expected > 0"),
+    ],
+)
+def test_attention_bound_refuses_an_unknown_type_or_a_scale_not_above_zero(
+    kwargs, message
+):
+    with pytest.raises(ValueError, match=r"attention_tolerance failed - " + message):
+        attention_tolerance(**kwargs)

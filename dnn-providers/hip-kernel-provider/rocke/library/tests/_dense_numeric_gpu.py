@@ -11,11 +11,11 @@
   oracle in the runners' ``[B, S, H, D]`` layout, on exactly the stored values. It
   runs one head per worker thread and remembers each result by its inputs, so
   parametrized rows on the same seeded inputs compute it once.
-* Comparisons: :func:`assert_close`, :func:`attention_tolerance` (the max-abs bound
-  per element type) and :func:`same_values` (equal elements). The
-  error metric is ``rocke.numeric.compare.max_abs_error`` on :func:`values`; equal
-  bit patterns are ``rocke.tests.ieee_compare.same_bits`` on
-  ``rocke.runtime.device_array.host_values``.
+* Comparisons: :func:`assert_close` (every element within a
+  ``rocke.numeric.compare.Tolerance`` of the reference, on :func:`values`; the
+  attention bounds are in ``_attention_tolerance``) and :func:`same_values`
+  (equal elements); equal bit patterns are ``rocke.tests.ieee_compare.same_bits``
+  on ``rocke.runtime.device_array.host_values``.
 * :class:`Alias`: a second view of another array's memory under another element
   type, for the launch checks that refuse overlapping arguments.
 * fp8 K/V (:func:`fp8_kv`) and a paged cache (:func:`paged_cache`,
@@ -32,6 +32,7 @@ from collections.abc import Sequence
 import numpy as np
 from rocke.core.storage import element_bytes
 from rocke.numeric import storage
+from rocke.numeric.compare import Tolerance, assert_within_tolerance
 from rocke.numeric.fp8 import fp8e4m3_decode_table
 from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.device_array import (
@@ -50,9 +51,6 @@ _FP8E4M3_MAX = float(np.nanmax(fp8e4m3_decode_table()))
 
 #: The dispatch spec id of each arch's default-grid dense kernel.
 DENSE_GRID_SPEC_ID = {"gfx942": "gfx942_dense", "gfx950": "gfx950_dense_grid"}
-
-#: Max-abs error bound of an attention output per stored element type.
-_ATTENTION_TOLERANCE = {"fp16": 2e-2, "bf16": 4e-2}
 
 
 def upload(host, dtype: str) -> DeviceArray:
@@ -120,18 +118,6 @@ def guard_intact(array: DeviceArray, guard_fill: float) -> bool:
     guards = np.concatenate([buffer[:lead_rows], buffer[lead_rows + array.shape[0] :]])
     expected = storage.encode(np.full(guards.shape, guard_fill), array.dtype)
     return guards.tobytes() == expected.tobytes()
-
-
-def attention_tolerance(dtype: str) -> float:
-    """The max-abs error bound of a dense attention output stored as ``dtype``
-    (fp16 or bf16), against the float64 oracle. fp16 keeps 10 mantissa bits to
-    bf16's 7, so its bound is tighter."""
-    if dtype not in _ATTENTION_TOLERANCE:
-        raise ValueError(
-            f"attention_tolerance failed - dtype={dtype!r}, expected one of "
-            f"{tuple(_ATTENTION_TOLERANCE)}"
-        )
-    return _ATTENTION_TOLERANCE[dtype]
 
 
 def values(array) -> np.ndarray:
@@ -310,11 +296,10 @@ def window64_analytic_lse(num_heads: int, sinks=None) -> np.ndarray:
         return np.log(mass)
 
 
-def assert_close(out, ref, *, atol: float, rtol: float, msg: str = "") -> None:
-    """``|out - ref| <= atol + rtol * |ref|`` element-wise; a NaN fails."""
-    np.testing.assert_allclose(
-        values(out), values(ref), rtol=rtol, atol=atol, equal_nan=False, err_msg=msg
-    )
+def assert_close(out, ref, tolerance: Tolerance, msg: str = "") -> None:
+    """Every element of ``out`` within ``tolerance`` of ``ref`` (device or host
+    arrays); a NaN or infinity fails. ``msg`` starts the failure message."""
+    assert_within_tolerance(values(out), values(ref), tolerance, context=msg)
 
 
 def same_values(a, b) -> bool:

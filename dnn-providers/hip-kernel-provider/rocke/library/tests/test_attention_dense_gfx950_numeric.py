@@ -4,7 +4,7 @@
 """On-GPU numeric lane for the gfx950 dense flash-attn kernel.
 
 Drives the PUBLIC entry point ``run_attention_dense_torch`` end-to-end on a real
-gfx950 GPU with device arrays (no torch) and checks max_abs against the float64
+gfx950 GPU with device arrays (no torch) and checks every element against the float64
 ``rocke.numeric.sdpa_reference`` oracle (sinks, bands and LSE included), computed
 from exactly the values stored on the device.
 
@@ -26,7 +26,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from rocke.numeric import storage
-from rocke.numeric.compare import max_abs_error
+from rocke.numeric.compare import Tolerance, max_abs_error, within_tolerance
 from rocke.runtime.device_array import DeviceArray, host_values
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.host_arrays import HostArray
@@ -39,9 +39,10 @@ from kernels.gfx950.attention_dense import (
     supports_attention_dense,
 )
 
+from ._attention_tolerance import LSE_TOLERANCE, attention_tolerance
 from ._dense_numeric_gpu import (
     Alias,
-    attention_tolerance,
+    assert_close,
     dense_reference,
     filled,
     first_tile_max,
@@ -213,10 +214,11 @@ class TestDenseNumeric:
         # Reference: float64 SDPA on the stored inputs
         ref = dense_reference(q, k, v, scale)[0]
 
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < tol, (
-            f"{dtype} D{d} GQA{hq}/{hkv} "
-            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        assert_close(
+            out,
+            ref,
+            tol,
+            f"{dtype} D{d} GQA{hq}/{hkv} " f"{'persist' if persistent else 'default'}",
         )
 
     @requires_gfx950_gpu
@@ -244,10 +246,11 @@ class TestDenseNumeric:
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
 
         ref = dense_reference(q, k, v, scale)[0]
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < tol, (
-            f"bf16 D128 GQA16/4 scale=0.5 "
-            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        assert_close(
+            out,
+            ref,
+            tol,
+            f"bf16 D128 GQA16/4 scale=0.5 " f"{'persist' if persistent else 'default'}",
         )
 
     @requires_gfx950_gpu
@@ -277,10 +280,12 @@ class TestDenseNumeric:
 
         assert np.isfinite(values(out)).all(), "non-finite output"
         ref = dense_reference(q, k, v, scale)[0]
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < tol, (
+        assert_close(
+            out,
+            ref,
+            tol,
             f"{dtype} D128 GQA16/4 scale={scale:g} "
-            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+            f"{'persist' if persistent else 'default'}",
         )
 
     @requires_gfx950_gpu
@@ -318,10 +323,12 @@ class TestDenseNumeric:
 
         assert np.isfinite(values(out)).all(), "non-finite output"
         ref = dense_reference(q, k, v, scale, window=window)[0]
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < tol, (
+        assert_close(
+            out,
+            ref,
+            tol,
             f"bf16 D{d} SWA{window} scale={scale:g} "
-            f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+            f"{'persist' if persistent else 'default'}",
         )
 
     @requires_gfx950_gpu
@@ -481,8 +488,7 @@ class TestDenseNumeric:
             launchers.append(_launcher_for(spec))
 
             ref = dense_reference(q, k, v, scale, window=sliding_window)[0]
-            max_abs = max_abs_error(values(out), values(ref))
-            assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
+            assert_close(out, ref, tol, f"B={B} S={S}")
 
         assert launchers[0] is not None, (
             "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is "
@@ -544,8 +550,7 @@ class TestDenseNumeric:
             launchers.append(_launcher_for(spec))
 
             ref = dense_reference(q, k, v, scale)[0]
-            max_abs = max_abs_error(values(out), values(ref))
-            assert max_abs < tol, f"Hq={hq} Hkv={hkv}: max_abs={max_abs:.3e} >= {tol}"
+            assert_close(out, ref, tol, f"Hq={hq} Hkv={hkv}")
 
         assert launchers[0] is not None, (
             "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
@@ -633,10 +638,11 @@ class TestDenseNumeric:
             launchers.append(_launcher_for(spec))
 
             ref = dense_reference(q, k, v, scale, window=window)[0]
-            max_abs = max_abs_error(values(out), values(ref))
-            assert max_abs < tol, (
-                f"{persist_decode} B={B} S={S} Hq={hq} Hkv={hkv}: "
-                f"max_abs={max_abs:.3e} >= {tol}"
+            assert_close(
+                out,
+                ref,
+                tol,
+                f"{persist_decode} B={B} S={S} Hq={hq} Hkv={hkv}: ",
             )
 
         assert launchers[0] is not None, "no launcher cached; this test is blind"
@@ -737,10 +743,7 @@ class TestDenseGqaPairVariants:
         )
 
         ref, _ = dense_reference(q, k, v, scale, window=sliding_window, sinks=sinks)
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < attention_tolerance(
-            "fp16"
-        ), f"gqa_pair {_name}: max_abs={max_abs:.3e}"
+        assert_close(out, ref, attention_tolerance("fp16"), f"gqa_pair {_name}")
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
@@ -772,10 +775,7 @@ class TestDenseGqaPairVariants:
         )
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
         ref = dense_reference(q, k, v, scale)[0]
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < attention_tolerance(
-            "fp16"
-        ), f"wide DMA MHA: max_abs={max_abs:.3e}"
+        assert_close(out, ref, attention_tolerance("fp16"), "wide DMA MHA")
 
 
 class TestDenseSinksNumeric:
@@ -863,7 +863,6 @@ class TestDenseSinksNumeric:
         # Reference: softmax(concat([QK, sink]))[..., :-1] @ V
         ref = dense_reference(q, k, v, scale, causal=causal, window=sw, sinks=sinks)[0]
 
-        max_abs = max_abs_error(values(out), values(ref))
         # Build descriptive label
         mask_label = []
         if not causal:
@@ -874,10 +873,12 @@ class TestDenseSinksNumeric:
             mask_label.append(f"sw{sw}")
         mask_str = "+".join(mask_label)
 
-        assert max_abs < tol, (
+        assert_close(
+            out,
+            ref,
+            tol,
             f"{dtype} D{d} GQA{hq}/{hkv} "
-            f"{'persist' if persistent else 'default'} {mask_str} sink_{sink_magnitude}: "
-            f"max_abs={max_abs:.3e} >= {tol}"
+            f"{'persist' if persistent else 'default'} {mask_str} sink_{sink_magnitude}",
         )
 
 
@@ -900,7 +901,18 @@ _BOTTOM_RIGHT_CASES = [
     pytest.param("bm128", 197, 400, 1, True, False, id="bm128-ragged-197x400"),
 ]
 
-_BOTTOM_RIGHT_TOL = 2e-2
+#: Every moving-diagonal case here is bf16.
+_BOTTOM_RIGHT_TOL = attention_tolerance("bf16")
+
+
+def _assert_shifted_not_top_left(out, shifted, top_left, label: str) -> None:
+    """``out`` matches the bottom-right (shifted-diagonal) reference and is
+    outside the bound around the top-left one, so the check cannot pass on a
+    kernel that ignores the shift."""
+    assert_close(out, shifted, _BOTTOM_RIGHT_TOL, f"{label}: shifted")
+    assert not within_tolerance(
+        values(out), values(top_left), _BOTTOM_RIGHT_TOL
+    ), f"{label}: unexpectedly matches top-left"
 
 
 class TestDenseBottomRightNumeric:
@@ -951,20 +963,12 @@ class TestDenseBottomRightNumeric:
 
         shifted = dense_reference(q, k, v, scale, bottom_right=True, sinks=sinks)[0]
         top_left = dense_reference(q, k, v, scale, sinks=sinks)[0]
-        shifted_err = max_abs_error(values(out), values(shifted))
-        top_left_err = max_abs_error(values(out), values(top_left))
-
         label = (
             f"{geometry} B{batch} {sq}x{skv} "
             f"{'ragged' if ragged else 'aligned'}"
             f"{'+sinks' if use_sinks else ''}"
         )
-        assert shifted_err < _BOTTOM_RIGHT_TOL, (
-            f"{label}: shifted max_abs={shifted_err:.3e} " f">= {_BOTTOM_RIGHT_TOL}"
-        )
-        assert top_left_err > 1e-3, (
-            f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
-        )
+        _assert_shifted_not_top_left(out, shifted, top_left, label)
 
     # fp8 KV is aligned-only and has no sink path, so only aligned, sink-free
     # moving diagonals apply. D128 and D64 cover both K layouts of the fp8 loader.
@@ -1021,15 +1025,7 @@ class TestDenseBottomRightNumeric:
 
         shifted = dense_reference(q, k_deq, v_deq, scale, bottom_right=True)[0]
         top_left = dense_reference(q, k_deq, v_deq, scale)[0]
-        shifted_err = max_abs_error(values(out), values(shifted))
-        top_left_err = max_abs_error(values(out), values(top_left))
-        label = f"fp8 D{d} {sq}x{skv}"
-        assert (
-            shifted_err < _BOTTOM_RIGHT_TOL
-        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
-        assert (
-            top_left_err > 1e-3
-        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
+        _assert_shifted_not_top_left(out, shifted, top_left, f"fp8 D{d} {sq}x{skv}")
 
     # The test above pins the fp8 bottom-right MATH on a hand-built default-tile
     # spec, which takes one KV segment. Dispatch does not select that spec: for a
@@ -1089,15 +1085,9 @@ class TestDenseBottomRightNumeric:
 
         shifted = dense_reference(q, k_deq, v_deq, scale, bottom_right=True)[0]
         top_left = dense_reference(q, k_deq, v_deq, scale)[0]
-        shifted_err = max_abs_error(values(out), values(shifted))
-        top_left_err = max_abs_error(values(out), values(top_left))
-        label = f"fp8 split D{d} {sq}x{skv} segs={spec.kv_segments}"
-        assert (
-            shifted_err < _BOTTOM_RIGHT_TOL
-        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
-        assert (
-            top_left_err > 1e-3
-        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
+        _assert_shifted_not_top_left(
+            out, shifted, top_left, f"fp8 split D{d} {sq}x{skv} segs={spec.kv_segments}"
+        )
 
 
 # KV-segment split on the default grid: (geometry, mask, diag_split, segments, sq,
@@ -1152,10 +1142,11 @@ class TestDenseKvSegmentsNumeric:
         ref, _ = dense_reference(
             q, k, v, scale, causal=mask != "full", bottom_right=mask == "br"
         )
-        err = max_abs_error(values(out), values(ref))
-        assert err < _BOTTOM_RIGHT_TOL, (
-            f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}: "
-            f"max_abs={err:.3e}"
+        assert_close(
+            out,
+            ref,
+            _BOTTOM_RIGHT_TOL,
+            f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}",
         )
 
 
@@ -1218,10 +1209,9 @@ class TestWideDmaFeatures:
         ref, _ = dense_reference(
             q, k, v, scale, causal=causal, window=sliding_window, sinks=sinks
         )
-        max_abs = max_abs_error(values(out), values(ref))
-        assert max_abs < attention_tolerance(
-            dtype
-        ), f"widedma bm{block_m} {dtype} {_name}: max_abs={max_abs:.3e}"
+        assert_close(
+            out, ref, attention_tolerance(dtype), f"widedma bm{block_m} {dtype} {_name}"
+        )
 
 
 def _scattered(sequence, page_ids, block_size=16):
@@ -1279,8 +1269,8 @@ class TestDenseLseNumeric:
         )
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
         assert returned is out
-        assert max_abs_error(values(out), values(ref)) < attention_tolerance(dtype)
-        assert max_abs_error(values(lse), values(lse_ref)) < attention_tolerance(dtype)
+        assert_close(out, ref, attention_tolerance(dtype))
+        assert_close(lse, lse_ref, LSE_TOLERANCE)
         off_out = filled(out.shape, out.dtype)
         run_attention_dense_torch(
             spec=replace(spec, emit_lse=False),
@@ -1334,14 +1324,12 @@ class TestDenseLseNumeric:
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True, window=64)
         # Rows 0..126 see at least one key; rows 127.. see none.
         o, o_off = values(out), values(off_out)
-        assert max_abs_error(o[:, :127], ref[:, :127]) < attention_tolerance("bf16")
+        assert_close(o[:, :127], ref[:, :127], attention_tolerance("bf16"))
         assert same_values(o[:, :127], o_off[:, :127])
         assert same_values(o[:, 127:], np.zeros_like(o[:, 127:]))
         lse_got = values(lse)
         finite = np.isfinite(lse_ref)
-        assert max_abs_error(lse_got[finite], lse_ref[finite]) < attention_tolerance(
-            "bf16"
-        )
+        assert_close(lse_got[finite], lse_ref[finite], LSE_TOLERANCE)
         assert np.array_equal(np.isneginf(lse_got), np.isneginf(lse_ref))
 
     @pytest.mark.parametrize("right", [0, -1], ids=["causal", "left-only"])
@@ -1443,7 +1431,7 @@ class TestDenseLseNumeric:
         assert max_abs_error(lse_got[finite], analytic_lse[finite]) < 1e-5
         assert max_abs_error(lse_ref[finite], analytic_lse[finite]) < 1e-5
         assert np.array_equal(np.isneginf(lse_got), np.isneginf(analytic_lse))
-        assert max_abs_error(values(out), values(ref)) < attention_tolerance("bf16")
+        assert_close(out, ref, attention_tolerance("bf16"))
         o = values(out)
         assert same_values(o[:, 127:], np.zeros_like(o[:, 127:]))
         if with_sink:
@@ -1603,8 +1591,8 @@ class TestDenseLseNumeric:
             sinks=sinks,
         )
         assert returned is out
-        assert max_abs_error(values(out), values(ref)) < attention_tolerance(dtype)
-        assert max_abs_error(values(lse), values(lse_ref)) < attention_tolerance(dtype)
+        assert_close(out, ref, attention_tolerance(dtype))
+        assert_close(lse, lse_ref, LSE_TOLERANCE)
         assert guard_intact(lse, 12345.0), "LSE written outside it"
         assert guard_intact(out, 123.0), "O written outside it"
         off_out = filled(out.shape, out.dtype)
@@ -1663,12 +1651,8 @@ class TestDenseLseNumeric:
             q, k, v, scale, q_offsets=q_offsets, kv_offsets=k_offsets
         )
         assert returned is out
-        assert max_abs_error(values(out), values(expected_out)) < attention_tolerance(
-            dtype
-        )
-        assert max_abs_error(values(lse), values(expected_lse)) < attention_tolerance(
-            dtype
-        )
+        assert_close(out, expected_out, attention_tolerance(dtype))
+        assert_close(lse, expected_lse, LSE_TOLERANCE)
         assert guard_intact(lse, 12345.0), "LSE written outside it"
         # Packed varlen is the one mode where LSE changes the O store guard
         # (stores only rows that exist), so pin the bits against LSE off.
@@ -1759,11 +1743,11 @@ class TestDenseLseNumeric:
         assert bool((~has_key).any()) == keyless
         tol = attention_tolerance(dtype)
         # NaN anywhere in ``out`` (a row never stored) fails the comparison.
-        assert max_abs_error(values(out), values(expected_out)) < tol
+        assert_close(out, expected_out, tol)
         if emit_lse:
             lse_got = values(lse_out)
             assert np.array_equal(np.isfinite(lse_got), has_key)
-            assert max_abs_error(lse_got[has_key], expected_lse[has_key]) < tol
+            assert_close(lse_got[has_key], expected_lse[has_key], LSE_TOLERANCE)
             assert bool((lse_got[~has_key] == float("-inf")).all())
             keyless_out = values(out)[~has_key.squeeze(-1)]
             assert same_values(keyless_out, np.zeros_like(keyless_out))
@@ -1999,8 +1983,8 @@ class TestDenseLseNumeric:
             result.bind_torch(tensors, scale=scale).launch()
         result.bind_torch({**tensors, "lse": lse}, scale=scale).launch()
         ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
-        assert max_abs_error(values(out), values(ref)) < attention_tolerance("bf16")
-        assert max_abs_error(values(lse), values(lse_ref)) < attention_tolerance("bf16")
+        assert_close(out, ref, attention_tolerance("bf16"))
+        assert_close(lse, lse_ref, LSE_TOLERANCE)
 
     def test_lse_runtime_shape_reuse(self):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -2051,12 +2035,8 @@ class TestDenseLseNumeric:
                     scale=scale,
                 )
                 ref, lse_ref = dense_reference(q, k, v, scale, causal=True)
-                assert max_abs_error(values(out), values(ref)) < attention_tolerance(
-                    "bf16"
-                )
-                assert max_abs_error(
-                    values(lse), values(lse_ref)
-                ) < attention_tolerance("bf16")
+                assert_close(out, ref, attention_tolerance("bf16"))
+                assert_close(lse, lse_ref, LSE_TOLERANCE)
                 launchers.append(_launcher_for(spec))
             assert launchers[0] is not None
             assert launchers[0] is launchers[1]
@@ -2127,7 +2107,7 @@ class TestDensePagedNumeric:
         assert np.isfinite(values(out)).all()
         scale = 1.0 / math.sqrt(q.shape[-1])
         ref = dense_reference(q, k, v, scale, window=window)[0]
-        assert max_abs_error(values(out), values(ref)) < attention_tolerance("fp16")
+        assert_close(out, ref, attention_tolerance("fp16"))
 
     @staticmethod
     def _check_paged(dtype, block_size, sq, sk, window, d):
@@ -2184,8 +2164,7 @@ class TestDensePagedNumeric:
         # A row whose window holds no key (an infinite reference LSE) must output
         # zero.
         live = np.isfinite(lse_ref[0, 0, :, 0])
-        max_abs = max_abs_error(paged[:, live], ref[:, live])
-        assert max_abs < attention_tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        assert_close(paged[:, live], ref[:, live], attention_tolerance(dtype), name)
         if not live.all():
             worst = np.abs(paged[:, ~live]).max()
             assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
@@ -2243,12 +2222,14 @@ class TestDenseTopLeftCrossLengthNumeric:
         )
 
         ref = dense_reference(q, k, v, scale, sinks=sinks)[0]
-        err = max_abs_error(values(out), values(ref))
         assert not np.isnan(values(out)).any(), "NaN in output"
-        assert err < _BOTTOM_RIGHT_TOL, (
+        assert_close(
+            out,
+            ref,
+            _BOTTOM_RIGHT_TOL,
             f"B{batch} {sq}x{skv} {'ragged' if ragged else 'aligned'} "
             f"{'persist' if persistent else 'default'}"
-            f"{'+sinks' if use_sinks else ''}: max_abs={err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+            f"{'+sinks' if use_sinks else ''}",
         )
 
 
@@ -2318,8 +2299,7 @@ def _band_reference(q, k, v, scale, window, right):
 def _check_band(out, ref, empty):
     o = values(out)
     assert not np.isnan(o).any(), "NaN in output"
-    err = max_abs_error(o[:, ~empty], ref[:, ~empty])
-    assert err < _BOTTOM_RIGHT_TOL, f"max_abs={err:.3e}"
+    assert_close(o[:, ~empty], ref[:, ~empty], _BOTTOM_RIGHT_TOL)
     if empty.any():
         worst = np.abs(o[:, empty]).max()
         assert worst == 0.0, f"{int(empty.sum())} empty rows not zero: {worst}"
@@ -2501,8 +2481,12 @@ class TestDenseBandIndexTruthTable:
             ]
             if visible:
                 expected[p, :, visible] = 1.0 / len(visible)
-        err = max_abs_error(values(out), values(np.broadcast_to(expected, out.shape)))
-        assert err < 1e-2, f"max_abs={err:.3e}"
+        # Each visible weight is exactly 1, so a row is 1/n rounded to bf16 (half
+        # an ulp, 2**-9 relative) and an invisible key's column exactly 0: a
+        # dropped or extra key misses by a whole 1/n.
+        assert_close(
+            out, np.broadcast_to(expected, out.shape), Tolerance(atol=0.0, rtol=2**-7)
+        )
 
 
 class TestDenseRowIndependence:
