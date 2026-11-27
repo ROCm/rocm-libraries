@@ -71,6 +71,16 @@ TEST_F(TestStringUtil, Fnv1aHashStringOverloadsConsistent)
     EXPECT_EQ(hashStdStr, hashStrView);
 }
 
+TEST_F(TestStringUtil, Fnv1aHashStdStringHashesEmbeddedNul)
+{
+    const std::string withNul("a\0b", 3);
+
+    const auto hashStdStr = hipdnn_data_sdk::utilities::fnv1aHash(withNul);
+
+    EXPECT_EQ(hashStdStr, hipdnn_data_sdk::utilities::fnv1aHash(std::string_view("a\0b", 3)));
+    EXPECT_NE(hashStdStr, hipdnn_data_sdk::utilities::fnv1aHash("a"));
+}
+
 TEST_F(TestStringUtil, Fnv1aHashLongStringHandling)
 {
     // Test with a very long string

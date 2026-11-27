@@ -60,6 +60,7 @@
 #include "relaunch_compare.hpp"
 #include "testing_matmul_grouped_c.hpp"
 #include "ulp.hpp"
+#include "uniform_check.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 #include "w4a16_datagen.hpp"
@@ -142,6 +143,19 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
     }
 }
 
+// gfx950 ships the F4 subtile swizzle (K padded to 32 B); other archs follow the enum (64 B).
+inline bool swizzleDeviceIsGfx950()
+{
+    static const bool isGfx950 = [] {
+        int device = 0;
+        hipDeviceProp_t props;
+        return hipGetDevice(&device) == hipSuccess
+               && hipGetDeviceProperties(&props, device) == hipSuccess
+               && !strncmp(props.gcnArchName, "gfx950", 6);
+    }();
+    return isGfx950;
+}
+
 void calculateKforSwizzling(
     hipDataType datatype, const Arguments& arg, size_t& MiK, size_t& MiKv, size_t& PackK)
 {
@@ -194,6 +208,23 @@ void calculateKforSwizzling(
     }
 
     PackK = 16 / MiKv / realDataTypeSize(datatype);
+}
+
+// K blocks (MiK * PackK) that K is rounded up to a multiple of: 2 for F4 off gfx950 (64 B).
+inline size_t swizzleKBlockMultiple(hipDataType datatype)
+{
+    return (static_cast<int>(datatype) == HIP_R_4F_E2M1 && !swizzleDeviceIsGfx950()) ? 2 : 1;
+}
+
+// K padding unit in elements. gfx950 F4 keeps its original value.
+size_t swizzledKPadUnitElements(hipDataType datatype, const Arguments& arg)
+{
+    size_t MiK = 0, MiKv = 0, PackK = 0;
+    calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
+    size_t unit = MiK * PackK * swizzleKBlockMultiple(datatype);
+    if(static_cast<int>(datatype) == HIP_R_4F_E2M1 && !swizzleDeviceIsGfx950())
+        unit *= 2;
+    return unit;
 }
 
 template <typename T,
@@ -403,7 +434,8 @@ void swizzle_tensor(T*               dst,
     const size_t K1  = MiK / MiKv;
     const size_t MK  = MiK * PackK;
     const size_t nMo = (m_n + MiM_N - 1) / MiM_N;
-    const size_t nKo = (k + MK - 1) / MK;
+    const size_t nKo = ((k + MK - 1) / MK + swizzleKBlockMultiple(datatype) - 1)
+                       / swizzleKBlockMultiple(datatype) * swizzleKBlockMultiple(datatype);
 #pragma omp parallel for collapse(2) schedule(static)
     for(size_t bb = 0; bb < b; bb++)
         for(size_t mo = 0; mo < nMo; mo++)
@@ -578,7 +610,8 @@ hipError_t swizzle_operand_device(HipDeviceBuffer& dBuf,
     const size_t K1         = MiK / MiKv;
     const size_t MK         = MiK * PackK;
     const size_t nMo        = (m_n + 15) / 16;
-    const size_t nKo        = (kElems + MK - 1) / MK;
+    const size_t kMult      = swizzleKBlockMultiple(datatype);
+    const size_t nKo        = ((kElems + MK - 1) / MK + kMult - 1) / kMult * kMult;
     const size_t total      = b * nMo * 16 * nKo * MK;
     const size_t outBytes   = total * elemBytes;
     const size_t blockBytes = dBuf.getNumBytes() / block_count;
@@ -2306,7 +2339,7 @@ private:
 // partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
 // and all on the current device otherwise (SPX: the same result, only for checking results, not for speed).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
-// workspace, events). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
+// workspace, counters). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
 // is read (or written) by the other partitions over peer access; a Replicated one gets a full
 // copy on every partition device (inputs copied from device 0 in initialize(), the slices of a
 // replicated D gathered back into the device 0 D by gatherD()), so the copy-back, the check and
@@ -2337,10 +2370,10 @@ public:
         {
             std::vector<hipblasLtHandle_t> handles{handle0};
             m_streams.push_back(stream0);
-            // One counter per partition, in host memory every device can reach: run() orders
-            // the partitions with stream writes and waits on them. Created here, so that run()
-            // only enqueues.
-            for(int i = 0; i < int(arg.partitions); i++)
+            // One counter per partition plus one for checkpoint(), in host memory every device
+            // can reach: the partitions are ordered with stream writes and waits on them.
+            // Created here, so that run() only enqueues.
+            for(int i = 0; i <= int(arg.partitions); i++)
             {
                 void* word = nullptr;
                 check(hipHostMalloc(
@@ -2586,29 +2619,55 @@ public:
         return m_gemm->initialize(algo, workspaces, true, m_streams);
     }
 
+    // Ready, set, go: the other partitions wait for the work already queued on stream0 (a
+    // sentinel fill of D, for example). Needed once after such work, not on every launch.
+    void checkpoint()
+    {
+        const uint64_t gate = ++m_gate;
+        check(hipStreamWriteValue64(m_streams[0], m_counters.back(), gate, 0),
+              "hipStreamWriteValue64");
+        for(size_t i = 1; i < m_streams.size(); i++)
+            check(hipStreamWaitValue64(
+                      m_streams[i], m_counters.back(), gate, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
+    }
+
+    // The instruction cache flush of --flush on the other partitions; the caller's stream gets
+    // its own from the timing loop. So every partition starts its next slice after a flush.
+    void flushOthers(int32_t grid)
+    {
+        int previous = 0;
+        check(hipGetDevice(&previous), "hipGetDevice");
+        for(size_t i = 1; i < m_streams.size(); i++)
+        {
+            check(hipSetDevice(m_devices[i]), "hipSetDevice");
+            hipblaslt_bench::launch_flush_icache(grid, m_streams[i]);
+        }
+        check(hipSetDevice(previous), "hipSetDevice");
+    }
+
     // One launch of every partition, joined on the GPU (PartitionedGemm::run does not join
-    // them). stream0 writes the launch number into its counter after the work already queued on
-    // it, and the other partitions wait for that before their slice. After its slice every other
-    // partition writes the number into its own counter, and stream0 waits for all of them, so
-    // stream0 sees the whole span and the next launch starts when this one has finished
+    // them), the way the TensileLite client joins a split: after its slice every partition
+    // writes the launch number into its own counter and waits for the other counters. So
+    // stream0 sees the whole span, and the next launch starts when this one has finished
     // everywhere.
     hipblasStatus_t run()
     {
-        const uint64_t launch = ++m_launch;
-        check(hipStreamWriteValue64(m_streams[0], m_counters[0], launch, 0),
-              "hipStreamWriteValue64");
-        for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitValue64(m_streams[i], m_counters[0], launch, hipStreamWaitValueGte),
-                  "hipStreamWaitValue64");
         auto status = m_gemm->run(m_streams);
-        if(status != HIPBLAS_STATUS_SUCCESS)
+        if(status != HIPBLAS_STATUS_SUCCESS || m_streams.size() < 2)
             return status;
-        for(size_t i = 1; i < m_streams.size(); i++)
+        const uint64_t launch = ++m_launch;
+        const size_t count = m_streams.size();
+        for(size_t i = 0; i < count; i++)
         {
             check(hipStreamWriteValue64(m_streams[i], m_counters[i], launch, 0),
                   "hipStreamWriteValue64");
-            check(hipStreamWaitValue64(m_streams[0], m_counters[i], launch, hipStreamWaitValueGte),
-                  "hipStreamWaitValue64");
+            for(size_t k = 1; k < count; k++)
+                check(hipStreamWaitValue64(m_streams[i],
+                                           m_counters[(i + k) % count],
+                                           launch,
+                                           hipStreamWaitValueGte),
+                      "hipStreamWaitValue64");
         }
         return status;
     }
@@ -2631,8 +2690,9 @@ private:
     std::vector<int>                                       m_devices; // device of each partition
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
-    std::vector<uint64_t*>                                 m_counters; // per partition, host memory
+    std::vector<uint64_t*>                                 m_counters; // per partition + gate, host memory
     uint64_t                                               m_launch = 0;
+    uint64_t                                               m_gate   = 0;
     std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
@@ -2847,9 +2907,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_da[i] = stride_a[i];
         if(do_swizzle_a)
         {
-            size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
-            calculateKforSwizzling(TiA, arg, MiK, __, PackK);
-            size_t  K_block = MiK * PackK;
+            size_t MiM = 16;
+            size_t  K_block = swizzledKPadUnitElements(TiA, arg);
             int64_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
             if(do_batched[i] && stride_a[i] != 0)
@@ -2878,9 +2937,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_db[i] = stride_b[i];
         if(do_swizzle_b)
         {
-            size_t MiN = 16, MiK = 0, __ = 0, PackK = 0;
-            calculateKforSwizzling(TiB, arg, MiK, __, PackK);
-            size_t  K_block = MiK * PackK;
+            size_t MiN = 16;
+            size_t  K_block = swizzledKPadUnitElements(TiB, arg);
             int64_t stride_swizzle
                 = ((N[i] + MiN - 1) / MiN) * MiN * ((K[i] + K_block - 1) / K_block) * K_block;
             if(do_batched[i] && stride_b[i] != 0)
@@ -3094,6 +3152,16 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    if(arg.uniform_check_inject && arg.uniform_check == hipblaslt_uniform_check::none)
+    {
+#ifdef GOOGLE_TEST
+        FAIL() << "uniform_check_inject requires uniform_check";
+#else
+        hipblaslt_cerr << "uniform_check_inject requires uniform_check" << std::endl;
+        return;
+#endif
+    }
+
     // The self-test counts the allclose failures that check() reports per solution: unit_check
     // and norm_check would fail the case outright on the NaN in the skipped solution's D. The
     // skipped solution follows one that wrote D.
@@ -3117,6 +3185,95 @@ void testing_matmul_with_bias(const Arguments& arg,
             return;
 #endif
         }
+    }
+
+    // uniform_check: ucRows and ucCols say whether the row or column direction runs. A requested
+    // direction that cannot run says why on stderr and its solutions report skip; a reason found
+    // here also leaves its inputs as generated.
+    const bool  ucRowOn = arg.uniform_check == hipblaslt_uniform_check::row;
+    const bool  ucColOn = arg.uniform_check == hipblaslt_uniform_check::column;
+    bool        ucRows = ucRowOn, ucCols = ucColOn;
+    std::string ucSkip;
+    auto        skipUniformCheck = [&](bool& on, const char* direction, const std::string& why) {
+        on     = false;
+        ucSkip = why;
+        hipblaslt_cerr << "uniform_check " << direction << " not done: " << why << std::endl;
+    };
+    auto subByte = [](hipDataType t) {
+        const int v = static_cast<int>(t);
+        return v == HIP_R_4F_E2M1 || v == HIP_R_6F_E2M3 || v == HIP_R_6F_E3M2 || t == HIP_R_4I
+               || t == HIP_R_4U;
+    };
+    const char* cEqualD = arg.c_equal_d && (arg.beta != 0 || arg.betai != 0)
+                              ? "c_equal_d with a nonzero beta: each launch reads the D the "
+                                "previous launch wrote"
+                              : nullptr;
+    if(ucRows)
+    {
+        if(std::all_of(M.begin(), M.end(), [](int64_t m) { return m <= 1; }))
+            skipUniformCheck(ucRows, "row", "M is 1: D has a single row, so no row is compared");
+        else if(arg.partitions > 1)
+            skipUniformCheck(ucRows,
+                             "row",
+                             "--partitions: each partition runs its own GEMM on its slice of D");
+        else if(cEqualD)
+            skipUniformCheck(ucRows, "row", cEqualD);
+        else if(isW4A16Scaling(arg.scaleA))
+            skipUniformCheck(ucRows, "row", "w4a16 group scales");
+        else if(isBlockScaling(arg.scaleA))
+        {
+            if(transA != HIPBLAS_OP_T)
+                skipUniformCheck(ucRows, "row", "MX A requires transA=T");
+            else if(mx_use_rocroller
+                    || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                skipUniformCheck(ucRows, "row", "MX A with padded or preswizzled scales");
+            for(int i = 0; i < gemm_count && ucRows; i++)
+                if(lda[i] != A_row[i] || K[i] % 128 != 0)
+                    skipUniformCheck(
+                        ucRows, "row", "MX A requires lda equal to K and K a multiple of 128");
+        }
+        else if(subByte(TiA))
+            skipUniformCheck(ucRows, "row", "sub-byte A without MX scales");
+    }
+    if(ucCols)
+    {
+        if(std::all_of(N.begin(), N.end(), [](int64_t n) { return n <= 1; }))
+            skipUniformCheck(
+                ucCols, "column", "N is 1: D has a single column, so no column is compared");
+        else if(arg.partitions > 1)
+            skipUniformCheck(ucCols,
+                             "column",
+                             "--partitions: each partition runs its own GEMM on its slice of D");
+        else if(cEqualD)
+            skipUniformCheck(ucCols, "column", cEqualD);
+        else if(isBlockScaling(arg.scaleB))
+            skipUniformCheck(ucCols, "column", "block-scaled B");
+        else if(subByte(TiB))
+            skipUniformCheck(ucCols, "column", "sub-byte B without block scales");
+    }
+    if(ucRows || ucCols)
+    {
+        // Every summation order gives the same D for these inputs.
+        const auto init    = arg.initialization;
+        auto       integer = [](hipDataType t) {
+            return t == HIP_R_8I || t == HIP_R_8U || t == HIP_R_32I || t == HIP_R_4I
+                   || t == HIP_R_4U;
+        };
+        if(init == hipblaslt_initialization::rand_int
+           || init == hipblaslt_initialization::integer_exact
+           || init == hipblaslt_initialization::zero || init == hipblaslt_initialization::special
+           || init == hipblaslt_initialization::fp16_accumulator_probe
+           || init == hipblaslt_initialization::inf || init == hipblaslt_initialization::neg_inf
+           || init == hipblaslt_initialization::nan || init == hipblaslt_initialization::neg_zero)
+            hipblaslt_cerr << "warning: --uniform_check with initialization "
+                           << hipblaslt_initialization2string(init)
+                           << ": these inputs sum exactly in any order, so a pass shows little; "
+                              "use hpl, trig_float or norm_dist"
+                           << std::endl;
+        else if(integer(TiA) || integer(TiB))
+            hipblaslt_cerr << "warning: --uniform_check with integer input types: they sum "
+                              "exactly in any order, so a pass shows little"
+                           << std::endl;
     }
 
     IntegerExactPattern      iePattern = IntegerExactPattern::standard;
@@ -3552,6 +3709,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 case HIPBLASLT_EPILOGUE_GELU_BIAS:
                     epilogue[i] = HIPBLASLT_EPILOGUE_GELU_AUX_BIAS;
                     break;
+                case HIPBLASLT_EPILOGUE_SWISH_EXT:
+                    epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_AUX_EXT;
+                    break;
+                case HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+                    epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT;
+                    break;
                 case HIPBLASLT_EPILOGUE_CLAMP_EXT:
                     epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT;
                     break;
@@ -3716,8 +3879,11 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
             // MX operands are generated on the host, so they keep their host copy.
-            hA.emplace_back(TiA, fast_check_only && !isBlockScaling(arg.scaleA) ? 0 : size_A[i]);
-            hB.emplace_back(TiB, fast_check_only && !isBlockScaling(arg.scaleB) ? 0 : size_B[i]);
+            // synchronize(dX, hX) copies the whole padded device buffer, so hX must cover it.
+            const size_t hostElemsA = do_swizzle_a ? std::max(size_A[i], size_dA[i]) : size_A[i];
+            const size_t hostElemsB = do_swizzle_b ? std::max(size_B[i], size_dB[i]) : size_B[i];
+            hA.emplace_back(TiA, fast_check_only && !isBlockScaling(arg.scaleA) ? 0 : hostElemsA);
+            hB.emplace_back(TiB, fast_check_only && !isBlockScaling(arg.scaleB) ? 0 : hostElemsB);
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
@@ -3830,8 +3996,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
 
                 // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-                hA.emplace_back(TiA, size_A[i]);
-                hB.emplace_back(TiB, size_B[i]);
+                hA.emplace_back(TiA, do_swizzle_a ? std::max(size_A[i], size_dA[i]) : size_A[i]);
+                hB.emplace_back(TiB, do_swizzle_b ? std::max(size_B[i], size_dB[i]) : size_B[i]);
                 hC.emplace_back(To, size_C[i]);
                 hD_gold.emplace_back(To, size_D_copy[i]);
                 hD_1.emplace_back(To, size_D_copy[i]);
@@ -4045,6 +4211,32 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       mxSeedIndex(/*isMatrixA=*/true, b, stride_a[i]));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
+            if(ucRows && scaleLayoutA != MXScaleLayout::None)
+                skipUniformCheck(ucRows, "row", "MX A with swizzled scales");
+            if(ucRows)
+            {
+                // Logical row m of op(A) is stored column m: K packed elements and K / blockSize
+                // natural-order scales, both contiguous since lda == K.
+                const int    tiA       = static_cast<int>(TiA);
+                const size_t bits      = tiA == HIP_R_4F_E2M1                             ? 4
+                                         : tiA == HIP_R_6F_E2M3 || tiA == HIP_R_6F_E3M2 ? 6
+                                                                                        : 8;
+                const size_t colBytes  = size_t(K[i]) * bits / 8;
+                const size_t kBlocks   = size_t(K[i]) / blockSize(arg.scaleA);
+                for(int64_t b = 0; b < num_batches[i]; b++)
+                {
+                    auto* dataPtrA = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                    auto* scalePtrA
+                        = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                    float* refPtrA = refAAll.data() + size_t(b) * K[i] * M[i];
+                    for(int64_t m = 1; m < M[i]; m++)
+                    {
+                        std::memcpy(dataPtrA + m * colBytes, dataPtrA, colBytes);
+                        std::memcpy(scalePtrA + m * kBlocks, scalePtrA, kBlocks);
+                        std::memcpy(refPtrA + m * K[i], refPtrA, K[i] * sizeof(float));
+                    }
+                }
+            }
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
@@ -4231,6 +4423,63 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_c[i],
                                   num_batches[i]);
 
+            // uniform_check: for the row direction, every logical row of op(A) and every row of
+            // C equal row 0; for the column direction, every logical column of op(B) and every
+            // column of C equal column 0. On the null stream, after the device initialization
+            // and before the copies below.
+            if(ucRows)
+            {
+                if(!isBlockScaling(arg.scaleA))
+                {
+                    const int64_t ldA = do_swizzle_a ? A_row[i] : lda[i];
+                    const int64_t sA  = (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
+                                                                           : stride_a[i];
+                    auto          fillA = transA == HIPBLAS_OP_N ? uniform_check_fill_rows_device
+                                                                 : uniform_check_fill_cols_device;
+                    CHECK_HIP_ERROR(fillA(dA[i].buf(),
+                                          realDataTypeSize(TiA),
+                                          A_row[i],
+                                          A_col[i],
+                                          ldA,
+                                          sA,
+                                          num_batches[i],
+                                          hipStreamDefault));
+                }
+                CHECK_HIP_ERROR(uniform_check_fill_rows_device(dC[i].buf(),
+                                                               realDataTypeSize(To),
+                                                               M[i],
+                                                               N[i],
+                                                               ldc[i],
+                                                               stride_c[i],
+                                                               num_batches[i],
+                                                               hipStreamDefault));
+            }
+            if(ucCols)
+            {
+                const int64_t ldB = do_swizzle_b ? B_row[i] : ldb[i];
+                const int64_t sB
+                    = (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i] : stride_b[i];
+                // Logical column n of op(B) is stored column n for transB=N and row n for T.
+                auto fillB = transB == HIPBLAS_OP_N ? uniform_check_fill_cols_device
+                                                    : uniform_check_fill_rows_device;
+                CHECK_HIP_ERROR(fillB(dB[i].buf(),
+                                      realDataTypeSize(TiB),
+                                      B_row[i],
+                                      B_col[i],
+                                      ldB,
+                                      sB,
+                                      num_batches[i],
+                                      hipStreamDefault));
+                CHECK_HIP_ERROR(uniform_check_fill_cols_device(dC[i].buf(),
+                                                               realDataTypeSize(To),
+                                                               M[i],
+                                                               N[i],
+                                                               ldc[i],
+                                                               stride_c[i],
+                                                               num_batches[i],
+                                                               hipStreamDefault));
+            }
+
         // generateMXInput already produced the reference floats and the
         // kernel-ready scale layout for both A and B; nothing to do here.
             if(arg.fast_check)
@@ -4397,6 +4646,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.gradient && arg.use_e)
             {
                 hipblaslt_init(hE[i].buf(), M[i], N[i], lde[i], Taux, stride_e[i], num_batches[i]);
+                if(ucRows)
+                    uniform_check_fill_rows_host(hE[i].buf(),
+                                                 realDataTypeSize(Taux),
+                                                 M[i],
+                                                 N[i],
+                                                 lde[i],
+                                                 stride_e[i],
+                                                 num_batches[i]);
+                if(ucCols)
+                    uniform_check_fill_cols_host(hE[i].buf(),
+                                                 realDataTypeSize(Taux),
+                                                 M[i],
+                                                 N[i],
+                                                 lde[i],
+                                                 stride_e[i],
+                                                 num_batches[i]);
             }
 
             if(arg.bias_vector)
@@ -4406,6 +4671,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, num_batches[i]);
                 else
                     hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
+                // A forward bias is along M whatever bias_source says; a gradient bias is an
+                // output.
+                if(ucRows && !arg.gradient)
+                    uniform_check_fill_constant_host(
+                        hBias[i].buf(), realDataTypeSize(Tbias), size_bias[i]);
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -4420,6 +4690,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else
                     hipblaslt_init(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
+                if(ucRows)
+                    uniform_check_fill_constant_host(
+                        hScaleA[i].buf(), realDataTypeSize(Talpha), size_scaleAVec[i]);
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -4434,6 +4707,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else
                     hipblaslt_init(
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
+                if(ucCols)
+                    uniform_check_fill_constant_host(
+                        hScaleB[i].buf(), realDataTypeSize(Talpha), size_scaleBVec[i]);
             }
 
             if(arg.scaleC)
@@ -4467,7 +4743,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_init(hScaleE[i].buf(), 1, 1, 1, Talpha);
 
             if(arg.scaleAlpha_vector)
+            {
                 hipblaslt_init(hScaleAlphaVec[i].buf(), M[i], 1, M[i], Talpha);
+                if(ucRows)
+                    uniform_check_fill_constant_host(
+                        hScaleAlphaVec[i].buf(), realDataTypeSize(Talpha), M[i]);
+            }
             else if(arg.device_scalar_alpha)
                 std::memcpy(hScaleAlphaVec[i].buf(), &h_alpha[i], realDataTypeSize(Talpha));
 
@@ -4831,6 +5112,48 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       1,
                                       -1,
                                       batchCount);
+                if(ucRows)
+                {
+                    auto fillA = transA == HIPBLAS_OP_N ? uniform_check_fill_rows_device
+                                                        : uniform_check_fill_cols_device;
+                    CHECK_HIP_ERROR(fillA(dA[batchCount].buf(),
+                                          realDataTypeSize(TiA),
+                                          A_row[i],
+                                          A_col[i],
+                                          do_swizzle_a ? A_row[i] : lda[i],
+                                          0,
+                                          1,
+                                          hipStreamDefault));
+                    CHECK_HIP_ERROR(uniform_check_fill_rows_device(dC[batchCount].buf(),
+                                                                   realDataTypeSize(To),
+                                                                   M[i],
+                                                                   N[i],
+                                                                   ldc[i],
+                                                                   0,
+                                                                   1,
+                                                                   hipStreamDefault));
+                }
+                if(ucCols)
+                {
+                    auto fillB = transB == HIPBLAS_OP_N ? uniform_check_fill_cols_device
+                                                        : uniform_check_fill_rows_device;
+                    CHECK_HIP_ERROR(fillB(dB[batchCount].buf(),
+                                          realDataTypeSize(TiB),
+                                          B_row[i],
+                                          B_col[i],
+                                          do_swizzle_b ? B_row[i] : ldb[i],
+                                          0,
+                                          1,
+                                          hipStreamDefault));
+                    CHECK_HIP_ERROR(uniform_check_fill_cols_device(dC[batchCount].buf(),
+                                                                   realDataTypeSize(To),
+                                                                   M[i],
+                                                                   N[i],
+                                                                   ldc[i],
+                                                                   0,
+                                                                   1,
+                                                                   hipStreamDefault));
+                }
                 // broadcast first block
                 CHECK_HIP_ERROR(broadcast(dA[batchCount], block_count));
                 CHECK_HIP_ERROR(broadcast(dB[batchCount], block_count));
@@ -6883,6 +7206,30 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(verifyD)
             for(auto& d : dD)
                 fillWithSentinel(d, To);
+        // When uniform_check is the only check, an element of D the kernel leaves unwritten keeps
+        // its row index, or column index for the column check (see
+        // uniform_check_fill_row_index_device). With c_equal_d beta is 0 (else uniform_check is
+        // skipped), so C, which is D, is not read. With c_equal_d and a value check, the later C
+        // restore replaces this fill and the value check catches unwritten elements.
+        else if(ucRows || ucCols)
+        {
+            const size_t elem = realDataTypeSize(To);
+            if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                for(int b = 0; b < arg.batch_count; b++)
+                    CHECK_HIP_ERROR(uniform_check_fill_row_index_device(
+                        (*dDp)[b].buf(), elem, M[0], N[0], ldd[0], 0, 1, stream, ucCols));
+            else
+                for(int i = 0; i < gemm_count; i++)
+                    CHECK_HIP_ERROR(uniform_check_fill_row_index_device((*dDp)[i].buf(),
+                                                                        elem,
+                                                                        M[i],
+                                                                        N[i],
+                                                                        ldd[i],
+                                                                        stride_d[i],
+                                                                        num_batches[i],
+                                                                        stream,
+                                                                        ucCols));
+        }
         if(!verifyOutputs)
             return;
         // E is an input when the gradient reads it, and the bias vector is an output only as a
@@ -6897,6 +7244,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.amaxD)
             for(auto& amax : dAmaxD)
                 CHECK_HIP_ERROR(hipMemsetAsync(amax.buf(), 0xFF, amax.getNumBytes(), stream));
+        // The fills are queued on this stream only; hold the other partitions until they ran.
+        if(partitionedRun)
+            partitionedRun->checkpoint();
     };
     // The checks compare the first launch of each solution. Copy its outputs to the host before a
     // later launch can change them: under c_equal_d each launch reads the previous launch's D as
@@ -6937,6 +7287,130 @@ void testing_matmul_with_bias(const Arguments& arg,
                                     std::isnan(fast_check_load(hAmaxD[i].buf(), Talpha, 0)));
         }
         return filled;
+    };
+    // uniform_check: checks on the device that the D of rotation block 0 is uniform in the running
+    // direction, and reports a failure on stderr without stopping the run. With uniform summation
+    // order on, a failure counts toward --verify_strict.
+    std::unique_ptr<HipDeviceBuffer> dUniformResult, dUniformFlags;
+    if(ucRows || ucCols)
+    {
+        // Flags for every (batch, line) pair of the largest D checked in one call; a
+        // pointer-array call checks one batch.
+        const bool pointerArray = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        size_t     flagsBytes   = 0;
+        for(int i = 0; i < (pointerArray ? 1 : gemm_count); i++)
+            flagsBytes = std::max(
+                flagsBytes,
+                uniform_check_flags_bytes(ucCols ? M[i] : N[i], pointerArray ? 1 : num_batches[i]));
+        dUniformResult
+            = std::make_unique<HipDeviceBuffer>(HIP_R_8I, sizeof(UniformCheckDeviceResult));
+        dUniformFlags = std::make_unique<HipDeviceBuffer>(HIP_R_8I, flagsBytes);
+        CHECK_HIP_ERROR(dUniformResult->memcheck());
+        CHECK_HIP_ERROR(dUniformFlags->memcheck());
+    }
+    // How many solutions the uniform check ran on; a case that checked none skips at the end.
+    size_t  ucChecked = 0;
+    int32_t ucUso     = 0;
+    if(ucRows || ucCols)
+        CHECK_HIPBLASLT_ERROR(hipblasLtGetUniformSummationOrder(handle, &ucUso));
+    // void, since CHECK_HIP_ERROR returns from it under gtest.
+    auto checkUniform = [&](size_t sol, UniformCheckResult& result) {
+        if(ucRowOn != ucRows || ucColOn != ucCols)
+            result.status = UniformCheckResult::Status::skip;
+        if(!ucRows && !ucCols)
+            return;
+        ++ucChecked;
+        auto*        dResult = dUniformResult->as<UniformCheckDeviceResult>();
+        void*        flags   = dUniformFlags->buf();
+        const size_t elem    = realDataTypeSize(To);
+        // uniform_check_inject flips one bit of the last element of line 0 of the first D, in
+        // batch 0, for the compare only. It needs that line to have more than one element (M > 1
+        // for the row direction, N > 1 for the column one), else the flipped element is the
+        // reference.
+        auto flipInjected = [&]() -> hipError_t {
+            const int64_t  row = ucCols ? 0 : M[0] - 1, col = ucCols ? N[0] - 1 : 0;
+            unsigned char* p
+                = static_cast<unsigned char*>((*dDp)[0].buf()) + (col * ldd[0] + row) * elem;
+            unsigned char byte = 0;
+            hipError_t    err  = hipMemcpyAsync(&byte, p, 1, hipMemcpyDeviceToHost, stream);
+            if(err == hipSuccess)
+                err = hipStreamSynchronize(stream);
+            byte ^= 1;
+            if(err == hipSuccess)
+                err = hipMemcpyAsync(p, &byte, 1, hipMemcpyHostToDevice, stream);
+            if(err == hipSuccess)
+                err = hipStreamSynchronize(stream);
+            return err;
+        };
+        if(arg.uniform_check_inject)
+            CHECK_HIP_ERROR(flipInjected());
+        // One GEMM of a group at a time, so the first difference names its GEMM.
+        const int groups     = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? 1 : gemm_count;
+        int       failedGemm = -1;
+        UniformCheckDeviceResult h{};
+        for(int i = 0; i < groups; i++)
+        {
+            CHECK_HIP_ERROR(uniform_check_reset_device(dResult, stream));
+            if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                for(int b = 0; b < arg.batch_count; b++)
+                    CHECK_HIP_ERROR(uniform_check_device((*dDp)[b].buf(),
+                                                         elem,
+                                                         M[0],
+                                                         N[0],
+                                                         ldd[0],
+                                                         0,
+                                                         1,
+                                                         ucCols,
+                                                         flags,
+                                                         dResult,
+                                                         stream));
+            else
+                CHECK_HIP_ERROR(uniform_check_device((*dDp)[i].buf(),
+                                                     elem,
+                                                     M[i],
+                                                     N[i],
+                                                     ldd[i],
+                                                     stride_d[i],
+                                                     num_batches[i],
+                                                     ucCols,
+                                                     flags,
+                                                     dResult,
+                                                     stream));
+            UniformCheckDeviceResult g;
+            CHECK_HIP_ERROR(hipMemcpyAsync(&g, dResult, sizeof(g), hipMemcpyDeviceToHost, stream));
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+            if(g.bad && failedGemm < 0)
+            {
+                failedGemm = i;
+                h.first    = g.first;
+            }
+            h.bad += g.bad;
+        }
+        if(arg.uniform_check_inject)
+            CHECK_HIP_ERROR(flipInjected());
+        result = {h.bad ? UniformCheckResult::Status::fail : UniformCheckResult::Status::pass,
+                  int64_t(h.bad),
+                  h.first_pos()};
+        if(h.bad)
+        {
+            std::ostringstream msg;
+            msg << "uniform_check " << (ucCols ? "column" : "row") << " failed for "
+                << solution_description(
+                       handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
+                << ": " << h.bad << (ucCols ? " rows" : " columns")
+                << " of D are not uniform; the first difference is";
+            if(gemm_count > 1)
+                msg << " in GEMM " << failedGemm;
+            msg << " at " << (ucCols ? "column " : "row ") << h.first_pos()
+                << (ucCols ? ", row " : ", column ") << h.first_line();
+#ifdef GOOGLE_TEST
+            ADD_FAILURE() << msg.str();
+#else
+            hipblaslt_cerr << msg.str() << std::endl;
+#endif
+            if(ucUso)
+                hipblaslt_bench_options::verification_failures()++;
+        }
     };
     if(!arg.timing)
     {
@@ -7255,6 +7729,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                       sol,
                                                                       heuristicResult.size());
             }
+            if(iter == 0)
+            {
+                UniformCheckResult uniform;
+                checkUniform(sol, uniform);
+            }
             if(arg.fast_check)
             {
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
@@ -7497,6 +7976,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             double      rtol    = 0.0;
             double      max_ulp = 0.0;
             double      avg_ulp = 0.0;
+
+            UniformCheckResult uniform;
         };
         std::vector<CandidateReport> reports(heuristicResult.size());
         int number_cold_calls
@@ -7878,6 +8359,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 first_launch_failed
                     = hipblaslt_bench_options::verification_failures() > failures_before;
             }
+            UniformCheckResult uniform;
+            checkUniform(sol, uniform);
             if(post_iters > 0 && relaunch)
                 verifyRelaunches(sol, first_launch_failed);
             else if(post_iters > 0)
@@ -7968,7 +8451,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_rtol,
                     hipblaslt_max_ulp,
                     hipblaslt_avg_ulp,
-                    timing);
+                    timing,
+                    uniform);
             }
 
             reports[sol] = {flops,
@@ -7978,7 +8462,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipblaslt_atol,
                             hipblaslt_rtol,
                             hipblaslt_max_ulp,
-                            hipblaslt_avg_ulp};
+                            hipblaslt_avg_ulp,
+                            uniform};
         };
 
         // Every path reports its candidates through these.
@@ -8019,6 +8504,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
                             runCandidate(b);
+                            if(partitioned && searchCfg.flush)
+                                partitionedRun->flushOthers(searchCfg.flush_grid);
                         }),
                     timingAbort);
             }
@@ -8320,7 +8807,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best.rtol,
                 best.max_ulp,
                 best.avg_ulp,
-                search.best_timing);
+                search.best_timing,
+                best.uniform);
         }
     }
 
@@ -8360,4 +8848,11 @@ void testing_matmul_with_bias(const Arguments& arg,
     // The stream is destroyed by stream_owner after the device buffers (see its declaration).
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start_owner.release()));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end_owner.release()));
+
+#ifdef GOOGLE_TEST
+    // A uniform_check case that checked no solution would otherwise pass while testing nothing.
+    if(arg.uniform_check != hipblaslt_uniform_check::none && ucChecked == 0)
+        GTEST_SKIP() << "uniform_check checked no solution"
+                     << (ucSkip.empty() ? std::string() : ": " + ucSkip);
+#endif
 }

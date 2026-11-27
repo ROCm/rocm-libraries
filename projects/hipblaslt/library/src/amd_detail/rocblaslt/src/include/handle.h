@@ -125,10 +125,16 @@ struct _rocblaslt_handle
     hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
 
     // 4-byte device slot; scanner does atomicCAS(0, call_id) so the slot
-    // holds the FIRST matmul's call_id whose D contained a NaN.
-    uint32_t*             check_numerics_flag       = nullptr;
-    // Host-mapped alias of the flag under STOP_ON_FIRST (null otherwise).
-    uint32_t*             check_numerics_flag_host  = nullptr;
+    // holds the FIRST matmul's call_id whose D contained a NaN. Always a
+    // hipMalloc allocation: a device atomic against mapped host memory is a
+    // PCIe AtomicOp, and root ports without an AtomicOp completer drop it.
+    uint32_t*             check_numerics_flag          = nullptr;
+    // STOP_ON_FIRST host mirror (null otherwise). The CAS winner publishes
+    // call_id here with a plain store so scan_D can peek without syncing.
+    // check_numerics_flag_host is the CPU address; _dev is the device
+    // address of the same allocation passed into the scanner kernel.
+    uint32_t*             check_numerics_flag_host     = nullptr;
+    uint32_t*             check_numerics_flag_host_dev = nullptr;
     // Per-matmul counter; 1-indexed so 0 stays the "no NaN" sentinel.
     std::atomic<uint32_t> check_numerics_call_id{0};
     uint32_t              check_numerics_scan_every = 1u;
@@ -282,15 +288,11 @@ struct _rocblaslt_handle
     uint32_t device_comm_world    = 0;
     uint32_t device_comm_channels = 0;
 
-    // Completion flags: device_comm_channels independent regions per rank, never
-    // passed in nor readable by the caller. device_comm_peer_flags[j] is rank j's
-    // region as addressed from this process, and is one of three kinds. Entry
-    // device_comm_rank is this handle's own allocation, which it frees. A peer in
-    // another process is an IPC mapping this handle owns and closes, which is what
-    // device_comm_peer_flags_mapped[j] marks. A peer in this process is its raw
-    // device pointer, borrowed from the handle that allocated it.
-    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD]        = {};
-    bool  device_comm_peer_flags_mapped[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+    // Completion flags: device_comm_channels independent regions per rank.
+    // device_comm_peer_flags[j] is rank j's region as addressed from this
+    // process. The caller allocated and mapped every entry and keeps them alive;
+    // the handle only borrows them.
+    void* device_comm_peer_flags[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
 #endif
 };
 
@@ -430,7 +432,9 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
-    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+    const struct hipblasLtFusionDescriptor* fused_epilogue = nullptr;
+    // Attached via ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE; non-owning, as above.
+    const struct hipblasLtFusionDescriptor* fused_prologue = nullptr;
 #endif
 
     std::shared_ptr<void> m_data; // Tensile data
@@ -474,6 +478,7 @@ struct _rocblaslt_matmul_desc
         this->grouped_launch.reset();
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
+        this->fused_prologue          = src.fused_prologue;
 #endif
     }
 };
@@ -481,10 +486,10 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 // Returns false unless desc requests a fused all-to-all.
 inline bool rocblaslt_resolve_fused_a2a(const _rocblaslt_matmul_desc& desc,
-                                        RocblasltFusedEpilogueInfo&   out)
+                                        RocblasltFusionInfo&          out)
 {
-    return rocblaslt_resolve_fused_epilogue(desc.fused_epilogue, out)
-           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+    return rocblaslt_resolve_fusion(desc.fused_epilogue, desc.fused_prologue, out)
+           && out.mode != RocblasltFusionInfo::Mode::Disabled;
 }
 #endif
 
