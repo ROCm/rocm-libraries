@@ -678,7 +678,9 @@ namespace rocisa
         std::string typeConvert() const
         {
             constexpr size_t f4_t = 32;
-            return ((variant[0] < f4_t) && (variant[1] < f4_t)) ? "f8f6f4" : "f4";
+            return ((variant[0] >= f4_t) || (variant[1] >= f4_t)) && instType == InstType::INST_F4
+                       ? "f4"
+                       : "f8f6f4";
         }
 
         std::vector<InstructionInput> getParams() const override

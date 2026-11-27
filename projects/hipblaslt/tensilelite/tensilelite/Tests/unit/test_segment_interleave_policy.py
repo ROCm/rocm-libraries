@@ -991,8 +991,9 @@ def _execute_scale_addresses(source, serial):
     (6, 1), (6, 2), (6, 3), (7, 1), (8, 4), (12, 3), (12, 6), (16, 8),
 ])
 @pytest.mark.parametrize("source_swap", [False, True])
-@pytest.mark.parametrize("dtype,depth_u", [("F8", 128), ("F4", 256)])
-@pytest.mark.parametrize("rectangular", [False, True])
+# A 32x16 (rectangular) shape has only the fp4 WMMA opcode on gfx1250, so it is F4-only.
+@pytest.mark.parametrize("dtype,depth_u,rectangular",
+                         [("F8", 128, False), ("F4", 256, False), ("F4", 256, True)])
 def test_contiguous_a_scale_loads_match_wmma_rows(
         derive, assembler, monkeypatch, tile, width, source_swap, dtype, depth_u, rectangular):
     import re

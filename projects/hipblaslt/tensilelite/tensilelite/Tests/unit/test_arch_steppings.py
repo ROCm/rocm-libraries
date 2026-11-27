@@ -56,6 +56,7 @@ from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.Types import IsaInfo, IsaVersion
 from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
 from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.SolutionStructs.Validators.MatrixInstruction import validateMIParameters
 from toolchain_test_helpers import (
     copy_isa_info_map,
     shared_assembler,
@@ -88,6 +89,9 @@ CAP_XCNT = "RequiresXCntForVolatileVMEM"
 CAP_ARB_STALL_OFFSET = "WmmaArbStallBitOffset"
 
 FP4_32X16_REASON = "does not support the fp4 32x16 matrix-instruction shape"
+UNSUPPORTED_32X16_F8F6F4 = (
+    "Invalid WMMA configuration: MatrixInstruction [32, 16, 128, 1] with input data types"
+)
 
 _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 
@@ -485,6 +489,12 @@ def _derive(iim, capsys, mi, **overrides):
     return sol, capsys.readouterr().out
 
 
+def _rejects_in_mi_validator(sol, iim, capsys):
+    """Run the standalone MatrixInstruction validator and return its rejection text."""
+    assert validateMIParameters(sol, iim, True) is False
+    return capsys.readouterr().out
+
+
 # =========================================================================== #
 # fp4 32x16 gating.
 # =========================================================================== #
@@ -559,37 +569,39 @@ MIXED_MAC_PARAMS = dict(
 )
 
 
-def test_mixed_mac_type_fp4_is_covered_by_the_same_gate(
-    _gp_gfx1250, gfx1250_iim, gfx1250_strict_iim, capsys
+def test_mixed_mac_type_fp4_32x16_rejected_by_mi_validator(
+    _gp_gfx1250, gfx1250_iim, capsys
 ):
-    """The opcode is selected by the WMMA operand format (MacDataType), so a gate
-    keyed on the memory format (DataTypeA/B) would look like a hole for configs
-    such as sk_mxf8f4gemm_tdm.yaml (``MacDataTypeA: F8, MacDataTypeB: F4``).
+    """A mixed fp8/fp4 operand pair has no 32x16 opcode either.
 
-    It is not one: ``DataTypeB`` is *defaulted from* ``MacDataTypeB`` whenever the
-    config does not set it explicitly (Problem.py), and ``getRealDataTypeB`` only
-    remaps the F8/BF8 pair -- never fp4. So MacDataType fp4 always implies
-    DataType fp4 and the two keys cannot diverge here. This pins that equivalence
-    so the gate is not "fixed" into keying on something it need not.
-
-    The v1 leg is what makes the gfx1250-strict reject meaningful: it shows the config is
-    derivable, so the rejection comes from the stepping and not from the config.
+    The existing MatrixInstruction validator should reject it through the
+    StinkyTofu mnemonic table, not through a separate Solution-level dtype rule.
     """
-    v1, _ = _derive(
-        gfx1250_iim, capsys, FP4_32X16_MI,
-        ProblemType=dict(MIXED_MAC), **MIXED_MAC_PARAMS
+    sol, out = _derive(
+        gfx1250_iim, capsys, FP4_32X16_MI, ProblemType=dict(MIXED_MAC), **MIXED_MAC_PARAMS
     )
-    assert v1.get("Valid") is True, "mixed-operand config must be derivable on v1"
-    assert v1["ProblemType"]["MacDataTypeB"].isFloat4()
-    assert v1["ProblemType"]["DataTypeB"].isFloat4()
-    assert v1["MIBlock"][0] == 32 and v1["MIBlock"][1] == 16
+    assert sol.get("Valid") is True, out
+    out = _rejects_in_mi_validator(sol, gfx1250_iim, capsys)
+    assert UNSUPPORTED_32X16_F8F6F4 in out
+    assert "v_wmma_scale_f32_32x16x128_f8f6f4" in out
 
-    v0, out = _derive(
-        gfx1250_strict_iim, capsys, FP4_32X16_MI,
-        ProblemType=dict(MIXED_MAC), **MIXED_MAC_PARAMS
+
+@pytest.mark.parametrize("data_type", ["F6", "B6", "F8", "B8"])
+def test_non_fp4_32x16_rejected_on_gfx1250(_gp_gfx1250, gfx1250_iim, capsys, data_type):
+    """v_wmma_scale_f32_32x16x128_f4 is the only 32x16 opcode and accepts only fp4.
+
+    Rocisa must name fp6/fp8 requests as the missing f8f6f4 opcode so the existing
+    validateMIParameters/unsupportedMatrixInstructionMnemonic path rejects them.
+    """
+    sol, out = _derive(
+        gfx1250_iim, capsys, FP4_32X16_MI,
+        ProblemType={"DataType": data_type, "DataTypeMXSA": "E8", "DataTypeMXSB": "E8"},
+        **MIXED_MAC_PARAMS,
     )
-    assert v0.get("Valid") is False
-    assert FP4_32X16_REASON in out
+    assert sol.get("Valid") is True, out
+    out = _rejects_in_mi_validator(sol, gfx1250_iim, capsys)
+    assert UNSUPPORTED_32X16_F8F6F4 in out
+    assert "v_wmma_scale_f32_32x16x128_f8f6f4" in out
 
 
 # =========================================================================== #
