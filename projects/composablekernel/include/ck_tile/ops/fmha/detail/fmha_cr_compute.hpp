@@ -164,18 +164,19 @@ template <bool Causal,
           int QKPriority,
           int PVPriority,
           bool SetPVPriority,
-          typename T          = __bf16,
-          int DQ              = 128,
-          int DV              = 128,
-          int Tile            = 128,
-          typename Args       = Arguments,
-          int QueryTiles      = 0,
-          int KeyTiles        = 0,
-          int KeyTile         = Tile,
-          bool TailFragments  = false,
-          bool PreferNonempty = false,
-          bool LateValue      = false,
-          int PrefixUnroll    = LoopUnroll>
+          typename T                     = __bf16,
+          int DQ                         = 128,
+          int DV                         = 128,
+          int Tile                       = 128,
+          typename Args                  = Arguments,
+          int QueryTiles                 = 0,
+          int KeyTiles                   = 0,
+          int KeyTile                    = Tile,
+          bool TailFragments             = false,
+          bool PreferNonempty            = false,
+          bool LateValue                 = false,
+          int PrefixUnroll               = LoopUnroll,
+          bool CooperativeNativePrefetch = false>
 CK_TILE_DEVICE void run(Args a)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
@@ -184,7 +185,7 @@ CK_TILE_DEVICE void run(Args a)
     constexpr bool HeadPadded = std::is_base_of_v<HeadPaddedArguments, Args>;
     constexpr bool CooperativePrefetch =
         Generic &&
-        (HeadPadded || DQ == 32 || DQ == 96 || DQ == 160 ||
+        (HeadPadded || DQ == 32 || DQ == 96 || DQ == 160 || CooperativeNativePrefetch ||
          (DQ == 64 && Tile == 64 && KeyTile == 128 && Args::kVirtualSink) ||
          (Tile == 128 && (Args::BiasEnum != BlockAttentionBiasEnum::NO_BIAS ||
                           Args::kHasLogitsSoftCap || Args::kVirtualSink))) &&
@@ -595,6 +596,19 @@ CK_TILE_DEVICE void run(Args a)
     using Operand = std::conditional_t<(DQ == 32 || DQ == 64) && !NativeOperands, I8, V16<T>>;
     // Keep casts at their use sites to preserve LLVM's loop operand ordering.
     Operand kc[QKFragments];
+    // Extending V through the next PV fragment avoids early VGPR reuse on
+    // the D128 N256 schedule. Per-dword empty-asm uses retain the operand's VGPRs.
+    auto keep_operand = [](Operand x) {
+#if defined(__HIP_DEVICE_COMPILE__)
+        const I8 words = bit_cast<I8>(x);
+#pragma unroll
+        for(int word = 0; word < 8; ++word)
+            asm volatile("" : : "v"(words[word]));
+#else
+        (void)x;
+#endif
+    };
+
     auto read_slice = [&](int buffer, int slice, int i) {
         return read_k32<DQ>(ks[buffer],
                             Pitch,
@@ -734,8 +748,11 @@ CK_TILE_DEVICE void run(Args a)
         for(int ns = 0; ns < BN / 32; ++ns)
         {
 
+            // Limit the next K slice to four fragments at a time. N96 stays
+            // below 512 VGPRs, allowing two workgroups alongside its LDS tile.
+            constexpr bool StreamK = DQ == 192 && BM == 128 && BN == 96;
             Operand kn[QKFragments];
-            if(ns + 1 < BN / 32)
+            if(ns + 1 < BN / 32 && !StreamK)
             {
 #pragma unroll
                 for(int i = 0; i < QKFragments; ++i)
@@ -791,9 +808,24 @@ CK_TILE_DEVICE void run(Args a)
 #pragma unroll
                 for(int i = 0; i < QKFragments; ++i)
                 {
+                    if constexpr(StreamK)
+                        if(i % 4 == 0 && ns + 1 < BN / 32)
+                        {
+#pragma unroll
+                            for(int j = 0; j < 4; ++j)
+                            {
+                                if constexpr(NativeOperands)
+                                    kn[i + j] = read_slice(stage, ns + 1, i + j);
+                                else
+                                    kn[i + j] = bit_cast<Operand>(read_slice(stage, ns + 1, i + j));
+                            }
+                        }
 #pragma unroll
                     for(int qm = 0; qm < QM; ++qm)
                         accumulate(qm, i);
+                    if constexpr(StreamK)
+                        if(i % 4 == 3)
+                            __builtin_amdgcn_sched_barrier(0);
                 }
             }
 
@@ -1254,11 +1286,16 @@ CK_TILE_DEVICE void run(Args a)
 #pragma unroll
                     for(int d = 0; d < VFragments; ++d)
                     {
+                        if constexpr(DQ == 128 && BM == 64 && BN == 256)
+                            if(d > 0)
+                                keep_operand(vc[d - 1]);
                         if constexpr(NativeOperands)
                             out[qm][d] = mma(vc[d], p[qm][t], out[qm][d]);
                         else
                             out[qm][d] = mma(bit_cast<V16<T>>(vc[d]), p[qm][t], out[qm][d]);
                     }
+                    if constexpr(DQ == 128 && BM == 64 && BN == 256)
+                        keep_operand(vc[VFragments - 1]);
                     __builtin_amdgcn_sched_barrier(0);
                 }
 

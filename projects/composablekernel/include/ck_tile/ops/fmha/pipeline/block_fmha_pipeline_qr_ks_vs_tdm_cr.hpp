@@ -140,7 +140,10 @@ struct BlockFmhaPipelineQRKSVSTdmCr
     static_assert((kHeadDim == kValueDim && kHeadDim >= 32 && kHeadDim <= 160 &&
                    kHeadDim % 32 == 0) ||
                   (kHeadDim == 192 && kValueDim == 128));
-    static_assert((kM0 == kN0 && (kM0 == 64 || kM0 == 128)) || (kM0 == 128 && kN0 == 64) ||
+    static_assert((kHeadDim == 192 && kM0 == 128 && kN0 == 96 && kIsGroupMode && kCausal &&
+                   std::is_same_v<QDataType, bf16_t> && !kPadHeadDimQ && !kPadHeadDimV &&
+                   !kGeneralArguments && !kStoreLSE) ||
+                  (kM0 == kN0 && (kM0 == 64 || kM0 == 128)) || (kM0 == 128 && kN0 == 64) ||
                   (kM0 == 64 && kN0 == 128 && kHeadDim <= 64) ||
                   (kM0 == 64 && kN0 == 256 && kHeadDim == 128 && kValueDim == 128 && kIsGroupMode &&
                    kCausal && std::is_same_v<QDataType, bf16_t> && !kPadHeadDimQ && !kPadHeadDimV &&
@@ -347,6 +350,12 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                     ? 2
                     : unroll;
             constexpr int qk_priority = rectangular && !(kHeadDim == 192 && kPadHeadDimQ) ? 2 : 1;
+            // Grouped D192 reuses cooperative prefetch; batch windows retain
+            // their existing schedule. This also enables deferred V waits,
+            // softmax-before-V reads, and the BF16 finite softmax base, including
+            // General and head-padded variants.
+            constexpr bool cooperative_native_prefetch =
+                kIsGroupMode && kHeadDim == 192 && kM0 == 128;
             detail::fmha_cr::run<kCausal,
                                  true,
                                  false,
@@ -371,7 +380,8 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                                  false,
                                  std::is_same_v<Tuning, FmhaTdmCrCausalSinkTuning>,
                                  Tuning::kLateValue,
-                                 prefix_unroll>(a);
+                                 prefix_unroll,
+                                 cooperative_native_prefetch>(a);
         }
         else
         {

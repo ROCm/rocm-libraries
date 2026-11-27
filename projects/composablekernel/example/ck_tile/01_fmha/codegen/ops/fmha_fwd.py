@@ -2424,8 +2424,17 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 "(a.window_size_left < 0 || a.window_size_left >= 2047) && "
                 "get_num_blocks(128) > num_cus"
             )
-            # With fewer blocks, N128 amortizes the long visible prefix;
-            # windowed attention keeps N64 to avoid extra masked score work.
+            # Select M128/N96 below for long full prefixes with enough query blocks.
+            # Short queries and windows keep the existing N64/N128 choices.
+            # Packed totals and max Q approximate prefix length and grid size
+            # for ragged groups; each kernel still masks individual members.
+            n96_eligible = CppConstraint(
+                "a.sink_ptr == nullptr && a.window_size_left < 0 && "
+                "a.window_size_right == 0 && a.max_seqlen_q >= 256 && "
+                "get_num_blocks(128) >= 2 * num_cus && "
+                "int64_t{a.seqlen_k} - a.seqlen_q >= 4096 * int64_t{a.batch}"
+            )
+            # With fewer blocks, N128 amortizes the long visible prefix.
             prefix = CppConstraint(
                 "a.sink_ptr == nullptr && a.max_seqlen_q >= 128 && "
                 "a.window_size_left < 0 && a.window_size_right == 0 && "
@@ -2436,12 +2445,28 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 "(get_num_blocks(128) <= 2 * num_cus && "
                 "a.max_seqlen_q >= 4096 && a.seqlen_k == a.seqlen_q))"
             )
+            # A nearly full M128 grid amortizes N128 on a fully visible window.
+            windowed = CppConstraint(
+                "a.sink_ptr == nullptr && a.window_size_right == 0 && "
+                "a.window_size_left >= 2047 && "
+                "get_num_blocks(128) >= 3 * num_cus / 4 && "
+                "get_num_blocks(128) <= num_cus && "
+                "int64_t{a.seqlen_k} - a.seqlen_q >= "
+                "(int64_t{a.window_size_left} + 1) * a.batch"
+            )
             return (
                 replace(
                     tile,
                     F_bm0=128,
+                    F_bn0=96,
+                    F_constraint=tile.F_constraint & n96_eligible,
+                ),
+                replace(
+                    tile,
+                    F_bm0=128,
                     F_bn0=128,
-                    F_constraint=tile.F_constraint & prefix,
+                    F_constraint=tile.F_constraint
+                    & CppConstraint(f"({prefix}) || ({windowed})"),
                 ),
                 replace(tile, F_bm0=128, F_constraint=tile.F_constraint & wide),
                 tile,

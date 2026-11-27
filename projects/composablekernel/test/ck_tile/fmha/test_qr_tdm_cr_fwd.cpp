@@ -1429,6 +1429,59 @@ void CheckFlatHeadTraversal()
 
 #if defined(CK_TILE_TEST_CR_REPORT)
 #if !defined(CK_TILE_TEST_CR_D64)
+template <int N>
+void CheckD192GroupedPrefetch()
+{
+    ForwardTestOptions options;
+    options.input_pattern       = InputPattern::Random;
+    options.fixed_tolerance     = true;
+    options.check_all_rows      = true;
+    options.check_output_writes = true;
+    options.num_heads           = 4;
+    options.repeats             = 16;
+    options.group_lengths_q     = {257, 17, 0, 129, 33};
+    options.group_lengths_k     = {1025, 259, 0, 65, 0};
+    // Cover tile tails, empty Q/K, and fully masked bottom-right rows in one
+    // ragged GQA batch. Nonpositive scales and scalar O force General; aligned
+    // positive-scale output also exercises Strided's deferred V wait.
+    for(bool packed : {false, true})
+        for(int padding : {0, 1})
+            for(float scale : {-0.25f, 0.f, 0.125f})
+                for(int mask_type : {1, 2})
+                    for(int left : {-1, 31, 2047})
+                    {
+                        SCOPED_TRACE(::testing::Message()
+                                     << "N=" << N << " packed=" << packed << " padding=" << padding
+                                     << " scale=" << scale << " mask=" << mask_type
+                                     << " left=" << left);
+                        options.packed_groups  = packed;
+                        options.output_padding = padding;
+                        options.scale_s        = scale;
+                        options.general_tuning = padding != 0 || scale <= 0;
+                        CheckForward<ck_tile::bf16_t,
+                                     192,
+                                     true,
+                                     true,
+                                     128,
+                                     true,
+                                     5,
+                                     false,
+                                     false,
+                                     ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                                     false,
+                                     false,
+                                     false,
+                                     N>(257, 1025, 1, mask_type, left, options);
+                    }
+}
+
+TEST_F(CrForward, D192GroupedPrefetch)
+{
+    CheckD192GroupedPrefetch<64>();
+    CheckD192GroupedPrefetch<96>();
+    CheckD192GroupedPrefetch<128>();
+}
+
 TEST_F(CrForward, D128WideKeysAndPrefix)
 {
     ForwardTestOptions options;

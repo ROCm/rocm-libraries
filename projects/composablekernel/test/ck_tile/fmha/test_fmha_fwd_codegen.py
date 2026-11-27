@@ -1479,7 +1479,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
         )
         dispatch = _CompiledDispatcher(self, pool, kernels)
         for batch, sq, sk, full, window in (
-            (8, 1024, 33792, (128, 64), (128, 64)),
+            (8, 1024, 33792, (128, 96), (128, 64)),
             (2, 4096, 4096, (128, 64), (128, 64)),
             (1, 128, 4224, (64, 64), (64, 64)),
             (1, 128, 32896, (128, 128), (64, 64)),
@@ -1488,6 +1488,21 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             (1, 1024, 5120, (64, 64), (64, 64)),
             (1, 2048, 2048, (64, 64), (64, 64)),
             (1, 4096, 4096, (128, 128), (128, 64)),
+            # N96 requires at least two workgroups per CU and a long full prefix.
+            (1, 3968, 8064, (128, 64), (128, 64)),
+            (1, 4096, 8191, (128, 64), (128, 64)),
+            (1, 4096, 8192, (128, 96), (128, 64)),
+            (2, 2048, 6144, (128, 96), (128, 64)),
+            (32, 256, 8448, (128, 96), (128, 64)),
+            (64, 128, 8320, (128, 64), (128, 64)),
+            # N128 windows need a nearly full M128 grid and a visible prefix.
+            (1, 1280, 9472, (128, 128), (64, 64)),
+            (1, 1536, 9728, (128, 128), (128, 128)),
+            (1, 2048, 6144, (128, 128), (128, 128)),
+            (1, 2049, 10241, (128, 64), (128, 64)),
+            (1, 2048, 4095, (64, 64), (64, 64)),
+            (1, 2048, 4096, (128, 128), (128, 128)),
+            (2, 1024, 9216, (128, 128), (128, 128)),
         ):
             for left in (-1, 2047):
                 with self.subTest(batch=batch, sq=sq, sk=sk, left=left):
@@ -1674,7 +1689,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             Counter(
                 {
                     (dtype, dim, mode): (
-                        (10 if mode == "batch" else (6 if dtype == "bf16" else 4))
+                        (10 if mode == "batch" else (7 if dtype == "bf16" else 4))
                         if dim == 192
                         else (
                             22
