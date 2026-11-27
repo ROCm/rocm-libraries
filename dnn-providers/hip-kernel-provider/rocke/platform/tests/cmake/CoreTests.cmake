@@ -237,7 +237,7 @@ if(BUILD_TESTING)
   add_executable(rocke_f64_mma core/test_f64_mma.cpp)
   target_link_libraries(rocke_f64_mma PRIVATE rocke_core)
   target_include_directories(rocke_f64_mma PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/gfx942")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/common")
   add_test(NAME rocke_f64_mma COMMAND rocke_f64_mma)
   set_tests_properties(rocke_f64_mma PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_mma)
