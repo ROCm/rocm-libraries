@@ -38,6 +38,9 @@
 # prints, and the runner fails unless exactly the expected param (full name, for example
 # StaticFDBSync/gfx942_228) ran unskipped and opened the expected SystemDB basename (gfx942e4). The
 # basename matters for gfx1100_0 and gfx1200_0, whose param name does not identify the DB.
+# Before each run the compiled miopen_gtest's own `--gtest_list_tests` must list that param, so a
+# FAMILY_MAP entry that the binary under test does not register fails at once with a clear message.
+# The unit tests read db_sync.cpp as text and cannot see what was compiled.
 #
 # Env (provided by TheRock's test_component.yml): AMDGPU_FAMILIES (required), THEROCK_BIN_DIR
 # (default ./build/bin), OUTPUT_ARTIFACTS_DIR (default ./build), TEST_TYPE (quick/standard/...).
@@ -218,7 +221,18 @@ def run(cmd, **kw):
     subprocess.run(cmd, check=True, **kw)
 
 
-FDB_LINE = re.compile(r'^FDB: "?([^",]+?)"?, PDB: ')
+# db_sync.cpp prints the find-db path with fs::path's operator<<, which writes std::quoted(path): the
+# path in double quotes, with a backslash before any quote or backslash inside it. The path is read
+# as that one quoted unit, so a comma, a space or even `", PDB: ` inside it does not end it early
+# (MIOPEN_SYSTEM_DB_PATH=/tmp/artifacts,local/db is a valid setting).
+FDB_LINE = re.compile(r'^FDB: "((?:[^"\\]|\\.)*)", PDB: ')
+FDB_ESCAPE = re.compile(r"\\(.)")
+
+
+def fdb_path_from_line(line: str):
+    """Return the find-db path of a db_sync.cpp `FDB: "...", PDB: ...` line, else None."""
+    match = FDB_LINE.match(line)
+    return FDB_ESCAPE.sub(r"\1", match.group(1)) if match else None
 
 
 def run_capture_fdb(cmd, **kw):
@@ -235,12 +249,67 @@ def run_capture_fdb(cmd, **kw):
     ) as proc:
         for line in proc.stdout:
             print(line, end="", flush=True)
-            match = FDB_LINE.match(line)
-            if match:
-                paths.append(match.group(1))
+            path = fdb_path_from_line(line)
+            if path is not None:
+                paths.append(path)
     if proc.returncode:
         raise subprocess.CalledProcessError(proc.returncode, cmd)
     return paths
+
+
+def static_fdbsync_params_from_listing(listing: str) -> list:
+    """Return the StaticFDBSync test names a `--gtest_list_tests` listing contains.
+
+    The listing is gtest's own account of what the binary registered:
+
+        Quick/CPU_DBSync_NONE.
+          StaticFDBSync/gfx908_120  # GetParam() = ("gfx908", 120)
+
+    A suite line starts in column 0, a test line is indented and may carry a `# GetParam()`
+    comment after its name.
+    """
+    names = []
+    for line in listing.splitlines():
+        if line[:1].isspace() and line.split():
+            name = line.split()[0]
+            if name.startswith("StaticFDBSync/"):
+                names.append(name)
+    return names
+
+
+def list_registered_params(cmd, **kw):
+    """Run `cmd` (a `--gtest_list_tests` command), echo its output and return the StaticFDBSync
+    test names it lists. Raises CalledProcessError if the binary fails to list."""
+    print(f"+ {' '.join(map(str, cmd))}", flush=True)
+    proc = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+        **kw,
+    )
+    print(proc.stdout, end="", flush=True)
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output=proc.stdout)
+    return static_fdbsync_params_from_listing(proc.stdout)
+
+
+def check_param_registered(registered: list, arch: str, expected: dict):
+    """Exit with an error unless the compiled miopen_gtest registers the expected param.
+
+    `registered` comes from the binary's own `--gtest_list_tests`, so it is what db_sync.cpp
+    instantiates in the build under test (a name left in a comment, an #if-ed out value or a
+    renamed num_cu does not count). Checking before the DBSync run also turns a stale FAMILY_MAP
+    entry into one clear message at the start instead of a "no param ran" after the run.
+    """
+    want = f"StaticFDBSync/{expected['param']}"
+    if want not in registered:
+        sys.exit(
+            f"::error::StaticFDBSync {arch} @ {expected['cu']} CU: {want} is not registered in "
+            f"miopen_gtest. Its --gtest_list_tests lists {len(registered)} StaticFDBSync "
+            f"params: {registered}. FAMILY_MAP and the instantiation in db_sync.cpp disagree."
+        )
 
 
 def gfx_target_version(arch: str) -> int:
@@ -475,13 +544,28 @@ def main():
             )
             report = work / f"gtest_{arch}_{cu}.json"
             report.unlink(missing_ok=True)
+            # Same emulated device as the run: without a device miopen_gtest aborts ("No device")
+            # even when it only lists tests.
+            under_rocjitsu = [
+                str(rocjitsu_bin),
+                "--config",
+                str(rj_config),
+                "--",
+                str(gtest),
+            ]
+            registered = list_registered_params(
+                under_rocjitsu
+                + [
+                    "--gtest_list_tests",
+                    "--gtest_filter=*StaticFDBSync*",
+                    "--gtest_color=no",
+                ],
+                env=env_base,
+            )
+            check_param_registered(registered, arch, expected)
             fdb_paths = run_capture_fdb(
-                [
-                    str(rocjitsu_bin),
-                    "--config",
-                    str(rj_config),
-                    "--",
-                    str(gtest),
+                under_rocjitsu
+                + [
                     "--gtest_filter=*StaticFDBSync*",
                     "--gtest_color=no",
                     f"--gtest_output=json:{report}",

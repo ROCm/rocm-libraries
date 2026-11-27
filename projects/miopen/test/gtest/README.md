@@ -34,8 +34,9 @@ AMDGPU_FAMILIES=gfx94X-dcgpu TEST_TYPE=standard \
 The artifact tree of a family must contain `miopen_gtest`, the SystemDBs, and the CK
 grouped-convolution plugin (`libMIOpenCKGroupedConv_<arch>.so`) of every target in its
 rows below. The runner stops if a plugin is missing. It emulates each target under
-rocjitsu at the CU count in the table and requires that exactly the named
-`StaticFDBSync` param ran and opened the named SystemDB:
+rocjitsu at the CU count in the table. Before each run it checks that the compiled
+`miopen_gtest` lists the named param in `--gtest_list_tests`, then it requires that
+exactly that `StaticFDBSync` param ran and opened the named SystemDB:
 
 | `AMDGPU_FAMILIES` | CK plugin | CU | `StaticFDBSync` param | SystemDB |
 | --- | --- | --- | --- | --- |
@@ -77,7 +78,8 @@ A job whose `TEST_TYPE` is `quick` skips the runner and prints
 
 The runner's own checks are tested without rocjitsu or a GPU by
 `dbsync/test_run_dbsync_rocjitsu.py`, which pre-commit runs when the runner or
-`db_sync.cpp` changes.
+`db_sync.cpp` changes. That test reads `db_sync.cpp` as text. Which params the build
+registers is checked by the runner against the binary itself.
 
 ## hipDNN shim surface
 
