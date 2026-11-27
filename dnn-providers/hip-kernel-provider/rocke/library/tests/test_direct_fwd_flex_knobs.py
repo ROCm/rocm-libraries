@@ -38,7 +38,7 @@ from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 from rocke.tests.gpu import current_device_arch_in
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.common.conv_direct_fwd_flex_mfma import (
@@ -642,7 +642,7 @@ def test_knob_describe_matches_python():
     """The C++ validator, kernel name, grid and workspace agree with Python's
     on every knob-class row (forward, own-filter, ds), accepted and refused,
     on three architectures."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_fwd_flex_mfma_spec_to_dict
 
     for arch in ("gfx950", "gfx942", "gfx1250"):
@@ -663,7 +663,7 @@ def test_knob_describe_matches_python():
 def test_knob_classes_lower_identically_on_both_engines():
     """One row per knob class lowers to the same .ll through the C++ engine
     and through Python."""
-    import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import lower_conv_direct_fwd_flex_mfma
 
     for rid, spec in _knob_specs("bf16"):
