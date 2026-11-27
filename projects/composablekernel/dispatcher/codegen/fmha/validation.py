@@ -358,7 +358,7 @@ BOOLS = ["t", "f"]
 
 # Dtype groups matching CK's _DT_* classification in fmha_fwd.py factory classes.
 DT_FP16_BF16 = {"fp16", "bf16"}
-DT_FP8 = {"fp8bf16", "fp8", "bf8"}
+DT_FP8 = {"fp8bf16", "fp8"}
 DT_FP32 = {"fp32"}
 
 # (tile, wave[:6], warp[:6]) of every batch_prefill_gfx11 shape that is built and

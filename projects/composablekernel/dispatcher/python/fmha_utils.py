@@ -819,7 +819,6 @@ class FmhaRunner:
             "fp32": np.float32,
             "fp8bf16": np.uint8,
             "fp8": np.uint8,
-            "bf8": np.uint8,
         }
         _NP_OUT_DTYPE = {
             "fp16": np.float16,
@@ -827,7 +826,6 @@ class FmhaRunner:
             "fp32": np.float32,
             "fp8bf16": np.float16,
             "fp8": np.float32,
-            "bf8": np.uint8,
         }
         in_dt = _NP_DTYPE.get(data_type, np.float16)
         out_dt = _NP_OUT_DTYPE.get(data_type, np.float16)
@@ -1144,7 +1142,6 @@ class FmhaRunner:
             "fp32": np.float32,
             "fp8bf16": np.uint8,
             "fp8": np.uint8,
-            "bf8": np.uint8,
         }
         in_dt = _NP_DTYPE.get(data_type, np.float16)
         Q_c = np.ascontiguousarray(Q.astype(in_dt))

@@ -46,7 +46,6 @@ DTYPE_BITS = {
     "bf16": 16,
     "fp8": 8,
     "fp8bf16": 8,
-    "bf8": 8,
 }
 
 # Element size in bytes per dtype, used by the auto-generated dispatcher to
@@ -331,7 +330,7 @@ class FmhaFwdApiTrait:
                 return f"a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0"
             else:
                 return f"a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0"
-        elif self.pipeline_tag in ["qr", "qr_fp8"]:
+        elif self.pipeline_tag == "qr":
             if self.skpad == "t":
                 return f"true /*a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
             else:

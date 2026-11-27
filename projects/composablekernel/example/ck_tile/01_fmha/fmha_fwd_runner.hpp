@@ -332,8 +332,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
             return "bf16";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8>)
             return "fp8";
-        else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdBf8>)
-            return "bf8";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
             return "fp8bf16";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8>)
@@ -1043,7 +1041,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     -std::log2(ck_tile::type_convert<float>(ck_tile::numeric<DataType>::max()));
                 // e8m0_t is basically an exponent of float32
                 // When scales are applied to tensor values, value * exp2(base - range) is around
-                // 0.125 and value * exp2(base + range) is around 8 for all types (fp8/bf8/fp4)
+                // 0.125 and value * exp2(base + range) is around 8 for all types (fp8/fp4)
                 ck_tile::HostTensor<float> pow2(scales.get_lengths());
                 ck_tile::FillUniformDistributionIntegerValue<float>{
                     base - range, base + range, next_seed()}(pow2);

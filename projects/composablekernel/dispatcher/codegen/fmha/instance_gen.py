@@ -55,7 +55,6 @@ from validation import (  # noqa: E402
     LDS_LIMITS,
     MASKS,
     SPLITKV_COMBINE_HDIMS_FP16,
-    SPLITKV_COMBINE_HDIMS_FP8,
     SUPPORTED_HDIMS,
     VALID_BK0,
     VALID_BM0,
@@ -165,7 +164,7 @@ def generate_fwd_tiles(
     """
     warp_classes = WARP_CLASSES.get(dtype, [(32, 32, 16)])
     bk0max = K0_MAX_SUBMAX_MAP.get(hdim_q, hdim_q)
-    is_fp8 = "fp8" in dtype or dtype in ("bf8", "mxfp8", "mxfp4")
+    is_fp8 = "fp8" in dtype or dtype in ("mxfp8", "mxfp4")
 
     tiles: List[FmhaTileConfig] = []
     for bm0 in VALID_BM0:
@@ -237,7 +236,7 @@ def generate_splitkv_tiles(
     apply_constraints=False skips LDS check (for exhaustive mode).
     """
     bk0max = K0_MAX_SUBMAX_MAP.get(hdim_q, hdim_q)
-    is_fp8 = "fp8" in dtype or dtype == "bf8"
+    is_fp8 = "fp8" in dtype
     wm0, wn0, wk0 = (32, 32, 32) if is_fp8 else (16, 16, 16)
 
     tiles: List[FmhaTileConfig] = []
@@ -303,7 +302,7 @@ def generate_bwd_tiles(
     """
     warp_classes = WARP_CLASSES.get(dtype, [(32, 32, 16)])
     bk0max = K0_MAX_SUBMAX_MAP.get(hdim_q, hdim_q)
-    is_fp8 = "fp8" in dtype or dtype in ("bf8", "mxfp8", "mxfp4")
+    is_fp8 = "fp8" in dtype or dtype in ("mxfp8", "mxfp4")
 
     tiles: List[FmhaTileConfig] = []
     for bm0 in VALID_BM0:
@@ -942,40 +941,6 @@ def get_splitkv_pipelines(
                     dvpad="t",
                 )
             )
-    elif dtype == "bf8":
-        for logits, mask, bias in itertools.product(BOOLS, SPLITKV_MASKS, BIASES):
-            if not check_logits_bias(logits, bias):
-                continue
-            specs.append(
-                SplitKVPipelineSpec(
-                    "qr",
-                    mask,
-                    bias,
-                    logits,
-                    "f",
-                    "f",
-                    squant="t",
-                    spad="f",
-                    skpad="f",
-                    dpad="f",
-                    dvpad="f",
-                )
-            )
-            specs.append(
-                SplitKVPipelineSpec(
-                    "qr",
-                    mask,
-                    bias,
-                    logits,
-                    "f",
-                    "f",
-                    squant="t",
-                    spad="t",
-                    skpad="t",
-                    dpad="f",
-                    dvpad="f",
-                )
-            )
 
     if receipt != 0:
         specs = [s for s in specs if _splitkv_receipt_filter(receipt, dtype, s)]
@@ -1013,14 +978,11 @@ def get_splitkv_combine_pipelines(
 ) -> List[SplitKVCombineSpec]:
     """Split-KV combine kernel pipelines."""
     specs: List[SplitKVCombineSpec] = []
-    squant = "t" if dtype == "bf8" else "f"
+    squant = "f"
 
     if dtype in DT_FP16_BF16:
         for spad, dvpad, lse in itertools.product(BOOLS, BOOLS, BOOLS):
             specs.append(SplitKVCombineSpec(spad, dvpad, lse, squant))
-    elif dtype == "bf8":
-        for spad, dvpad in itertools.product(BOOLS, BOOLS):
-            specs.append(SplitKVCombineSpec(spad, dvpad, "f", squant))
     return specs
 
 
@@ -1063,42 +1025,6 @@ def get_pagedkv_pipelines(
                     logits,
                     "f",
                     sink,
-                    spad="t",
-                    skpad="t",
-                    dpad="f",
-                    dvpad="f",
-                )
-            )
-    elif dtype == "bf8":
-        for logits, mask, bias in itertools.product(BOOLS, MASKS, BIASES):
-            if not check_logits_bias(logits, bias):
-                continue
-            specs.append(
-                PipelineSpec(
-                    "qr_pagedkv",
-                    mask,
-                    bias,
-                    "f",
-                    "f",
-                    logits,
-                    "f",
-                    "f",
-                    spad="f",
-                    skpad="f",
-                    dpad="f",
-                    dvpad="f",
-                )
-            )
-            specs.append(
-                PipelineSpec(
-                    "qr_pagedkv",
-                    mask,
-                    bias,
-                    "f",
-                    "f",
-                    logits,
-                    "f",
-                    "f",
                     spad="t",
                     skpad="t",
                     dpad="f",
@@ -1182,7 +1108,7 @@ def get_appendkv_pipelines(
                     dvpad="t",
                 )
             )
-    elif dtype in ("fp8", "bf8"):
+    elif dtype == "fp8":
         specs.append(
             AppendKVPipelineSpec(
                 rope="none", pagedkv="f", spad="t", skpad="t", dpad="t", dvpad="t"
@@ -2232,13 +2158,7 @@ def _expand_splitkv(
         comb_specs = get_splitkv_combine_pipelines(dtype, receipt)
         if not comb_specs:
             continue
-        hdims = (
-            SPLITKV_COMBINE_HDIMS_FP16
-            if dtype in ("fp16", "bf16")
-            else SPLITKV_COMBINE_HDIMS_FP8
-            if dtype == "bf8"
-            else []
-        )
+        hdims = SPLITKV_COMBINE_HDIMS_FP16 if dtype in ("fp16", "bf16") else []
         for hv in hdims:
             for mode in MODES:
                 if allowed_modes is not None and mode not in allowed_modes:

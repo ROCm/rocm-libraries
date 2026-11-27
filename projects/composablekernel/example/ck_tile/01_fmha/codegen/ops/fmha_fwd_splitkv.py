@@ -801,12 +801,6 @@ class KernelComponentFactoryBase:
                 pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                 pipelines.append(Pipeline("qr", "row", "t", "t", "t", "t", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                 pipelines.append(Pipeline("qr_nwarp_sshuffle", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
-        elif dtype in ["bf8"]:
-            for logits, mask, bias in itertools.product(
-                ["t", "f"], get_mask_map(mask_impl).keys(), BIAS_MAP.keys()
-            ):
-                pipelines.append(Pipeline("qr", "row", "f", "f", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
-                pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
         elif dtype in ["fp8fp16", "fp8bf16"]:
             # TODO
             None
@@ -824,10 +818,6 @@ class KernelComponentFactoryBase:
                 ["t", "f"], ["t", "f"], ["t", "f"]
             ):
                 pipelines.append(Pipeline("unused", spad, dvpad, lse, squant))
-        elif dtype in ["bf8"]:
-            # no need lse kernels
-            for spad, dvpad in itertools.product(["t", "f"], ["t", "f"]):
-                pipelines.append(Pipeline("unused", spad, dvpad, "f", squant))
         else:
             assert False
         return pipelines
@@ -842,12 +832,6 @@ class KernelComponentFactoryBase:
                 "96": FmhaFwdSplitKVCombineTileSize(32, -1),
                 "128": FmhaFwdSplitKVCombineTileSize(32, -1),
                 # "160" : FmhaFwdSplitKVCombineTileSize(32, -1),
-                "256": FmhaFwdSplitKVCombineTileSize(32, -1),
-            }
-        elif dtype in ["bf8"]:
-            return {
-                "64": FmhaFwdSplitKVCombineTileSize(32, -1),
-                "128": FmhaFwdSplitKVCombineTileSize(32, -1),
                 "256": FmhaFwdSplitKVCombineTileSize(32, -1),
             }
         else:
@@ -867,11 +851,6 @@ class KernelComponentFactoryGfx9(KernelComponentFactoryBase):
                 "128": FmhaFwdTileSize( 64, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 16, 16, 16, 16, -1),
                 # "160" : FmhaFwdTileSize(64, 128, 32, 160, 32, 160, 4, 1, 1, 4, 1, 1, 16, 16, 16, 16, 16, 16, -1),
                 "256": FmhaFwdTileSize( 64, 128, 32, 256, 32, 256, 4, 1, 1, 4, 1, 1, 16, 16, 16, 16, 16, 16, -1),
-            }  # fmt: skip
-        elif dtype in ["bf8"]:
-            return {
-                "64" : FmhaFwdTileSize(128,  64, 32,  64, 32,  64, 2, 1, 1, 2, 1, 1, 32, 32, 32, 32, 32, 32, -1),
-                "128": FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 32, 32, 32, 32, 32, 32, -1),
             }  # fmt: skip
         else:
             return None
@@ -915,12 +894,6 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
                 "256": [FmhaFwdTileSize( 16, 128,  32, 256,  32,  256,  1, 8, 1,  1, 8, 1,  16, 16, 16,  16, 16, 16,  -1),
                         FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
-        elif dtype in ["bf8"]:
-            return {
-                #                      bm0, bn0, bk0, bn1, bk1,
-                "64" : FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
-                "128": FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
-            }  # fmt: skip
         else:
             return None
 
@@ -960,8 +933,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 for mask in get_mask_map(mask_impl).keys():
                     pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "f", "f", "f", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
                     pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
-        elif dtype in ["fp8", "bf8"]:
-            squant = "t" if dtype == "fp8" else "f"
+        elif dtype == "fp8":
+            squant = "t"
             for logits, mask, bias in itertools.product(
                 ["t", "f"], get_mask_map(mask_impl).keys(), BIAS_MAP.keys()
             ):
@@ -986,12 +959,6 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 "128": [FmhaFwdTileSize(16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"{num_rows} <= 16"), "qr_tdm_pingpong"),
                         FmhaFwdTileSize(64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-            }  # fmt: skip
-        elif dtype in ["bf8"]:
-            return {
-                #                      bm0, bn0, bk0, bn1, bk1,
-                "64" : FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1),
-                "128": FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1),
             }  # fmt: skip
         else:
             return None

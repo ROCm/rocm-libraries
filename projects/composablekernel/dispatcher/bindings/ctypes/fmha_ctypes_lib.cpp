@@ -53,8 +53,7 @@ static int dtype_input_bytes(const char* dtype)
         return 2;
     if(std::strcmp(dtype, "fp32") == 0)
         return 4;
-    if(std::strcmp(dtype, "fp8bf16") == 0 || std::strcmp(dtype, "bf8") == 0 ||
-       std::strcmp(dtype, "fp8") == 0)
+    if(std::strcmp(dtype, "fp8bf16") == 0 || std::strcmp(dtype, "fp8") == 0)
         return 1;
     return 2; // fp16, bf16
 }
@@ -65,8 +64,6 @@ static int dtype_output_bytes(const char* dtype)
         return 2;
     if(std::strcmp(dtype, "fp32") == 0 || std::strcmp(dtype, "fp8") == 0)
         return 4;
-    if(std::strcmp(dtype, "bf8") == 0)
-        return 1;
     return 2; // fp16, bf16, fp8bf16 (output is bf16)
 }
 

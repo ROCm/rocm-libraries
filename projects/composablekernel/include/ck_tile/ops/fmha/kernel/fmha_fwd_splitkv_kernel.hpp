@@ -110,7 +110,6 @@ struct FmhaFwdSplitKVKernel
     template <> struct t2s<ck_tile::fp16_t> { static constexpr const char * name = "fp16"; };
     template <> struct t2s<ck_tile::bf16_t> { static constexpr const char * name = "bf16"; };
     template <> struct t2s<ck_tile::fp8_t> { static constexpr const char * name = "fp8"; };
-    template <> struct t2s<ck_tile::bf8_t> { static constexpr const char * name = "bf8"; };
     // clang-format on
 
     CK_TILE_HOST static std::string GetName()

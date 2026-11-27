@@ -13,6 +13,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Changed
 
 ### Removed
+* Removed the CK Tile FMHA `bf8` data type from the FMHA example, the dispatcher FMHA code generator, and the Tile Engine FMHA benchmark; use `fp8` or `fp8bf16` instead.
+* Removed the deprecated CK Tile FMHA pipeline `BlockFmhaPipelineQRKSVSFp8` (`block_fmha_pipeline_qr_ks_vs_fp8.hpp`).
 
 ### Optimized
 
