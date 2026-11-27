@@ -162,9 +162,8 @@ extern "C" {
  *     rocke_fused_moe_forward_lower_to_llvm) stay. rocke_topk_softmax_spec_t lost
  *     cross_wave_argmax, which no lowering read, so its size changes.
  * 24: rocke_direct_depthwise_spec_t gained stride_skip (bool) and block_h (int)
- *     at its end, and rocke_direct_depthwise_spatial_spec_t gained dgrad (bool)
- *     and block_h (int) at its end, which changes both sizes. The open gfx1250
- *     depthwise PRs share this bump; whichever lands second re-bumps. */
+ *     at its end, and rocke_direct_depthwise_spatial_spec_t gained dgrad (int)
+ *     and block_h (int) at its end, which changes both sizes. */
 #define ROCKE_ABI_VERSION 24
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.

@@ -92,6 +92,9 @@ class TestDepthwiseFwdCplSpecs(unittest.TestCase):
         # Row blocks are a packed-kernel knob.
         self.assertTrue(ok(_stream(s2, cpl=2, block_h=4), "gfx1250")[0])
         self.assertFalse(ok(_stream(s2, block_h=4), "gfx1250")[0])
+        ok_neg, why = ok(_stream(s2, cpl=2, block_h=-1), "gfx1250")
+        self.assertFalse(ok_neg)
+        self.assertIn("block_h -1", why)
         grid, _ = dc.direct_launch_geometry(_stream(s2, cpl=2, block_h=4))
         self.assertEqual(grid[2], s2.N * -(-s2.Ho // 4))
 
@@ -199,6 +202,15 @@ class TestDepthwiseSpatialSpecs(unittest.TestCase):
             self.assertFalse(any("block_h" in k for k in seen["gfx950"]), variant)
             self.assertTrue(any("block_h" in k for k in seen["gfx1250"]), variant)
             self.assertTrue(seen["gfx1250"], variant)
+        # The spatial dgrad has no rows at all on the wave64 targets.
+        _, caps_list = DIRECT_CAPABILITIES["direct_depthwise_spatial_dgrad"]
+        caps = next(c for c in caps_list if c.KH == 3)
+        for arch in ("gfx942", "gfx950"):
+            wave = ArchTarget.from_gfx(arch).wave_size
+            _, jobs = _caps_jobs(
+                arch, wave, "direct_depthwise_spatial_dgrad", "dgrad", caps, "bf16"
+            )
+            self.assertEqual(list(jobs), [], arch)
         # The 3x3 Toeplitz dgrad form is cached for the wave32 WMMA targets only.
         from kernels.conv.direct_aot_jobs import _dw_win_policy_reason
 

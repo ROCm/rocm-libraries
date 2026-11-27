@@ -1165,6 +1165,44 @@ static void test_problem_dims_refused(void)
     check_problem_dims("fwd_smallk_wmma", sk, rocke_fwd_smallk_wmma_is_valid_spec);
 }
 
+/* The spatial depthwise dgrad and row-block refusals: a non-square filter, a
+ * column padding of its own (is_valid_spec only) and a negative block_h. */
+static void test_spatial_refusals(void)
+{
+    char reason[ERR_CAP];
+    rocke_direct_depthwise_spatial_spec_t sp = rocke_direct_depthwise_spatial_spec_default();
+    sp.wave_size = 32;
+    sp.dgrad = 1;
+    sp.problem = dw_problem(3, 3, 1, -1);
+    CHECK(rocke_direct_depthwise_spatial_is_valid_spec(&sp, "gfx1250", reason, sizeof(reason)),
+          "square spatial dgrad refused: %s",
+          reason);
+
+    sp.problem = dw_problem(3, 5, 1, -1);
+    CHECK(!rocke_direct_depthwise_spatial_is_valid_spec(&sp, "gfx1250", reason, sizeof(reason)),
+          "is_valid accepted a 3x5 spatial dgrad");
+    CHECK(strstr(reason, "square filter") != NULL, "reason names the filter: %s", reason);
+    CHECK(rocke_direct_depthwise_spatial_validate(&sp, reason, sizeof(reason)) != ROCKE_OK,
+          "validate accepted a 3x5 spatial dgrad");
+    CHECK(strstr(reason, "square filter") != NULL, "reason names the filter: %s", reason);
+
+    sp.problem = dw_problem(3, 3, 1, 0);
+    CHECK(!rocke_direct_depthwise_spatial_is_valid_spec(&sp, "gfx1250", reason, sizeof(reason)),
+          "is_valid accepted pad_w != PAD");
+    CHECK(strstr(reason, "one padding for both axes") != NULL,
+          "reason names the padding: %s",
+          reason);
+
+    sp.problem = dw_problem(3, 3, 1, -1);
+    sp.block_h = -1;
+    CHECK(!rocke_direct_depthwise_spatial_is_valid_spec(&sp, "gfx1250", reason, sizeof(reason)),
+          "is_valid accepted block_h=-1");
+    CHECK(strstr(reason, "block_h must be >= 0") != NULL, "reason names block_h: %s", reason);
+    CHECK(rocke_direct_depthwise_spatial_validate(&sp, reason, sizeof(reason)) != ROCKE_OK,
+          "validate accepted block_h=-1");
+    CHECK(strstr(reason, "block_h must be >= 0") != NULL, "reason names block_h: %s", reason);
+}
+
 int main(void)
 {
     test_problem_dims_refused();
@@ -1190,6 +1228,7 @@ int main(void)
     test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();
     test_fwd_tapouter_tdm_split_stages();
+    test_spatial_refusals();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);
