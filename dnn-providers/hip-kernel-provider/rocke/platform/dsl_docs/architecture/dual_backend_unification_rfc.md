@@ -448,6 +448,10 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS14 / WS15 — Stratified, multi-arch CI [sequence after WS13]
 
+> Superseded for performance: benchmarks run in their own tier on a dedicated
+> system, never in CI ([`TESTING.md` §5.0.3](../../../TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)),
+> so T5 and the perf filters below are not CI work.
+
 **Premise.** The library spans no-GPU logic, comgr compilation, GPU numeric execution, integration layers, and performance — so CI must be **stratified** and **multi-arch**. Today: Tier-0 strong (`run_diff` ll/ir is pure text-gen; dispatch/verify/serialize units), Tier-2 partial (gfx950-only numeric), Tiers 1/4/5 + all multi-arch numeric missing.
 
 **WS14 — tiers + instance suite.**

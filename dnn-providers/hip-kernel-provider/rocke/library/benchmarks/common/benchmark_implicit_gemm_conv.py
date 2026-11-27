@@ -50,10 +50,16 @@ import re
 import sys
 from dataclasses import dataclass
 from dataclasses import replace as dc_replace
-from typing import NamedTuple
-from typing import List
+from typing import TYPE_CHECKING, List, NamedTuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from rocke import KernelDef
+    from rocke.helpers.compile import KernelArtifact
+
+    from kernels.common.conv_implicit_gemm import ConvProblem
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
 
 # hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
 # is the only launch in this driver that can reach the limit. The z extent is
@@ -105,6 +111,7 @@ from builders.common.conv_reference import (
     conv_wgrad_reference,
 )
 from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.host_buffers import as_u8_buffer
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
 from kernels.conv.aot_jobs import (  # noqa: E402
@@ -384,6 +391,45 @@ class WgradCombo(NamedTuple):
     streamk_reduction: str = ""
 
 
+class DgradCombo(NamedTuple):
+    """One point in the dgrad sweep (:func:`build_dgrad_sweep_kernel`).
+
+    ``split_k`` is a degree, 1 for none, or -1 for the split-K resolver's pick.
+    """
+
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_tile_mn: int
+    pipeline: str
+    epilogue: str
+    split_k: int
+
+
+def dgrad_sweep_grid(split_k_values: tuple[int, ...]) -> list[DgradCombo]:
+    """Every point of the dgrad sweep before ``--sample``: the product of the
+    conv cache axes (tile_m and tile_n, tile_k, warp_m and warp_n,
+    warp_tile_mn, pipeline, epilogue) and ``split_k_values``, in that order,
+    kept where the warps fit inside the tile."""
+    return [
+        DgradCombo(*c)
+        for c in itertools.product(
+            _TILE_MN,
+            _TILE_MN,
+            _TILE_K,
+            _WARP_MN,
+            _WARP_MN,
+            _WARP_TILE_MN,
+            _PIPELINES,
+            _EPILOGUES,
+            split_k_values,
+        )
+        if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
+    ]
+
+
 @dataclass
 class Result:
     kernel_name: str
@@ -464,8 +510,10 @@ def _grid_for_wgrad_spec(spec, split_k: int):
     return (gx, gy, spec.grid_groups * split_k)
 
 
-def _sample_combos(combos: list, frac: float, seed: int) -> list:
-    """Return a random subset of *combos* of size ceil(frac * len(combos))."""
+def sample_combos(combos: list, frac: float, seed: int) -> list:
+    """A random subset of ``combos``, ``round(frac * len(combos))`` of them
+    (at least 1), drawn by ``random.Random(seed).sample``: the ``--sample``
+    rule of every sweep."""
     n = max(1, round(len(combos) * frac))
     rng = random.Random(seed)
     return rng.sample(combos, min(n, len(combos)))
@@ -597,7 +645,7 @@ def _tf32_is_emulated(arch: str, op_id: "str | None" = None) -> bool:
     return tf32_is_emulated(arch)
 
 
-def _verify_tol(compute_dtype: str, arch: str, op_id: "str | None" = None) -> float:
+def verify_tol(compute_dtype: str, arch: str, op_id: "str | None" = None) -> float:
     """``--verify`` bound for a kernel whose A/B MMA inputs are ``compute_dtype``.
 
     Keyed on the compute dtype, not the storage dtype: an fp32 output of bf16
@@ -616,6 +664,23 @@ def _rank_results(results: list, what: str = "") -> "tuple[list, list]":
     driver.
     """
     return rank_verified(results, lambda r: r.tflops, lambda r: r.passed, what)
+
+
+def verify_verdict(
+    out_values: np.ndarray,
+    ref_out: np.ndarray,
+    *,
+    compute_dtype: str,
+    arch: str,
+    ref_floor: float = 1.0,
+    op_id: str | None = None,
+) -> tuple[bool, float]:
+    """``(passed, error)`` of ``--verify`` for an output against its float64
+    reference: the peak-normalised error (:func:`peak_relative_error`, with the
+    reference peak floored at ``ref_floor``) must be below
+    :func:`verify_tol` of ``compute_dtype`` on ``arch``."""
+    error = peak_relative_error(out_values, ref_out, floor=ref_floor)
+    return error < verify_tol(compute_dtype, arch, op_id), error
 
 
 def _verify_kernel(
@@ -691,9 +756,7 @@ def _verify_kernel(
     rt.memcpy_d2h(u8(out_host), out_dev, out_t.nbytes)
     out_values = storage.decode(out_host, out_dtype).astype(np.float64)
     diff = out_values - ref_out
-    ref_scale = max(ref_floor, float(np.abs(ref_out).max()))
-    rel_err = float(np.abs(diff).max()) / ref_scale
-    # Peak-normalised relative error: max|out-ref| / max|ref|.
+    # Peak-normalised relative error: max|out-ref| / max(max|ref|, ref_floor).
     # Caveat: a large relative error on a small-magnitude weight can be masked
     # by the global-max denominator, and 5e-2 is fairly loose for bf16
     # reductions over K_wg ~ 25k.  A mean/L2 relative check or a tighter bf16
@@ -706,12 +769,18 @@ def _verify_kernel(
     # separates them; without it, fall back to the output dtype.
     if compute_dtype is None:
         compute_dtype = "fp16" if out_dtype in ("fp16", "bf16") else "fp32"
-    tol = _verify_tol(compute_dtype, arch, op_id)
-    err = rel_err
-    status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
+    passed, err = verify_verdict(
+        out_values,
+        ref_out,
+        compute_dtype=compute_dtype,
+        arch=arch,
+        ref_floor=ref_floor,
+        op_id=op_id,
+    )
+    status = "PASS" if passed else f"FAIL(rel_err={err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
-    if err >= tol and dump_fail:
+    if not passed and dump_fail:
         import pathlib
 
         dump_dir = pathlib.Path(dump_fail)
@@ -741,7 +810,7 @@ def _verify_kernel(
         )
         return True, False  # dump triggered → stop the sweep; kernel failed
 
-    return False, err < tol
+    return False, passed
 
 
 # ---------------------------------------------------------------------------
@@ -2642,13 +2711,20 @@ def _build_wgrad_two_stage_one(args_tuple):
     return combo, spec, resolved_split_k, s1_kernel, s2_kernel
 
 
-def _build_dgrad_one(args_tuple):
-    """Top-level picklable worker: validate + build IR for one dgrad combo.
+def _dgrad_sweep_spec(
+    combo: DgradCombo, *, problem: ConvProblem, dtype: str, arch: str
+) -> DgradConvSpec | None:
+    """The dgrad spec of ``combo`` on ``problem`` and ``arch``, or ``None`` when
+    the combo has none.
 
-    Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
-    Must live at module level for pickle.
+    ``dtype`` is the problem dtype (``--dtype``). The spec takes the largest-K
+    MMA atom of ``combo.warp_tile_mn`` that fits ``combo.tile_k``, the vector
+    widths, K-outer B tile and uniform K decode of the dgrad spec's default
+    policies, and for ``combo.split_k == -1`` the degree the split-K resolver
+    picks (1 on a wave32 target; ``ROCKE_CONV_SPLIT_K`` overrides it). ``None``
+    when no atom fits, when an explicit split-K degree above 1 asks for the
+    cshuffle epilogue, or when :func:`is_valid_dgrad_spec` rejects the spec.
     """
-    combo, problem, dtype, arch, vec_a, vec_b, vec_c = args_tuple
     (
         tile_m,
         tile_n,
@@ -2667,8 +2743,11 @@ def _build_dgrad_one(args_tuple):
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
-        build_implicit_gemm_conv_dgrad,
         is_valid_dgrad_spec,
+    )
+
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(
+        problem.cpg, problem.kpg, storage_dtype(dtype)
     )
 
     target = ArchTarget.from_gfx(arch)
@@ -2746,13 +2825,34 @@ def _build_dgrad_one(args_tuple):
         ),
     )
     ok, _ = is_valid_dgrad_spec(spec, arch)
-    if not ok:
+    return spec if ok else None
+
+
+def build_dgrad_sweep_kernel(
+    combo: DgradCombo, *, problem: ConvProblem, dtype: str, arch: str
+) -> tuple[DgradConvSpec, KernelDef] | None:
+    """``(spec, kernel)`` the dgrad sweep builds for ``combo`` on ``problem``
+    and ``arch``, or ``None`` when the combo is not a sweep candidate.
+
+    ``dtype`` is the problem dtype (``--dtype``). ``None`` when no MMA atom of
+    ``combo.warp_tile_mn`` fits ``combo.tile_k``, when an explicit split-K
+    degree above 1 asks for the cshuffle epilogue, when
+    :func:`is_valid_dgrad_spec` rejects the spec, or when the dgrad builder
+    refuses it with ``ValueError``, a refusal the validator does not foresee
+    (e.g. a tile no load width divides among the block's threads).
+    """
+    spec = _dgrad_sweep_spec(combo, problem=problem, dtype=dtype, arch=arch)
+    if spec is None:
         return None
+    from kernels.common.conv_implicit_gemm_dgrad import (
+        build_implicit_gemm_conv_dgrad,
+    )
+
     try:
         kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
     except ValueError:
         return None
-    return combo, spec, resolved_split_k, kernel
+    return spec, kernel
 
 
 # Process-local memo for the two-stage Stage-2 (workspace-reduce) kernel.
@@ -2826,19 +2926,34 @@ def _build_and_compile_wgrad_two_stage_one(args_tuple):
     return combo, spec, resolved_split_k, s1_artifact, s2_artifact
 
 
+def compile_dgrad_sweep_candidate(
+    combo: DgradCombo, *, problem: ConvProblem, dtype: str, arch: str
+) -> tuple[DgradConvSpec, KernelArtifact] | None:
+    """``(spec, artifact)``: the kernel :func:`build_dgrad_sweep_kernel` builds
+    for ``combo``, compiled for ``arch``; ``None`` when the combo is not a
+    sweep candidate. Any other failure raises."""
+    built = build_dgrad_sweep_kernel(combo, problem=problem, dtype=dtype, arch=arch)
+    if built is None:
+        return None
+    spec, kernel = built
+    from rocke import compile_kernel as _compile_kernel
+
+    return spec, _compile_kernel(kernel, arch=arch)
+
+
 def _build_and_compile_dgrad_one(args_tuple):
-    """Merged worker: validate + build IR + compile for one dgrad combo.
+    """Merged worker: :func:`compile_dgrad_sweep_candidate` of one dgrad combo.
 
     Returns ``(combo, spec, resolved_split_k, artifact)`` on success, or ``None``.
     """
-    result = _build_dgrad_one(args_tuple)
-    if result is None:
+    combo, problem, dtype, arch = args_tuple
+    compiled = compile_dgrad_sweep_candidate(
+        combo, problem=problem, dtype=dtype, arch=arch
+    )
+    if compiled is None:
         return None
-    combo, spec, resolved_split_k, kernel = result
-    from rocke import compile_kernel as _compile_kernel
-
-    artifact = _compile_kernel(kernel, arch=args_tuple[3])
-    return combo, spec, resolved_split_k, artifact
+    spec, artifact = compiled
+    return combo, spec, spec.split_k, artifact
 
 
 def _worker_pool(max_workers: int):
@@ -2861,10 +2976,10 @@ def _worker_pool(max_workers: int):
 #: Work items each automatically sized pool worker gets at least. A worker
 #: imports the kernel modules before its first item, and the pool starts and
 #: joins its workers one at a time, so one worker per CPU on a many-core host
-#: spends longer starting and stopping than it saves. Measured on a 384-thread
-#: host with a cold COMGR cache, a sweep of a few hundred dgrad combos ran about
-#: three times faster at 16 to 28 combos per worker than at one worker per CPU,
-#: and slower again at 7 or 55 combos per worker.
+#: spends longer starting and stopping than it saves. On a many-core host with
+#: a cold COMGR cache, a sweep of a few hundred dgrad combos ran fastest at 16
+#: to 28 combos per worker: much faster than at one worker per CPU, and slower
+#: again with far fewer or far more combos per worker.
 _ITEMS_PER_AUTO_WORKER = 16
 
 
@@ -3100,7 +3215,7 @@ def _run_sweep(
         # exhaustive baseline.
         if args.unmerged_frac < 1.0:
             _n_unmerged = len(combos)
-            combos = _sample_combos(combos, args.unmerged_frac, args.seed + case_idx)
+            combos = sample_combos(combos, args.unmerged_frac, args.seed + case_idx)
             print(
                 f"  depthwise: sampling {len(combos)}/{_n_unmerged} unmerged "
                 f"(Gm=1) combos — on depthwise this leg is the baseline, not a "
@@ -3173,7 +3288,7 @@ def _run_sweep(
     if args.sample is not None:
         total = len(combos)
         effective_seed = args.seed + case_idx
-        combos = _sample_combos(combos, args.sample, effective_seed)
+        combos = sample_combos(combos, args.sample, effective_seed)
         print(
             f"Sampling {len(combos)}/{total} combinations "
             f"({args.sample*100:.0f}%, seed={effective_seed}).",
@@ -3606,7 +3721,7 @@ def _run_wgrad_sweep(
     if args.sample is not None:
         total = len(combos)
         effective_seed = args.seed + case_idx
-        combos = _sample_combos(combos, args.sample, effective_seed)
+        combos = sample_combos(combos, args.sample, effective_seed)
         print(
             f"Sampling {len(combos)}/{total} wgrad combinations "
             f"({args.sample*100:.0f}%, seed={effective_seed}).",
@@ -3752,7 +3867,7 @@ def _run_wgrad_sweep(
             for _red in _sk_reductions
         ]
         if args.sample is not None:
-            sk_combos = _sample_combos(sk_combos, args.sample, args.seed + case_idx)
+            sk_combos = sample_combos(sk_combos, args.sample, args.seed + case_idx)
         print(
             f"  stream-K: building {len(sk_combos)} combos "
             f"(modes {list(args.streamk_modes)} x reductions "
@@ -4520,26 +4635,11 @@ def _run_dgrad_sweep(
 
     split_k_values = args.split_k_degrees if args.split_k == 0 else (args.split_k,)
 
-    combos = [
-        c
-        for c in itertools.product(
-            _TILE_MN,
-            _TILE_MN,
-            _TILE_K,
-            _WARP_MN,
-            _WARP_MN,
-            _WARP_TILE_MN,
-            _PIPELINES,
-            _EPILOGUES,
-            split_k_values,
-        )
-        # geometry pre-filter: warp warps must fit inside the tile.
-        if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
-    ]
+    combos = dgrad_sweep_grid(split_k_values)
 
     if args.sample is not None:
         total = len(combos)
-        combos = _sample_combos(combos, args.sample, args.seed)
+        combos = sample_combos(combos, args.sample, args.seed)
         print(
             f"Sampling {len(combos)}/{total} dgrad combinations "
             f"({args.sample*100:.0f}%, seed={args.seed}).",
@@ -4564,7 +4664,7 @@ def _run_dgrad_sweep(
             f"Building IR + compiling {len(combos)} dgrad combos in parallel ...",
             flush=True,
         )
-    work = [(combo, problem, dtype, arch, vec_a, vec_b, vec_c) for combo in combos]
+    work = [(combo, problem, dtype, arch) for combo in combos]
     pending = _build_ir_parallel(work, _build_and_compile_dgrad_one, jobs)
     n_skipped = len(combos) - len(pending)
     n_built = len(pending)
@@ -5019,7 +5119,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # Same sampling as the JIT sweep: a fixed-seed subset, so a
                 # cache holding tens of thousands of kernels for one shape can
                 # be surveyed in minutes rather than hours.
-                candidates = _sample_combos(
+                candidates = sample_combos(
                     candidates, args.sample, args.seed + case_idx
                 )
             print(

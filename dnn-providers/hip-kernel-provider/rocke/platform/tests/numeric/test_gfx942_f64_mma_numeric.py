@@ -10,6 +10,8 @@ from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import available_engines, lower_with_engine
 from rocke.tests.gpu import current_device_arch_in
 
+pytestmark = pytest.mark.gpu
+
 
 def _llvm(kernel, engine):
     return lower_with_engine(kernel, "gfx942", engine=engine)

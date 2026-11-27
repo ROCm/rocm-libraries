@@ -6,68 +6,85 @@ helpers write that declaration."""
 from __future__ import annotations
 
 import pytest
+from rocke.core.arch.target import known_arches
 from rocke.tests.lanes import (
-    BINDING_LANE,
-    CI_TEST_TOOLS,
-    GFX950_RUNNER,
-    GFX1151_GFX12_RUNNER,
-    GFX1250_RUNNER,
+    BUILD_VARIANT,
     LANES,
-    NIGHTLY_SOURCE,
+    PR_RUNNER_ARCHES,
+    RUNNER_HARDWARE,
+    SOURCE_TREE,
+    TICKET,
     Lane,
     arch_skip_reason,
     import_or_skip_until,
     lanes_waited_for,
     runner_lanes_for,
     skip_needing_arch,
+    skip_needing_gpus,
     skip_until,
+    skip_until_installed,
     skip_until_reason,
 )
 
 
+def test_there_are_four_lanes_each_a_different_kind_of_wait():
+    """What CI lacks comes in four kinds: hardware no runner has, a build or
+    test environment CI does not provide, work a ticket tracks, and a source
+    checkout. A finer distinction (which arch, which tool) is in the reason."""
+    assert LANES == (RUNNER_HARDWARE, BUILD_VARIANT, TICKET, SOURCE_TREE)
+    assert [lane.name for lane in LANES] == [
+        "runner-hardware",
+        "build-variant",
+        "ticket",
+        "source-tree",
+    ]
+    assert {lane.marker for lane in LANES if lane.marker} == {
+        "exhaustive",
+        "integration",
+    }
+
+
 def test_a_declared_reason_reads_back_as_its_lanes():
-    reason = skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")
-    assert reason == "waits for gfx950-runner: needs a gfx950 GPU"
-    assert lanes_waited_for(reason) == (GFX950_RUNNER,)
-    both = skip_until_reason(GFX950_RUNNER, GFX1250_RUNNER, reason="needs either")
-    assert lanes_waited_for(both) == (GFX950_RUNNER, GFX1250_RUNNER)
+    reason = skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")
+    assert reason == "waits for runner-hardware: needs a gfx950 GPU"
+    assert lanes_waited_for(reason) == (RUNNER_HARDWARE,)
+    both = skip_until_reason(RUNNER_HARDWARE, BUILD_VARIANT, reason="needs both")
+    assert lanes_waited_for(both) == (RUNNER_HARDWARE, BUILD_VARIANT)
 
 
 def test_a_reason_that_only_mentions_a_lane_declares_none():
     for reason in (
         "needs a gfx950 GPU, found gfx942",
         "could not import 'rocke_engine'",
-        "the gfx950-runner waits for: nothing",
+        "the runner-hardware waits for: nothing",
         "",
     ):
         assert lanes_waited_for(reason) == (), reason
 
 
 def test_a_declaration_of_a_lane_that_does_not_exist_fails_loudly():
-    with pytest.raises(ValueError, match=r"lanes \['gfx9999-runner'\] are not in"):
-        lanes_waited_for("waits for gfx9999-runner: renamed lane")
+    with pytest.raises(ValueError, match=r"lanes \['gfx950-runner'\] are not in"):
+        lanes_waited_for("waits for gfx950-runner: renamed lane")
 
 
-def test_only_a_listed_lane_ci_lacks_can_be_declared():
+def test_only_a_listed_lane_can_be_declared_once():
     with pytest.raises(ValueError, match="expected at least one lane"):
         skip_until_reason(reason="why")
     with pytest.raises(ValueError, match="expected one of rocke.tests.lanes.LANES"):
-        skip_until_reason(Lane("unlisted", "a lane", enrolled=True), reason="why")
-    with pytest.raises(ValueError, match="expected a lane CI lacks"):
-        skip_until_reason(NIGHTLY_SOURCE, reason="why")
+        skip_until_reason(Lane("unlisted", "a lane"), reason="why")
+    with pytest.raises(ValueError, match="expected each lane once"):
+        skip_until_reason(TICKET, TICKET, reason="why")
     with pytest.raises(ValueError, match="reason is empty"):
-        skip_until_reason(GFX950_RUNNER, reason=" ")
+        skip_until_reason(RUNNER_HARDWARE, reason=" ")
 
 
 def test_a_lane_is_validated_at_construction():
     with pytest.raises(ValueError, match="expected lowercase words"):
-        Lane("GFX950 runner", "a lane", enrolled=True)
-    with pytest.raises(ValueError, match="expected neither for a lane whose files"):
-        Lane("x", "a lane", enrolled=False, arches=("gfx950",))
-    with pytest.raises(ValueError, match="expected neither for a lane whose files"):
-        Lane("x", "a lane", enrolled=False, marker="exhaustive")
+        Lane("GFX950 runner", "a lane")
     with pytest.raises(ValueError, match="expected a tuple of known gfx arches"):
-        Lane("x", "a lane", enrolled=True, arches=("gfx9999",))
+        Lane("x", "a lane", arches=("gfx9999",))
+    with pytest.raises(ValueError, match="expected a tuple of known gfx arches"):
+        Lane("x", "a lane", arches="gfx950")
     assert len({lane.name for lane in LANES}) == len(LANES)
     runner_arches = [arch for lane in LANES for arch in lane.arches]
     assert len(set(runner_arches)) == len(runner_arches), "an arch has two lanes"
@@ -75,18 +92,37 @@ def test_a_lane_is_validated_at_construction():
 
 def test_skip_until_skips_with_the_declared_reason():
     with pytest.raises(pytest.skip.Exception) as skipped:
-        skip_until(BINDING_LANE, reason="no rocke_engine")
-    assert skipped.value.msg == "waits for binding-lane: no rocke_engine"
+        skip_until(BUILD_VARIANT, reason="no rocke_engine")
+    assert skipped.value.msg == "waits for build-variant: no rocke_engine"
     assert skipped.value.allow_module_level
 
 
 def test_import_or_skip_until_returns_the_module_or_declares_its_lane():
-    assert import_or_skip_until("json", CI_TEST_TOOLS).__name__ == "json"
+    assert import_or_skip_until("json", BUILD_VARIANT).__name__ == "json"
     with pytest.raises(pytest.skip.Exception) as missing:
-        import_or_skip_until("a_module_that_is_not_installed", CI_TEST_TOOLS)
+        import_or_skip_until("a_module_that_is_not_installed", BUILD_VARIANT)
     assert missing.value.msg.startswith(
-        "waits for ci-test-tools: could not import 'a_module_that_is_not_installed'"
+        "waits for build-variant: could not import 'a_module_that_is_not_installed'"
     )
+
+
+def test_skip_until_installed_reads_the_requirements_file(tmp_path):
+    """A requirements file every line of which is met runs on; one with a
+    package missing, or installed at a version its specifier refuses, skips
+    the case as waiting for the lane and names each unmet line."""
+    met = tmp_path / "met.txt"
+    met.write_text("# comment line\npytest>=1.0  # trailing comment\n\nnumpy\n")
+    skip_until_installed(met, BUILD_VARIANT)
+    unmet = tmp_path / "unmet.txt"
+    unmet.write_text("pytest<1.0\na-distribution-that-is-not-installed\n")
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        skip_until_installed(unmet, BUILD_VARIANT)
+    assert skipped.value.msg.startswith("waits for build-variant: unmet.txt: pytest ")
+    assert skipped.value.msg.endswith(
+        " does not satisfy pytest<1.0; a-distribution-that-is-not-installed is not "
+        "installed"
+    )
+    assert skipped.value.allow_module_level
 
 
 def test_a_module_that_is_installed_but_fails_to_import_is_not_a_lane_wait(
@@ -103,28 +139,49 @@ def test_a_module_that_is_installed_but_fails_to_import_is_not_a_lane_wait(
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     with pytest.raises(ImportError, match="undefined symbol"):
-        import_or_skip_until("broken_engine", BINDING_LANE)
+        import_or_skip_until("broken_engine", BUILD_VARIANT)
     with pytest.raises(ModuleNotFoundError, match="a_dependency_that_is_not"):
-        import_or_skip_until("engine_missing_a_dependency", BINDING_LANE)
+        import_or_skip_until("engine_missing_a_dependency", BUILD_VARIANT)
 
 
-def test_a_case_waits_for_runner_lanes_only_when_no_ci_runner_has_its_arch():
-    assert runner_lanes_for(("gfx950",)) == (GFX950_RUNNER,)
-    assert runner_lanes_for(("gfx950", "gfx1250")) == (GFX950_RUNNER, GFX1250_RUNNER)
-    assert runner_lanes_for(("gfx1151", "gfx1201")) == (GFX1151_GFX12_RUNNER,)
+def test_every_gpu_arch_has_a_pull_request_runner_or_waits_for_the_hardware():
+    """The device arches split into those a pull-request runner has and those
+    the runner hardware lane waits for; a generic target is neither."""
+    device_arches = {arch for arch in known_arches() if not arch.endswith("-generic")}
+    assert set(PR_RUNNER_ARCHES) | set(RUNNER_HARDWARE.arches) == device_arches
+    assert not set(PR_RUNNER_ARCHES) & set(RUNNER_HARDWARE.arches)
+    assert PR_RUNNER_ARCHES == ("gfx942", "gfx1100")
+    assert {"gfx950", "gfx1101", "gfx1102", "gfx1103"} <= set(RUNNER_HARDWARE.arches)
+
+
+def test_a_case_that_needs_more_gpus_waits_for_the_runner_hardware():
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        skip_needing_gpus(2, reason="needs two GPUs, found one")
+    assert skipped.value.msg == "waits for runner-hardware: needs two GPUs, found one"
+    for count in (1, True, 2.0):
+        with pytest.raises(ValueError, match="expected an integer of at least 2"):
+            skip_needing_gpus(count, reason="x")
+
+
+def test_a_case_waits_for_runner_hardware_only_when_no_ci_runner_has_its_arch():
+    assert runner_lanes_for(("gfx950",)) == (RUNNER_HARDWARE,)
+    assert runner_lanes_for(("gfx908",)) == (RUNNER_HARDWARE,)
+    assert runner_lanes_for(("gfx950", "gfx1250")) == (RUNNER_HARDWARE,)
+    assert runner_lanes_for(("gfx1151", "gfx1201")) == (RUNNER_HARDWARE,)
+    assert runner_lanes_for(("gfx90a",)) == (RUNNER_HARDWARE,)
     # gfx942 has a CI runner: the case runs there, so it waits for no lane.
     assert runner_lanes_for(("gfx942", "gfx950")) == ()
     assert runner_lanes_for(()) == ()
     assert arch_skip_reason(("gfx950",), "needs gfx950") == (
-        "waits for gfx950-runner: needs gfx950"
+        "waits for runner-hardware: needs gfx950"
     )
     assert arch_skip_reason(("gfx942", "gfx950"), "needs gfx942/gfx950") == (
         "needs gfx942/gfx950"
     )
     with pytest.raises(pytest.skip.Exception) as gfx950_only:
         skip_needing_arch(("gfx950",), reason="needs gfx950, found gfx942")
-    assert (
-        gfx950_only.value.msg == "waits for gfx950-runner: needs gfx950, found gfx942"
+    assert gfx950_only.value.msg == (
+        "waits for runner-hardware: needs gfx950, found gfx942"
     )
     with pytest.raises(pytest.skip.Exception) as on_a_ci_runner:
         skip_needing_arch(("gfx942",), reason="needs gfx942, found gfx1100")

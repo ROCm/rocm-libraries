@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def _runner_path() -> Path:
@@ -22,7 +22,7 @@ def _runner_path() -> Path:
         if candidate.is_file():
             return candidate
     skip_until(
-        SOURCE_TREE_CASES,
+        SOURCE_TREE,
         reason="top-level run_checks.py is absent from this platform-only tree",
     )
 
@@ -48,7 +48,7 @@ def test_platform_only_install_does_not_require_the_top_level_runner():
     cmake = platform / "CMakeLists.txt"
     if not cmake.is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="source CMake project is absent from the installed test artifact",
         )
     _assert_guarded_runner_install(cmake.read_text())

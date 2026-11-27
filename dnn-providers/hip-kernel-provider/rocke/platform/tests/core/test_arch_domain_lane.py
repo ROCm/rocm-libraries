@@ -45,9 +45,11 @@ from rocke.core.lower_llvm import (
 )
 from rocke.tests.engines import native_engine_or_skip
 from rocke.tests.lanes import (
-    BINDING_LANE,
-    SOURCE_TREE_CASES,
+    BUILD_VARIANT,
+    SOURCE_TREE,
+    TICKET,
     import_or_skip_until,
+    skip_until,
     skip_until_reason,
 )
 
@@ -64,7 +66,7 @@ _RUN_ALL_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 _needs_sources = pytest.mark.skipif(
     not (LOWER_LLVM.exists() and CPP_CORE.exists() and CHECK_GATE.exists()),
     reason=skip_until_reason(
-        SOURCE_TREE_CASES,
+        SOURCE_TREE,
         reason="reads the platform sources, which an installed test layout omits",
     ),
 )
@@ -351,7 +353,7 @@ def test_every_binding_requires_a_target() -> None:
     """
     import re
 
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     takes_target = re.compile(r"^\w+\(\w+: dict, arch: str\)")
     offenders = []
     checked = 0
@@ -590,7 +592,7 @@ def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
                     c is not None and arch_domain.is_negative(c.status) for c in cells
                 ):
                     return decl, arch, tuple(sorted(keys)), flavor
-    pytest.skip("no committed column has an all-negative aliased declare")
+    skip_until(TICKET, reason="no committed column has an all-negative aliased declare")
 
 
 def test_the_post_pass_reports_every_key_an_aliased_declare_could_be(
@@ -659,7 +661,7 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
 
 
 BINDINGS = PLATFORM / "cpp" / "bindings"
-_OMITS_CPP = skip_until_reason(SOURCE_TREE_CASES, reason="installed layout omits cpp/")
+_OMITS_CPP = skip_until_reason(SOURCE_TREE, reason="installed layout omits cpp/")
 # Library families bind from library/cpp/bindings (rocke_library_engine); the
 # same rules hold there. Scanned when the sibling tree is present.
 BINDING_SOURCES = [
@@ -786,7 +788,7 @@ def test_every_binding_module_raises_a_refusal_as_python_does(module: str) -> No
     """The cpp backend's refusal is the same kind of exception as the Python
     lowerer's: a NotImplementedError, the convention for a kernel the lowerer
     declines for its target (how hsaco_parity counts a refusal)."""
-    engine = import_or_skip_until(module, BINDING_LANE)
+    engine = import_or_skip_until(module, BUILD_VARIANT)
     refused = getattr(engine, "ArchDomainError", None)
     assert refused is not None, f"{module} has no ArchDomainError"
     assert issubclass(refused, NotImplementedError)
@@ -977,7 +979,7 @@ def test_a_borrowing_lane_refuses_at_its_source(
 ) -> None:
     """A borrowed column keeps Python and C++ diagnostics on its source lane."""
     if not arch_domain.COLUMN_ALIASES:
-        pytest.skip("every qualified lane has its own committed column")
+        skip_until(TICKET, reason="every qualified lane has its own committed column")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
     tested: list[str] = []
     for lane, source in arch_domain.COLUMN_ALIASES.items():

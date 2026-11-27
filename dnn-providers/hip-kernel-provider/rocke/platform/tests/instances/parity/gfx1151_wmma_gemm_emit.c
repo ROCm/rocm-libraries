@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_gemm_emit.c -- C-side emitter for the gfx1151
- * (RDNA3.5 / Strix Halo) WMMA GEMM parity harness. Selects one of 6 sampled
+ * (RDNA3.5) WMMA GEMM parity harness. Selects one of 6 sampled
  * WmmaGemmSpec configs by argv[1] (0..5), builds it exactly as the Python
  * emitter gfx1151_wmma_gemm_emit.py does, and lowers to LLVM .ll text at
  * arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.

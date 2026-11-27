@@ -49,7 +49,7 @@
 | A=(M, K) / B=(N, K) / C=(M, N) | strides + stride-1 axis per tensor, named K- / N- / M-contiguous (axis order: `tiling_api_surface.md` sec 3, "One axis convention"; a **layout pictogram** here is great) |
 | atom / wave size | `<MxNxK>` / `<64\|32>` |
 | pipeline | <interleaved · double-buffered · …> |
-| arch / GPU | <gfx90a/gfx942 · MI210/MI300> |
+| arch / GPU | <gfx90a/gfx942> |
 
 **Environment & reproduction:** commit/branch; exact build+run command; correctness method (integer inputs vs
 numpy golden, `max_abs_diff==0.0`); rocprof caveats (ROCm-7.14 container). *(a compact table works well.)*

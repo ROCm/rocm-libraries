@@ -257,9 +257,16 @@ def _emission_profile(flavor: str) -> _LlvmEmissionProfile:
         ) from exc
 
 
-def _supports_llvm23_target_ops(flavor: str) -> bool:
+def supports_llvm23_target_ops(flavor: str) -> bool:
     """Whether ``flavor`` admits the LLVM23-generation target-op surface."""
     return _emission_profile(flavor).has(_LlvmEmissionCapability.LLVM23_TARGET_OPS)
+
+
+class LlvmProfileRefusal(NotImplementedError):
+    """The lowering refuses an op because the LLVM flavor's emission profile
+    lacks what the op's IR needs (an intrinsic declared another way, or not
+    at all, before that profile). The same kernel lowers at a flavor whose
+    profile has it, so a caller can tell this refusal from any other."""
 
 
 def _flavor_at_least(flavor: str, required: str) -> bool:

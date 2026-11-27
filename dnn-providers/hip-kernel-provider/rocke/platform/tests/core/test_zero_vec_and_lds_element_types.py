@@ -154,6 +154,7 @@ def test_lds_loads_outside_the_element_rules_still_raise():
 _EVERY_ARCH = wired_arches()
 
 
+@pytest.mark.gpu
 def test_lds_round_trip_of_i16_on_gpu():
     n = 4
     # Span the whole i16 range, sign bit included, so a truncated or sign-extended

@@ -285,11 +285,11 @@ class UnifiedAttention2DTiledSpec:
     # over ``REGS_PER_LANE = block_m_per_warp / 4`` register slots
     # per lane instead of 4. The LDS budget grows with ``BLOCK_M``
     # (``Q_lds``, ``P_lds``, ``Acc_lds``), so ``block_m_per_warp=32``
-    # crosses MI355X's 3 → 2 WGs/CU threshold for the prefill workload.
+    # crosses gfx950's 3 → 2 WGs/CU threshold for the prefill workload.
     # Only ``{16, 32}`` are supported; 32 requires ``num_warps``
     # in ``{1, 2, 4}`` so total threads stay within the 1024 CTA cap.
     #
-    # **Measured (MI355X, bf16, HD=64, BS=32, T=64)**: ``block_m_per_warp=32``
+    # **Measured (gfx950, bf16, HD=64, BS=32, T=64)**: ``block_m_per_warp=32``
     # with ``num_warps=4`` (BLOCK_M=128) was 1.6-2.0× SLOWER than the
     # default on every prefill shape we tested, because the doubled
     # ``Q_lds`` + ``P_lds`` + ``Acc_lds`` push the kernel from 3 → 2
@@ -436,7 +436,7 @@ class UnifiedAttention2DTiledSpec:
     # Stages ``k_slice_hd``-wide K slices in a ``ring_depth``-slot ring instead of
     # double-buffering full [T, HD] K tiles. This is the LDS prerequisite for
     # NumPrefetchK/V=3
-    # on MI300X; v1 syncs per slice before adding overlap.
+    # on gfx942; v1 syncs per slice before adding overlap.
     use_k_sliced_ring: bool = False
     # Ring pipeline depth: how many K slices are staged/in-flight at once.
     #   3 (default): depth-3 pipeline (live set {kg, kg+1, kg+2}), 3 LDS slots.
@@ -593,7 +593,7 @@ class UnifiedAttention2DTiledSpec:
                 f"Other counts would need new MFMA distribution logic. "
                 f"num_warps=8 (BLOCK_M=128, THREADS=512) matches the BLOCK_M "
                 f"the production Triton 2D kernel uses for high-q prefill "
-                f"shapes; both are well within MI355X's 1024-thread CTA cap."
+                f"shapes; both are well within gfx950's 1024-thread CTA cap."
             )
         if self.block_m_per_warp not in (16, 32):
             raise ValueError(
@@ -1650,7 +1650,7 @@ def build_unified_attention_2d_tiled(
     # MFMA_N`` consecutive PV N-tiles). Two regimes:
     #
     # 1. ``HD <= 64``: use 32-col stripes. The big LDS savings (e.g. NW=4
-    #    T=64 HD=64 drops 16 KiB → 2 KiB) crosses MI355X's 2 → 3 WGs/CU
+    #    T=64 HD=64 drops 16 KiB → 2 KiB) crosses gfx950's 2 → 3 WGs/CU
     #    threshold and is worth a couple of extra sync barriers per CTA.
     #
     # 2. ``HD >= 128``: use full-HD stripes. The old F32 Acc_lds was
@@ -1682,7 +1682,7 @@ def build_unified_attention_2d_tiled(
     # ``(r * (HD/2 + 4)) % 32`` cycles every ~8 rows instead of every 1.
     # That converts the worst case from 16-way to 2-way bank conflict.
     # An internal conv kernel optimization study measured +43% throughput on
-    # MI355X gfx950 from this same trick.
+    # gfx950 from this same trick.
     #
     # We pad by exactly 16 bytes (8 halves) -- not 4 -- to preserve
     # 16-byte alignment for ``ds_write_b128``/``ds_read_b128`` (vec8).
@@ -5812,7 +5812,7 @@ def build_unified_attention_2d_tiled(
     # ``Acc_lds`` is only [BLOCK_M, OUT_STRIPE_COLS] of the working dtype,
     # so the per-CTA epilogue LDS is ``BLOCK_M * 32 * 2`` bytes -- a 75-87%
     # reduction vs the previous ``BLOCK_M * HD * 4`` F32 buffer. That LDS
-    # savings is what gives MI355X room for 3 WGs/CU on prefill workloads
+    # savings is what gives gfx950 room for 3 WGs/CU on prefill workloads
     # (the documented Triton ``num_warps=4`` BLOCK_M=128 configuration runs
     # at 3-4 WGs/CU; we now match that occupancy class).
     N_TILES_PER_STRIPE = OUT_STRIPE_COLS // MFMA_N
@@ -5910,7 +5910,7 @@ def build_unified_attention_2d_tiled(
         # After the O stripes, not before: emitted ahead of them, the LSE store
         # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
         # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
-        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # LSE-off on gfx942 / gfx950 (ROCm 10). Here the O ISA matches LSE-off.
         # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
         # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
         # (lane_col == 0) write; each owns REGS_PER_LANE rows.

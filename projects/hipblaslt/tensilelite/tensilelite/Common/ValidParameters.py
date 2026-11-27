@@ -451,6 +451,8 @@ validParameters = { # we need to make sure this matches develop
     # VectorWidthA and inherited VectorWidthMXSA retain their values.
     # WTA == VWA (MIWaveTile[0] == VectorWidthA) keeps the original path.
     # B keeps its VectorWidthB layout and iterate setting.
+    # When active with LDSSegmentInterleave, requires paired LDS buffers;
+    # persistent unpaired fallback (including PrefetchAcrossPersistent) is rejected.
     "WaveTileContiguousA": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
@@ -605,6 +607,14 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # Store cacheline align on the MXF4 -> 16-bit subtile store (gfx950, MI16, permlane16 store).
+    # A paired store fills half of each 128B line; with this on, two paired stores that
+    # hold the two halves of the same lines are blended in place so each store writes
+    # full lines, which removes the partial-line write traffic. It applies to the plain
+    # post-loop store's guard-free interior body and to the staged and woven fused
+    # stores, and is a no-op on kernels and store paths where it cannot apply. On by
+    # default.
+    "StoreCachelineAlign": [False, True],
     # FusedA2A=A2AGemm: K sub-rounds per peer shard, each with its own flag.
     "A2ASubRounds": [1, 2, 4],
     # Load options:

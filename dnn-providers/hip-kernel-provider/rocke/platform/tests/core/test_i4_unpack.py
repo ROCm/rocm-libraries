@@ -75,6 +75,7 @@ def _unpack_kernel(name: str) -> KernelDef:
 
 
 # The optimizer runs only when asked; run the bytes through both paths.
+@pytest.mark.gpu
 @pytest.mark.parametrize("optimize_ir", [False, True], ids=["plain", "optimized"])
 @pytest.mark.parametrize("name", sorted(_UNPACKERS))
 def test_every_byte_unpacks_to_its_signed_nibbles_on_gpu(name, optimize_ir):

@@ -28,6 +28,12 @@ from .session import reuse_workers
 from .targets import get_device_processor
 
 _TESTS = Path(__file__).resolve().parents[1]
+# How long one request of a pinned reference test may take: below the per-test
+# limit of the GPU pytest entries (ROCKE_TEST_ITEM_TIMEOUT_GPU in
+# platform/tests/cmake/TestTimeouts.cmake), so one stalled request fails with
+# the worker's own error and log tail instead of at that limit. A test whose
+# requests together outlast the limit still ends there.
+PINNED_REQUEST_TIMEOUT_SECONDS = 100
 
 
 def select_bundle(
@@ -155,7 +161,11 @@ def select_bundle(
                 f"no extracted {arch} {name} reference bundle at {bundle}; {hint}"
             )
         manifest = load_bundle(bundle, lock, architecture=arch, variant=variant)
-        workers.enter_context(reuse_workers(operation.worker_module))
+        workers.enter_context(
+            reuse_workers(
+                operation.worker_module, timeout=PINNED_REQUEST_TIMEOUT_SECONDS
+            )
+        )
         opened[architecture, variant] = target, bundle, manifest
         return opened[architecture, variant]
 

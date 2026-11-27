@@ -77,7 +77,7 @@ outside the envelope is the hand-argument §0 rule 1 forbids, wearing a tool's o
   - **Same-address** in a group is a **broadcast** (free) — a *separate* pathology counted by
     `SQ_LDS_ADDR_CONFLICT`, not bank conflict. Report it separately (it should be ~0 in a pure bank study).
 
-### 1.4 The CDNA2 LDS **write-port** rule (validated gfx90a MI210, `lds_conflict.simulate_hist` + `_VALIDATION_CORPUS`)
+### 1.4 The CDNA2 LDS **write-port** rule (validated gfx90a, `lds_conflict.simulate_hist` + `_VALIDATION_CORPUS`)
 The write datapath is NOT the naive `Σ_bank (distinct − 1)` replay counter (that over-counts stores ~8–9×).
 It has **two hardware constants**, both confirmed by the fit being integer-exact on all measured store
 configs **and** by independently reproducing the measured `productive` (= footprint/NB) it was not fit to:
@@ -111,7 +111,7 @@ pad+32 f16 gives stride 144 dwords, `s=16=1×16` → BC=0. `s=0` (any bank-multi
 worst case. **A `b32` narrowing swizzle does NOT fix a b128 store** — measured `conflicts/access = 3.00`
 (worse, 4× the LDS instructions): HW is the arbiter, and padding to the odd-half-stripe is the cheap fix.
 
-### 1.5 The CDNA2 LDS **read-port** rule (validated gfx90a MI210, `lds_conflict._VALIDATION_CORPUS["gfx90a"]["read_hists"]`)
+### 1.5 The CDNA2 LDS **read-port** rule (validated gfx90a, `lds_conflict._VALIDATION_CORPUS["gfx90a"]["read_hists"]`)
 
 ```
 served_read(half_wave, phase) = max_bank_depth(half_wave, phase)   # NO port cap, NO combine

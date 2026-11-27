@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/gfx1201_wmma_gemm_emit.py -- Python reference emitter for the
-# gfx1201 (RDNA4 / Navi48) WMMA GEMM parity harness. Selects one of 6 sampled
+# gfx1201 (RDNA4) WMMA GEMM parity harness. Selects one of 6 sampled
 # WmmaGemmSpec configs by argv[1] (0..5), builds it via build_wmma_gemm and
 # prints lower_kernel_to_llvm(arch='gfx1201') to stdout so it can be
 # byte-compared with the C emitter gfx1201_wmma_gemm_emit.c.

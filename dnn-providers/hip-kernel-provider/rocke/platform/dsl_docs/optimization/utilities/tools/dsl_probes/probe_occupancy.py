@@ -94,7 +94,7 @@ class ArchCaps:
     simds_per_cu: int
 
 
-# Defaults are gfx950 (MI355X). Override for older parts.
+# Defaults are gfx950. Override for older parts.
 ARCH_GFX950 = ArchCaps(
     name="gfx950",
     lds_bytes_per_cu=160 * 1024,
@@ -105,7 +105,7 @@ ARCH_GFX950 = ArchCaps(
     waves_per_simd=8,
     simds_per_cu=4,
 )
-ARCH_GFX942 = ArchCaps(  # MI300X
+ARCH_GFX942 = ArchCaps(
     name="gfx942",
     lds_bytes_per_cu=64 * 1024,
     max_waves_per_cu=32,
@@ -115,7 +115,7 @@ ARCH_GFX942 = ArchCaps(  # MI300X
     waves_per_simd=8,
     simds_per_cu=4,
 )
-ARCH_GFX90A = ArchCaps(  # MI250X
+ARCH_GFX90A = ArchCaps(
     name="gfx90a",
     lds_bytes_per_cu=64 * 1024,
     max_waves_per_cu=32,

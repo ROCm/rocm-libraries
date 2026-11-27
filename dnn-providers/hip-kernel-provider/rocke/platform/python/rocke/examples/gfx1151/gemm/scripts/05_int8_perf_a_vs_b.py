@@ -57,7 +57,7 @@ from rocke.instances.gfx1151.wmma_gemm_iu8_dequant import (  # noqa: E402
 from rocke.runtime.hip_module import Runtime  # noqa: E402
 from rocke.runtime.launcher import time_launches  # noqa: E402
 
-# gfx1151 (Radeon 8060S) tensor-core ceilings: int8 WMMA is ~2x the f16 rate.
+# gfx1151 (40 CUs) tensor-core ceilings: int8 WMMA is ~2x the f16 rate.
 _PEAK_F16_TF = 59.0
 _PEAK_I8_TOPS = 118.0
 

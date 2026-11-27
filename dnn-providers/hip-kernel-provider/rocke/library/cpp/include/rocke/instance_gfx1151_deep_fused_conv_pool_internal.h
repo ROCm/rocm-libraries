@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_gfx1151_deep_fused_conv_pool_internal.h -- PRIVATE shared state +
- * phase-function contract for the C99 port of the gfx1151 (RDNA3.5 / Strix Halo,
+ * phase-function contract for the C99 port of the gfx1151 (RDNA3.5,
  * wave32, WMMA 16x16x16) genuine-int8/int4 deep-fused conv0 -> conv1 -> maxpool
  * builder (rocke/instances/gfx1151/deep_fused_conv_pool.py, 3238 LOC).
  *

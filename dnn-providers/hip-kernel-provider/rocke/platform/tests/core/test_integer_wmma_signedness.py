@@ -32,7 +32,7 @@ from rocke.core.isa.matrix_calls import MATRIX_CALLS, MatrixOperand
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.tests.engines import lower_hip_with_both_engines, lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts, target_mnemonics
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 # (signed op_id, operand bits, the generic target whose row lists it)
 _INSTRUCTIONS = (
@@ -99,8 +99,15 @@ def test_every_integer_row_is_listed_with_its_operand_dtypes():
         assert op.b_dtype[0] == ("i" if flag_b == "i1 1" else "u"), op_id
 
 
-@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
-@pytest.mark.parametrize("op_id, gfx, flags", _ROWS)
+@pytest.mark.parametrize(
+    "op_id, gfx, flags, flavor",
+    [
+        (op_id, gfx, flags, flavor)
+        for op_id, gfx, flags in _ROWS
+        for flavor in LLVM_FLAVORS
+        if MATRIX_CALLS[op_id].lowers_at(flavor)
+    ],
+)
 def test_both_engines_pass_the_flags_the_row_gives(op_id, gfx, flags, flavor):
     text = lower_with_both_engines(_kernel(gfx, op_id), gfx, flavor)
     assert _flags(text, MATRIX_CALLS[op_id].intrinsic) == flags
@@ -224,7 +231,7 @@ def test_neither_engine_writes_a_signedness_flag_literal():
     ]
     if not sources:
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason=f"source-tree check: no engine sources under {root}",
         )
     found = [

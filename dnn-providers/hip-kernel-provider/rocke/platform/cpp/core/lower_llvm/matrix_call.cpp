@@ -333,11 +333,22 @@ static const char* declared_text(rocke_lower_t* L, const char* key)
     return rocke_ll_decl_text(L->flavor, key);
 }
 
+void rocke_ll_refuse_llvm23_matrix_op(rocke_lower_t* L, const char* op_id)
+{
+    rocke_ll_fail(L,
+                  ROCKE_ERR_NOTIMPL,
+                  "tile.%s requires llvm23 (ROCm 7.13+), got %s",
+                  op_id,
+                  rocke_llvm_flavor_name(L->flavor));
+}
+
 void rocke_ll_emit_matrix_call(rocke_lower_t* L,
                                const rocke_op_t* op,
                                const char* op_id,
                                const rocke_matrix_call_t* call)
 {
+    if(!rocke_matrix_call_lowers_at(call, L->flavor))
+        rocke_ll_refuse_llvm23_matrix_op(L, op_id);
     if(op->num_operands != 3)
         rocke_ll_fail(
             L, ROCKE_ERR_VALUE, "tile.%s expects 3 operands, got %d", op_id, op->num_operands);

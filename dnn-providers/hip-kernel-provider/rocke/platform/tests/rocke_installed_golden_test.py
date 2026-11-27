@@ -99,7 +99,13 @@ def main(argv: list[str] | None = None) -> int:
     _add_installed_python_paths()
 
     from rocke.core.ir_golden import drift_hint, golden_case_ids, load_golden
-    from rocke.tests.ci_shard import ACTIVATION_FLAG, current_shard, header_line
+    from rocke.tests.ci_shard import (
+        ShardKeyListing,
+        add_shard_argument,
+        header_line,
+        list_keys_path,
+        shard_from_arguments,
+    )
     from rocke_ir_parity_harness import (
         GOLDEN_FLAVORS,
         GOLDEN_NAME,
@@ -108,30 +114,30 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument(
-        ACTIVATION_FLAG,
-        dest="shard_from_gtest_env",
-        action="store_true",
+    add_shard_argument(
+        parser,
         help="check only this CI shard's cases",
+        list_help="write the cases the CI shards split, each its own shard key, "
+        "to this path instead of checking them",
     )
     arguments = parser.parse_args(argv)
-    try:
-        shard = (
-            current_shard(from_gtest=True) if arguments.shard_from_gtest_env else None
-        )
-    except ValueError as error:
-        parser.error(f"rocke-ctest-shard: {error}")
+    shard = shard_from_arguments(parser, arguments)
+    listing = list_keys_path(arguments)
 
     golden = _find_golden()
     flavors = ", ".join(GOLDEN_FLAVORS)
     owns_case = None
-    if arguments.shard_from_gtest_env:
-        print(header_line(shard))
-    if shard is not None:
+    if listing is not None or shard is not None:
         # A case only the golden still names is checked (reported missing) by
         # the shard that owns its id, like every other case.
         case_ids = {case["case_id"] for case in cases()}
         case_ids |= golden_case_ids(load_golden(golden))
+    if listing is not None:
+        ShardKeyListing({case: case for case in sorted(case_ids)}).write(listing)
+        return 0
+    if arguments.shard_from_gtest_env:
+        print(header_line(shard))
+    if shard is not None:
         print(shard.split_line(case_ids))
         owns_case = shard.owns
     drift = check_golden(golden, owns_case=owns_case)

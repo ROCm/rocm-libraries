@@ -1,4 +1,4 @@
-# Dense flash-attention prefill (gfx950 / MI355X)
+# Dense flash-attention prefill (gfx950)
 
 Productized dense causal flash-attention prefill kernel for gfx950, authored in the
 rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
@@ -54,7 +54,7 @@ a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
 `W = (seqlen_q // 256) * Hq * B` work items, so the per-CTA launch/dispatch + scalar
 setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
-block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
+block per CU on gfx950 (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
 loss). The work-item decode is `persist_decode="auto"` by default. For aligned
 causal attention auto selects `hq_minor_swz` for large MHA, else `bt_hkv_minor`
 with fewer batches than XCDs; otherwise `hkv_major` for GQA with enough work per
@@ -94,14 +94,14 @@ The dispatcher enables it for aligned persistent causal D128/BN64 fp16 and bf16
 shapes without sliding windows, sinks, or ragged lengths, whatever the block
 order.
 
-## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
+## Measured (gfx950, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
 
 > These measurements predate the current block orders. Where they show
 > `hkv-major` as the default or `gqa-pair` as auto-selected, auto now picks
 > `bt_hkv_minor` / `qb_major`, which measured ahead of the pair decodes on
 > their shapes.
 
-Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only **same-session
+Absolute gfx950 TFLOPS swing **±25–30% with auto-clock**, so only **same-session
 ratios are load-bearing**; the table below is one representative session, with each
 number pinned to its exact config (grid / decode / V-pad / lazy):
 
@@ -119,7 +119,7 @@ The load-bearing, clock-invariant deltas: hkv-major vs qb-major ≈ **1.04×** (
 spill and parity-identical vs `torch.nn.functional.scaled_dot_product_attention`
 (max abs err ~1.46e-3 at Sq=8192).
 
-## Measured Llama-3-8B target (MI355X, fp16)
+## Measured Llama-3-8B target (gfx950, fp16)
 
 For `B=1, Sq=Skv=8192, Hq=32, Hkv=8, D=128, causal`, five-round same-GPU
 ABBA measurements repeated twice for the final wide-DMA+IGLP kernel:
@@ -136,7 +136,7 @@ The gqa-pair step raised estimated L2 hit rate 32.0%→65.1%, halved fetch volum
 wide DMA + IGLP reducing LDS-wait share 30.3%→7.6% and the mapped PV MFMA
 callsite 19.4%→5.3%.
 
-## Ungated dashboard sweep (MI355X)
+## Ungated dashboard sweep (gfx950)
 
 The capability-gated policy was measured against the previous exact-shape policy
 on the 90 unique dense shapes from the 2026-09-02 Solera export. Both runs used

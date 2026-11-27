@@ -1,7 +1,7 @@
-# CK DSL Unified Attention 2D — gfx942 (MI300X) Experiment Summary
+# CK DSL Unified Attention 2D — gfx942 Experiment Summary
 
 Date: 2026-06-05 (consolidated end-to-end arc; supersedes the per-batch living-document drafts)
-Scope: fp16/bf16 prefill-2D unified attention SDPA-fwd on **gfx942 (CDNA3 / MI300X)**
+Scope: fp16/bf16 prefill-2D unified attention SDPA-fwd on **gfx942 (CDNA3)**
 (`instances/gfx942/attention_tiled_2d.py` narrow path; the wide flash regime lives in the
 provider `compile_service.py`). The gfx950 study `attention_2d_experiment_summary.md` is a
 separate effort; its wide-K `16x16x32` / `32x32x16` atoms and transposed/combo ladder are
@@ -366,7 +366,7 @@ L4 merged at commit `9cff43bdd2d`.
 ### Phase-A correction — what flash actually does (re-profiled)
 
 **Batch 3's claim that "flash never round-trips V through LDS at all" is WRONG — corrected here.**
-Fresh kernel-trace + counters of PyTorch aotriton `attn_fwd` on gfx942 (MI300X), D128 fp16:
+Fresh kernel-trace + counters of PyTorch aotriton `attn_fwd` on gfx942, D128 fp16:
 
 | flash `attn_fwd` (D128 fp16) | value |
 |---|---:|

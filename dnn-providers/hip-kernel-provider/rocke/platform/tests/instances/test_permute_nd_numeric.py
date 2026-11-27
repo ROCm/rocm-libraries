@@ -48,6 +48,7 @@ def test_the_cases_cover_vector_widths_8_4_2_and_the_scalar_path():
     assert [spec.vec_width for spec in _SPECS] == [8, 4, 2, 1, 1, 1, 1]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("spec", _SPECS, ids=lambda spec: spec.kernel_name())
 def test_permute_matches_numpy_transpose_on_gpu(spec):
     arch = current_device_arch_in(_RUN_ARCHES, subject="permute_nd")

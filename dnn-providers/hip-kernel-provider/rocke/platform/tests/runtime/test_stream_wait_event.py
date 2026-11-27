@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.stall_gate import StallGate
 from rocke.tests.gpu import current_device_arch
+
+pytestmark = pytest.mark.gpu
 
 
 def test_gpu_the_waiting_stream_holds_until_the_event_completes():

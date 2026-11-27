@@ -38,7 +38,7 @@
     },
     {
       "label": "chiplet_swizzle",
-      "hypothesis": "XCD-aware grid swizzle (MI355X 8 XCDs)",
+      "hypothesis": "XCD-aware grid swizzle (8 XCDs on gfx950)",
       "error": "no samples"
     },
     {

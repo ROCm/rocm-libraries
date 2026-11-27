@@ -14,7 +14,9 @@ import ast
 import contextlib
 import io
 import json
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1258,3 +1260,70 @@ class ShardedCheckTest(unittest.TestCase):
                         self.assertEqual(cut[name], doc[name])
                 for name, keys in seen.items():
                     self.assertEqual(keys, set(doc[name]))
+
+
+class ShardKeyListingTest(unittest.TestCase):
+    """Under ``LIST_KEYS_FLAG`` the generator writes the probes a sharded check
+    splits instead of probing them, keyed by declaration key."""
+
+    def test_the_listing_is_refused_without_the_shard_flag(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(G.__file__)),
+                "--check",
+                ci_shard.LIST_KEYS_FLAG,
+                "keys.json",
+            ],
+            capture_output=True,
+            text=True,
+            env=self._environment(),
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(
+            f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}",
+            result.stderr,
+        )
+
+    @staticmethod
+    def _environment() -> dict[str, str]:
+        """This process's environment without a CI shard, with the rocke
+        package on the generator's path."""
+        environment = ci_shard.unsharded_environment()
+        rocke_root = str(Path(ci_shard.__file__).resolve().parents[2])
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [rocke_root, environment.get("PYTHONPATH", "")]
+        )
+        return environment
+
+    def test_each_declaration_key_lists_one_probe_per_wired_arch(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            listing_path = Path(scratch) / "keys.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(G.__file__)),
+                    "--check",
+                    "--unvalidated-exit-code",
+                    "77",
+                    ci_shard.ACTIVATION_FLAG,
+                    ci_shard.LIST_KEYS_FLAG,
+                    str(listing_path),
+                ],
+                capture_output=True,
+                text=True,
+                env=self._environment(),
+                check=False,
+            )
+            if result.returncode == 77:
+                self.skipTest("no LLVM toolchain this generator can validate with")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            listing = ci_shard.ShardKeyListing.read(listing_path)
+        arches = sorted(wired_arches())
+        probes_of: dict[str, list[str]] = {}
+        for probe, key in listing.key_of_case.items():
+            probes_of.setdefault(key, []).append(probe)
+        self.assertTrue(probes_of)
+        for key, probes in probes_of.items():
+            self.assertEqual(sorted(probes), [f"{key}/{arch}" for arch in arches])

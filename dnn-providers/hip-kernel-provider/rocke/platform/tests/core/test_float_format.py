@@ -23,11 +23,11 @@ import random
 import struct
 import subprocess
 
-import pytest
 from rocke.core.ir import F32, F64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 
 def _bits(value: float) -> str:
@@ -57,7 +57,10 @@ def _sample() -> list[float]:
 def test_native_float_spelling_matches_python_repr():
     executable = os.environ.get("ROCKE_FLOAT_FORMAT_TEST")
     if not executable:
-        pytest.skip("set ROCKE_FLOAT_FORMAT_TEST to the built rocke_float_format test")
+        skip_until(
+            BUILD_VARIANT,
+            reason="set ROCKE_FLOAT_FORMAT_TEST to the built rocke_float_format test",
+        )
     values = _sample()
     native = subprocess.run(
         [executable, "--repr"],

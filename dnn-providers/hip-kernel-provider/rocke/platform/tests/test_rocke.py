@@ -79,8 +79,8 @@ from rocke.tests.engines import (
     skip_without_cpp_engine,
 )
 from rocke.tests.lanes import (
-    BINDING_LANE,
-    TORCH_IN_CI,
+    BUILD_VARIANT,
+    TICKET,
     import_or_skip_until,
     skip_until,
     skip_until_reason,
@@ -114,7 +114,7 @@ except Exception:  # pragma: no cover - depends on the environment
     _HAVE_TORCH = False
 
 _requires_torch = unittest.skipUnless(
-    _HAVE_TORCH, skip_until_reason(TORCH_IN_CI, reason="requires torch")
+    _HAVE_TORCH, skip_until_reason(TICKET, reason="requires torch")
 )
 
 # A gfx950-only atom lowered for gfx942 raises `ArchDomainWarning`. Make it an
@@ -2088,7 +2088,7 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         try:
             import rocke_engine
         except ModuleNotFoundError:
-            skip_until(BINDING_LANE, reason="rocke_engine extension not built")
+            skip_until(BUILD_VARIANT, reason="rocke_engine extension not built")
         from rocke.core.lower_llvm import LLVM_FLAVORS
 
         self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
@@ -2207,7 +2207,7 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         try:
             import rocke_engine  # noqa: F401
         except ModuleNotFoundError:
-            skip_until(BINDING_LANE, reason="rocke_engine extension not built")
+            skip_until(BUILD_VARIANT, reason="rocke_engine extension not built")
 
     def test_agree_on_the_bare_host(self):
         """No env pointing anywhere: whatever this machine has, both must see
@@ -5024,7 +5024,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_matmul_bias_relu_scale(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -5043,7 +5043,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_matmul_only(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5056,7 +5056,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_unsupported_graph(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5068,7 +5068,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_compile_fn_exposes_plan_without_launching(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import compile_fn
 
         def fn(A, B, bias):
@@ -5548,7 +5548,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
     """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
 
     def test_explain_matmul_gelu(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5560,7 +5560,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], None)
 
     def test_explain_matmul_bias_silu(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -5575,7 +5575,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], "bias")
 
     def test_explain_matmul_with_residual(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias, residual):
@@ -5592,7 +5592,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(len(info["residual_arg_names"]), 1)
 
     def test_explain_pointwise_chain(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5604,7 +5604,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["a_arg_name"], "A")
 
     def test_explain_pointwise_binary_chain(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5619,7 +5619,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["unary_chain"], ("relu",))
 
     def test_explain_matmul_scale_clamp(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5633,7 +5633,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         )
 
     def test_explain_rowwise_reduction_sum(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5645,7 +5645,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "sum")
 
     def test_explain_rowwise_reduction_mean(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -6194,7 +6194,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
     @_requires_torch
     def test_materialize_with_fake_pool_binds_tensors(self):
         # Use the real WorkspacePool with a CPU "device" via torch.
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import materialize_plan
         from rocke.runtime.launcher import WorkspacePool
 
@@ -6217,7 +6217,7 @@ class TestValidationHarness(unittest.TestCase):
 
     @_requires_torch
     def test_benchmark_case_runs_torch_eager_baseline(self):
-        torch = import_or_skip_until("torch", TORCH_IN_CI)
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import BenchmarkCase, run_fusion_validation_matrix
 
         def ref_fn(x, y):

@@ -1,6 +1,6 @@
 # gfx1151 WMMA GEMM — the quantization/precision ladder
 
-A self-contained study of WMMA GEMM on **gfx1151 (RDNA3.5 / Strix Halo APU,
+A self-contained study of WMMA GEMM on **gfx1151 (RDNA3.5 APU,
 wave32)** across the precision ladder the hardware supports — from the f16
 baseline through int4 weight-only to **int8**, with the two int8 compute paths
 compared head-to-head — each rung verified for correctness on silicon.
@@ -46,7 +46,7 @@ ceiling).
 
 | | |
 |---|---|
-| GPU | Radeon 8060S / **gfx1151** (RDNA3.5, Strix Halo APU), wave32 |
+| GPU | **gfx1151** (RDNA3.5 APU, 40 CUs), wave32 |
 | OS | **Windows-native** (this box) |
 | comgr / hip | `C:\Windows\System32\amd_comgr_3.dll`, `amdhip64_7.dll` (versioned driver DLLs) |
 | f16 WMMA peak | ~59 TFLOP/s |

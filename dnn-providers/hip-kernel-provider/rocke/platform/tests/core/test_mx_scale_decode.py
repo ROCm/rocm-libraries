@@ -49,7 +49,7 @@ from rocke.tests.engines import (
     engine_modules_available,
     native_engine_or_skip,
 )
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 pytestmark = pytest.mark.filterwarnings(
     "error::rocke.core.lower_llvm.ArchDomainWarning"
@@ -143,7 +143,7 @@ def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines(arch):
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
     if not engine_modules_available():
-        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
+        skip_until(BUILD_VARIANT, reason="needs the rocke_engine binding")
     ll = lower_mx_gemm(_mx_gemm_spec(), arch=arch, backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll
@@ -326,6 +326,7 @@ def _decode_on_gpu(arch):
         module.unload()
 
 
+@pytest.mark.gpu
 def test_all_codes_decode_to_the_spec_value_on_gpu(gpu_arch):
     got = _decode_on_gpu(gpu_arch)
     for code in range(_CODES):

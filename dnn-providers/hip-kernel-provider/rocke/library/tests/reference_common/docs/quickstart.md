@@ -222,8 +222,7 @@ Then:
 
 1. **Check it without a GPU.** `cases --arch` lists the new variant beside the
    others and `status` reports it unpublished. Run the host checks from the
-   [first recipe](#i-changed-a-covered-kernel), and for SDPA also
-   `library/tests/test_sdpa_torch_reference.py`, which needs no Torch. The
+   [first recipe](#i-changed-a-covered-kernel). The
    existing host tests need no edit; the checks that run for every variant,
    including `test_enrolled_variants_follow_the_layout_rules`, cover the new
    one.

@@ -35,6 +35,9 @@ from rocke.instances.common.flatmm import (
     flatmm_signature,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
+from rocke.tests.lanes import skip_needing_arch
+
+pytestmark = pytest.mark.gpu
 
 # The arches this test has run green on; add one once it has.
 _RUN_ARCHES = ("gfx90a", "gfx942", "gfx950")
@@ -72,7 +75,10 @@ def gpu_arch():
 def test_flatmm_matches_the_exact_batched_product_on_gpu(gpu_arch, tile_name, shape):
     tile = _TILES[tile_name](gpu_arch)
     if tile is None:
-        pytest.skip(f"{tile_name} uses an atom {gpu_arch} does not have (gfx950 only)")
+        skip_needing_arch(
+            ("gfx950",),
+            reason=f"{tile_name} uses an atom {gpu_arch} does not have (gfx950 only)",
+        )
     batch, m, n, k, padded = _SHAPES[shape]
     spec = FlatMMSpec(
         tile=tile,

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx942 (CDNA3 / MI300X) unified-attention 2D tiled SDPA-fwd parity + latency.
+"""gfx942 (CDNA3) unified-attention 2D tiled SDPA-fwd parity + latency.
 
 Torch-reference-only correctness + latency harness for the gfx942 narrow /
 wide (flash-regime) tiled attention kernel

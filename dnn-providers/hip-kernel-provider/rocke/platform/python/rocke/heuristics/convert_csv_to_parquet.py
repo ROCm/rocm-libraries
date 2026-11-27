@@ -67,7 +67,7 @@ METRIC_COLUMNS: Set[str] = {
 
 # Hardware profiles for different architectures
 HW_PROFILES = {
-    "gfx950": {  # MI300 series
+    "gfx950": {
         "hw_num_cus": 256,
         "hw_simds_per_cu": 4,
         "hw_shader_engines": 32,
@@ -80,7 +80,7 @@ HW_PROFILES = {
         "hw_l3_cache_kb": 262144,
         "hw_num_xcd": 8,
     },
-    "gfx942": {  # MI300A
+    "gfx942": {  # the 228-CU part
         "hw_num_cus": 228,
         "hw_simds_per_cu": 4,
         "hw_shader_engines": 28,
@@ -93,7 +93,7 @@ HW_PROFILES = {
         "hw_l3_cache_kb": 262144,
         "hw_num_xcd": 8,
     },
-    "gfx90a": {  # MI250X
+    "gfx90a": {
         "hw_num_cus": 110,
         "hw_simds_per_cu": 4,
         "hw_shader_engines": 8,
