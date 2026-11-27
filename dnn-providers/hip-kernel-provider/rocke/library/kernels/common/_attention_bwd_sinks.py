@@ -289,7 +289,7 @@ class NullSink(DqSink):
         return None
 
     def consume(self, b, dq_frag, rows, h, *, clamp: bool = True) -> None:
-        raise RuntimeError("NullSink receives no dQ fragments (G4 is not emitted)")
+        raise ValueError("NullSink receives no dQ fragments (G4 is not emitted)")
 
     def finish(self, b: IRBuilder) -> None:
         return None

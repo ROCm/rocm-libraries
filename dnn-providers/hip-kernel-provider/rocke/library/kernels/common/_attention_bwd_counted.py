@@ -216,9 +216,10 @@ class CountedWaits:
         self._issued += n
 
     def end_step(self) -> None:
-        """Check that the step issued exactly ``n_atomics`` atomics."""
+        """Check that the step issued exactly ``n_atomics`` atomics (a
+        ``ValueError`` otherwise, the type the C++ twin's status stands for)."""
         if self._issued != self.n_atomics:
-            raise AssertionError(
+            raise ValueError(
                 f"the q step issued {self._issued} dQ atomics, the count model "
                 f"assumes {self.n_atomics}"
             )

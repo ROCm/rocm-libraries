@@ -216,7 +216,7 @@ def test_null_and_split_slice_sinks():
     assert ns.emits_g4 is False and SK.AtomicWorkspaceSink.emits_g4 is True
     ns.begin_head(b, b.const_i32(0))
     ns.finish(b)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError, match="NullSink receives no dQ fragments"):
         ns.consume(b, [], b.const_i32(0), b.const_i32(0))
     with pytest.raises(NotImplementedError):
         SK.SplitSliceSink()
