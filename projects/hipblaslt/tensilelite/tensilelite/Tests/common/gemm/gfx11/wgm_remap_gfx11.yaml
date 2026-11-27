@@ -1,0 +1,66 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
+
+# DefaultWGM remap (magic divides on gfx11), non-persistent. MT64x64, so the
+# grid is ceil(M/64) x ceil(N/64) tiles. WGM > 0 bands along N, WGM < 0 along M.
+# The sizes give, for the swept |WGM|:
+#   17 tiles: last band of height 1 for |WGM| 2, 8; height 2 for 3, 5
+#   16 tiles: no partial band for |WGM| 2, 8
+#    2 tiles: grid smaller than |WGM| (a single, partial band)
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [false]
+        - TransposeLDS: [0]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [true]
+        - WorkGroupMapping: [-8, -5, -3, -2, -1, 0, 1, 2, 3, 5, 8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1050, 1050, 2, 64]  # 17 x 17 tiles, batch 2
+          - Exact: [1024, 1050, 1, 64]  # 16 x 17
+          - Exact: [1050, 1024, 1, 64]  # 17 x 16
+          - Exact: [100, 130, 1, 64]    # 2 x 3
+          - Exact: [1050, 100, 1, 64]   # 17 x 2
