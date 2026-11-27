@@ -746,6 +746,17 @@ tracked as a gap.
 **Unstable / flaky.** Not tracked as a category; hipBLASLt has no `UNSTABLE` tag. That is a real gap
 rather than a claim that nothing is flaky. What exists instead is a quarantine list, described next.
 
+### Python bindings enum sync
+
+The opt-in Python bindings (`projects/hipblaslt/python/`) bind every value of every public enum. The `hipblaslt-python-enum-sync` pre-commit hook checks that, on any PR that changes `hipblaslt.h`, `hipblaslt-ext.hpp` or `hipblas-common.h`, with nothing built. It runs locally if pre-commit is installed, and in the `pre-commit` workflow.
+
+If it fires on your PR, you added an enum value. Fix it in one of two ways, as the message says:
+
+- add a `reg(e, "<C enum>", "<Python name>", <C value>);` line to `projects/hipblaslt/python/csrc/enums.cpp`, under the same `#if HIPBLASLT_HAS_...` guard if the value has one;
+- or, for a sentinel or a value the header marks "Not supported yet", add it to `ALLOWED_MISSING` in `projects/hipblaslt/python/src/hipblaslt/_coverage.py` with a one-line reason.
+
+The bindings' coverage test is the backstop. It reads the headers after the preprocessor has run, in the bindings' Component CI lanes.
+
 ### Flaky Test Policy
 
 hipBLASLt does not currently tag flaky tests, and has no `UNSTABLE` category. A nondeterministic
@@ -1943,7 +1954,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | No CI lane runs TSAN yet, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | AIHPBLAS-5035 |
 | Multi-GPU tests cover one feature, fused GEMM plus all-to-all, on two gfx950 GPUs | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
 | Three parallel enum-to-string tables can drift | Low | Medium | None automated | AIHPBLAS-3558 |
-| The Python bindings lanes compile and test against an installed hipBLASLt (a pinned TheRock nightly), so changes to its declarations or behavior reach these tests only after the pinned version is bumped. New status values are still caught on the PR that adds them | Medium | Medium | The lanes run when the public headers change, and the bindings' status check reads the PR's own hipblas-common.h | AIHPBLAS-5268 |
+| The Python bindings lanes compile and test against an installed hipBLASLt (a pinned TheRock nightly), so changes to its declarations or behavior reach these tests only after the pinned version is bumped. New status and enum values are still caught on the PR that adds them | Medium | Medium | The lanes run when the public headers change, and the bindings' status and enum checks read the PR's own headers | AIHPBLAS-5268 |
 | TheRock's CI path filter keeps only the new path of a renamed file, so moving a library source into `projects/hipblaslt/python/` could let the bindings' entry in `.github/skip-ci-config.toml` skip TheRock CI for that pull request | Low | High if hit | Any other library change in the same pull request still runs TheRock CI, and the gfx1250 gate reads both paths of a rename | AIHPBLAS-5276 |
 
 ## Owners and Review Cadence

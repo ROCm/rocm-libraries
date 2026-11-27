@@ -1,5 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+#include "init.hpp"
 #include "status.hpp"
 
 #include <hipblaslt/hipblaslt-version.h>
@@ -76,4 +77,6 @@ NB_MODULE(_core, m)
         [](int code) { hipblaslt_py::check_status_code(code, "_raise_test_status"); },
         "Test hook: raise HipblasLtError for a nonzero status value, which needn't be one the "
         "installed header has.");
+
+    init_enums(m);
 }

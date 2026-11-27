@@ -98,6 +98,7 @@ endif()
 
 nanobind_add_module(_core NB_SUPPRESS_WARNINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/csrc/module.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/csrc/enums.cpp"
 )
 # hipBLASLt's headers first: hip::host's include directory may hold an older hipBLASLt.
 target_include_directories(_core BEFORE PRIVATE "${HIPBLASLT_PY_BUILD_INCLUDE_DIR}")
