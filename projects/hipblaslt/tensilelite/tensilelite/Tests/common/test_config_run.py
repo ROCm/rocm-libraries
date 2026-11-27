@@ -74,6 +74,43 @@ def _require_verification(log, verify_reuse: bool, verify_upload: bool) -> None:
             assert sum(map(int, counts)) > 0, f"No GPU {kind} upload-skip verification executed"
 
 
+def _launch_summaries(output: str) -> list[dict[str, str]]:
+    """The "key = value" fields of every StreamK launch summary in output, plus its kernel."""
+    summaries = []
+    for block in output.split("TensileLite::"):
+        if not block.startswith("StreamK LAUNCH SUMMARY"):
+            continue
+        fields = dict(re.findall(r"^ +(\w+) += (\S+)", block, re.MULTILINE))
+        fields["kernel"] = re.search(r"kernel='([^']+)'", block).group(1)
+        summaries.append(fields)
+    return summaries
+
+
+def _field_matches(actual, wanted) -> bool:
+    """wanted is an int to equal or a string ">N" to exceed."""
+    if actual is None:
+        return False
+    if isinstance(wanted, str) and wanted.startswith(">"):
+        return int(actual) > int(wanted[1:])
+    return int(actual) == int(wanted)
+
+
+def _require_streamk_launches(log, expected: list[dict]) -> None:
+    """Each entry names a tile count and summary fields: every StreamK launch of that
+    many tiles must report them, and at least one launch must have that many tiles."""
+    log.seek(0)
+    summaries = _launch_summaries(log.read())
+    for expectation in expected:
+        tiles = expectation["tiles"]
+        launches = [row for row in summaries if row.get("tiles") == str(tiles)]
+        assert launches, f"No StreamK launch of {tiles} tiles: {log.name}"
+        for row in launches:
+            for field, wanted in expectation.items():
+                assert _field_matches(row.get(field), wanted), (
+                    f"{row['kernel']}: {tiles} tiles launched with {field} = {row.get(field)},"
+                    f" expected {wanted}: {log.name}")
+
+
 def _run_client_process(args: list[str], env: dict[str, str], log) -> None:
     result = subprocess.run(
         [sys.executable, "-c", "import sys; from tensilelite.run import main; main(sys.argv[1:])",
@@ -98,18 +135,29 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     schedules = parameters.get("streamk_schedules", [])
     verify_reuse = parameters.get("verify_reference_reuse", False)
     verify_upload = parameters.get("verify_upload_skip", False)
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    # Expected StreamK launch summary fields per tile count; unscheduled configs only.
+    launches = parameters.get("streamk_launches", [])
+    assert not (launches and schedules), "streamk_launches applies to unscheduled configs"
+    # Environment for the client alone, e.g. debug overrides only an env var reaches.
+    client_env = {key: str(value) for key, value in parameters.get("client_env", {}).items()}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), **client_env}
     if verify_reuse:
         env["TENSILELITE_VERIFY_REFERENCE_REUSE"] = "1"
     if verify_upload:
         env["TENSILELITE_VERIFY_UPLOAD_SKIP"] = "1"
+    if launches:
+        env["TENSILE_DB"] = "0x200000"
     if not schedules:
-        if verify_reuse or verify_upload:
-            # A separate process scopes verification to this config and captures the
-            # client's count even when it inherits its stdout file descriptor.
-            with open(os.path.join(output_dir, "reuse-verification.log"), "w+") as log:
+        if verify_reuse or verify_upload or client_env or launches:
+            # A separate process scopes verification, client_env and the launch summaries
+            # to this config, and its log holds the client's output even when the client
+            # inherits its stdout file descriptor.
+            log_name = "reuse-verification.log" if verify_reuse or verify_upload else "client.log"
+            with open(os.path.join(output_dir, log_name), "w+") as log:
                 _run_client_process(args, env, log)
                 _require_verification(log, verify_reuse, verify_upload)
+                if launches:
+                    _require_streamk_launches(log, launches)
         else:
             run.main(args)
         return
@@ -131,13 +179,9 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
                 _require_verification(log, verify_reuse, verify_upload)
             log.seek(0)
             records = {}
-            for block in log.read().split("TensileLite::"):
-                if not block.startswith("StreamK LAUNCH SUMMARY"):
-                    continue
-                fields = dict(re.findall(r"^ +(\w+) += (\S+)", block, re.MULTILINE))
+            for fields in _launch_summaries(log.read()):
                 if "physicalPartialSlots" in fields:
-                    kernel = re.search(r"kernel='([^']+)'", block).group(1)
-                    records.setdefault(kernel, []).append(fields)
+                    records.setdefault(fields["kernel"], []).append(fields)
         assert records, f"No clustered StreamK launches observed: {log_path}"
         for kernel, launches in records.items():
             if mode == "whole":
