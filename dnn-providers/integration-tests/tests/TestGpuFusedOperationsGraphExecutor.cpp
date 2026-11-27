@@ -210,7 +210,7 @@ void expectGpuMatchesCpu(const flatbuffers::FlatBufferBuilder& graph,
 
 // conv, then an add and a multiply with per-channel operands, as in the CPU executor's
 // ConvAddMulFusedGraph.
-TEST(TestGpuFusedOperationsGraphExecutor, ConvAddMulMatchesCpu)
+TEST(TestGpuFusedOperationsGraphExecutorDevice, ConvAddMulMatchesCpu)
 {
     constexpr int64_t X_UID = 1;
     constexpr int64_t W_UID = 2;
@@ -244,7 +244,7 @@ TEST(TestGpuFusedOperationsGraphExecutor, ConvAddMulMatchesCpu)
 }
 
 // conv, then a bias add, then ReLU: the three-node graph the engines fuse.
-TEST(TestGpuFusedOperationsGraphExecutor, ConvBiasReluMatchesCpu)
+TEST(TestGpuFusedOperationsGraphExecutorDevice, ConvBiasReluMatchesCpu)
 {
     const std::vector<int64_t> xDims = {2, 3, 6, 6};
     const std::vector<int64_t> wDims = {4, 3, 3, 3};
@@ -272,7 +272,7 @@ TEST(TestGpuFusedOperationsGraphExecutor, ConvBiasReluMatchesCpu)
 }
 
 // Tensor 5 of the builder is the inverse variance, which has to be positive.
-TEST(TestGpuFusedOperationsGraphExecutor, BatchnormReluMatchesCpu)
+TEST(TestGpuFusedOperationsGraphExecutorDevice, BatchnormReluMatchesCpu)
 {
     constexpr int64_t INV_VARIANCE_UID = 5;
     const std::vector<int64_t> dims = {2, 3, 4, 4};
@@ -284,7 +284,7 @@ TEST(TestGpuFusedOperationsGraphExecutor, BatchnormReluMatchesCpu)
 
 // Not the test SDK's layernorm builder: it gives scale and bias the normalized dims alone, which
 // the GPU reference rejects at execution.
-TEST(TestGpuFusedOperationsGraphExecutor, LayernormReluMatchesCpu)
+TEST(TestGpuFusedOperationsGraphExecutorDevice, LayernormReluMatchesCpu)
 {
     constexpr int64_t X_UID = 1;
     constexpr int64_t NORMALIZED_UID = 2;
@@ -318,7 +318,7 @@ TEST(TestGpuFusedOperationsGraphExecutor, LayernormReluMatchesCpu)
 }
 
 // Tensor 2 of the builder is the RMSNorm output.
-TEST(TestGpuFusedOperationsGraphExecutor, RMSNormReluMatchesCpu)
+TEST(TestGpuFusedOperationsGraphExecutorDevice, RMSNormReluMatchesCpu)
 {
     constexpr int64_t NORMALIZED_UID = 2;
     constexpr int64_t ACTIVATED_UID = 5;
@@ -331,7 +331,7 @@ TEST(TestGpuFusedOperationsGraphExecutor, RMSNormReluMatchesCpu)
 }
 
 // matmul, then a bias add, then ReLU.
-TEST(TestGpuFusedOperationsGraphExecutor, MatmulBiasReluMatchesCpu)
+TEST(TestGpuFusedOperationsGraphExecutorDevice, MatmulBiasReluMatchesCpu)
 {
     constexpr int64_t A_UID = 1;
     constexpr int64_t B_UID = 2;

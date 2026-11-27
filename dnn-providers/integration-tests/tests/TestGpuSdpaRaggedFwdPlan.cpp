@@ -495,7 +495,7 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
 // The plan must run the same kernel as a direct fpropRagged call, including the LSE. Equal
 // lengths leave no padding, so whole tensors are compared. ExecuteUsesFloatProbabilityNotProviderRounding
 // checks the probability mode, which this tolerance cannot tell apart.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteMatchesDirectFpropRaggedBf16)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -587,7 +587,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
 // The plan computes P in fp32 (an independent oracle, SEM-012), not with AITER's bf16 P rounding.
 // Large V values make the rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the
 // plan must match FLOAT.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -666,7 +666,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
 }
 
 // fp8: the plan must pass the Q/K/V descales from the variant pack through to fpropRagged.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MatchesDirectFpropRagged)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteFp8MatchesDirectFpropRagged)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -922,7 +922,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
 } // namespace
 
 // Reviewer repro: a baked Q descale lives in the graph, not the variant pack.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8BakedDescaleNotInVariantPack)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteFp8BakedDescaleNotInVariantPack)
 {
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
@@ -930,7 +930,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8BakedDescaleNotInVariantPack)
                            {OperandStorage::TENSOR, {2.0f}});
 }
 
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8RuntimePassByValueDescales)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteFp8RuntimePassByValueDescales)
 {
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::RUNTIME_PASS_BY_VALUE, {0.5f}},
@@ -939,7 +939,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8RuntimePassByValueDescales)
 }
 
 // Every storage mode in one graph, with a per-KV-head [B, H_kv, 1, 1] device V descale.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MixedDescaleStorage)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteFp8MixedDescaleStorage)
 {
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
@@ -985,14 +985,14 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForNonScalarHostDescale)
 
 // Dense frontend-default stats with unequal lengths: batch b's LSE rows start at b * Sq_max * H,
 // not at its first packed Q token.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteDenseStatsUnequalLengthsMatchesCpu)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteDenseStatsUnequalLengthsMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     checkPlanLseAgainstCpu(RaggedStatsLayout::DENSE);
 }
 
 // Packed stats carrying their own ragged_offset aux.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecutePackedStatsUnequalLengthsMatchesCpu)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecutePackedStatsUnequalLengthsMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     checkPlanLseAgainstCpu(RaggedStatsLayout::PACKED);
@@ -1000,7 +1000,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecutePackedStatsUnequalLengthsMatchesCpu)
 
 // AITER's form: token offset tables with ragged_offset_multiplier = seq stride on every ragged
 // tensor, including the packed stats.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteTokenOffsetsMatchesCpu)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteTokenOffsetsMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     checkPlanLseAgainstCpu(RaggedStatsLayout::PACKED, /*tokenOffsets=*/true);
@@ -1029,7 +1029,7 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
 
 // V has its own ragged_offset (allowed by RFC-0014). V lengths that differ from K's must be
 // rejected and matching ones must run.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteRejectsKvSequenceLengthMismatch)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteRejectsKvSequenceLengthMismatch)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1118,7 +1118,7 @@ std::string scaleSourceName(const ::testing::TestParamInfo<ScaleSource>& info)
     }
 }
 
-class TestGpuSdpaRaggedFwdPlanScale : public ::testing::TestWithParam<ScaleSource>
+class TestGpuSdpaRaggedFwdPlanScaleDevice : public ::testing::TestWithParam<ScaleSource>
 {
 };
 
@@ -1126,7 +1126,7 @@ class TestGpuSdpaRaggedFwdPlanScale : public ::testing::TestWithParam<ScaleSourc
 
 // A non-default scale must reach the kernel in every storage mode. Comparing against the
 // default-scale output proves the inputs are sensitive to the scale.
-TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
+TEST_P(TestGpuSdpaRaggedFwdPlanScaleDevice, ExecuteHonorsNonDefaultScale)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1237,7 +1237,7 @@ TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
 }
 
 INSTANTIATE_TEST_SUITE_P(ScaleSources,
-                         TestGpuSdpaRaggedFwdPlanScale,
+                         TestGpuSdpaRaggedFwdPlanScaleDevice,
                          ::testing::Values(ScaleSource::ATTR_VALUE,
                                            ScaleSource::DEVICE_TENSOR,
                                            ScaleSource::BAKED_TENSOR,
@@ -1329,7 +1329,7 @@ void checkPlanMaskAgainstCpu(const SdpaAttributesT& attrs,
 } // namespace
 
 // Deprecated causal_mask_bottom_right resolves to left = -1, right = 0, bottom-right alignment.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteCausalBottomRightFlagMatchesCpu)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteCausalBottomRightFlagMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     SdpaAttributesT attrs;
@@ -1338,7 +1338,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteCausalBottomRightFlagMatchesCpu)
 }
 
 // Deprecated causal_mask resolves to top-left causal.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteCausalTopLeftFlagMatchesCpu)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteCausalTopLeftFlagMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     SdpaAttributesT attrs;
@@ -1347,7 +1347,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteCausalTopLeftFlagMatchesCpu)
 }
 
 // Explicit bounds with bottom-right diagonal_alignment reach the kernel unchanged.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteBottomRightBandMatchesCpu)
+TEST(TestGpuSdpaRaggedFwdPlanDevice, ExecuteBottomRightBandMatchesCpu)
 {
     SKIP_IF_NO_DEVICES();
     SdpaAttributesT attrs;
@@ -1374,12 +1374,12 @@ struct RaggedDeprecatedCausalCase
     bool expectedTopLeft;
 };
 
-class TestGpuSdpaRaggedFwdPlanDeprecatedCausal
+class TestGpuSdpaRaggedFwdPlanDeprecatedCausalDevice
     : public ::testing::TestWithParam<RaggedDeprecatedCausalCase>
 {
 };
 
-TEST_P(TestGpuSdpaRaggedFwdPlanDeprecatedCausal, ComposesWithExplicitBounds)
+TEST_P(TestGpuSdpaRaggedFwdPlanDeprecatedCausalDevice, ComposesWithExplicitBounds)
 {
     SKIP_IF_NO_DEVICES();
     const auto& p = GetParam();
@@ -1393,7 +1393,7 @@ TEST_P(TestGpuSdpaRaggedFwdPlanDeprecatedCausal, ComposesWithExplicitBounds)
 }
 
 INSTANTIATE_TEST_SUITE_P(,
-                         TestGpuSdpaRaggedFwdPlanDeprecatedCausal,
+                         TestGpuSdpaRaggedFwdPlanDeprecatedCausalDevice,
                          ::testing::Values(RaggedDeprecatedCausalCase{"CausalWithLeftBound",
                                                                       true,
                                                                       false,

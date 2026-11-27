@@ -38,6 +38,10 @@
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options_test.cpp
      )
+ add_hiptensor_unit_test(api_attribute_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/api_attribute_test.cpp
+     )
  add_hiptensor_unit_test(plan_lifetime_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/plan_lifetime_test.cpp
@@ -58,6 +62,10 @@ add_hiptensor_unit_test(elementwise_broadcast_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_broadcast_test.cpp
     )
+add_hiptensor_unit_test(elementwise_instance_selection_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_instance_selection_test.cpp
+    )
 add_hiptensor_unit_test(reduction_mode_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/reduction_mode_test.cpp
@@ -68,6 +76,10 @@ add_hiptensor_unit_test(device_init_test
 add_hiptensor_unit_test(concurrency_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrency_test.cpp
+    )
+add_hiptensor_unit_test(scalar_alignment_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/scalar_alignment_test.cpp
     )
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}

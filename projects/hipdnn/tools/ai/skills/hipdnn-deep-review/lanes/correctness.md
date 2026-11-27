@@ -15,7 +15,8 @@ Read every changed line of your owned files, and the outside code each change de
   (`projects/hipdnn/docs/testing/KNOWN_TESTING_GAPS.md`). Prove a leak by reasoning over the ownership path, or request a local
   `-DBUILD_ADDRESS_SANITIZER=ON` run of the affected tests from `RUN` under **Handoffs**.
 - Providers: applicability predicates match what the implementation supports (when `APPL` runs, predicate gaps go to it under **Handoffs**); registration names the right op, layouts, types and
-  behavior notes; workspace size, stream use, async behavior and external-library calls are correct; unsupported inputs fail
+  behavior notes; workspace size, stream use, async behavior and external-library calls are correct (when `EXEC` runs, allocation, synchronization, lazy loading and
+  graph-capture breakage go to it under **Handoffs**); unsupported inputs fail
   predictably.
 - New operation: walk the PR Checklist in `projects/hipdnn/docs/AddingNewOperations.md`; report each layer the diff misses
   (schema and `SCHEMAS` list, `NodeAttributes` union, backend descriptor and factories, frontend

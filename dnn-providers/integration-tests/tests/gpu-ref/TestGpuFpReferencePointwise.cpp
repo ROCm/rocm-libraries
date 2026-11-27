@@ -3,6 +3,7 @@
 
 #include "GpuPointwiseRefTestFixture.hpp"
 #include "PointwiseShapeCatalog.hpp"
+#include "QuickCases.hpp"
 #include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
@@ -243,6 +244,61 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
     assertAllClose(outputCpuTensor,
                    outputGpuTensor,
                    getDynamicTolerance<float, HalfType>(operation, fillRange));
+}
+
+namespace
+{
+// A FLOAT input0 with a narrow input1 and FLOAT compute, the operand types of a FLOAT matmul
+// output plus a narrow bias.
+template <typename OutputType, typename Input1Type>
+void runFloatInputNarrowBiasAdd()
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({1, 3, 2, 2});
+    Tensor<Input1Type> input1Tensor({1, 3, 2, 2});
+    Tensor<OutputType> outputCpuTensor({1, 3, 2, 2});
+    Tensor<OutputType> outputGpuTensor({1, 3, 2, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, Input1Type{-fillRange}, Input1Type{fillRange}, seed);
+
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::ADD;
+    CpuReferencePointwiseImpl<OutputType, float, Input1Type>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<OutputType, float, Input1Type, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllClose(outputCpuTensor,
+                   outputGpuTensor,
+                   getDynamicTolerance<OutputType, Input1Type>(operation, fillRange));
+}
+} // namespace
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputHalfBiasHalfOutput)
+{
+    runFloatInputNarrowBiasAdd<HalfType, HalfType>();
+}
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputBfloat16BiasBfloat16Output)
+{
+    runFloatInputNarrowBiasAdd<BFloat16Type, BFloat16Type>();
+}
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputHalfBiasFloatOutput)
+{
+    runFloatInputNarrowBiasAdd<float, HalfType>();
+}
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputBfloat16BiasFloatOutput)
+{
+    runFloatInputNarrowBiasAdd<float, BFloat16Type>();
 }
 
 TEST(TestGpuPointwiseMixedTypes, BinaryMinMixedInputs)
@@ -1546,11 +1602,8 @@ TEST_P(TestGpuPointwiseUnarySpecialValuesFp32, MatchesCpuRef)
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuPointwiseUnaryRef4DFp32,
-                         ::testing::ValuesIn(getSmall4dCoreUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef4DFp32,
-                         ::testing::ValuesIn(getSmall4dCoreBinaryPointwiseCases()));
+                         ::testing::ValuesIn(quickCase(getSmall4dCoreBinaryPointwiseCases())));
 // The extended modes compile kernels the core modes do not, so their small fp32 cases run in the
 // standard tier.
 INSTANTIATE_TEST_SUITE_P(StandardSmall,
@@ -1590,13 +1643,16 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
-// Fp16/Bfp16 are covered by the standard tier's small-shape run.
+// Fp16/Bfp16 are covered by the standard tier's small-shape run. The fp32 core-mode fixtures run
+// the small cases followed by the medium cases in one instantiation.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DFp32,
-                         ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
+                         ::testing::ValuesIn(concatCases(getSmall4dCoreUnaryPointwiseCases(),
+                                                         getMedium4dUnaryPointwiseCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp32,
-                         ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
+                         ::testing::ValuesIn(concatCases(getSmall4dCoreBinaryPointwiseCases(),
+                                                         getMedium4dBinaryPointwiseCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseCompareRef4DFp32,
                          ::testing::ValuesIn(getMedium4dComparePointwiseCases()));
@@ -1622,10 +1678,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseUnaryRef5DFp32,
-                         ::testing::ValuesIn(getSmall5dCoreUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuPointwiseBinaryRef5DFp32,
-                         ::testing::ValuesIn(getSmall5dCoreBinaryPointwiseCases()));
+                         ::testing::ValuesIn(quickCase(getSmall5dCoreUnaryPointwiseCases())));
 // The extended modes compile kernels the core modes do not, so their small fp32 cases run in the
 // standard tier.
 INSTANTIATE_TEST_SUITE_P(StandardSmall,
@@ -1665,13 +1718,16 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
-// Fp16/Bfp16 are covered by the standard tier's small-shape run.
+// Fp16/Bfp16 are covered by the standard tier's small-shape run. The fp32 core-mode fixtures run
+// the small cases followed by the medium cases in one instantiation.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DFp32,
-                         ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
+                         ::testing::ValuesIn(concatCases(getSmall5dCoreUnaryPointwiseCases(),
+                                                         getMedium5dUnaryPointwiseCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp32,
-                         ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
+                         ::testing::ValuesIn(concatCases(getSmall5dCoreBinaryPointwiseCases(),
+                                                         getMedium5dBinaryPointwiseCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseCompareRef5DFp32,
                          ::testing::ValuesIn(getMedium5dComparePointwiseCases()));

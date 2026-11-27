@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cstring>
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -50,6 +51,29 @@ TEST(stridesFromLengthsTest, UtilTest)
     expected = {};
     output   = hiptensor::stridesFromLengths(input);
     EXPECT_EQ(output, expected);
+}
+
+TEST(elementSpaceFromLengthsAndStridesTest, UtilTest)
+{
+    using V = std::vector<std::size_t>;
+
+    // Packed strides span exactly the element count, in either order.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4, 5}, V{1, 3, 12}), 60u);
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4, 5}, V{20, 5, 1}), 60u);
+
+    // Padded strides span one past the offset of the last element.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4}, V{1, 10}), 33u);
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4, 5}, V{1, 8, 64}), 3u + 24 + 256);
+
+    // A broadcast (stride 0) mode adds nothing.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4}, V{1, 0}), 3u);
+
+    // An empty tensor spans nothing; a rank-0 tensor holds one element.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 0}, V{1, 3}), 0u);
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{}, V{}), 1u);
+
+    // Without matching strides, fall back to the packed element count.
+    EXPECT_EQ(hiptensor::elementSpaceFromLengthsAndStrides(V{3, 4}, V{}), 12u);
 }
 
 TEST(alignStridesToModesTest, UtilTest)
@@ -159,6 +183,66 @@ TEST(readValComputeDescTest, UtilTest)
     EXPECT_EQ(hiptensor::readVal<double>(&f16Val, HIPTENSOR_COMPUTE_DESC_16F), 2.5);
     EXPECT_EQ(hiptensor::readVal<double>(&f32Val, HIPTENSOR_COMPUTE_DESC_32F), 2.5);
     EXPECT_EQ(hiptensor::readVal<double>(&f64Val, HIPTENSOR_COMPUTE_DESC_64F), 2.5);
+}
+
+// Host scalars come from user pointers with no alignment guarantee: a complex double passed as
+// double[2] is only 8-byte aligned. readVal and writeVal must work at any byte offset.
+TEST(readWriteValUnalignedTest, UtilTest)
+{
+    alignas(16) unsigned char buffer[64] = {};
+    for(size_t offset = 0; offset < 16; offset++)
+    {
+        unsigned char* p = buffer + offset;
+
+        hipDoubleComplex const z = make_hipDoubleComplex(1.25, -2.5);
+        std::memcpy(p, &z, sizeof(z));
+        auto zr = hiptensor::readVal<hiptensor::ScalarData>(p, HIPTENSOR_COMPUTE_DESC_C64F);
+        EXPECT_EQ(hipCreal(zr.mComplex), 1.25) << "offset " << offset;
+        EXPECT_EQ(hipCimag(zr.mComplex), -2.5) << "offset " << offset;
+
+        hipFloatComplex const c = make_hipFloatComplex(0.5f, 3.0f);
+        std::memcpy(p, &c, sizeof(c));
+        auto cr = hiptensor::readVal<hiptensor::ScalarData>(p, HIPTENSOR_COMPUTE_DESC_C32F);
+        EXPECT_EQ(hipCreal(cr.mComplex), 0.5) << "offset " << offset;
+        EXPECT_EQ(hipCimag(cr.mComplex), 3.0) << "offset " << offset;
+
+        double const d = -7.75;
+        std::memcpy(p, &d, sizeof(d));
+        EXPECT_EQ(hiptensor::readVal<double>(p, HIPTENSOR_COMPUTE_DESC_64F), -7.75)
+            << "offset " << offset;
+        EXPECT_EQ(hiptensor::readVal<double>(p, HIPTENSOR_R_64F), -7.75) << "offset " << offset;
+        EXPECT_EQ(hiptensor::readVal<hiptensor::ScalarData>(p, HIPTENSOR_COMPUTE_DESC_64F).mReal,
+                  -7.75)
+            << "offset " << offset;
+
+        float const f = 6.5f;
+        std::memcpy(p, &f, sizeof(f));
+        EXPECT_EQ(hiptensor::readVal<float>(p, HIPTENSOR_COMPUTE_DESC_32F), 6.5f)
+            << "offset " << offset;
+
+        // writeVal stores exactly the bytes of the scalar at the given address.
+        hiptensor::writeVal(p,
+                            HIPTENSOR_COMPUTE_DESC_C64F,
+                            hiptensor::ScalarData(HIPTENSOR_COMPUTE_DESC_C64F, 4.5, -1.5));
+        hipDoubleComplex zw;
+        std::memcpy(&zw, p, sizeof(zw));
+        EXPECT_EQ(hipCreal(zw), 4.5) << "offset " << offset;
+        EXPECT_EQ(hipCimag(zw), -1.5) << "offset " << offset;
+
+        hiptensor::writeVal(p,
+                            HIPTENSOR_COMPUTE_DESC_C32F,
+                            hiptensor::ScalarData(HIPTENSOR_COMPUTE_DESC_C32F, 2.0, 0.25));
+        hipFloatComplex cw;
+        std::memcpy(&cw, p, sizeof(cw));
+        EXPECT_EQ(hipCrealf(cw), 2.0f) << "offset " << offset;
+        EXPECT_EQ(hipCimagf(cw), 0.25f) << "offset " << offset;
+
+        hiptensor::writeVal(
+            p, HIPTENSOR_COMPUTE_DESC_64F, hiptensor::ScalarData(HIPTENSOR_COMPUTE_DESC_64F, 9.5));
+        double dw;
+        std::memcpy(&dw, p, sizeof(dw));
+        EXPECT_EQ(dw, 9.5) << "offset " << offset;
+    }
 }
 
 TEST(algoTypeToStringTest, UtilTest)

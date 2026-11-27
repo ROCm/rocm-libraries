@@ -637,7 +637,7 @@ def test_leak_sweep_allowlist_covers_every_report_lane(part):
     assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
 
 
-@pytest.mark.parametrize("lane", ["APPL", "IMPACT", "TIER"])
+@pytest.mark.parametrize("lane", ["APPL", "EXEC", "IMPACT", "TIER"])
 def test_lane_id_is_a_provisional_id(part, lane):
     """A finding ID from a concern lane is recognised, like every other report lane."""
     # catches: the lane dropped from CONCERN_LANES/REPORT_LANES, so its findings are
@@ -726,9 +726,14 @@ def test_orient_gate_checks_context_orient_links_against_the_round(
     assert (
         capsys.readouterr().out == "not at base: orient/io.md (cited at CONTEXT.md:2)\n"
     )
+    (rd / "CONTEXT.md").write_text(
+        "The `core` lane uses `orient/core.md` directly, not via a table.\n"
+    )
+    run(part, "orient-gate", rd)
+    assert capsys.readouterr().out == ""
 
 
-def test_orient_gate_reports_extra_count_for_a_citation_in_two_places(
+def test_orient_gate_lists_every_citation_site_for_a_path_cited_twice(
     part, tmp_path, capsys
 ):
     clone = tmp_path / "clone"
@@ -755,7 +760,7 @@ def test_orient_gate_reports_extra_count_for_a_citation_in_two_places(
     assert exc.value.code == 1
     assert (
         capsys.readouterr().out
-        == "not at base: src/gone.hpp (cited at CONTEXT.md:1, +1 more)\n"
+        == "not at base: src/gone.hpp (cited at CONTEXT.md:1, orient/a.md:1)\n"
     )
 
 
@@ -830,3 +835,85 @@ def test_leak_sweep_allow_list_matches_every_report_lane(part):
         assert pattern.fullmatch(f"{lane}2-p3"), lane
     listed = allow[2 : allow.index(")")].split("|")
     assert sorted(listed) == sorted(part.REPORT_LANES)
+
+
+EXEC_RST = "projects/hipdnn/docs/user-guides/how-to/capture-hipgraph.rst"
+EXEC_PLUGIN_DOC = "projects/hipdnn/docs/PluginDevelopment.md"
+
+
+def test_exec_scope_is_production_runtime_code_and_the_two_contract_docs(part):
+    # catches: a provider or core runtime change that never reaches EXEC, a test, fixture,
+    # sample or tool that does, or a contract doc that is dropped as documentation
+    ingestor = "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
+    inside = (
+        f"{ingestor}/packs/X.cpp",
+        "projects/hipdnn/backend/src/Graph.cpp",
+        "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/IPlan.hpp",
+        "projects/hipdnn/data_sdk/include/hipdnn_data_sdk/a.hpp",
+        "dnn-providers/hip-kernel-provider/descriptors/rocKE/x/x.ued.json",
+        "dnn-providers/hip-kernel-provider/flydsl/gen_descriptors.py",
+        EXEC_RST,
+        EXEC_PLUGIN_DOC,
+    )
+    outside = (
+        "dnn-providers/hip-kernel-provider/src/tests/TestX.cpp",
+        "projects/hipdnn/backend/tests/TestGraph.cpp",
+        "projects/hipdnn/frontend/tests/test_graph.py",
+        "projects/hipdnn/plugin_sdk/tests/TestPlan.cpp",
+        "dnn-providers/hip-kernel-provider/src/tests/fixtures/x.ued.json",
+        "dnn-providers/hip-kernel-provider/test_descriptors/x.ued.json",
+        "dnn-providers/hip-kernel-provider/descriptor-packaging/examples/x.ued.json",
+        "dnn-providers/miopen-provider/integration_tests/IntegrationX.cpp",
+        "dnn-providers/miopen-provider/integration-tests/x.cpp",
+        "dnn-providers/miopen-provider/README.md",
+        "projects/hipdnn/backend/docs/notes.md",
+        "projects/hipdnn/docs/Other.md",
+        "projects/hipdnn/docs/user-guides/how-to/other.rst",
+        "projects/hipdnn/tools/ai/a.py",
+        "projects/hipdnn/samples/a.cpp",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("EXEC", rows)} == set(inside)
+
+
+def test_packets_exec_lane_takes_trigger_files_only(part, tmp_path, capsys):
+    # catches: EXEC not registered as a concern lane, or scoped to every changed file
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    trigger = "dnn-providers/hip-kernel-provider/src/packs/X.cpp"
+    other = "projects/hipdnn/tools/ai/a.py"
+    rd = make_round(tmp_path / "a", [(3, 1, trigger), (2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    run(part, "packets", rd, "--lanes", "EXEC")
+    packet = (rd / "packets" / "EXEC.md").read_text()
+    assert trigger in packet and other not in packet
+    rd = make_round(tmp_path / "b", [(2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    capsys.readouterr()
+    run(part, "packets", rd, "--lanes", "EXEC")
+    assert not (rd / "packets" / "EXEC.md").exists()
+    assert "EXEC: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_exec_does_not_change_any_other_lane_packet(part, tmp_path):
+    # catches: a change to shared packet code that alters another lane's packet text when
+    # EXEC is named in --lanes
+    paths = [
+        "dnn-providers/hip-kernel-provider/src/packs/X.cpp",
+        "projects/hipdnn/backend/src/Graph.cpp",
+        EXEC_RST,
+        "projects/hipdnn/tools/ai/a.py",
+    ]
+    rd = make_round(tmp_path, [(3, 1, p) for p in paths])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    others = "TESTQ,TESTB,TIER,AUTH,BUILD,DEPS,API,IMPACT,APPL,DESIGN,DOCS"
+    run(part, "packets", rd, "--lanes", others)
+    before = {p.name: p.read_text() for p in (rd / "packets").glob("*.md")}
+    run(part, "packets", rd, "--lanes", f"{others},EXEC")
+    after = {p.name: p.read_text() for p in (rd / "packets").glob("*.md")}
+    assert after.pop("EXEC.md")
+    assert after == before
