@@ -65,7 +65,15 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
     defined(__gfx117__))
-    if constexpr(GridwiseGemm::template IsValidInstanceDevice<CGlobalMemoryDataOperation>())
+#if defined(__gfx11__) || defined(__gfx117__)
+    // Split-K (AtomicAdd) is rejected on the host for gfx11, do not compile this variant
+    constexpr bool IsSplitKSupported =
+        CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd;
+#else
+    constexpr bool IsSplitKSupported = true;
+#endif
+    if constexpr(IsSplitKSupported &&
+                 GridwiseGemm::template IsValidInstanceDevice<CGlobalMemoryDataOperation>())
     {
         using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
 
