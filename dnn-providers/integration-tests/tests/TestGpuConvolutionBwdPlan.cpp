@@ -397,9 +397,11 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenOnlyOneOperandTypeDi
         std::vector<std::pair<const char*, int64_t>>{{"dy", 10}, {"w", 11}, {"dx", 12}})
     {
         SCOPED_TRACE(name);
-        const auto graphBuilder = createCustomConvBwdGraph();
-        const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+        auto graphBuilder = createCustomConvBwdGraph();
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        // NOLINTEND(misc-const-correctness)
         ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
         auto* tensor = const_cast<TensorAttributes*>(graphWrap.getTensorMap().at(uid));
@@ -616,9 +618,11 @@ TEST(TestGpuConvolutionBwdPlanBfp16, ExecutePlan)
 
 TEST(TestGpuConvolutionBwdPlanBuilder, IsNotApplicableForConvolutionMode)
 {
-    const auto graphBuilder = createCustomConvBwdGraph();
-    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto graphBuilder = createCustomConvBwdGraph();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    // NOLINTEND(misc-const-correctness)
 
     const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
                                        DataType::FLOAT,

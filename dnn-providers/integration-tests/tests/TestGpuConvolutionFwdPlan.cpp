@@ -457,22 +457,24 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForConvolutionMode)
     const std::vector<int64_t> wDims = {1, 1, 1, 1};
     const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    const auto graphBuilder = createConvFwdGraph(X_UID,
-                                                 W_UID,
-                                                 Y_UID,
-                                                 xDims,
-                                                 wDims,
-                                                 yDims,
-                                                 generateStrides(xDims),
-                                                 generateStrides(wDims),
-                                                 generateStrides(yDims),
-                                                 {0, 0},
-                                                 {1, 1},
-                                                 {1, 1},
-                                                 DataType::FLOAT);
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto graphBuilder = createConvFwdGraph(X_UID,
+                                           W_UID,
+                                           Y_UID,
+                                           xDims,
+                                           wDims,
+                                           yDims,
+                                           generateStrides(xDims),
+                                           generateStrides(wDims),
+                                           generateStrides(yDims),
+                                           {0, 0},
+                                           {1, 1},
+                                           {1, 1},
+                                           DataType::FLOAT);
 
-    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    // NOLINTEND(misc-const-correctness)
 
     const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
                                        DataType::FLOAT,

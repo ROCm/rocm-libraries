@@ -193,9 +193,11 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 
 TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseForUnsupportedModes)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
+    // NOLINTEND(misc-const-correctness)
 
     const GpuResampleFwdPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -296,9 +298,11 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableAcrossModesPaddingAndIndexPresen
         = tensorMap.at(nodeAttributes->x_tensor_uid());
     EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), tensorMap));
 
-    const auto computeTypeBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
-    const auto computeTypeGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto computeTypeBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto computeTypeGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         computeTypeBuilder.GetBufferPointer(), computeTypeBuilder.GetSize());
+    // NOLINTEND(misc-const-correctness)
     auto* node = const_cast<Node*>(&computeTypeGraph.getNode(0));
     ASSERT_TRUE(node->mutate_compute_data_type(DataType::HALF));
     EXPECT_FALSE(
@@ -536,9 +540,11 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
 
 TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseForUnsupportedModes)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
+    // NOLINTEND(misc-const-correctness)
 
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,
                                     DataType::FLOAT,
@@ -619,10 +625,12 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableAcrossModesPaddingAndIndexPresen
                 SCOPED_TRACE(testing::Message() << "mode=" << static_cast<int>(mode)
                                                 << ", padding=" << static_cast<int>(paddingMode)
                                                 << ", hasIndex=" << hasIndex);
-                const auto builder
+                // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+                auto builder
                     = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(hasIndex, mode);
-                const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+                auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
                     builder.GetBufferPointer(), builder.GetSize());
+                // NOLINTEND(misc-const-correctness)
                 auto* nodeAttributes = const_cast<ResampleBwdAttributes*>(
                     graph.getNode(0).attributes_as_ResampleBwdAttributes());
                 ASSERT_NE(nodeAttributes, nullptr);
@@ -646,10 +654,12 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableAcrossModesPaddingAndIndexPresen
         = tensorMap.at(nodeAttributes->dy_tensor_uid());
     EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), tensorMap));
 
-    const auto computeTypeBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto computeTypeBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
         false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
-    const auto computeTypeGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto computeTypeGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         computeTypeBuilder.GetBufferPointer(), computeTypeBuilder.GetSize());
+    // NOLINTEND(misc-const-correctness)
     auto* node = const_cast<Node*>(&computeTypeGraph.getNode(0));
     ASSERT_TRUE(node->mutate_compute_data_type(DataType::HALF));
     const GpuResampleBwdPlanBuilder<DataType::FLOAT,

@@ -294,9 +294,11 @@ if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 
-include(CheckToolVersion)
+# Explicit paths: in a superbuild the root puts cmake/modules first on CMAKE_MODULE_PATH, so a
+# plain include() would load the shared copies of these two modules instead of the providers'.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CheckToolVersion.cmake)
 include(ClangCheck)
-include(ClangTidy)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangTidy.cmake)
 include(Sanitizers)
 include(WindowsDllStaging)
 

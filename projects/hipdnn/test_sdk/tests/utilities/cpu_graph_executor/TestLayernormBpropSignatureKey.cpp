@@ -181,7 +181,8 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingDy)
                                                 hipdnn_data_sdk::utilities::TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTNEXTLINE(misc-const-correctness) written through const_cast below
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
     auto* nodeAttributes
         = const_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(
@@ -211,7 +212,8 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingX)
                                                 hipdnn_data_sdk::utilities::TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTNEXTLINE(misc-const-correctness) written through const_cast below
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
     auto* nodeAttributes
         = const_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(
@@ -241,7 +243,8 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingDx)
                                                 hipdnn_data_sdk::utilities::TensorLayout::NHWC);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTNEXTLINE(misc-const-correctness) written through const_cast below
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
     auto* nodeAttributes
         = const_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(

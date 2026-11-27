@@ -31,7 +31,7 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "include/cudnn_frontend_EngineConfigGenerator.h at the new tag, then update this "
               "assert.");
 
-// NOLINTBEGIN(readability-identifier-naming,performance-for-range-copy,performance-unnecessary-value-param,readability-container-size-empty,readability-implicit-bool-conversion):
+// NOLINTBEGIN(readability-identifier-naming,performance-for-range-copy,performance-unnecessary-value-param,readability-container-size-empty,readability-implicit-bool-conversion,misc-const-correctness):
 // ported verbatim; upstream's spelling and shapes are the source-compatible surface.
 
 using executionPlans_t = std::vector<cudnn_frontend::ExecutionPlan>;
@@ -64,7 +64,6 @@ public:
         -> cudnn_frontend::EngineConfigList
     {
         cudnn_frontend::EngineConfigList engine_configs;
-        // NOLINTNEXTLINE(misc-const-correctness) verbatim port of the cuDNN frontend source
         for(auto fn : engine_config_generators)
         {
             cudnn_frontend::EngineConfigList new_engine_config = fn(opGraph);
@@ -128,6 +127,6 @@ inline auto filter(Predicate pred, executionPlans_t& plans) -> executionPlans_t
     return filtered_plans;
 }
 
-// NOLINTEND(readability-identifier-naming,performance-for-range-copy,performance-unnecessary-value-param,readability-container-size-empty,readability-implicit-bool-conversion)
+// NOLINTEND(readability-identifier-naming,performance-for-range-copy,performance-unnecessary-value-param,readability-container-size-empty,readability-implicit-bool-conversion,misc-const-correctness)
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend

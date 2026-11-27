@@ -124,7 +124,8 @@ if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 
-include(ClangTidy)
+# Explicit path: in a superbuild a plain include() would load the shared cmake/modules copy.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangTidy.cmake)
 
 # Sanitizer support (Address Sanitizer, etc.)
 include(Sanitizers)

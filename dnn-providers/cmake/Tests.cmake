@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 include(GoogleTest)
-include(CheckToolVersion)
+include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 find_package(Python3 COMPONENTS Interpreter)
 

@@ -106,9 +106,11 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongComputeDataTyp
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForIncorrectReductionMode)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    // NOLINTBEGIN(misc-const-correctness) written through const_cast below
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
+    // NOLINTEND(misc-const-correctness)
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 

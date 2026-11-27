@@ -93,7 +93,7 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     add_compile_definitions(ADDRESS_SANITIZER)
 
     # Ensure the LLVM symbolizer is located before setting TEST_ENVIRONMENT.
-    include(CheckToolVersion)
+    include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
     findandcheckllvmsymbolizer()
 
     # Redirect MIOpen's kernel cache to a build-local dir, isolated from the developer's real

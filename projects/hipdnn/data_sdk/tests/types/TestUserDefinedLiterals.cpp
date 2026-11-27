@@ -526,27 +526,29 @@ TEST_F(TestUserDefinedLiterals, LiteralWithMin)
 
 TEST_F(TestUserDefinedLiterals, AutoTypeDeduction)
 {
-    const auto bf = 1.0_bf;
-    const auto h = 1.0_h;
-    const auto e2m1 = 1.0_e2m1;
-    const auto e2m3 = 1.0_e2m3;
-    const auto e3m2 = 1.0_e3m2;
-    const auto e4m3 = 1.0_e4m3;
-    const auto e4m3Fnuz = 1.0_e4m3_fnuz;
-    const auto e5m2 = 1.0_e5m2;
-    const auto e5m2Fnuz = 1.0_e5m2_fnuz;
-    const auto e8m0 = 1.0_e8m0;
+    // NOLINTBEGIN(misc-const-correctness) the test checks what plain auto deduces from each literal
+    auto bf = 1.0_bf;
+    auto h = 1.0_h;
+    auto e2m1 = 1.0_e2m1;
+    auto e2m3 = 1.0_e2m3;
+    auto e3m2 = 1.0_e3m2;
+    auto e4m3 = 1.0_e4m3;
+    auto e4m3Fnuz = 1.0_e4m3_fnuz;
+    auto e5m2 = 1.0_e5m2;
+    auto e5m2Fnuz = 1.0_e5m2_fnuz;
+    auto e8m0 = 1.0_e8m0;
+    // NOLINTEND(misc-const-correctness)
 
-    static_assert(std::is_same_v<decltype(bf), const bfloat16>);
-    static_assert(std::is_same_v<decltype(h), const half>);
-    static_assert(std::is_same_v<decltype(e2m1), const fp4_e2m1>);
-    static_assert(std::is_same_v<decltype(e2m3), const fp6_e2m3>);
-    static_assert(std::is_same_v<decltype(e3m2), const fp6_e3m2>);
-    static_assert(std::is_same_v<decltype(e4m3), const fp8_e4m3>);
-    static_assert(std::is_same_v<decltype(e4m3Fnuz), const fp8_e4m3_fnuz>);
-    static_assert(std::is_same_v<decltype(e5m2), const fp8_e5m2>);
-    static_assert(std::is_same_v<decltype(e5m2Fnuz), const fp8_e5m2_fnuz>);
-    static_assert(std::is_same_v<decltype(e8m0), const fp8_e8m0>);
+    static_assert(std::is_same_v<decltype(bf), bfloat16>);
+    static_assert(std::is_same_v<decltype(h), half>);
+    static_assert(std::is_same_v<decltype(e2m1), fp4_e2m1>);
+    static_assert(std::is_same_v<decltype(e2m3), fp6_e2m3>);
+    static_assert(std::is_same_v<decltype(e3m2), fp6_e3m2>);
+    static_assert(std::is_same_v<decltype(e4m3), fp8_e4m3>);
+    static_assert(std::is_same_v<decltype(e4m3Fnuz), fp8_e4m3_fnuz>);
+    static_assert(std::is_same_v<decltype(e5m2), fp8_e5m2>);
+    static_assert(std::is_same_v<decltype(e5m2Fnuz), fp8_e5m2_fnuz>);
+    static_assert(std::is_same_v<decltype(e8m0), fp8_e8m0>);
 }
 
 // ============================================================================
