@@ -258,6 +258,18 @@ gfx950 2D changes touch stored ids; no such id is stored in this tree.
 here the only kernels that changed under an unchanged id are ones that
 computed wrong output, and the dropped zero-width ids are refused already.
 
+**Tuning-id migration for gfx950 2D `compile_backend` rename.** The
+`compile_backend` field was renamed from `"hipcc"` to `"hip"` as part of the
+hipcc-to-amdclang++ migration. Because `variant_id` embeds `compile_backend`
+directly (e.g. `narrow_nw1_mw16_t64x128_hipcc` → `narrow_nw1_mw16_t64x128_hip`),
+every gfx950 unified 2D tuning id that carried the `_hipcc` suffix is rekeyed.
+No such id is stored in this tree. A downstream tuning store must drop its old
+`_hipcc`-suffixed ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
+`variant_id` string itself separates old and new ids, and the runtime normalizer
+in `_select_2d_compile_backend()` and `make_explicit_attention_2d_spec()` accepts
+the legacy `"hipcc"` value and maps it to `"hip"` so that explicit configs
+using the old name still resolve.
+
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only

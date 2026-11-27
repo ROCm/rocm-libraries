@@ -6,6 +6,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
+import re
+
 import pytest
 
 
@@ -28,7 +30,7 @@ def test_missing_tools_skip(helper, monkeypatch, route, missing):
     monkeypatch.setattr(
         helper.shutil, "which", lambda name: None if name == missing else name
     )
-    with pytest.raises(pytest.skip.Exception, match=f"{missing} is required"):
+    with pytest.raises(pytest.skip.Exception, match=re.escape(f"{missing} is required")):
         helper.run_numeric(monkeypatch, "fp8", "bf8", "bf16", route, 32, 64, 128)
 
 
