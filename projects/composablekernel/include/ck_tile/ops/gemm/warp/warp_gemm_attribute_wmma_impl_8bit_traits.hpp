@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ck_tile/core/arch/mma/wmma/wmma_gfx1250_f8_16x16x128.hpp"
 #include "warp_gemm_attribute_wmma_impl_base_traits.hpp"
 #include "warp_gemm_params.hpp"
 namespace ck_tile {
@@ -566,12 +567,8 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8(bit_cast<int32x16_t>(a_vec),
-                                                           bit_cast<int32x16_t>(b_vec),
-                                                           0,
-                                                           bit_cast<fp32x8_t>(c_vec),
-                                                           P::reuse_a,  // matrix_a_reuse
-                                                           P::reuse_b); // matrix_b_reuse
+        return core::arch::mma::wmma_f32_16x16x128_f8<bf8_t, bf8_t, P::reuse_a, P::reuse_b>(
+            bit_cast<int32x16_t>(a_vec), bit_cast<int32x16_t>(b_vec), bit_cast<fp32x8_t>(c_vec));
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -604,12 +601,8 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8(bit_cast<int32x16_t>(a_vec),
-                                                           bit_cast<int32x16_t>(b_vec),
-                                                           0,
-                                                           bit_cast<fp32x8_t>(c_vec),
-                                                           P::reuse_a,  // matrix_a_reuse
-                                                           P::reuse_b); // matrix_b_reuse
+        return core::arch::mma::wmma_f32_16x16x128_f8<fp8_t, bf8_t, P::reuse_a, P::reuse_b>(
+            bit_cast<int32x16_t>(a_vec), bit_cast<int32x16_t>(b_vec), bit_cast<fp32x8_t>(c_vec));
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -642,12 +635,8 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8(bit_cast<int32x16_t>(a_vec),
-                                                           bit_cast<int32x16_t>(b_vec),
-                                                           0,
-                                                           bit_cast<fp32x8_t>(c_vec),
-                                                           P::reuse_a,  // matrix_a_reuse
-                                                           P::reuse_b); // matrix_b_reuse
+        return core::arch::mma::wmma_f32_16x16x128_f8<bf8_t, fp8_t, P::reuse_a, P::reuse_b>(
+            bit_cast<int32x16_t>(a_vec), bit_cast<int32x16_t>(b_vec), bit_cast<fp32x8_t>(c_vec));
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -1150,12 +1139,8 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(bit_cast<int32x16_t>(a_vec),
-                                                           bit_cast<int32x16_t>(b_vec),
-                                                           0,
-                                                           bit_cast<fp32x8_t>(c_vec),
-                                                           P::reuse_a,  // matrix_a_reuse
-                                                           P::reuse_b); // matrix_b_reuse
+        return core::arch::mma::wmma_f32_16x16x128_f8<fp8_t, fp8_t, P::reuse_a, P::reuse_b>(
+            bit_cast<int32x16_t>(a_vec), bit_cast<int32x16_t>(b_vec), bit_cast<fp32x8_t>(c_vec));
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;

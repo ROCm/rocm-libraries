@@ -18,6 +18,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
+* Fixed the CK and CK Tile build for gfx1250-strict with compilers that reject the FP8/BF8 16x16x128 WMMA builtins on that target (`needs target feature wmma-16x16x128fp8-insts`). On gfx1250-strict the FP8/BF8 16x16x128 WMMA wrappers now use the scaled F8F6F4 16x16x128 WMMA instruction with an explicit scale of 1.0; the f16-output forms accumulate in f32 and round once. gfx1250 and gfx1251 keep the native instructions.
+
 ### Known issues
 
 ### Upcoming changes
