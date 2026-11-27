@@ -607,6 +607,13 @@ def test_wgrad_lds_reasons():
         "too many accumulators",
     )
     assert is_valid_dw_wgrad_lds_spec(replace(wide, lane_ch=2), "gfx950")[0]
+    # a channel tile that is not a multiple of 8 (2 channels x 3 lanes)
+    assert is_valid_dw_wgrad_lds_spec(
+        replace(base, lane_ch=2, lanes_c=3, lanes_w=64), "gfx950"
+    ) == (
+        False,
+        "lane_ch must be 2, 4 or 8 and the channel tile a multiple of 8",
+    )
     assert "wave64" in is_valid_dw_wgrad_lds_spec(base, "gfx1250")[1]
 
 
@@ -696,6 +703,21 @@ def test_pp_grouped_dgrad_rows(row, dtype):
     assert spec.launch_geometry()[0][0] == p.groups * one.launch_geometry()[0][0]
     # the dense 64-wide block stays refused, and so does 128 for a grouped one
     assert "block_k must be 64" in dgrad_pp_mfma_reason(replace(spec, block_k=128))
+
+
+def test_pp_grouped_kernel_names_carry_the_per_group_channels():
+    p = _pp_dgrad(_PP_DGRAD_ROWS[0], "fp16")
+    names = set()
+    for cpg in (p.cpg, p.cpg + 8):
+        q = replace(p, cpg=cpg, kpg=cpg)
+        spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(q), block_k=64)
+        assert f"_c{q.cpg}k{q.kpg}" in spec.kernel_name()
+        names.add(spec.kernel_name())
+    assert len(names) == 2
+    dense = DgradPpMfmaSpec(
+        problem=replace(dgrad_pp_mfma_problem(p), groups=1), block_k=64
+    )
+    assert f"_c{p.cpg}k{p.kpg}" not in dense.kernel_name()
 
 
 def test_pp_grouped_dgrad_refusals():
@@ -934,6 +956,7 @@ def _compile(kernel):
     return compile_kernel(kernel, arch="gfx950")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize(
     "row", [r for r in _WIN_ROWS if r[1] == _WIN_FWD], ids=lambda r: r[0]
@@ -959,6 +982,7 @@ def test_win_forward_matches_the_reference(row, dtype):
     _tol_check(storage.decode(y, dtype), ref, dtype)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize(
     "row", [r for r in _WIN_ROWS if r[1] == _WIN_DGRAD], ids=lambda r: r[0]
@@ -985,6 +1009,7 @@ def test_win_dgrad_matches_the_reference(row, dtype):
     _tol_check(storage.decode(dx, dtype), ref, dtype)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _SPATIAL_ROWS, ids=lambda r: r[0])
 def test_spatial_row_tiles_match_the_reference(row, dtype):
@@ -1034,6 +1059,7 @@ def _run_dw_wgrad(spec, artifact, dtype):
     return dw, ref
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _WGRAD_LDS_ROWS, ids=lambda r: r[0])
 def test_wgrad_lds_matches_the_reference(row, dtype):
@@ -1044,6 +1070,7 @@ def test_wgrad_lds_matches_the_reference(row, dtype):
     _tol_check(dw, ref, dtype)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _WGRAD_MFMA_ROWS, ids=lambda r: r[0])
 def test_wgrad_mfma_matches_the_reference(row, dtype):
@@ -1054,6 +1081,7 @@ def test_wgrad_mfma_matches_the_reference(row, dtype):
     _tol_check(dw, ref, dtype)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _PP_DGRAD_ROWS, ids=lambda r: r[0])
 def test_pp_grouped_dgrad_matches_the_reference(row, dtype):
@@ -1079,6 +1107,7 @@ def test_pp_grouped_dgrad_matches_the_reference(row, dtype):
     _tol_check(storage.decode(dx, dtype), ref, dtype)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _PP_FWD_ROWS, ids=lambda r: r[0])
 def test_pp_forward_valid_padding_matches_the_reference(row, dtype):

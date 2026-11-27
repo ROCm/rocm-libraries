@@ -1783,7 +1783,10 @@ bf16 I/O). Four implementations:
   axes swapped on the fly, padding `2 - pad`, no weight pre-pass. Dense
   problems only (`groups == 1`); K2, K3 and K4 are the forward's. The AOT grid
   builds one `dgrad` filter binary beside each forward one (same tiles, dtypes
-  and vector widths), so a dgrad is served by the cache like the forward.
+  and vector widths). The cache holds these binaries for the Winograd sweep
+  (`benchmark_winograd_aot.py --direction dgrad`, which the comparison driver
+  runs); the packaged library plan stays forward-only, so no packaged dgrad
+  request selects them yet.
 - **Generalized** (`conv_winograd_gen` + K3 with `taps`): any `F(m, r)` per
   axis (1-D `1 x r` / `r x 1`, 5x5), and segmented long filters: `S`
   segments of `F(m, m)` share one input transform and K3 sums
