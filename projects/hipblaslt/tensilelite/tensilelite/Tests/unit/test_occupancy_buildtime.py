@@ -321,6 +321,52 @@ class TestComputeOccupancyMultiplierParity:
             )
 
 
+# ── Workgroups of fewer than 4 waves share the CU's SIMDs ────────────────────
+
+class TestComputeOccupancySmallWorkgroups:
+    """The waves the 4 SIMDs hold are shared among whole workgroups (gfx950)."""
+
+    def _occ(self, vgpr_count, lds_bytes, num_threads, sgpr_count=64):
+        return compute_occupancy_from_resources(
+            vgpr_count=vgpr_count,
+            lds_bytes=lds_bytes,
+            sgpr_count=sgpr_count,
+            num_threads=num_threads,
+            physical_vgpr=512,
+            physical_sgpr=800,
+            device_lds=163840,
+            max_waves_per_simd=8,
+        )
+
+    @pytest.mark.parametrize(
+        "vgpr,lds,threads,sgpr,expected",
+        [
+            (184, 18688, 128, 64, 4),   # 2 waves per SIMD x 4 SIMDs / 2 waves
+            (256, 16384, 64, 64, 8),    # 2 waves per SIMD x 4 SIMDs / 1 wave
+            (8, 0, 64, 64, 32),         # the CU's 32 wave slots
+            (8, 40960, 128, 64, 4),     # LDS-limited
+            (8, 0, 512, 400, 1),        # 2 SGPR-limited waves per SIMD / 8 waves
+            (8, 0, 192, 64, 10),        # 8 waves per SIMD x 4 SIMDs / 3 waves
+            (8, 0, 320, 102, 5),        # 7 SGPR-limited waves x 4 SIMDs / 5 waves
+            (8, 0, 512, 102, 3),        # 7 SGPR-limited waves x 4 SIMDs / 8 waves
+            (100, 0, 128, 64, 8),       # 100 VGPRs take 104: 4 waves per SIMD
+        ],
+    )
+    def test_workgroups_per_cu(self, vgpr, lds, threads, sgpr, expected):
+        assert self._occ(vgpr, lds, threads, sgpr) == expected
+
+
+class TestComputeOccupancyBarrierCap:
+    """Workgroups of more than one wave are capped at the CU's 16 barriers (gfx908)."""
+
+    @pytest.mark.parametrize("threads,expected", [(64, 40), (128, 16), (192, 13)])
+    def test_multi_wave_workgroups_are_capped(self, threads, expected):
+        assert compute_occupancy_from_resources(
+            vgpr_count=16, lds_bytes=0, sgpr_count=64, num_threads=threads,
+            physical_vgpr=256, physical_sgpr=800, device_lds=65536,
+            max_waves_per_simd=10) == expected
+
+
 # ── Fix #4: _arch_caps_for_kernel safe fallback ───────────────────────────────
 
 class TestArchCapsForKernelSafeFallback:

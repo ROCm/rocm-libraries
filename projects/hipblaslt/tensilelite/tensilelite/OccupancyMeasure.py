@@ -26,9 +26,11 @@ def compute_occupancy_from_resources(
 ) -> int:
     """Compute CUOccupancy from kernel resource counts (no GPU needed).
 
-    Mirrors getVgprOccupancy in KernelWriterAssembly.py exactly:
-    the workgroup multiplier scales the aligned VGPR footprint (not just the
-    wave cap), so >256-thread kernels correctly yield lower VGPR occupancy.
+    Mirrors getCUOccupancy in KernelWriterAssembly.py (gfx9, wave64): the
+    waves the CU's 4 SIMDs can hold are shared among whole workgroups, so a
+    1- or 2-wave workgroup fits more times per CU than a 4-wave one and a
+    >256-thread workgroup fewer. VGPRs are allocated in physical_vgpr / 64
+    blocks, and multi-wave workgroups are capped at the CU's 16 barriers.
 
     For ArchAccUnifiedRegs ISAs the unified physical_vgpr pool (512 on gfx950)
     is divided by vgpr_count (=.amdhsa_next_free_vgpr).
@@ -46,18 +48,23 @@ def compute_occupancy_from_resources(
     Returns:
         Max active workgroups per CU (TensileLite's CUOccupancy).
     """
-    # Workgroup multiplier: ceil(max(numThreads, 256) / 256) — matches getVgprOccupancy.
-    # For >256-thread blocks each SIMD slot holds multiplier waves, so the aligned
-    # VGPR footprint per slot scales up by the same factor (Fix #1).
-    multiplier    = max(int(ceil(num_threads / 256.0)), 1)
-    max_occ       = max_waves_per_simd // multiplier
-    vgpr_align    = 4   # AMDGPU VGPR allocation granularity (dwords)
-    vgprs_aligned = int(ceil(max(vgpr_count, 1) / vgpr_align)) * vgpr_align * multiplier
-    vgpr_occ      = physical_vgpr // vgprs_aligned
-    sgpr_occ      = physical_sgpr // max(sgpr_count, 1) if sgpr_count > 0 else max_waves_per_simd
-    lds_occ       = device_lds // max(((lds_bytes + 255) // 256) * 256, 256) if lds_bytes > 0 else max_waves_per_simd
+    simds_per_cu        = 4
+    max_barriers_per_cu = 16  # LLVM getMaxWorkGroupsPerCU on gfx9
+    waves_per_workgroup = max(int(ceil(num_threads / 64.0)), 1)
+    # The per-SIMD VGPR file splits into 64 allocation blocks (getVgprOccupancy):
+    # 8 VGPRs on the 512-entry unified file, 4 on a 256-entry one.
+    vgpr_align          = physical_vgpr // 64
+    vgprs_aligned       = int(ceil(max(vgpr_count, 1) / vgpr_align)) * vgpr_align
+    waves_per_simd      = min(physical_vgpr // vgprs_aligned, max_waves_per_simd)
+    # TODO: SGPR allocation granularity and the reserved SGPRs (VCC etc.) are not modeled.
+    if sgpr_count > 0:
+        waves_per_simd  = min(waves_per_simd, physical_sgpr // sgpr_count)
+    wave_occ            = simds_per_cu * waves_per_simd // waves_per_workgroup
+    if waves_per_workgroup > 1:
+        wave_occ        = min(wave_occ, max_barriers_per_cu)
+    lds_occ             = device_lds // max(((lds_bytes + 255) // 256) * 256, 256) if lds_bytes > 0 else wave_occ
 
-    return max(1, min(vgpr_occ, sgpr_occ, lds_occ, max_occ))
+    return max(1, min(wave_occ, lds_occ))
 
 
 # ── Build-time helpers ────────────────────────────────────────────────────────
