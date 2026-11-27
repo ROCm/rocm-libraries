@@ -31,6 +31,8 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include "backends/ck/ck_backend.hpp"
+#include "backends/common/registry.hpp"
 #include "handle.hpp"
 #include "hip_device.hpp"
 #include "logger.hpp"
@@ -167,6 +169,49 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                                   uint64_t                workspaceSize,
                                   hipStream_t             stream)
 {
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::reduce(
+            handle, plan, alpha, A, beta, C, D, workspace, workspaceSize, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.beta  = beta;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.C   = C;
+    buffers.out = D;
+
+    return hiptensor::backend::executePlan("hiptensorReduce",
+                                           hiptensor::backend::OpKind::Reduction,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           workspace,
+                                           workspaceSize,
+                                           cfg);
+}
+
+hiptensorStatus_t hiptensor::ckbackend::reduce(hiptensorHandle_t            handle,
+                                               hiptensorPlan_t              plan,
+                                               void const*                  alpha,
+                                               void const*                  A,
+                                               void const*                  beta,
+                                               void const*                  C,
+                                               void*                        D,
+                                               void*                        workspace,
+                                               uint64_t                     workspaceSize,
+                                               backend::LaunchConfig const& cfg)
+{
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -239,7 +284,7 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
         // elementwise binary operations. hiptensorCreatePlan already set the
         // plan's operation to HIPTENSOR_OP_ADD, so that executions sharing the
         // plan only read it.
-        return hiptensorElementwiseBinaryExecute(handle, plan, alpha, A, beta, C, D, stream);
+        return elementwiseBinary(handle, plan, alpha, A, beta, C, D, cfg);
     }
 
     auto& instances = hiptensor::ReductionSolutionInstances::instance();
@@ -355,12 +400,13 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     if(C && C != D)
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
-        // Need to copy C to D if C != D
-        auto hipStatus = hipMemcpy(D,
-                                   C,
-                                   hiptensor::elementsFromLengths(descC->mLengths)
-                                       * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                   hipMemcpyDeviceToDevice);
+        // Need to copy C to D if C != D, on the caller's stream so that the kernel reads it
+        auto hipStatus = hipMemcpyAsync(D,
+                                        C,
+                                        hiptensor::elementsFromLengths(descC->mLengths)
+                                            * hiptensor::hiptensorDataTypeSize(descC->mType),
+                                        hipMemcpyDeviceToDevice,
+                                        stream);
         if(hipStatus != hipSuccess)
         {
             hiptensor::clearHipError();
@@ -377,20 +423,9 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
 
     for(auto pSolution : solutions)
     {
-        using hiptensor::HiptensorOptions;
-        auto& options = HiptensorOptions::instance();
-
         // Perform reduction with timing if LOG_LEVEL_PERF_TRACE
-        auto streamConfig =
-            (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE) ?
-            StreamConfig{
-                stream, // stream id
-                true, // time_kernel
-                0, // log_level
-                options->coldRuns(), // cold_niters
-                options->hotRuns(), // nrepeat
-            }:
-        StreamConfig{stream, false};
+        auto streamConfig = toStreamConfig(
+            (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE) ? timedLaunch(cfg) : cfg);
         hiptensor::ReductionMetrics problemMetrics;
         auto [isSupported, time] = (*pSolution)(descA->mLengths,
                                                 descA->mStrides,

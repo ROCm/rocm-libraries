@@ -27,9 +27,11 @@
 #include <cassert>
 #include <fstream>
 
+#include "backends/common/backend.hpp"
 #include "data_types.hpp"
 #include "hash.hpp"
 #include "plan_cache.hpp"
+#include "plan_cache_key.hpp"
 #include "util.hpp"
 
 namespace hiptensor
@@ -41,65 +43,19 @@ namespace hiptensor
     {
     }
 
-    PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc)
+    PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc,
+                                           std::string const&             backendName)
     {
-        auto tag             = desc->mTag;
-        auto ADataType       = desc->mDescA ? desc->mDescA->mType : hiptensor::NONE_TYPE;
-        auto BDataType       = desc->mDescB ? desc->mDescB->mType : hiptensor::NONE_TYPE;
-        auto CDataType       = desc->mDescC ? desc->mDescC->mType : hiptensor::NONE_TYPE;
-        auto DDataType       = desc->mDescD ? desc->mDescD->mType : hiptensor::NONE_TYPE;
-        auto computeType     = desc->mDescCompute;
-        auto operationType   = desc->mOperationType;
-        auto contractionOpId = desc->mContractionOpId;
-
-        //Get lengths
-        std::vector<std::size_t> lengthsA = hiptensor::getTensorLengths(desc->mDescA);
-        std::vector<std::size_t> lengthsB = hiptensor::getTensorLengths(desc->mDescB);
-        std::vector<std::size_t> lengthsC = hiptensor::getTensorLengths(desc->mDescC);
-        std::vector<std::size_t> lengthsD = hiptensor::getTensorLengths(desc->mDescD);
-
-        std::vector<std::size_t> arrLSM;
-        arrLSM.insert(arrLSM.end(), lengthsA.begin(), lengthsA.end());
-        arrLSM.insert(arrLSM.end(), lengthsB.begin(), lengthsB.end());
-        arrLSM.insert(arrLSM.end(), lengthsC.begin(), lengthsC.end());
-        arrLSM.insert(arrLSM.end(), lengthsD.begin(), lengthsD.end());
-
-        //Get strides
-        std::vector<std::size_t> stridesA = hiptensor::getTensorStrides(desc->mDescA);
-        std::vector<std::size_t> stridesB = hiptensor::getTensorStrides(desc->mDescB);
-        std::vector<std::size_t> stridesC = hiptensor::getTensorStrides(desc->mDescC);
-        std::vector<std::size_t> stridesD = hiptensor::getTensorStrides(desc->mDescD);
-
-        arrLSM.insert(arrLSM.end(), stridesA.begin(), stridesA.end());
-        arrLSM.insert(arrLSM.end(), stridesB.begin(), stridesB.end());
-        arrLSM.insert(arrLSM.end(), stridesC.begin(), stridesC.end());
-        arrLSM.insert(arrLSM.end(), stridesD.begin(), stridesD.end());
-
-        //Get modes
-        arrLSM.insert(arrLSM.end(), desc->mModeA.begin(), desc->mModeA.end());
-        arrLSM.insert(arrLSM.end(), desc->mModeB.begin(), desc->mModeB.end());
-        arrLSM.insert(arrLSM.end(), desc->mModeC.begin(), desc->mModeC.end());
-        arrLSM.insert(arrLSM.end(), desc->mModeD.begin(), desc->mModeD.end());
-
-        //generate hash ID by {Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes}
-        PlanCache::HashId hashID = Hash{}(tag,
-                                          ADataType,
-                                          BDataType,
-                                          CDataType,
-                                          DDataType,
-                                          computeType,
-                                          operationType,
-                                          contractionOpId,
-                                          arrLSM);
-
-        return hashID;
+        return backendName == backend::kCkBackendName ? legacyPlanCacheKey(desc)
+                                                      : fullPlanCacheKey(desc, backendName);
     }
 
-    PlanCache::Uid PlanCache::querySolutionUid(hiptensorOperationDescriptor_t desc)
+    PlanCache::Uid PlanCache::querySolutionUid(hiptensorOperationDescriptor_t desc,
+                                               std::string const&             backend)
     {
         std::scoped_lock lock(mMutex);
 
-        PlanCache::HashId hashID      = getHashID(desc);
+        PlanCache::HashId hashID      = getHashID(desc, backend);
         PlanCache::Uid    solutionUid = getSolutionID(hashID);
         //Update cache line used time
         if(solutionUid > 0ull)
