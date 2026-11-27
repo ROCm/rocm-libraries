@@ -80,7 +80,7 @@ def _gp_gfx950(gfx950_iim):
     defaultSolution.update(saved_ds)
 
 
-def _make_params(gfx950_iim, mi, depth_u):
+def _make_params(gfx950_iim, mi, depth_u, **over):
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
@@ -107,13 +107,14 @@ def _make_params(gfx950_iim, mi, depth_u):
         "DirectToVgprA": False, "DirectToVgprB": False,
         "DirectToVgprSparseMetadata": False, "WorkGroupMapping": 4,
     }
+    params.update(over)
     params.update(matrixInstructionToMIParameters(
         mi, isa, params["WavefrontSize"], problem_type, params["WorkGroup"], gfx950_iim))
     return params
 
 
-def _solve(gfx950_iim, assembler, mi, depth_u=128):
-    params = _make_params(gfx950_iim, mi, depth_u)
+def _solve(gfx950_iim, assembler, mi, depth_u=128, **over):
+    params = _make_params(gfx950_iim, mi, depth_u, **over)
     return Solution(params, False, True, False, assembler, gfx950_iim)
 
 
@@ -199,7 +200,7 @@ def test_shared_gr_rejected_off_dual_period(_gp_gfx950, gfx950_iim, assembler):
 # ---------------------------------------------------------------------------
 # Codegen: the emitted assembly has the per-tile scale structure.
 # ---------------------------------------------------------------------------
-def _emit(gfx950_iim, assembler, mi):
+def _emit(gfx950_iim, assembler, mi, depth_u=128, **over):
     from tensilelite.Toolchain.Validators import validateToolchain
     cxx = validateToolchain("amdclang++")
     if not cxx or not shutil.which(cxx):
@@ -211,8 +212,9 @@ def _emit(gfx950_iim, assembler, mi):
     from tensilelite.Common.Types import DebugConfig
     import rocisa
 
-    sol = _solve(gfx950_iim, assembler, mi, depth_u=128)
-    assert sol.get("Valid") and sol.get("_DualPeriodMXFP8")
+    sol = _solve(gfx950_iim, assembler, mi, depth_u=depth_u, **over)
+    assert sol.get("Valid"), f"solution rejected: mi={mi} depth_u={depth_u}"
+    assert bool(sol.get("_DualPeriodMXFP8")) == (depth_u == 128)
     for kernel in generateKernelObjectsFromSolutions([sol]):
         ri = rocisa.rocIsa.getInstance()
         ri.init(tuple(kernel["ISA"]), shutil.which(cxx))
@@ -268,3 +270,23 @@ def test_even_tile_keeps_pair_scale_reads(_gp_gfx950, gfx950_iim, assembler):
     src = _emit(gfx950_iim, assembler, _EVEN)
     assert {w for w, _, _ in _scale_reads(src, "MXSA") + _scale_reads(src, "MXSB")} == {"group"}
     assert "swizzle group?" not in src and "ScaleByteOff" not in src
+
+
+
+# ---------------------------------------------------------------------------
+# Large odd tile counts on the single-period path.  From 11 tiles up the data
+# tiles are partitioned; an odd count gives unequal partitions.  Two things
+# must hold: the boundary sits on a multiple of the global-read width (13 by 7
+# -> [6, 7]; a boundary at 7 lets partition 1's last two-strip load overwrite
+# tile 7 before partition 2 reads it), and the register assignment still
+# repeats within the unroll limit (it is retried with idle-register padding).
+# ---------------------------------------------------------------------------
+_ODD_M13 = [16, 16, 128, 1, 1, 13, 4, 1, 4]  # MT208x256
+_ODD_M15 = [16, 16, 128, 1, 1, 15, 4, 1, 4]  # MT240x256
+_ODD_N13 = [16, 16, 128, 1, 1, 4, 13, 4, 1]  # MT256x208
+_ODD_N15 = [16, 16, 128, 1, 1, 4, 15, 4, 1]  # MT256x240
+
+
+@pytest.mark.parametrize("mi", [_ODD_M13, _ODD_M15, _ODD_N13, _ODD_N15])
+def test_large_odd_tile_count_emits_single_period(_gp_gfx950, gfx950_iim, assembler, mi):
+    _emit(gfx950_iim, assembler, mi, depth_u=256, PrefetchGlobalRead=1, PrefetchLocalRead=1)

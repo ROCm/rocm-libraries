@@ -357,7 +357,8 @@ class SchedulerConfig:
 
     @staticmethod
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str,
-                                   mn: int = 1, remainder_last: bool = False) -> List[int]:
+                                   mn: int = 1, remainder_last: bool = False,
+                                   align: int = 1) -> List[int]:
         if isinstance(spec, (list, tuple)):
             assert sum(spec) == total, \
                 f"partition sizes for {dim} must sum to {total}, got {sum(spec)}"
@@ -374,10 +375,22 @@ class SchedulerConfig:
         s = max(mn, (s // mn) * mn)
         if s > total:
             return [total]
+        if align > 1 and s % align != 0:
+            # One global read covers `align` tile strips.  A boundary that is not a multiple of
+            # it lets a partition's last load overwrite the first strips of the next partition
+            # before they are read.  Keep the partition count, shrink the leading partitions to
+            # the aligned size and give the rest to the last one (13 by 7 -> [6, 7]).
+            count = -(-total // s)
+            aligned = (s // align) * align
+            if aligned == 0:
+                return [total]
+            return [aligned] * (count - 1) + [total - aligned * (count - 1)]
         num_full = total // s
         remainder = total - num_full * s
         if remainder == 0:
             return [s] * num_full
+        if align > 1 and remainder % align != 0:
+            return [s] * num_full + [remainder]
         if not remainder_last:
             if num_full == 1:
                 return [s, remainder]
@@ -448,12 +461,16 @@ class SchedulerConfig:
 
         mn_M = max((g.mn for g in (self.lrA, self.lrSA) if g is not None), default=1)
         mn_N = max((g.mn for g in (self.lrB, self.lrSB) if g is not None), default=1)
+        # A per-tile scale read (lrS*.mn == 1, odd MIWaveTile) drops the pair alignment that the
+        # scale local read gives even MX tiles, so align those boundaries to the load width.
+        align_M = int(self.grA.mn) if self.lrSA is not None and self.lrSA.mn == 1 else 1
+        align_N = int(self.grB.mn) if self.lrSB is not None and self.lrSB.mn == 1 else 1
         self._partitionSizesM = self._normalize_partition_sizes(
             self.partitionSizeM, self.numMFMATilesM, 'M', mn_M,
-            remainder_last=data_multi_du)
+            remainder_last=data_multi_du, align=align_M)
         self._partitionSizesN = self._normalize_partition_sizes(
             self.partitionSizeN, self.numMFMATilesN, 'N', mn_N,
-            remainder_last=data_multi_du)
+            remainder_last=data_multi_du, align=align_N)
         self._prefixM = self._build_prefix(self._partitionSizesM)
         self._prefixN = self._build_prefix(self._partitionSizesN)
         assert self.partitionOrder in ("m-major", "n-major"), \
@@ -1544,7 +1561,28 @@ class LogicalScheduler:
 
         Iterated until convergence (max 8 unroll iterations).  Sets
         self.tile_peaks, self.needs_unrolling, self.unroll_factor.
+
+        Unequal data partitions draw different numbers of registers from the free list, so
+        the assignment can drift by one register per iteration and not repeat within the
+        limit.  When that happens the pass is repeated with every short partition padded to
+        the largest one by idle registers, which makes each iteration draw the same number.
         """
+        saved = [(slot,
+                  {t: list(v) for t, v in slot.mfma.vgpr_tile_maps.items()} if slot.mfma else None,
+                  [list(lr.vgpr_tile_map) for lr in slot.lrs])
+                 for slots in self._partitions for slot in slots]
+        if self._assign_vgpr_tiles_free_list_pass(pad_short_partitions=False):
+            return
+        for slot, mfma_maps, lr_maps in saved:
+            if slot.mfma:
+                slot.mfma.vgpr_tile_maps = mfma_maps
+            for lr, m in zip(slot.lrs, lr_maps):
+                lr.vgpr_tile_map = m
+        converged = self._assign_vgpr_tiles_free_list_pass(pad_short_partitions=True)
+        assert converged, "assign_vgpr_tiles did not converge after 8 unroll iterations"
+
+    def _assign_vgpr_tiles_free_list_pass(self, pad_short_partitions: bool) -> bool:
+        """One attempt of the free-list allocation; False when it does not converge."""
 
         cfg = self.config
         numK = cfg.numSubIterK
@@ -1554,6 +1592,21 @@ class LogicalScheduler:
         if cfg.hasScale:
             lr_grans['SA'] = cfg.lrSA
             lr_grans['SB'] = cfg.lrSB
+
+        # (tensor, group of a short partition's last tile) -> idle registers allocated and
+        # released together with that tile.
+        pad_for = {}
+        if pad_short_partitions:
+            for tensor, sizes in (('A', cfg._partitionSizesM), ('B', cfg._partitionSizesN)):
+                if len(set(sizes)) > 1:
+                    largest, start = max(sizes), 0
+                    for size in sizes:
+                        if size < largest:
+                            mn = lr_grans[tensor].mn
+                            pad_for[(tensor, ((start + size - 1) // mn) * mn)] = largest - size
+                        start += size
+            if not pad_for:
+                return False
 
         # ── Phase 1: find last MFMA read for each key ──
         last_read = {}  # key -> flat position
@@ -1629,6 +1682,10 @@ class LogicalScheduler:
                                 key = (tensor, group, k_chunk)
                                 if key not in active:
                                     active[key] = pools[tensor].alloc()
+                                    for j in range(pad_for.get((tensor, group), 0)):
+                                        pad_key = (tensor, ('pad', group, j), k_chunk)
+                                        if pad_key not in active:
+                                            active[pad_key] = pools[tensor].alloc()
                                 tile_map[group] = active[key]
                             slot.mfma.vgpr_tile_maps.setdefault(tensor, []).append(tile_map)
 
@@ -1653,10 +1710,21 @@ class LogicalScheduler:
                                 vid = pools[tensor].alloc()
                                 target[key] = vid
                                 tile_map[group] = vid
+                                for j in range(pad_for.get((tensor, group), 0)):
+                                    pad_key = (tensor, ('pad', group, j), k_chunk)
+                                    if pad_key in target:
+                                        pools[tensor].release(target[pad_key])
+                                    target[pad_key] = pools[tensor].alloc()
                         lr.vgpr_tile_map.append(tile_map)
 
-                    to_release = [key for key, lr_pos in last_read.items()
-                                  if lr_pos == pos and key in active]
+                    to_release = []
+                    for key, lr_pos in last_read.items():
+                        if lr_pos == pos and key in active:
+                            to_release.append(key)
+                            for j in range(pad_for.get((key[0], key[1]), 0)):
+                                pad_key = (key[0], ('pad', key[1], j), key[2])
+                                if pad_key in active:
+                                    to_release.append(pad_key)
                     for key in to_release:
                         pools[key[0]].release(active[key])
                         del active[key]
@@ -1683,13 +1751,13 @@ class LogicalScheduler:
             all_next_iters.append(next_iter)
             carry_active = next_iter
         else:
-            assert False, (f"assign_vgpr_tiles did not converge after "
-                           f"{MAX_UNROLL} unroll iterations")
+            return False
 
         self.unroll_factor = unroll_iter
         self.needs_unrolling = self.unroll_factor > 1
         self.tile_peaks = max_peaks
         self.compact_b_overlay = True
+        return True
 
 
     def _assign_vgpr_tiles_deterministic(self):
