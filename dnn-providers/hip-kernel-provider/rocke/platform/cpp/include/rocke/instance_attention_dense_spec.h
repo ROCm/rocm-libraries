@@ -9,6 +9,7 @@
  *   -------------------------------------------   -------------------------------------
  *   DENSE_TILE_GEOMETRIES                         ROCKE_DENSE_TILE_GEOMETRIES
  *   INT32_LIMIT                                   ROCKE_ATTENTION_DENSE_INT32_LIMIT
+ *   _spec_checks.I32_KV_BUFFER_BYTES              ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES
  *   @dataclass AttentionDenseSpec                 rocke_attention_dense_spec_t
  *                                                   + rocke_attention_dense_spec_default()
  *   AttentionDenseSpec.__post_init__              rocke_attention_dense_spec_validate()

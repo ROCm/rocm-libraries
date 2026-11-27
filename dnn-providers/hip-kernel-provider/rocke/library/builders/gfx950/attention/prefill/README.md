@@ -403,8 +403,11 @@ routes it to the unified kernels.
 Per-sequence alignment: for the paged unified kernels `seqlen_q` / `seqlen_k` are
 the batch maxima and the diagonal is derived per sequence at runtime, so on gfx950
 `TOP_LEFT_CAUSAL` (or the top-left alignment of the band fields) selects the `_tl`
-body even when the two maxima are equal; it is never folded into bottom-right. Only
-dense, which takes uniform lengths, folds the alignments at equal length. On arches
+body even when the two maxima are equal; it is never folded into bottom-right. Dense
+folds the alignments at equal length only for one sequence; for several packed
+sequences it keeps the requested alignment of plain causal and places each diagonal
+at run time, as the paged unified kernels do (a bottom-right window or lookahead is
+refused there). On arches
 without a top-left kernel (gfx942 / gfx1250) the legacy equal-length shortcut remains
 and serves top-left with the bottom-right body, which is correct only when every
 sequence has `q_len == kv_len`.

@@ -3854,8 +3854,8 @@ def run_attention_dense_torch(
     ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous: [1, S, H, D] for
     one sequence, or, with ``spec.varlen`` (any ``batch``), packed
     [total_q, Hq, D] with ``cu_seqlens_q`` only: each sequence's KV length is its
-    ``kv_lens`` entry and must equal its query length (bottom-right: be at least
-    its query length). ``spec.block_size`` is the cache page size and
+    ``kv_lens`` entry, any length under top-left, at least its query length under
+    bottom-right. ``spec.block_size`` is the cache page size and
     ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. The
     structural checks always run; ``validate_paged=False`` skips only the
     synchronized checks of the table and length contents, whose contract then

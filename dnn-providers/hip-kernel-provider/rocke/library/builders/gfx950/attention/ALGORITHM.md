@@ -698,7 +698,7 @@ covers the whole cache (§7.2 for caches past that range).
   (`qb_minor` when the query heads do not split evenly over the XCDs): with the
   sequence as the fastest grid digit, each sequence would run on one XCD.
 
-That holds up to the i32 K/V buffer range, the unified kernels' threshold
+That holds up to the i32 K/V buffer range that dense and unified share
 (`kv_cache_needs_i64_addr`). Past it, `use_i64_kv_addr` (dispatch sets it at
 binding from the cache size) moves the page into a 64-bit base, as §7.2 does
 for the unified kernels: each wave builds one resource per K/V tile over its

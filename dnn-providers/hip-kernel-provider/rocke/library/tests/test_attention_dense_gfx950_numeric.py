@@ -2742,24 +2742,33 @@ class TestDensePagedNumeric:
             assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
 
 
-def _paged_varlen_spec(lens, block_size, d, dtype, num_kv_blocks, window=0, **kw):
+def _paged_varlen_spec(lens, block_size, d, dtype, num_kv_blocks, window=0, **knobs):
+    """The grid candidate's dispatched spec of a paged request for ``lens`` on a
+    cache of ``num_kv_blocks``, so the rows run the tile dispatch picks;
+    ``knobs`` override it."""
+    from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
     longest = max(lens)
-    return Gfx950AttentionDenseSpec(
-        batch=len(lens),
-        seqlen_q=longest,
-        seqlen_kv=longest,
-        num_query_heads=16,
-        num_kv_heads=4,
-        head_size=d,
-        causal=True,
-        dtype=dtype,
-        sliding_window=window,
-        varlen=True,
-        paged=True,
-        block_size=block_size,
-        num_kv_blocks=num_kv_blocks,
-        **kw,
+    spec = tuning_spec_with_knobs(
+        AttentionRequest(
+            batch=len(lens),
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=longest,
+            seqlen_k=longest,
+            hdim_q=d,
+            hdim_v=d,
+            arch="gfx950",
+            mask_type=1,
+            dtype=dtype,
+            sliding_window=window,
+            layout="paged",
+            kv_block_size=block_size,
+        ),
+        "gfx950_dense_grid",
+        knobs,
     )
+    return spec.with_num_kv_blocks(num_kv_blocks).kernel_spec
 
 
 class TestDensePagedVarlenNumeric:

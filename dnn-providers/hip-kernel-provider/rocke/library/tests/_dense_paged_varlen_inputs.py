@@ -20,10 +20,13 @@ PAGED_VARLEN_EDGES = [256, 1, 17, 63, 65, 0, 512, 48]
 PAGED_VARLEN_RAGGED = [1000, 17, 0, 512]
 # Top-left paged varlen with q_len != kv_len, as (kv_lens, q_lens): unequal maxima
 # both ways, equal maxima over mixed sequences, sequences without keys (kv_len 0),
-# and under a window, rows past kv_len + window that see no key.
+# and under a window, rows past kv_len + window that see no key. "q_gt_kv_partial":
+# several Q tiles over a KV length that ends inside a KV tile, which the KV-tail
+# guards of the mask-free tiles are for.
 PAGED_VARLEN_TOP_LEFT_CROSS = {
     "q_lt_kv": ([512, 300, 17, 65], [256, 300, 1, 64]),
     "q_gt_kv": ([256, 17, 0, 100], [512, 64, 33, 100]),
+    "q_gt_kv_partial": ([300, 17, 0], [600, 64, 33]),
     "equal_maxima": ([512, 256, 0], [256, 512, 40]),
 }
 _PAD_ID = 0x7FFF_FFFF
@@ -45,7 +48,8 @@ def paged_varlen_inputs(lens, block_size, d, dtype, hq=16, hkv=4, q_lens=None):
     ids, NaN in every unused page (block 0 included, which out-of-sequence lookups
     read), NaN in each last page's slots past the sequence's length, and table
     columns past each sequence's pages set to an invalid id. ``lens`` are the KV
-    lengths; the query lengths are ``q_lens`` (bottom-right), else the same."""
+    lengths; the query lengths are ``q_lens`` (any under top-left, ``q_len <=
+    kv_len`` under bottom-right), else the same."""
     tdt = _TORCH_DT[dtype]
     q_lens = lens if q_lens is None else q_lens
     total = sum(q_lens)

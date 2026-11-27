@@ -3395,8 +3395,8 @@ def run_attention_dense_torch(
     ``[num_kv_blocks, block_size, Hkv, D]`` and ``block_tables`` ([B, max_pages] i32)
     / ``kv_lens`` ([B] i32) are required; with ``spec.varlen`` too, ``q``/``out`` are
     packed [total_q, Hq, D] with ``cu_seqlens_q`` (int32 [B+1]) only: each sequence's
-    KV length is its ``kv_lens`` entry and must equal its query length
-    (bottom-right: be at least its query length).
+    KV length is its ``kv_lens`` entry, any length under top-left, at least its
+    query length under bottom-right.
     ``validate_paged=False`` skips the host check of the table and length contents
     (a device->host sync), see
     :func:`kernels.common._attention_dense_paged.validate_paged_launch`.
