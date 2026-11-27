@@ -150,6 +150,14 @@ static SchedCategory schedCategoryForOpcode(stinkytofu::logical::Opcode op) {
         case Logical::DSStore2B64:
         case Logical::DSStoreB8HID16:
         case Logical::DSStoreD16HIB16:
+        // ds_bpermute_b32 ([G] epilogue edge-shift, ShiftVectorComponentsMFMA):
+        //     rocisa DSBPermuteB32 derives from DSStoreInstruction, so its
+        //     schedCategory() is LocalWrite (LocalWriteInstruction base). It is a
+        //     lane-cross permute, not a real LDS store, but the scheduler counts
+        //     it as LocalWrite; mirror that here so the makeLogicalLeaf oracle
+        //     matches when the edge-shift math is flipped. schedExactKind/
+        //     schedWeight use the Instruction base (None/1) on both sides.
+        case Logical::DSBPermuteB32:
             return SchedCategory::LocalWrite;
         // --- mfma region: matrix ops -> MFMA (matches rocisa
         //     {MFMA,SMFMA,MXMFMA}Instruction::schedCategory). All three rocisa

@@ -17320,7 +17320,9 @@ class KernelWriterAssembly(KernelWriter):
   def shiftVectorComponents(self, kernel, tP):
     component = Component.ShiftVectorComponents.find(self)
     if component:
-      return component(self, kernel, tP)
+      # [G] edge-shift Phase-3 flip: VALU math -> LogicalLeaf, branches/labels
+      # stay rocisa (gated/no-op off gfx1250+trial; subtile-guarded internally).
+      return self._logicalizeShiftVector(component(self, kernel, tP))
 
   ##############################################################################
   # computeStoreSrd
@@ -24116,13 +24118,69 @@ class KernelWriterAssembly(KernelWriter):
       self._flipInstructionsToLeaves(module)
     return module
 
-  def _flipInstructionsToLeaves(self, module):
+  def _logicalizeShiftVector(self, module):
+    """[G] epilogue edge-shift Phase-3 flip (approach i, same shape as
+    _logicalizeActivationMath): convert the VALU/scalar math of a
+    shiftVectorComponents module to LogicalLeaf, leaving branches / labels /
+    placeholder Modules as rocisa.
+
+    shiftVectorComponents (ShiftVectorComponentsMFMA for gfx1250) builds a
+    self-contained edge-shift block: VALU/scalar math (v_mov_b32 / v_mul_i32_i24 /
+    v_add_co_u32 / v_cmp* / v_cndmask_b32 / v_and_b32 / v_lshlrev_b32 / v_sub_u32 /
+    ds_bpermute_b32 / s_mov_b32) interleaved with inline SCBranchVCCNZ branches,
+    Labels, *_placeholder Modules (resolved into branches *later* by
+    updateBranchPlaceHolder), and scheduling/sync boundaries (s_waitcnt / s_nop /
+    s_or_saveexec). We flip only the math: _flipInstructionsToLeaves skips
+    BranchInstruction + the skipExtra boundary set (SWaitCnt/SNop/SOrSaveExec*) +
+    Labels, and the placeholder Modules are still empty at flip time so recursing
+    them is a no-op -- the branches/waits that get added or legalized afterwards
+    stay rocisa, matching the branch/label-as-boundary rule.
+
+    The boundary skips are required for correctness: a flipped SWaitCnt loses its
+    waitData through the leaf round-trip, so legalizeWaitCnt would create no wait
+    and abort; s_nop carries wait-state semantics; s_or_saveexec carries the exec-
+    mask dependency the shift relies on. Everything flipped is Other/None/weight-1
+    in both rocisa and the C++ schedCategory tables except ds_bpermute_b32
+    (DSBPermuteB32), which rocisa categorises LocalWrite via its DSStoreInstruction
+    base; schedCategoryForOpcode has a matching DSBPermuteB32 -> LocalWrite case so
+    the makeLogicalLeaf oracle matches. The explicit s_waitcnt(dscnt=0) that guards
+    the ds_bpermute result stays rocisa, so the dscnt dependency is unaffected by
+    flipping the permute. The leaf's rocisaInst clone is byte-identical to what the
+    lazy converter would lower (eager == lazy); ValuC-relative symbolic VGPRs stay
+    symbolic and resolve identically on both A/B passes. Subtile-guarded (subtile
+    has its own store/scheduler path that introspects concrete types);
+    maybe_logical_leaf is itself gated on gfx1250 + active region + trial, so this
+    is a no-op everywhere else."""
+    if self.states.kernel["UseSubtileImpl"]:
+      return module
+    with logical_region("shiftVector"):
+      self._flipInstructionsToLeaves(module,
+                                     skipExtra=(SWaitCnt, SNop, SOrSaveExecB32, SOrSaveExecB64))
+    return module
+
+  def _flipInstructionsToLeaves(self, module, skipExtra=()):
     """Recursively replace each leaf instruction item in *module* with its
     LogicalLeaf (via maybe_logical_leaf). Recurses into nested Modules; Labels /
-    TextBlocks (non-Instruction items) are left untouched."""
+    TextBlocks (non-Instruction items) and BranchInstructions are left untouched.
+
+    Branches stay rocisa as control-flow boundaries: the logical passes treat
+    labels/branches as region boundaries anyway, and edge-shift branch
+    placeholders (empty *_placeholder Modules at flip time) are resolved into real
+    branches *after* this flip by updateBranchPlaceHolder -- so those too remain
+    rocisa. Activation (the other caller) has no branches, so the skip is inert
+    there.
+
+    *skipExtra* is an additional tuple of instruction types left as rocisa. Edge-
+    shift passes the scheduling/sync boundaries that must NOT become leaves --
+    SWaitCnt (its waitData does not survive the leaf round-trip, so legalizeWaitCnt
+    would create no wait and abort), SNop (wait-state semantics), and SOrSaveExec*
+    (exec-mask dependency). Activation passes nothing, so its behaviour is
+    unchanged."""
     for idx, item in enumerate(module.items()):
       if isinstance(item, Module):
-        self._flipInstructionsToLeaves(item)
+        self._flipInstructionsToLeaves(item, skipExtra)
+      elif isinstance(item, BranchInstruction) or (skipExtra and isinstance(item, skipExtra)):
+        continue
       elif isinstance(item, _LogicalFlipInstruction):
         module.setItem(idx, maybe_logical_leaf(item))
 
