@@ -433,6 +433,14 @@ repos:
         files: ^projects/hipdnn/scripts/(test_)?resolve_quartz_rocm\.py$
         pass_filenames: false
 
+      - id: hipdnn-windows-rocm-setup-tests
+        name: hipDNN Windows ROCm setup script tests
+        entry: python -m pytest projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts/test_windows_rocm_setup.py -q
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^projects/hipdnn/(tools/ai/skills/hipdnn-superbuild/scripts/|scripts/resolve_quartz_rocm\.py$)
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

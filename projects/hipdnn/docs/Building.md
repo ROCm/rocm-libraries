@@ -829,7 +829,7 @@ python -m rocm_sdk path --bin     # its bin folder
 On Windows the `bin` folder is typically added to `PATH` so the built executables can load the ROCm DLLs at runtime (covered in the next step). See [Pointing the build at ROCm](#pointing-the-build-at-rocm).
 
 > [!NOTE]
-> The [wheel_build_setup.ps1](../scripts/windows/wheel_build_setup.ps1) script automates the wheel install and prints the CMake variables to use. Run `.\scripts\windows\wheel_build_setup.ps1` for the latest nightlies, or with `-SHA <commit-sha>` for a specific staging build.
+> The [wheel_build_setup.ps1](../scripts/windows/wheel_build_setup.ps1) script automates the wheel install and prints the CMake variables to use. Run `.\scripts\windows\wheel_build_setup.ps1` for the newest Quartz-selected nightly, with `-RocmVersion latest` or `-RocmVersion <version>` to override, or with `-SHA <commit-sha>` for a specific staging build.
 
 #### 8. Setup Environment Variables
 
