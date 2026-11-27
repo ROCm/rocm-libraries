@@ -53,10 +53,11 @@ namespace hiptensor
     constexpr int64_t ckMaxTensorBytes = int64_t(1) << 31;
 
     // Empirical workaround for a CK bug, not an addressing limit: f64 elementwise operations
-    // whose inputs are not laid out like the output wrote zeros for tensors of 1 GiB, and were
-    // correct at 512 MiB. Until the bug is root-caused and fixed in CK, such tensors must span
-    // fewer than 512 MiB; the same limit is applied to permutations. Remove this limit once the
-    // kernels are fixed.
+    // whose inputs are not laid out like the output wrote zeros for tensors of 1 GiB. The
+    // smallest size that fails has not been determined, so until the bug is root-caused and
+    // fixed in CK, such tensors must span fewer than 512 MiB, half the size seen to fail, as a
+    // margin. The same limit is applied to permutations and to reductions that keep the rank,
+    // which run as elementwise operations. Remove this limit once the kernels are fixed.
     constexpr int64_t ckMaxF64PermutedTensorBytes = int64_t(1) << 29;
 
     // Bytes of one element as the kernels see it: one plane of a complex element.
@@ -188,10 +189,16 @@ namespace hiptensor
         }
 
         // f64 permutations and elementwise operations with any input laid out differently from
-        // the output, including a broadcast input.
+        // the output, including a broadcast input. A reduction whose output keeps the rank of A
+        // runs as the elementwise binary operation D = alpha * A + beta * C.
+        bool const isSameRankReduction
+            = desc.mOperationType == HIPTENSOR_REDUCTION && desc.mDescA != nullptr
+              && desc.mDescD != nullptr
+              && desc.mDescA->mLengths.size() == desc.mDescD->mLengths.size();
         bool const isElementwise = desc.mOperationType == HIPTENSOR_PERMUTATION
                                    || desc.mOperationType == HIPTENSOR_ELEMENTWISE_BINARY
-                                   || desc.mOperationType == HIPTENSOR_ELEMENTWISE_TRINARY;
+                                   || desc.mOperationType == HIPTENSOR_ELEMENTWISE_TRINARY
+                                   || isSameRankReduction;
         if(!isElementwise)
         {
             return {};

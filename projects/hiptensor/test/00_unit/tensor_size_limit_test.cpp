@@ -27,7 +27,8 @@
 // hiptensorCreatePlan returns HIPTENSOR_STATUS_NOT_SUPPORTED for tensors the kernels cannot
 // address: tensors whose elements span 2^31 bytes or more (from their lengths and strides), the
 // intermediate A * B tensor of a trinary contraction past that size, and f64 elementwise
-// operations with an input laid out differently from the output past 2^29 bytes.
+// operations, including reductions that keep the rank, with an input laid out differently from
+// the output past 2^29 bytes. Most cases also check that tensors just below the limit are planned.
 //
 // The tests create descriptors and plans only. No tensor memory is allocated: plan creation of
 // permutations, elementwise operations and reductions does not allocate, and contractions are
@@ -38,6 +39,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace
@@ -202,6 +204,48 @@ protected:
         return plan(op, HIPTENSOR_ALGO_DEFAULT, planCreated);
     }
 
+    // D = reduce(A) with C = D. Returns the status of the plan;
+    // HIPTENSOR_STATUS_ARCH_MISMATCH when the device does not support `type`.
+    hiptensorStatus_t reduction(std::vector<int64_t> const& lengthsA,
+                                std::vector<int32_t> const& modesA,
+                                std::vector<int64_t> const& lengthsD,
+                                std::vector<int32_t> const& modesD,
+                                hiptensorDataType_t         type)
+    {
+        hiptensorTensorDescriptor_t descA = nullptr;
+        hiptensorTensorDescriptor_t descD = nullptr;
+        if(auto status = tensor(&descA, lengthsA, type); status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        if(auto status = tensor(&descD, lengthsD, type); status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            ADD_FAILURE() << "hiptensorCreateTensorDescriptor failed for D";
+            return status;
+        }
+
+        hiptensorOperationDescriptor_t op     = nullptr;
+        auto                           status = hiptensorCreateReduction(mHandle,
+                                               &op,
+                                               descA,
+                                               modesA.data(),
+                                               HIPTENSOR_OP_IDENTITY,
+                                               descD,
+                                               modesD.data(),
+                                               HIPTENSOR_OP_IDENTITY,
+                                               descD,
+                                               modesD.data(),
+                                               HIPTENSOR_OP_ADD,
+                                               computeFor(type));
+        keep(op);
+        if(status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            ADD_FAILURE() << "hiptensorCreateReduction failed";
+            return status;
+        }
+        return plan(op);
+    }
+
     static hiptensorComputeDescriptor_t computeFor(hiptensorDataType_t type)
     {
         return type == HIPTENSOR_R_64F ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
@@ -235,57 +279,47 @@ TEST_F(TensorSizeLimitTest, PaddedStridesCountTowardTheLimit)
               HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
+// 32768 x 32768 half-precision elements per tensor span exactly 2^31 bytes; one column less is
+// planned.
 TEST_F(TensorSizeLimitTest, ElementwiseBinaryAtLimitIsNotSupported)
 {
-    // 2^30 half-precision elements per tensor.
-    std::vector<int64_t> const  lengths = {32768, 32768};
-    int32_t const               modes[] = {'m', 'n'};
-    hiptensorTensorDescriptor_t descA = nullptr, descC = nullptr, descD = nullptr;
-    ASSERT_EQ(tensor(&descA, lengths, HIPTENSOR_R_16F), HIPTENSOR_STATUS_SUCCESS);
-    ASSERT_EQ(tensor(&descC, lengths, HIPTENSOR_R_16F), HIPTENSOR_STATUS_SUCCESS);
-    ASSERT_EQ(tensor(&descD, lengths, HIPTENSOR_R_16F), HIPTENSOR_STATUS_SUCCESS);
+    int32_t const modes[] = {'m', 'n'};
+    for(auto const& [lengths, expected] :
+        {std::pair{std::vector<int64_t>{32768, 32768}, HIPTENSOR_STATUS_NOT_SUPPORTED},
+         std::pair{std::vector<int64_t>{32768, 32767}, HIPTENSOR_STATUS_SUCCESS}})
+    {
+        SCOPED_TRACE(lengths[1]);
+        hiptensorTensorDescriptor_t descA = nullptr, descC = nullptr, descD = nullptr;
+        ASSERT_EQ(tensor(&descA, lengths, HIPTENSOR_R_16F), HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(tensor(&descC, lengths, HIPTENSOR_R_16F), HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(tensor(&descD, lengths, HIPTENSOR_R_16F), HIPTENSOR_STATUS_SUCCESS);
 
-    hiptensorOperationDescriptor_t op = nullptr;
-    ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
-                                               &op,
-                                               descA,
-                                               modes,
-                                               HIPTENSOR_OP_IDENTITY,
-                                               descC,
-                                               modes,
-                                               HIPTENSOR_OP_IDENTITY,
-                                               descD,
-                                               modes,
-                                               HIPTENSOR_OP_ADD,
-                                               HIPTENSOR_COMPUTE_DESC_32F),
-              HIPTENSOR_STATUS_SUCCESS);
-    EXPECT_EQ(plan(keep(op)), HIPTENSOR_STATUS_NOT_SUPPORTED);
+        hiptensorOperationDescriptor_t op = nullptr;
+        ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                                   &op,
+                                                   descA,
+                                                   modes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   descC,
+                                                   modes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   descD,
+                                                   modes,
+                                                   HIPTENSOR_OP_ADD,
+                                                   HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        EXPECT_EQ(plan(keep(op)), expected);
+    }
 }
 
+// A of 16384 x 32768 floats, reduced over n, spans exactly 2^31 bytes; one column less is
+// planned.
 TEST_F(TensorSizeLimitTest, ReductionAtLimitIsNotSupported)
 {
-    // A of 2^29 floats, reduced over n.
-    int32_t const               modesA[] = {'m', 'n'};
-    int32_t const               modesD[] = {'m'};
-    hiptensorTensorDescriptor_t descA = nullptr, descD = nullptr;
-    ASSERT_EQ(tensor(&descA, {16384, 32768}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
-    ASSERT_EQ(tensor(&descD, {16384}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
-
-    hiptensorOperationDescriptor_t op = nullptr;
-    ASSERT_EQ(hiptensorCreateReduction(mHandle,
-                                       &op,
-                                       descA,
-                                       modesA,
-                                       HIPTENSOR_OP_IDENTITY,
-                                       descD,
-                                       modesD,
-                                       HIPTENSOR_OP_IDENTITY,
-                                       descD,
-                                       modesD,
-                                       HIPTENSOR_OP_ADD,
-                                       HIPTENSOR_COMPUTE_DESC_32F),
+    EXPECT_EQ(reduction({16384, 32768}, {'m', 'n'}, {16384}, {'m'}, HIPTENSOR_R_32F),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(reduction({16384, 32767}, {'m', 'n'}, {16384}, {'m'}, HIPTENSOR_R_32F),
               HIPTENSOR_STATUS_SUCCESS);
-    EXPECT_EQ(plan(keep(op)), HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
 // f64 permutations with a transposed input are limited to 2^29 bytes per tensor; with the
@@ -302,42 +336,66 @@ TEST_F(TensorSizeLimitTest, F64TransposedPermutationLimit)
     EXPECT_EQ(permutation({8192, 8192}, HIPTENSOR_R_64F, false), HIPTENSOR_STATUS_SUCCESS);
 }
 
-// D[m,n] = A[m,k] * B[n,k] with A of 2^29 floats.
-TEST_F(TensorSizeLimitTest, ContractionAtLimitIsNotSupported)
+// A reduction whose output keeps the rank of A runs as an elementwise operation, so an f64 one
+// with a transposed output is limited to 2^29 bytes per tensor as well; with the input's layout
+// the same size is planned.
+TEST_F(TensorSizeLimitTest, F64SameRankReductionWithTransposedOutputLimit)
 {
-    int32_t const               modesA[] = {'m', 'k'};
-    int32_t const               modesB[] = {'n', 'k'};
-    int32_t const               modesD[] = {'m', 'n'};
-    hiptensorTensorDescriptor_t descA = nullptr, descB = nullptr, descD = nullptr;
-    ASSERT_EQ(tensor(&descA, {65536, 8192}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
-    ASSERT_EQ(tensor(&descB, {2, 8192}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
-    ASSERT_EQ(tensor(&descD, {65536, 2}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
-
-    hiptensorOperationDescriptor_t op     = nullptr;
-    auto                           status = hiptensorCreateContraction(mHandle,
-                                             &op,
-                                             descA,
-                                             modesA,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descB,
-                                             modesB,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             nullptr,
-                                             nullptr,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descD,
-                                             modesD,
-                                             HIPTENSOR_COMPUTE_DESC_32F);
-    keep(op);
+    auto status = reduction({8192, 8192}, {'m', 'n'}, {8192, 8192}, {'n', 'm'}, HIPTENSOR_R_64F);
     if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
     {
-        GTEST_SKIP() << "Contractions are not supported on this device";
+        GTEST_SKIP() << "f64 tensors are not supported on this device";
     }
-    ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(reduction({8192, 8191}, {'m', 'n'}, {8191, 8192}, {'n', 'm'}, HIPTENSOR_R_64F),
+              HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(reduction({8192, 8192}, {'m', 'n'}, {8192, 8192}, {'m', 'n'}, HIPTENSOR_R_64F),
+              HIPTENSOR_STATUS_SUCCESS);
+}
 
-    bool planCreated = true;
-    EXPECT_EQ(plan(op, HIPTENSOR_ALGO_ACTOR_CRITIC, &planCreated), HIPTENSOR_STATUS_NOT_SUPPORTED);
-    EXPECT_FALSE(planCreated);
+// D[m,n] = A[m,k] * B[n,k] with A of 65536 x 8192 floats, spanning exactly 2^31 bytes; with
+// one k less the contraction is planned.
+TEST_F(TensorSizeLimitTest, ContractionAtLimitIsNotSupported)
+{
+    int32_t const modesA[] = {'m', 'k'};
+    int32_t const modesB[] = {'n', 'k'};
+    int32_t const modesD[] = {'m', 'n'};
+    for(int64_t const k : {8192, 8191})
+    {
+        SCOPED_TRACE(k);
+        hiptensorTensorDescriptor_t descA = nullptr, descB = nullptr, descD = nullptr;
+        ASSERT_EQ(tensor(&descA, {65536, k}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(tensor(&descB, {2, k}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(tensor(&descD, {65536, 2}, HIPTENSOR_R_32F), HIPTENSOR_STATUS_SUCCESS);
+
+        hiptensorOperationDescriptor_t op     = nullptr;
+        auto                           status = hiptensorCreateContraction(mHandle,
+                                                 &op,
+                                                 descA,
+                                                 modesA,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 descB,
+                                                 modesB,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 nullptr,
+                                                 nullptr,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 descD,
+                                                 modesD,
+                                                 HIPTENSOR_COMPUTE_DESC_32F);
+        keep(op);
+        if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        {
+            GTEST_SKIP() << "Contractions are not supported on this device";
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+
+        bool       planCreated = false;
+        bool const atLimit     = k == 8192;
+        EXPECT_EQ(plan(op, HIPTENSOR_ALGO_ACTOR_CRITIC, &planCreated),
+                  atLimit ? HIPTENSOR_STATUS_NOT_SUPPORTED : HIPTENSOR_STATUS_SUCCESS);
+        EXPECT_EQ(planCreated, !atLimit);
+    }
 }
 
 // E[m,j] = A[m,k] * B[k,n] * C[n,j]: every tensor is small, but the intermediate T[m,n] = A * B

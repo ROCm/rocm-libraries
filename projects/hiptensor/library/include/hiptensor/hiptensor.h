@@ -294,8 +294,8 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! including the intermediate `A * B` of a trinary contraction, is too large for the kernels to
 //! address: its elements, from the lowest to the highest addressed by its lengths and strides, span
 //! 2^31 bytes or more (for complex types, per real or imaginary part), or, for an `HIPTENSOR_R_64F`
-//! permutation or elementwise binary or trinary operation with an input laid out differently from
-//! the output, 2^29 bytes or more.
+//! permutation, elementwise binary or trinary operation, or reduction whose output keeps the rank
+//! of `A`, with an input laid out differently from the output, 2^29 bytes or more.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 //! @retval `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` When the provided workspace is too small.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
