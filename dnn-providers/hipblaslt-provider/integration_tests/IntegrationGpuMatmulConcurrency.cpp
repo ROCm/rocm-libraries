@@ -127,7 +127,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -153,16 +153,16 @@ protected:
         const std::vector<int64_t> dims = {1, DIM, DIM};
         const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
-        auto a = std::make_shared<TensorAttributes>(
+        const auto a = std::make_shared<TensorAttributes>(
             makeTensorAttributes("a", DataType::FLOAT, dims, strides).set_uid(UID_A));
-        auto b = std::make_shared<TensorAttributes>(
+        const auto b = std::make_shared<TensorAttributes>(
             makeTensorAttributes("b", DataType::FLOAT, dims, strides).set_uid(UID_B));
 
         auto c = graph.matmul(a, b, MatmulAttributes());
         if(withBias)
         {
             const std::vector<int64_t> biasDims = {1, 1, DIM};
-            auto bias = std::make_shared<TensorAttributes>(
+            const auto bias = std::make_shared<TensorAttributes>(
                 makeTensorAttributes("bias",
                                      DataType::FLOAT,
                                      biasDims,
@@ -263,11 +263,12 @@ protected:
 
         const auto elements = static_cast<size_t>(DIM * DIM);
         const size_t bytes = elements * sizeof(float);
-        auto dA = deviceAlloc(bytes);
-        auto dB = deviceAlloc(bytes);
-        auto dC = deviceAlloc(bytes);
-        auto dBias = withBias ? deviceAlloc(static_cast<size_t>(DIM) * sizeof(float)) : nullptr;
-        auto dWorkspace
+        const auto dA = deviceAlloc(bytes);
+        const auto dB = deviceAlloc(bytes);
+        const auto dC = deviceAlloc(bytes);
+        const auto dBias
+            = withBias ? deviceAlloc(static_cast<size_t>(DIM) * sizeof(float)) : nullptr;
+        const auto dWorkspace
             = workspaceSize > 0 ? deviceAlloc(static_cast<size_t>(workspaceSize)) : nullptr;
         if(!dA || !dB || !dC || (withBias && !dBias) || (workspaceSize > 0 && !dWorkspace))
         {
@@ -305,7 +306,7 @@ protected:
                 failures.record(at + "hipMemset failed");
                 return;
             }
-            auto execErr = shared.execute(*handle, pack, dWorkspace.get());
+            const auto execErr = shared.execute(*handle, pack, dWorkspace.get());
             if(execErr.is_bad())
             {
                 failures.record(at + "execute: " + execErr.err_msg);
@@ -388,11 +389,11 @@ TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentKnobQueriesOnSharedGraph)
 
     const std::vector<int64_t> dims = {1, KNOB_DIM, KNOB_DIM};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    auto a = std::make_shared<TensorAttributes>(
+    const auto a = std::make_shared<TensorAttributes>(
         makeTensorAttributes("a", DataType::FLOAT, dims, strides).set_uid(UID_A));
-    auto b = std::make_shared<TensorAttributes>(
+    const auto b = std::make_shared<TensorAttributes>(
         makeTensorAttributes("b", DataType::FLOAT, dims, strides).set_uid(UID_B));
-    auto c = graph.matmul(a, b, MatmulAttributes());
+    const auto c = graph.matmul(a, b, MatmulAttributes());
     c->set_output(true).set_data_type(DataType::FLOAT).set_uid(UID_C);
 
     auto result = graph.validate();

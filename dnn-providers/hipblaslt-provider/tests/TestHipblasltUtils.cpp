@@ -602,7 +602,7 @@ TEST(TestHipblasltUtils, IsDenseRowMajorDeclinesRankMismatch)
 TEST(TestHipblasltUtils, ThrowOnHipblasltFailureEvaluatesItsArgumentOnce)
 {
     int calls = 0;
-    auto failsOnce = [&calls]() {
+    const auto failsOnce = [&calls]() {
         return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
     };
 
@@ -622,7 +622,7 @@ TEST(TestHipblasltUtils, ThrowOnHipblasltFailureEvaluatesItsArgumentOnce)
 TEST(TestHipblasltUtils, ThrowOnHipblasltFailureDoesNotThrowOnSuccess)
 {
     int calls = 0;
-    auto succeeds = [&calls]() {
+    const auto succeeds = [&calls]() {
         ++calls;
         return HIPBLAS_STATUS_SUCCESS;
     };
@@ -639,7 +639,7 @@ TEST(TestHipblasltUtils, LogOnHipblasltFailureEvaluatesItsArgumentOnce)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     int calls = 0;
-    auto failsOnce = [&calls]() {
+    const auto failsOnce = [&calls]() {
         return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
     };
 

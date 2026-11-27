@@ -267,7 +267,7 @@ void runFloatInputNarrowBiasAdd()
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    auto operation = PointwiseMode::ADD;
+    const auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<OutputType, float, Input1Type>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 

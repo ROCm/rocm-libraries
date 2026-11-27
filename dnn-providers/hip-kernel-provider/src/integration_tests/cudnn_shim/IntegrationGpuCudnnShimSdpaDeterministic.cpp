@@ -77,9 +77,9 @@ void buildGraph(fe::graph::Graph& graph, GraphKind kind)
     {
         const std::vector<int64_t> dims = {2, 8, 128, 64};
         const std::vector<int64_t> strides = {int64_t{8} * 128 * 64, int64_t{128} * 64, 64, 1};
-        auto q = makeTensor(graph, 1, "Q", type, dims, strides);
-        auto k = makeTensor(graph, 2, "K", type, dims, strides);
-        auto v = makeTensor(graph, 3, "V", type, dims, strides);
+        const auto q = makeTensor(graph, 1, "Q", type, dims, strides);
+        const auto k = makeTensor(graph, 2, "K", type, dims, strides);
+        const auto v = makeTensor(graph, 3, "V", type, dims, strides);
         auto [o, stats] = graph.sdpa(q,
                                      k,
                                      v,
@@ -111,12 +111,12 @@ void buildGraph(fe::graph::Graph& graph, GraphKind kind)
     const auto& io = asmOnly ? bshd : packed;
     const auto& oStrides = asmOnly ? padded : packed;
 
-    auto q = makeTensor(graph, 1, "Q", type, dims, io);
-    auto k = makeTensor(graph, 2, "K", type, dims, io);
-    auto v = makeTensor(graph, 3, "V", type, dims, io);
-    auto o = makeTensor(graph, 4, "O", type, dims, oStrides);
-    auto dO = makeTensor(graph, 5, "dO", type, dims, io);
-    auto stats = makeTensor(
+    const auto q = makeTensor(graph, 1, "Q", type, dims, io);
+    const auto k = makeTensor(graph, 2, "K", type, dims, io);
+    const auto v = makeTensor(graph, 3, "V", type, dims, io);
+    const auto o = makeTensor(graph, 4, "O", type, dims, oStrides);
+    const auto dO = makeTensor(graph, 5, "dO", type, dims, io);
+    const auto stats = makeTensor(
         graph, 6, "LSE", fe::DataType_t::FLOAT, {batch, heads, seq, 1}, {heads * seq, seq, 1, 1});
     auto [dq, dk, dv]
         = graph.sdpa_backward(q,

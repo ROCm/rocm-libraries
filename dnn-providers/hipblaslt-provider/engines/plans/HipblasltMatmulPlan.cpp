@@ -269,7 +269,7 @@ void MatmulParams::setEpilogue(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
     hipDataType biasDataType)
 {
-    auto epilogueParams
+    const auto epilogueParams
         = hipblaslt_utils::mapPointwiseModeToHipblasLtEpilogue(activAttr, _biasUid.has_value());
 
     _matmulDesc.setEpilogue(epilogueParams.epilogue);
@@ -384,7 +384,7 @@ void MatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     HipblasltMatmulDesc desc = _params.desc().clone();
     if(_params.biasUid().has_value())
     {
-        auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
+        const auto biasBuffer = hipblaslt_utils::findDeviceBuffer(
             _params.biasUid().value(), deviceBuffers, numDeviceBuffers);
         desc.setBiasPointer(biasBuffer.ptr);
     }

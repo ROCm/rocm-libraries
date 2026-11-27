@@ -214,21 +214,23 @@ TEST(TestMatmulParams, ColumnMajor)
 // With K == 1, A [M, 1] and B [1, N] carry strides that no stride-1 rule accepts.
 TEST(TestMatmulParams, AcceptsSizeOneKOperandsWithNonCanonicalStrides)
 {
-    std::vector<int64_t> const cDims = {4, 5};
-    std::vector<int64_t> const cStrides = {5, 1};
+    const std::vector<int64_t> cDims = {4, 5};
+    const std::vector<int64_t> cStrides = {5, 1};
 
     {
         // A [M, 1] with column-style strides.
-        auto builder = createValidMatmulGraph({4, 1}, {1, 4}, {1, 5}, {5, 1}, cDims, cStrides);
-        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        const auto builder
+            = createValidMatmulGraph({4, 1}, {1, 4}, {1, 5}, {5, 1}, cDims, cStrides);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
         ASSERT_NE(attrs, nullptr);
         EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
     }
     {
         // B [1, N] with strides that are neither 1.
-        auto builder = createValidMatmulGraph({4, 1}, {1, 1}, {1, 5}, {99, 100}, cDims, cStrides);
-        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        const auto builder
+            = createValidMatmulGraph({4, 1}, {1, 1}, {1, 5}, {99, 100}, cDims, cStrides);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
         ASSERT_NE(attrs, nullptr);
         EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
@@ -256,12 +258,12 @@ hipblasOperation_t getTransAttribute(const HipblasltMatmulDesc& desc,
 // Fails if the transpose of a size-1 operand is derived from its raw strides.
 TEST(TestMatmulParams, SizeOneRowOperandWithNonCanonicalStridesIsTransposed)
 {
-    auto builder = createValidMatmulGraph({4, 1}, {1, 1}, {1, 5}, {99, 100}, {4, 5}, {5, 1});
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto builder = createValidMatmulGraph({4, 1}, {1, 1}, {1, 5}, {99, 100}, {4, 5}, {5, 1});
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
     ASSERT_NE(attrs, nullptr);
 
-    MatmulParams const params(*attrs, graph.getTensorMap());
+    const MatmulParams params(*attrs, graph.getTensorMap());
 
     EXPECT_EQ(getTransAttribute(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSA), HIPBLAS_OP_T);
     EXPECT_EQ(getTransAttribute(params.desc(), HIPBLASLT_MATMUL_DESC_TRANSB), HIPBLAS_OP_N);
@@ -285,15 +287,15 @@ void makeTensorColumnMajor(flatbuffers::FlatBufferBuilder& builder,
 
 TEST(TestMatmulParams, ThrowsOnColumnMajorOutput)
 {
-    std::vector<int64_t> const aDims = {4, 8};
-    std::vector<int64_t> const aStrides = {8, 1};
-    std::vector<int64_t> const bDims = {8, 5};
-    std::vector<int64_t> const bStrides = {5, 1};
-    std::vector<int64_t> const cDims = {4, 5};
-    std::vector<int64_t> const cStrides = {1, 4}; // Column-major output
+    const std::vector<int64_t> aDims = {4, 8};
+    const std::vector<int64_t> aStrides = {8, 1};
+    const std::vector<int64_t> bDims = {8, 5};
+    const std::vector<int64_t> bStrides = {5, 1};
+    const std::vector<int64_t> cDims = {4, 5};
+    const std::vector<int64_t> cStrides = {1, 4}; // Column-major output
 
-    auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
     ASSERT_NE(attrs, nullptr);
@@ -307,7 +309,7 @@ TEST(TestMatmulParams, ThrowsOnColumnMajorFusedFinalOutput)
     auto builder = createValidMatmulBiasActivGraph();
     // Tensor order: A, B, C_matmul, bias, C_bias, C (final output).
     makeTensorColumnMajor(builder, 5, 4);
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
     auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
@@ -325,7 +327,7 @@ TEST(TestMatmulParams, FusedIntermediateLayoutDoesNotAffectRowMajorOutput)
 {
     auto builder = createValidMatmulBiasActivGraph();
     makeTensorColumnMajor(builder, 2, 4); // C_matmul
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
     auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
@@ -340,15 +342,15 @@ TEST(TestMatmulParams, FusedIntermediateLayoutDoesNotAffectRowMajorOutput)
 // A [M, 1] output is row-major whatever stride its size-1 dim carries.
 TEST(TestMatmulParams, AcceptsSingleColumnOutputWithNonCanonicalStride)
 {
-    std::vector<int64_t> const aDims = {4, 8};
-    std::vector<int64_t> const aStrides = {8, 1};
-    std::vector<int64_t> const bDims = {8, 1};
-    std::vector<int64_t> const bStrides = {1, 1};
-    std::vector<int64_t> const cDims = {4, 1};
-    std::vector<int64_t> const cStrides = {1, 4};
+    const std::vector<int64_t> aDims = {4, 8};
+    const std::vector<int64_t> aStrides = {8, 1};
+    const std::vector<int64_t> bDims = {8, 1};
+    const std::vector<int64_t> bStrides = {1, 1};
+    const std::vector<int64_t> cDims = {4, 1};
+    const std::vector<int64_t> cStrides = {1, 4};
 
-    auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
     ASSERT_NE(attrs, nullptr);
@@ -601,7 +603,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
 // not from the packed virtual matmul output.
 TEST(TestMatmulParams, CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded)
 {
-    auto fused = createValidMatmulBiasActivGraph(
+    const auto fused = createValidMatmulBiasActivGraph(
         {2, 4, 8},
         {32, 8, 1},
         {2, 8, 5},
@@ -610,8 +612,8 @@ TEST(TestMatmulParams, CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded)
         {20, 5, 1},
         false,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
-    auto builder = mutateGraph(fused, [](auto& g) {
-        for(auto& tensor : g.tensors)
+    const auto builder = mutateGraph(fused, [](auto& g) {
+        for(const auto& tensor : g.tensors)
         {
             if(tensor->name == "C")
             {
@@ -619,7 +621,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded)
             }
         }
     });
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
     auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
@@ -636,7 +638,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetTakesFinalOutputStrideWhenPadded)
 // the virtual matmul output is packed.
 TEST(TestMatmulParams, ThrowsOnFusedFinalOutputBatchStrideBelowMatrixSpan)
 {
-    auto fused = createValidMatmulBiasActivGraph(
+    const auto fused = createValidMatmulBiasActivGraph(
         {2, 4, 8},
         {32, 8, 1},
         {2, 8, 5},
@@ -645,8 +647,8 @@ TEST(TestMatmulParams, ThrowsOnFusedFinalOutputBatchStrideBelowMatrixSpan)
         {20, 5, 1},
         false,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
-    auto builder = mutateGraph(fused, [](auto& g) {
-        for(auto& tensor : g.tensors)
+    const auto builder = mutateGraph(fused, [](auto& g) {
+        for(const auto& tensor : g.tensors)
         {
             if(tensor->name == "C")
             {
@@ -654,7 +656,7 @@ TEST(TestMatmulParams, ThrowsOnFusedFinalOutputBatchStrideBelowMatrixSpan)
             }
         }
     });
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
     auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
@@ -678,8 +680,8 @@ TEST(TestMatmulParams, PlainOutputBatchStrideMustCoverOneMatrix)
 
     for(const auto& cStrides : {std::vector<int64_t>{10, 5, 1}, std::vector<int64_t>{0, 5, 1}})
     {
-        auto builder = makeGraph(cStrides);
-        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        const auto builder = makeGraph(cStrides);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
         ASSERT_NE(attrs, nullptr);
 
@@ -687,8 +689,8 @@ TEST(TestMatmulParams, PlainOutputBatchStrideMustCoverOneMatrix)
             << "batch stride " << cStrides[0];
     }
 
-    auto builder = makeGraph({20, 5, 1});
-    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto builder = makeGraph({20, 5, 1});
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
     ASSERT_NE(attrs, nullptr);
 

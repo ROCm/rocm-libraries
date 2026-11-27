@@ -196,7 +196,7 @@ protected:
 
         ASSERT_EQ(hipInit(0), hipSuccess);
 
-        auto pluginPath = std::filesystem::weakly_canonical(
+        const auto pluginPath = std::filesystem::weakly_canonical(
             hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
@@ -221,10 +221,10 @@ protected:
         const auto aDims = batched(c.batchDims, {c.m, c.k});
         const auto bDims = batched(c.batchDims, {c.k, c.n});
         const auto outDims = batched(c.batchDims, {c.m, c.n});
-        auto a = std::make_shared<TensorAttributes>(
+        const auto a = std::make_shared<TensorAttributes>(
             makeTensorAttributes("a", c.ioType, aDims, stridesOrPacked(c.aStrides, aDims))
                 .set_uid(UID_A));
-        auto b = std::make_shared<TensorAttributes>(
+        const auto b = std::make_shared<TensorAttributes>(
             makeTensorAttributes("b", c.ioType, bDims, stridesOrPacked(c.bStrides, bDims))
                 .set_uid(UID_B));
 
@@ -240,7 +240,7 @@ protected:
         {
             std::vector<int64_t> biasDims(outDims.size(), 1);
             biasDims.back() = c.n;
-            auto bias = std::make_shared<TensorAttributes>(
+            const auto bias = std::make_shared<TensorAttributes>(
                 makeTensorAttributes("bias", DataType::FLOAT, biasDims, packedStrides(biasDims))
                     .set_uid(UID_BIAS));
             PointwiseAttributes biasAttrs;
@@ -405,10 +405,10 @@ protected:
         const std::vector<float> outInit(extent + GUARD_ELEMENTS, GUARD_VALUE);
         const auto outInitBytes = encode(outInit, c.finalType);
 
-        auto dA = deviceAlloc(aBytes.size());
-        auto dB = deviceAlloc(bBytes.size());
-        auto dBias = deviceAlloc(biasBytes.size());
-        auto dC = deviceAlloc(outBytes);
+        const auto dA = deviceAlloc(aBytes.size());
+        const auto dB = deviceAlloc(bBytes.size());
+        const auto dBias = deviceAlloc(biasBytes.size());
+        const auto dC = deviceAlloc(outBytes);
         ASSERT_TRUE(dA && dB && dBias && dC) << "device allocation failed";
         ASSERT_EQ(hipMemcpy(dA.get(), aBytes.data(), aBytes.size(), hipMemcpyHostToDevice),
                   hipSuccess);
@@ -421,7 +421,7 @@ protected:
 
         int64_t workspaceSize = 0;
         ASSERT_TRUE(graph.get_workspace_size(workspaceSize).is_good());
-        auto dWorkspace
+        const auto dWorkspace
             = workspaceSize > 0 ? deviceAlloc(static_cast<size_t>(workspaceSize)) : nullptr;
         ASSERT_TRUE(workspaceSize == 0 || dWorkspace) << "workspace allocation failed";
 
@@ -431,7 +431,7 @@ protected:
         {
             pack[UID_BIAS] = dBias.get();
         }
-        auto execErr = graph.execute(*_handle, pack, dWorkspace.get());
+        const auto execErr = graph.execute(*_handle, pack, dWorkspace.get());
         ASSERT_TRUE(execErr.is_good()) << execErr.err_msg;
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
