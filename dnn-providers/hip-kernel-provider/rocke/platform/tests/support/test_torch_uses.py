@@ -170,17 +170,17 @@ def _allowlist(tmp_path: Path, text: str) -> Path:
 
 
 def test_the_allowlist_reads_one_line_per_file():
-    entry = format_allowlist_entry("a/b.py", frozenset({TORCH_OBJECT, IMPORT}))
-    assert entry == "a/b.py: import torch_object"
+    entry = format_allowlist_entry("a/b.py", {TORCH_OBJECT: 4, IMPORT: 1})
+    assert entry == "a/b.py: import=1 torch_object=4"
 
 
 def test_the_allowlist_skips_comments_and_blank_lines(tmp_path):
     path = _allowlist(
-        tmp_path, "# header\n\na/b.py: import torch_object\nc.cmake: config\n"
+        tmp_path, "# header\n\na/b.py: import=1 torch_object=4\nc.cmake: config=2\n"
     )
     assert read_allowlist(path) == {
-        "a/b.py": AllowlistEntry(frozenset({IMPORT, TORCH_OBJECT})),
-        "c.cmake": AllowlistEntry(frozenset({CONFIG})),
+        "a/b.py": AllowlistEntry({IMPORT: 1, TORCH_OBJECT: 4}),
+        "c.cmake": AllowlistEntry({CONFIG: 2}),
     }
 
 
@@ -188,13 +188,19 @@ def test_the_allowlist_skips_comments_and_blank_lines(tmp_path):
     "text, message",
     [
         (
-            "a/b.py import\n",
-            r"allowlist.txt:1='a/b.py import', expected 'file: kind \.\.\.'",
+            "a/b.py import=1\n",
+            r"allowlist.txt:1='a/b.py import=1', expected 'file: kind=count \.\.\.'",
         ),
-        ("a/b.py:\n", r"allowlist.txt:1='a/b.py:', expected 'file: kind \.\.\.'"),
-        ("a/b.py: imports\n", r"allowlist.txt:1 kind='imports', expected one of \["),
         (
-            "a/b.py: import\na/b.py: config\n",
+            "a/b.py:\n",
+            r"allowlist.txt:1='a/b.py:', expected 'file: kind=count \.\.\.'",
+        ),
+        (
+            "a/b.py: imports=1\n",
+            r"allowlist.txt:1 kind='imports', expected one of \[",
+        ),
+        (
+            "a/b.py: import=1\na/b.py: config=1\n",
             r"allowlist.txt:2 file='a/b.py', expected",
         ),
     ],
@@ -212,7 +218,7 @@ def test_a_tree_that_matches_its_allowlist_has_no_breach():
     found = {"a.py": _uses(IMPORT, TORCH_OBJECT)}
     assert (
         allowlist_breaches(
-            found, {"a.py": AllowlistEntry(frozenset({IMPORT, TORCH_OBJECT}))}
+            found, {"a.py": AllowlistEntry({IMPORT: 1, TORCH_OBJECT: 1})}
         )
         == []
     )
@@ -226,21 +232,37 @@ def test_a_file_not_on_the_list_is_a_new_use():
 def test_a_listed_file_gaining_a_kind_is_a_new_kind_of_use():
     breaches = allowlist_breaches(
         {"a.py": _uses(IMPORT, TORCH_API)},
-        {"a.py": AllowlistEntry(frozenset({IMPORT}))},
+        {"a.py": AllowlistEntry({IMPORT: 1})},
     )
     assert breaches == ["a.py: new kind of torch use: line 2 torch_api: code"]
 
 
+def test_a_listed_file_gaining_a_use_of_a_listed_kind_is_more_use():
+    breaches = allowlist_breaches(
+        {"a.py": _uses(IMPORT, TORCH_OBJECT, TORCH_OBJECT)},
+        {"a.py": AllowlistEntry({IMPORT: 1, TORCH_OBJECT: 1})},
+    )
+    assert breaches == [
+        (
+            "a.py: more torch use than listed: torch_object 1 -> 2: line 2 "
+            "torch_object: code; line 3 torch_object: code"
+        )
+    ]
+
+
 def test_a_listed_file_without_torch_is_a_stale_entry():
-    breaches = allowlist_breaches({}, {"gone.py": AllowlistEntry(frozenset({IMPORT}))})
+    breaches = allowlist_breaches({}, {"gone.py": AllowlistEntry({IMPORT: 1})})
     assert breaches == ["gone.py: stale entry, no torch use left: delete its line"]
 
 
 def test_a_listed_kind_no_longer_used_is_stale():
     breaches = allowlist_breaches(
         {"a.py": _uses(IMPORT)},
-        {"a.py": AllowlistEntry(frozenset({IMPORT, TORCH_API}))},
+        {"a.py": AllowlistEntry({IMPORT: 1, TORCH_API: 1})},
     )
     assert breaches == [
-        "a.py: stale kinds, no longer used: torch_api; make the line 'a.py: import'"
+        (
+            "a.py: stale counts, fewer than listed: torch_api 1 -> 0; make the line "
+            "'a.py: import=1'"
+        )
     ]

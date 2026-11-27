@@ -3,12 +3,13 @@
 """No new torch use anywhere in the rocke tree.
 
 rocKE does not use torch. The uses that remain are listed, one line per file
-with the kinds of use it makes, in ``no_torch_allowlist.txt`` beside this file,
-and are being removed. The gate reads every Python, requirements, pyproject and
-CMake file under ``rocke/`` with :mod:`rocke.tests.torch_uses` and fails when a
-file not on the list uses torch, when a listed file gains a kind of use, and
-when a listed file or kind no longer uses torch (delete or shorten its line:
-the list only shrinks). TESTING.md ("No torch") states the rule.
+counting the uses of each kind it makes, in ``no_torch_allowlist.txt`` beside
+this file, and are being removed. The gate reads every Python, requirements,
+pyproject and CMake file under ``rocke/`` with :mod:`rocke.tests.torch_uses` and
+fails when a file not on the list uses torch, when a listed file gains a kind
+of use or a use of a listed kind, and when a listed file has fewer uses than its
+line counts (lower the count, shorten or delete its line: the list only
+shrinks). TESTING.md ("No torch") states the rule.
 
 It reads the source checkout through git, so it runs in the build tree only
 (``rocke_no_torch_check``), never in the installed test tree.
@@ -24,8 +25,8 @@ import pytest
 from rocke.assets import platform_root
 from rocke.tests.source_allowlist import (
     AllowlistEntry,
-    file_kinds,
     format_allowlist_entry,
+    kind_counts,
 )
 from rocke.tests.torch_uses import (
     TorchUseKind,
@@ -56,7 +57,7 @@ def test_the_allowlist_is_sorted_one_canonical_line_per_file():
         if line and not line.startswith("#")
     ]
     canonical = [
-        format_allowlist_entry(path, entry.kinds)
+        format_allowlist_entry(path, entry.counts)
         for path, entry in sorted(read_allowlist(ALLOWLIST).items())
     ]
     assert listed == canonical
@@ -83,7 +84,7 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
-LISTED = {"listed.py": AllowlistEntry(frozenset({TorchUseKind.IMPORT}))}
+LISTED = {"listed.py": AllowlistEntry({TorchUseKind.IMPORT: 1})}
 
 
 def test_the_tree_is_what_git_tracks_or_would_track(repository):
@@ -135,6 +136,18 @@ def test_a_planted_new_kind_in_a_listed_file_fails_the_gate(repository):
     ]
 
 
+def test_a_planted_second_import_in_a_listed_file_fails_the_gate(repository):
+    (repository / "listed.py").write_text(
+        "import torch\nimport torch.nn\n", encoding="utf-8"
+    )
+    assert allowlist_breaches(tree_torch_uses(repository), LISTED) == [
+        (
+            "listed.py: more torch use than listed: import 1 -> 2: line 1 import: "
+            "import torch; line 2 import: import torch.nn"
+        )
+    ]
+
+
 def test_a_listed_file_whose_torch_use_was_removed_fails_the_gate(repository):
     (repository / "listed.py").write_text("import numpy\n", encoding="utf-8")
     assert allowlist_breaches(tree_torch_uses(repository), LISTED) == [
@@ -145,9 +158,9 @@ def test_a_listed_file_whose_torch_use_was_removed_fails_the_gate(repository):
 def test_the_planted_files_pass_once_listed(repository):
     (repository / "requirements.txt").write_text("torch\n", encoding="utf-8")
     found = tree_torch_uses(repository)
-    allowed = {path: AllowlistEntry(file_kinds(uses)) for path, uses in found.items()}
+    allowed = {path: AllowlistEntry(kind_counts(uses)) for path, uses in found.items()}
     assert allowed == {
-        "listed.py": AllowlistEntry(frozenset({TorchUseKind.IMPORT})),
-        "requirements.txt": AllowlistEntry(frozenset({TorchUseKind.CONFIG})),
+        "listed.py": AllowlistEntry({TorchUseKind.IMPORT: 1}),
+        "requirements.txt": AllowlistEntry({TorchUseKind.CONFIG: 1}),
     }
     assert allowlist_breaches(found, allowed) == []

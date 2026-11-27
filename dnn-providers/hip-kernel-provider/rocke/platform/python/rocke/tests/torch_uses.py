@@ -29,7 +29,7 @@ Identifiers that only carry torch in their name (``run_unified_attention_torch``
 ``TorchBinding``) are not uses: :func:`torch_named_identifiers` lists them for the
 renames that remove them.
 
-    python -m rocke.tests.torch_uses            # each file's kinds, allowlist format
+    python -m rocke.tests.torch_uses            # each file's uses, allowlist format
     python -m rocke.tests.torch_uses --names    # the torch-named identifiers
 """
 
@@ -65,7 +65,7 @@ __all__ = [
 
 
 class TorchUseKind(enum.Enum):
-    """What a torch use does; the gate allowlists kinds per file."""
+    """What a torch use does; the gate allowlists a count of each kind per file."""
 
     IMPORT = "import"
     """An ``import`` of torch or a torch submodule, a call of ``__import__``,
@@ -346,8 +346,8 @@ def tree_torch_uses(root: Path) -> dict[str, list[TorchUse]]:
 
 
 def read_allowlist(path: Path) -> dict[str, AllowlistEntry]:
-    """The allowlist at ``path``: one ``file: kind kind`` line per file
-    (:func:`rocke.tests.source_allowlist.read_allowlist`)."""
+    """The allowlist at ``path``: one ``file: kind=count kind=count`` line per
+    file (:func:`rocke.tests.source_allowlist.read_allowlist`)."""
     return source_allowlist.read_allowlist(path, TorchUseKind)
 
 
@@ -357,8 +357,9 @@ def allowlist_breaches(
 ) -> list[str]:
     """What breaks the allowlist, one line per file, sorted by file
     (:func:`rocke.tests.source_allowlist.allowlist_breaches`): a file that
-    uses torch and is not listed, a kind of use its line does not list, and a
-    line or kind the tree no longer uses."""
+    uses torch and is not listed, a kind of use its line does not list, more
+    uses of a kind than its line counts, and a line, kind or count the tree no
+    longer needs."""
     return source_allowlist.allowlist_breaches(found, allowed, subject="torch use")
 
 
@@ -367,7 +368,7 @@ def _print_inventory(root: Path, *, names: bool) -> None:
         for path, uses in tree_torch_uses(root).items():
             print(
                 source_allowlist.format_allowlist_entry(
-                    path, source_allowlist.file_kinds(uses)
+                    path, source_allowlist.kind_counts(uses)
                 )
             )
         return
@@ -392,7 +393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--names",
         action="store_true",
-        help="list torch-named identifiers instead of each file's kinds of use",
+        help="list torch-named identifiers instead of each file's uses by kind",
     )
     arguments = parser.parse_args(argv)
     root = arguments.root or platform_root().parent

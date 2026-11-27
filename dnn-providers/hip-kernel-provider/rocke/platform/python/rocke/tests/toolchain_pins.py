@@ -70,7 +70,8 @@ __all__ = [
 
 
 class ToolchainPinKind(enum.Enum):
-    """What a pin ties to one toolchain; the gate allowlists kinds per file."""
+    """What a pin ties to one toolchain; the gate allowlists a count of each kind
+    per file."""
 
     FLAVOR_PIN = "flavor_pin"
     """One LLVM flavor (``"llvm22"``, or a collection holding only it) set as a
@@ -464,8 +465,8 @@ def tree_toolchain_pins(root: Path) -> dict[str, list[ToolchainPin]]:
 
 
 def read_allowlist(path: Path) -> dict[str, AllowlistEntry]:
-    """The allowlist at ``path``: one ``file: kind kind  # ISSUE`` line per file,
-    the issue the one that removes the line
+    """The allowlist at ``path``: one ``file: kind=count kind=count  # ISSUE``
+    line per file, the issue the one that removes the line
     (:func:`rocke.tests.source_allowlist.read_allowlist`)."""
     return source_allowlist.read_allowlist(path, ToolchainPinKind, require_issue=True)
 
@@ -476,13 +477,13 @@ def allowlist_breaches(
 ) -> list[str]:
     """What breaks the allowlist, one line per file, sorted by file
     (:func:`rocke.tests.source_allowlist.allowlist_breaches`): a file with a pin
-    that is not listed, a kind its line does not list, and a line or kind the
-    tree no longer has."""
+    that is not listed, a kind its line does not list, more pins of a kind than
+    its line counts, and a line, kind or count the tree no longer needs."""
     return source_allowlist.allowlist_breaches(found, allowed, subject="toolchain pin")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Print each file's kinds of pin as an allowlist line without its issue."""
+    """Print each file's pins by kind as an allowlist line without its issue."""
     parser = argparse.ArgumentParser(
         prog="python -m rocke.tests.toolchain_pins",
         description=__doc__.splitlines()[0],
@@ -498,7 +499,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for path, pins in tree_toolchain_pins(root).items():
         print(
             source_allowlist.format_allowlist_entry(
-                path, source_allowlist.file_kinds(pins)
+                path, source_allowlist.kind_counts(pins)
             )
         )
     return 0

@@ -68,7 +68,7 @@ def test_the_allowlist_is_sorted_one_canonical_line_per_file():
         if line and not line.startswith("#")
     ]
     canonical = [
-        format_allowlist_entry(path, entry.kinds, entry.issue)
+        format_allowlist_entry(path, entry.counts, entry.issue)
         for path, entry in sorted(read_allowlist(ALLOWLIST).items())
     ]
     assert listed == canonical
@@ -283,7 +283,7 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
-LISTED = {"library/tests/listed.py": AllowlistEntry(frozenset({FLAVOR_PIN}), "AICK-1")}
+LISTED = {"library/tests/listed.py": AllowlistEntry({FLAVOR_PIN: 1}, "AICK-1")}
 
 
 @pytest.mark.parametrize(
@@ -369,6 +369,20 @@ def test_a_planted_new_kind_in_a_listed_file_fails_the_gate(repository):
         (
             "library/tests/listed.py: new kind of toolchain pin: line 2 rocm_pin: "
             "GATE_COMGR_ROCM = '7.2'"
+        )
+    ]
+
+
+def test_a_planted_second_pin_of_a_listed_kind_fails_the_gate(repository):
+    (repository / "library" / "tests" / "listed.py").write_text(
+        'GATE_FLAVOR = "llvm22"\nOTHER_FLAVOR = "llvm23"\n', encoding="utf-8"
+    )
+    breaches = allowlist_breaches(tree_toolchain_pins(repository), LISTED)
+    assert breaches == [
+        (
+            "library/tests/listed.py: more toolchain pin than listed: "
+            "flavor_pin 1 -> 2: line 1 flavor_pin: GATE_FLAVOR = 'llvm22'; "
+            "line 2 flavor_pin: OTHER_FLAVOR = 'llvm23'"
         )
     ]
 

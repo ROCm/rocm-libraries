@@ -8,26 +8,30 @@ those of :func:`rocke.tests.source_tree.source_files`.)
 A source check (``rocke.tests.torch_uses``, ``rocke.tests.toolchain_pins``)
 reports findings: each has a 1-based ``line``, a ``kind`` (a member of the
 check's own ``enum.Enum``) and the ``detail`` of the code it found. Its gate
-compares the tree's findings with an allowlist file, one line per file::
+compares the tree's findings with an allowlist file, one line per file, naming
+each kind the file has and how many findings of that kind::
 
-    library/tests/example.py: kind_a kind_b
+    library/tests/example.py: kind_a=3 kind_b=1
 
-The list only shrinks: a file not on it, or a kind its line does not name, fails
-the gate, and so does a line or kind the tree no longer needs (the stale line
-goes). A list read with ``require_issue=True`` names, on every line, the issue
-that removes it, after the kinds; a list read without it names none::
+The list only shrinks: a file not on it, a kind its line does not name, or more
+findings of a kind than its line counts, fails the gate, and so does a line,
+kind or count the tree no longer needs (the stale line is shortened or goes).
+A list read with ``require_issue=True`` names, on every line, the issue that
+removes it, after the counts; a list read without it names none::
 
-    library/tests/pinned.py: kind_a  # AICK-1234
+    library/tests/pinned.py: kind_a=1  # AICK-1234
 
 ``#`` lines and blank lines are comments.
 """
 
 from __future__ import annotations
 
+import collections
 import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Protocol
 
 from .pending_lanes import ISSUE_PATTERN
@@ -38,10 +42,12 @@ __all__ = [
     "allowlist_breaches",
     "file_kinds",
     "format_allowlist_entry",
+    "kind_counts",
     "read_allowlist",
 ]
 
 _ISSUE_MARK = "  # "
+_COUNT_MARK = "="
 
 
 class Finding(Protocol):
@@ -59,11 +65,34 @@ class Finding(Protocol):
 
 @dataclass(frozen=True)
 class AllowlistEntry:
-    """One allowlist line: the kinds its file may still have, and the issue that
-    removes them (None on a list that names none)."""
+    """One allowlist line: how many findings of each kind its file may still
+    have, and the issue that removes them (None on a list that names none)."""
 
-    kinds: frozenset[enum.Enum]
+    counts: Mapping[enum.Enum, int]
     issue: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.counts:
+            raise ValueError(
+                "AllowlistEntry failed - counts={}, expected at least one kind"
+            )
+        for kind, count in self.counts.items():
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise TypeError(
+                    f"AllowlistEntry failed - {kind.value}={type(count).__name__}, "
+                    "expected int"
+                )
+            if count < 1:
+                raise ValueError(
+                    f"AllowlistEntry failed - {kind.value}={count!r}, expected a "
+                    "whole number above 0"
+                )
+        object.__setattr__(self, "counts", MappingProxyType(dict(self.counts)))
+
+    @property
+    def kinds(self) -> frozenset[enum.Enum]:
+        """The kinds the line names."""
+        return frozenset(self.counts)
 
 
 def file_kinds(findings: Sequence[Finding]) -> frozenset[enum.Enum]:
@@ -71,13 +100,52 @@ def file_kinds(findings: Sequence[Finding]) -> frozenset[enum.Enum]:
     return frozenset(finding.kind for finding in findings)
 
 
+def kind_counts(findings: Sequence[Finding]) -> dict[enum.Enum, int]:
+    """How many of ``findings`` have each kind; kinds with none are left out."""
+    return dict(collections.Counter(finding.kind for finding in findings))
+
+
 def format_allowlist_entry(
-    path: str, kinds: frozenset[enum.Enum], issue: str | None = None
+    path: str, counts: Mapping[enum.Enum, int], issue: str | None = None
 ) -> str:
-    """One allowlist line: ``path: kind kind``, kinds sorted, then ``  # issue``
-    when there is one."""
-    line = f"{path}: {' '.join(sorted(kind.value for kind in kinds))}"
+    """One allowlist line: ``path: kind=count kind=count``, kinds sorted, then
+    ``  # issue`` when there is one."""
+    named = sorted(
+        f"{kind.value}{_COUNT_MARK}{count}" for kind, count in counts.items()
+    )
+    line = f"{path}: {' '.join(named)}"
     return line if issue is None else f"{line}{_ISSUE_MARK}{issue}"
+
+
+def _read_counts(
+    tokens: Sequence[str], known: Mapping[str, enum.Enum], where: str, line: str
+) -> dict[enum.Enum, int]:
+    counts: dict[enum.Enum, int] = {}
+    for token in tokens:
+        kind_text, marked, count_text = token.partition(_COUNT_MARK)
+        if not marked:
+            raise ValueError(
+                f"read_allowlist failed - {where}={line!r}, expected "
+                "'file: kind=count ...'"
+            )
+        if kind_text not in known:
+            raise ValueError(
+                f"read_allowlist failed - {where} kind={kind_text!r}, expected one "
+                f"of {sorted(known)}"
+            )
+        if not count_text.isdecimal() or int(count_text) < 1:
+            raise ValueError(
+                f"read_allowlist failed - {where} {kind_text}={count_text!r}, "
+                "expected a whole number above 0"
+            )
+        kind = known[kind_text]
+        if kind in counts:
+            raise ValueError(
+                f"read_allowlist failed - {where} kind={kind_text!r}, expected each "
+                "kind named once"
+            )
+        counts[kind] = int(count_text)
+    return counts
 
 
 def read_allowlist(
@@ -85,9 +153,10 @@ def read_allowlist(
 ) -> dict[str, AllowlistEntry]:
     """The allowlist at ``path``, whose kinds are members of ``kind_type``.
 
-    A malformed line, an unknown kind, a file listed twice, or (with
-    ``require_issue``) a line without an issue, or with text after the kinds that
-    is not one, is a ``ValueError`` naming the line."""
+    A malformed line, an unknown kind, a count that is not a whole number above
+    0, a kind named twice, a file listed twice, or (with ``require_issue``) a
+    line without an issue, or with text after the counts that is not one, is a
+    ``ValueError`` naming the line."""
     known = {kind.value: kind for kind in kind_type}
     allowed: dict[str, AllowlistEntry] = {}
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -96,18 +165,14 @@ def read_allowlist(
             continue
         where = f"{path.name}:{number}"
         entry_text, marked, issue = line.partition(_ISSUE_MARK)
-        listed, separator, kinds_text = entry_text.partition(": ")
-        kinds = kinds_text.split()
-        if not separator or not kinds:
+        listed, separator, counts_text = entry_text.partition(": ")
+        tokens = counts_text.split()
+        if not separator or not tokens:
             raise ValueError(
-                f"read_allowlist failed - {where}={line!r}, expected 'file: kind ...'"
+                f"read_allowlist failed - {where}={line!r}, expected "
+                "'file: kind=count ...'"
             )
-        unknown = [kind for kind in kinds if kind not in known]
-        if unknown:
-            raise ValueError(
-                f"read_allowlist failed - {where} kind={unknown[0]!r}, expected one "
-                f"of {sorted(known)}"
-            )
+        counts = _read_counts(tokens, known, where, line)
         if marked and not (require_issue and ISSUE_PATTERN.fullmatch(issue)):
             raise ValueError(
                 f"read_allowlist failed - {where} text={issue!r}, expected "
@@ -115,22 +180,21 @@ def read_allowlist(
                     "the issue that removes the line: a Jira id (AICK-1234) or "
                     "ROCm/<repo>#<number>"
                     if require_issue
-                    else "nothing after the kinds"
+                    else "nothing after the counts"
                 )
             )
         if require_issue and not marked:
             raise ValueError(
                 f"read_allowlist failed - {where}={line!r}, expected "
-                f"'file: kind ...{_ISSUE_MARK}<issue>', the issue that removes it"
+                f"'file: kind=count ...{_ISSUE_MARK}<issue>', the issue that "
+                "removes it"
             )
         if listed in allowed:
             raise ValueError(
                 f"read_allowlist failed - {where} file={listed!r}, expected each file "
                 "listed once"
             )
-        allowed[listed] = AllowlistEntry(
-            frozenset(known[kind] for kind in kinds), issue if marked else None
-        )
+        allowed[listed] = AllowlistEntry(counts, issue if marked else None)
     return allowed
 
 
@@ -139,6 +203,17 @@ def _lines_of(findings: Sequence[Finding], kinds: frozenset[enum.Enum]) -> str:
         f"line {finding.line} {finding.kind.value}: {finding.detail}"
         for finding in findings
         if finding.kind in kinds
+    )
+
+
+def _count_changes(
+    changed: Sequence[enum.Enum],
+    listed: Mapping[enum.Enum, int],
+    found: Mapping[enum.Enum, int],
+) -> str:
+    return ", ".join(
+        f"{kind.value} {listed[kind]} -> {found.get(kind, 0)}"
+        for kind in sorted(changed, key=lambda kind: kind.value)
     )
 
 
@@ -152,29 +227,52 @@ def allowlist_breaches(
     names a finding in the messages (``"torch use"``).
 
     A file not on the list has a finding; a listed file has a kind its line does
-    not list; a listed file no longer has a kind its line lists, or any finding
-    (the line is stale: the list only shrinks, so its lines go when the
-    findings go).
+    not list, or more findings of a kind than its line counts; a listed file has
+    fewer findings of a kind than its line counts, none of a kind its line
+    lists, or none at all (the line is stale: the list only shrinks, so its
+    counts drop and its lines go when the findings go).
     """
     breaches = []
     for path in sorted(set(found) | set(allowed)):
         findings = found.get(path, ())
-        kinds = file_kinds(findings)
+        counts = kind_counts(findings)
         entry = allowed.get(path)
         if entry is None:
-            breaches.append(f"{path}: new {subject}: {_lines_of(findings, kinds)}")
-            continue
-        if added := kinds - entry.kinds:
             breaches.append(
-                f"{path}: new kind of {subject}: "
-                f"{_lines_of(findings, frozenset(added))}"
+                f"{path}: new {subject}: {_lines_of(findings, frozenset(counts))}"
             )
-        if not kinds:
-            breaches.append(f"{path}: stale entry, no {subject} left: delete its line")
-        elif gone := entry.kinds - kinds:
-            kept = format_allowlist_entry(path, entry.kinds - gone, entry.issue)
+            continue
+        if added := frozenset(counts) - entry.kinds:
             breaches.append(
-                f"{path}: stale kinds, no longer used: "
-                f"{' '.join(sorted(kind.value for kind in gone))}; make the line {kept!r}"
+                f"{path}: new kind of {subject}: {_lines_of(findings, added)}"
+            )
+        if grown := [
+            kind
+            for kind in entry.kinds & frozenset(counts)
+            if counts[kind] > entry.counts[kind]
+        ]:
+            breaches.append(
+                f"{path}: more {subject} than listed: "
+                f"{_count_changes(grown, entry.counts, counts)}: "
+                f"{_lines_of(findings, frozenset(grown))}"
+            )
+        if not counts:
+            breaches.append(f"{path}: stale entry, no {subject} left: delete its line")
+        elif shrunk := [
+            kind for kind in entry.kinds if counts.get(kind, 0) < entry.counts[kind]
+        ]:
+            kept = {
+                kind: min(counts[kind], entry.counts[kind])
+                for kind in entry.kinds
+                if kind in counts
+            }
+            remedy = (
+                f"make the line {format_allowlist_entry(path, kept, entry.issue)!r}"
+                if kept
+                else "delete its line"
+            )
+            breaches.append(
+                f"{path}: stale counts, fewer than listed: "
+                f"{_count_changes(shrunk, entry.counts, counts)}; {remedy}"
             )
     return breaches
