@@ -219,6 +219,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   their instance lists, applicability answers and default backward-weights configurations. The
   LGBM perf-config picker remembers its ranking per problem. `MIOPEN_DEBUG_CK_PROBLEM_CACHE=0`
   turns off the per-problem CK caches.
+* [Conv] Skip a naive convolution solver before building and launching it when a run-time lower
+  bound already exceeds its existing find timeout budget. This prevents work that the timeout
+  would abandon from continuing on the GPU and slowing the next call. The bound counts only the
+  filter taps that read inside the input and assumes the naive kernel reaches at most 10 percent of
+  the device's fp32 FMA peak. While the bound is on, Find also leaves a naive solver out of its
+  parallel precompile when another solver is available, and builds it only if it is evaluated. Set
+  ``MIOPEN_NAIVE_BOUND_SKIP=0`` to disable the shortcut and precompile naive solvers as before.
 * [Conv] Creating a convolution or GEMM descriptor no longer draws from `std::random_device`. On
   CPUs where `RDSEED` often reports no entropy available, each draw cost tens of microseconds, so
   applications that create a convolution descriptor per call paid it on every convolution.
